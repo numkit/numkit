@@ -1,0 +1,240 @@
+// runtime/src/eval.cpp
+//
+// Language-runtime eval-family builtins (run / eval / evalin), extracted from
+// toolboxes/builtin's registerWorkspaceBuiltins into the runtime layer
+// (L2, engine-coupled scripting runtime — NOT a math/io toolbox). The shared
+// resolveEvalScope helper moved with them. Behaviour is unchanged; only the
+// owning translation unit / layer differs. registerEvalFamily is composed by
+// installRuntimeLibrary (runtime.cpp), which bundle/installStandardLibrary calls.
+#include <numkit/runtime/function_file.hpp>
+#include <numkit/runtime/runtime.hpp>
+
+#include <numkit/core/callback_builtin.hpp>
+#include <numkit/core/engine.hpp>
+#include <numkit/value/span.hpp>
+#include <numkit/value/value.hpp>
+
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+namespace numkit::runtime {
+
+void registerEvalFamily(Engine &engine)
+{
+    // Legacy compat: env var NK_LEGACY_EVAL_SCOPE=1 reverts to the
+    // pre-2026-05 behaviour where eval/run from inside a function
+    // leaked variables and imports into workspaceEnv. Provided as an
+    // escape hatch for code that depended on the old (buggy) scope.
+    auto resolveEvalScope = [](CallContext &ctx) -> Environment * {
+        const char *legacy = std::getenv("NK_LEGACY_EVAL_SCOPE");
+        if (legacy && legacy[0] == '1' && legacy[1] == '\0')
+            return &ctx.engine->workspaceEnv();
+        return ctx.env;
+    };
+
+    engine.registerFunction(
+        "run", [resolveEvalScope](Span<const Value> args, size_t,
+                                   Span<Value> outs, CallContext &ctx) {
+            if (args.empty() || !args[0].isChar())
+                throw std::runtime_error("run requires a string filename");
+            std::string p = args[0].toString();
+            auto rp = ctx.engine->resolvePath(p);
+            if (!rp.fs || !rp.fs->exists(rp.path))
+                throw std::runtime_error("run: file not found: " + p);
+            std::string content = rp.fs->readFile(rp.path);
+
+            // Push script origin for the duration of the run so that
+            // sibling .m files in the same directory resolve without
+            // addpath. The dir is extracted from the resolved path
+            // (rp.path is the script's full path inside rp.fs).
+            // Root-level files ("/foo.m") need scriptDir = "/" — an
+            // empty string would be treated as "no scriptDir" by the
+            // resolver, so substr(0,0) won't do.
+            std::string scriptDir;
+            {
+                size_t slash = rp.path.find_last_of("/\\");
+                if (slash == 0)
+                    scriptDir.assign(1, rp.path[0]);   // "/" or "\\"
+                else if (slash != std::string::npos)
+                    scriptDir = rp.path.substr(0, slash);
+            }
+            ctx.engine->pushScriptOrigin(rp.fs->name(), scriptDir, rp.path);
+            // MATLAB run() semantics: a FUNCTION file executes its primary
+            // function — nullary runs; required inputs fail with the natural
+            // "not enough input arguments" (bugs/opened/lang/run-invokes-
+            // nullary-function-file.md; MATLAB-verified via the corpus).
+            std::string primaryFn;
+            bool isFunctionFile = numkit::runtime::primaryFunctionOfFile(content, primaryFn);
+            try {
+                ctx.engine->eval(content, resolveEvalScope(ctx));
+                if (isFunctionFile)
+                    ctx.engine->eval(primaryFn + ";", resolveEvalScope(ctx));
+            } catch (...) {
+                ctx.engine->popScriptOrigin();
+                throw;
+            }
+            ctx.engine->popScriptOrigin();
+            outs[0] = Value();
+        });
+
+    // ── mfilename ─────────────────────────────────────────────
+    // MATLAB R2025b (probed 2026-09-16/17): inside a script returns the
+    // file's base name without extension; 'fullpath' returns the whole
+    // path without extension; with no executing file (REPL/eval'd
+    // string) returns ''. Inside a FUNCTION m-file the call machinery
+    // pushes the function's own origin (UserFunction::sourceFile /
+    // BytecodeChunk::originFile, stamped by the m-file resolver), so
+    // currentScriptFile() reports the function's file for the body's
+    // duration. Anonymous functions and classdef members follow the
+    // capture-at-creation rule (probed 2026-09-17): a handle born in a
+    // file keeps THAT file — even when later called from a different
+    // script — and one born at the command window keeps '' (a known but
+    // empty origin that masks the caller's file).
+    engine.registerFunction(
+        "mfilename", [](Span<const Value> args, size_t,
+                        Span<Value> outs, CallContext &ctx) {
+            bool fullpath = false;
+            if (args.size() > 1)
+                throw std::runtime_error(
+                    "mfilename: too many arguments (expected at most 1)");
+            if (args.size() == 1) {
+                if (!args[0].isChar())
+                    throw std::runtime_error("mfilename: argument must be 'fullpath'");
+                const std::string opt = args[0].toString();
+                if (opt != "fullpath")
+                    throw std::runtime_error(
+                        "mfilename: unrecognized option '" + opt
+                        + "' (only 'fullpath' is supported)");
+                fullpath = true;
+            }
+            const std::string *file = ctx.engine->currentScriptFile();
+            if (!file || file->empty()) {
+                outs[0] = Value::stringScalar("", ctx.engine->resource());
+                return;
+            }
+            // Normalize separators so the base/fullpath split works for
+            // both native-backslash and canonical-forward forms. A path
+            // with no separator keeps just the extension-stripped base
+            // for BOTH forms.
+            std::string p = *file;
+            size_t slash = p.find_last_of("/\\");
+            std::string base = (slash == std::string::npos) ? p
+                                                            : p.substr(slash + 1);
+            size_t dot = base.find_last_of('.');
+            if (dot != std::string::npos && dot > 0)
+                base.resize(dot);
+            std::string out =
+                fullpath && slash != std::string::npos
+                    ? p.substr(0, slash + 1) + base
+                    : base;
+            outs[0] = Value::stringScalar(out, ctx.engine->resource());
+        });
+
+    // ── eval ─────────────────────────────────────────────────
+    // eval(str) executes `str` in the caller's workspace. Matches
+    // MATLAB: variables defined in the eval'd code are visible to the
+    // caller (when caller is at top-level), and imports are scoped to
+    // the caller's lifetime.
+    //
+    // When the caller captures the result (`r = eval(...)`, nargout>=1),
+    // MATLAB suppresses any "ans = ..." display the inner code would
+    // otherwise emit. The third arg routes that suppress through the
+    // engine, which flips suppressOutput on top-level statements before
+    // executing.
+    engine.registerFunction(
+        "eval", [resolveEvalScope](Span<const Value> args, size_t nargout,
+                                    Span<Value> outs, CallContext &ctx) {
+            if (args.empty() || !args[0].isChar())
+                throw std::runtime_error("eval requires a string");
+            const bool suppress = (nargout >= 1);
+            outs[0] = ctx.engine->eval(args[0].toString(),
+                                       resolveEvalScope(ctx),
+                                       suppress);
+        });
+
+    // ── input ────────────────────────────────────────────────
+    // x = input(prompt): display the prompt, read ONE line, evaluate it
+    // as an expression in the caller's workspace (the eval path above).
+    // x = input(prompt, 's'): return the raw line as char. MATLAB
+    // R2025b doc semantics: an empty line gives [] (or '' with 's');
+    // prompt is a char vector or string scalar; the format argument
+    // must be exactly 's'. Interactive-only behaviors that Windows
+    // -batch cannot probe (it rejects input() before any validation)
+    // are documented divergences: on an erroneous expression we
+    // propagate the error (interactive MATLAB re-prompts); on stdin
+    // EOF we treat it as an empty line (returns []). The entered
+    // expression inherits eval()'s caller-visibility limitation
+    // (bugs/opened/core/eval-family-frame-visibility.md): mid-chunk,
+    // script variables live in VM registers, not yet in the
+    // Environment — input is at parity with eval(), guarded there.
+    engine.registerFunction(
+        "input", [resolveEvalScope](Span<const Value> args, size_t nargout,
+                                     Span<Value> outs, CallContext &ctx) {
+            if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+                throw std::runtime_error(
+                    "input: prompt must be a character vector or string scalar");
+            bool asText = false;
+            if (args.size() > 1) {
+                if (!args[1].isChar() && !args[1].isString())
+                    throw std::runtime_error(
+                        "input: format must be the character 's'");
+                const std::string fmt = args[1].toString();
+                if (fmt != "s")
+                    throw std::runtime_error(
+                        "input: format must be the character 's'");
+                asText = true;
+            }
+            if (nargout > 1)
+                throw std::runtime_error("input: Too many output arguments");
+
+            ctx.engine->outputText(args[0].toString());
+            std::string line;
+            const auto &provider = ctx.engine->inputProvider();
+            if (provider) {
+                line = provider();
+            } else {
+                if (!std::getline(std::cin, line))  // EOF -> empty line
+                    line.clear();
+            }
+            if (asText)
+                outs[0] = Value::fromString(line, ctx.engine->resource());
+            else if (line.empty())
+                outs[0] = Value::Empty;
+            else
+                outs[0] = ctx.engine->eval(line, resolveEvalScope(ctx),
+                                           /*suppressDisplay=*/true);
+        });
+
+    // ── evalin ───────────────────────────────────────────────
+    // evalin(workspace, str) executes `str` in either the base
+    // workspace ('base') or the workspace of the caller of the function
+    // containing this evalin call ('caller'). The latter matches
+    // MATLAB's two-frames-up rule.
+    engine.registerFunction(
+        "evalin", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            if (args.size() < 2)
+                throw std::runtime_error("evalin: requires (workspace, code)");
+            if (!args[0].isChar() || !args[1].isChar())
+                throw std::runtime_error("evalin: arguments must be strings");
+            std::string where = args[0].toString();
+            std::string code = args[1].toString();
+            Environment *target = nullptr;
+            if (where == "base") {
+                target = &ctx.engine->workspaceEnv();
+            } else if (where == "caller") {
+                if (ctx.engine->callerDepth() < 1)
+                    throw std::runtime_error(
+                        "evalin: 'caller' is not valid in the base workspace");
+                target = ctx.engine->callerEnv(1);
+                if (!target) target = &ctx.engine->workspaceEnv();
+            } else {
+                throw std::runtime_error(
+                    "evalin: workspace must be 'base' or 'caller', got '" + where + "'");
+            }
+            outs[0] = ctx.engine->eval(code, target);
+        });
+}
+
+} // namespace numkit::runtime
