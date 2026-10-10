@@ -128,7 +128,6 @@ void register_lang(Engine &engine) {
         outs[0] = std::move(cell);
     };
     engine.registerFunction("__numkit_fwd_call__", fwdCallFn);
-    engine.registerFunction("__nk_fwd_call__", fwdCallFn);
 
     // str2func / func2str moved to the runtime layer
     // (runtime/src/function_handles.cpp, registerFunctionHandles) — they

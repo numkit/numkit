@@ -71,12 +71,9 @@ Engine::Engine(std::pmr::memory_resource *mr)
     reinstallConstants();
     registerVirtualFS(std::make_unique<NativeFS>());
 
-    // Element-wise fusion default: on unless NUMKIT_FUSE=0 / NK_FUSE=0 (kill switch). No
+    // Element-wise fusion default: on unless NUMKIT_FUSE=0 (kill switch). No
     // effect until the standard library registers rules (see fusionEnabled()).
-    const char *fe = std::getenv("NUMKIT_FUSE");
-    if (!fe)
-        fe = std::getenv("NK_FUSE");
-    if (fe)
+    if (const char *fe = std::getenv("NUMKIT_FUSE"))
         fusionEnabled_ = !(fe[0] == '0' && fe[1] == '\0');
     // No library installs here — a bare Engine has the language runtime,
     // constants and primitive arithmetic, but no named functions. Call

@@ -1,7 +1,7 @@
 /// @file play_manifest.hpp
 /// @ingroup group_core
 ///
-/// Play manifest extraction (NK Play, portion A).
+/// Play manifest extraction (NumKit Play, portion A).
 ///
 /// A gallery script opens with a block comment carrying the UI manifest:
 ///

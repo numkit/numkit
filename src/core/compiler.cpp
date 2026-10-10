@@ -3815,8 +3815,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
         bodyExpr->type == NodeType::CALL
         && !bodyExpr->children.empty()
         && bodyExpr->children[0]->type == NodeType::IDENTIFIER
-        && bodyExpr->children[0]->strValue != "__numkit_fwd_call__"
-        && bodyExpr->children[0]->strValue != "__nk_fwd_call__";
+        && bodyExpr->children[0]->strValue != "__numkit_fwd_call__";
     if (forwardVarargout) {
         // Only forward when the callee is a GLOBAL function name (e.g. deal),
         // not a parameter or a captured handle variable — `@(x) f(x)` /

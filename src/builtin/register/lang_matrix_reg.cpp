@@ -129,9 +129,9 @@ void colon_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 }
 
 // MATLAB's sparse() with size args allocates an MxN sparse zero matrix.
-// NK has no sparse storage class -- this stub returns dense zeros.
+// NumKit has no sparse storage class -- this stub returns dense zeros.
 // Matches issparse=false (we ship that stub; see types.cpp:issparse).
-// KNOWN GAP: nk returns dense; MATLAB returns sparse storage class.
+// KNOWN GAP: NumKit returns dense; MATLAB returns sparse storage class.
 // All numerical operations match (zeros on both sides), only class()
 // differs. Documented in PROGRESS for sparse().
 void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)

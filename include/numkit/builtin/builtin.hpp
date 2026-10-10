@@ -1,6 +1,6 @@
 // src/builtin/include/nk/builtin/builtin.hpp
 //
-// Master umbrella header for NK Standard Builtin Library (numkit::builtin).
+// Master umbrella header for NumKit Standard Builtin Library (numkit::builtin).
 // Pure, engine-free C++ mathematical, array manipulation, and data analysis APIs.
 #pragma once
 

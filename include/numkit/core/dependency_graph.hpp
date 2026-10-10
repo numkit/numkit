@@ -1,7 +1,7 @@
 /// @file dependency_graph.hpp
 /// @ingroup group_core
 ///
-/// Statement-level variable dependency analysis (NK Play, portion A).
+/// Statement-level variable dependency analysis (NumKit Play, portion A).
 ///
 /// Facts per TOP-LEVEL statement of a script:
 ///   Writes — variables the statement (re)defines: `x = …`,
@@ -52,7 +52,7 @@ namespace numkit {
 /// figure state. Each bare call READS and WRITES this name, forming a
 /// sequential chain: re-running one re-runs the tail of the chain.
 /// Reserved prefix — cannot collide with user variables.
-inline constexpr char kFigureStateVar[] = "__nk_figstate__";
+inline constexpr char kFigureStateVar[] = "__numkit_figstate__";
 
 struct StatementFacts
 {

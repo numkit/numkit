@@ -1,9 +1,9 @@
 /// @file standard_library.hpp
 /// @ingroup group_lang
-// src/bundle/include/nk/bundle/standard_library.hpp
+// include/numkit/core/standard_library.hpp
 //
-// The composition layer for NK. StandardLibrary::install wires all
-// standard subsystems (Runtime, Builtin, and all Toolboxes) into an Engine instance.
+// The composition layer for NumKit. StandardLibrary::install wires all
+// standard subsystems (Runtime, Builtin) into an Engine instance.
 #pragma once
 
 #include <memory>

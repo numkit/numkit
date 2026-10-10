@@ -351,7 +351,7 @@ void trapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 // abscissae/weights (no f-calls); the per-node accumulation mirrors the C++
 // gaussKronrod15 loop exactly (fused K/G in node order) so results are
 // bit-identical to the synchronous `Value integral(...)` API, which is retained.
-static const char *kIntegralMSource = R"NKM(
+static const char *kIntegralMSource = R"NUMKIT_M(
 function r = integral(fn, a, b, opt, optval)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('nk:integral:fnType', 'integral: 1st argument must be a function handle');
@@ -408,7 +408,7 @@ function r = numkit_adaptint(fn, a, b, tol, depth, xk, wk, wg)
   mid = 0.5*(a + b);
   r = numkit_adaptint(fn, a, mid, tol*0.5, depth+1, xk, wk, wg) + numkit_adaptint(fn, mid, b, tol*0.5, depth+1, xk, wk, wg);
 end
-)NKM";
+)NUMKIT_M";
 
 void registerIntegralM(Engine &engine)
 {
@@ -421,7 +421,7 @@ void registerIntegralM(Engine &engine)
 //   impulse(b, a, t)        — the analog impulse response of b(s)/a(s)
 //     evaluated on the t grid (partial fractions via residue; strictly
 //     proper transfers — direct-feedthrough terms error clearly).
-static const char *kInlineClassSource = R"NKM(
+static const char *kInlineClassSource = R"NUMKIT_M(
 
 classdef inline
     % inline(expr, arg1, ...) — the legacy anonymous-function constructor.
@@ -474,9 +474,9 @@ classdef inline
     end
 end
 
-)NKM";
+)NUMKIT_M";
 
-static const char *kImpulseMSource = R"NKM(
+static const char *kImpulseMSource = R"NUMKIT_M(
 function [h, tout, x] = impulse(b, a, t)
     % impulse(b, a, t): analog impulse response of b(s)/a(s) on the t
     % grid — the legacy Signals & Systems textbook form (probed vs
@@ -516,7 +516,7 @@ function [h, tout, x] = impulse(b, a, t)
     end
     tout = [];
     x = [];
-)NKM";
+)NUMKIT_M";
 
 void registerInlineImpulseM(Engine &engine)
 {
