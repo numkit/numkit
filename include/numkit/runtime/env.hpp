@@ -22,7 +22,7 @@ void registerEnvRuntime(Engine &engine);
 /// @brief Process-environment builtins.
 ///
 /// Thin wrappers over `_putenv_s` / `::setenv` and the cross-platform
-/// `envGet` from `nk/fs/branding.hpp`. No Engine state required;
+/// `envGet` from `numkit/sys/env.hpp`. No Engine state required;
 /// `getenv` just needs a memory resource for its Value result.
 
 /// @brief Set / unset an environment variable (`setenv(name, value)`).

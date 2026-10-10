@@ -6,7 +6,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
 
-#include <numkit/fs/branding.hpp>     // for envGet
+#include <numkit/sys/env.hpp>
 #include <numkit/core/types.hpp>
 
 #include <cstdlib>

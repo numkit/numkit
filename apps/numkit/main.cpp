@@ -12,7 +12,7 @@
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
 #include <numkit/runtime/function_file.hpp>
-#include <numkit/fs/branding.hpp>
+#include <numkit/sys/env.hpp>
 #include <numkit/core/build_info.hpp>
 
 #include <filesystem>
