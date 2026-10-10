@@ -446,7 +446,7 @@ void isspace_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
     outs[0] = isspaceFn(args[0], ctx.engine->resource());
 }
 
-#define NK_STR_BIN_REG(FN)                                                       \
+#define NUMKIT_STR_BIN_REG(FN)                                                       \
     void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,             \
                   CallContext &ctx)                                              \
     {                                                                             \
@@ -454,10 +454,10 @@ void isspace_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
         outs[0] = FN(args[0], args[1], ctx.engine->resource());                  \
     }
 
-NK_STR_BIN_REG(extractAfter)
-NK_STR_BIN_REG(extractBefore)
+NUMKIT_STR_BIN_REG(extractAfter)
+NUMKIT_STR_BIN_REG(extractBefore)
 
-#undef NK_STR_BIN_REG
+#undef NUMKIT_STR_BIN_REG
 
 void extractBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {
@@ -465,7 +465,7 @@ void extractBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallCo
     outs[0] = extractBetween(args[0], args[1], args[2], ctx.engine->resource());
 }
 
-#define NK_STR_TRI_REG(FN)                                                       \
+#define NUMKIT_STR_TRI_REG(FN)                                                       \
     void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,             \
                   CallContext &ctx)                                              \
     {                                                                             \
@@ -473,11 +473,11 @@ void extractBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallCo
         outs[0] = FN(args[0], args[1], args[2], ctx.engine->resource());         \
     }
 
-NK_STR_TRI_REG(insertAfter)
-NK_STR_TRI_REG(insertBefore)
-NK_STR_TRI_REG(eraseBetween)
+NUMKIT_STR_TRI_REG(insertAfter)
+NUMKIT_STR_TRI_REG(insertBefore)
+NUMKIT_STR_TRI_REG(eraseBetween)
 
-#undef NK_STR_TRI_REG
+#undef NUMKIT_STR_TRI_REG
 
 void replaceBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {

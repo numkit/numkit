@@ -91,7 +91,7 @@ void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     }
 }
 
-#define NK_FLIP_REG(name)                                                      \
+#define NUMKIT_FLIP_REG(name)                                                      \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
                     Span<Value> outs, CallContext &ctx)                       \
     {                                                                          \
@@ -99,10 +99,10 @@ void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         outs[0] = numkit::narrowComplex(name(args[0], ctx.engine->resource()), ctx.engine->resource());                      \
     }
 
-NK_FLIP_REG(fliplr)
-NK_FLIP_REG(flipud)
+NUMKIT_FLIP_REG(fliplr)
+NUMKIT_FLIP_REG(flipud)
 
-#undef NK_FLIP_REG
+#undef NUMKIT_FLIP_REG
 
 void rot90_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
                CallContext &ctx)
@@ -159,7 +159,7 @@ void circshift_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     outs[0] = numkit::narrowComplex(circshiftND(args[0], Span<const int64_t>(shifts.data(), nk), mr), ctx.engine->resource());
 }
 
-#define NK_TRI_REG(name)                                                       \
+#define NUMKIT_TRI_REG(name)                                                       \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
                     Span<Value> outs, CallContext &ctx)                       \
     {                                                                          \
@@ -172,10 +172,10 @@ void circshift_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         outs[0] = numkit::narrowComplex(name(args[0], k, ctx.engine->resource()), ctx.engine->resource());                   \
     }
 
-NK_TRI_REG(tril)
-NK_TRI_REG(triu)
+NUMKIT_TRI_REG(tril)
+NUMKIT_TRI_REG(triu)
 
-#undef NK_TRI_REG
+#undef NUMKIT_TRI_REG
 
 void flip_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
               CallContext &ctx)
@@ -211,7 +211,7 @@ void sub2ind_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
 }
 
 // paddata / trimdata / resize adapters.
-#define NK_RESIZE_REG(FN)                                                       \
+#define NUMKIT_RESIZE_REG(FN)                                                       \
     void FN##_reg(Span<const Value> args, size_t /*nargout*/,                  \
                   Span<Value> outs, CallContext &ctx)                           \
     {                                                                            \
@@ -220,11 +220,11 @@ void sub2ind_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         outs[0] = numkit::narrowComplex(FN(args[0], n, ctx.engine->resource()), ctx.engine->resource());                       \
     }
 
-NK_RESIZE_REG(paddata)
-NK_RESIZE_REG(trimdata)
-NK_RESIZE_REG(resize)
+NUMKIT_RESIZE_REG(paddata)
+NUMKIT_RESIZE_REG(trimdata)
+NUMKIT_RESIZE_REG(resize)
 
-#undef NK_RESIZE_REG
+#undef NUMKIT_RESIZE_REG
 
 // ind2sub(siz, ind) → multiple outputs (one per dim of siz). When the
 // caller requests fewer outputs than siz has dims, the last output

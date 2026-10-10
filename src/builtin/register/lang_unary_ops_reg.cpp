@@ -28,7 +28,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNOP_REG(OP_NAME, CXX_FN)                                             \
+#define NUMKIT_UNOP_REG(OP_NAME, CXX_FN)                                             \
     void OP_NAME##_reg(Span<const Value> args, size_t /*nargout*/,              \
                            Span<Value> outs, CallContext &ctx)                       \
     {                                                                                 \
@@ -36,12 +36,12 @@ namespace detail {
         outs[0] = CXX_FN(args[0], ctx.engine->resource());                           \
     }
 
-NK_UNOP_REG(uminus,     uminus)
-NK_UNOP_REG(uplus,      uplus)
-NK_UNOP_REG(not,        logicalNot)
-NK_UNOP_REG(ctranspose, ctranspose)
+NUMKIT_UNOP_REG(uminus,     uminus)
+NUMKIT_UNOP_REG(uplus,      uplus)
+NUMKIT_UNOP_REG(not,        logicalNot)
+NUMKIT_UNOP_REG(ctranspose, ctranspose)
 
-#undef NK_UNOP_REG
+#undef NUMKIT_UNOP_REG
 
 } // namespace detail
 

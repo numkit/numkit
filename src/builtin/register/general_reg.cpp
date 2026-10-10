@@ -250,10 +250,10 @@ void register_general(Engine &engine) {
                             });
 
     // ── version ───────────────────────────────────────────────
-    // nk doesn't carry a SemVer; the build's link-time stamp
+    // NumKit doesn't carry a SemVer; the build's link-time stamp
     // serves as our "version". The timestamp lives in a tiny
     // separate TU (version_string.cpp) that gets recompiled on
-    // every build via the `nk_build_info` CMake target — so the
+    // every build via the `numkit_build_info` CMake target — so the
     // value here ALWAYS reflects the actual link time, not stale
     // __DATE__/__TIME__ macros from whenever library.cpp's .o
     // happened to last refresh. Declaration lives in the generated

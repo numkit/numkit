@@ -252,7 +252,7 @@ public:
     // Value-level operator application with object-overload dispatch — the
     // counterpart to the AST (TreeWalker) and bytecode (VM) operator paths for
     // callers that hold Values but no AST node / bytecode operands: the codegen
-    // Value-ABI bridge (nk_codegen_rt's Dynamic tier) and feval of an operator
+    // Value-ABI bridge (numkit_codegen_rt's Dynamic tier) and feval of an operator
     // handle. Mirrors the VM slow path exactly: tryObject*Op first (overloads),
     // then the registered numeric op; throws "Undefined … operator" when
     // neither applies. `op` is the source token ("+", ".*", "==", "-", "~",
@@ -380,7 +380,7 @@ public:
 
     // Element-wise fusion (see fusion_rule.hpp). The standard library
     // registers concrete rules; both backends consult them when enabled.
-    // Disabled instantly (no rebuild) via setFusion(false) / NK_FUSE=0.
+    // Disabled instantly (no rebuild) via setFusion(false) / NUMKIT_FUSE=0.
     void addFusionRule(FusionRule rule) { fusionRules_.push_back(std::move(rule)); }
     const std::vector<FusionRule> &fusionRules() const { return fusionRules_; }
     void setFusion(bool on) { fusionEnabled_ = on; }
@@ -891,7 +891,7 @@ private:
     Backend backend_ = Backend::VM;
 
     // Element-wise fusion: registered idiom→kernel rules + on/off gate.
-    // Default reflects NK_FUSE (set in the ctor); the registry is empty
+    // Default reflects NUMKIT_FUSE (set in the ctor); the registry is empty
     // until the standard library installs rules, so a bare Engine is unaffected.
     std::vector<FusionRule> fusionRules_;
     bool fusionEnabled_ = true;

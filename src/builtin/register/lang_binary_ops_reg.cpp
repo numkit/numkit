@@ -34,7 +34,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_BINOP_REG(OP_NAME, CXX_FN)                                            \
+#define NUMKIT_BINOP_REG(OP_NAME, CXX_FN)                                            \
     void OP_NAME##_reg(Span<const Value> args, size_t /*nargout*/,              \
                            Span<Value> outs, CallContext &ctx)                       \
     {                                                                                 \
@@ -42,23 +42,23 @@ namespace detail {
         outs[0] = CXX_FN(args[0], args[1], ctx.engine->resource());                  \
     }
 
-NK_BINOP_REG(plus,     plus)
-NK_BINOP_REG(minus,    minus)
-NK_BINOP_REG(times,    times)
-NK_BINOP_REG(mtimes,   mtimes)
-NK_BINOP_REG(rdivide,  rdivide)
-NK_BINOP_REG(mrdivide, mrdivide)
-NK_BINOP_REG(mldivide, mldivide)
-NK_BINOP_REG(power,    elementPower)   // MATLAB power(a,b) = a.^b → C++ elementPower
-NK_BINOP_REG(mpower,   power)          // MATLAB mpower(a,b) = a^b  → C++ power
-NK_BINOP_REG(eq,       eq)
-NK_BINOP_REG(ne,       ne)
-NK_BINOP_REG(lt,       lt)
-NK_BINOP_REG(le,       le)
-NK_BINOP_REG(gt,       gt)
-NK_BINOP_REG(ge,       ge)
+NUMKIT_BINOP_REG(plus,     plus)
+NUMKIT_BINOP_REG(minus,    minus)
+NUMKIT_BINOP_REG(times,    times)
+NUMKIT_BINOP_REG(mtimes,   mtimes)
+NUMKIT_BINOP_REG(rdivide,  rdivide)
+NUMKIT_BINOP_REG(mrdivide, mrdivide)
+NUMKIT_BINOP_REG(mldivide, mldivide)
+NUMKIT_BINOP_REG(power,    elementPower)   // MATLAB power(a,b) = a.^b → C++ elementPower
+NUMKIT_BINOP_REG(mpower,   power)          // MATLAB mpower(a,b) = a^b  → C++ power
+NUMKIT_BINOP_REG(eq,       eq)
+NUMKIT_BINOP_REG(ne,       ne)
+NUMKIT_BINOP_REG(lt,       lt)
+NUMKIT_BINOP_REG(le,       le)
+NUMKIT_BINOP_REG(gt,       gt)
+NUMKIT_BINOP_REG(ge,       ge)
 
-#undef NK_BINOP_REG
+#undef NUMKIT_BINOP_REG
 
 // ldivide(a, b) = b ./ a (MATLAB convention).
 void ldivide_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,

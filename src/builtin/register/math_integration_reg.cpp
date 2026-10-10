@@ -380,10 +380,10 @@ function r = integral(fn, a, b, opt, optval)
     r = 0; return;
   end
   [xk, wk, wg] = __gk15_nodes();
-  r = sgn * nk_adaptint(fn, a, b, absTol, 0, xk, wk, wg);
+  r = sgn * numkit_adaptint(fn, a, b, absTol, 0, xk, wk, wg);
 end
 
-function [K, G] = nk_gk15(fn, a, b, xk, wk, wg)
+function [K, G] = numkit_gk15(fn, a, b, xk, wk, wg)
   half = 0.5*(b - a);
   mid = 0.5*(b + a);
   K = 0; G = 0; gi = 1;
@@ -399,14 +399,14 @@ function [K, G] = nk_gk15(fn, a, b, xk, wk, wg)
   G = half*G;
 end
 
-function r = nk_adaptint(fn, a, b, tol, depth, xk, wk, wg)
-  [K, G] = nk_gk15(fn, a, b, xk, wk, wg);
+function r = numkit_adaptint(fn, a, b, tol, depth, xk, wk, wg)
+  [K, G] = numkit_gk15(fn, a, b, xk, wk, wg);
   if abs(K - G) < tol || depth >= 20
     r = K;
     return;
   end
   mid = 0.5*(a + b);
-  r = nk_adaptint(fn, a, mid, tol*0.5, depth+1, xk, wk, wg) + nk_adaptint(fn, mid, b, tol*0.5, depth+1, xk, wk, wg);
+  r = numkit_adaptint(fn, a, mid, tol*0.5, depth+1, xk, wk, wg) + numkit_adaptint(fn, mid, b, tol*0.5, depth+1, xk, wk, wg);
 end
 )NKM";
 

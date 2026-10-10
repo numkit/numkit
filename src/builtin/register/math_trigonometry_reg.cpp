@@ -31,7 +31,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -41,48 +41,48 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                          \
     }
 
-NK_UNARY_ADAPTER(tan,  tan)
-NK_UNARY_ADAPTER(asin, asin)
-NK_UNARY_ADAPTER(acos, acos)
-NK_UNARY_ADAPTER(atan, atan)
+NUMKIT_UNARY_ADAPTER(tan,  tan)
+NUMKIT_UNARY_ADAPTER(asin, asin)
+NUMKIT_UNARY_ADAPTER(acos, acos)
+NUMKIT_UNARY_ADAPTER(atan, atan)
 
-NK_UNARY_ADAPTER(sinh,  sinh)
-NK_UNARY_ADAPTER(cosh,  cosh)
-NK_UNARY_ADAPTER(tanh,  tanh)
-NK_UNARY_ADAPTER(asinh, asinh)
-NK_UNARY_ADAPTER(acosh, acosh)
-NK_UNARY_ADAPTER(atanh, atanh)
+NUMKIT_UNARY_ADAPTER(sinh,  sinh)
+NUMKIT_UNARY_ADAPTER(cosh,  cosh)
+NUMKIT_UNARY_ADAPTER(tanh,  tanh)
+NUMKIT_UNARY_ADAPTER(asinh, asinh)
+NUMKIT_UNARY_ADAPTER(acosh, acosh)
+NUMKIT_UNARY_ADAPTER(atanh, atanh)
 
-NK_UNARY_ADAPTER(sind,  sind)
-NK_UNARY_ADAPTER(cosd,  cosd)
-NK_UNARY_ADAPTER(tand,  tand)
-NK_UNARY_ADAPTER(asind, asind)
-NK_UNARY_ADAPTER(acosd, acosd)
-NK_UNARY_ADAPTER(atand, atand)
+NUMKIT_UNARY_ADAPTER(sind,  sind)
+NUMKIT_UNARY_ADAPTER(cosd,  cosd)
+NUMKIT_UNARY_ADAPTER(tand,  tand)
+NUMKIT_UNARY_ADAPTER(asind, asind)
+NUMKIT_UNARY_ADAPTER(acosd, acosd)
+NUMKIT_UNARY_ADAPTER(atand, atand)
 
-NK_UNARY_ADAPTER(sinpi, sinpi)
-NK_UNARY_ADAPTER(cospi, cospi)
+NUMKIT_UNARY_ADAPTER(sinpi, sinpi)
+NUMKIT_UNARY_ADAPTER(cospi, cospi)
 
-NK_UNARY_ADAPTER(sec,   sec)
-NK_UNARY_ADAPTER(csc,   csc)
-NK_UNARY_ADAPTER(cot,   cot)
-NK_UNARY_ADAPTER(sech,  sech)
-NK_UNARY_ADAPTER(csch,  csch)
-NK_UNARY_ADAPTER(coth,  coth)
-NK_UNARY_ADAPTER(secd,  secd)
-NK_UNARY_ADAPTER(cscd,  cscd)
-NK_UNARY_ADAPTER(cotd,  cotd)
-NK_UNARY_ADAPTER(asec,  asec)
-NK_UNARY_ADAPTER(acsc,  acsc)
-NK_UNARY_ADAPTER(acot,  acot)
-NK_UNARY_ADAPTER(asech, asech)
-NK_UNARY_ADAPTER(acsch, acsch)
-NK_UNARY_ADAPTER(acoth, acoth)
-NK_UNARY_ADAPTER(asecd, asecd)
-NK_UNARY_ADAPTER(acscd, acscd)
-NK_UNARY_ADAPTER(acotd, acotd)
+NUMKIT_UNARY_ADAPTER(sec,   sec)
+NUMKIT_UNARY_ADAPTER(csc,   csc)
+NUMKIT_UNARY_ADAPTER(cot,   cot)
+NUMKIT_UNARY_ADAPTER(sech,  sech)
+NUMKIT_UNARY_ADAPTER(csch,  csch)
+NUMKIT_UNARY_ADAPTER(coth,  coth)
+NUMKIT_UNARY_ADAPTER(secd,  secd)
+NUMKIT_UNARY_ADAPTER(cscd,  cscd)
+NUMKIT_UNARY_ADAPTER(cotd,  cotd)
+NUMKIT_UNARY_ADAPTER(asec,  asec)
+NUMKIT_UNARY_ADAPTER(acsc,  acsc)
+NUMKIT_UNARY_ADAPTER(acot,  acot)
+NUMKIT_UNARY_ADAPTER(asech, asech)
+NUMKIT_UNARY_ADAPTER(acsch, acsch)
+NUMKIT_UNARY_ADAPTER(acoth, acoth)
+NUMKIT_UNARY_ADAPTER(asecd, asecd)
+NUMKIT_UNARY_ADAPTER(acscd, acscd)
+NUMKIT_UNARY_ADAPTER(acotd, acotd)
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 void atan2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {

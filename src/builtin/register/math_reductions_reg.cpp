@@ -40,7 +40,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 namespace detail {
 
 // Helper to reduce boilerplate — unary adapter that calls Fn(mr, args[0]).
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -50,14 +50,14 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                         \
     }
 
-// Same as NK_UNARY_ADAPTER but passes &outs[0] through as an
+// Same as NUMKIT_UNARY_ADAPTER but passes &outs[0] through as an
 // output-buffer reuse hint. The callee MAY overwrite *outs[0]'s
 // existing buffer instead of allocating fresh, when the hint is
 // a uniquely-owned heap double of matching shape. The VM CALL
 // handler pre-fills outs[0] with R[I.a] (the destination register)
 // when none of the args alias the destination — so `z = sin(x)`
 // in a loop reuses z's buffer iteration after iteration.
-#define NK_UNARY_ADAPTER_HINT(name, fn)                                         \
+#define NUMKIT_UNARY_ADAPTER_HINT(name, fn)                                         \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -70,18 +70,18 @@ namespace detail {
 // SIMD-backed unaries — abs lives in backends/MStdAbs_*.cpp,
 // sin/cos/exp/log in backends/MStdTranscendental_*.cpp. We host their
 // engine adapters here because no other TU does.
-NK_UNARY_ADAPTER_HINT(abs,     abs)
-NK_UNARY_ADAPTER_HINT(sin,     sin)
-NK_UNARY_ADAPTER_HINT(cos,     cos)
-NK_UNARY_ADAPTER_HINT(exp,     exp)
-NK_UNARY_ADAPTER_HINT(log,     log)
+NUMKIT_UNARY_ADAPTER_HINT(abs,     abs)
+NUMKIT_UNARY_ADAPTER_HINT(sin,     sin)
+NUMKIT_UNARY_ADAPTER_HINT(cos,     cos)
+NUMKIT_UNARY_ADAPTER_HINT(exp,     exp)
+NUMKIT_UNARY_ADAPTER_HINT(log,     log)
 
 // All other unary adapters (sqrt / tan / asin / acos / atan / log2 /
 // log10 / floor / ceil / round / fix / sign / deg2rad / rad2deg /
 // expm1 / log1p / gamma / erf / ...) live next to their public APIs
 // under math/elementary/{trigonometry,exponents,rounding,misc,special}.cpp.
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 // sum/prod/mean — MATLAB signatures:
 //   sum(X)                  — scalar reduce, default output type
@@ -827,7 +827,7 @@ Value dispatchReductionAdapter(Span<const Value> args, const char *fn,
 
 } // namespace
 
-#define NK_REDUCTION_ADAPTER(name, fn, op)                                       \
+#define NUMKIT_REDUCTION_ADAPTER(name, fn, op)                                       \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                 \
                     Span<Value> outs, CallContext &ctx)                         \
     {                                                                             \
@@ -860,11 +860,11 @@ Value dispatchReductionAdapter(Span<const Value> args, const char *fn,
             });                                                                   \
     }
 
-NK_REDUCTION_ADAPTER(sum,  sum,  SumOp)
-NK_REDUCTION_ADAPTER(prod, prod, ProdOp)
-NK_REDUCTION_ADAPTER(mean, mean, MeanOp)
+NUMKIT_REDUCTION_ADAPTER(sum,  sum,  SumOp)
+NUMKIT_REDUCTION_ADAPTER(prod, prod, ProdOp)
+NUMKIT_REDUCTION_ADAPTER(mean, mean, MeanOp)
 
-#undef NK_REDUCTION_ADAPTER
+#undef NUMKIT_REDUCTION_ADAPTER
 
 // hypot / nthroot / expm1 / log1p adapters → math/elementary/{misc,exponents}.cpp
 // gamma / gammaln / erf / erfc / erfinv adapters → math/elementary/special.cpp

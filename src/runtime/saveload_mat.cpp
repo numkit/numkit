@@ -754,7 +754,7 @@ void saveMat(Engine &engine, Environment &env,
     // part of the MAT Level-5 format specification (readers identify the
     // file by it) — file-format interop, not shipped diagnostics.
     MatWriter mw;
-    std::string hdrText = "MATLAB 5.0 MAT-file, Platform: NK Autonomous Engine, Created by NK";
+    std::string hdrText = "MATLAB 5.0 MAT-file, Platform: NumKit Autonomous Engine, Created by NumKit";
     hdrText.resize(116, ' ');
     mw.writeBytes(hdrText.data(), 116);
     std::uint8_t zeroSubsystem[8] = {0};

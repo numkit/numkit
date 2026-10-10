@@ -3806,7 +3806,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
     funcNode->paramNames = node->paramNames;
     // When the body is a named-function call `@(p) g(...)`, lower it to a
     // varargout function that forwards the call-site nargout to the body via
-    // the `__nk_fwd_call__` helper — `varargout = __nk_fwd_call__(nargout,
+    // the `__numkit_fwd_call__` helper — `varargout = __numkit_fwd_call__(nargout,
     // 'g', args...)` — so `[a,b] = (@(x) deal(x+1,x-1))(5)` returns both
     // values (anonymous multi-output / nargout forwarding). Non-call bodies
     // (e.g. `@(x) x+1`) keep the single-output `__result__ = expr` fast path.
@@ -3815,6 +3815,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
         bodyExpr->type == NodeType::CALL
         && !bodyExpr->children.empty()
         && bodyExpr->children[0]->type == NodeType::IDENTIFIER
+        && bodyExpr->children[0]->strValue != "__numkit_fwd_call__"
         && bodyExpr->children[0]->strValue != "__nk_fwd_call__";
     if (forwardVarargout) {
         // Only forward when the callee is a GLOBAL function name (e.g. deal),
@@ -3840,10 +3841,10 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
         auto vaId = makeNode(NodeType::IDENTIFIER);
         vaId->strValue = "varargout";
         assignNode->children.push_back(std::move(vaId));
-        // RHS: __nk_fwd_call__(nargout, 'g', args...)
+        // RHS: __numkit_fwd_call__(nargout, 'g', args...)
         auto fwdCall = makeNode(NodeType::CALL);
         auto fwdId = makeNode(NodeType::IDENTIFIER);
-        fwdId->strValue = "__nk_fwd_call__";
+        fwdId->strValue = "__numkit_fwd_call__";
         fwdCall->children.push_back(std::move(fwdId));
         auto nargoutId = makeNode(NodeType::IDENTIFIER);
         nargoutId->strValue = "nargout";

@@ -23,12 +23,14 @@ namespace numkit::runtime {
 
 void registerEvalFamily(Engine &engine)
 {
-    // Legacy compat: env var NK_LEGACY_EVAL_SCOPE=1 reverts to the
+    // Legacy compat: env var NUMKIT_LEGACY_EVAL_SCOPE=1 / NK_LEGACY_EVAL_SCOPE=1 reverts to the
     // pre-2026-05 behaviour where eval/run from inside a function
     // leaked variables and imports into workspaceEnv. Provided as an
     // escape hatch for code that depended on the old (buggy) scope.
     auto resolveEvalScope = [](CallContext &ctx) -> Environment * {
-        const char *legacy = std::getenv("NK_LEGACY_EVAL_SCOPE");
+        const char *legacy = std::getenv("NUMKIT_LEGACY_EVAL_SCOPE");
+        if (!legacy)
+            legacy = std::getenv("NK_LEGACY_EVAL_SCOPE");
         if (legacy && legacy[0] == '1' && legacy[1] == '\0')
             return &ctx.engine->workspaceEnv();
         return ctx.env;

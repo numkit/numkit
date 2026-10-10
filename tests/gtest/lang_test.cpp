@@ -62,12 +62,12 @@ TEST_F(LangTest, DirectCppLangAPI) {
     EXPECT_FALSE(builtin::isvarname(Value::scalar(123.0)).toBool());
 
     // Environment variables
-    builtin::setenv("NK_CPP_API_TEST", "active_42");
-    EXPECT_EQ(builtin::getenv("NK_CPP_API_TEST"), "active_42");
+    builtin::setenv("NUMKIT_CPP_API_TEST", "active_42");
+    EXPECT_EQ(builtin::getenv("NUMKIT_CPP_API_TEST"), "active_42");
 
-    Value envVal = builtin::getenv(Value::fromString("NK_CPP_API_TEST"));
+    Value envVal = builtin::getenv(Value::fromString("NUMKIT_CPP_API_TEST"));
     EXPECT_EQ(envVal.toString(), "active_42");
 
-    builtin::setenv("NK_CPP_API_TEST", "");
-    EXPECT_EQ(builtin::getenv("NK_CPP_API_TEST"), "");
+    builtin::setenv("NUMKIT_CPP_API_TEST", "");
+    EXPECT_EQ(builtin::getenv("NUMKIT_CPP_API_TEST"), "");
 }

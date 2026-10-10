@@ -136,7 +136,7 @@ FsContext::ResolvedPath FsContext::resolvePath(const std::string &userPath) cons
     }
 
     // 2. NUMKIT_FS env var selects the backend.
-    std::string fsName = envGet(envVarName("FS").c_str());
+    std::string fsName = envGetPrefixed("FS");
     if (fsName == "auto")
         fsName.clear();
 
@@ -162,7 +162,7 @@ FsContext::ResolvedPath FsContext::resolvePath(const std::string &userPath) cons
     std::string path = userPath;
     if (!isAbsolutePath(path)) {
         std::string cwd = !cwd_.empty() ? cwd_
-                                        : envGet(envVarName("CWD").c_str());
+                                        : envGetPrefixed("CWD");
         if (cwd.empty()) {
             if (auto *sdir = currentScriptDir()) {
                 if (!sdir->empty()) cwd = *sdir;

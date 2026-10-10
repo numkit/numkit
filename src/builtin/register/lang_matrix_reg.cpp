@@ -1314,9 +1314,7 @@ void diff_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
                                     ctx.engine->resource());
 }
 
-#undef NK_CUM_REG
-
-#define NK_LOGICAL_RED_REG(name, fn)                                           \
+#define NUMKIT_LOGICAL_RED_REG(name, fn)                                           \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
                     Span<Value> outs, CallContext &ctx)                       \
     {                                                                          \
@@ -1327,10 +1325,10 @@ void diff_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
         outs[0] = fn(args[0], dim, ctx.engine->resource());                   \
     }
 
-NK_LOGICAL_RED_REG(any, numkit::builtin::anyOf)
-NK_LOGICAL_RED_REG(all, numkit::builtin::allOf)
+NUMKIT_LOGICAL_RED_REG(any, numkit::builtin::anyOf)
+NUMKIT_LOGICAL_RED_REG(all, numkit::builtin::allOf)
 
-#undef NK_LOGICAL_RED_REG
+#undef NUMKIT_LOGICAL_RED_REG
 
 void xor_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {

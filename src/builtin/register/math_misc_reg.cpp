@@ -30,7 +30,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -40,14 +40,14 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                          \
     }
 
-NK_UNARY_ADAPTER(deg2rad, deg2rad)
-NK_UNARY_ADAPTER(rad2deg, rad2deg)
-NK_UNARY_ADAPTER(wrapToPi, wrapToPi)
-NK_UNARY_ADAPTER(wrapTo2Pi, wrapTo2Pi)
-NK_UNARY_ADAPTER(wrapTo180, wrapTo180)
-NK_UNARY_ADAPTER(wrapTo360, wrapTo360)
+NUMKIT_UNARY_ADAPTER(deg2rad, deg2rad)
+NUMKIT_UNARY_ADAPTER(rad2deg, rad2deg)
+NUMKIT_UNARY_ADAPTER(wrapToPi, wrapToPi)
+NUMKIT_UNARY_ADAPTER(wrapTo2Pi, wrapTo2Pi)
+NUMKIT_UNARY_ADAPTER(wrapTo180, wrapTo180)
+NUMKIT_UNARY_ADAPTER(wrapTo360, wrapTo360)
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 void mod_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {

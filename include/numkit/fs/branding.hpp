@@ -27,11 +27,17 @@ namespace numkit {
 //   • Error-identifier strings such as "numkit:assert" (defined across
 //     toolboxes/builtin/src and toolboxes/signal/src)
 //   • Documentation, README, CMake project name
-inline constexpr const char *kEnvPrefix = "NK";
+inline constexpr const char *kEnvPrefix = "NUMKIT";
+inline constexpr const char *kLegacyEnvPrefix = "NK";
 
 inline std::string envVarName(const char *suffix)
 {
     return std::string(kEnvPrefix) + "_" + suffix;
+}
+
+inline std::string envVarNameLegacy(const char *suffix)
+{
+    return std::string(kLegacyEnvPrefix) + "_" + suffix;
 }
 
 // Cross-platform environment-variable read: returns "" when unset.
@@ -59,6 +65,15 @@ inline void envSet(const char *name, const std::string &value)
 #else
     setenv(name, value.c_str(), 1);
 #endif
+}
+
+// Reads environment variable with NUMKIT_<suffix> first, falling back to legacy NK_<suffix>.
+inline std::string envGetPrefixed(const char *suffix)
+{
+    std::string val = envGet(envVarName(suffix).c_str());
+    if (val.empty())
+        val = envGet(envVarNameLegacy(suffix).c_str());
+    return val;
 }
 
 } // namespace numkit

@@ -12,7 +12,7 @@ namespace {
 // Scratch carrier for native param writes (see header): the value
 // lands here, then ONE native assignment statement runs through
 // eval — cell semantics, growth and type checks stay the engine's.
-constexpr const char *kParamCarrier = "__nk_reactive_param__";
+constexpr const char *kParamCarrier = "__numkit_reactive_param__";
 }  // namespace
 
 ReactiveSession::ReactiveSession(Engine &engine) : engine_(engine) {}

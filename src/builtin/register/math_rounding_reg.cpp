@@ -32,7 +32,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -42,13 +42,13 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                          \
     }
 
-NK_UNARY_ADAPTER(floor,   floor)
-NK_UNARY_ADAPTER(ceil,    ceil)
-NK_UNARY_ADAPTER(fix,     fix)
-NK_UNARY_ADAPTER(sign,    sign)
-NK_UNARY_ADAPTER(subplus, subplus)
+NUMKIT_UNARY_ADAPTER(floor,   floor)
+NUMKIT_UNARY_ADAPTER(ceil,    ceil)
+NUMKIT_UNARY_ADAPTER(fix,     fix)
+NUMKIT_UNARY_ADAPTER(sign,    sign)
+NUMKIT_UNARY_ADAPTER(subplus, subplus)
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 // round(x) | round(x, N) | round(x, N, 'decimals'|'significant').
 void round_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)

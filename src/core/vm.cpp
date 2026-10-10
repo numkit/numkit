@@ -2232,7 +2232,7 @@ enter_frame:
                         // can't observe a moved-out R[I.a]), hand the
                         // destination's current value to the adapter
                         // via outs[0]. Adapters that opt in (the
-                        // NK_UNARY_ADAPTER_HINT macro for abs/sin/cos/
+                        // NUMKIT_UNARY_ADAPTER_HINT macro for abs/sin/cos/
                         // exp/log) check for a uniquely-owned heap
                         // double of matching shape and write straight
                         // into its buffer instead of allocating fresh.
@@ -4052,7 +4052,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
             // Output-reuse hint — same logic as the generic CALL path.
             // Hand the destination's current value to the adapter via
             // outs[0] when no arg register aliases R[I.a]; opt-in
-            // adapters (NK_UNARY_ADAPTER_HINT) reuse its buffer
+            // adapters (NUMKIT_UNARY_ADAPTER_HINT) reuse its buffer
             // instead of allocating fresh.
             bool canHint = R[I.a].hasHeap();
             for (uint8_t i = 0; i < na && canHint; ++i)

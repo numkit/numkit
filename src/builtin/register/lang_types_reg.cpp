@@ -78,7 +78,7 @@ void logical_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
 }
 
 // ── Simple predicate adapters ────────────────────────────────────────────
-#define NK_PRED_REG(FN)                                                             \
+#define NUMKIT_PRED_REG(FN)                                                             \
     void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,               \
                   CallContext &ctx)                                                 \
     {                                                                               \
@@ -86,31 +86,31 @@ void logical_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
         outs[0] = FN(args[0], ctx.engine->resource());                             \
     }
 
-NK_PRED_REG(isnumeric)
-NK_PRED_REG(islogical)
-NK_PRED_REG(ischar)
-NK_PRED_REG(isstring)
-NK_PRED_REG(iscell)
-NK_PRED_REG(isstruct)
-NK_PRED_REG(isempty)
-NK_PRED_REG(isscalar)
-NK_PRED_REG(isreal)
-NK_PRED_REG(isinteger)
-NK_PRED_REG(isfloat)
-NK_PRED_REG(issingle)
-NK_PRED_REG(issparse)
-NK_PRED_REG(isnan)
-NK_PRED_REG(isinf)
-NK_PRED_REG(isfinite)
-NK_PRED_REG(isvector)
-NK_PRED_REG(isrow)
-NK_PRED_REG(iscolumn)
-NK_PRED_REG(ismatrix)
-NK_PRED_REG(issortedrows)
-NK_PRED_REG(isuniform)
-NK_PRED_REG(anymissing)
+NUMKIT_PRED_REG(isnumeric)
+NUMKIT_PRED_REG(islogical)
+NUMKIT_PRED_REG(ischar)
+NUMKIT_PRED_REG(isstring)
+NUMKIT_PRED_REG(iscell)
+NUMKIT_PRED_REG(isstruct)
+NUMKIT_PRED_REG(isempty)
+NUMKIT_PRED_REG(isscalar)
+NUMKIT_PRED_REG(isreal)
+NUMKIT_PRED_REG(isinteger)
+NUMKIT_PRED_REG(isfloat)
+NUMKIT_PRED_REG(issingle)
+NUMKIT_PRED_REG(issparse)
+NUMKIT_PRED_REG(isnan)
+NUMKIT_PRED_REG(isinf)
+NUMKIT_PRED_REG(isfinite)
+NUMKIT_PRED_REG(isvector)
+NUMKIT_PRED_REG(isrow)
+NUMKIT_PRED_REG(iscolumn)
+NUMKIT_PRED_REG(ismatrix)
+NUMKIT_PRED_REG(issortedrows)
+NUMKIT_PRED_REG(isuniform)
+NUMKIT_PRED_REG(anymissing)
 
-#undef NK_PRED_REG
+#undef NUMKIT_PRED_REG
 
 void ismissing_reg(Span<const Value> args, size_t, Span<Value> outs,
                    CallContext &ctx)
@@ -137,20 +137,20 @@ void issorted_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
 // flintmax/intmax/intmin/realmax/realmin all share an "optional type-name
 // string" calling convention; one adapter per fn keeps error messages
 // useful.
-#define NK_LIMIT_REG(FN)                                                              \
+#define NUMKIT_LIMIT_REG(FN)                                                              \
     void FN##_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) \
     {                                                                                  \
         const Value &t = args.empty() ? Value::Empty : args[0];                       \
         outs[0] = FN(t, ctx.engine->resource());                                       \
     }
 
-NK_LIMIT_REG(flintmax)
-NK_LIMIT_REG(intmax)
-NK_LIMIT_REG(intmin)
-NK_LIMIT_REG(realmax)
-NK_LIMIT_REG(realmin)
+NUMKIT_LIMIT_REG(flintmax)
+NUMKIT_LIMIT_REG(intmax)
+NUMKIT_LIMIT_REG(intmin)
+NUMKIT_LIMIT_REG(realmax)
+NUMKIT_LIMIT_REG(realmin)
 
-#undef NK_LIMIT_REG
+#undef NUMKIT_LIMIT_REG
 
 void allfinite_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {

@@ -171,7 +171,7 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     if (nargout > 2) outs[2] = orientUniqueVec(ic, /*column=*/true, mr);
 }
 
-#define NK_BIN_SETOP_REG(name, fn)                                             \
+#define NUMKIT_BIN_SETOP_REG(name, fn)                                             \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
                     Span<Value> outs, CallContext &ctx)                       \
     {                                                                          \
@@ -753,9 +753,9 @@ void setdiff_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
                          mr, "setdiff");
     narrowOut();
 }
-NK_BIN_SETOP_REG(discretize, discretize)
+NUMKIT_BIN_SETOP_REG(discretize, discretize)
 
-#undef NK_BIN_SETOP_REG
+#undef NUMKIT_BIN_SETOP_REG
 
 void primes_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {

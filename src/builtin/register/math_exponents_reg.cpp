@@ -30,7 +30,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -40,16 +40,16 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                          \
     }
 
-NK_UNARY_ADAPTER(sqrt,  sqrt)
-NK_UNARY_ADAPTER(log2,  log2)
-NK_UNARY_ADAPTER(log10, log10)
-NK_UNARY_ADAPTER(expm1, expm1)
-NK_UNARY_ADAPTER(log1p, log1p)
+NUMKIT_UNARY_ADAPTER(sqrt,  sqrt)
+NUMKIT_UNARY_ADAPTER(log2,  log2)
+NUMKIT_UNARY_ADAPTER(log10, log10)
+NUMKIT_UNARY_ADAPTER(expm1, expm1)
+NUMKIT_UNARY_ADAPTER(log1p, log1p)
 
-NK_UNARY_ADAPTER(reallog,  reallog)
-NK_UNARY_ADAPTER(realsqrt, realsqrt)
+NUMKIT_UNARY_ADAPTER(reallog,  reallog)
+NUMKIT_UNARY_ADAPTER(realsqrt, realsqrt)
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 void pow2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {

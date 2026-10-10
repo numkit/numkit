@@ -113,7 +113,7 @@ inline int64_t extGcd(int64_t a, int64_t b, int64_t &u, int64_t &v)
     return g;
 }
 
-#define NK_BIN_REG_BIT(name, fn)                                                       \
+#define NUMKIT_BIN_REG_BIT(name, fn)                                                       \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                       \
                     Span<Value> outs, CallContext &ctx)                               \
     {                                                                                  \
@@ -122,7 +122,7 @@ inline int64_t extGcd(int64_t a, int64_t b, int64_t &u, int64_t &v)
                                    #name, fn, ctx.engine->resource());                                         \
     }
 
-#define NK_BIN_REG(name, fn)                                                   \
+#define NUMKIT_BIN_REG(name, fn)                                                   \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
                     Span<Value> outs, CallContext &ctx)                       \
     {                                                                          \
@@ -130,14 +130,14 @@ inline int64_t extGcd(int64_t a, int64_t b, int64_t &u, int64_t &v)
         outs[0] = fn(args[0], args[1], ctx.engine->resource());               \
     }
 
-NK_BIN_REG(lcm,      lcm)
-NK_BIN_REG_BIT(bitand,   bitand_)
-NK_BIN_REG_BIT(bitor,    bitor_)
-NK_BIN_REG_BIT(bitxor,   bitxor_)
-NK_BIN_REG_BIT(bitshift, bitshift)
+NUMKIT_BIN_REG(lcm,      lcm)
+NUMKIT_BIN_REG_BIT(bitand,   bitand_)
+NUMKIT_BIN_REG_BIT(bitor,    bitor_)
+NUMKIT_BIN_REG_BIT(bitxor,   bitxor_)
+NUMKIT_BIN_REG_BIT(bitshift, bitshift)
 
-#undef NK_BIN_REG
-#undef NK_BIN_REG_BIT
+#undef NUMKIT_BIN_REG
+#undef NUMKIT_BIN_REG_BIT
 
 // gcd: 1-output is the gcd; [g,u,v]=gcd(a,b) also returns the Bezout
 // coefficients (extended Euclid), elementwise. lcm is unaffected.

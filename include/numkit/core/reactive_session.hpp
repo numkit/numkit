@@ -18,8 +18,8 @@
 ///     case degrades to a full tail re-run, never a wrong result.
 ///
 /// Param writes: the value lands in a scratch variable and a NATIVE
-/// assignment statement (`var = __nk_reactive_param__;`,
-/// `C{r,c} = __nk_reactive_param__;`) runs through eval — growth,
+/// assignment statement (`var = __numkit_reactive_param__;`,
+/// `C{r,c} = __numkit_reactive_param__;`) runs through eval — growth,
 /// type checks and cell semantics are the engine's own, zero value
 /// marshalling.
 ///

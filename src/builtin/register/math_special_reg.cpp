@@ -29,7 +29,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-#define NK_UNARY_ADAPTER(name, fn)                                              \
+#define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
                     Span<Value> outs, CallContext &ctx)                        \
     {                                                                            \
@@ -39,17 +39,17 @@ namespace detail {
         outs[0] = fn(args[0], ctx.engine->resource());                          \
     }
 
-NK_UNARY_ADAPTER(gamma,   gamma)
-NK_UNARY_ADAPTER(gammaln, gammaln)
-NK_UNARY_ADAPTER(erf,     erf)
-NK_UNARY_ADAPTER(erfc,    erfc)
-NK_UNARY_ADAPTER(erfinv,  erfinv)
-NK_UNARY_ADAPTER(erfcinv, erfcinv)
-NK_UNARY_ADAPTER(erfcx,   erfcx)
-NK_UNARY_ADAPTER(expint,  expint)
-NK_UNARY_ADAPTER(psi,     psi)
+NUMKIT_UNARY_ADAPTER(gamma,   gamma)
+NUMKIT_UNARY_ADAPTER(gammaln, gammaln)
+NUMKIT_UNARY_ADAPTER(erf,     erf)
+NUMKIT_UNARY_ADAPTER(erfc,    erfc)
+NUMKIT_UNARY_ADAPTER(erfinv,  erfinv)
+NUMKIT_UNARY_ADAPTER(erfcinv, erfcinv)
+NUMKIT_UNARY_ADAPTER(erfcx,   erfcx)
+NUMKIT_UNARY_ADAPTER(expint,  expint)
+NUMKIT_UNARY_ADAPTER(psi,     psi)
 
-#undef NK_UNARY_ADAPTER
+#undef NUMKIT_UNARY_ADAPTER
 
 void beta_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
               CallContext &ctx)
@@ -92,7 +92,7 @@ void legendre_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     outs[0] = legendre(n, args[1], ctx.engine->resource());
 }
 
-#define NK_BESSEL_REG(name)                                                       \
+#define NUMKIT_BESSEL_REG(name)                                                       \
     void name##_reg(Span<const Value> args, size_t /*nargout*/,                  \
                     Span<Value> outs, CallContext &ctx)                          \
     {                                                                              \
@@ -102,12 +102,12 @@ void legendre_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
         outs[0] = name(args[0], args[1], ctx.engine->resource());                \
     }
 
-NK_BESSEL_REG(besselj)
-NK_BESSEL_REG(bessely)
-NK_BESSEL_REG(besseli)
-NK_BESSEL_REG(besselk)
+NUMKIT_BESSEL_REG(besselj)
+NUMKIT_BESSEL_REG(bessely)
+NUMKIT_BESSEL_REG(besseli)
+NUMKIT_BESSEL_REG(besselk)
 
-#undef NK_BESSEL_REG
+#undef NUMKIT_BESSEL_REG
 
 void besselh_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
