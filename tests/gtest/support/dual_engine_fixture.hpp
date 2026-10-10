@@ -13,7 +13,7 @@
 #pragma once
 
 #include <numkit/core/engine.hpp>
-#include <numkit/bundle/standard_engine.hpp>
+#include <numkit/core/standard_engine.hpp>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <string>

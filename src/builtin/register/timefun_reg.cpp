@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_timefun(Engine &engine) {
     engine.registerFunction("clock",
@@ -190,4 +190,4 @@ void register_timefun(Engine &engine) {
         });
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

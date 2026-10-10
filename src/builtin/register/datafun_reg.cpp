@@ -309,7 +309,7 @@ void accumarray_reg(Span<const Value> args, size_t /*nargout*/,
 
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_datafun(Engine &engine) {
     engine.registerFunction("linspace", &::numkit::builtin::detail::linspace_reg);
@@ -426,4 +426,4 @@ void register_datafun(Engine &engine) {
         });
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

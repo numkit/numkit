@@ -7,7 +7,7 @@
 //   numkit -h | --help      display usage help
 //   numkit -v | --version   display version info
 
-#include <numkit/bundle/standard_engine.hpp>
+#include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>

@@ -44,7 +44,7 @@ struct FevalCallbackBuiltin : CallbackBuiltin
 } // namespace numkit::builtin::detail
 
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_lang(Engine &engine) {
     using namespace ::numkit::builtin::detail;
@@ -152,4 +152,4 @@ void register_lang(Engine &engine) {
 }
 
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

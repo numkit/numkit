@@ -3,10 +3,10 @@
 // StandardLibrary::install — wires language runtime, builtins, and SIMD fusion rules into an Engine.
 // Toolboxes (signal, stats, etc.) are loaded dynamically as plugins via PluginLoader.
 
-#include <numkit/bundle/standard_library.hpp>
+#include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/runtime/runtime.hpp>
-#include <numkit/bundle/builtin_library.hpp>
+#include <numkit/builtin/library.hpp>
 
 namespace numkit {
 

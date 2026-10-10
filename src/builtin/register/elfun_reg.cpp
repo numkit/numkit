@@ -76,7 +76,7 @@ void tand_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void tanh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_elfun(Engine &engine) {
     engine.registerFunction("sqrt",     &::numkit::builtin::detail::sqrt_reg);
@@ -145,4 +145,4 @@ void register_elfun(Engine &engine) {
     engine.registerFunction("hypot",    &::numkit::builtin::detail::hypot_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

@@ -42,7 +42,7 @@ void rmpath_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void which_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 }
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 using namespace ::numkit::builtin;
 
@@ -628,4 +628,4 @@ void register_general(Engine &engine) {
         });
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

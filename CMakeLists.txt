@@ -54,9 +54,6 @@ file(GLOB_RECURSE NUMKIT_SOURCES
     "src/core/*.cpp"
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"
-    "src/register/builtin/*.cpp"
-    "src/register/fusion/*.cpp"
-    "src/bundle/*.cpp"
 )
 
 if(NOT NUMKIT_WITH_SIMD)
@@ -77,8 +74,8 @@ target_include_directories(numkit
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/register
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/register/support
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register/support
 )
 
 target_link_libraries(numkit

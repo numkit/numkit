@@ -1,7 +1,7 @@
 // src/bundle/src/register/builtin/ops_reg.cpp
 
 #include <numkit/builtin/ops.hpp>
-#include <numkit/bundle/builtin_library.hpp>
+#include <numkit/builtin/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
@@ -87,7 +87,7 @@ void BuiltinLibrary::registerUnaryOps(Engine &engine)
 
 } // namespace numkit
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_ops(Engine &engine) {
     BuiltinLibrary::registerBinaryOps(engine);
@@ -136,4 +136,4 @@ void register_ops(Engine &engine) {
     engine.registerFunction("xor",        &::numkit::builtin::detail::xor_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

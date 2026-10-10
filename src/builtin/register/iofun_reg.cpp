@@ -15,7 +15,7 @@ void sscanf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void textscan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_iofun(Engine &engine) {
     engine.registerFunction("sprintf",    &::numkit::builtin::detail::sprintf_reg);
@@ -26,4 +26,4 @@ void register_iofun(Engine &engine) {
     engine.registerFunction("textscan",   &::numkit::builtin::detail::textscan_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

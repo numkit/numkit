@@ -42,7 +42,7 @@ void psi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_specfun(Engine &engine) {
     engine.registerFunction("airy",        &::numkit::builtin::detail::airy_reg);
@@ -79,4 +79,4 @@ void register_specfun(Engine &engine) {
     engine.registerFunction("psi",         &::numkit::builtin::detail::psi_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

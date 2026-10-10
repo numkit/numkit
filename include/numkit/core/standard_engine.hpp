@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <numkit/bundle/standard_library.hpp>
+#include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <memory_resource>

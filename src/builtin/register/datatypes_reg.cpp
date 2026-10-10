@@ -59,7 +59,7 @@ void uint64_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void uint8_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_datatypes(Engine &engine) {
     // Pure numeric and array type constructors & conversions
@@ -118,4 +118,4 @@ void register_datatypes(Engine &engine) {
     engine.registerFunction("isequaln",  &::numkit::builtin::detail::isequaln_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

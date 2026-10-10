@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_matfun(Engine &engine) {
     engine.registerFunction("idivide",
@@ -23,4 +23,4 @@ void register_matfun(Engine &engine) {
         });
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

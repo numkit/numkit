@@ -45,7 +45,7 @@ void zp2tf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_polyfun(Engine &engine) {
     engine.registerFunction("__gk15_nodes", &::numkit::builtin::detail::gk15_nodes_reg);
@@ -83,4 +83,4 @@ void register_polyfun(Engine &engine) {
     engine.registerFunction("zp2tf",     &::numkit::builtin::detail::zp2tf_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

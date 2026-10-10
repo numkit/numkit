@@ -82,7 +82,7 @@ void validatestring_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_strfun(Engine &engine) {
     engine.registerFunction("convertContainedStringsToChars",
@@ -176,4 +176,4 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("regexptranslate", &::numkit::builtin::detail::regexptranslate_reg);
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail

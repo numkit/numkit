@@ -118,7 +118,7 @@ struct BsxfunCallbackBuiltin : CallbackBuiltin
 
 } // namespace numkit::builtin::detail
 
-namespace numkit::bundle::builtin {
+namespace numkit::builtin::detail {
 
 void register_elmat(Engine &engine) {
     engine.registerFunction("blkdiag",    &::numkit::builtin::detail::blkdiag_reg);
@@ -287,4 +287,4 @@ void register_elmat(Engine &engine) {
     engine.registerCallbackBuiltin("bsxfun", std::make_shared<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
 }
 
-} // namespace numkit::bundle::builtin
+} // namespace numkit::builtin::detail
