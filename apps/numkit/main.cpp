@@ -13,6 +13,7 @@
 #include <numkit/core/parser.hpp>
 #include <numkit/runtime/function_file.hpp>
 #include <numkit/sys/env.hpp>
+#include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/build_info.hpp>
 
 #include <filesystem>
@@ -181,13 +182,70 @@ int runRepl()
 
 void printUsage(const char *prog)
 {
-    std::cout << "Usage: " << prog << " [options] [script.m]\n\n"
+    std::cout << "Usage: " << prog << " [options] [script.m]\n"
+              << "       " << prog << " pkg <command> [arguments]\n\n"
               << "Options:\n"
               << "  -e, --eval <code>    evaluate inline MATLAB code and exit\n"
               << "  --cwd=<path>         set working directory\n"
               << "  -v, --version        print version and build timestamp\n"
               << "  -h, --help           show this help message\n\n"
+              << "Package Management:\n"
+              << "  pkg install <target> install a package (e.g. numkit-signal, owner/repo, URL)\n"
+              << "  pkg list             list installed packages and their status\n"
+              << "  pkg build [dir]      build a module in the specified directory\n"
+              << "  pkg remove <name>    remove an installed package\n\n"
               << "If no script or --eval is provided, starts an interactive REPL.\n";
+}
+
+void printPkgUsage(const char *prog)
+{
+    std::cout << "Usage: " << prog << " pkg <command> [arguments]\n\n"
+              << "Commands:\n"
+              << "  install <target>   install a package (e.g. numkit-signal, user/repo, URL, or local path)\n"
+              << "  list               list installed packages and their status\n"
+              << "  build [dir]        build a module from source in the specified directory (default: .)\n"
+              << "  remove <name>      remove an installed package\n"
+              << "  help               show this help message\n\n"
+              << "Examples:\n"
+              << "  " << prog << " pkg install numkit-signal\n"
+              << "  " << prog << " pkg install username/custom-toolbox\n"
+              << "  " << prog << " pkg list\n";
+}
+
+int runPkgCommand(int argc, char **argv)
+{
+    if (argc < 3) {
+        printPkgUsage(argv[0]);
+        return 1;
+    }
+    std::string subcmd = argv[2];
+    numkit::pkg::PackageManager pm;
+
+    if (subcmd == "install") {
+        if (argc < 4) {
+            std::cerr << "Error: 'pkg install' requires a package target.\n"
+                      << "Example: " << argv[0] << " pkg install numkit-signal\n";
+            return 1;
+        }
+        return pm.install(argv[3]);
+    } else if (subcmd == "list") {
+        return pm.list(std::cout);
+    } else if (subcmd == "build") {
+        std::string dir = (argc >= 4) ? argv[3] : ".";
+        return pm.build(dir);
+    } else if (subcmd == "remove" || subcmd == "uninstall") {
+        if (argc < 4) {
+            std::cerr << "Error: 'pkg remove' requires a package name.\n";
+            return 1;
+        }
+        return pm.remove(argv[3]);
+    } else if (subcmd == "-h" || subcmd == "--help" || subcmd == "help") {
+        printPkgUsage(argv[0]);
+        return 0;
+    } else {
+        std::cerr << "Unknown pkg command: '" << subcmd << "'. Type '" << argv[0] << " pkg help'.\n";
+        return 1;
+    }
 }
 
 void printVersion()
@@ -201,6 +259,10 @@ void printVersion()
 
 int main(int argc, char **argv)
 {
+    if (argc >= 2 && std::string(argv[1]) == "pkg") {
+        return runPkgCommand(argc, argv);
+    }
+
     std::string target;
     std::string evalCode;
 

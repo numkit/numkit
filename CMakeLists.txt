@@ -68,6 +68,7 @@ file(GLOB_RECURSE NUMKIT_SOURCES
     "src/core/*.cpp"
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"
+    "src/pkg/*.cpp"
 )
 
 if(NOT NUMKIT_WITH_SIMD)
@@ -134,6 +135,7 @@ if(NUMKIT_BUILD_TESTS)
         tests/gtest/matrix_test.cpp
         tests/gtest/ops_test.cpp
         tests/gtest/numeric_test.cpp
+        tests/gtest/package_manager_test.cpp
     )
 
     add_executable(numkit_gtest ${NUMKIT_TEST_SOURCES})

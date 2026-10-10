@@ -20,6 +20,7 @@ void registerEnvRuntime(Engine &engine);              // env.cpp
 void registerReflectionRuntime(Engine &engine);       // reflection.cpp
 void registerDiagnosticsRuntime(Engine &engine);      // diagnostics.cpp
 void registerSplitapplyCallbackBuiltin(Engine &engine); // splitapply_callback.cpp
+void registerPkgRuntime(Engine &engine);              // pkg.cpp
 
 void installRuntimeLibrary(Engine &engine)
 {
@@ -40,6 +41,7 @@ void RuntimeLibrary::install(Engine &engine)
     runtime::registerDiagnosticsRuntime(engine);
     runtime::registerReflectionRuntime(engine);
     runtime::registerSplitapplyCallbackBuiltin(engine);
+    runtime::registerPkgRuntime(engine);
 }
 
 } // namespace numkit
