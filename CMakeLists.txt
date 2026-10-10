@@ -33,6 +33,21 @@ if(NOT TARGET numkit_value)
     endif()
 endif()
 
+# ── Dependency: numkit/sys ───────────────────────────────────────────────
+if(NOT TARGET numkit_sys)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../sys/CMakeLists.txt")
+        message(STATUS "Using local numkit/sys from ${CMAKE_CURRENT_SOURCE_DIR}/../sys")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../sys" _deps/numkit_sys)
+    else()
+        FetchContent_Declare(
+            numkit_sys
+            GIT_REPOSITORY https://github.com/numkit/sys.git
+            GIT_TAG main
+        )
+        FetchContent_MakeAvailable(numkit_sys)
+    endif()
+endif()
+
 # ── Dependency: numkit/ops ───────────────────────────────────────────────
 if(NOT TARGET numkit_ops)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ops/CMakeLists.txt")
@@ -50,7 +65,6 @@ endif()
 
 # ── Gather Sources ───────────────────────────────────────────────────────
 file(GLOB_RECURSE NUMKIT_SOURCES
-    "src/fs/*.cpp"
     "src/core/*.cpp"
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"
@@ -81,6 +95,7 @@ target_include_directories(numkit
 target_link_libraries(numkit
     PUBLIC
         numkit_value
+        numkit_sys
         numkit_ops
 )
 
