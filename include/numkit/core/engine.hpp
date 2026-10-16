@@ -1,4 +1,4 @@
-// include/engine.hpp
+﻿// include/engine.hpp
 #pragma once
 
 #include <numkit/core/debugger.hpp>
@@ -6,8 +6,8 @@
 #include <numkit/value/object.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/fusion_rule.hpp>
-#include <numkit/fs/vfs.hpp>
-#include <numkit/fs/fs_context.hpp>
+#include <numkit/sys/vfs.hpp>
+#include <numkit/sys/fs_context.hpp>
 #include <numkit/ops/rng_context.hpp>
 #include <numkit/core/vm.hpp>
 
@@ -66,7 +66,7 @@ public:
                           const std::string &name,
                           ExternalFunc func);
 
-    // ── Class registry (object model — see object_model.md) ──────
+    // â”€â”€ Class registry (object model â€” see object_model.md) â”€â”€â”€â”€â”€â”€
     // Register a builtin (C++-backed) class. Later, user classdef
     // populates the same registry via an adapter. Throws on duplicate.
     void registerClass(BuiltinClass cls);
@@ -74,36 +74,36 @@ public:
     // nullptr. Used by constructor / method / property dispatch.
     const BuiltinClass *findClass(const std::string &name) const;
 
-    // ── State-machine callbacks (callback_builtin.hpp, vm_callbacks_plan.md) ──
-    // Register a higher-order builtin (cellfun/arrayfun/…) that can drive its
+    // â”€â”€ State-machine callbacks (callback_builtin.hpp, vm_callbacks_plan.md) â”€â”€
+    // Register a higher-order builtin (cellfun/arrayfun/â€¦) that can drive its
     // user-code callbacks as pausable VM frames. Registered alongside the
     // ordinary synchronous external registration; the VM consults this first and
     // falls back to the synchronous builtin when the driver declines (builtin
     // handle / unsupported arg form). Returns the registered driver or nullptr.
     void registerCallbackBuiltin(const std::string &name, std::shared_ptr<CallbackBuiltin> cb);
     CallbackBuiltin *callbackBuiltin(const std::string &name) const;
-    // True if `handle` (plain handle or {handle, captures…} closure cell) names
-    // a USER function — i.e. there is a compiled body to step through — rather
+    // True if `handle` (plain handle or {handle, capturesâ€¦} closure cell) names
+    // a USER function â€” i.e. there is a compiled body to step through â€” rather
     // than a builtin.
     bool isUserCodeHandle(const Value &handle) const;
     // Register every top-level `function` in `src` as a PERSISTENT user
-    // function (userFuncs_ + VM compiled table) — the same path m-file loading
+    // function (userFuncs_ + VM compiled table) â€” the same path m-file loading
     // uses, so they survive `clear` and work on both backends. Used to install
     // `.m`-implemented builtins (e.g. fzero) whose callbacks must be pausable:
     // the `.m` body's f-calls compile to ordinary VM frames, debuggable for
     // free, no fiber / state machine. See vm_callbacks_plan.md.
     // The source text is retained and replayed by reinstallBuiltinSources()
-    // after `clear all/classes/functions` — MATLAB transparently reloads
+    // after `clear all/classes/functions` â€” MATLAB transparently reloads
     // cleared functions from disk; these have no disk backing, so the engine
     // re-registers them instead (bugs/opened/runtime/clear-all-wipes-builtin-msources.md).
     void registerBuiltinMSource(const std::string &src);
     // Same contract for startup `classdef` sources (e.g. the inline class):
-    // parses and registers each top-level CLASSDEF_DEF via registerClassDef —
-    // the identical call the compiler makes for a classdef statement — and
+    // parses and registers each top-level CLASSDEF_DEF via registerClassDef â€”
+    // the identical call the compiler makes for a classdef statement â€” and
     // retains the text for the same post-clear replay.
     void registerBuiltinClassSource(const std::string &src);
     // Replay every retained startup registration (m-source functions +
-    // classdefs). Parser/registry work only — no VM run — so it is safe to
+    // classdefs). Parser/registry work only â€” no VM run â€” so it is safe to
     // call from inside the `clear` external while a chunk is executing.
     void reinstallBuiltinSources();
 
@@ -114,19 +114,19 @@ public:
     // class REPLACES it wholesale (see unregisterClassDef) so REPL / IDE edits
     // take effect. `qualifiedName` (e.g. "geo.Vec") names a class loaded from a
     // `+pkg/Name.m` file: the source node carries only the leaf (`Vec`), so the
-    // package qualification — which lives in the path — is threaded in here and
+    // package qualification â€” which lives in the path â€” is threaded in here and
     // becomes the registry identity (class()/isa()/registry keys all use it).
-    // Empty (the default) → use the node's own name (inline / unpackaged).
+    // Empty (the default) â†’ use the node's own name (inline / unpackaged).
     void registerClassDef(const ASTNode *classdef, const std::string &qualifiedName = "");
     // Same, with the class file's provenance known from the caller (the
     // m-file resolver) instead of captured from the currently executing
-    // origin — resolution can happen while an unrelated script runs.
+    // origin â€” resolution can happen while an unrelated script runs.
     void registerClassDefFrom(const ASTNode *classdef, const std::string &qualifiedName,
                               const std::string &fsName, const std::string &scriptDir,
                               const std::string &scriptFile);
     // `clear classes` / `clear all`: remove every USER classdef so the next
     // reference re-loads (file classes) or errors as undefined (inline ones).
-    // Built-in classes (containers.Map, …) are not in classDefs_ and survive.
+    // Built-in classes (containers.Map, â€¦) are not in classDefs_ and survive.
     void clearClassDefs();
     // Run a classdef method body (args already include `self` first) /
     // constructor body (with `obj` seeded to the default instance) on the
@@ -136,7 +136,7 @@ public:
     Value invokeClassCtor(const UserFunction &ctor, const Value &seed,
                           Span<const Value> args);
     // Compile a classdef method/constructor body into the VM's global compiled
-    // table (idempotent), returning its chunk — so the VM can run the body as
+    // table (idempotent), returning its chunk â€” so the VM can run the body as
     // a native frame. See vm_callbacks_plan.md.
     const BytecodeChunk *ensureClassMethodChunk(const UserFunction &uf);
     // Enforce a classdef method's declared access from the current context
@@ -157,8 +157,8 @@ public:
     void enforcePropGetAccess(const std::string &className, const std::string &prop);
     void enforcePropSetAccess(const std::string &className, const std::string &prop);
     // Resolve a classdef operator overload (binary / unary) to its compiled
-    // method chunk for an in-bytecode VM frame-push. Returns nullptr — caller
-    // uses the numeric fast path or the C++ slow path (`tryObject*Op`) — when no
+    // method chunk for an in-bytecode VM frame-push. Returns nullptr â€” caller
+    // uses the numeric fast path or the C++ slow path (`tryObject*Op`) â€” when no
     // operand is an object, the class has no such overload, the overload is a
     // synthetic non-UserFunction (enum eq/ne), or the body can't VM-compile. On
     // success sets ownerClassOut to the dominant object's class and enforces the
@@ -171,9 +171,9 @@ public:
     // Resolve a classdef `subsref`/`subsasgn` overload to its compiled method
     // chunk for an in-bytecode VM frame-push, marshaling the call args (subsref:
     // [self, substruct]; subsasgn: [self, substruct, value]). `idx` is the flat
-    // subscript list; for subsasgn `idxAndVal` is [subscripts…, value] (value
-    // last). Returns nullptr — caller uses the C++ slow path / builtin
-    // indexing — when the class has no such overload or the body can't compile.
+    // subscript list; for subsasgn `idxAndVal` is [subscriptsâ€¦, value] (value
+    // last). Returns nullptr â€” caller uses the C++ slow path / builtin
+    // indexing â€” when the class has no such overload or the body can't compile.
     // On success sets ownerClassOut to the object's class. P4, vm_callbacks_plan.md.
     const BytecodeChunk *resolveSubsrefChunk(const Value &self, Span<const Value> idx,
                                              std::string &ownerClassOut,
@@ -204,8 +204,8 @@ public:
     bool classCtxAllows(const std::string &declClass, bool privateOnly) const;
     bool classCtxInCtorOf(const std::string &declClass) const;
     // Construct an object enforcing a non-public constructor's access against
-    // the current context (private ctor → only from the declaring class;
-    // protected → also subclasses). Used at the user-facing `ClassName(args)`
+    // the current context (private ctor â†’ only from the declaring class;
+    // protected â†’ also subclasses). Used at the user-facing `ClassName(args)`
     // call sites; internal default-fill calls `cls->construct` directly so
     // object-array growth is never blocked. A public ctor (or a non-classdef
     // BuiltinClass) passes straight through.
@@ -223,7 +223,7 @@ public:
     // by the VM ctor-frame path before pushing the constructor frame. No-op for
     // a public ctor or a non-classdef BuiltinClass.
     void enforceCtorAccess(const std::string &className);
-    // MATLAB-style display text for an OBJECT value. `name` empty →
+    // MATLAB-style display text for an OBJECT value. `name` empty â†’
     // bare body (disp); otherwise the `name =\n\n<body>\n` form.
     std::string formatObjectDisplay(const std::string &name, const Value &obj) const;
     // Emit an OBJECT value to the engine output, honouring a class-defined
@@ -234,10 +234,10 @@ public:
     void displayObject(const std::string &name, const Value &obj);
     // Operator overloading: when `lhs` or `rhs` is an OBJECT, dispatch the
     // binary operator `op` (the source token, e.g. "+", ".*", "==") to the
-    // dominant object's class `ops` entry (MATLAB names: plus/times/eq/…).
+    // dominant object's class `ops` entry (MATLAB names: plus/times/eq/â€¦).
     // The hook receives self = the dominant object and args = {lhs, rhs}.
     // Returns true (out set) when handled; false when neither side is an
-    // object. Throws the MATLAB "Undefined operator … for type …" error
+    // object. Throws the MATLAB "Undefined operator â€¦ for type â€¦" error
     // when an object operand has no matching overload. Shared by both
     // engines' binary-op slow paths.
     bool tryObjectBinaryOp(const std::string &op, const Value &lhs, const Value &rhs,
@@ -249,21 +249,21 @@ public:
     // MATLAB "Undefined operator" error when an object has no overload.
     bool tryObjectUnaryOp(const std::string &op, const Value &operand,
                           Environment *env, Value &out);
-    // Value-level operator application with object-overload dispatch — the
+    // Value-level operator application with object-overload dispatch â€” the
     // counterpart to the AST (TreeWalker) and bytecode (VM) operator paths for
     // callers that hold Values but no AST node / bytecode operands: the codegen
     // Value-ABI bridge (numkit_codegen_rt's Dynamic tier) and feval of an operator
     // handle. Mirrors the VM slow path exactly: tryObject*Op first (overloads),
-    // then the registered numeric op; throws "Undefined … operator" when
+    // then the registered numeric op; throws "Undefined â€¦ operator" when
     // neither applies. `op` is the source token ("+", ".*", "==", "-", "~",
-    // "'", …). Short-circuit "&&"/"||" are NOT handled here (they are control
-    // flow, lowered by the caller) — pass an eager logical op instead.
+    // "'", â€¦). Short-circuit "&&"/"||" are NOT handled here (they are control
+    // flow, lowered by the caller) â€” pass an eager logical op instead.
     Value applyBinaryOp(const std::string &op, const Value &lhs, const Value &rhs);
     Value applyUnaryOp(const std::string &op, const Value &operand);
     // Builtin object-array slice store: dst(subscripts) = val, default-
     // filling grown slots via the class's no-arg constructor. `perDim` holds
-    // the resolved 0-based index list per subscript — one list → linear
-    // store (shape-preserving / vector grow), several → N-D store (grid
+    // the resolved 0-based index list per subscript â€” one list â†’ linear
+    // store (shape-preserving / vector grow), several â†’ N-D store (grid
     // grow). `val` is a scalar object (broadcast) or matches the target
     // count. Callers first verify dst is a valid target (empty/unset, or a
     // same-class object array). Centralises the store boilerplate shared by
@@ -277,11 +277,11 @@ public:
     bool tryObjectSubsref(Value &self, Span<const Value> args, std::size_t nargout,
                           Value &out, Environment *env);
 
-    // ── Namespace introspection (used by resolver — Phase 6) ──────
+    // â”€â”€ Namespace introspection (used by resolver â€” Phase 6) â”€â”€â”€â”€â”€â”€
 
     // Top-level namespaces in registration order. `compat` shows up
     // here once the first MATLAB-mirror library calls
-    // registerFunction("compat", …).
+    // registerFunction("compat", â€¦).
     const std::vector<std::string> &namespaces() const { return namespaceOrder_; }
 
     // Multimap from leaf name (last segment) to full name
@@ -294,38 +294,38 @@ public:
 
     // Runtime resolver: given a name (possibly short), looks it up considering
     // the active imports in `env` (and its parent chain). Returns nullptr
-    // if not resolvable. `env` may be nullptr — then only direct (core or
+    // if not resolvable. `env` may be nullptr â€” then only direct (core or
     // fully-qualified) lookup is performed.
     //
     // Resolution order (per namespace_design.md Section 3):
     //   1. Direct: externalFuncs_.find(name)  (core / already qualified)
-    //   2. Walk env→parent chain, for each scope's active imports:
-    //      - wildcard `import a.b.*`     → try "a.b.<name>"
-    //      - explicit `import a.b.c`     → if c == name, try "a.b.c"
-    //      - alias    `import a.b as x`  → only resolves x.<name> (handled
+    //   2. Walk envâ†’parent chain, for each scope's active imports:
+    //      - wildcard `import a.b.*`     â†’ try "a.b.<name>"
+    //      - explicit `import a.b.c`     â†’ if c == name, try "a.b.c"
+    //      - alias    `import a.b as x`  â†’ only resolves x.<name> (handled
     //                                       in dotted-name lookup, not here)
     const ExternalFunc *findExternal(const std::string &name,
                                       const Environment *env) const;
 
-    // Returns the full qualified name for a bare leaf name (e.g. "fft" →
-    // "signal.transforms.fft") — the namespace source that the bare-name
+    // Returns the full qualified name for a bare leaf name (e.g. "fft" â†’
+    // "signal.transforms.fft") â€” the namespace source that the bare-name
     // resolver found. Empty when the name doesn't resolve. Used by `which`.
     std::string bareNameSource(const std::string &name) const;
 
     // Compile-time check: is `name` a leaf name registered anywhere in the
     // namespace tree? Used by the compiler to decide whether an identifier
-    // is a callable. Does NOT consider imports — that's a runtime concept.
+    // is a callable. Does NOT consider imports â€” that's a runtime concept.
     bool isKnownLeafName(const std::string &name) const;
 
     void setVariable(const std::string &name, Value val);
     Value *getVariable(const std::string &name);
 
-    // Execute code — uses current backend (TreeWalker by default).
+    // Execute code â€” uses current backend (TreeWalker by default).
     // When `suppressTopLevelDisplay==true`, every top-level statement
     // in `code` is silenced (ans / lhs displays skipped). Side-effect
     // prints inside called functions (disp, fprintf, ...) still fire.
     // Used by the `eval` builtin when the outer caller captures the
-    // return value — matches MATLAB:
+    // return value â€” matches MATLAB:
     //   r = eval('a + b');   % no inner ans display
     //   eval('a + b');       % inner ans display proceeds normally
     Value eval(const std::string &code, bool suppressTopLevelDisplay = false);
@@ -349,7 +349,7 @@ public:
     Value eval(const std::string &code, Environment *scope,
                bool suppressTopLevelDisplay = false);
 
-    // Safe execution — never throws, returns result + error diagnostics
+    // Safe execution â€” never throws, returns result + error diagnostics
     struct EvalResult {
         Value value;
         bool ok = true;
@@ -365,7 +365,7 @@ public:
 
     // Backend selection
     // Run a user function body on the TreeWalker from inside VM
-    // dispatch — the register-exhaustion fallback contract for chunk-less
+    // dispatch â€” the register-exhaustion fallback contract for chunk-less
     // (TW-only) user functions whose schema/body the VM's operand space
     // cannot hold (e.g. >255 named parameters). Single- and multi-output.
     Value callUserFunctionOnTreeWalker(const UserFunction &uf,
@@ -387,7 +387,7 @@ public:
     bool fusionEnabled() const { return fusionEnabled_ && !fusionRules_.empty(); }
     // Fusion-fire telemetry: both backends call noteFusionHit() each time a rule's
     // execute() returns true. Lets tests PROVE a kernel actually fires (a parity
-    // test alone can't — a silent decline gives the same fused==unfused result).
+    // test alone can't â€” a silent decline gives the same fused==unfused result).
     void noteFusionHit() { ++fusionHits_; }
     size_t fusionHits() const { return fusionHits_; }
     void resetFusionHits() { fusionHits_ = 0; }
@@ -397,7 +397,7 @@ public:
     OutputFunc outputFunc() const { return outputFunc_; }
     // Injectable line source for `input()` (the setOutputFunc pattern):
     // the provider returns ONE entered line (no trailing newline). When
-    // unset, the input builtin reads stdin — the CLI path. Tests feed
+    // unset, the input builtin reads stdin â€” the CLI path. Tests feed
     // canned lines; the WASM/JS shell pre-loads piped stdin through the
     // bindings (see repl_bindings); the IDE later supplies its own
     // transport (dev-docs/todo/ide_input_adapter.md).
@@ -426,11 +426,11 @@ public:
     // Compile-time probe for the compiler's dotted-rvalue decision: can
     // `name` be CALLED with no parentheses? True when it is a registered
     // external (full name), a short-name leaf of one, or an
-    // already-registered user function. No lazy m-file probing — the
+    // already-registered user function. No lazy m-file probing â€” the
     // predicate must stay side-effect-free.
     bool hasCallableName(const std::string &name) const;
 
-    // ── Public callback API for builtins ──────────────────────
+    // â”€â”€ Public callback API for builtins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Invoke a function-handle Value from C++. Routes through TW so
     // both built-in (externalFuncs_) and user/anonymous handles work
     // regardless of the active backend. `env` defaults to
@@ -448,9 +448,9 @@ public:
                                                size_t nout,
                                                Environment *env = nullptr);
 
-    // Unified lookup — script-scope first, then workspace-scope, then
+    // Unified lookup â€” script-scope first, then workspace-scope, then
     // an m-file resolver pass over the configured search path
-    // (script-origin → addPath_-list). Returns nullptr when the name
+    // (script-origin â†’ addPath_-list). Returns nullptr when the name
     // isn't found anywhere. May parse-and-cache an m-file as a
     // side-effect.
     //
@@ -462,13 +462,13 @@ public:
     const UserFunction *lookupUserFunction(const std::string &name,
                                             const Environment *env);
 
-    // Const variant — never triggers the m-file resolver. Use for
+    // Const variant â€” never triggers the m-file resolver. Use for
     // pure introspection / "is this CURRENTLY known" checks.
     const UserFunction *lookupUserFunctionLocal(const std::string &name) const;
 
     // Clear workspace-scope user functions. Script-local functions
     // live in a separate bucket (see beginScript/endScript) and are
-    // untouched — MATLAB treats file-scoped functions as lexically
+    // untouched â€” MATLAB treats file-scoped functions as lexically
     // part of the script, not the workspace.
     void clearUserFunctions();
 
@@ -485,10 +485,10 @@ public:
 
     // Base-workspace global membership is the single set workspaceEnv_->globals_
     // (see Environment::globalNames). The compiler reads it to seed each new
-    // top-level chunk's globalNames list — split-mode execution otherwise loses
+    // top-level chunk's globalNames list â€” split-mode execution otherwise loses
     // the declaration between statements.
 
-    // ── M-file path registry (Phase 9) ─────────────────────────────
+    // â”€â”€ M-file path registry (Phase 9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Directories searched (in order) by lookupUserFunction's m-file
     // resolver pass. Paths are VFS-resolvable strings (e.g.
     // "native:/scripts", "local:/work", or just a relative path).
@@ -496,7 +496,7 @@ public:
     void rmPath(const std::string &dir);
     const std::vector<std::string> &path() const { return mPath_; }
 
-    // Drop all cached m-file entries — next lookup re-scans the disk.
+    // Drop all cached m-file entries â€” next lookup re-scans the disk.
     // Powers MATLAB's `rehash` builtin.
     void rehashMFiles();
 
@@ -517,7 +517,7 @@ public:
     // workspace. Nesting is supported via internal save stacks, so
     // recursive eval() calls don't lose their outer scope.
     //
-    // The AST pointer must outlive the matching endScript() — the
+    // The AST pointer must outlive the matching endScript() â€” the
     // caller (eval, DebugSession) owns lifetime.
     void beginScript(const ASTNode *ast);
     void endScript();
@@ -525,16 +525,16 @@ public:
     // Copy the current script-scope user/compiled function buckets
     // into the workspace-scope ones. Used by eval() at script exit
     // so that REPL-ish multi-statement pastes (`function f()...end;
-    // f();` on one go) leave `f` callable from a later eval —
+    // f();` on one go) leave `f` callable from a later eval â€”
     // preserving the engine's REPL persistence contract. Debug
     // sessions don't call this, so file-scoped helpers in a .m
     // script don't leak into base workspace.
     void promoteScriptLocalsToWorkspace();
 
-    // --- Debugger API — grouped behind engine.debug() (see DebugFacade) ──
+    // --- Debugger API â€” grouped behind engine.debug() (see DebugFacade) â”€â”€
     // The debugger accessors live off the public Engine surface (private,
     // reached through the DebugFacade handle) to bound the class's public
-    // method count — architecture-review risk #3.
+    // method count â€” architecture-review risk #3.
     DebugFacade debug();
 
 private:
@@ -559,9 +559,9 @@ public:
     // registerConstant() so `clear all` doesn't wipe them.
     void reinstallConstants();
 
-    // Register a host-level constant — visible to every script as if it
+    // Register a host-level constant â€” visible to every script as if it
     // were `pi`/`eps`/etc. Does not appear in `whos` or the debug
-    // Workspace panel, can be shadowed by `name = …` and un-shadowed by
+    // Workspace panel, can be shadowed by `name = â€¦` and un-shadowed by
     // `clear name`, and survives `clear all`.
     void registerConstant(const std::string &name, Value val);
 
@@ -571,7 +571,7 @@ public:
     // runtime safety checks.
     bool isReservedName(const std::string &name) const;
 
-    // Tic/toc timer access — used by workspace builtins
+    // Tic/toc timer access â€” used by workspace builtins
     void setTicTimer(TimePoint tp)
     {
         ticBase_ = tp;
@@ -584,7 +584,7 @@ public:
     // Used by clear() to avoid modifying workspaceEnv from within function scope.
     bool isInsideFunctionCall() const;
 
-    // ── Frame stack introspection (for assignin / evalin / inputname) ──
+    // â”€â”€ Frame stack introspection (for assignin / evalin / inputname) â”€â”€
     //
     // Walk the user-function call stack from a builtin currently being
     // executed. n=0 = the immediate caller's scope (the function or
@@ -616,32 +616,32 @@ public:
     // call sites.
     std::string inputName(int k);
 
-    // ── Virtual filesystem ────────────────────────────────────
+    // â”€â”€ Virtual filesystem â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     //
-    // Registry of named filesystems ("native", "temporary", "local", …).
+    // Registry of named filesystems ("native", "temporary", "local", â€¦).
     // A native FS is pre-registered in the Engine constructor; the IDE
     // installs "temporary" / "local" via CallbackFS hooks at startup.
     //
     // resolvePath() picks the right backend by this order of precedence:
     //   1. explicit prefix in the path ("temporary:/foo", "local:/foo",
-    //      "native:/foo") — wins over everything
+    //      "native:/foo") â€” wins over everything
     //   2. env var NUMKIT_FS, if it names a registered backend
     //   3. the current script's origin (set by the IDE before eval)
     //   4. "native" if registered
     // Relative paths are joined with `cwd_` when set; otherwise with
-    // NUMKIT_CWD as a host-runtime fallback. cwd_ takes precedence —
+    // NUMKIT_CWD as a host-runtime fallback. cwd_ takes precedence â€”
     // once `cd` / setCwd writes to it, the env var is ignored.
     void registerVirtualFS(std::unique_ptr<VirtualFS> fs);
     VirtualFS *findVirtualFS(const std::string &name) const;
 
     // Each frame carries (fsName, scriptDir):
-    //   * fsName     — VFS that the script came from. Used by resolvePath
+    //   * fsName     â€” VFS that the script came from. Used by resolvePath
     //                  as the implicit FS for relative paths inside the
     //                  script.
-    //   * scriptDir  — directory containing the script. Used by
+    //   * scriptDir  â€” directory containing the script. Used by
     //                  resolveMFile_ as the implicit search dir, so
     //                  sibling .m files resolve without addpath.
-    // 1-arg overload pushes an empty scriptDir — kept for callers that
+    // 1-arg overload pushes an empty scriptDir â€” kept for callers that
     // only know the FS (IDE running an unsaved buffer, tests).
     void pushScriptOrigin(const std::string &fsName);
     void pushScriptOrigin(const std::string &fsName, const std::string &scriptDir);
@@ -655,7 +655,7 @@ public:
     // a depth captured at frame entry on every frame-removal path.
     size_t scriptOriginDepth() const { return fsCtx_.scriptOriginDepth(); }
     void truncateScriptOrigins(size_t depth) { fsCtx_.truncateScriptOrigins(depth); }
-    // Capture the currently executing file as a function's provenance —
+    // Capture the currently executing file as a function's provenance â€”
     // the reference engine's rule for anonymous functions and classdef
     // methods: the origin is fixed at CREATION, and a function born with
     // no executing file keeps '' even when later called from a script.
@@ -671,7 +671,7 @@ public:
     }
 
     // Engine-owned current working directory.
-    //   * `cd` / setCwd write here — canonical when non-empty.
+    //   * `cd` / setCwd write here â€” canonical when non-empty.
     //   * pwd reports this (with backend-cwd fallback when empty).
     //   * resolvePath consults this first, then NUMKIT_CWD env var.
     // The two-tier model lets hosts seed cwd via `setenv NUMKIT_CWD`
@@ -686,8 +686,8 @@ public:
     ResolvedPath resolvePath(const std::string &userPath) const;
 
     // Direct handle to the filesystem session (VFS registry + script-origin
-    // stack + cwd + resolver). Lets core-free toolbox code (io codecs, …)
-    // resolve paths through fs::FsContext WITHOUT depending on Engine — the
+    // stack + cwd + resolver). Lets core-free toolbox code (io codecs, â€¦)
+    // resolve paths through fs::FsContext WITHOUT depending on Engine â€” the
     // Engine-free C++ API surface. Registration adapters pass engine.fsContext().
     FsContext &fsContext() noexcept { return fsCtx_; }
     const FsContext &fsContext() const noexcept { return fsCtx_; }
@@ -698,9 +698,9 @@ public:
     ops::RngContext &rng() noexcept { return rng_; }
     const ops::RngContext &rng() const noexcept { return rng_; }
 
-    // ── MATLAB-style file descriptor table ────────────────────
+    // â”€â”€ MATLAB-style file descriptor table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     //
-    // The fopen / fclose / fprintf(fid, …) state + machinery now live on
+    // The fopen / fclose / fprintf(fid, â€¦) state + machinery now live on
     // FsContext (fs/, L0) so the stateful fopen-family is Engine-free; the
     // methods below forward to fsCtx_. `OpenFile` is aliased here so existing
     // callers keep writing `Engine::OpenFile`. fids 0/1/2 are still routed to
@@ -716,8 +716,8 @@ public:
 
 private:
     std::pmr::memory_resource *mr_;  // not owned; caller-supplied or get_default_resource()
-    std::unique_ptr<Environment> globalsEnv_;     // MATLAB 'global' variables — shared across functions
-    std::unique_ptr<Environment> constantsEnv_;  // pi, eps, inf, etc. — parent for all scopes
+    std::unique_ptr<Environment> globalsEnv_;     // MATLAB 'global' variables â€” shared across functions
+    std::unique_ptr<Environment> constantsEnv_;  // pi, eps, inf, etc. â€” parent for all scopes
     std::unique_ptr<Environment> workspaceEnv_;  // top-level workspace (base workspace)
 
     std::unordered_map<std::string, BinaryOpFunc> binaryOps_;
@@ -744,7 +744,7 @@ private:
     std::unordered_map<std::string, UserFunction> userFuncs_;
     // Startup registration sources retained for post-clear replay
     // (reinstallBuiltinSources): m-source function texts and classdef
-    // source texts. Cleared functions/classes reload from disk in MATLAB —
+    // source texts. Cleared functions/classes reload from disk in MATLAB â€”
     // these have no disk backing, so the engine re-registers them.
     std::vector<std::string> builtinMSourceTexts_;
     std::vector<std::string> builtinClassSourceTexts_;
@@ -792,7 +792,7 @@ private:
                                const std::string &scriptDir, const std::string &scriptFile);
 
     // Evict a previously-registered classdef so a redefinition fully replaces
-    // it (REPL / IDE re-run of `classdef Name … end`). Removes the registry
+    // it (REPL / IDE re-run of `classdef Name â€¦ end`). Removes the registry
     // class, the descriptor, the `Name.static` / `Name.CONST` qualified
     // externals, and the compiled method chunks. Called by registerClassDef
     // when `Name` is already registered, instead of the old idempotent skip.
@@ -803,13 +803,13 @@ private:
     // core `sum` builtin that merely shares the name.
     void dropFileClassCtorExternal_(const std::string &name);
     // After `base` is (re)registered, re-register every class that transitively
-    // derives from it (parent-first), so subclasses — which hold a snapshot of
-    // the base's methods/props — pick up the new definition. Guarded by
+    // derives from it (parent-first), so subclasses â€” which hold a snapshot of
+    // the base's methods/props â€” pick up the new definition. Guarded by
     // suppressDependentCascade_ against re-entrant fan-out.
     void reregisterDerivedClasses(const std::string &base);
 
     OutputFunc outputFunc_;
-    InputProvider inputProvider_;   // empty → input() reads stdin
+    InputProvider inputProvider_;   // empty â†’ input() reads stdin
     FigureManager figureManager_;
     mutable std::unique_ptr<PluginLoader> pluginLoader_;
 
@@ -821,20 +821,20 @@ private:
     // so that export wipes workspaceEnv before writing back.
     bool clearAllCalled_ = false;
 
-    // Host-registered constants — (name → value). Restored into
+    // Host-registered constants â€” (name â†’ value). Restored into
     // constantsEnv_ alongside the built-ins by reinstallConstants() so
     // `clear all` does not drop them. Name presence also feeds
-    // isReservedName() so these behave the same as `pi`/`eps`/…
+    // isReservedName() so these behave the same as `pi`/`eps`/â€¦
     std::unordered_map<std::string, Value> userConstants_;
 
-    // Script-lexical user functions — peer to userFuncs_ but never
+    // Script-lexical user functions â€” peer to userFuncs_ but never
     // cleared by `clear all`. Managed by begin/endScript (which
     // drives both this map and the compiler's matching bucket) so
     // file-scoped functions survive a mid-script clear.
     std::unordered_map<std::string, UserFunction> scriptLocalUserFuncs_;
     std::vector<std::unordered_map<std::string, UserFunction>> savedScriptLocalUserFuncs_;
 
-    // ── M-file resolver state (Phase 9) ───────────────────────────
+    // â”€â”€ M-file resolver state (Phase 9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     std::vector<std::string> mPath_;
     struct MFileCacheEntry
     {
@@ -844,7 +844,7 @@ private:
         std::shared_ptr<const std::string> sourceCode;  // keeps AST live
     };
     std::unordered_map<std::string, MFileCacheEntry> mFileCache_;
-    // Helper — returns nullptr if `name`.m can't be located in any of
+    // Helper â€” returns nullptr if `name`.m can't be located in any of
     // (script-origin, mPath_-list) or fails to parse. On success caches
     // the parsed UserFunction in userFuncs_ and the compiled chunk in
     // the Compiler.
@@ -857,11 +857,11 @@ private:
 
     // Virtual filesystem session: VFS registry + script-origin stack + cwd +
     // path resolver. Engine forwards its filesystem API to this (see the
-    // delegating wrappers in engine.cpp). Owned by value — FsContext is
+    // delegating wrappers in engine.cpp). Owned by value â€” FsContext is
     // STL-only (fs/, L0).
     FsContext fsCtx_;
 
-    // The session's random-number stream + rng() control. Owned by value —
+    // The session's random-number stream + rng() control. Owned by value â€”
     // RngContext is an ops (L0.5) type. Default-constructed = rng('default').
     // Each Engine has an independent, reproducible stream; registration
     // adapters pass engine.rng() to the ops generators / toolbox samplers, so
@@ -878,7 +878,7 @@ private:
     // so independently-numbered closures can never collide in
     // compiledFuncs_ / userFuncs_ (a TreeWalker-executed literal that
     // re-used a low id used to shadow a compiled chunk and run a
-    // foreign body — bugs/opened/core/anon-table-resolution-corruption.md).
+    // foreign body â€” bugs/opened/core/anon-table-resolution-corruption.md).
     std::atomic<int> anonNameCounter_{0};
 
     std::unique_ptr<Compiler> compiler_;
@@ -890,7 +890,7 @@ private:
     std::unique_ptr<VM> vm_;
     Backend backend_ = Backend::VM;
 
-    // Element-wise fusion: registered idiom→kernel rules + on/off gate.
+    // Element-wise fusion: registered idiomâ†’kernel rules + on/off gate.
     // Default reflects NUMKIT_FUSE (set in the ctor); the registry is empty
     // until the standard library installs rules, so a bare Engine is unaffected.
     std::vector<FusionRule> fusionRules_;

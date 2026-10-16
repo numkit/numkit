@@ -1,18 +1,18 @@
-// runtime/src/workspace.cpp
+﻿// runtime/src/workspace.cpp
 //
 // Language-runtime workspace builtins, extracted verbatim from toolboxes/builtin's
 // registerWorkspaceBuiltins into the runtime layer (L2, engine-coupled scripting
-// runtime — NOT a math/io toolbox). Behaviour unchanged. registerWorkspaceRuntime
+// runtime â€” NOT a math/io toolbox). Behaviour unchanged. registerWorkspaceRuntime
 // is composed by installRuntimeLibrary (runtime.cpp).
 //
 // Cluster: clear / import / assignin / inputname / who / whos / exist / clearvars.
-// (clc / which stay in toolboxes/builtin — path/meta, not workspace runtime.)
+// (clc / which stay in toolboxes/builtin â€” path/meta, not workspace runtime.)
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
-#include <numkit/fs/vfs.hpp>          // FileStat (exist / who -file / whos -file)
+#include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)
 #include <numkit/value/scratch.hpp>   // ScratchArena / ScratchVec (who / whos)
 #include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
@@ -30,7 +30,7 @@
 
 namespace numkit::runtime {
 
-// save / load (workspace persistence) — impl + matio v5 .mat backend live
+// save / load (workspace persistence) â€” impl + matio v5 .mat backend live
 // in workspace/saveload.cpp (+ saveload_mat.cpp). Their reg adapters are
 // defined there; declared here so registerWorkspaceRuntime can register
 // them bare (MATLAB save/load are base builtins).
@@ -41,7 +41,7 @@ void load_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
 
 void registerWorkspaceRuntime(Engine &engine)
 {
-    // ── clear ──────────────────────────────────────────────────
+    // â”€â”€ clear â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("clear",
                             [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
@@ -59,7 +59,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     std::string first = args[0].isChar() ? args[0].toString() : "";
 
                                     if (first == "-regexp") {
-                                        // clear -regexp pat1 pat2 ... — drop every workspace
+                                        // clear -regexp pat1 pat2 ... â€” drop every workspace
                                         // variable whose name matches at least one pattern.
                                         // MATLAB uses regexp-style partial match (so `^foo`
                                         // matches "foo1"), not whole-string regex_match.
@@ -99,13 +99,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                     if (first == "global") {
                                         auto *gs = ctx.env->globalsEnv();
                                         if (args.size() == 1) {
-                                            // clear global — clear all globals
+                                            // clear global â€” clear all globals
                                             if (gs)
                                                 gs->clearAll();
                                             env->clearAll();
                                             ctx.engine->markClearAll();
                                         } else {
-                                            // clear global x y — clear specific globals
+                                            // clear global x y â€” clear specific globals
                                             for (size_t i = 1; i < args.size(); ++i) {
                                                 if (args[i].isChar()) {
                                                     std::string gname = args[i].toString();
@@ -153,7 +153,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     } else {
                                         // `clear x`, `clear pi`, etc.
                                         // Un-shadow a built-in by removing the
-                                        // workspace slot — the next read then
+                                        // workspace slot â€” the next read then
                                         // falls back to constantsEnv_. No
                                         // special filtering: MATLAB allows it.
                                         for (auto &a : args) {
@@ -165,13 +165,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                 outs[0] = Value();
                             });
 
-    // ── import ────────────────────────────────────────────────
-    // Command-style: `import signal.*` → import('signal.*').
-    // Function-style: `import('signal', 'as', 's')` → alias form.
+    // â”€â”€ import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Command-style: `import signal.*` â†’ import('signal.*').
+    // Function-style: `import('signal', 'as', 's')` â†’ alias form.
     // Each string arg is one of:
-    //   'a.b.c'   — single-symbol import (path = [a, b, c])
-    //   'a.b.*'   — wildcard import      (path = [a, b], wildcard=true)
-    //   3-arg form 'a.b' / 'as' / 'name'  → alias
+    //   'a.b.c'   â€” single-symbol import (path = [a, b, c])
+    //   'a.b.*'   â€” wildcard import      (path = [a, b], wildcard=true)
+    //   3-arg form 'a.b' / 'as' / 'name'  â†’ alias
     // Multiple args allowed: `import a.* b.*` pushes two imports.
     engine.registerFunction(
         "import", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
@@ -207,7 +207,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
             if (args.empty()) fail("requires at least one argument");
 
-            // Alias form: import('a.b', 'as', 'name') — exactly 3 args, args[1] == 'as'.
+            // Alias form: import('a.b', 'as', 'name') â€” exactly 3 args, args[1] == 'as'.
             if (args.size() == 3 && (args[1].isChar() || args[1].isString())
                 && args[1].toString() == "as") {
                 Import imp;
@@ -229,8 +229,8 @@ void registerWorkspaceRuntime(Engine &engine)
             outs[0] = Value();
         });
 
-    // ── assignin ──────────────────────────────────────────────
-    // assignin(workspace, name, val) — write `name = val` in
+    // â”€â”€ assignin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // assignin(workspace, name, val) â€” write `name = val` in
     // `workspace`, where `workspace` is 'base' (top-level) or 'caller'
     // (the workspace of the function that called the function
     // containing this assignin). VM mode also write-throughs to the
@@ -252,7 +252,7 @@ void registerWorkspaceRuntime(Engine &engine)
                 ctx.engine->workspaceEnv().set(name, args[2]);
             } else if (where == "caller") {
                 // 'caller' is invalid when assignin is called directly
-                // from the base workspace — there's no enclosing
+                // from the base workspace â€” there's no enclosing
                 // function to take a caller of (matches MATLAB's
                 // "ASSIGNIN cannot have 'caller' as a workspace when
                 // used in the base workspace").
@@ -270,7 +270,7 @@ void registerWorkspaceRuntime(Engine &engine)
             outs[0] = Value();
         });
 
-    // ── inputname ────────────────────────────────────────────
+    // â”€â”€ inputname â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // inputname(k) returns the variable name of the k-th input arg as
     // written at the call site of the function containing this call.
     // Empty string if the arg was a literal / expression / non-identifier.
@@ -287,7 +287,7 @@ void registerWorkspaceRuntime(Engine &engine)
             outs[0] = Value::fromString(name, ctx.engine->resource());
         });
 
-    // ── who ────────────────────────────────────────────────────
+    // â”€â”€ who â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("who",
                             [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
@@ -318,20 +318,20 @@ void registerWorkspaceRuntime(Engine &engine)
                                 ScratchArena scratch(ctx.engine->resource());
                                 ScratchVec<std::string> names(&scratch);
                                 // Pseudo-vars set by callUserFunction (nargin /
-                                // nargout) shouldn't appear in `who` output —
+                                // nargout) shouldn't appear in `who` output â€”
                                 // matches MATLAB.
                                 auto isPseudo = [](const std::string &n) {
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
                                     // localNames() excludes parent-env constants
-                                    // (pi, eps, …) — they show up here only if
+                                    // (pi, eps, â€¦) â€” they show up here only if
                                     // shadowed in the workspace, as in MATLAB.
                                     auto src = env->localNames();
                                     for (auto &n : src)
                                         if (!isPseudo(n)) names.push_back(n);
                                     // Globals declared in this workspace live in
-                                    // globalsEnv_, not local storage — MATLAB
+                                    // globalsEnv_, not local storage â€” MATLAB
                                     // lists them too. Disjoint from localNames.
                                     for (const auto &g : env->globalNames())
                                         if (!isPseudo(g) && env->get(g)) names.push_back(g);
@@ -357,7 +357,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 outs[0] = Value();
                             });
 
-    // ── whos ───────────────────────────────────────────────────
+    // â”€â”€ whos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("whos",
                             [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
@@ -398,7 +398,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     for (auto &n : src)
                                         if (!isPseudo(n)) names.push_back(n);
                                     // Globals declared in this workspace (value
-                                    // in globalsEnv_, not local storage) — list
+                                    // in globalsEnv_, not local storage) â€” list
                                     // them too, matching MATLAB.
                                     for (const auto &g : env->globalNames())
                                         if (!isPseudo(g) && env->get(g)) names.push_back(g);
@@ -452,7 +452,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 outs[0] = Value();
                             });
 
-    // ── exist ──────────────────────────────────────────────────
+    // â”€â”€ exist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("exist",
                             [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
                                 if (args.empty())
@@ -468,7 +468,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (typeFilter == "class") {
                                     // No user-defined classdef yet (no class system in
                                     // numkit::Engine). Returning 0 matches MATLAB's
-                                    // behaviour for unknown class names — scripts that
+                                    // behaviour for unknown class names â€” scripts that
                                     // probe for a class get a benign "no" rather than
                                     // a fatal "unsupported".
                                     outs[0] = Value::scalar(0.0, ctx.engine->resource());
@@ -520,7 +520,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 } else if (typeFilter == "builtin") {
                                     if (ctx.engine->hasExternalFunction(varName)) code = 5;
                                 } else if (typeFilter == "file") {
-                                    // Direct path — file or m-file in search path
+                                    // Direct path â€” file or m-file in search path
                                     if (vfsExists(varName))                       code = 2;
                                     else if (findMFile())                          code = 2;
                                 } else if (typeFilter == "dir") {
@@ -530,7 +530,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 outs[0] = Value::scalar(code, ctx.engine->resource());
                             });
 
-    // clearvars — clear named workspace variables. With no args, clears
+    // clearvars â€” clear named workspace variables. With no args, clears
     // all. With "-except name1 name2 ...", clears everything except the
     // listed names. Doesn't unload functions, never affects globals
     // (matches MATLAB's `clearvars` vs. `clear` distinction).
@@ -562,7 +562,7 @@ void registerWorkspaceRuntime(Engine &engine)
             outs[0] = Value();
         });
 
-    // ── save / load ────────────────────────────────────────────
+    // â”€â”€ save / load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Workspace persistence (ASCII + matio v5 .mat). Registered BARE
     // because MATLAB save/load are base builtins, not io-toolbox fns;
     // the old io.workspace.* / compat.* aliases are retired (unused).

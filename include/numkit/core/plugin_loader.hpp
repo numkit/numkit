@@ -1,9 +1,9 @@
-// src/core/include/nk/core/plugin_loader.hpp
+﻿// src/core/include/nk/core/plugin_loader.hpp
 //
 // PluginLoader: dynamic loading and resolution for NumKit modules (.dll / .so).
 #pragma once
 
-#include <numkit/plugin.hpp>
+#include <numkit/sys/plugin.hpp>
 #include <string>
 #include <vector>
 #include <unordered_map>

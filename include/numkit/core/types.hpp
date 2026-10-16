@@ -1,10 +1,10 @@
-// include/types.hpp
+﻿// include/types.hpp
 #pragma once
 
-#include <numkit/plugin.hpp>
+#include <numkit/sys/plugin.hpp>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/environment.hpp>
-#include <numkit/value/error.hpp>   // numkit::Error (L0) — re-exported here for existing users
+#include <numkit/value/error.hpp>   // numkit::Error (L0) â€” re-exported here for existing users
 #include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 
@@ -43,7 +43,7 @@ struct ReturnSignal
 enum class FlowSignal : uint8_t { NONE = 0, BREAK, CONTINUE, RETURN };
 
 // ============================================================
-// Reserved names — classified for precise use at call sites.
+// Reserved names â€” classified for precise use at call sites.
 // ============================================================
 //
 // Numeric/logical constants served by `constantsEnv_` (parent of the
@@ -57,7 +57,7 @@ extern const std::unordered_set<std::string> kBuiltinConstants;
 // used in indexing. None of them live in any environment.
 extern const std::unordered_set<std::string> kPseudoVars;
 
-// Union of the above — "any name the compiler / debugger treats
+// Union of the above â€” "any name the compiler / debugger treats
 // specially and must not mistake for a plain user variable". Most
 // filter sites want this broad set; the narrower ones are for places
 // where we specifically need "true constant" semantics (e.g. deciding
@@ -83,15 +83,15 @@ struct UserFunction
     // Drives the member-access execution context (pushed while the body runs).
     // Empty for ordinary functions.
     std::string ownerClass;
-    // m-file provenance — set by the m-file resolver (file functions),
+    // m-file provenance â€” set by the m-file resolver (file functions),
     // captured at creation for anonymous functions and at registration for
     // classdef methods. When originKnown the call machinery pushes a
     // script-origin frame for the body's duration, so mfilename() reports
     // the captured file and sibling lookups see its directory. A KNOWN but
     // EMPTY origin (function born at the command window) pushes an empty
-    // entry — masking the caller's file, matching the reference engine's
+    // entry â€” masking the caller's file, matching the reference engine's
     // capture-at-creation semantics. Not known (in-script defs, closures)
-    // → no push, the body runs under the caller's origin.
+    // â†’ no push, the body runs under the caller's origin.
     bool originKnown = false;
     std::string sourceFs;
     std::string sourceDir;

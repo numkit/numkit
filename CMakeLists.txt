@@ -63,12 +63,39 @@ if(NOT TARGET numkit_ops)
     endif()
 endif()
 
+# ── Codegen AOT Config ───────────────────────────────────────────────────
+set(NUMKIT_CODEGEN_AOT_AVAILABLE 0)
+set(NUMKIT_CODEGEN_AOT_IS_MSVC 0)
+set(NUMKIT_CODEGEN_AOT_VCVARS "")
+set(NUMKIT_CODEGEN_AOT_CXX "${CMAKE_CXX_COMPILER}")
+if(MSVC AND CMAKE_GENERATOR_INSTANCE)
+    set(_nk_vcvars "${CMAKE_GENERATOR_INSTANCE}/VC/Auxiliary/Build/vcvars64.bat")
+    if(EXISTS "${_nk_vcvars}")
+        set(NUMKIT_CODEGEN_AOT_AVAILABLE 1)
+        set(NUMKIT_CODEGEN_AOT_IS_MSVC 1)
+        set(NUMKIT_CODEGEN_AOT_VCVARS "${_nk_vcvars}")
+    endif()
+elseif(NOT MSVC AND CMAKE_CXX_COMPILER)
+    set(NUMKIT_CODEGEN_AOT_AVAILABLE 1)
+endif()
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/codegen/aot_config.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/numkit/codegen/aot_config.hpp
+    @ONLY
+)
+
 # ── Gather Sources ───────────────────────────────────────────────────────
 file(GLOB_RECURSE NUMKIT_SOURCES
     "src/core/*.cpp"
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"
     "src/pkg/*.cpp"
+    "src/ode/*.cpp"
+    "src/optim/*.cpp"
+    "src/io/*.cpp"
+    "src/graphics/*.cpp"
+    "src/scriptgraph/*.cpp"
+    "src/codegen/*.cpp"
 )
 
 if(NOT NUMKIT_WITH_SIMD)
@@ -85,12 +112,19 @@ add_library(numkit::core ALIAS numkit)
 target_include_directories(numkit
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register/support
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ode
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/optim
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/io
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/scriptgraph
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/codegen
 )
 
 target_link_libraries(numkit
@@ -107,11 +141,16 @@ if(NUMKIT_WITH_SIMD)
     target_link_libraries(numkit PRIVATE hwy hwy_contrib)
 endif()
 
-# ── Executable: numkit CLI / REPL ────────────────────────────────────────
+# ── Executables: numkit CLI / REPL & numkit_codegen ──────────────────────
 if(NUMKIT_BUILD_CLI)
     add_executable(numkit_cli apps/numkit/main.cpp)
     set_target_properties(numkit_cli PROPERTIES OUTPUT_NAME numkit)
     target_link_libraries(numkit_cli PRIVATE numkit)
+
+    if(NOT EMSCRIPTEN)
+        add_executable(numkit_codegen apps/numkit_codegen/main.cpp)
+        target_link_libraries(numkit_codegen PRIVATE numkit)
+    endif()
 endif()
 
 # ── Testing: numkit_gtest ────────────────────────────────────────────────

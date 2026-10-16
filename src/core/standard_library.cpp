@@ -7,6 +7,12 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/runtime/runtime.hpp>
 #include <numkit/builtin/library.hpp>
+#include <numkit/linalg/library.hpp>
+#include <numkit/ode/library.hpp>
+#include <numkit/optim/library.hpp>
+#include <numkit/io/library.hpp>
+#include <numkit/graphics/library.hpp>
+#include <numkit/core/help.hpp>
 
 namespace numkit {
 
@@ -22,7 +28,17 @@ void StandardLibrary::install(Engine &engine)
     // 2. Builtin standard language algorithms
     BuiltinLibrary::install(engine);
 
-    // 3. Element-wise SIMD fusion rules — registered after builtins exist
+    // 3. Base mathematical, I/O, and graphics libraries
+    LinalgLibrary::install(engine);
+    OdeLibrary::install(engine);
+    OptimLibrary::install(engine);
+    IoLibrary::install(engine);
+    GraphicsLibrary::install(engine);
+
+    // 4. Help & Discovery system
+    bundle::HelpLibrary::install(engine);
+
+    // 5. Element-wise SIMD fusion rules — registered after builtins exist
     registerFusionRules(engine);
 }
 

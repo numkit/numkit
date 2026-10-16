@@ -4183,13 +4183,6 @@ bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *
 
     // Try compiled user function
     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-        for (size_t qi = 0; qi < found->code.size(); ++qi)
-            fprintf(stderr, "  [%02zu] op=%d a=%d b=%d c=%d d=%d e=%d\n",
-                    qi, (int)found->code[qi].op, (int)found->code[qi].a,
-                    (int)found->code[qi].b, (int)found->code[qi].c,
-                    (int)found->code[qi].d, (int)found->code[qi].e);
-        for (size_t si = 0; si < found->strings.size(); ++si)
-            fprintf(stderr, "  str[%zu]=%s\n", si, found->strings[si].c_str());
         frame.ip = ip + 1;
         pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
         return true; // caller must re-enter dispatch loop

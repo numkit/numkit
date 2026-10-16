@@ -119,8 +119,28 @@ public:
         return engine_.callFunctionHandle(handle, args, static_cast<Environment *>(env));
     }
 
-    std::vector<Value> callFunctionHandleMulti(const Value &handle, Span<const Value> args, size_t nargout) override {
-        return engine_.callFunctionHandleMulti(handle, args, nargout);
+    std::vector<Value> callFunctionHandleMulti(const Value &handle, Span<const Value> args, size_t nargout, void *env = nullptr) override {
+        return engine_.callFunctionHandleMulti(handle, args, nargout, static_cast<Environment *>(env));
+    }
+
+    ops::RngContext &rng() override {
+        return engine_.rng();
+    }
+
+    FsContext::ResolvedPath resolvePath(const std::string &userPath) const override {
+        return engine_.resolvePath(userPath);
+    }
+
+    FigureManager &figureManager() override {
+        return engine_.figureManager();
+    }
+
+    void registerBuiltinMSource(const std::string &src) override {
+        engine_.registerBuiltinMSource(src);
+    }
+
+    const ExternalFunc *findExternal(const std::string &name, const Environment *env = nullptr) const override {
+        return engine_.findExternal(name, env);
     }
 
 private:
@@ -129,20 +149,30 @@ private:
 };
 
 static bool parseManifest(const std::string &content, std::string &libName, std::vector<std::string> &funcs) {
-    size_t libPos = content.find("\"library\"");
-    if (libPos != std::string::npos) {
-        size_t colon = content.find(':', libPos);
-        if (colon != std::string::npos) {
-            size_t q1 = content.find('"', colon);
-            if (q1 != std::string::npos) {
-                size_t q2 = content.find('"', q1 + 1);
-                if (q2 != std::string::npos) {
-                    libName = content.substr(q1 + 1, q2 - q1 - 1);
-                }
-            }
+    auto extractStringField = [&](const char *key) -> std::string {
+        size_t pos = content.find(key);
+        if (pos == std::string::npos) return {};
+        size_t colon = content.find(':', pos);
+        if (colon == std::string::npos) return {};
+        size_t q1 = content.find('"', colon);
+        if (q1 == std::string::npos) return {};
+        size_t q2 = content.find('"', q1 + 1);
+        if (q2 == std::string::npos) return {};
+        return content.substr(q1 + 1, q2 - q1 - 1);
+    };
+
+    libName = extractStringField("\"library\"");
+    if (libName.empty()) {
+        std::string pkgName = extractStringField("\"name\"");
+        if (!pkgName.empty()) {
+            libName = "numkit_" + pkgName;
         }
     }
+
     size_t fnPos = content.find("\"functions\"");
+    if (fnPos == std::string::npos) {
+        fnPos = content.find("\"exports\"");
+    }
     if (fnPos != std::string::npos) {
         size_t bOpen = content.find('[', fnPos);
         size_t bClose = (bOpen != std::string::npos) ? content.find(']', bOpen) : std::string::npos;
