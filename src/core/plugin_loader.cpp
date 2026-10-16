@@ -199,6 +199,15 @@ PluginLoader::PluginLoader(Engine &engine)
     searchPaths_.push_back(".");
     searchPaths_.push_back("modules");
     searchPaths_.push_back("../modules");
+#ifdef _WIN32
+    if (const char *up = std::getenv("USERPROFILE")) {
+        searchPaths_.push_back((std::filesystem::path(up) / ".numkit" / "modules").string());
+    }
+#else
+    if (const char *home = std::getenv("HOME")) {
+        searchPaths_.push_back((std::filesystem::path(home) / ".numkit" / "modules").string());
+    }
+#endif
     searchPaths_.push_back("C:/Users/User/Projects/numkit");
 }
 
@@ -268,6 +277,8 @@ void PluginLoader::scanManifests_()
         if (!std::filesystem::exists(sp, ec)) continue;
 
         auto checkManifest = [&](const std::filesystem::path &manifestPath, const std::filesystem::path &dir) {
+            std::error_code dirEc;
+            if (!std::filesystem::exists(dir, dirEc)) return;
             std::ifstream file(manifestPath);
             if (!file.is_open()) return;
             std::stringstream buffer;

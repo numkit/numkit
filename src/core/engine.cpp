@@ -1869,7 +1869,7 @@ const ExternalFunc *Engine::findExternal(const std::string &name,
     // 4. Plugin / modular toolbox autoload fallback:
     //    If the function is provided by an installed plugin module in the manifest
     //    that has not been loaded yet, try to load it now on-demand.
-    if (pluginLoader_ && pluginLoader_->tryAutoLoadForFunction(name)) {
+    if (pluginLoader().tryAutoLoadForFunction(name)) {
         auto it2 = externalFuncs_.find(name);
         if (it2 != externalFuncs_.end()) return &it2->second;
         auto range2 = shortNameIndex_.equal_range(name);
@@ -1920,7 +1920,7 @@ bool Engine::isKnownLeafName(const std::string &name) const
         || shortNameIndex_.find(name) != shortNameIndex_.end()) {
         return true;
     }
-    if (pluginLoader_ && pluginLoader_->tryAutoLoadForFunction(name)) {
+    if (pluginLoader().tryAutoLoadForFunction(name)) {
         return externalFuncs_.find(name) != externalFuncs_.end()
                || shortNameIndex_.find(name) != shortNameIndex_.end();
     }
