@@ -1,4 +1,4 @@
-﻿// fsolve_reg.cpp â€” fsolve (nonlinear system solver) as an embedded `.m`
+// fsolve_reg.cpp â€” fsolve (nonlinear system solver) as an embedded `.m`
 // wrapper, mirroring the fzero / fminsearch pattern (vm_callbacks_plan.md):
 // the objective F(x) is always user code, so the solver is written in `.m`
 // and every F(x) evaluation runs as bytecode â†’ pausable under the debugger
@@ -18,11 +18,11 @@ namespace numkit::optim {
 static const char *kFsolveMSource = R"NKM(
 function [x, fval, exitflag] = fsolve(fn, x0, varargin)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:fsolve:fnType', 'fsolve: 1st argument must be a function handle');
+    error('numkit:fsolve:fnType', 'fsolve: 1st argument must be a function handle');
   end
   n = numel(x0);
   if n == 0
-    error('nk:fsolve:badX0', 'fsolve: x0 must be non-empty');
+    error('numkit:fsolve:badX0', 'fsolve: x0 must be non-empty');
   end
   isRow = (size(x0, 1) == 1);
   x = reshape(x0, n, 1);

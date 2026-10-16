@@ -1,4 +1,4 @@
-﻿// fzero_reg.cpp â€” Engine adapters + embedded-.m registration relocated from
+// fzero_reg.cpp â€” Engine adapters + embedded-.m registration relocated from
 // the optim toolbox in Phase D. Toolbox keeps the Engine-free FnHandle
 // kernels (fzero/fminbnd/fminsearch); this core-coupled glue lives in bundle.
 #include <numkit/optim/local/fzero.hpp>
@@ -150,7 +150,7 @@ void fminsearch_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
 static const char *kFzeroMSource = R"NKM(
 function [x, fval, exitflag] = fzero(fn, x0)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:fzero:notHandle', 'fzero: first argument must be a function handle');
+    error('numkit:fzero:notHandle', 'fzero: first argument must be a function handle');
   end
   if numel(x0) == 1
     [a, b] = NUMKIT_fzero_bracket(fn, x0);
@@ -165,11 +165,11 @@ function [x, fval, exitflag] = fzero(fn, x0)
   elseif numel(x0) == 2
     a = x0(1); b = x0(2);
     if ~(isfinite(a) && isfinite(b)) || a >= b
-      error('nk:fzero:badInterval', 'fzero: interval [a, b] must satisfy a < b and be finite');
+      error('numkit:fzero:badInterval', 'fzero: interval [a, b] must satisfy a < b and be finite');
     end
     x = NUMKIT_fzero_brent(fn, a, b);
   else
-    error('nk:fzero:badX0', 'fzero: 2nd argument must be a scalar x0 or a 2-element interval [a, b]');
+    error('numkit:fzero:badX0', 'fzero: 2nd argument must be a scalar x0 or a 2-element interval [a, b]');
   end
   fval = fn(x);
   exitflag = 1;
@@ -177,7 +177,7 @@ end
 
 function [a, b] = NUMKIT_fzero_bracket(fn, x0)
   if ~isfinite(x0)
-    error('nk:fzero:badX0', 'fzero: x0 must be finite');
+    error('numkit:fzero:badX0', 'fzero: x0 must be finite');
   end
   if x0 == 0
     step = 0.02;
@@ -212,7 +212,7 @@ function [a, b] = NUMKIT_fzero_bracket(fn, x0)
       b = aprev; return;
     end
   end
-  error('nk:fzero:noBracket', 'fzero: failed to find a bracket containing a sign change near x0');
+  error('numkit:fzero:noBracket', 'fzero: failed to find a bracket containing a sign change near x0');
 end
 
 function r = NUMKIT_fzero_brent(fn, a, b)
@@ -221,7 +221,7 @@ function r = NUMKIT_fzero_brent(fn, a, b)
   if fa == 0, r = a; return; end
   if fb == 0, r = b; return; end
   if (fa < 0) == (fb < 0)
-    error('nk:fzero:noSignChange', 'fzero: f(a) and f(b) must have opposite signs (no sign change in the supplied interval)');
+    error('numkit:fzero:noSignChange', 'fzero: f(a) and f(b) must have opposite signs (no sign change in the supplied interval)');
   end
   c = a; fc = fa; d = b - a; e = d;
   for it = 1:200
@@ -270,7 +270,7 @@ function r = NUMKIT_fzero_brent(fn, a, b)
     end
     fb = fn(b);
   end
-  error('nk:fzero:noConverge', 'fzero: failed to converge within iteration limit');
+  error('numkit:fzero:noConverge', 'fzero: failed to converge within iteration limit');
 end
 )NKM";
 
@@ -292,11 +292,11 @@ void registerFzeroM(Engine &engine)
 static const char *kFminsearchMSource = R"NKM(
 function [x, fval, exitflag] = fminsearch(fn, x0, tol)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:fminsearch:fnType', 'fminsearch: 1st argument must be a function handle');
+    error('numkit:fminsearch:fnType', 'fminsearch: 1st argument must be a function handle');
   end
   n = numel(x0);
   if n == 0
-    error('nk:fminsearch:badX0', 'fminsearch: x0 must be non-empty');
+    error('numkit:fminsearch:badX0', 'fminsearch: x0 must be non-empty');
   end
   if nargin < 3 || isempty(tol) || ~(tol > 0)
     tol = 1e-4;

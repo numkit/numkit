@@ -5,6 +5,7 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
+#include <numkit/sys/toolchain.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -97,13 +98,13 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
         baseTarget = trimmed.substr(0, tagPos);
     }
 
-    // 1. Check if local directory path
+    // 1. Check if explicit local directory path (starts with ./, ../, /, \, or drive letter)
     std::error_code ec;
-    if (baseTarget.rfind("./", 0) == 0 || baseTarget.rfind(".\\", 0) == 0 ||
+    if (baseTarget == "." || baseTarget == ".." ||
+        baseTarget.rfind("./", 0) == 0 || baseTarget.rfind(".\\", 0) == 0 ||
         baseTarget.rfind("../", 0) == 0 || baseTarget.rfind("..\\", 0) == 0 ||
         baseTarget.rfind("/", 0) == 0 || baseTarget.rfind("\\", 0) == 0 ||
-        (baseTarget.size() >= 2 && baseTarget[1] == ':') ||
-        fs::is_directory(baseTarget, ec))
+        (baseTarget.size() >= 2 && baseTarget[1] == ':'))
     {
         target.isLocal = true;
         fs::path p = fs::absolute(baseTarget, ec);
@@ -183,16 +184,21 @@ std::string PackageManager::locateSharedLibrary(const std::string &buildDir, con
 
 int PackageManager::install(const std::string &targetInput, bool verbose)
 {
-    if (!sys::isCommandAvailable("git")) {
-        std::cerr << "Error: 'git' command is not available in PATH.\n";
-        return 1;
-    }
-    if (!sys::isCommandAvailable("cmake")) {
-        std::cerr << "Error: 'cmake' command is not available in PATH.\n";
+    auto cmakeTool = sys::findCMake();
+    if (!cmakeTool.found) {
+        std::cerr << "Error: CMake not found in PATH or standard installation directories.\n";
         return 1;
     }
 
     PackageTarget target = resolveTarget(targetInput);
+
+    if (!target.isLocal) {
+        auto gitTool = sys::findGit();
+        if (!gitTool.found) {
+            std::cerr << "Error: 'git' command is not available in PATH.\n";
+            return 1;
+        }
+    }
 
     if (verbose) {
         std::cout << "Installing package '" << target.name << "'...\n";
@@ -205,12 +211,13 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
             std::cout << "Using local source directory: " << sourceDir << "\n";
         }
     } else {
+        auto gitTool = sys::findGit();
         sourceDir = (fs::path(cacheDir_) / target.name).string();
         if (fs::exists(sourceDir)) {
             if (verbose) {
                 std::cout << "Updating existing repository in cache...\n";
             }
-            std::string pullCmd = "git -C \"" + sourceDir + "\" pull --ff-only";
+            std::string pullCmd = "\"" + gitTool.path + "\" -C \"" + sourceDir + "\" pull --ff-only";
             auto pullRes = sys::runProcess(pullCmd);
             if (!pullRes.ok()) {
                 if (verbose) {
@@ -222,7 +229,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
         }
 
         if (!fs::exists(sourceDir)) {
-            std::string cloneCmd = "git clone --depth 1 ";
+            std::string cloneCmd = "\"" + gitTool.path + "\" clone --depth 1 ";
             if (!target.tagOrBranch.empty()) {
                 cloneCmd += "--branch \"" + target.tagOrBranch + "\" ";
             }
@@ -242,7 +249,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
 
     // Configure CMake build
     std::string buildDir = (fs::path(sourceDir) / "build").string();
-    std::string cfgCmd = "cmake -B \"" + buildDir + "\" -S \"" + sourceDir + "\" -DCMAKE_BUILD_TYPE=Release";
+    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + sourceDir + "\" -DCMAKE_BUILD_TYPE=Release";
     if (verbose) {
         std::cout << "Configuring CMake project...\n";
     }
@@ -253,7 +260,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
     }
 
     // Build project
-    std::string buildCmd = "cmake --build \"" + buildDir + "\" --config Release";
+    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release";
     if (verbose) {
         std::cout << "Building shared module...\n";
     }
@@ -282,14 +289,19 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
         return 1;
     }
 
-    // Write manifest.json
+    // Copy source manifest.json (preserving exports/functions) or generate fallback manifest.json
+    fs::path srcManifest = fs::path(sourceDir) / "manifest.json";
     fs::path manifestPath = destDir / "manifest.json";
-    std::ofstream mf(manifestPath);
-    if (mf.is_open()) {
-        mf << "{\n"
-           << "  \"name\": \"" << target.name << "\",\n"
-           << "  \"library\": \"" << fs::path(libPath).filename().string() << "\"\n"
-           << "}\n";
+    if (fs::exists(srcManifest, ec)) {
+        fs::copy_file(srcManifest, manifestPath, fs::copy_options::overwrite_existing, ec);
+    } else {
+        std::ofstream mf(manifestPath);
+        if (mf.is_open()) {
+            mf << "{\n"
+               << "  \"name\": \"" << target.name << "\",\n"
+               << "  \"library\": \"" << fs::path(libPath).filename().string() << "\"\n"
+               << "}\n";
+        }
     }
 
     std::cout << "Package 'numkit-" << target.name << "' successfully installed to:\n"
@@ -349,8 +361,9 @@ int PackageManager::list(std::ostream &out) const
 
 int PackageManager::build(const std::string &dir, bool verbose)
 {
-    if (!sys::isCommandAvailable("cmake")) {
-        std::cerr << "Error: 'cmake' command is not available in PATH.\n";
+    auto cmakeTool = sys::findCMake();
+    if (!cmakeTool.found) {
+        std::cerr << "Error: CMake not found in PATH or standard installation directories.\n";
         return 1;
     }
 
@@ -359,14 +372,14 @@ int PackageManager::build(const std::string &dir, bool verbose)
         std::cout << "Building module in " << dir << "...\n";
     }
 
-    std::string cfgCmd = "cmake -B \"" + buildDir + "\" -S \"" + dir + "\" -DCMAKE_BUILD_TYPE=Release";
+    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + dir + "\" -DCMAKE_BUILD_TYPE=Release";
     auto cfgRes = sys::runProcess(cfgCmd);
     if (!cfgRes.ok()) {
         std::cerr << "CMake configuration failed:\n" << cfgRes.output << "\n";
         return 1;
     }
 
-    std::string buildCmd = "cmake --build \"" + buildDir + "\" --config Release";
+    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release";
     auto buildRes = sys::runProcess(buildCmd);
     if (!buildRes.ok()) {
         std::cerr << "CMake build failed:\n" << buildRes.output << "\n";

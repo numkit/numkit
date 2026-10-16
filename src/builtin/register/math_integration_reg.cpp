@@ -354,23 +354,23 @@ void trapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 static const char *kIntegralMSource = R"NUMKIT_M(
 function r = integral(fn, a, b, opt, optval)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:integral:fnType', 'integral: 1st argument must be a function handle');
+    error('numkit:integral:fnType', 'integral: 1st argument must be a function handle');
   end
   absTol = 1e-10;
   if nargin >= 4
     if nargin < 5
-      error('nk:integral:badFlag', 'integral: option name without a value');
+      error('numkit:integral:badFlag', 'integral: option name without a value');
     end
     if ~strcmp(lower(opt), 'abstol')
-      error('nk:integral:badFlag', 'integral: unsupported option');
+      error('numkit:integral:badFlag', 'integral: unsupported option');
     end
     absTol = optval;
   end
   if ~(isfinite(a) && isfinite(b))
-    error('nk:integral:badBounds', 'integral: bounds must be finite');
+    error('numkit:integral:badBounds', 'integral: bounds must be finite');
   end
   if absTol <= 0
-    error('nk:integral:badTol', 'integral: absTol must be positive');
+    error('numkit:integral:badTol', 'integral: absTol must be positive');
   end
   sgn = 1;
   if b < a

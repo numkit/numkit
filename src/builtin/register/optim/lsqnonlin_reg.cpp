@@ -1,4 +1,4 @@
-﻿// lsqnonlin_reg.cpp â€” lsqnonlin / lsqcurvefit (nonlinear least squares) as
+// lsqnonlin_reg.cpp â€” lsqnonlin / lsqcurvefit (nonlinear least squares) as
 // embedded `.m` wrappers, mirroring the fzero / fminsearch / fsolve pattern
 // (vm_callbacks_plan.md): the residual F(p) is always user code, so the
 // solver is written in `.m` and every F(p) evaluation runs as bytecode â†’
@@ -18,14 +18,14 @@ namespace numkit::optim {
 static const char *kLsqnonlinMSource = R"NKM(
 function [p, resnorm, residual, exitflag] = lsqnonlin(fn, p0, lb, ub, varargin)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:lsqnonlin:fnType', 'lsqnonlin: 1st argument must be a function handle');
+    error('numkit:lsqnonlin:fnType', 'lsqnonlin: 1st argument must be a function handle');
   end
   if (nargin >= 3 && ~isempty(lb)) || (nargin >= 4 && ~isempty(ub))
-    error('nk:lsqnonlin:bounds', 'lsqnonlin: bound constraints (lb/ub) are not yet supported');
+    error('numkit:lsqnonlin:bounds', 'lsqnonlin: bound constraints (lb/ub) are not yet supported');
   end
   n = numel(p0);
   if n == 0
-    error('nk:lsqnonlin:badP0', 'lsqnonlin: p0 must be non-empty');
+    error('numkit:lsqnonlin:badP0', 'lsqnonlin: p0 must be non-empty');
   end
   isRow = (size(p0, 1) == 1);
   x = reshape(p0, n, 1);
@@ -42,10 +42,10 @@ end
 
 function [p, resnorm, residual, exitflag] = lsqcurvefit(fn, p0, xdata, ydata, lb, ub, varargin)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:lsqcurvefit:fnType', 'lsqcurvefit: 1st argument must be a function handle');
+    error('numkit:lsqcurvefit:fnType', 'lsqcurvefit: 1st argument must be a function handle');
   end
   if (nargin >= 5 && ~isempty(lb)) || (nargin >= 6 && ~isempty(ub))
-    error('nk:lsqcurvefit:bounds', 'lsqcurvefit: bound constraints (lb/ub) are not yet supported');
+    error('numkit:lsqcurvefit:bounds', 'lsqcurvefit: bound constraints (lb/ub) are not yet supported');
   end
   yc = reshape(ydata, numel(ydata), 1);
   resfn = @(p) reshape(fn(p, xdata), numel(yc), 1) - yc;

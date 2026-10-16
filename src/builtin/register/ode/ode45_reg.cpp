@@ -1,4 +1,4 @@
-﻿// bundle/src/register/ode/ode45_reg.cpp â€” Engine adapter + embedded-.m registration relocated from the
+// bundle/src/register/ode/ode45_reg.cpp â€” Engine adapter + embedded-.m registration relocated from the
 // ode toolbox in Phase D (solver 3-way split): the toolbox keeps the
 // Engine-free FnHandle kernel; this core-coupled glue lives in bundle.
 #include <numkit/ode/solvers.hpp>
@@ -59,21 +59,21 @@ function [t, y] = ode45(fn, tspan, y0, opts)
     end
   end
   ts = tspan(:); nspan = numel(ts);
-  if nspan < 2, error('nk:ode45:tspanShort', 'ode45: tspan must have at least 2 elements'); end
+  if nspan < 2, error('numkit:ode45:tspanShort', 'ode45: tspan must have at least 2 elements'); end
   t0 = ts(1); tf = ts(nspan);
-  if t0 == tf, error('nk:ode45:tspanDegenerate', 'ode45: tspan(end) must differ from tspan(1)'); end
+  if t0 == tf, error('numkit:ode45:tspanDegenerate', 'ode45: tspan(end) must differ from tspan(1)'); end
   if tf > t0, dir = 1; else, dir = -1; end
   for i = 2:nspan
     if (ts(i) - ts(i-1))*dir <= 0
-      error('nk:ode45:tspanMono', 'ode45: tspan must be strictly monotonic');
+      error('numkit:ode45:tspanMono', 'ode45: tspan must be strictly monotonic');
     end
   end
   yc = y0(:); d = numel(yc);
   if numel(abs_tol) ~= 1 && numel(abs_tol) ~= d
-    error('nk:ode45:absTolSize', 'ode45: AbsTol must be scalar or match length(y0)');
+    error('numkit:ode45:absTolSize', 'ode45: AbsTol must be scalar or match length(y0)');
   end
   k1 = fn(t0, yc); k1 = k1(:);
-  if numel(k1) ~= d, error('nk:ode45:badRhsSize', 'ode45: RHS size mismatch'); end
+  if numel(k1) ~= d, error('numkit:ode45:badRhsSize', 'ode45: RHS size mismatch'); end
   h = initial_step;
   if ~(h > 0)
     sc0 = abs_tol + rel_tol*abs(yc);
@@ -130,11 +130,11 @@ function [t, y] = ode45(fn, tspan, y0, opts)
       failed = failed + 1;
       fac = max(0.1, 0.9*(1/err_norm)^(1/5));
       h = th*fac;
-      if failed > 10, error('nk:ode45:tooManyFailures', 'ode45: too many step rejections'); end
-      if h < abs(tc)*1e-15, error('nk:ode45:stepUnderflow', 'ode45: step size underflow'); end
+      if failed > 10, error('numkit:ode45:tooManyFailures', 'ode45: too many step rejections'); end
+      if h < abs(tc)*1e-15, error('numkit:ode45:stepUnderflow', 'ode45: step size underflow'); end
     end
   end
-  if step_count >= max_steps, error('nk:ode45:tooManySteps', 'ode45: exceeded integration steps'); end
+  if step_count >= max_steps, error('numkit:ode45:tooManySteps', 'ode45: exceeded integration steps'); end
   t = T; y = Y;
 end
 

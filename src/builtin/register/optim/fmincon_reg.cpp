@@ -1,4 +1,4 @@
-﻿// fmincon_reg.cpp â€” fmincon (nonlinear constrained minimization) as an
+// fmincon_reg.cpp â€” fmincon (nonlinear constrained minimization) as an
 // embedded `.m`, mirroring the other optim solvers (pausable objective).
 //
 // min f(x) s.t. AÂ·x â‰¤ b, AeqÂ·x = beq, lb â‰¤ x â‰¤ ub, c(x) â‰¤ 0, ceq(x) = 0.
@@ -26,7 +26,7 @@ namespace numkit::optim {
 static const char *kFminconMSource = R"NKM(
 function [x, fval, exitflag] = fmincon(fn, x0, A, b, Aeq, beq, lb, ub, nonlcon, varargin)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:fmincon:fnType', 'fmincon: 1st argument must be a function handle');
+    error('numkit:fmincon:fnType', 'fmincon: 1st argument must be a function handle');
   end
   n = numel(x0);
   if nargin < 3, A = []; end

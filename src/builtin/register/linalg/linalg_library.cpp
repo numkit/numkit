@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/library.cpp
+// toolboxes/linalg/src/library.cpp
 //
 // Registration hub for the Linear Algebra Toolbox.
 //
@@ -113,10 +113,10 @@ namespace numkit {
 static const char *kFunmMSource = R"NKM(
 function F = funm(A, fun)
   if nargin < 2
-    error('nk:funm:nargin', 'funm: requires (A, fun)');
+    error('numkit:funm:nargin', 'funm: requires (A, fun)');
   end
   if ~(ismatrix(A) && size(A,1) == size(A,2))
-    error('nk:funm:square', 'funm: A must be a square matrix');
+    error('numkit:funm:square', 'funm: A must be a square matrix');
   end
   [V, D] = eig(A);
   F = V * diag(fun(diag(D))) / V;

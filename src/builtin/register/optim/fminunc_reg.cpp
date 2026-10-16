@@ -1,4 +1,4 @@
-﻿// fminunc_reg.cpp â€” fminunc (unconstrained gradient minimization) as an
+// fminunc_reg.cpp â€” fminunc (unconstrained gradient minimization) as an
 // embedded `.m` wrapper, mirroring the fzero / fminsearch / fsolve pattern
 // (vm_callbacks_plan.md): the objective f(x) is always user code, so the
 // solver is written in `.m` and every f(x) evaluation runs as bytecode â†’
@@ -19,11 +19,11 @@ namespace numkit::optim {
 static const char *kFminuncMSource = R"NKM(
 function [x, fval, exitflag] = fminunc(fn, x0, varargin)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
-    error('nk:fminunc:fnType', 'fminunc: 1st argument must be a function handle');
+    error('numkit:fminunc:fnType', 'fminunc: 1st argument must be a function handle');
   end
   n = numel(x0);
   if n == 0
-    error('nk:fminunc:badX0', 'fminunc: x0 must be non-empty');
+    error('numkit:fminunc:badX0', 'fminunc: x0 must be non-empty');
   end
   isRow = (size(x0, 1) == 1);
   x = reshape(x0, n, 1);

@@ -191,24 +191,92 @@ static bool parseManifest(const std::string &content, std::string &libName, std:
     return !libName.empty();
 }
 
+static std::filesystem::path getExecutableDir() {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, buf, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        return std::filesystem::path(std::string(buf, len)).parent_path();
+    }
+#elif defined(__linux__)
+    std::error_code ec;
+    auto p = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec) return p.parent_path();
+#endif
+    return {};
+}
+
+static bool sharedLibExistsInDir(const std::filesystem::path &dir, const std::string &libName) {
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec)) return false;
+    const char *candidates[] = {
+        "",
+#ifdef _WIN32
+        ".dll"
+#elif defined(__APPLE__)
+        ".dylib",
+        ".so"
+#else
+        ".so"
+#endif
+    };
+    for (const char *ext : candidates) {
+        if (std::filesystem::exists(dir / (libName + ext), ec) &&
+            std::filesystem::is_regular_file(dir / (libName + ext), ec)) {
+            return true;
+        }
+#ifndef _WIN32
+        if (std::filesystem::exists(dir / ("lib" + libName + ext), ec) &&
+            std::filesystem::is_regular_file(dir / ("lib" + libName + ext), ec)) {
+            return true;
+        }
+#endif
+    }
+    return false;
+}
+
 } // namespace
 
 PluginLoader::PluginLoader(Engine &engine)
     : engine_(engine)
 {
-    searchPaths_.push_back(".");
-    searchPaths_.push_back("modules");
-    searchPaths_.push_back("../modules");
+    auto addUnique = [&](const std::filesystem::path &p) {
+        if (p.empty()) return;
+        std::error_code ec;
+        std::string norm = p.lexically_normal().string();
+        for (const auto &existing : searchPaths_) {
+            if (existing == norm) return;
+        }
+        searchPaths_.push_back(norm);
+    };
+
+    if (const char *envMod = std::getenv("NUMKIT_MODULES_PATH")) {
+        if (*envMod) addUnique(envMod);
+    }
+
+    addUnique(".");
+    addUnique("modules");
+    addUnique("../modules");
+    addUnique("..");
+
 #ifdef _WIN32
     if (const char *up = std::getenv("USERPROFILE")) {
-        searchPaths_.push_back((std::filesystem::path(up) / ".numkit" / "modules").string());
+        addUnique(std::filesystem::path(up) / ".numkit" / "modules");
     }
 #else
     if (const char *home = std::getenv("HOME")) {
-        searchPaths_.push_back((std::filesystem::path(home) / ".numkit" / "modules").string());
+        addUnique(std::filesystem::path(home) / ".numkit" / "modules");
     }
 #endif
-    searchPaths_.push_back("C:/Users/User/Projects/numkit");
+
+    auto exeDir = getExecutableDir();
+    if (!exeDir.empty()) {
+        addUnique(exeDir);
+        addUnique(exeDir / "modules");
+        addUnique(exeDir / ".." / "modules");
+        addUnique(exeDir / ".." / "..");
+        addUnique(exeDir / ".." / ".." / "..");
+    }
 }
 
 PluginLoader::~PluginLoader()
@@ -238,6 +306,18 @@ bool PluginLoader::loadModule(const std::string &path, const std::string &target
         if (p.extension() != ".so") withExt += ".so";
 #endif
         h = osLoadLibrary(withExt.c_str());
+#ifndef _WIN32
+        if (!h) {
+            std::filesystem::path libPrefixed = p.parent_path() / ("lib" + p.filename().string());
+            std::string lpStr = libPrefixed.string();
+#if defined(__APPLE__)
+            if (libPrefixed.extension() != ".dylib") lpStr += ".dylib";
+#else
+            if (libPrefixed.extension() != ".so") lpStr += ".so";
+#endif
+            h = osLoadLibrary(lpStr.c_str());
+        }
+#endif
     }
 
     if (!h) {
@@ -277,8 +357,6 @@ void PluginLoader::scanManifests_()
         if (!std::filesystem::exists(sp, ec)) continue;
 
         auto checkManifest = [&](const std::filesystem::path &manifestPath, const std::filesystem::path &dir) {
-            std::error_code dirEc;
-            if (!std::filesystem::exists(dir, dirEc)) return;
             std::ifstream file(manifestPath);
             if (!file.is_open()) return;
             std::stringstream buffer;
@@ -287,19 +365,30 @@ void PluginLoader::scanManifests_()
             std::string libName;
             std::vector<std::string> funcs;
             if (parseManifest(content, libName, funcs)) {
+                if (!sharedLibExistsInDir(dir, libName)) return;
                 std::filesystem::path libPath = dir / libName;
                 for (const auto &fn : funcs) {
                     manifestIndex_[fn] = libPath.string();
+                }
+                std::string pkgName = libName;
+                if (pkgName.rfind("numkit_", 0) == 0) {
+                    pkgName = pkgName.substr(7);
+                }
+                if (!pkgName.empty()) {
+                    manifestIndex_["@pkg:" + pkgName] = libPath.string();
                 }
             }
         };
 
         if (std::filesystem::is_directory(sp, ec)) {
             checkManifest(std::filesystem::path(sp) / "manifest.json", sp);
+            checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build");
+            checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build" / "Release");
 
             for (const auto &entry : std::filesystem::directory_iterator(sp, ec)) {
                 if (entry.is_directory(ec)) {
                     checkManifest(entry.path() / "manifest.json", entry.path());
+                    checkManifest(entry.path() / "manifest.json", entry.path() / "build");
                     checkManifest(entry.path() / "manifest.json", entry.path() / "build" / "Release");
                 }
             }
@@ -311,6 +400,12 @@ bool PluginLoader::tryAutoLoadForFunction(const std::string &functionName)
 {
     scanManifests_();
     auto it = manifestIndex_.find(functionName);
+    if (it == manifestIndex_.end()) {
+        auto firstDot = functionName.find('.');
+        if (firstDot != std::string::npos) {
+            it = manifestIndex_.find("@pkg:" + functionName.substr(0, firstDot));
+        }
+    }
     if (it == manifestIndex_.end()) {
         auto dot = functionName.rfind('.');
         if (dot != std::string::npos) {
