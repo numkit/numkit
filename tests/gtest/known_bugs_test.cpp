@@ -6,7 +6,9 @@
 // their own files, e.g. sort-missingplacement -> matrix_test.cpp.)
 
 #include <numkit/core/engine.hpp>
+#include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/core/standard_engine.hpp>
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -944,4 +946,6 @@ TEST_F(LinalgKnownBug, DISABLED_FunmDefectiveBranch)
     EXPECT_NEAR(evalScalar("F(1, 2)"), 7.38905609893065, 1e-9);
     EXPECT_NEAR(evalScalar("F(2, 2)"), 7.38905609893065, 1e-9);
 }
+
+
 
