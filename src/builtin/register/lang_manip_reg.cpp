@@ -211,20 +211,107 @@ void sub2ind_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
 }
 
 // paddata / trimdata / resize adapters.
-#define NUMKIT_RESIZE_REG(FN)                                                       \
-    void FN##_reg(Span<const Value> args, size_t /*nargout*/,                  \
-                  Span<Value> outs, CallContext &ctx)                           \
-    {                                                                            \
-        argcheck::checkNargin(args.size(), 2, #FN); \
-        const size_t n = argcheck::arrayDim(args[1], #FN);                      \
-        outs[0] = numkit::narrowComplex(FN(args[0], n, ctx.engine->resource()), ctx.engine->resource());                       \
+struct ResizeOpts {
+    int dim = 0;
+    std::string side = "trailing";
+    double fillValue = 0.0;
+};
+
+ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *fn)
+{
+    ResizeOpts opts;
+    if (args.size() <= 2) return opts;
+    // Positional form: fn(X, len, dim[, side]) when arg 3 is numeric
+    if (!args[2].isChar() && !args[2].isString()) {
+        argcheck::checkNargin(args.size(), 3, 4, fn);
+        opts.dim = argcheck::dimArg(args[2], fn);
+        if (args.size() >= 4) {
+            static const char *const kSides[] = {"trailing", "leading", "both", "right", "left"};
+            const size_t sideIdx = argcheck::expectedChoice(
+                args[3], {"trailing", "leading", "both", "right", "left"},
+                4, "Side", fn);
+            opts.side = kSides[sideIdx];
+        }
+        return opts;
     }
+    if (((args.size() - 2) % 2) != 0) {
+        throw Error(std::string(fn) + ": Name-Value arguments must occur in pairs",
+                    0, 0, fn, "", std::string("numkit:") + fn + ":unpairedNameValue");
+    }
+    for (size_t i = 2; i < args.size(); i += 2) {
+        const size_t keyIdx = allowFill
+            ? argcheck::expectedChoice(args[i], {"dimension", "side", "fillvalue"},
+                                       static_cast<int>(i + 1), "Name", fn)
+            : argcheck::expectedChoice(args[i], {"dimension", "side"},
+                                       static_cast<int>(i + 1), "Name", fn);
+        const Value &val = args[i + 1];
+        if (keyIdx == 0) {
+            if (val.isChar() || val.isString()) {
+                argcheck::expectedChoice(val, {"auto"},
+                                         static_cast<int>(i + 2), "Dimension", fn);
+                opts.dim = 0;
+            } else {
+                const double dv = argcheck::expectedReal(val, static_cast<int>(i + 2), "Dimension", fn);
+                opts.dim = argcheck::expectedInteger(dv, static_cast<int>(i + 2), "Dimension", fn);
+                argcheck::expectedPositive(dv, static_cast<int>(i + 2), "Dimension", fn);
+            }
+        } else if (keyIdx == 1) {
+            static const char *const kSides[] = {"trailing", "leading", "both", "right", "left"};
+            const size_t sideIdx = argcheck::expectedChoice(
+                val, {"trailing", "leading", "both", "right", "left"},
+                static_cast<int>(i + 2), "Side", fn);
+            opts.side = kSides[sideIdx];
+        } else if (keyIdx == 2) {
+            opts.fillValue = argcheck::expectedReal(val, static_cast<int>(i + 2), "FillValue", fn);
+        }
+    }
+    return opts;
+}
 
-NUMKIT_RESIZE_REG(paddata)
-NUMKIT_RESIZE_REG(trimdata)
-NUMKIT_RESIZE_REG(resize)
+void paddata_reg(Span<const Value> args, size_t /*nargout*/,
+                 Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 2, "paddata");
+    const size_t n = argcheck::arrayDim(args[1], "paddata");
+    if (args.size() == 2) {
+        outs[0] = numkit::narrowComplex(paddata(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        return;
+    }
+    const auto opts = parseResizeOpts(args, true, "paddata");
+    outs[0] = numkit::narrowComplex(
+        paddata(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->resource()),
+        ctx.engine->resource());
+}
 
-#undef NUMKIT_RESIZE_REG
+void trimdata_reg(Span<const Value> args, size_t /*nargout*/,
+                  Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 2, "trimdata");
+    const size_t n = argcheck::arrayDim(args[1], "trimdata");
+    if (args.size() == 2) {
+        outs[0] = numkit::narrowComplex(trimdata(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        return;
+    }
+    const auto opts = parseResizeOpts(args, false, "trimdata");
+    outs[0] = numkit::narrowComplex(
+        trimdata(args[0], n, opts.dim, opts.side, ctx.engine->resource()),
+        ctx.engine->resource());
+}
+
+void resize_reg(Span<const Value> args, size_t /*nargout*/,
+                Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 2, "resize");
+    const size_t n = argcheck::arrayDim(args[1], "resize");
+    if (args.size() == 2) {
+        outs[0] = numkit::narrowComplex(resize(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        return;
+    }
+    const auto opts = parseResizeOpts(args, true, "resize");
+    outs[0] = numkit::narrowComplex(
+        resize(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->resource()),
+        ctx.engine->resource());
+}
 
 // ind2sub(siz, ind) → multiple outputs (one per dim of siz). When the
 // caller requests fewer outputs than siz has dims, the last output

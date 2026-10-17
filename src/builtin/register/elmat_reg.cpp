@@ -63,6 +63,7 @@ void nonzeros_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void numel_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void nzmax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void ones_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void paddata_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void pagectranspose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void pagetranspose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void pascal_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -84,6 +85,7 @@ void toeplitz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void topkrows_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void transpose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void tril_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void trimdata_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void triu_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void true_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void vander_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -194,26 +196,8 @@ void register_elmat(Engine &engine) {
         });
 
     engine.registerFunction("zeros",      &::numkit::builtin::detail::zeros_reg);
-
-    engine.registerFunction("paddata",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 2)
-                throw std::runtime_error("paddata requires (X, len[, dim, side])");
-            size_t len = argcheck::arrayDim(args[1], "paddata");
-            int dim = (args.size() >= 3) ? argcheck::dimArg(args[2], "paddata") : 0;
-            std::string side = (args.size() >= 4) ? args[3].toString() : "right";
-            outs[0] = numkit::builtin::paddata(args[0], len, dim, side, ctx.engine->resource());
-        });
-
-    engine.registerFunction("trimdata",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 2)
-                throw std::runtime_error("trimdata requires (X, len[, dim, side])");
-            size_t len = argcheck::arrayDim(args[1], "trimdata");
-            int dim = (args.size() >= 3) ? argcheck::dimArg(args[2], "trimdata") : 0;
-            std::string side = (args.size() >= 4) ? args[3].toString() : "right";
-            outs[0] = numkit::builtin::trimdata(args[0], len, dim, side, ctx.engine->resource());
-        });
+    engine.registerFunction("paddata",    &::numkit::builtin::detail::paddata_reg);
+    engine.registerFunction("trimdata",   &::numkit::builtin::detail::trimdata_reg);
 
     engine.registerFunction("head",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {

@@ -957,5 +957,32 @@ TEST_F(LinalgKnownBug, EigRealSpectrumComplexTyping)
     EXPECT_NEAR(evalScalar("w(1)"), 0.696349678, 1e-6);
 }
 
+// bugs/closed/lang/reg-macro-ignored-options.md — eraseBetween 'Boundaries'
+// and paddata / trimdata / resize Name-Value options honored.
+TEST_F(BuiltinKnownBug, RegMacroOptionsHonored)
+{
+    EXPECT_EQ(eval("eraseBetween(\"abcabc\", \"b\", \"b\", \"Boundaries\", \"inclusive\")").toString(), "ac");
+    EXPECT_EQ(eval("eraseBetween(\"abcabc\", \"b\", \"b\", \"Boundaries\", \"exclusive\")").toString(), "abbc");
+
+    eval("p1 = paddata(1:4, 6, 'FillValue', -9);");
+    EXPECT_DOUBLE_EQ(evalScalar("p1(4)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p1(5)"), -9.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p1(6)"), -9.0);
+
+    eval("p2 = paddata(1:4, 6, 'Side', 'leading', 'FillValue', 7);");
+    EXPECT_DOUBLE_EQ(evalScalar("p2(1)"), 7.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p2(2)"), 7.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p2(3)"), 1.0);
+
+    eval("t1 = trimdata(1:6, 4, 'Side', 'leading');");
+    EXPECT_DOUBLE_EQ(evalScalar("t1(1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("t1(4)"), 6.0);
+
+    eval("r1 = resize(1:3, 5, 'FillValue', 99);");
+    EXPECT_DOUBLE_EQ(evalScalar("r1(4)"), 99.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r1(5)"), 99.0);
+}
+
+
 
 

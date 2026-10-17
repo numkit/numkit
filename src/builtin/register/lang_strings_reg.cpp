@@ -459,30 +459,52 @@ NUMKIT_STR_BIN_REG(extractBefore)
 
 #undef NUMKIT_STR_BIN_REG
 
+bool parseBetweenBoundaries(Span<const Value> args, size_t startIdx, const char *fn)
+{
+    if (args.size() <= startIdx) return false;
+    if ((args.size() - startIdx) != 2) {
+        argcheck::checkNargin(args.size(), startIdx, startIdx, fn);
+    }
+    argcheck::expectedChoice(args[startIdx], {"boundaries"},
+                             static_cast<int>(startIdx + 1), "Name", fn);
+    const size_t b = argcheck::expectedChoice(
+        args[startIdx + 1], {"inclusive", "exclusive"},
+        static_cast<int>(startIdx + 2), "Boundaries", fn);
+    return b == 0;
+}
+
 void extractBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 3, "extractBetween");
-    outs[0] = extractBetween(args[0], args[1], args[2], ctx.engine->resource());
+    argcheck::checkNargin(args.size(), 3, 5, "extractBetween");
+    const bool inc = parseBetweenBoundaries(args, 3, "extractBetween");
+    outs[0] = extractBetween(args[0], args[1], args[2], inc, ctx.engine->resource());
 }
 
 #define NUMKIT_STR_TRI_REG(FN)                                                       \
     void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,             \
                   CallContext &ctx)                                              \
     {                                                                             \
-        argcheck::checkNargin(args.size(), 3, #FN); \
+        argcheck::checkNargin(args.size(), 3, 3, #FN); \
         outs[0] = FN(args[0], args[1], args[2], ctx.engine->resource());         \
     }
 
 NUMKIT_STR_TRI_REG(insertAfter)
 NUMKIT_STR_TRI_REG(insertBefore)
-NUMKIT_STR_TRI_REG(eraseBetween)
 
 #undef NUMKIT_STR_TRI_REG
 
+void eraseBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 3, 5, "eraseBetween");
+    const bool inc = parseBetweenBoundaries(args, 3, "eraseBetween");
+    outs[0] = eraseBetween(args[0], args[1], args[2], inc, ctx.engine->resource());
+}
+
 void replaceBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 4, "replaceBetween");
-    outs[0] = replaceBetween(args[0], args[1], args[2], args[3], ctx.engine->resource());
+    argcheck::checkNargin(args.size(), 4, 6, "replaceBetween");
+    const bool inc = parseBetweenBoundaries(args, 4, "replaceBetween");
+    outs[0] = replaceBetween(args[0], args[1], args[2], args[3], inc, ctx.engine->resource());
 }
 
 void dec2bin_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
