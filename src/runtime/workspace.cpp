@@ -1,4 +1,4 @@
-﻿// runtime/src/workspace.cpp
+// runtime/src/workspace.cpp
 //
 // Language-runtime workspace builtins, extracted verbatim from toolboxes/builtin's
 // registerWorkspaceBuiltins into the runtime layer (L2, engine-coupled scripting
@@ -12,6 +12,7 @@
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
+#include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)
 #include <numkit/value/scratch.hpp>   // ScratchArena / ScratchVec (who / whos)
 #include <numkit/value/span.hpp>
@@ -215,6 +216,9 @@ void registerWorkspaceRuntime(Engine &engine)
                 if (imp.wildcard) fail("'as' alias is not allowed with wildcard import");
                 imp.alias = asString(args[2], 2);
                 if (imp.alias.empty()) fail("alias name must be non-empty");
+                if (!imp.path.empty()) {
+                    ctx.engine->pluginLoader().tryAutoLoadForFunction(imp.path[0] + ".");
+                }
                 ctx.env->pushImport(std::move(imp));
                 outs[0] = Value();
                 return;
@@ -224,6 +228,9 @@ void registerWorkspaceRuntime(Engine &engine)
                 std::string spec = asString(args[i], i);
                 Import imp;
                 parseSpec(spec, imp);
+                if (!imp.path.empty()) {
+                    ctx.engine->pluginLoader().tryAutoLoadForFunction(imp.path[0] + ".");
+                }
                 ctx.env->pushImport(std::move(imp));
             }
             outs[0] = Value();

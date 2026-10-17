@@ -1583,38 +1583,51 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
     std::string funcName;
     if (headNode->type == NodeType::FIELD_ACCESS) {
         const ASTNode *recvNode = headNode->children[0].get();
-        Value recvTmp;
-        Value *objPtr = nullptr;
-        if (recvNode->type == NodeType::IDENTIFIER) {
-            objPtr = env->get(recvNode->strValue);
-        } else {
-            recvTmp = execNode(recvNode, env);
-            objPtr = &recvTmp;
-        }
-        if (objPtr && objPtr->isObject()) {
-            const std::string &mname = headNode->strValue;
-            const BuiltinClass *cls = engine_.findClass(objPtr->objectClassName());
-            if (cls && cls->methods.count(mname)) {
-                std::vector<Value> margs;
-                margs.reserve(node->children.size() - 1);
-                for (size_t i = 1; i < node->children.size(); ++i)
-                    margs.push_back(execNode(node->children[i].get(), env));
-                Value self = *objPtr; // handle: shares state; value: own copy
-                std::vector<Value> outBuf(nout);
-                CallContext ctx{&engine_, env};
-                cls->methods.at(mname)(self, Span<const Value>(margs.data(), margs.size()),
-                                       nout, Span<Value>(outBuf), ctx);
-                return outBuf;
-            }
-        }
         std::string dotted = headNode->strValue;
         const ASTNode *cur = recvNode;
         while (cur && cur->type == NodeType::FIELD_ACCESS) {
             dotted = cur->strValue + "." + dotted;
             cur = cur->children.empty() ? nullptr : cur->children[0].get();
         }
+        bool isPackageCall = false;
         if (cur && cur->type == NodeType::IDENTIFIER) {
             dotted = cur->strValue + "." + dotted;
+            if (!env->get(cur->strValue)) {
+                isPackageCall = true;
+                if (engine_.hasCallableName(cur->strValue)
+                    && !engine_.findClass(cur->strValue)
+                    && !engine_.classCtor(cur->strValue)
+                    && !engine_.hasExternalFunction(dotted)
+                    && !engine_.lookupUserFunction(dotted, env)) {
+                    isPackageCall = false;
+                }
+            }
+        }
+        if (!isPackageCall) {
+            Value recvTmp;
+            Value *objPtr = nullptr;
+            if (recvNode->type == NodeType::IDENTIFIER) {
+                objPtr = env->get(recvNode->strValue);
+            } else {
+                recvTmp = execNode(recvNode, env);
+                objPtr = &recvTmp;
+            }
+            if (objPtr && objPtr->isObject()) {
+                const std::string &mname = headNode->strValue;
+                const BuiltinClass *cls = engine_.findClass(objPtr->objectClassName());
+                if (cls && cls->methods.count(mname)) {
+                    std::vector<Value> margs;
+                    margs.reserve(node->children.size() - 1);
+                    for (size_t i = 1; i < node->children.size(); ++i)
+                        margs.push_back(execNode(node->children[i].get(), env));
+                    Value self = *objPtr; // handle: shares state; value: own copy
+                    std::vector<Value> outBuf(nout);
+                    CallContext ctx{&engine_, env};
+                    cls->methods.at(mname)(self, Span<const Value>(margs.data(), margs.size()),
+                                           nout, Span<Value>(outBuf), ctx);
+                    return outBuf;
+                }
+            }
         }
         funcName = std::move(dotted);
     } else {
@@ -1670,14 +1683,16 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
         return callUserFunctionMulti(*_uf, args, env, nout, node);
     }
     if (const ExternalFunc *fn = engine_.findExternal(funcName, env)) {
-        funcNode->cachedOp = fn;
+        if (engine_.hasExternalFunction(funcName))
+            funcNode->cachedOp = fn;
         std::vector<Value> outBuf(nout);
         CallContext ctx{&engine_, env};
         (*fn)(args, nout, Span<Value>(outBuf), ctx);
         return outBuf;
     }
 
-    throw std::runtime_error("Undefined function: " + funcName);
+    throw std::runtime_error(
+        engine_.formatUndefinedFunctionError(funcName, "Undefined function: " + funcName));
 }
 
 // ============================================================
@@ -2226,7 +2241,8 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
             return callUserFunction(*uf, args, env, node);
         }
         if (const ExternalFunc *fn = engine_.findExternal(name, env)) {
-            funcNode->cachedOp = fn;
+            if (engine_.hasExternalFunction(name))
+                funcNode->cachedOp = fn;
             Value outBuf[1];
             CallContext ctx{&engine_, env};
             (*fn)(args, nargout, Span<Value>(outBuf, 1), ctx);
@@ -2239,7 +2255,8 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
                                  + std::string(mtypeName(var->type())) + ", and no function '"
                                  + name + "' was found");
     }
-    throw std::runtime_error("Undefined function or variable: " + name);
+    throw std::runtime_error(
+        engine_.formatUndefinedFunctionError(name, "Undefined function or variable: " + name));
 }
 
 Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env)
@@ -3152,7 +3169,8 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
         return result;
     }
 
-    throw std::runtime_error("Undefined function: " + name);
+    throw std::runtime_error(
+        engine_.formatUndefinedFunctionError(name, "Undefined function: " + name));
 }
 
 // ============================================================

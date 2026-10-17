@@ -416,7 +416,7 @@ int PackageManager::remove(const std::string &nameInput)
     return 0;
 }
 
-int PackageManager::load(const std::string &nameInput, Engine &engine)
+int PackageManager::load(const std::string &nameInput, Engine &engine, const std::string &targetNamespace)
 {
     std::string name = nameInput;
     if (name.rfind("numkit-", 0) == 0) {
@@ -426,13 +426,20 @@ int PackageManager::load(const std::string &nameInput, Engine &engine)
     fs::path targetDir = fs::path(modulesDir_) / name;
     std::string libPath = locateSharedLibrary(targetDir.string(), name);
     if (libPath.empty()) {
+        libPath = engine.pluginLoader().findPackageLibrary(name);
+    }
+    if (libPath.empty()) {
         std::cerr << "Error: Module library for package '" << nameInput << "' not found in " << targetDir.string() << "\n";
         return 1;
     }
 
     try {
-        engine.pluginLoader().loadModule(libPath);
-        std::cout << "Package 'numkit-" << name << "' loaded successfully.\n";
+        engine.pluginLoader().loadModule(libPath, targetNamespace);
+        if (!targetNamespace.empty()) {
+            std::cout << "Package 'numkit-" << name << "' loaded into namespace '" << targetNamespace << "'.\n";
+        } else {
+            std::cout << "Package 'numkit-" << name << "' loaded successfully.\n";
+        }
         return 0;
     } catch (const std::exception &e) {
         std::cerr << "Error loading module '" << name << "': " << e.what() << "\n";

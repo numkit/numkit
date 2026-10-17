@@ -1,4 +1,4 @@
-﻿// src/core/include/nk/core/plugin_loader.hpp
+// src/core/include/nk/core/plugin_loader.hpp
 //
 // PluginLoader: dynamic loading and resolution for NumKit modules (.dll / .so).
 #pragma once
@@ -31,6 +31,12 @@ public:
 
     // Try to auto-load a module if a known manifest exports `functionName`
     bool tryAutoLoadForFunction(const std::string &functionName);
+
+    // Return the package name that exports `functionName` (without loading it), or empty string
+    std::string moduleProvidingFunction(const std::string &functionName);
+
+    // Locate the shared library path for a known package name (e.g. "signal")
+    std::string findPackageLibrary(const std::string &pkgName);
 
     // Check if a library at `path` is already loaded
     bool isLoaded(const std::string &path) const;

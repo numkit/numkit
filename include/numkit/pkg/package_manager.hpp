@@ -44,7 +44,7 @@ public:
     int list(std::ostream &out) const;
     int build(const std::string &dir = ".", bool verbose = true);
     int remove(const std::string &name);
-    int load(const std::string &name, Engine &engine);
+    int load(const std::string &name, Engine &engine, const std::string &targetNamespace = "");
 
     const std::string &modulesDir() const { return modulesDir_; }
     const std::string &cacheDir() const { return cacheDir_; }

@@ -49,8 +49,17 @@ namespace {
 
 class HostPluginContext : public PluginContext, public std::enable_shared_from_this<HostPluginContext> {
 public:
-    HostPluginContext(Engine &engine, const std::string &prefixNs)
-        : engine_(engine), prefixNs_(prefixNs) {}
+    HostPluginContext(Engine &engine, const std::string &prefixNs, const std::string &defaultNs)
+        : engine_(engine), prefixNs_(prefixNs), defaultNs_(defaultNs)
+    {
+        if (!prefixNs_.empty()) {
+            auto dot = prefixNs_.find('.');
+            std::string topNs = (dot != std::string::npos) ? prefixNs_.substr(0, dot) : prefixNs_;
+            engine_.markPluginNamespace(topNs, /*isolated=*/true);
+        } else if (!defaultNs_.empty()) {
+            engine_.markPluginNamespace(defaultNs_, /*isolated=*/false);
+        }
+    }
 
     std::pmr::memory_resource *resource() const noexcept override {
         return engine_.resource();
@@ -84,15 +93,28 @@ public:
                     engine_.registerFunction(prefixNs_ + "." + sub, name, wrapped);
                 } catch (...) {}
             }
+        } else if (ns.empty()) {
+            // Never register bare names into core root from a plugin: keep inside defaultNs_
+            // (shortNameIndex_ resolves bare calls in Compat mode; Isolated mode stays clean).
+            if (!defaultNs_.empty()) {
+                try {
+                    engine_.registerFunction(defaultNs_, name, wrapped);
+                } catch (const std::exception &) {}
+            } else {
+                try {
+                    engine_.registerFunction(name, wrapped);
+                } catch (const std::exception &) {}
+            }
         } else {
+            auto dot = ns.find('.');
+            std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
+            engine_.markPluginNamespace(topNs, /*isolated=*/false);
             try {
                 engine_.registerFunction(ns, name, wrapped);
             } catch (const std::exception &) {
                 // Ignore duplicate registration when replacing or already present
             }
-            auto dot = ns.find('.');
             if (dot != std::string::npos) {
-                std::string topNs = ns.substr(0, dot);
                 try {
                     engine_.registerFunction(topNs, name, wrapped);
                 } catch (const std::exception &) {}
@@ -106,6 +128,10 @@ public:
             try {
                 engine_.registerFunction(prefixNs_, name, wrapped);
             } catch (...) {}
+        } else if (!defaultNs_.empty()) {
+            try {
+                engine_.registerFunction(defaultNs_, name, wrapped);
+            } catch (const std::exception &) {}
         } else {
             try {
                 engine_.registerFunction(name, wrapped);
@@ -146,6 +172,7 @@ public:
 private:
     Engine &engine_;
     std::string prefixNs_;
+    std::string defaultNs_;
 };
 
 static bool parseManifest(const std::string &content, std::string &libName, std::vector<std::string> &funcs) {
@@ -287,11 +314,20 @@ PluginLoader::~PluginLoader()
     handles_.clear();
 }
 
-bool PluginLoader::loadModule(const std::string &path, const std::string &targetNamespace)
+bool PluginLoader::loadModule(const std::string &pathInput, const std::string &targetNamespace)
 {
+    std::string path = pathInput;
+    if (path.find('/') == std::string::npos && path.find('\\') == std::string::npos) {
+        std::string resolved = findPackageLibrary(path);
+        if (!resolved.empty()) {
+            path = resolved;
+        }
+    }
+
     std::filesystem::path p(path);
     std::string normPath = p.lexically_normal().string();
-    if (loadedPaths_.find(normPath) != loadedPaths_.end()) {
+    std::string cacheKey = targetNamespace.empty() ? normPath : (normPath + "#" + targetNamespace);
+    if (loadedPaths_.find(cacheKey) != loadedPaths_.end()) {
         return true;
     }
 
@@ -321,23 +357,36 @@ bool PluginLoader::loadModule(const std::string &path, const std::string &target
     }
 
     if (!h) {
-        throw std::runtime_error("loadmodule: failed to load '" + path + "': " + osLastError());
+        throw std::runtime_error("loadmodule: failed to load '" + pathInput + "': " + osLastError());
     }
 
     auto initFn = reinterpret_cast<NumkitPluginInitFn>(osGetProcAddress(h, "numkit_plugin_init"));
     if (!initFn) {
         osCloseLibrary(h);
-        throw std::runtime_error("loadmodule: library '" + path + "' does not export numkit_plugin_init entry point");
+        throw std::runtime_error("loadmodule: library '" + pathInput + "' does not export numkit_plugin_init entry point");
     }
 
-    auto ctx = std::make_shared<HostPluginContext>(engine_, targetNamespace);
+    std::string stem = p.stem().string();
+    if (stem.rfind("lib", 0) == 0 && stem.size() > 3) {
+        stem = stem.substr(3);
+    }
+    if (stem.rfind("numkit_", 0) == 0 && stem.size() > 7) {
+        stem = stem.substr(7);
+    } else if (stem.rfind("numkit-", 0) == 0 && stem.size() > 7) {
+        stem = stem.substr(7);
+    }
+
+    auto ctx = std::make_shared<HostPluginContext>(engine_, targetNamespace, stem);
     if (!initFn(*ctx)) {
         osCloseLibrary(h);
-        throw std::runtime_error("loadmodule: initialization failed for '" + path + "' (ABI mismatch)");
+        throw std::runtime_error("loadmodule: initialization failed for '" + pathInput + "' (ABI mismatch)");
     }
 
     handles_.push_back(h);
-    loadedPaths_.insert(normPath);
+    loadedPaths_.insert(cacheKey);
+    if (targetNamespace.empty()) {
+        loadedPaths_.insert(normPath);
+    }
     return true;
 }
 
@@ -399,19 +448,20 @@ void PluginLoader::scanManifests_()
 bool PluginLoader::tryAutoLoadForFunction(const std::string &functionName)
 {
     scanManifests_();
+    auto firstDot = functionName.find('.');
+    if (firstDot != std::string::npos) {
+        auto it = manifestIndex_.find("@pkg:" + functionName.substr(0, firstDot));
+        if (it == manifestIndex_.end()) {
+            return false;
+        }
+        try {
+            return loadModule(it->second);
+        } catch (...) {
+            return false;
+        }
+    }
+
     auto it = manifestIndex_.find(functionName);
-    if (it == manifestIndex_.end()) {
-        auto firstDot = functionName.find('.');
-        if (firstDot != std::string::npos) {
-            it = manifestIndex_.find("@pkg:" + functionName.substr(0, firstDot));
-        }
-    }
-    if (it == manifestIndex_.end()) {
-        auto dot = functionName.rfind('.');
-        if (dot != std::string::npos) {
-            it = manifestIndex_.find(functionName.substr(dot + 1));
-        }
-    }
     if (it == manifestIndex_.end()) {
         return false;
     }
@@ -421,6 +471,42 @@ bool PluginLoader::tryAutoLoadForFunction(const std::string &functionName)
     } catch (...) {
         return false;
     }
+}
+
+std::string PluginLoader::moduleProvidingFunction(const std::string &functionName)
+{
+    if (functionName.find('.') != std::string::npos) {
+        return {};
+    }
+    scanManifests_();
+    auto it = manifestIndex_.find(functionName);
+    if (it == manifestIndex_.end()) {
+        return {};
+    }
+    std::string stem = std::filesystem::path(it->second).stem().string();
+    if (stem.rfind("lib", 0) == 0 && stem.size() > 3) {
+        stem = stem.substr(3);
+    }
+    if (stem.rfind("numkit_", 0) == 0 && stem.size() > 7) {
+        stem = stem.substr(7);
+    }
+    return stem;
+}
+
+std::string PluginLoader::findPackageLibrary(const std::string &pkgNameInput)
+{
+    scanManifests_();
+    std::string pkg = pkgNameInput;
+    if (pkg.rfind("numkit_", 0) == 0) {
+        pkg = pkg.substr(7);
+    } else if (pkg.rfind("numkit-", 0) == 0) {
+        pkg = pkg.substr(7);
+    }
+    auto it = manifestIndex_.find("@pkg:" + pkg);
+    if (it != manifestIndex_.end()) {
+        return it->second;
+    }
+    return {};
 }
 
 bool PluginLoader::isLoaded(const std::string &path) const

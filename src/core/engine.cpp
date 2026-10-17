@@ -12,6 +12,7 @@
 #include <numkit/core/tree_walker.hpp>
 #include <numkit/core/vm.hpp>
 #include <numkit/core/plugin_loader.hpp>
+#include <numkit/sys/env.hpp>
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -75,6 +76,12 @@ Engine::Engine(std::pmr::memory_resource *mr)
     // effect until the standard library registers rules (see fusionEnabled()).
     if (const char *fe = std::getenv("NUMKIT_FUSE"))
         fusionEnabled_ = !(fe[0] == '0' && fe[1] == '\0');
+
+    std::string nm = numkit::envGet("NUMKIT_MODE");
+    if (nm.empty())
+        nm = numkit::envGet("NUMKIT_NAMESPACE_MODE");
+    if (nm == "isolated" || nm == "namespaced" || nm == "strict")
+        namespaceMode_ = NamespaceMode::Isolated;
     // No library installs here — a bare Engine has the language runtime,
     // constants and primitive arithmetic, but no named functions. Call
     // numkit::installStandardLibrary(engine) to load the full set.
@@ -1796,6 +1803,75 @@ static bool walkImportCandidates_(const std::string &name,
     return false;
 }
 
+void Engine::markPluginNamespace(const std::string &ns, bool isolated)
+{
+    if (ns.empty()) return;
+    auto dot = ns.find('.');
+    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
+    pluginNamespaces_.insert(topNs);
+    if (isolated) {
+        isolatedPluginNamespaces_.insert(topNs);
+    }
+}
+
+bool Engine::isPluginNamespace(const std::string &ns) const
+{
+    auto dot = ns.find('.');
+    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
+    return pluginNamespaces_.count(topNs) > 0;
+}
+
+bool Engine::isIsolatedPluginNamespace(const std::string &ns) const
+{
+    auto dot = ns.find('.');
+    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
+    return isolatedPluginNamespaces_.count(topNs) > 0;
+}
+
+std::string Engine::formatUndefinedFunctionError(const std::string &name,
+                                                 const std::string &baseMsg) const
+{
+    if (name.find('.') != std::string::npos)
+        return baseMsg;
+
+    if (namespaceMode_ == NamespaceMode::Isolated) {
+        std::string modName;
+        auto range = shortNameIndex_.equal_range(name);
+        for (auto sit = range.first; sit != range.second; ++sit) {
+            auto dot = sit->second.find('.');
+            if (dot != std::string::npos) {
+                std::string topNs = sit->second.substr(0, dot);
+                if (pluginNamespaces_.count(topNs) > 0) {
+                    modName = topNs;
+                    break;
+                }
+            }
+        }
+        if (modName.empty()) {
+            modName = const_cast<Engine *>(this)->pluginLoader().moduleProvidingFunction(name);
+        }
+        if (!modName.empty()) {
+            return baseMsg + " (isolated namespace mode: '" + name
+                   + "' is in module '" + modName + "' — use '"
+                   + modName + "." + name + "(...)' or 'import " + modName + ".*')";
+        }
+    } else {
+        auto range = shortNameIndex_.equal_range(name);
+        for (auto sit = range.first; sit != range.second; ++sit) {
+            auto dot = sit->second.find('.');
+            if (dot != std::string::npos) {
+                std::string topNs = sit->second.substr(0, dot);
+                if (isolatedPluginNamespaces_.count(topNs) > 0) {
+                    return baseMsg + " ('" + name + "' is loaded in isolated namespace '"
+                           + topNs + "' — use '" + topNs + "." + name
+                           + "(...)' or 'import " + topNs + ".*')";
+                }
+            }
+        }
+    }
+    return baseMsg;
+}
+
 const ExternalFunc *Engine::findExternal(const std::string &name,
                                          const Environment *env) const
 {
@@ -1818,24 +1894,43 @@ const ExternalFunc *Engine::findExternal(const std::string &name,
                 hit = &qit->second;
                 return true;
             }
+            if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(qualified)) {
+                auto qit2 = externalFuncs_.find(qualified);
+                if (qit2 != externalFuncs_.end()) {
+                    hit = &qit2->second;
+                    return true;
+                }
+            }
             return false;
         });
     if (hit) return hit;
 
-    // 3. Bare-name fallback (MATLAB semantics): toolbox functions are
-    //    globally available without import. shortNameIndex_ is the primary
-    //    mechanism — it already maps leaf names to full qualified names
-    //    (e.g. "fft" → "signal.transforms.fft"). For the rare leaf-name
-    //    collision across namespaces, pick by namespace registration order
-    //    (namespaceOrder_), which is deterministic.
+    auto allowBareFromFull = [this](const std::string &full) -> bool {
+        auto dot = full.find('.');
+        if (dot == std::string::npos) return true;
+        std::string topNs = full.substr(0, dot);
+        if (isolatedPluginNamespaces_.count(topNs) > 0)
+            return false;
+        if (namespaceMode_ == NamespaceMode::Isolated
+            && pluginNamespaces_.count(topNs) > 0)
+            return false;
+        return true;
+    };
+
+    // 3. Bare-name fallback (MATLAB semantics in Compat mode; core-only in Isolated mode):
+    //    shortNameIndex_ maps leaf names to full qualified names.
+    //    For the rare leaf-name collision across namespaces, pick by namespace
+    //    registration order (namespaceOrder_), which is deterministic.
     if (name.find('.') == std::string::npos) {
         auto range = shortNameIndex_.equal_range(name);
         if (range.first != range.second) {
             // Fast path: unique leaf name (99%+ of cases) — one lookup.
             if (std::next(range.first) == range.second) {
-                auto fit = externalFuncs_.find(range.first->second);
-                if (fit != externalFuncs_.end())
-                    return &fit->second;
+                if (allowBareFromFull(range.first->second)) {
+                    auto fit = externalFuncs_.find(range.first->second);
+                    if (fit != externalFuncs_.end())
+                        return &fit->second;
+                }
             } else {
                 // Collision: multiple namespaces have this leaf name.
                 // Pick the one whose top-level namespace registered first.
@@ -1851,6 +1946,8 @@ const ExternalFunc *Engine::findExternal(const std::string &name,
                 const std::string *best = nullptr;
                 int bestRank = INT_MAX;
                 for (auto sit = range.first; sit != range.second; ++sit) {
+                    if (!allowBareFromFull(sit->second))
+                        continue;
                     int r = rankOf(sit->second);
                     if (r < bestRank) {
                         bestRank = r;
@@ -1869,13 +1966,22 @@ const ExternalFunc *Engine::findExternal(const std::string &name,
     // 4. Plugin / modular toolbox autoload fallback:
     //    If the function is provided by an installed plugin module in the manifest
     //    that has not been loaded yet, try to load it now on-demand.
-    if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
-        auto it2 = externalFuncs_.find(name);
-        if (it2 != externalFuncs_.end()) return &it2->second;
-        auto range2 = shortNameIndex_.equal_range(name);
-        if (range2.first != range2.second) {
-            auto fit = externalFuncs_.find(range2.first->second);
-            if (fit != externalFuncs_.end()) return &fit->second;
+    //    In Isolated mode, only qualified names (with '.') auto-load here;
+    //    imported names were already handled in Step 2.
+    const bool isQualified = (name.find('.') != std::string::npos);
+    if (isQualified || namespaceMode_ == NamespaceMode::Compat) {
+        if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
+            auto it2 = externalFuncs_.find(name);
+            if (it2 != externalFuncs_.end()) return &it2->second;
+            if (!isQualified) {
+                auto range2 = shortNameIndex_.equal_range(name);
+                for (auto sit = range2.first; sit != range2.second; ++sit) {
+                    if (!allowBareFromFull(sit->second))
+                        continue;
+                    auto fit = externalFuncs_.find(sit->second);
+                    if (fit != externalFuncs_.end()) return &fit->second;
+                }
+            }
         }
     }
 
@@ -1889,9 +1995,23 @@ std::string Engine::bareNameSource(const std::string &name) const
     auto range = shortNameIndex_.equal_range(name);
     if (range.first == range.second)
         return {};
-    // Unique leaf: return directly.
-    if (std::next(range.first) == range.second)
-        return range.first->second;
+
+    auto allowBareFromFull = [this](const std::string &full) -> bool {
+        auto dot = full.find('.');
+        if (dot == std::string::npos) return true;
+        std::string topNs = full.substr(0, dot);
+        if (isolatedPluginNamespaces_.count(topNs) > 0)
+            return false;
+        if (namespaceMode_ == NamespaceMode::Isolated
+            && pluginNamespaces_.count(topNs) > 0)
+            return false;
+        return true;
+    };
+
+    // Unique leaf: return directly if allowed.
+    if (std::next(range.first) == range.second) {
+        return allowBareFromFull(range.first->second) ? range.first->second : std::string{};
+    }
     // Collision: same ranking as findExternal step 3.
     auto rankOf = [this](const std::string &full) {
         auto dot = full.find('.');
@@ -1905,6 +2025,8 @@ std::string Engine::bareNameSource(const std::string &name) const
     const std::string *best = nullptr;
     int bestRank = INT_MAX;
     for (auto sit = range.first; sit != range.second; ++sit) {
+        if (!allowBareFromFull(sit->second))
+            continue;
         int r = rankOf(sit->second);
         if (r < bestRank) {
             bestRank = r;
@@ -1916,15 +2038,7 @@ std::string Engine::bareNameSource(const std::string &name) const
 
 bool Engine::isKnownLeafName(const std::string &name) const
 {
-    if (externalFuncs_.find(name) != externalFuncs_.end()
-        || shortNameIndex_.find(name) != shortNameIndex_.end()) {
-        return true;
-    }
-    if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
-        return externalFuncs_.find(name) != externalFuncs_.end()
-               || shortNameIndex_.find(name) != shortNameIndex_.end();
-    }
-    return false;
+    return findExternal(name, workspaceEnv_.get()) != nullptr;
 }
 
 PluginLoader &Engine::pluginLoader()
@@ -2542,13 +2656,18 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
 
 bool Engine::hasExternalFunction(const std::string &name) const
 {
-    return externalFuncs_.count(name) > 0;
+    if (externalFuncs_.count(name) > 0)
+        return true;
+    if (name.find('.') != std::string::npos) {
+        return findExternal(name, workspaceEnv_.get()) != nullptr;
+    }
+    return false;
 }
 
 bool Engine::hasCallableName(const std::string &name) const
 {
     return externalFuncs_.find(name) != externalFuncs_.end()
-        || shortNameIndex_.find(name) != shortNameIndex_.end()
+        || !bareNameSource(name).empty()
         || lookupUserFunctionLocal(name) != nullptr;
 }
 

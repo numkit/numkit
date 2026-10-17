@@ -1,4 +1,4 @@
-﻿// include/engine.hpp
+// include/engine.hpp
 #pragma once
 
 #include <numkit/core/debugger.hpp>
@@ -28,6 +28,12 @@ class DebugFacade;       // grouped debugger handle (engine.debug()); defined be
 struct ClassDefDesc;     // user-classdef descriptor; full type in engine.cpp
 struct CallbackBuiltin;  // higher-order builtin driver; callback_builtin.hpp
 class PluginLoader;      // dynamic module loader and resolver
+
+enum class NamespaceMode
+{
+    Compat,    // MATLAB compatibility: toolbox functions resolve bare and qualified (default)
+    Isolated   // Strict namespaces: toolbox functions require qualification or `import`
+};
 
 class Engine
 {
@@ -282,6 +288,15 @@ public:
     // Top-level namespaces in registration order. `compat` shows up
     // here once the first MATLAB-mirror library calls
     // registerFunction("compat", â€¦).
+    void setNamespaceMode(NamespaceMode mode) noexcept { namespaceMode_ = mode; }
+    NamespaceMode namespaceMode() const noexcept { return namespaceMode_; }
+
+    void markPluginNamespace(const std::string &topNs, bool isolated = false);
+    bool isPluginNamespace(const std::string &topNs) const;
+    bool isIsolatedPluginNamespace(const std::string &topNs) const;
+    std::string formatUndefinedFunctionError(const std::string &funcName,
+                                             const std::string &baseMsg) const;
+
     const std::vector<std::string> &namespaces() const { return namespaceOrder_; }
 
     // Multimap from leaf name (last segment) to full name
@@ -775,6 +790,9 @@ private:
     std::unordered_multimap<std::string, std::string> shortNameIndex_;
     std::vector<std::string> namespaceOrder_;
     std::unordered_set<std::string> namespaceSet_;
+    std::unordered_set<std::string> pluginNamespaces_;
+    std::unordered_set<std::string> isolatedPluginNamespaces_;
+    NamespaceMode namespaceMode_ = NamespaceMode::Compat;
 
     // Internal helper used by both registerFunction overloads.
     // Throws std::runtime_error if `fullName` already registered.

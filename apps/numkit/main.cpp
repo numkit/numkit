@@ -186,6 +186,8 @@ void printUsage(const char *prog)
               << "       " << prog << " pkg <command> [arguments]\n\n"
               << "Options:\n"
               << "  -e, --eval <code>    evaluate inline MATLAB code and exit\n"
+              << "  --isolated           strict namespace mode (modules require qualified calls or import)\n"
+              << "  --compat             MATLAB compatibility mode (default: global bare module calls)\n"
               << "  --cwd=<path>         set working directory\n"
               << "  -v, --version        print version and build timestamp\n"
               << "  -h, --help           show this help message\n\n"
@@ -274,6 +276,10 @@ int main(int argc, char **argv)
         } else if (arg == "-v" || arg == "--version") {
             printVersion();
             return 0;
+        } else if (arg == "--isolated") {
+            numkit::envSet("NUMKIT_MODE", "isolated");
+        } else if (arg == "--compat") {
+            numkit::envSet("NUMKIT_MODE", "compat");
         } else if (arg == "-e" || arg == "--eval") {
             if (i + 1 < argc) {
                 evalCode = argv[++i];

@@ -2252,7 +2252,9 @@ enter_frame:
                         R[I.a] = std::move(ob[0]);
                         break;
                     }
-                    throw std::runtime_error("VM: undefined function '" + funcName + "'");
+                    throw std::runtime_error(
+                        engine_.formatUndefinedFunctionError(
+                            funcName, "VM: undefined function '" + funcName + "'"));
                 }
             }
 
@@ -2374,7 +2376,9 @@ enter_frame:
                         R[I.a] = std::move(ob[0]);
                         break;
                     }
-                    throw std::runtime_error("VM: undefined function '" + funcName + "'");
+                    throw std::runtime_error(
+                        engine_.formatUndefinedFunctionError(
+                            funcName, "VM: undefined function '" + funcName + "'"));
                 }
             }
 
@@ -2461,7 +2465,9 @@ enter_frame:
                             R[outBase + i] = std::move(outBuf[i]);
                         break;
                     }
-                    throw std::runtime_error("VM: undefined function '" + funcName + "'");
+                    throw std::runtime_error(
+                        engine_.formatUndefinedFunctionError(
+                            funcName, "VM: undefined function '" + funcName + "'"));
                 }
             }
 
@@ -2527,7 +2533,9 @@ enter_frame:
                             R[outBase + i] = std::move(outBuf[i]);
                         break;
                     }
-                    throw std::runtime_error("VM: undefined function '" + funcName + "'");
+                    throw std::runtime_error(
+                        engine_.formatUndefinedFunctionError(
+                            funcName, "VM: undefined function '" + funcName + "'"));
                 }
             }
 

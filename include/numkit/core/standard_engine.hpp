@@ -24,9 +24,24 @@ namespace numkit {
 
 struct StandardEngine : Engine
 {
-    StandardEngine() { installStandardLibrary(*this); }
-    explicit StandardEngine(std::pmr::memory_resource *mr) : Engine(mr)
+    StandardEngine()
     {
+        installStandardLibrary(*this);
+    }
+    explicit StandardEngine(NamespaceMode mode)
+    {
+        setNamespaceMode(mode);
+        installStandardLibrary(*this);
+    }
+    explicit StandardEngine(std::pmr::memory_resource *mr)
+        : Engine(mr)
+    {
+        installStandardLibrary(*this);
+    }
+    StandardEngine(std::pmr::memory_resource *mr, NamespaceMode mode)
+        : Engine(mr)
+    {
+        setNamespaceMode(mode);
         installStandardLibrary(*this);
     }
 };
