@@ -43,7 +43,8 @@ void ode23_reg(Span<const Value> args, size_t nargout,
 // Split into ode23 + NUMKIT_bs23_step + NUMKIT_bs23_hermite so no single chunk exceeds
 // the 255-register VM limit (see callback_pausability.md gotchas).
 static const char *kOde23MSource = R"NKM(
-function [t, y] = ode23(fn, tspan, y0, opts)
+function [t, y] = ode23(fn, tspan, y0, opts, varargin)
+  if ischar(fn) || isstring(fn), fn = str2func(fn); end
   rel_tol = 1e-3; abs_tol = 1e-6; max_step = inf; initial_step = 0; refine = 1;
   if nargin >= 4 && isstruct(opts)
     if isfield(opts,'RelTol')      && ~isempty(opts.RelTol),      rel_tol = opts.RelTol; end
@@ -69,7 +70,7 @@ function [t, y] = ode23(fn, tspan, y0, opts)
   if numel(abs_tol) ~= 1 && numel(abs_tol) ~= d
     error('numkit:ode23:absTolSize', 'ode23: AbsTol must be scalar or match length(y0)');
   end
-  k1 = fn(t0, yc); k1 = k1(:);
+  k1 = fn(t0, yc, varargin{:}); k1 = k1(:);
   if numel(k1) ~= d, error('numkit:ode23:badRhsSize', 'ode23: RHS size mismatch'); end
   h = initial_step;
   if ~(h > 0)
@@ -78,7 +79,7 @@ function [t, y] = ode23(fn, tspan, y0, opts)
     d1 = sqrt(sum((k1 ./ sc0).^2) / d);
     if d0 < 1e-5 || d1 < 1e-5, h0 = 1e-6; else, h0 = 0.01*d0/d1; end
     h0 = min(h0, abs(tf - t0));
-    k2t = fn(t0 + dir*h0, yc + dir*h0*k1); k2t = k2t(:);
+    k2t = fn(t0 + dir*h0, yc + dir*h0*k1, varargin{:}); k2t = k2t(:);
     d2 = sqrt(sum(((k2t - k1) ./ sc0).^2) / d) / h0;
     if max(d1, d2) < 1e-15, h1 = max(1e-6, h0*1e-3); else, h1 = (0.01/max(d1,d2))^(1/3); end
     h = min([100*h0, h1, max_step, abs(tf - t0)]);
@@ -92,7 +93,7 @@ function [t, y] = ode23(fn, tspan, y0, opts)
   while ((dir > 0 && tc < tf) || (dir < 0 && tc > tf)) && step_count < max_steps
     step_count = step_count + 1;
     th = min(min(h, (tf - tc)*dir), max_step);
-    [ynew, err_norm, k4] = NUMKIT_bs23_step(fn, tc, yc, th, dir, k1, rel_tol, abs_tol);
+    [ynew, err_norm, k4] = NUMKIT_bs23_step(fn, tc, yc, th, dir, k1, rel_tol, abs_tol, varargin{:});
     if err_norm <= 1
       t_old = tc; t_new = tc + dir*th;
       if emit_at_tspan
@@ -135,16 +136,16 @@ function [t, y] = ode23(fn, tspan, y0, opts)
   t = T; y = Y;
 end
 
-function [ynew, err_norm, k4] = NUMKIT_bs23_step(fn, tc, yc, h, dir, k1, rel_tol, abs_tol)
+function [ynew, err_norm, k4] = NUMKIT_bs23_step(fn, tc, yc, h, dir, k1, rel_tol, abs_tol, varargin)
   c2 = 1/2; c3 = 3/4;
   a21 = 1/2;
   a31 = 0; a32 = 3/4;
   b1 = 2/9; b2 = 1/3; b3 = 4/9;
   e1 = 2/9 - 7/24; e2 = 1/3 - 1/4; e3 = 4/9 - 1/3; e4 = 0 - 1/8;
-  k2 = fn(tc + dir*c2*h, yc + dir*h*(a21*k1)); k2 = k2(:);
-  k3 = fn(tc + dir*c3*h, yc + dir*h*(a31*k1 + a32*k2)); k3 = k3(:);
+  k2 = fn(tc + dir*c2*h, yc + dir*h*(a21*k1), varargin{:}); k2 = k2(:);
+  k3 = fn(tc + dir*c3*h, yc + dir*h*(a31*k1 + a32*k2), varargin{:}); k3 = k3(:);
   ynew = yc + dir*h*(b1*k1 + b2*k2 + b3*k3);
-  k4 = fn(tc + dir*h, ynew); k4 = k4(:);
+  k4 = fn(tc + dir*h, ynew, varargin{:}); k4 = k4(:);
   sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
   er = dir*h*(e1*k1 + e2*k2 + e3*k3 + e4*k4);
   err_norm = sqrt(sum((er ./ sc).^2) / numel(yc));
@@ -157,6 +158,149 @@ function out = NUMKIT_bs23_hermite(theta, dir, h, yn, ynew, k1, k4)
   tm1 = theta - 1;
   dy = ynew - yn;
   out = one_m_t*yn + theta*ynew + t_tm1*(one_m_2t*dy + tm1*(dir*h)*k1 + theta*(dir*h)*k4);
+end
+
+function [t, y] = ode23s(fn, tspan, y0, opts, varargin)
+  if ischar(fn) || isstring(fn), fn = str2func(fn); end
+  if nargin < 4, opts = []; end
+  rel_tol = 1e-3; abs_tol = 1e-6; max_step = inf; initial_step = 0; refine = 1;
+  if isstruct(opts)
+    if isfield(opts,'RelTol')      && ~isempty(opts.RelTol),      rel_tol = opts.RelTol; end
+    if isfield(opts,'AbsTol')      && ~isempty(opts.AbsTol),      abs_tol = opts.AbsTol(:); end
+    if isfield(opts,'MaxStep')     && ~isempty(opts.MaxStep),     max_step = opts.MaxStep; end
+    if isfield(opts,'InitialStep') && ~isempty(opts.InitialStep), initial_step = opts.InitialStep; end
+    if isfield(opts,'Refine')      && ~isempty(opts.Refine)
+      rr = opts.Refine;
+      if rr >= 1, refine = floor(rr); else, refine = 1; end
+    end
+  end
+  ts = tspan(:); nspan = numel(ts);
+  if nspan < 2, error('numkit:ode23s:tspanShort', 'ode23s: tspan must have at least 2 elements'); end
+  t0 = ts(1); tf = ts(nspan);
+  if t0 == tf, error('numkit:ode23s:tspanDegenerate', 'ode23s: tspan(end) must differ from tspan(1)'); end
+  if tf > t0, dir = 1; else, dir = -1; end
+  for i = 2:nspan
+    if (ts(i) - ts(i-1))*dir <= 0
+      error('numkit:ode23s:tspanMono', 'ode23s: tspan must be strictly monotonic');
+    end
+  end
+  yc = y0(:); d = numel(yc);
+  if numel(abs_tol) ~= 1 && numel(abs_tol) ~= d
+    error('numkit:ode23s:absTolSize', 'ode23s: AbsTol must be scalar or match length(y0)');
+  end
+  f0 = fn(t0, yc, varargin{:}); f0 = f0(:);
+  if numel(f0) ~= d, error('numkit:ode23s:badRhsSize', 'ode23s: RHS size mismatch'); end
+  h = initial_step;
+  if ~(h > 0)
+    sc0 = abs_tol + rel_tol*abs(yc);
+    r0 = max(abs(f0 ./ sc0));
+    if r0 > 1e-12
+      h = (rel_tol^(1/3)) / r0;
+    else
+      h = 1e-4 * abs(tf - t0);
+    end
+    h = min([h, max_step, abs(tf - t0)]);
+    if ~(h > 0), h = max(1e-10, abs(tf - t0)*1e-6); end
+  end
+  T = t0; Y = yc';
+  emit_at_tspan = (nspan > 2);
+  if emit_at_tspan, refine = 1; else, refine = max(1, refine); end
+  next_span = 2;
+  tc = t0; max_steps = 100000; step_count = 0; failed = 0;
+  while ((dir > 0 && tc < tf) || (dir < 0 && tc > tf)) && step_count < max_steps
+    step_count = step_count + 1;
+    th = min(min(h, (tf - tc)*dir), max_step);
+    [ynew, err_norm, f2] = NUMKIT_ros23_step(fn, tc, yc, th, dir, f0, rel_tol, abs_tol, varargin{:});
+    if err_norm <= 1
+      t_old = tc; t_new = tc + dir*th;
+      if emit_at_tspan
+        while next_span <= nspan
+          tt = ts(next_span);
+          theta = (tt - t_old) / (dir*th);
+          if theta > 1 + 1e-12, break; end
+          cl = max(0, min(1, theta));
+          if abs(cl - 1) < 1e-15
+            T = [T; tt]; Y = [Y; ynew'];
+          else
+            yint = NUMKIT_bs23_hermite(cl, dir, th, yc, ynew, f0, f2);
+            T = [T; tt]; Y = [Y; yint'];
+          end
+          next_span = next_span + 1;
+        end
+      elseif refine > 1
+        for r = 1:(refine-1)
+          theta = r/refine;
+          yint = NUMKIT_bs23_hermite(theta, dir, th, yc, ynew, f0, f2);
+          T = [T; t_old + dir*th*theta]; Y = [Y; yint'];
+        end
+        T = [T; t_new]; Y = [Y; ynew'];
+      else
+        T = [T; t_new]; Y = [Y; ynew'];
+      end
+      tc = t_new; yc = ynew; f0 = f2; failed = 0;
+      if err_norm < 1e-300, fac = 5; else, fac = 0.8*(1/err_norm)^(1/3); end
+      fac = min(5, max(0.2, fac));
+      h = min(th*fac, max_step);
+    else
+      failed = failed + 1;
+      if isnan(err_norm) || isinf(err_norm), fac = 0.2; else, fac = max(0.1, 0.8*(1/err_norm)^(1/3)); end
+      h = th*fac;
+      if failed > 50, error('numkit:ode23s:tooManyFailures', 'ode23s: too many step rejections'); end
+      if h < max(1e-30, abs(tc)*1e-15), error('numkit:ode23s:stepUnderflow', 'ode23s: step size underflow'); end
+    end
+  end
+  if step_count >= max_steps, error('numkit:ode23s:tooManySteps', 'ode23s: exceeded integration steps'); end
+  t = T; y = Y;
+end
+
+function [ynew, err_norm, f2] = NUMKIT_ros23_step(fn, tc, yc, h, dir, f0, rel_tol, abs_tol, varargin)
+  n = numel(yc);
+  d = 1 / (2 + sqrt(2));
+  e32 = 6 + sqrt(2);
+  s = dir * h;
+  J = zeros(n, n);
+  for j = 1:n
+    dy = max(1e-8, 1e-8 * abs(yc(j)));
+    yp = yc; yp(j) = yc(j) + dy;
+    fp = fn(tc, yp, varargin{:});
+    J(:, j) = (fp(:) - f0) / dy;
+  end
+  dt = max(1e-8, 1e-8 * abs(tc));
+  ft = fn(tc + dt, yc, varargin{:});
+  dFdt = (ft(:) - f0) / dt;
+  W = eye(n) - (s * d) * J;
+  k1 = W \ (f0 + (s * d) * dFdt);
+  f1 = fn(tc + 0.5*s, yc + 0.5*s*k1, varargin{:}); f1 = f1(:);
+  k2 = (W \ (f1 - k1)) + k1;
+  ynew = yc + s * k2;
+  f2 = fn(tc + s, ynew, varargin{:}); f2 = f2(:);
+  k3 = W \ (f2 - e32*(k2 - f1) - 2*(k1 - f0) + (s * d) * dFdt);
+  sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
+  er = (s / 6) * (k1 - 2*k2 + k3);
+  err_norm = sqrt(sum((er ./ sc).^2) / n);
+  if isnan(err_norm) || isinf(err_norm) || any(isnan(ynew)) || any(isinf(ynew))
+    err_norm = 100;
+  end
+end
+
+function [t, y] = ode15s(fn, tspan, y0, opts, varargin)
+  if nargin < 4, opts = []; end
+  [t, y] = ode23s(fn, tspan, y0, opts, varargin{:});
+end
+
+function [t, y] = ode23t(fn, tspan, y0, opts, varargin)
+  if nargin < 4, opts = []; end
+  [t, y] = ode23s(fn, tspan, y0, opts, varargin{:});
+end
+
+function [t, y] = ode23tb(fn, tspan, y0, opts, varargin)
+  if nargin < 4, opts = []; end
+  [t, y] = ode23s(fn, tspan, y0, opts, varargin{:});
+end
+
+function [t, y] = ode113(fn, tspan, y0, opts, varargin)
+  if nargin < 4, opts = []; end
+  [t, y] = ode45(fn, tspan, y0, opts, varargin{:});
 end
 )NKM";
 

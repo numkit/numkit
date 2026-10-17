@@ -33,6 +33,7 @@ void gallery_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void hadamard_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void hankel_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void hilb_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void ichol_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void ind2sub_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void inf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void invhilb_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -138,6 +139,7 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("hadamard",   &::numkit::builtin::detail::hadamard_reg);
     engine.registerFunction("hankel",     &::numkit::builtin::detail::hankel_reg);
     engine.registerFunction("hilb",       &::numkit::builtin::detail::hilb_reg);
+    engine.registerFunction("ichol",      &::numkit::builtin::detail::ichol_reg);
     engine.registerFunction("ind2sub",    &::numkit::builtin::detail::ind2sub_reg);
     engine.registerFunction("inf",        &::numkit::builtin::detail::inf_reg);
     engine.registerFunction("Inf",        &::numkit::builtin::detail::inf_reg);
@@ -269,6 +271,46 @@ void register_elmat(Engine &engine) {
         });
 
     engine.registerCallbackBuiltin("bsxfun", std::make_shared<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
+
+    engine.registerFunction("eps",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            if (args.empty()) {
+                outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
+                return;
+            }
+            const Value &x = args[0];
+            if (x.isChar() || x.isString()) {
+                std::string s = x.toString();
+                if (s == "single") {
+                    outs[0] = Value::scalar(static_cast<double>(std::numeric_limits<float>::epsilon()), mr);
+                } else {
+                    outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
+                }
+                return;
+            }
+            if (x.isEmpty()) {
+                outs[0] = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+                return;
+            }
+            size_t dArr[Dims::kMaxRank];
+            int nd = x.dims().ndims();
+            for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+            Value out = Value::matrixND(dArr, nd, ValueType::DOUBLE, mr);
+            double *dst = out.doubleDataMut();
+            const size_t n = x.numel();
+            for (size_t i = 0; i < n; ++i) {
+                double v = std::abs(x.elemAsDouble(i));
+                if (std::isnan(v) || std::isinf(v)) {
+                    dst[i] = std::numeric_limits<double>::quiet_NaN();
+                } else if (v <= std::numeric_limits<double>::min()) {
+                    dst[i] = std::numeric_limits<double>::denorm_min();
+                } else {
+                    dst[i] = std::nextafter(v, std::numeric_limits<double>::infinity()) - v;
+                }
+            }
+            outs[0] = std::move(out);
+        });
 }
 
 } // namespace numkit::builtin::detail

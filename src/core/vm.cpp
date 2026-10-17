@@ -1146,7 +1146,10 @@ enter_frame:
                                              engine_.mr_);
                 } else {
                     auto indices = Value::resolveIndices(ix, mv.numel());
-                    R[I.a] = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
+                    Value res = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
+                    if (indices.size() > 1 && ix.dims().rows() > 1 && ix.dims().cols() > 1)
+                        res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+                    R[I.a] = std::move(res);
                 }
                 break;
             }
@@ -1240,6 +1243,15 @@ enter_frame:
                     size_t i = (size_t) ix.toScalar() - 1;
                     Value &dst = R[I.a];
                     const Value &rhs = R[I.c];
+
+                    if (rhs.isStruct() && (dst.isUnset() || dst.isEmpty() || dst.isStruct())) {
+                        if (dst.isUnset() || dst.isEmpty())
+                            dst = Value::structArray(0, 0, engine_.mr_);
+                        dst.growStructArrayTo(i, engine_.mr_);
+                        for (const auto &name : rhs.fieldNamesInOrder())
+                            dst.setField(i, name, rhs.field(name));
+                        break;
+                    }
 
                     // Amortised O(1) grow-by-one: `A(end+1) = scalar` or
                     // `A(i) = scalar` where i == numel(A). Uses Value's
@@ -1389,6 +1401,16 @@ enter_frame:
                 size_t maxR = R[I.a].dims().rows(), maxC = R[I.a].dims().cols();
                 for (size_t r : rowIds) maxR = std::max(maxR, r + 1);
                 for (size_t c : colIds) maxC = std::max(maxC, c + 1);
+                if (R[I.a].isEmpty() && !val.isScalar()) {
+                    if (riIsColon && ciIsColon) {
+                        maxR = val.dims().rows();
+                        maxC = val.dims().cols();
+                    } else if (riIsColon) {
+                        maxR = (colIds.size() == 1 && val.dims().isVector()) ? val.numel() : val.dims().rows();
+                    } else if (ciIsColon) {
+                        maxC = (rowIds.size() == 1 && val.dims().isVector()) ? val.numel() : val.dims().cols();
+                    }
+                }
                 if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols())
                     R[I.a].resize(maxR, maxC, engine_.mr_);
 
@@ -3493,6 +3515,22 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
             }
     }
 
+    // Sync caller's live global registers to globalsEnv before importing into callee
+    if (!frames_.empty()) {
+        const auto &cf0 = frames_.back();
+        if (cf0.chunk) {
+            for (const auto &gname : cf0.chunk->globalNames) {
+                for (const auto &[vname, reg] : cf0.chunk->varMap) {
+                    if (vname == gname && reg < cf0.nregs) {
+                        if (!cf0.R[reg].isUnset() && !cf0.R[reg].isDeleted())
+                            engine_.globalsEnv_->set(gname, cf0.R[reg]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     // Import global variables from globalsEnv
     for (auto &gname : funcChunk.globalNames) {
         for (auto &[vname, reg] : funcChunk.varMap) {
@@ -3642,6 +3680,17 @@ void VM::popCallFrame(Value retVal)
     if (!frames_.empty()) {
         CallFrame &caller = frames_.back();
         R_ = caller.R;
+        if (caller.chunk) {
+            for (const auto &gname : caller.chunk->globalNames) {
+                for (const auto &[vname, reg] : caller.chunk->varMap) {
+                    if (vname == gname && reg < caller.nregs) {
+                        if (Value *gval = engine_.globalsEnv_->get(gname))
+                            caller.R[reg] = *gval;
+                        break;
+                    }
+                }
+            }
+        }
 
         if (frame.isMultiReturn) {
             // MATLAB: a `[...] = f()` destructure that requests more
@@ -4352,7 +4401,10 @@ void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB,
             // (Raw doubleData() threw "Not a double array" on e.g. A(int32(2))
             // and silently truncated fractional indices.)
             auto indices = Value::resolveIndices(ix, mv.numel());
-            R[dstReg] = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
+            Value res = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
+            if (indices.size() > 1 && ix.dims().rows() > 1 && ix.dims().cols() > 1)
+                res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+            R[dstReg] = std::move(res);
         }
     } else if (na == 2) {
         const Value &ri = AB[0];

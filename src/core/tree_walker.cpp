@@ -1262,18 +1262,34 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             }
         }
 
-        auto rowIdx = resolveIndex(lhs->children[1].get(), *var, 0, 2, env);
-        auto colIdx = resolveIndex(lhs->children[2].get(), *var, 1, 2, env);
+        const ASTNode *rSub = lhs->children[1].get();
+        const ASTNode *cSub = lhs->children[2].get();
+        bool riIsColon = (rSub->type == NodeType::COLON_EXPR && rSub->children.empty());
+        bool ciIsColon = (cSub->type == NodeType::COLON_EXPR && cSub->children.empty());
 
-        size_t maxR = 0, maxC = 0;
+        auto rowIdx = riIsColon ? std::vector<size_t>() : resolveIndex(rSub, *var, 0, 2, env);
+        auto colIdx = ciIsColon ? std::vector<size_t>() : resolveIndex(cSub, *var, 1, 2, env);
+
+        size_t maxR = var->dims().rows(), maxC = var->dims().cols();
         for (auto r : rowIdx)
             maxR = std::max(maxR, r + 1);
         for (auto c : colIdx)
             maxC = std::max(maxC, c + 1);
+        if (var->isEmpty() && !rhs.isScalar()) {
+            if (riIsColon && ciIsColon) {
+                maxR = rhs.dims().rows();
+                maxC = rhs.dims().cols();
+            } else if (riIsColon) {
+                maxR = (colIdx.size() == 1 && rhs.dims().isVector()) ? rhs.numel() : rhs.dims().rows();
+            } else if (ciIsColon) {
+                maxC = (rowIdx.size() == 1 && rhs.dims().isVector()) ? rhs.numel() : rhs.dims().cols();
+            }
+        }
         if (maxR > var->dims().rows() || maxC > var->dims().cols())
-            var->resize(std::max(var->dims().rows(), maxR),
-                        std::max(var->dims().cols(), maxC),
-                        engine_.mr_);
+            var->resize(maxR, maxC, engine_.mr_);
+
+        if (riIsColon) rowIdx = resolveIndex(rSub, *var, 0, 2, env);
+        if (ciIsColon) colIdx = resolveIndex(cSub, *var, 1, 2, env);
 
         var->indexSet2D(rowIdx.data(), rowIdx.size(),
                         colIdx.data(), colIdx.size(), rhs);
@@ -2308,9 +2324,19 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
             return var.elemAt(scalarIdx, engine_.mr_);
         }
 
-        auto indices = resolveIndex(callNode->children[1].get(), var, 0, 1, env);
-        checkBounds(indices, var.numel(), "linear index");
-        return var.indexGet(indices.data(), indices.size(), engine_.mr_);
+        Value idxVal;
+        {
+            IndexContextGuard guard(indexContextStack_, {&var, 0, 1});
+            idxVal = execNode(callNode->children[1].get(), env);
+        }
+        if (idxVal.isLogical()) {
+            return var.logicalIndex(idxVal.logicalData(), idxVal.numel(), engine_.mr_);
+        }
+        auto indices = Value::resolveIndices(idxVal, var.numel());
+        Value res = var.indexGet(indices.data(), indices.size(), engine_.mr_);
+        if (indices.size() > 1 && idxVal.dims().rows() > 1 && idxVal.dims().cols() > 1)
+            res = res.reshape(idxVal.dims().rows(), idxVal.dims().cols(), engine_.mr_);
+        return res;
     }
     if (nargs == 2) {
         // ── scalar fast path: M(i, j) ──

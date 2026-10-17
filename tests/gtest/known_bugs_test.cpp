@@ -180,8 +180,8 @@ TEST_F(BuiltinKnownBug, NumericalIntegrationND)
     EXPECT_NEAR(evalScalar("quad2d(@(x,y)x.*y,0,1,0,1)"), 0.25, 1e-9);
 }
 
-// bugs/builtin/ode-stiff.md — ode15s (stiff/multistep solver family).
-TEST_F(BuiltinKnownBug, DISABLED_Ode15s)
+// bugs/closed/ode/ode-stiff.md — ode15s (stiff/multistep solver family).
+TEST_F(BuiltinKnownBug, Ode15s)
 {
     eval("[t, y] = ode15s(@(t,y) -y, [0 1], 1);");   // y = e^{-t}
     EXPECT_NEAR(evalScalar("y(1)"),   1.0,          1e-9);

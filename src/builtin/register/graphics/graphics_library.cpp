@@ -1,4 +1,4 @@
-﻿// src/graphics/src/library.cpp
+// src/graphics/src/library.cpp
 //
 // Engine-coupled installer for the graphics plotting service â€” the SOLE
 // graphics TU that includes <nk/core>. It is registration glue only: it
@@ -1611,6 +1611,15 @@ void GraphicsLibrary::install(Engine &engine)
                     auto *mr = ctx.engine->resource();
                     if (name == "figure" || name == "gcf") {
                         outs[0] = makeFigureHandle(fm, mr);
+                        if (name == "figure" && args.size() >= 2 && (args[0].isChar() || args[0].isString())) {
+                            int hid = graphicsHandleIdOf(outs[0]);
+                            if (auto *rec = fm.findHandle(hid)) {
+                                for (size_t i = 0; i + 1 < args.size(); i += 2) {
+                                    if (args[i].isChar() || args[i].isString())
+                                        recordSetProp(fm, rec, args[i].toString(), args[i + 1]);
+                                }
+                            }
+                        }
                     } else if (const std::string &slot = textSlotOf(name);
                                !slot.empty()) {
                         // sgtitle is figure-scoped (kNoAxes) so scoped

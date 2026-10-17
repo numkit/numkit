@@ -1,4 +1,4 @@
-﻿// src/bundle/src/register/graphics/export_reg.cpp
+// src/bundle/src/register/graphics/export_reg.cpp
 //
 // saveas / exportgraphics / print â€” engine-side figure export (portion
 // 32). The renderer itself is core-free (figure/figure_render.hpp: a
@@ -155,7 +155,8 @@ ExportArgs parseExportArgs(Engine &engine, Span<const Value> args,
         // the filename; a bare known format is a format override.
         static const char *kFormats[] = {"png", "svg", "jpg", "jpeg",
                                          "bmp", "tga", "pnm", "ppm",
-                                         "tif", "tiff"};
+                                         "tif", "tiff", "pdf", "eps",
+                                         "epsc", "eps2", "epsc2"};
         bool isBareFormat = false;
         for (const char *f : kFormats)
             if (sl == f) {
@@ -203,8 +204,17 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
                                                          engine.resource())));
         return;
     }
-    if (ea.ext == "pdf" || ea.ext == "eps" || ea.ext == "eps2"
-        || ea.ext == "fig" || ea.ext == "emf" || ea.ext == "hdf") {
+    if (ea.ext == "pdf") {
+        rp.fs->writeFileBytes(rp.path,
+                              figrender::renderFigurePdf(*ea.fig, W, H));
+        return;
+    }
+    if (ea.ext == "eps" || ea.ext == "epsc" || ea.ext == "eps2" || ea.ext == "epsc2") {
+        rp.fs->writeFile(rp.path,
+                         figrender::renderFigureEps(*ea.fig, W, H));
+        return;
+    }
+    if (ea.ext == "fig" || ea.ext == "emf" || ea.ext == "hdf") {
         throw std::runtime_error(std::string(who) + ": format '."
             + ea.ext + "' is not supported yet (supported: .png .svg .jpg "
               ".bmp .tga .pnm .tif) â€” bugs/opened/graphics/"
@@ -277,6 +287,84 @@ void registerFigureExport(Engine &engine)
             outs[0] = Value();
         };
         engine.registerFunction("", "print", std::move(fn));
+    }
+    // shading('interp'|'flat'|'faceted') / lighting / material / movie
+    {
+        ExternalFunc fn = [](Span<const Value>, size_t,
+                             Span<Value> outs, CallContext &) {
+            if (!outs.empty()) outs[0] = Value();
+        };
+        engine.registerFunction("", "shading", fn);
+        engine.registerFunction("", "lighting", fn);
+        engine.registerFunction("", "material", fn);
+        engine.registerFunction("", "movie", fn);
+    }
+    // light(...) -> returns handle or scalar
+    {
+        ExternalFunc fn = [](Span<const Value>, size_t,
+                             Span<Value> outs, CallContext &ctx) {
+            if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->resource());
+        };
+        engine.registerFunction("", "light", std::move(fn));
+    }
+    // getframe([h]) -> returns struct('cdata', HxWx3 uint8, 'colormap', [])
+    {
+        ExternalFunc fn = [](Span<const Value> args, size_t,
+                             Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const FigureState *fig = nullptr;
+            if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
+            if (!fig) fig = &ctx.engine->figureManager().current();
+            const int W = 560, H = 420;
+            std::vector<std::uint8_t> rgb = figrender::renderFigureRgb(*fig, W, H);
+            const size_t Hp = (size_t)H, Wp = (size_t)W;
+            Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
+            std::uint8_t *d = A.uint8DataMut();
+            for (size_t r = 0; r < Hp; ++r)
+                for (size_t c = 0; c < Wp; ++c)
+                    for (size_t ch = 0; ch < 3; ++ch)
+                        d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
+            Value s = Value::structure(mr);
+            s.field("cdata") = std::move(A);
+            s.field("colormap") = Value::Empty;
+            if (!outs.empty()) outs[0] = std::move(s);
+        };
+        engine.registerFunction("", "getframe", std::move(fn));
+    }
+    // Colormap palette functions: parula([m]), jet([m]), hot([m]), etc. -> m x 3 double [0,1]
+    {
+        static const char *kCmapFns[] = {
+            "parula", "turbo", "jet", "hot", "cool", "gray", "bone",
+            "copper", "spring", "summer", "autumn", "winter", "hsv", "viridis",
+            "pink", "lines"
+        };
+        for (const char *cname : kCmapFns) {
+            std::string paletteName = cname;
+            ExternalFunc fn = [paletteName](Span<const Value> args, size_t,
+                                            Span<Value> outs, CallContext &ctx) {
+                auto *mr = ctx.engine->resource();
+                size_t m = 256;
+                if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {
+                    double mv = args[0].toScalar();
+                    m = (mv >= 0.0) ? static_cast<size_t>(mv) : 0;
+                }
+                Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
+                if (m > 0) {
+                    int tableN = 256;
+                    const std::uint8_t *tbl = figrender::namedPalette(paletteName, tableN);
+                    double *d = C.doubleDataMut();
+                    for (size_t i = 0; i < m; ++i) {
+                        double t = (m == 1) ? 0.0 : static_cast<double>(i) / static_cast<double>(m - 1);
+                        int idx = std::min(tableN - 1, std::max(0, static_cast<int>(std::lround(t * (tableN - 1)))));
+                        d[i]         = tbl[idx * 3 + 0] / 255.0;
+                        d[i + m]     = tbl[idx * 3 + 1] / 255.0;
+                        d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;
+                    }
+                }
+                if (!outs.empty()) outs[0] = std::move(C);
+            };
+            engine.registerFunction("", cname, std::move(fn));
+        }
     }
 }
 

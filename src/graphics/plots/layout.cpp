@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” layout.cpp
+// nk/graphics â€” layout.cpp
 //
 // graphics.layout.* builders (figure / subplot / axes / labels / limits / legend / ticks / colormap), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -44,7 +44,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto *mr = gc.mr;
             auto &fm = gc.fm;
             int id;
-            if (args.empty()) {
+            if (args.empty() || args[0].isChar() || args[0].isString()) {
                 id = fm.newFigure();
             } else if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
                 // figure(f) with a Figure handle â€” make its figure current.

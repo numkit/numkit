@@ -148,14 +148,90 @@ void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     if (args.size() == 1) {
         // sparse(A) -- "convert" dense to sparse. We just return A as-is
         // (since we have no sparse storage). For most numerical use this
-        // is correct; isparse() still returns false (matches nk
+        // is correct; issparse() still returns false (matches nk
         // semantics).
         outs[0] = args[0];
         return;
     }
-    throw Error("sparse: nk has no sparse storage; supports only "
-                "sparse(M, N) → dense zeros and sparse(A) → A passthrough",
-                0, 0, "sparse", "", "numkit:sparse:NoSparse");
+    if (args.size() >= 3) {
+        // sparse(i, j, v [, m, n [, nzmax]]) -- accumulate triplets into dense m x n.
+        const Value &vi = args[0];
+        const Value &vj = args[1];
+        const Value &vv = args[2];
+        const size_t ni = vi.numel();
+        const size_t nj = vj.numel();
+        const size_t nv = vv.numel();
+        const size_t len = std::max({ni, nj, nv});
+        size_t M = 0, N = 0;
+        for (size_t k = 0; k < ni; ++k) {
+            long long r = static_cast<long long>(vi.elemAsDouble(k));
+            if (r > static_cast<long long>(M)) M = static_cast<size_t>(r);
+        }
+        for (size_t k = 0; k < nj; ++k) {
+            long long c = static_cast<long long>(vj.elemAsDouble(k));
+            if (c > static_cast<long long>(N)) N = static_cast<size_t>(c);
+        }
+        if (args.size() >= 5) {
+            M = argcheck::arrayDim(args[3], "sparse");
+            N = argcheck::arrayDim(args[4], "sparse");
+        }
+        Value out = Value::matrix(M, N, ValueType::DOUBLE, mr);
+        double *od = out.doubleDataMut();
+        for (size_t k = 0; k < len; ++k) {
+            size_t r = static_cast<size_t>(vi.elemAsDouble(ni == 1 ? 0 : k));
+            size_t c = static_cast<size_t>(vj.elemAsDouble(nj == 1 ? 0 : k));
+            double val = vv.elemAsDouble(nv == 1 ? 0 : k);
+            if (r >= 1 && r <= M && c >= 1 && c <= N) {
+                od[(r - 1) + (c - 1) * M] += val;
+            }
+        }
+        outs[0] = std::move(out);
+        return;
+    }
+}
+
+// Zero-fill incomplete Cholesky factorization ichol(A [, opts]):
+// returns lower-triangular L preserving the sparsity pattern of A.
+void ichol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 2, "ichol");
+    auto *mr = ctx.engine->resource();
+    const Value &A = args[0];
+    const size_t n = A.dims().rows();
+    if (n != A.dims().cols())
+        throw Error("ichol: input matrix must be square",
+                    0, 0, "ichol", "", "numkit:ichol:notSquare");
+    Value L = Value::matrix(n, n, ValueType::DOUBLE, mr);
+    double *ld = L.doubleDataMut();
+    for (size_t j = 0; j < n; ++j) {
+        for (size_t i = j; i < n; ++i) {
+            double aij = A.elemAsDouble(i + j * n);
+            ld[i + j * n] = aij;
+        }
+    }
+    for (size_t k = 0; k < n; ++k) {
+        double lkk = ld[k + k * n];
+        if (lkk <= 0.0)
+            throw Error("ichol: encountered nonpositive pivot",
+                        0, 0, "ichol", "", "numkit:ichol:nonposPivot");
+        lkk = std::sqrt(lkk);
+        ld[k + k * n] = lkk;
+        for (size_t i = k + 1; i < n; ++i) {
+            if (ld[i + k * n] != 0.0) {
+                ld[i + k * n] /= lkk;
+            }
+        }
+        for (size_t j = k + 1; j < n; ++j) {
+            double ljk = ld[j + k * n];
+            if (ljk == 0.0) continue;
+            for (size_t i = j; i < n; ++i) {
+                if (ld[i + j * n] != 0.0) {
+                    ld[i + j * n] -= ld[i + k * n] * ljk;
+                }
+            }
+        }
+    }
+    outs[0] = std::move(L);
 }
 
 // `nan` / `NaN` / `inf` / `Inf` are MATLAB built-in functions (not

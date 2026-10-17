@@ -1,4 +1,4 @@
-﻿/// @file figure_render.hpp
+/// @file figure_render.hpp
 /// @ingroup group_graphics
 ///
 /// Engine-side figure renderer â€” the software path behind
@@ -1953,6 +1953,114 @@ inline std::string renderFigureSvg(const FigureState &fig, int W, int H,
     }
     s += "</svg>\n";
     return s;
+}
+
+inline std::string renderFigureEps(const FigureState &fig, int W, int H)
+{
+    std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    std::string s = "%!PS-Adobe-3.0 EPSF-3.0\n"
+                    "%%BoundingBox: 0 0 " + std::to_string(W) + " " + std::to_string(H) + "\n"
+                    "%%EndComments\n"
+                    "1 1 1 setrgbcolor 0 0 " + std::to_string(W) + " " + std::to_string(H) + " rectfill\n";
+    auto escPs = [](const std::string &t) {
+        std::string o;
+        for (char ch : t) {
+            if (ch == '(' || ch == ')' || ch == '\\') o += '\\';
+            if (ch >= 0x20 && ch <= 0x7E) o += ch;
+        }
+        return o;
+    };
+    char buf[128];
+    for (const Cmd &c : cmds) {
+        std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f setrgbcolor\n",
+                      c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
+        s += buf;
+        if (c.kind == Cmd::TEXT) {
+            std::snprintf(buf, sizeof buf, "/Courier findfont %.1f scalefont setfont %.1f %.1f moveto (%s) show\n",
+                          c.fontSize, c.x, H - c.y, escPs(c.text).c_str());
+            s += buf;
+        } else if (c.kind == Cmd::MARK) {
+            double r = c.width / 2.0;
+            std::snprintf(buf, sizeof buf, "newpath %.1f %.1f %.1f 0 360 arc stroke\n",
+                          c.x, H - c.y, r);
+            s += buf;
+        } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
+            std::snprintf(buf, sizeof buf, "%.2f setlinewidth %s newpath %.1f %.1f moveto\n",
+                          c.width, c.dash ? "[7 5] 0 setdash" : "[] 0 setdash",
+                          c.xs[0], H - c.ys[0]);
+            s += buf;
+            for (size_t i = 1; i < c.xs.size(); ++i) {
+                std::snprintf(buf, sizeof buf, "%.1f %.1f lineto\n", c.xs[i], H - c.ys[i]);
+                s += buf;
+            }
+            s += (c.kind == Cmd::POLY && c.fill) ? "closepath fill\n" : "stroke\n";
+        }
+    }
+    s += "showpage\n%%EOF\n";
+    return s;
+}
+
+inline std::string renderFigurePdf(const FigureState &fig, int W, int H)
+{
+    std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    std::string stream = "1 1 1 rg 0 0 " + std::to_string(W) + " " + std::to_string(H) + " re f\n";
+    auto escPdf = [](const std::string &t) {
+        std::string o;
+        for (char ch : t) {
+            if (ch == '(' || ch == ')' || ch == '\\') o += '\\';
+            if (ch >= 0x20 && ch <= 0x7E) o += ch;
+        }
+        return o;
+    };
+    char buf[160];
+    for (const Cmd &c : cmds) {
+        double r = c.color.r / 255.0, g = c.color.g / 255.0, b = c.color.b / 255.0;
+        if (c.kind == Cmd::TEXT) {
+            std::snprintf(buf, sizeof buf, "BT /F1 %.1f Tf %.3f %.3f %.3f rg %.1f %.1f Td (%s) Tj ET\n",
+                          c.fontSize, r, g, b, c.x, H - c.y, escPdf(c.text).c_str());
+            stream += buf;
+        } else if (c.kind == Cmd::MARK) {
+            double rad = c.width / 2.0;
+            std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f RG 1 w %.1f %.1f %.1f %.1f re S\n",
+                          r, g, b, c.x - rad, (H - c.y) - rad, c.width, c.width);
+            stream += buf;
+        } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
+            std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f %s %.2f w %s %.1f %.1f m\n",
+                          r, g, b, (c.kind == Cmd::POLY && c.fill) ? "rg" : "RG",
+                          c.width, c.dash ? "[7 5] 0 d" : "[] 0 d",
+                          c.xs[0], H - c.ys[0]);
+            stream += buf;
+            for (size_t i = 1; i < c.xs.size(); ++i) {
+                std::snprintf(buf, sizeof buf, "%.1f %.1f l\n", c.xs[i], H - c.ys[i]);
+                stream += buf;
+            }
+            stream += (c.kind == Cmd::POLY && c.fill) ? "h f\n" : "S\n";
+        }
+    }
+    std::string pdf = "%PDF-1.4\n";
+    size_t off1 = pdf.size();
+    pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+    size_t off2 = pdf.size();
+    pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+    size_t off3 = pdf.size();
+    pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+        + std::to_string(W) + " " + std::to_string(H)
+        + "] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n";
+    size_t off4 = pdf.size();
+    pdf += "4 0 obj\n<< /Length " + std::to_string(stream.size()) + " >>\nstream\n"
+        + stream + "endstream\nendobj\n";
+    size_t off5 = pdf.size();
+    pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n";
+    size_t xref = pdf.size();
+    pdf += "xref\n0 6\n0000000000 65535 f \n";
+    size_t offs[5] = {off1, off2, off3, off4, off5};
+    for (int i = 0; i < 5; ++i) {
+        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", offs[i]);
+        pdf += buf;
+    }
+    pdf += "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + std::to_string(xref) + "\n%%EOF\n";
+    return pdf;
 }
 
 // â”€â”€ RGB raster backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
