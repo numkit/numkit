@@ -17,6 +17,7 @@
 #include <numkit/core/figure_render.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/image/io/io.hpp>
+#include <numkit/value/argcheck.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -342,6 +343,7 @@ void registerFigureExport(Engine &engine)
             std::string paletteName = cname;
             ExternalFunc fn = [paletteName](Span<const Value> args, size_t,
                                             Span<Value> outs, CallContext &ctx) {
+                argcheck::checkNargin(args.size(), 0, 1, paletteName.c_str());
                 auto *mr = ctx.engine->resource();
                 size_t m = 256;
                 if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {

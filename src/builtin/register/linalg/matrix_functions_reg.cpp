@@ -10,6 +10,7 @@
 #include <numkit/linalg/matrix_functions.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
@@ -29,7 +30,7 @@ void logm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     if (args.size() != 1)
         throw Error("logm: requires exactly 1 argument",
                     0, 0, "logm", "", "numkit:logm:nargin");
-    // General Schur-based solver (real/complex, symmetric or not) â€” the
+    // General Schur-based solver (real/complex, symmetric or not) — the
     // compute entry owns the type contract.
     outs[0] = logm(args[0], ctx.engine->resource());
 }
@@ -39,14 +40,14 @@ void sqrtm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     if (args.size() != 1)
         throw Error("sqrtm: requires exactly 1 argument",
                     0, 0, "sqrtm", "", "numkit:sqrtm:nargin");
-    // General Schur-based solver (real/complex, symmetric or not) â€” the
+    // General Schur-based solver (real/complex, symmetric or not) — the
     // compute entry owns the type contract.
     outs[0] = sqrtm(args[0], ctx.engine->resource());
 }
 
-// MATLAB signature: w = expmv(t, A, v) â€” three positional args, t first.
+// Reference signature: w = expmv(t, A, v) — three positional args, t first.
 // Some flavours (e.g. expmv from Higham's package) use (A, v) and an
-// optional t; we mirror MATLAB's documented order with t leading.
+// optional t; we mirror the documented order with t leading.
 void expmv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
     if (args.size() != 3)
@@ -58,9 +59,7 @@ void expmv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 
 void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("funm: requires (A, fun)",
-                    0, 0, "funm", "", "numkit:funm:nargin");
+    argcheck::checkNargin(args.size(), 2, "funm");
     auto *mr = ctx.engine->resource();
     const Value &A = args[0];
     const Value &fnArg = args[1];

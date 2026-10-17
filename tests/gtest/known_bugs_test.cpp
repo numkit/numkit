@@ -714,13 +714,31 @@ TEST_F(BuiltinKnownBug, StrncmpMaxArity)
     EXPECT_THROW(eval("r = strncmp('a', 'b', 1, 1);"), std::exception);
 }
 
-// bugs/opened/lang/reshape-cellnd.md — cell/string arrays reject >3-D
-// reshape; the reference reshapes them like numeric arrays.
-TEST_F(BuiltinKnownBug, DISABLED_ReshapeCellND)
+// bugs/closed/lang/reshape-cellnd.md — cell/string arrays reshape >3-D
+TEST_F(BuiltinKnownBug, ReshapeCellND)
 {
     eval("c = reshape(num2cell(1:16), 2, 2, 2, 2);");
     EXPECT_EQ(static_cast<int>(evalScalar("numel(c)")), 16);
     EXPECT_NEAR(evalScalar("double(c{5})"), 5.0, 1e-12);   // column-major
+    eval("s = reshape(repmat(\"a\", 1, 16), 2, 2, 2, 2);");
+    EXPECT_EQ(static_cast<int>(evalScalar("numel(s)")), 16);
+    EXPECT_EQ(static_cast<int>(evalScalar("ndims(s)")), 4);
+}
+
+// bugs/closed/lang/maxmin-linear.md — 'linear' index option in max/min
+TEST_F(BuiltinKnownBug, MaxMinLinearOption)
+{
+    eval("A = reshape(1:24, [2 3 4]); [v, idx] = max(A, [], [1 3], 'linear');");
+    EXPECT_DOUBLE_EQ(evalScalar("v(1)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("v(2)"), 22.0);
+    EXPECT_DOUBLE_EQ(evalScalar("v(3)"), 24.0);
+    EXPECT_DOUBLE_EQ(evalScalar("idx(1)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("idx(2)"), 22.0);
+    EXPECT_DOUBLE_EQ(evalScalar("idx(3)"), 24.0);
+    eval("[mv, midx] = min(A, [], 2, 'linear');");
+    EXPECT_DOUBLE_EQ(evalScalar("mv(1,1,1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("midx(1,1,1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("midx(2,1,2)"), 8.0);
 }
 
 // bugs/closed/lang/char-array-arithmetic.md — elementwise scalar

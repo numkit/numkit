@@ -613,18 +613,38 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("conv2",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 4, "conv2");
+            auto *mr = ctx.engine->resource();
             std::string shape = "full";
-            if (args.size() >= 3 && !args[2].isEmpty()) {
-                if (args[2].isChar() || args[2].isString()) {
-                    shape = args[2].toString();
-                } else {
-                    throw Error("conv2: the separable form conv2(u, v, A) is not "
-                                "supported yet — build the kernel with "
-                                "conv2(u, v) and convolve with that",
-                                0, 0, "conv2", "", "numkit:conv2:separableUnsupported");
+            if (args.size() >= 3 && !args[2].isEmpty() &&
+                !(args[2].isChar() || args[2].isString())) {
+                // Separable form: conv2(u, v, A[, shape])
+                if ((!args[0].isEmpty() && !args[0].dims().isVector()) ||
+                    (!args[1].isEmpty() && !args[1].dims().isVector())) {
+                    throw Error("conv2: first two arguments u and v must be vectors in separable form conv2(u, v, A)",
+                                0, 0, "conv2", "", "numkit:conv2:firstTwoInputsNotVectors");
                 }
+                if (args.size() >= 4 && !args[3].isEmpty()) {
+                    if (!args[3].isChar() && !args[3].isString())
+                        throw Error("conv2: shape option must be 'full', 'same', or 'valid'",
+                                    0, 0, "conv2", "", "numkit:conv2:badShape");
+                    shape = args[3].toString();
+                }
+                const size_t m = args[0].numel();
+                const size_t n = args[1].numel();
+                Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
+                double *kd = k.doubleDataMut();
+                for (size_t c = 0; c < n; ++c) {
+                    const double vc = args[1].elemAsDouble(c);
+                    for (size_t r = 0; r < m; ++r)
+                        kd[r + c * m] = args[0].elemAsDouble(r) * vc;
+                }
+                outs[0] = signal::conv2(args[2], k, shape, mr);
+                return;
             }
-            outs[0] = signal::conv2(args[0], args[1], shape, ctx.engine->resource());
+            if (args.size() >= 3 && !args[2].isEmpty()) {
+                shape = args[2].toString();
+            }
+            outs[0] = signal::conv2(args[0], args[1], shape, mr);
         });
 
     engine.registerFunction("convn",

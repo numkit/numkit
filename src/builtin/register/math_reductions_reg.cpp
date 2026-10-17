@@ -885,31 +885,85 @@ namespace {
 // Detect optional trailing 'omitnan'/'includenan' string in the reduction
 // form, returning the effective arg count (excluding the flag if present)
 // and the omit flag.
-size_t stripTrailingNanFlag(Span<const Value> args, bool &omitNan)
+size_t stripTrailingMaxMinFlags(Span<const Value> args, bool &omitNan, bool &linear)
 {
     // MATLAB's DEFAULT for max/min is 'omitnan' (NaN is ignored unless every
     // element is NaN). Only an explicit 'includenan' turns omission off.
-    // (sum/mean/etc. default to 'includenan'; max/min are the exception.)
     omitNan = true;
+    linear = false;
     size_t n = args.size();
-    if (n == 0) return 0;
-    const Value &last = args[n - 1];
-    if (last.type() != ValueType::CHAR) return n;
-    std::string s = last.toString();
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    if (s == "omitnan")    { omitNan = true;  return n - 1; }
-    if (s == "includenan") { omitNan = false; return n - 1; }
+    while (n >= 2 && isStringArg(args[n - 1])) {
+        std::string s = lowercaseStr(args[n - 1]);
+        if (s == "omitnan")    { omitNan = true;  --n; continue; }
+        if (s == "includenan") { omitNan = false; --n; continue; }
+        if (s == "linear")     { linear = true;   --n; continue; }
+        break;
+    }
     return n;
+}
+
+// Convert slice-relative 1-based indices `idx` (along the sorted listed
+// dimensions `redDims`) into 1-based column-major linear indices into `a0`.
+Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
+                          Span<const int> redDims,
+                          std::pmr::memory_resource *mr)
+{
+    if (idx.isEmpty()) return idx;
+    const int nd = std::max(2, a0.dims().ndim());
+    std::vector<char> listed(static_cast<size_t>(nd) + 1, 0);
+    for (int d : redDims)
+        if (d >= 1 && d <= nd)
+            listed[static_cast<size_t>(d)] = 1;
+
+    std::vector<std::pair<size_t, size_t>> nonListedDims;
+    std::vector<std::pair<size_t, size_t>> listedDims;
+    size_t stride = 1;
+    for (int d = 1; d <= nd; ++d) {
+        size_t sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
+        if (listed[static_cast<size_t>(d)])
+            listedDims.emplace_back(sz, stride);
+        else
+            nonListedDims.emplace_back(sz, stride);
+        stride *= sz;
+    }
+
+    Value out = idx;
+    double *dst = out.doubleDataMut();
+    const size_t total = out.numel();
+    for (size_t q = 0; q < total; ++q) {
+        double v = dst[q];
+        if (!std::isfinite(v) || v < 1.0) continue;
+        size_t k = static_cast<size_t>(v) - 1;
+
+        size_t remQ = q;
+        size_t baseOff = 0;
+        for (const auto &[dimSz, st] : nonListedDims) {
+            size_t coord = (dimSz > 0) ? (remQ % dimSz) : 0;
+            remQ = (dimSz > 0) ? (remQ / dimSz) : 0;
+            baseOff += coord * st;
+        }
+
+        size_t remK = k;
+        size_t redOff = 0;
+        for (const auto &[dimSz, st] : listedDims) {
+            size_t coord = (dimSz > 0) ? (remK % dimSz) : 0;
+            remK = (dimSz > 0) ? (remK / dimSz) : 0;
+            redOff += coord * st;
+        }
+
+        dst[q] = static_cast<double>(1 + baseOff + redOff);
+    }
+    return out;
 }
 
 } // namespace
 
 void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 4, "max");
+    argcheck::checkNargin(args.size(), 1, 5, "max");
     bool omitNan = false;
-    const size_t n = stripTrailingNanFlag(args, omitNan);
+    bool linear = false;
+    const size_t n = stripTrailingMaxMinFlags(args, omitNan, linear);
     auto *mr = ctx.engine->resource();
     // MATLAB returns DOUBLE (the code points) for max/min of a CHAR array — the
     // char class is NOT preserved (unlike sort/unique/cummax; note mode DOES
@@ -945,11 +999,7 @@ void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
             dim = argcheck::dimArg(args[2], "max");
     }
     if (!vecdimSet.empty()) {
-        // Reference contract (probed 2026-09-17): two outputs with a
-        // vector operating dimension require the 'linear' option —
-        // rejected here until 'linear' is supported at all
-        // (bugs/opened/lang/maxmin-linear.md).
-        if (nargout > 1)
+        if (nargout > 1 && !linear)
             throw Error("max: returning two outputs with a dimension "
                         "vector requires the 'linear' option",
                         0, 0, "max", "", "numkit:max:vecdimLinear");
@@ -958,19 +1008,31 @@ void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
             ? maxOmitNan(c, static_cast<int>(c.dims().ndim()), mr)
             : max(c, static_cast<int>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
+        if (nargout > 1) {
+            Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
+            outs[1] = vecdim::expandReduced(std::move(linIdx), a0, vecdimSet, mr);
+        }
         return;
     }
     auto [val, idx] = omitNan ? maxOmitNan(a0, dim, mr) : max(a0, dim, mr);
     outs[0] = std::move(val);
-    if (nargout > 1)
-        outs[1] = std::move(idx);
+    if (nargout > 1) {
+        if (linear) {
+            int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            int redArr[1] = {effDim};
+            outs[1] = toLinearMaxMinIndex(idx, a0, Span<const int>(redArr, 1), mr);
+        } else {
+            outs[1] = std::move(idx);
+        }
+    }
 }
 
 void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 4, "min");
+    argcheck::checkNargin(args.size(), 1, 5, "min");
     bool omitNan = false;
-    const size_t n = stripTrailingNanFlag(args, omitNan);
+    bool linear = false;
+    const size_t n = stripTrailingMaxMinFlags(args, omitNan, linear);
     auto *mr = ctx.engine->resource();
     // MATLAB returns DOUBLE (code points) for min of a CHAR array — see max_reg
     // + bugs/builtin/maxmin-char-double.md.
@@ -999,9 +1061,7 @@ void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
             dim = argcheck::dimArg(args[2], "min");
     }
     if (!vecdimSet.empty()) {
-        // See max_reg: two outputs with a dimension vector require the
-        // 'linear' option (bugs/opened/lang/maxmin-linear.md).
-        if (nargout > 1)
+        if (nargout > 1 && !linear)
             throw Error("min: returning two outputs with a dimension "
                         "vector requires the 'linear' option",
                         0, 0, "min", "", "numkit:min:vecdimLinear");
@@ -1010,12 +1070,23 @@ void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
             ? minOmitNan(c, static_cast<int>(c.dims().ndim()), mr)
             : min(c, static_cast<int>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
+        if (nargout > 1) {
+            Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
+            outs[1] = vecdim::expandReduced(std::move(linIdx), a0, vecdimSet, mr);
+        }
         return;
     }
     auto [val, idx] = omitNan ? minOmitNan(a0, dim, mr) : min(a0, dim, mr);
     outs[0] = std::move(val);
-    if (nargout > 1)
-        outs[1] = std::move(idx);
+    if (nargout > 1) {
+        if (linear) {
+            int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            int redArr[1] = {effDim};
+            outs[1] = toLinearMaxMinIndex(idx, a0, Span<const int>(redArr, 1), mr);
+        } else {
+            outs[1] = std::move(idx);
+        }
+    }
 }
 
 // Generators
