@@ -473,6 +473,9 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("fft2",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "fft2");
+            if (args.size() == 2)
+                throw Error("fft2: requires 1 or 3 arguments (got 2 — specify both m and n)",
+                            0, 0, "fft2", "", "numkit:fft2:nargin");
             int m = -1, n = -1;
             if (args.size() >= 2 && !args[1].isEmpty())
                 m = argcheck::expectedInteger(
@@ -499,6 +502,9 @@ void register_datafun(Engine &engine) {
                                 0, 0, "ifft2", "", "numkit:ifft2:badOption");
                 --nargs;
             }
+            if (nargs == 2)
+                throw Error("ifft2: requires 1 or 3 numeric arguments (got 2 — specify both m and n)",
+                            0, 0, "ifft2", "", "numkit:ifft2:nargin");
             int m = -1, n = -1;
             if (nargs >= 2 && !args[1].isEmpty())
                 m = argcheck::expectedInteger(
