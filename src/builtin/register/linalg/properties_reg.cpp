@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/properties_reg.cpp
+// toolboxes/linalg/src/properties_reg.cpp
 //
 // Register half of the matrix-property builtins: the CallContext wrappers
 // inv / trace / det / rank / cond / normest / rcond / condest / condeig
@@ -132,6 +132,7 @@ void condeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     const Value &A = args[0];
     // Eig dispatch matches the eig_reg path.
     auto sym = [&]() -> bool {
+        if (A.isComplex()) return false;
         if (A.dims().ndim() != 2) return false;
         const std::size_t n = static_cast<std::size_t>(A.dims().dim(0));
         if (n != static_cast<std::size_t>(A.dims().dim(1))) return false;

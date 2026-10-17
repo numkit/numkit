@@ -926,26 +926,39 @@ TEST_F(LinalgKnownBug, DetCellDiagnostic)
     }
 }
 
-// bugs/opened/linalg/complex-kernel-gaps.md — the reference computes
-// these entries for complex input (values probed R2025b 2026-09-18);
-// nk's kernels are real-only and reject with complexUnsupported.
-TEST_F(LinalgKnownBug, DISABLED_ExpmComplexKernel)
+// bugs/closed/linalg/complex-kernel-gaps.md — complex kernels for expm,
+// condest, condeig, rcond, rref, ldl, and balance (probed R2025b).
+TEST_F(LinalgKnownBug, ExpmComplexKernel)
 {
     eval("e = expm(complex([2 1; 1 3], 1));");
     EXPECT_NEAR(evalScalar("real(e(1,1))"), -5.84268292, 1e-8);
     EXPECT_NEAR(evalScalar("imag(e(1,1))"), 10.30999422, 1e-8);
 }
 
-TEST_F(LinalgKnownBug, DISABLED_CondestComplexKernel)
+TEST_F(LinalgKnownBug, CondestComplexKernel)
 {
-    EXPECT_NEAR(evalScalar("condest(complex([2 1; 1 3], 1))"), 3.2, 1e-9);
+    EXPECT_NEAR(evalScalar("condest(complex([2 1; 1 3]))"), 3.2, 1e-9);
+    EXPECT_NEAR(evalScalar("condest(complex([2 1; 1 3], 1))"), 3.59191299940485, 1e-9);
+    EXPECT_NEAR(evalScalar("rcond(complex([2 1; 1 3], 1))"), 0.278403179633163, 1e-9);
 }
 
-TEST_F(LinalgKnownBug, DISABLED_CondeigComplexKernel)
+TEST_F(LinalgKnownBug, CondeigComplexKernel)
 {
+    eval("c0 = condeig(complex([2 1; 1 3]));");
+    EXPECT_NEAR(evalScalar("c0(1)"), 1.0, 1e-6);
+    EXPECT_NEAR(evalScalar("c0(2)"), 1.0, 1e-6);
     eval("c = condeig(complex([2 1; 1 3], 1));");
-    EXPECT_NEAR(evalScalar("c(1)"), 1.0, 1e-6);
-    EXPECT_NEAR(evalScalar("c(2)"), 1.0, 1e-6);
+    EXPECT_NEAR(evalScalar("c(1)"), 1.02866724729207, 1e-6);
+    EXPECT_NEAR(evalScalar("c(2)"), 1.02866724729207, 1e-6);
+    eval("[R, jb] = rref([1 1i; 2 2i]);");
+    EXPECT_NEAR(evalScalar("imag(R(1,2))"), 1.0, 1e-12);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(jb)"), 1.0);
+    eval("H = [2, 1+1i; 1-1i, 3]; [L, D] = ldl(H);");
+    EXPECT_LT(evalScalar("norm(L*D*L' - H)"), 1e-12);
+    eval("[T, B] = balance([1, 300+400i; 3-4i, 2]);");
+    EXPECT_DOUBLE_EQ(evalScalar("T(1,1)"), 8.0);
+    EXPECT_NEAR(evalScalar("real(B(1,2))"), 37.5, 1e-12);
+    EXPECT_NEAR(evalScalar("imag(B(1,2))"), 50.0, 1e-12);
 }
 
 // bugs/closed/linalg/funm-defective-branch.md — the m-source funm
