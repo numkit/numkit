@@ -76,23 +76,19 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
                     0, 0, "chol", "", "numkit:chol:notSquare");
 
     if (n == 0) {
-        outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
+        outs[0] = Value::matrix(0, 0, A.type(), mr);
         if (nargout > 1) outs[1] = Value::scalar(0.0);
         return;
     }
 
-    // Type-generic factor + emit. The raw-buffer kernels in
-    // decompositions_detail.hpp are complex-aware (Hermitian checks and
-    // conjugates inside), so instantiating them for complex here is the whole
-    // complex-linalg fix (bugs/opened/linalg/complex-linalg-regression.md).
+    const bool wantSingle = (A.type() == ValueType::SINGLE);
+    Value Aw = detail::widenSingleToDouble(A, mr);
+
     const auto emit = [&](auto tag, auto roData, auto rwData, auto makeR) {
         using T = std::remove_const_t<std::remove_pointer_t<decltype(tag)>>;
         auto R = makeR();
-        const std::size_t fail = cholUpperFactor(roData(A), rwData(R), n);
+        const std::size_t fail = cholUpperFactor(roData(Aw), rwData(R), n);
         if (fail != 0) {
-            // Not positive-definite. With <2 outputs MATLAB errors; with the
-            // [R,p] form it returns p = failure column and R = the leading
-            // (p-1)×(p-1) factor (no error).
             if (nargout < 2)
                 throw Error("chol: matrix is not positive-definite",
                             0, 0, "chol", "", "numkit:chol:notPosDef");
@@ -106,15 +102,15 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
                         rs[row + col * k] = rf[row + col * n];
                 if (lower) sub = transposeSquare(roData(sub), k, mr);
             }
-            outs[0] = std::move(sub);
+            outs[0] = detail::narrowDoubleToSingleIf(sub, wantSingle, mr);
             outs[1] = Value::scalar(static_cast<double>(fail));
             return;
         }
         if (lower) R = transposeSquare(roData(R), n, mr);
-        outs[0] = std::move(R);
+        outs[0] = detail::narrowDoubleToSingleIf(R, wantSingle, mr);
         if (nargout > 1) outs[1] = Value::scalar(0.0);
     };
-    if (A.isComplex())
+    if (Aw.isComplex())
         emit(static_cast<const std::complex<double> *>(nullptr),
              [](const Value &v) { return v.complexData(); },
              [](Value &v) { return v.complexDataMut(); },
@@ -128,10 +124,23 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 namespace {
 
-// First `k` columns of a DOUBLE matrix (column-major → block copy).
 Value firstCols(const Value &A, size_t k, std::pmr::memory_resource *mr)
 {
     const size_t r = A.dims().rows();
+    if (A.isComplex()) {
+        auto out = Value::complexMatrix(r, k, mr);
+        const Complex *src = A.complexData();
+        Complex *dst = out.complexDataMut();
+        for (size_t i = 0; i < r * k; ++i) dst[i] = src[i];
+        return out;
+    }
+    if (A.type() == ValueType::SINGLE) {
+        auto out = Value::matrix(r, k, ValueType::SINGLE, mr);
+        const float *src = A.singleData();
+        float *dst = out.singleDataMut();
+        for (size_t i = 0; i < r * k; ++i) dst[i] = src[i];
+        return out;
+    }
     auto out = Value::matrix(r, k, ValueType::DOUBLE, mr);
     const double *src = A.doubleData();
     double *dst = out.doubleDataMut();
@@ -139,10 +148,27 @@ Value firstCols(const Value &A, size_t k, std::pmr::memory_resource *mr)
     return out;
 }
 
-// Top-left kr×kc block of a DOUBLE matrix.
 Value topLeftBlock(const Value &A, size_t kr, size_t kc, std::pmr::memory_resource *mr)
 {
     const size_t r = A.dims().rows();
+    if (A.isComplex()) {
+        auto out = Value::complexMatrix(kr, kc, mr);
+        const Complex *src = A.complexData();
+        Complex *dst = out.complexDataMut();
+        for (size_t c = 0; c < kc; ++c)
+            for (size_t i = 0; i < kr; ++i)
+                dst[c * kr + i] = src[c * r + i];
+        return out;
+    }
+    if (A.type() == ValueType::SINGLE) {
+        auto out = Value::matrix(kr, kc, ValueType::SINGLE, mr);
+        const float *src = A.singleData();
+        float *dst = out.singleDataMut();
+        for (size_t c = 0; c < kc; ++c)
+            for (size_t i = 0; i < kr; ++i)
+                dst[c * kr + i] = src[c * r + i];
+        return out;
+    }
     auto out = Value::matrix(kr, kc, ValueType::DOUBLE, mr);
     const double *src = A.doubleData();
     double *dst = out.doubleDataMut();
@@ -152,27 +178,23 @@ Value topLeftBlock(const Value &A, size_t kr, size_t kc, std::pmr::memory_resour
     return out;
 }
 
-// Convert a permutation matrix P (n×n, P·A = L·U) to a 1-based row-index
-// row vector p such that A(p,:) = L·U.
 Value permMatrixToVector(const Value &P, std::pmr::memory_resource *mr)
 {
     const size_t n = P.dims().rows();
     auto p = Value::matrix(1, n, ValueType::DOUBLE, mr);
-    const double *pd = P.doubleData();
     double *out = p.doubleDataMut();
     for (size_t i = 0; i < n; ++i) {
         size_t col = 0;
         double best = -1.0;
         for (size_t j = 0; j < n; ++j) {
-            const double v = pd[j * n + i];   // P(i, j), column-major
+            const double v = P.elemAsDouble(j * n + i);
             if (v > best) { best = v; col = j; }
         }
-        out[i] = static_cast<double>(col + 1);   // 1-based
+        out[i] = static_cast<double>(col + 1);
     }
     return p;
 }
 
-// Parse a trailing 'econ' / 0 economy flag for svd/qr.
 bool wantsEcon(Span<const Value> args, const char *fn)
 {
     if (args.size() < 2) return false;
@@ -188,7 +210,7 @@ bool wantsEcon(Span<const Value> args, const char *fn)
         throw Error(std::string(fn) + ": unknown option '" + s + "'",
                     0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
     }
-    if (o.isScalar() && o.toScalar() == 0.0) return true;   // legacy svd(A,0)/qr(A,0)
+    if (o.isScalar() && o.toScalar() == 0.0) return true;
     throw Error(std::string(fn) + ": invalid second argument",
                 0, 0, fn, "", std::string("numkit:") + fn + ":badArg");
 }
@@ -211,7 +233,7 @@ void lu_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
         std::transform(s.begin(), s.end(), s.begin(),
                        [](unsigned char c) { return std::tolower(c); });
         if (s == "vector") vectorP = true;
-        else if (s == "matrix") vectorP = false;   // explicit default
+        else if (s == "matrix") vectorP = false;
         else throw Error("lu: unknown option '" + s + "'",
                          0, 0, "lu", "", "numkit:lu:badOption");
     }
@@ -232,7 +254,6 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
 {
     auto *mr = ctx.engine->resource();
 
-    // Options: 'econ' or 0 → economy; 'vector'/'matrix' → P form (3-output only).
     bool econ = false, vectorP = false;
     for (size_t i = 1; i < args.size(); ++i) {
         const Value &o = args[i];
@@ -256,7 +277,6 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
     const size_t m = args[0].dims().rows(), n = args[0].dims().cols();
 
     if (nargout >= 3) {
-        // Column-pivoted QR: A·P = Q·R. econ + 3-output → P as a vector (MATLAB).
         std::vector<std::size_t> perm;
         auto [Q, R] = qr_pivoted(args[0], perm, mr);
         if (econ) {
@@ -276,8 +296,8 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
             Value P = Value::matrix(n, n, ValueType::DOUBLE, mr);
             double *Pd = P.doubleDataMut();
             std::fill(Pd, Pd + n * n, 0.0);
-            for (size_t k = 0; k < n; ++k) Pd[perm[k] + k * n] = 1.0;  // P[perm[k], k] = 1
-            outs[2] = std::move(P);
+            for (size_t k = 0; k < n; ++k) Pd[perm[k] + k * n] = 1.0;
+            outs[2] = detail::narrowDoubleToSingleIf(P, args[0].type() == ValueType::SINGLE, mr);
         }
         return;
     }

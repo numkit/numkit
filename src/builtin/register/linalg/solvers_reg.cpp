@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/solvers_reg.cpp
+// toolboxes/linalg/src/solvers_reg.cpp
 //
 // Register half of the linear-solver builtins: the CallContext wrappers
 // linsolve / lsqminnorm / lsqnonneg that delegate to the engine-free
@@ -9,6 +9,7 @@
 // Phase 2b compute/register split â€” see project_layering_refactor memory.
 
 #include <numkit/linalg/solvers.hpp>
+#include <numkit/linalg/detail/linalg_detail.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
 #include <numkit/value/value.hpp>
@@ -46,24 +47,25 @@ void lsqnonneg_reg(Span<const Value> args, size_t nargout,
     if (args.size() < 2)
         throw Error("lsqnonneg: requires (C, d)",
                     0, 0, "lsqnonneg", "", "numkit:lsqnonneg:nargin");
-    auto R = lsqnonneg_impl(args[0], args[1], ctx.engine->resource());
+    auto *mr = ctx.engine->resource();
+    auto R = lsqnonneg_impl(args[0], args[1], mr);
+    const bool wantSingle = (args[0].type() == ValueType::SINGLE ||
+                             args[1].type() == ValueType::SINGLE);
     outs[0] = R.x;
     if (nargout >= 2 && outs.size() >= 2)
-        outs[1] = Value::scalar(R.resnorm, ctx.engine->resource());
+        outs[1] = detail::narrowDoubleToSingleIf(Value::scalar(R.resnorm, mr), wantSingle, mr);
     if (nargout >= 3 && outs.size() >= 3)
         outs[2] = R.residual;
     if (nargout >= 4 && outs.size() >= 4)
-        outs[3] = Value::scalar(static_cast<double>(R.exitflag),
-                                ctx.engine->resource());
+        outs[3] = Value::scalar(static_cast<double>(R.exitflag), mr);
     if (nargout >= 5 && outs.size() >= 5) {
-        Value out_struct = Value::structure(ctx.engine->resource());
+        Value out_struct = Value::structure(mr);
         out_struct.structFields()["iterations"] =
-            Value::scalar(static_cast<double>(R.iterations),
-                          ctx.engine->resource());
+            Value::scalar(static_cast<double>(R.iterations), mr);
         out_struct.structFields()["algorithm"] =
-            Value::fromString(R.algorithm, ctx.engine->resource());
+            Value::fromString(R.algorithm, mr);
         out_struct.structFields()["message"] =
-            Value::fromString(R.message, ctx.engine->resource());
+            Value::fromString(R.message, mr);
         outs[4] = std::move(out_struct);
     }
 }

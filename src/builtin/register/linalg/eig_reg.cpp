@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/eig_reg.cpp
+// toolboxes/linalg/src/eig_reg.cpp
 //
 // Register half of the eigenvalue family: the CallContext wrappers
 // eig / hess / schur / sylvester / polyeig / ordeig that delegate to the
@@ -11,6 +11,7 @@
 // Phase 2b compute/register split â€” see project_layering_refactor memory.
 
 #include <numkit/linalg/eig.hpp>
+#include <numkit/linalg/detail/linalg_detail.hpp>
 #include <numkit/linalg/matrix_functions.hpp>         // sylvester (general)
 #include <numkit/linalg/properties.hpp>               // inv (generalized eig B\A)
 #include <numkit/builtin/ops.hpp>  // mtimes (eig(A,B))
@@ -153,7 +154,7 @@ static Value leftEigenvectors(const Value &M, const Value &D,
         for (std::size_t i = 0; i < n; ++i)
             wd[i + k * n] = (nrm > 0.0) ? vld[i + best * n] / nrm : vld[i + best * n];
     }
-    return W;
+    return detail::narrowDoubleToSingleIf(W, M.type() == ValueType::SINGLE, mr);
 }
 
 void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
@@ -163,10 +164,6 @@ void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
                     0, 0, "eig", "", "numkit:eig:nargin");
     auto *mr = ctx.engine->resource();
 
-    // Parse trailing args: an optional second matrix B (generalized
-    // problem AÂ·v = Î»Â·BÂ·v) and/or a string flag 'vector'/'matrix'
-    // ('chol'/'qz'/'nobalance' accepted and ignored â€” we always reduce
-    // the generalized problem to the standard one B\A).
     const Value *A = &args[0];
     const Value *B = nullptr;
     bool wantMatrix = false;
@@ -189,26 +186,34 @@ void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         }
     }
 
-    // Reduce a generalized problem (A, B) to the standard problem on
-    // M = B\A = inv(B)Â·A. The eigenvalues of M equal the generalized
-    // eigenvalues, and any eigenvector v of M satisfies AÂ·v = BÂ·vÂ·Î».
-    Value M = B ? numkit::builtin::mtimes(inv(*B, mr), *A, mr) : *A;
+    const bool wantSingle = (A->type() == ValueType::SINGLE ||
+                             (B && B->type() == ValueType::SINGLE));
+    Value M;
+    if (B) {
+        detail::requireDoubleInput(*A, "eig");
+        detail::requireDoubleInput(*B, "eig", "B");
+        Value Aw = detail::widenSingleToDouble(*A, mr);
+        Value Bw = detail::widenSingleToDouble(*B, mr);
+        M = numkit::builtin::mtimes(inv(Bw, mr), Aw, mr);
+    } else {
+        M = *A;
+    }
 
     if (nargout >= 2) {
         auto [V, D] = eigVDAuto(M, mr);
         if (nargout >= 3)
-            outs[2] = leftEigenvectors(M, D, mr);   // left eigenvectors
-        outs[0] = std::move(V);
-        outs[1] = std::move(D);
+            outs[2] = detail::narrowDoubleToSingleIf(leftEigenvectors(M, D, mr), wantSingle, mr);
+        outs[0] = detail::narrowDoubleToSingleIf(V, wantSingle, mr);
+        outs[1] = detail::narrowDoubleToSingleIf(D, wantSingle, mr);
         return;
     }
-    if (wantMatrix) {                       // 'matrix' â†’ diagonal D even with 1 output
+    if (wantMatrix) {
         auto [V, D] = eigVDAuto(M, mr);
         (void)V;
-        outs[0] = std::move(D);
+        outs[0] = detail::narrowDoubleToSingleIf(D, wantSingle, mr);
         return;
     }
-    outs[0] = eigValuesAuto(M, mr);
+    outs[0] = detail::narrowDoubleToSingleIf(eigValuesAuto(M, mr), wantSingle, mr);
 }
 
 void hess_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)

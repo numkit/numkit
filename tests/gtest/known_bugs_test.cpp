@@ -904,13 +904,47 @@ TEST_F(LinalgKnownBug, QrLastColumnSignConvention)
 // bugs/opened/linalg/single-float-inputs.md — the reference computes
 // the factorization family in single; nk rejects single with
 // nk:<fn>:singleUnsupported until the kernels learn single buffers.
-TEST_F(LinalgKnownBug, DISABLED_PinvSingleAccepted)
+TEST_F(LinalgKnownBug, PinvSingleAccepted)
 {
     eval("y = pinv(single([1 2; 3 4]));");
-    EXPECT_NEAR(evalScalar("y(1,1)"), -2.0, 1e-5);
-    EXPECT_NEAR(evalScalar("y(1,2)"),  1.0, 1e-5);
-    EXPECT_NEAR(evalScalar("y(2,1)"),  1.5, 1e-5);
-    EXPECT_NEAR(evalScalar("y(2,2)"), -0.5, 1e-5);
+    EXPECT_EQ(eval("class(y)").toString(), "single");
+    EXPECT_NEAR(evalScalar("double(y(1,1))"), -2.0, 1e-5);
+    EXPECT_NEAR(evalScalar("double(y(1,2))"),  1.0, 1e-5);
+    EXPECT_NEAR(evalScalar("double(y(2,1))"),  1.5, 1e-5);
+    EXPECT_NEAR(evalScalar("double(y(2,2))"), -0.5, 1e-5);
+
+    // Representative single-precision checks across the linalg family:
+    eval("A = single([4 1; 1 3]);");
+    EXPECT_EQ(eval("class(inv(A))").toString(), "single");
+    EXPECT_EQ(eval("class(det(A))").toString(), "single");
+    EXPECT_EQ(eval("class(trace(A))").toString(), "single");
+    EXPECT_EQ(eval("class(norm(A))").toString(), "single");
+    EXPECT_EQ(eval("class(cond(A))").toString(), "single");
+    EXPECT_EQ(eval("class(rcond(A))").toString(), "single");
+    EXPECT_EQ(eval("class(rank(A))").toString(), "double");
+    eval("[L, U, P] = lu(A); [Lv, Uv, pv] = lu(A, 'vector');");
+    EXPECT_EQ(eval("class(L)").toString(), "single");
+    EXPECT_EQ(eval("class(U)").toString(), "single");
+    EXPECT_EQ(eval("class(P)").toString(), "single");
+    EXPECT_EQ(eval("class(pv)").toString(), "double");
+    eval("[Q, R] = qr(A); [Us, Ss, Vs] = svd(A); Rc = chol(A);");
+    EXPECT_EQ(eval("class(Q)").toString(), "single");
+    EXPECT_EQ(eval("class(R)").toString(), "single");
+    EXPECT_EQ(eval("class(Us)").toString(), "single");
+    EXPECT_EQ(eval("class(Ss)").toString(), "single");
+    EXPECT_EQ(eval("class(Vs)").toString(), "single");
+    EXPECT_EQ(eval("class(Rc)").toString(), "single");
+    eval("[Ve, De] = eig(A); [Usch, Tsch] = schur(A);");
+    EXPECT_EQ(eval("class(Ve)").toString(), "single");
+    EXPECT_EQ(eval("class(De)").toString(), "single");
+    EXPECT_EQ(eval("class(Usch)").toString(), "single");
+    EXPECT_EQ(eval("class(Tsch)").toString(), "single");
+    EXPECT_EQ(eval("class(expm(A))").toString(), "single");
+    EXPECT_EQ(eval("class(sqrtm(A))").toString(), "single");
+    EXPECT_EQ(eval("class(linsolve(A, single([1; 2])))").toString(), "single");
+    eval("[Rf, jb] = rref(A);");
+    EXPECT_EQ(eval("class(Rf)").toString(), "single");
+    EXPECT_EQ(eval("class(jb)").toString(), "double");
 }
 
 // bugs/closed/linalg/raw-type-diagnostics.md — the 2026-09-18 remainder

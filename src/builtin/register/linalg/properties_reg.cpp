@@ -131,23 +131,7 @@ void condeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     // becomes a hot path).
     const Value &A = args[0];
     // Eig dispatch matches the eig_reg path.
-    auto sym = [&]() -> bool {
-        if (A.isComplex()) return false;
-        if (A.dims().ndim() != 2) return false;
-        const std::size_t n = static_cast<std::size_t>(A.dims().dim(0));
-        if (n != static_cast<std::size_t>(A.dims().dim(1))) return false;
-        const double *p = A.doubleData();
-        const double tol = 1e-10;
-        for (std::size_t i = 0; i < n; ++i)
-            for (std::size_t j = i + 1; j < n; ++j) {
-                const double d = std::fabs(p[i + j * n] - p[j + i * n]);
-                const double s = std::max(std::fabs(p[i + j * n]),
-                                           std::fabs(p[j + i * n]));
-                if (d > tol * (1.0 + s)) return false;
-            }
-        return true;
-    }();
-    if (sym) {
+    if (!A.isComplex() && isSymmetricApprox(A, 1e-10)) {
         auto [V, D] = eig_symmetric(A, mr);
         outs[0] = std::move(V);
         outs[1] = std::move(D);

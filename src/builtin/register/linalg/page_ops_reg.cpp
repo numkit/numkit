@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/page_ops_reg.cpp
+// toolboxes/linalg/src/page_ops_reg.cpp
 //
 // Register half of the paged-matrix builtins: the CallContext wrappers
 // pageinv / pageeig / pagesvd / pagepinv / pagenorm / pagemldivide /
@@ -8,6 +8,7 @@
 // Phase 2b compute/register split â€” see project_layering_refactor memory.
 
 #include <numkit/linalg/page_ops.hpp>
+#include <numkit/linalg/detail/linalg_detail.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
 #include <numkit/value/value.hpp>
@@ -89,7 +90,7 @@ void pagenorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     }
     auto *mr = ctx.engine->resource();
     if (p == -2.0) {
-        // Frobenius per page. Apply pageShape + iterate norm_fro.
+        detail::requireDoubleInput(args[0], "pagenorm");
         const int nd = args[0].dims().ndim();
         if (nd < 2 || nd > 3)
             throw Error("pagenorm: input must be 2-D or 3-D",
@@ -102,12 +103,20 @@ void pagenorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
                               : Value::matrix3d(1, 1, pages, ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
         for (std::size_t pp = 0; pp < pages; ++pp) {
-            const double *src = args[0].doubleData() + pp * m * n;
             double s = 0.0;
-            for (std::size_t k = 0; k < m * n; ++k) s += src[k] * src[k];
+            if (args[0].isComplex()) {
+                const Complex *src = args[0].complexData() + pp * m * n;
+                for (std::size_t k = 0; k < m * n; ++k) s += detail::abs_sq(src[k]);
+            } else {
+                const std::size_t base = pp * m * n;
+                for (std::size_t k = 0; k < m * n; ++k) {
+                    const double v = args[0].elemAsDouble(base + k);
+                    s += v * v;
+                }
+            }
             od[pp] = std::sqrt(s);
         }
-        outs[0] = std::move(out);
+        outs[0] = detail::narrowDoubleToSingleIf(out, args[0].type() == ValueType::SINGLE, mr);
         return;
     }
     outs[0] = pagenorm(args[0], p, mr);
