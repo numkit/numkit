@@ -1748,9 +1748,9 @@ TEST_P(GridKronTest, NdgridSingleArgThrows)
     EXPECT_THROW(eval("X = ndgrid(1:5);"), std::exception);
 }
 
-// ── kron (deferred to external numkit/linalg plugin) ────────────
+// ── kron / cross / dot ─────────────────────────────────────────
 
-TEST_P(GridKronTest, DISABLED_KronOnesShape)
+TEST_P(GridKronTest, KronOnesShape)
 {
     eval("K = kron(ones(2, 3), ones(4, 5));");
     auto *K = getVarPtr("K");
@@ -1760,7 +1760,7 @@ TEST_P(GridKronTest, DISABLED_KronOnesShape)
         EXPECT_DOUBLE_EQ(K->doubleData()[i], 1.0);
 }
 
-TEST_P(GridKronTest, DISABLED_KronIdentityWithMatrix)
+TEST_P(GridKronTest, KronIdentityWithMatrix)
 {
     // kron(eye(2), B) places B on the diagonal blocks, zeros off-diagonal.
     eval("B = [10 20; 30 40];"
@@ -1778,7 +1778,7 @@ TEST_P(GridKronTest, DISABLED_KronIdentityWithMatrix)
     EXPECT_DOUBLE_EQ((*K)(2, 0), 0.0);
 }
 
-TEST_P(GridKronTest, DISABLED_KronVectorVector)
+TEST_P(GridKronTest, KronVectorVector)
 {
     // kron([1 2 3], [10 20]) = [10 20 20 40 30 60].
     eval("K = kron([1 2 3], [10 20]);");
@@ -1790,7 +1790,7 @@ TEST_P(GridKronTest, DISABLED_KronVectorVector)
         EXPECT_DOUBLE_EQ(K->doubleData()[i], expected[i]);
 }
 
-TEST_P(GridKronTest, DISABLED_KronKnownSmallExample)
+TEST_P(GridKronTest, KronKnownSmallExample)
 {
     // [1 2; 3 4] ⊗ [0 1; 1 0] =
     //   [1*0 1*1 2*0 2*1;
@@ -1817,7 +1817,7 @@ TEST_P(GridKronTest, DISABLED_KronKnownSmallExample)
                 << "at (" << r << "," << c << ")";
 }
 
-TEST_P(GridKronTest, DISABLED_KronEmptyAGivesEmpty)
+TEST_P(GridKronTest, KronEmptyAGivesEmpty)
 {
     // Probed R2025b: EMPTY operands ERROR (the reference fails with an
     // internal badsubscript) — the old empty-result expectation was a
@@ -1828,7 +1828,7 @@ TEST_P(GridKronTest, DISABLED_KronEmptyAGivesEmpty)
 // Complex kron: ordinary Kronecker product with complex element products
 // (no conjugation). Was rejected ("complex inputs are not supported"). vs
 // MATLAB R2025b. 2026-05-29.
-TEST_P(GridKronTest, DISABLED_KronComplex)
+TEST_P(GridKronTest, KronComplex)
 {
     eval("K = kron([1 2], [3+4i, 5]);");   // [1*[3+4i 5], 2*[3+4i 5]] = [3+4i 5 6+8i 10]
     auto *K = getVarPtr("K");
@@ -1849,7 +1849,7 @@ TEST_P(GridKronTest, DISABLED_KronComplex)
 }
 
 // Complex cross: ordinary cross product with complex arithmetic (no conj).
-TEST_P(GridKronTest, DISABLED_CrossComplex)
+TEST_P(GridKronTest, CrossComplex)
 {
     eval("c = cross([1+1i 0 0], [0 1 0]);");   // [0 0 1+1i]
     auto *c = getVarPtr("c");
@@ -1871,7 +1871,7 @@ TEST_P(GridKronTest, DISABLED_CrossComplex)
 // first length-3 dimension). For a 3x3 (ambiguous) input nk picked dim 1
 // regardless of the requested dim. MATLAB crosses along the requested dim.
 // vs MATLAB R2025b. DEEP-PROBE 2026-05-31.
-TEST_P(GridKronTest, DISABLED_CrossAlongDim)
+TEST_P(GridKronTest, CrossAlongDim)
 {
     // dim 1 (each column a 3-vec): cross([1 2 3;4 5 6;7 8 9],eye(3),1)
     //   = [0 -8 6; 7 0 -3; -4 2 0].
@@ -1903,7 +1903,7 @@ TEST_P(GridKronTest, Kron3DInputThrows)
 // Complex dot: MATLAB conjugates the FIRST argument -> dot(a,b)=sum(conj(a).*b),
 // per-column for matrices. nk previously dropped the imaginary part via
 // elemAsDouble (returned a wrong real scalar). vs MATLAB R2025b. 2026-05-29.
-TEST_P(GridKronTest, DISABLED_DotComplexConjugatesFirstArg)
+TEST_P(GridKronTest, DotComplexConjugatesFirstArg)
 {
     eval("z = dot([1+2i 3], [4 5i]);");   // conj([1+2i 3]).*[4 5i] = [4-8i,15i] -> 4+7i
     auto *z = getVarPtr("z");
@@ -1935,7 +1935,7 @@ TEST_P(GridKronTest, DISABLED_DotComplexConjugatesFirstArg)
 // MATLAB: dim 2 reduces across rows (Hx1), dim 1 down columns (1xW); a vector
 // with explicit dim follows the general sum(conj(A).*B,dim) rule. vs MATLAB
 // R2025b. DEEP-PROBE 2026-05-31.
-TEST_P(GridKronTest, DISABLED_DotAlongDim)
+TEST_P(GridKronTest, DotAlongDim)
 {
     // dim 2 -> per-row column vector [6;30].
     eval("d2 = dot([1 2 3;4 5 6],[1 1 1;2 2 2],2);");

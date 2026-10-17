@@ -742,8 +742,8 @@ TEST_P(BuiltinTest, IsstrpropAndFamily)
     EXPECT_EQ(S->logicalData()[3], 1);   // tab
 }
 
-// ── Optimization — Pack 20 (deferred to external numkit/optim plugin) ──────
-TEST_P(BuiltinTest, DISABLED_FminbndScalar)
+// ── Optimization — Pack 20 ────────────────────────────────────────────────
+TEST_P(BuiltinTest, FminbndScalar)
 {
     // Min of (x-3)^2 on [0, 10] is x=3, value=0.
     eval("y = fminbnd(@(x) (x-3)^2, 0, 10);");
@@ -753,7 +753,7 @@ TEST_P(BuiltinTest, DISABLED_FminbndScalar)
     EXPECT_NEAR(getVar("y2"), M_PI, 1e-4);
 }
 
-TEST_P(BuiltinTest, DISABLED_FminsearchVector)
+TEST_P(BuiltinTest, FminsearchVector)
 {
     // 2-D quadratic: min of (x1-1)^2 + 10*(x2-2)^2 at [1, 2]. Nelder-Mead with
     // the default 1e-4 tol now enforces BOTH TolFun and TolX, so it converges
@@ -767,7 +767,7 @@ TEST_P(BuiltinTest, DISABLED_FminsearchVector)
 
 // fminsearch convergence accuracy: enforcing TolX (simplex size) as well as
 // TolFun makes it reach the true minimum, matching MATLAB R2025b. 2026-05-31.
-TEST_P(BuiltinTest, DISABLED_FminsearchConvergenceAccuracy)
+TEST_P(BuiltinTest, FminsearchConvergenceAccuracy)
 {
     // Rosenbrock from [-1.2 1] -> [1 1] (MATLAB gives [1.00002 1.00004]).
     eval("r = fminsearch(@(v) 100*(v(2)-v(1)^2)^2 + (1-v(1))^2, [-1.2 1]);");
@@ -788,7 +788,7 @@ TEST_P(BuiltinTest, DISABLED_FminsearchConvergenceAccuracy)
 }
 
 // [x, fval, exitflag] multi-output for fzero / fminbnd / fminsearch.
-TEST_P(BuiltinTest, DISABLED_FzeroFvalExitflag)
+TEST_P(BuiltinTest, FzeroFvalExitflag)
 {
     eval("function [a,b,c] = fz(f, x0)\n  [a,b,c] = fzero(f, x0);\nend");
     eval("[x, fval, ef] = fz(@(x) x.^2 - 4, [0 10]);");
@@ -797,7 +797,7 @@ TEST_P(BuiltinTest, DISABLED_FzeroFvalExitflag)
     EXPECT_DOUBLE_EQ(getVar("ef"), 1.0);
 }
 
-TEST_P(BuiltinTest, DISABLED_FminbndFvalExitflag)
+TEST_P(BuiltinTest, FminbndFvalExitflag)
 {
     eval("function [a,b,c] = fb(f, lo, hi)\n  [a,b,c] = fminbnd(f, lo, hi);\nend");
     eval("[x, fval, ef] = fb(@(x) (x-3).^2 + 1, 0, 10);");
@@ -806,7 +806,7 @@ TEST_P(BuiltinTest, DISABLED_FminbndFvalExitflag)
     EXPECT_DOUBLE_EQ(getVar("ef"), 1.0);
 }
 
-TEST_P(BuiltinTest, DISABLED_FminsearchFvalExitflag)
+TEST_P(BuiltinTest, FminsearchFvalExitflag)
 {
     eval("function [a,b,c] = fs(f, x0)\n  [a,b,c] = fminsearch(f, x0);\nend");
     eval("[x, fval, ef] = fs(@(v) (v(1)-1)^2 + (v(2)-2)^2, [0 0]);");
@@ -818,13 +818,13 @@ TEST_P(BuiltinTest, DISABLED_FminsearchFvalExitflag)
     EXPECT_DOUBLE_EQ(getVar("ef"), 1.0);
 }
 
-TEST_P(BuiltinTest, DISABLED_FzeroOutputStructDeferredThrows)
+TEST_P(BuiltinTest, FzeroOutputStructDeferredThrows)
 {
     eval("function [a,b,c,d] = fz4(f, x0)\n  [a,b,c,d] = fzero(f, x0);\nend");
     EXPECT_THROW(eval("[x,fv,ef,op] = fz4(@(x) x.^2 - 4, [0 10]);"), std::exception);
 }
 
-TEST_P(BuiltinTest, DISABLED_OptimsetGet)
+TEST_P(BuiltinTest, OptimsetGet)
 {
     eval("o = optimset('TolX', 1e-9, 'MaxIter', 200);");
     EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'TolX');"), 1e-9);
