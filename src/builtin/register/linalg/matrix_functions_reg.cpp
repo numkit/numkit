@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/matrix_functions_reg.cpp
+// toolboxes/linalg/src/matrix_functions_reg.cpp
 //
 // Register half of the matrix-function builtins: the CallContext wrappers
 // expm / logm / sqrtm / expmv that delegate to the engine-free compute in
@@ -54,6 +54,47 @@ void expmv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
                     0, 0, "expmv", "", "numkit:expmv:nargin");
     const double t = args[0].toScalar();
     outs[0] = expmv(t, args[1], args[2], ctx.engine->resource());
+}
+
+void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+{
+    if (args.size() < 2)
+        throw Error("funm: requires (A, fun)",
+                    0, 0, "funm", "", "numkit:funm:nargin");
+    auto *mr = ctx.engine->resource();
+    const Value &A = args[0];
+    const Value &fnArg = args[1];
+
+    std::string knownName;
+    if (fnArg.isChar() || fnArg.isString()) {
+        knownName = fnArg.toString();
+    } else if (fnArg.isFuncHandle()) {
+        knownName = fnArg.funcHandleName();
+    }
+    if (knownName == "exp" || knownName == "log" || knownName == "sqrt"
+        || knownName == "sin" || knownName == "cos"
+        || knownName == "sinh" || knownName == "cosh") {
+        outs[0] = funm(A, knownName, mr);
+        return;
+    }
+
+    Value handle = fnArg;
+    if (fnArg.isChar() || fnArg.isString()) {
+        handle = Value::funcHandle(knownName, mr);
+    } else if (!fnArg.isFuncHandle()
+               && !(fnArg.isCell() && fnArg.numel() >= 1 && fnArg.cellAt(0).isFuncHandle())) {
+        throw Error("funm: second argument must be a function handle or function name",
+                    0, 0, "funm", "", "numkit:funm:badFun");
+    }
+
+    auto evalScalarFn = [&](std::complex<double> z) -> std::complex<double> {
+        Value x = (z.imag() == 0.0) ? Value::scalar(z.real(), mr)
+                                    : Value::complexScalar(z.real(), z.imag(), mr);
+        Value y = ctx.engine->callFunctionHandle(handle, Span<const Value>(&x, 1), ctx.env);
+        if (y.isComplex()) return y.toComplex();
+        return std::complex<double>(y.toScalar(), 0.0);
+    };
+    outs[0] = funm(A, evalScalarFn, mr);
 }
 
 } // namespace detail

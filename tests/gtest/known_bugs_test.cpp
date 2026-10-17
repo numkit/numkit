@@ -1,4 +1,4 @@
-﻿// toolboxes/builtin/tests/known_bugs_test.cpp
+// toolboxes/builtin/tests/known_bugs_test.cpp
 //
 // One DISABLED_ test per OPEN bug in bugs/builtin/*.md. Disabled until
 // fixed; remove `DISABLED_` to turn into a live regression guard.
@@ -573,27 +573,21 @@ TEST_P(CommandGlueTest, ExistFileInsideFunction)
     EXPECT_DOUBLE_EQ(evalScalar("eIn"), 2.0);
 }
 
-// bugs/opened/runtime/mldivide-singular-warning.md — the reference
+// bugs/closed/runtime/mldivide-singular-warning.md — the reference
 // WARNS "Matrix is singular to working precision" and returns an
 // Inf-filled solution for an exactly singular square solve; nk throws
 // nk:mldivide:singular instead (probed R2025b 2026-09-18).
-TEST_P(CommandGlueTest, DISABLED_MldivideSingularWarns)
+TEST_P(CommandGlueTest, MldivideSingularWarns)
 {
     eval("x = true(2) \\ eye(2);");
     EXPECT_DOUBLE_EQ(evalScalar("x(1,1)"), std::numeric_limits<double>::infinity());
 }
 
-// bugs/opened/runtime/dir-nargout-in-argument.md — a call in ARGUMENT
+// bugs/closed/runtime/dir-nargout-in-argument.md — a call in ARGUMENT
 // position must request one output: MATLAB gives numel(dir(path))==1
-// inside fprintf(...) just like in an assignment. nk currently
-// invokes the argument call with nargout=0, so dir prints its listing
-// and returns nothing → numel = 0.
-TEST_P(CommandGlueTest, DISABLED_DirNargoutInsideCallArgument)
+// inside fprintf(...) just like in an assignment.
+TEST_P(CommandGlueTest, DirNargoutInsideCallArgument)
 {
-    // Statement-context argument calls drop nargout only on the VM;
-    // skip the healthy backend so the guard fails when enabled.
-    if (GetParam() != numkit::Engine::Backend::VM)
-        GTEST_SKIP() << "VM-only bug";
     const std::string tmp = (std::string)std::tmpnam(nullptr) + "_dirarg.txt";
     eval("fid = fopen('" + tmp + "', 'w'); fwrite(fid, uint8('x')); fclose(fid);");
     // Assignment context: outer call requests an output, the inner dir
@@ -601,35 +595,35 @@ TEST_P(CommandGlueTest, DISABLED_DirNargoutInsideCallArgument)
     eval("a = numel(dir('" + tmp + "'));");
     EXPECT_DOUBLE_EQ(evalScalar("a"), 1.0);
     // Statement context (outer call itself has nargout=0): the inner
-    // dir currently runs at nargout=0, prints its listing and returns
-    // nothing — MATLAB requests one output for ANY argument position,
+    // dir requests one output for ANY argument position,
     // so ans must be 1 there too. Observable via ans.
     eval("numel(dir('" + tmp + "'));");
     EXPECT_DOUBLE_EQ(evalScalar("ans"), 1.0);
     ::remove(tmp.c_str());
 }
 
-// bugs/opened/runtime/exist-toolbox-fn-returns-zero.md — the
+// bugs/closed/runtime/exist-toolbox-fn-returns-zero.md — the
 // no-filter exist() probe misses registered toolbox externals:
 // exist('butter')==0 while butter(...) executes (MATLAB gives 2).
-TEST_P(CommandGlueTest, DISABLED_ExistToolboxFunctionNoFilter)
+TEST_P(CommandGlueTest, ExistToolboxFunctionNoFilter)
 {
     EXPECT_DOUBLE_EQ(evalScalar("exist('sin');"), 5.0);      // builtin
     EXPECT_DOUBLE_EQ(evalScalar("exist('butter');"), 2.0);  // toolbox
     EXPECT_DOUBLE_EQ(evalScalar("exist('hamming');"), 2.0);
 }
 
-// bugs/opened/runtime/abs-single-matrix.md — abs() on a single matrix
+// bugs/closed/runtime/abs-single-matrix.md — abs() on a single matrix
 // throws "Not a double array" (double works; MATLAB returns single).
-// bugs/opened/lang/struct-mixed-cell-shapes.md — struct() rejects
+// bugs/closed/lang/struct-mixed-cell-shapes.md — struct() rejects
 // cell values whose elements have mixed shapes (MATLAB spreads a 1xN
 // cell and each slot may hold any shape).
-TEST_F(BuiltinKnownBug, DISABLED_StructMixedCellShapes)
+TEST_F(BuiltinKnownBug, StructMixedCellShapes)
 {
     eval("sn = struct('m', {magic(2), 1}, 't', {{1, 'x'}});");
-    EXPECT_EQ(eval("numel(sn);").toString(), "2");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(sn)"), 2.0);
     EXPECT_DOUBLE_EQ(evalScalar("sn(2).m"), 1.0);
-    EXPECT_DOUBLE_EQ(evalScalar("sn(1).m(2,2)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sn(1).m(2,1)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sn(1).m(2,2)"), 2.0);
 }
 
 TEST_F(BuiltinKnownBug, AbsSingleMatrix)
@@ -729,10 +723,10 @@ TEST_F(BuiltinKnownBug, DISABLED_ReshapeCellND)
     EXPECT_NEAR(evalScalar("double(c{5})"), 5.0, 1e-12);   // column-major
 }
 
-// bugs/opened/lang/char-array-arithmetic.md — elementwise scalar
+// bugs/closed/lang/char-array-arithmetic.md — elementwise scalar
 // arithmetic on char arrays computes over code values in the reference
 // engine; nk throws the raw "Not a double array".
-TEST_F(BuiltinKnownBug, DISABLED_CharArrayScalarDivision)
+TEST_F(BuiltinKnownBug, CharArrayScalarDivision)
 {
     eval("x = 'ab' / 10;");
     EXPECT_NEAR(evalScalar("x(1)"), 9.7, 1e-12);
@@ -936,15 +930,31 @@ TEST_F(LinalgKnownBug, DISABLED_CondeigComplexKernel)
     EXPECT_NEAR(evalScalar("c(2)"), 1.0, 1e-6);
 }
 
-// bugs/opened/linalg/funm-defective-branch.md — the m-source funm
+// bugs/closed/linalg/funm-defective-branch.md — the m-source funm
 // degenerates on defective matrices (singular eigenvector matrix);
 // the reference answers expm(B) here (probed R2025b 2026-09-18).
-TEST_F(LinalgKnownBug, DISABLED_FunmDefectiveBranch)
+TEST_F(LinalgKnownBug, FunmDefectiveBranch)
 {
     eval("F = funm([2 1; 0 2], @exp);");
     EXPECT_NEAR(evalScalar("F(1, 1)"), 7.38905609893065, 1e-9);
     EXPECT_NEAR(evalScalar("F(1, 2)"), 7.38905609893065, 1e-9);
     EXPECT_NEAR(evalScalar("F(2, 2)"), 7.38905609893065, 1e-9);
+}
+
+// bugs/closed/linalg/eig-real-spectrum-complex-typing.md — real
+// eigenproblems with a real Perron-Frobenius root (or full real
+// spectrum) must strip complex-Schur phase and ~1e-16 imaginary dust
+// so extracted real eigenvectors and weights are real-typed.
+TEST_F(LinalgKnownBug, EigRealSpectrumComplexTyping)
+{
+    eval("A = [1 9 3; 0.1111111111111111 1 8; 0.3333333333333333 0.125 1];"
+         "[V, D] = eig(A);"
+         "[~, idx] = max(real(diag(D)));"
+         "v = V(:, idx);"
+         "w = v / sum(v);");
+    EXPECT_DOUBLE_EQ(evalScalar("isreal(v)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("isreal(w)"), 1.0);
+    EXPECT_NEAR(evalScalar("w(1)"), 0.696349678, 1e-6);
 }
 
 

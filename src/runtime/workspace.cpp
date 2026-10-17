@@ -505,6 +505,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     isVar = (gs && gs->get(varName) != nullptr);
                                 }
                                 bool isFunc = ctx.engine->hasFunction(varName);
+                                bool isToolboxFunc = !isFunc && (ctx.engine->findExternal(varName, env) != nullptr);
 
                                 // Walk path list to check for `<name>.m` (m-file resolver)
                                 auto findMFile = [&]() -> bool {
@@ -520,6 +521,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (typeFilter.empty()) {
                                     if (isVar)              code = 1;
                                     else if (isFunc)        code = 5;
+                                    else if (isToolboxFunc) code = 2;
                                     else if (vfsExists(varName)) code = 2;       // file
                                     else if (findMFile())   code = 2;            // m-file in path
                                 } else if (typeFilter == "var") {
@@ -527,9 +529,10 @@ void registerWorkspaceRuntime(Engine &engine)
                                 } else if (typeFilter == "builtin") {
                                     if (ctx.engine->hasExternalFunction(varName)) code = 5;
                                 } else if (typeFilter == "file") {
-                                    // Direct path â€” file or m-file in search path
-                                    if (vfsExists(varName))                       code = 2;
-                                    else if (findMFile())                          code = 2;
+                                    // Direct path — file, toolbox function, or m-file in search path
+                                    if (isToolboxFunc)                            code = 2;
+                                    else if (vfsExists(varName))                  code = 2;
+                                    else if (findMFile())                         code = 2;
                                 } else if (typeFilter == "dir") {
                                     if (vfsIsDir(varName))                        code = 7;
                                 }

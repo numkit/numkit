@@ -71,11 +71,12 @@ void ordeig_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
 // schur_convert.cpp
 void cdf2rdf_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
 void rsf2csf_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-// matrix_functions.cpp
+// // matrix_functions.cpp
 void expm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
 void logm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
 void sqrtm_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
 void expmv_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void funm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
 // predicates.cpp
 void issymmetric_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
 void ishermitian_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
@@ -104,29 +105,7 @@ void pagelsqminnorm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
 
 namespace numkit {
 
-// funm â€” general matrix function via the eigendecomposition:
-//   F = VÂ·diag(fun(eig(A)))Â·Vâ»Â¹  (valid for diagonalizable A).
-// A real matrix with complex eigenvalues yields a complex V/D and hits the
-// complex-linalg limitation (bugs/linalg/complex-matrix-unsupported); the
-// common real-eigenvalue / symmetric cases match MATLAB exactly. The
-// Schurâ€“Parlett path for defective matrices is not implemented.
-static const char *kFunmMSource = R"NKM(
-function F = funm(A, fun)
-  if nargin < 2
-    error('numkit:funm:nargin', 'funm: requires (A, fun)');
-  end
-  if ~(ismatrix(A) && size(A,1) == size(A,2))
-    error('numkit:funm:square', 'funm: A must be a square matrix');
-  end
-  [V, D] = eig(A);
-  F = V * diag(fun(diag(D))) / V;
-  if isreal(A)
-    F = real(F);
-  end
-end
-)NKM";
-
-// decomposition â€” object caching matrix factorizations
+// decomposition — object caching matrix factorizations
 static const char *kDecompositionMSource = R"NKM(
 classdef decomposition
   properties
@@ -179,30 +158,30 @@ end
 void LinalgLibrary::install(Engine &engine)
 {
     // Every function lands in THREE places:
-    //   1. Bare global name `<name>`           â€” matches MATLAB, which
+    //   1. Bare global name `<name>`           — matches MATLAB, which
     //      exposes the entire linalg surface unqualified (`eig(A)` works
     //      with no import). Also what BuiltinLibrary did for these
     //      functions before they migrated here.
-    //   2. Namespaced `linalg.<sub>.<name>`    â€” addressable explicitly
+    //   2. Namespaced `linalg.<sub>.<name>`    — addressable explicitly
     //      after `import linalg.*` or as a fully qualified call.
-    //   3. `compat.<name>`                     â€” picked up by the standard
+    //   3. `compat.<name>`                     — picked up by the standard
     //      `import compat.*` test fixture (toolboxes/{stats,signal} pattern).
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
         engine.registerFunction(name, fn);                                    // 1
         engine.registerFunction(std::string("linalg.") + sub, name, fn);      // 2
-        // compat.* registration removed â€” bare-name resolver replaces it                          // 3
+        // compat.* registration removed — bare-name resolver replaces it                          // 3
     };
 
-    // â”€â”€ Vector ops â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Vector ops ───────────────────────────────────────────────
     reg("vector", "cross", &linalg::detail::cross_reg);
     reg("vector", "dot",   &linalg::detail::dot_reg);
     reg("vector", "kron",  &linalg::detail::kron_reg);
 
-    // â”€â”€ Norms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Norms ────────────────────────────────────────────────────
     reg("norm", "norm",    &linalg::detail::norm_reg);
     reg("norm", "vecnorm", &linalg::detail::vecnorm_reg);
 
-    // â”€â”€ Properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Properties ───────────────────────────────────────────────
     reg("prop", "inv",     &linalg::detail::inv_reg);
     reg("prop", "trace",   &linalg::detail::trace_reg);
     reg("prop", "det",     &linalg::detail::det_reg);
@@ -213,7 +192,7 @@ void LinalgLibrary::install(Engine &engine)
     reg("prop", "condest", &linalg::detail::condest_reg);
     reg("prop", "condeig", &linalg::detail::condeig_reg);
 
-    // â”€â”€ Decompositions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Decompositions ───────────────────────────────────────────
     reg("decomp", "chol", &linalg::detail::chol_reg);
     reg("decomp", "lu",   &linalg::detail::lu_reg);
     reg("decomp", "qr",   &linalg::detail::qr_reg);
@@ -231,17 +210,17 @@ void LinalgLibrary::install(Engine &engine)
     reg("decomp", "svdsketch",  &linalg::detail::svdsketch_reg);
     reg("decomp", "svdappend",  &linalg::detail::svdappend_reg);
 
-    // â”€â”€ Pseudo-inverse / subspace queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Pseudo-inverse / subspace queries ────────────────────────
     reg("pseudo", "pinv",     &linalg::detail::pinv_reg);
     reg("pseudo", "orth",     &linalg::detail::orth_reg);
     reg("pseudo", "null",     &linalg::detail::null_reg);
     reg("pseudo", "subspace", &linalg::detail::subspace_reg);
 
-    // â”€â”€ Specialty decompositions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Specialty decompositions ─────────────────────────────────
     reg("decomp", "balance", &linalg::detail::balance_reg);
     reg("decomp", "ldl",     &linalg::detail::ldl_reg);
 
-    // â”€â”€ Eig family + Hessenberg + Schur + Sylvester â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Eig family + Hessenberg + Schur + Sylvester ──────────────
     reg("eig", "eig",       &linalg::detail::eig_reg);
     reg("eig", "hess",      &linalg::detail::hess_reg);
     reg("eig", "schur",     &linalg::detail::schur_reg);
@@ -251,13 +230,14 @@ void LinalgLibrary::install(Engine &engine)
     reg("eig", "polyeig",   &linalg::detail::polyeig_reg);
     reg("eig", "ordeig",    &linalg::detail::ordeig_reg);
 
-    // â”€â”€ Matrix functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Matrix functions ─────────────────────────────────────────
     reg("matfn", "expm",  &linalg::detail::expm_reg);
     reg("matfn", "logm",  &linalg::detail::logm_reg);
     reg("matfn", "sqrtm", &linalg::detail::sqrtm_reg);
     reg("matfn", "expmv", &linalg::detail::expmv_reg);
+    reg("matfn", "funm",  &linalg::detail::funm_reg);
 
-    // â”€â”€ Predicates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Predicates ───────────────────────────────────────────────
     reg("pred", "issymmetric", &linalg::detail::issymmetric_reg);
     reg("pred", "ishermitian", &linalg::detail::ishermitian_reg);
     reg("pred", "isbanded",    &linalg::detail::isbanded_reg);
@@ -266,16 +246,16 @@ void LinalgLibrary::install(Engine &engine)
     reg("pred", "istriu",      &linalg::detail::istriu_reg);
     reg("pred", "bandwidth",   &linalg::detail::bandwidth_reg);
 
-    // â”€â”€ Solvers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Solvers ──────────────────────────────────────────────────
     reg("solve", "linsolve",   &linalg::detail::linsolve_reg);
     reg("solve", "lsqminnorm", &linalg::detail::lsqminnorm_reg);
     reg("solve", "lsqnonneg",  &linalg::detail::lsqnonneg_reg);
 
-    // â”€â”€ Misc utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Misc utilities ───────────────────────────────────────────
     reg("misc", "rref",     &linalg::detail::rref_reg);
     reg("misc", "planerot", &linalg::detail::planerot_reg);
 
-    // â”€â”€ Page ops â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Page ops ─────────────────────────────────────────────────
     reg("page", "pageinv",        &linalg::detail::pageinv_reg);
     reg("page", "pageeig",        &linalg::detail::pageeig_reg);
     reg("page", "pagesvd",        &linalg::detail::pagesvd_reg);
@@ -285,8 +265,6 @@ void LinalgLibrary::install(Engine &engine)
     reg("page", "pagemrdivide",   &linalg::detail::pagemrdivide_reg);
     reg("page", "pagelsqminnorm", &linalg::detail::pagelsqminnorm_reg);
 
-    // funm: general matrix function via eig (embedded .m).
-    engine.registerBuiltinMSource(kFunmMSource);
     engine.registerBuiltinMSource(kDecompositionMSource);
 }
 

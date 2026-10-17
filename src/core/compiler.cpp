@@ -1435,8 +1435,12 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
 {
     auto *child = node->children[0].get();
 
-    // Expression statements are nargout=0 context — functions should
-    // not produce output values (tic, figure, fprintf, etc.)
+    // Expression statements are nargout=0 context for top-level calls —
+    // functions should not produce output values (tic, figure, fprintf, etc.).
+    // Non-call expressions (e.g. `1 + numel(dir(p))`) evaluate operands in
+    // value context (nargout=1).
+    const uint8_t stmtNargout =
+        (child->type == NodeType::CALL || child->type == NodeType::COMMAND_CALL) ? 0 : 1;
     struct NargoutGuard
     {
         uint8_t &ref;
@@ -1448,7 +1452,7 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
             ref = v;
         }
         ~NargoutGuard() { ref = saved; }
-    } nargoutGuard(nargoutContext_, 0);
+    } nargoutGuard(nargoutContext_, stmtNargout);
 
     // MATLAB display / ans rule:
     //   - A bare read of a user variable (`v` on a line by itself) displays
@@ -3142,6 +3146,15 @@ int Compiler::tryCompileFused(const ASTNode *node)
 
 uint8_t Compiler::compileCall(const ASTNode *node)
 {
+    const uint8_t callNargout = nargoutContext_;
+    struct NargoutRestore
+    {
+        uint8_t &ref;
+        uint8_t saved;
+        ~NargoutRestore() { ref = saved; }
+    } nargoutGuard{nargoutContext_, callNargout};
+    nargoutContext_ = 1;
+
     // Element-wise fusion fast path: if `node` matches a registered idiom, emit
     // FUSE_EWISE + the normally compiled idiom as fallback.
     if (int r = tryCompileFused(node); r >= 0) return static_cast<uint8_t>(r);
@@ -3222,7 +3235,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
                                              argBase,
                                              static_cast<uint8_t>(nargs),
                                              funcIdx,
-                                             anyBraceArg ? nargoutContext_ : 0));
+                                             anyBraceArg ? callNargout : 0));
                 return dst;
             }
         }
@@ -3565,7 +3578,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
         int16_t funcIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::CALL_FLATTEN, dst, argBase,
                                      static_cast<uint8_t>(argRegs.size()), funcIdx,
-                                     nargoutContext_));
+                                     callNargout));
         return dst;
     }
 
@@ -3605,7 +3618,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
                                  argBase,
                                  static_cast<uint8_t>(nargs),
                                  funcIdx,
-                                 nargoutContext_));
+                                 callNargout));
     recordCallArgNames(node, callIdx);
     return dst;
 }

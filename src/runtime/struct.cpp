@@ -30,12 +30,15 @@ Value structure(std::pmr::memory_resource *)
 Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
 {
     // First pass: validate names and determine array shape. If any value
-    // is a CELL, struct() returns a struct array of that cell's shape;
-    // every other CELL value must have the same shape. Non-cell values
-    // are broadcast to every element.
+    // is a CELL, struct() unwraps cells; non-scalar cells define the
+    // struct array shape and must all match, while scalar (1x1) cells
+    // broadcast their single element across the struct array (or produce
+    // a scalar struct when all cells are 1x1). Non-cell values are
+    // broadcast to every element.
     size_t arrRows = 1;
     size_t arrCols = 1;
-    bool isArray = false;
+    bool hasCell = false;
+    bool hasNonScalarCell = false;
     for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2) {
         const Value &name = nameValuePairs[i];
         if (!name.isChar() && !name.isString())
@@ -43,22 +46,29 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
                          "numkit:struct:invalidFieldName");
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
-            if (!isArray) {
-                arrRows = v.dims().rows();
-                arrCols = v.dims().cols();
-                isArray = true;
-            } else if (arrRows != v.dims().rows() || arrCols != v.dims().cols()) {
-                throw Error("struct: cell-array values must all have the same shape",
-                             0, 0, "struct", "", "numkit:struct:cellShape");
+            hasCell = true;
+            const size_t r = v.dims().rows();
+            const size_t c = v.dims().cols();
+            if (r != 1 || c != 1) {
+                if (!hasNonScalarCell) {
+                    arrRows = r;
+                    arrCols = c;
+                    hasNonScalarCell = true;
+                } else if (arrRows != r || arrCols != c) {
+                    throw Error("struct: cell-array values must all have the same shape",
+                                 0, 0, "struct", "", "numkit:struct:cellShape");
+                }
             }
         }
     }
 
-    if (!isArray) {
-        // Scalar struct path — preserve original behaviour.
+    if (!hasNonScalarCell) {
+        // Scalar struct path (either no cells, or only 1x1 scalar cells).
         auto s = Value::structure(mr);
-        for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2)
-            s.field(nameValuePairs[i].toString()) = nameValuePairs[i + 1];
+        for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2) {
+            const Value &v = nameValuePairs[i + 1];
+            s.field(nameValuePairs[i].toString()) = (hasCell && v.isCell()) ? v.cellAt(0) : v;
+        }
         return s;
     }
 
@@ -69,9 +79,13 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
         std::string fname = nameValuePairs[i].toString();
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
-            // Per-element assignment from cell — use setField (preserves order)
-            for (size_t k = 0; k < numel; ++k)
-                s.setField(k, fname, v.cellAt(k));
+            if (v.numel() == 1) {
+                s.setFieldAll(fname, v.cellAt(0));
+            } else {
+                // Per-element assignment from cell — use setField (preserves order)
+                for (size_t k = 0; k < numel; ++k)
+                    s.setField(k, fname, v.cellAt(k));
+            }
         } else {
             s.setFieldAll(fname, v);
         }
