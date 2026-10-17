@@ -11,7 +11,7 @@
 #include <numkit/value/shape_ops.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
-#include "elmat/manip_detail.hpp"
+#include <numkit/builtin/detail/elmat/manip_detail.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>

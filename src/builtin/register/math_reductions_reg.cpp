@@ -13,12 +13,12 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include "elfun/_unary_hint.hpp"  // 3-arg sin/cos/exp/log/abs hint overloads
+#include <numkit/builtin/detail/elfun/_unary_hint.hpp>  // 3-arg sin/cos/exp/log/abs hint overloads
 #include "support/reduce_vecdim.hpp"
 #include <numkit/ops/helpers.hpp>
-#include "datafun/var_reduction.hpp"  // for sumScan + addInto
+#include <numkit/builtin/detail/datafun/var_reduction.hpp>  // for sumScan + addInto
 #include <numkit/ops/reductions.hpp>
-#include "datafun/reductions_detail.hpp"
+#include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>

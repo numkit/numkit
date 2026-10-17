@@ -5,7 +5,7 @@
 // engine-free in numkit::builtin (integration.cpp).
 
 #include <numkit/builtin/polyfun.hpp>
-#include "polyfun/integration_detail.hpp"
+#include <numkit/builtin/detail/polyfun/integration_detail.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/ops/helpers.hpp>

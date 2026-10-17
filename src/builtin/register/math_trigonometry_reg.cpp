@@ -10,7 +10,7 @@
 #include <numkit/builtin/elfun.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include "elfun/_unary_hint.hpp"   // 3-arg sin/cos hint overloads
+#include <numkit/builtin/detail/elfun/_unary_hint.hpp>   // 3-arg sin/cos hint overloads
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>

@@ -7,12 +7,17 @@
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/ops/helpers.hpp>
+#include <numkit/signal/transforms/fft.hpp>
+#include <numkit/signal/transforms/transform_helpers.hpp>
+#include <numkit/signal/convolution/convolution.hpp>
+#include <numkit/signal/digital_filtering/filter.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cctype>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace numkit::builtin::detail {
 
@@ -423,6 +428,249 @@ void register_datafun(Engine &engine) {
             if (args.empty())
                 throw std::runtime_error("full requires 1 argument");
             outs[0] = args[0];
+        });
+
+    // Base Fourier transforms & helpers (MATLAB datafun / elfun)
+    engine.registerFunction("fft",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 3, "fft");
+            int n = -1, dim = 0;
+            if (args.size() >= 2 && !args[1].isEmpty())
+                n = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[1], 2, "n", "fft"), 2, "n", "fft");
+            if (args.size() >= 3)
+                dim = argcheck::dimArg(args[2], "fft");
+            outs[0] = signal::fft(args[0], n, dim, ctx.engine->resource());
+        });
+
+    engine.registerFunction("ifft",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 4, "ifft");
+            std::size_t nargs = args.size();
+            bool symmetric = false;
+            if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
+                std::string flag = args[nargs - 1].toString();
+                for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (flag == "symmetric") symmetric = true;
+                else if (flag == "nonsymmetric") symmetric = false;
+                else
+                    throw Error("ifft: unknown option '" + args[nargs - 1].toString() +
+                                    "' (expected 'symmetric' or 'nonsymmetric')",
+                                0, 0, "ifft", "", "numkit:ifft:badOption");
+                --nargs;
+            }
+            int n = -1, dim = 0;
+            if (nargs >= 2 && !args[1].isEmpty())
+                n = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[1], 2, "n", "ifft"), 2, "n", "ifft");
+            if (nargs >= 3)
+                dim = argcheck::dimArg(args[2], "ifft");
+            auto *mr = ctx.engine->resource();
+            outs[0] = symmetric ? signal::ifftSymmetric(args[0], n, dim, mr)
+                                : signal::ifft(args[0], n, dim, mr);
+        });
+
+    engine.registerFunction("fft2",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 3, "fft2");
+            int m = -1, n = -1;
+            if (args.size() >= 2 && !args[1].isEmpty())
+                m = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[1], 2, "m", "fft2"), 2, "m", "fft2");
+            if (args.size() >= 3 && !args[2].isEmpty())
+                n = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[2], 3, "n", "fft2"), 3, "n", "fft2");
+            outs[0] = signal::fft2(args[0], m, n, ctx.engine->resource());
+        });
+
+    engine.registerFunction("ifft2",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 4, "ifft2");
+            std::size_t nargs = args.size();
+            bool symmetric = false;
+            if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
+                std::string flag = args[nargs - 1].toString();
+                for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (flag == "symmetric") symmetric = true;
+                else if (flag == "nonsymmetric") symmetric = false;
+                else
+                    throw Error("ifft2: unknown option '" + args[nargs - 1].toString() +
+                                    "' (expected 'symmetric' or 'nonsymmetric')",
+                                0, 0, "ifft2", "", "numkit:ifft2:badOption");
+                --nargs;
+            }
+            int m = -1, n = -1;
+            if (nargs >= 2 && !args[1].isEmpty())
+                m = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[1], 2, "m", "ifft2"), 2, "m", "ifft2");
+            if (nargs >= 3 && !args[2].isEmpty())
+                n = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[2], 3, "n", "ifft2"), 3, "n", "ifft2");
+            auto *mr = ctx.engine->resource();
+            if (symmetric) {
+                if (m > 0 || n > 0)
+                    throw Error("ifft2: the 'symmetric' option with explicit size args "
+                                "(m, n) is not supported in this revision",
+                                0, 0, "ifft2", "", "numkit:ifft2:symmetricResize");
+                outs[0] = signal::ifft2Symmetric(args[0], mr);
+                return;
+            }
+            outs[0] = signal::ifft2(args[0], m, n, mr);
+        });
+
+    engine.registerFunction("fftn",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "fftn");
+            std::vector<std::size_t> sz;
+            if (args.size() >= 2 && !args[1].isEmpty()) {
+                const std::size_t n = args[1].numel();
+                sz.resize(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double d = args[1].elemAsDouble(i);
+                    if (d <= 0 || d != std::floor(d))
+                        throw Error("fftn: size entries must be positive integers",
+                                    0, 0, "fftn", "", "numkit:fftn:badSize");
+                    sz[i] = static_cast<std::size_t>(d);
+                }
+            }
+            outs[0] = signal::fftn(args[0], Span<const std::size_t>(sz.data(), sz.size()),
+                                   ctx.engine->resource());
+        });
+
+    engine.registerFunction("ifftn",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 3, "ifftn");
+            std::vector<std::size_t> sz;
+            if (args.size() >= 2 && !args[1].isEmpty()) {
+                const std::size_t n = args[1].numel();
+                sz.resize(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double d = args[1].elemAsDouble(i);
+                    if (d <= 0 || d != std::floor(d))
+                        throw Error("ifftn: size entries must be positive integers",
+                                    0, 0, "ifftn", "", "numkit:ifftn:badSize");
+                    sz[i] = static_cast<std::size_t>(d);
+                }
+            }
+            outs[0] = signal::ifftn(args[0], Span<const std::size_t>(sz.data(), sz.size()),
+                                    ctx.engine->resource());
+        });
+
+    engine.registerFunction("nextpow2",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "nextpow2");
+            outs[0] = signal::nextpow2(args[0], ctx.engine->resource());
+        });
+
+    engine.registerFunction("fftshift",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "fftshift");
+            if (args.size() >= 2) {
+                const int dim = argcheck::dimArg(args[1], "fftshift");
+                if (dim < 1 || dim > 3)
+                    throw Error("fftshift: dim must be 1, 2, or 3",
+                                0, 0, "fftshift", "", "numkit:fftshift:dim");
+                outs[0] = signal::fftshift(args[0], dim, ctx.engine->resource());
+            } else {
+                outs[0] = signal::fftshift(args[0], ctx.engine->resource());
+            }
+        });
+
+    engine.registerFunction("ifftshift",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "ifftshift");
+            if (args.size() >= 2) {
+                const int dim = argcheck::dimArg(args[1], "ifftshift");
+                if (dim < 1 || dim > 3)
+                    throw Error("ifftshift: dim must be 1, 2, or 3",
+                                0, 0, "ifftshift", "", "numkit:ifftshift:dim");
+                outs[0] = signal::ifftshift(args[0], dim, ctx.engine->resource());
+            } else {
+                outs[0] = signal::ifftshift(args[0], ctx.engine->resource());
+            }
+        });
+
+    // Base convolution & digital filtering (MATLAB datafun)
+    engine.registerFunction("conv",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "conv");
+            std::string shape = "full";
+            if (args.size() >= 3 && !args[2].isEmpty()) {
+                if (!args[2].isChar() && !args[2].isString())
+                    throw Error("conv: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                                0, 0, "conv", "", "numkit:conv:badShape");
+                shape = args[2].toString();
+            }
+            outs[0] = signal::conv(args[0], args[1], shape, ctx.engine->resource());
+        });
+
+    engine.registerFunction("conv2",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 4, "conv2");
+            std::string shape = "full";
+            if (args.size() >= 3 && !args[2].isEmpty()) {
+                if (args[2].isChar() || args[2].isString()) {
+                    shape = args[2].toString();
+                } else {
+                    throw Error("conv2: the separable form conv2(u, v, A) is not "
+                                "supported yet — build the kernel with "
+                                "conv2(u, v) and convolve with that",
+                                0, 0, "conv2", "", "numkit:conv2:separableUnsupported");
+                }
+            }
+            outs[0] = signal::conv2(args[0], args[1], shape, ctx.engine->resource());
+        });
+
+    engine.registerFunction("convn",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "convn");
+            std::string shape = "full";
+            if (args.size() >= 3 && !args[2].isEmpty()) {
+                if (!args[2].isChar() && !args[2].isString())
+                    throw Error("convn: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                                0, 0, "convn", "", "numkit:convn:badShape");
+                shape = args[2].toString();
+            }
+            outs[0] = signal::convn(args[0], args[1], shape, ctx.engine->resource());
+        });
+
+    engine.registerFunction("deconv",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "deconv");
+            auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->resource());
+            outs[0] = std::move(q);
+            if (nargout > 1)
+                outs[1] = std::move(r);
+        });
+
+    engine.registerFunction("filter",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 3, 5, "filter");
+            const bool hasZi = (args.size() >= 4 && !args[3].isEmpty()
+                                && !args[3].isChar() && !args[3].isString());
+            auto *mr = ctx.engine->resource();
+            if (!hasZi && nargout <= 1) {
+                outs[0] = signal::filter(args[0], args[1], args[2], mr);
+                return;
+            }
+            const Value zi = hasZi ? args[3] : Value();
+            signal::FilterState st = signal::filter(args[0], args[1], args[2], zi, mr);
+            outs[0] = std::move(st.y);
+            if (nargout > 1)
+                outs[1] = std::move(st.zf);
+        });
+
+    engine.registerFunction("filter2",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "filter2");
+            std::string shape = "same";
+            if (args.size() >= 3 && !args[2].isEmpty()) {
+                if (!args[2].isChar() && !args[2].isString())
+                    throw Error("filter2: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                                0, 0, "filter2", "", "numkit:filter2:badShape");
+                shape = args[2].toString();
+            }
+            outs[0] = signal::filter2(args[0], args[1], shape, ctx.engine->resource());
         });
 }
 

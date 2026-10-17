@@ -11,7 +11,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
-#include "ops/binary_ops_detail.hpp"
+#include <numkit/builtin/detail/ops/binary_ops_detail.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>

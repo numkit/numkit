@@ -10,7 +10,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
-#include "elfun/mod_simd.hpp"
+#include <numkit/builtin/detail/elfun/mod_simd.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>

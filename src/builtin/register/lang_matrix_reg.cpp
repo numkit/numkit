@@ -15,8 +15,8 @@
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
-#include "datafun/cumsum.hpp"
-#include "elmat/matrix_detail.hpp"
+#include <numkit/builtin/detail/datafun/cumsum.hpp>
+#include <numkit/builtin/detail/elmat/matrix_detail.hpp>
 #include <numkit/ops/reductions.hpp>
 #include <numkit/ops/rows_helpers.hpp>
 #include <numkit/value/error.hpp>

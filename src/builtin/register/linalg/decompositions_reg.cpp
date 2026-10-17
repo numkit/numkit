@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/decompositions_reg.cpp
+// toolboxes/linalg/src/decompositions_reg.cpp
 //
 // Register half of the matrix-factorisation builtins: the CallContext
 // wrappers chol / lu / qr / svd / qrupdate / qrinsert / qrdelete /
@@ -10,7 +10,7 @@
 // live in this TU's anonymous namespace. library.cpp forward-declares +
 // registers the *_reg fns by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/decompositions.hpp>
 #include <numkit/linalg/qz.hpp>
@@ -19,7 +19,7 @@
 #include <numkit/linalg/ordqz.hpp>
 #include <numkit/linalg/eigs.hpp>
 #include <numkit/linalg/svd_sketch.hpp>
-#include "decompositions_detail.hpp"   // cholUpperFactor / transposeSquare / qr_pivoted
+#include <numkit/linalg/detail/decompositions_detail.hpp>   // cholUpperFactor / transposeSquare / qr_pivoted
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
 #include <numkit/value/value.hpp>
@@ -46,7 +46,7 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     auto *mr = ctx.engine->resource();
     const Value &A = args[0];
     // This entry carries the [R,p]/'lower' forms locally (raw-buffer
-    // kernels below), so the shared type contract fires here â€” the same
+    // kernels below), so the shared type contract fires here — the same
     // core the compute-side chol uses.
     detail::requireDoubleInput(A, "chol");
 
@@ -92,7 +92,7 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
         if (fail != 0) {
             // Not positive-definite. With <2 outputs MATLAB errors; with the
             // [R,p] form it returns p = failure column and R = the leading
-            // (p-1)Ã—(p-1) factor (no error).
+            // (p-1)×(p-1) factor (no error).
             if (nargout < 2)
                 throw Error("chol: matrix is not positive-definite",
                             0, 0, "chol", "", "numkit:chol:notPosDef");
@@ -128,7 +128,7 @@ void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 namespace {
 
-// First `k` columns of a DOUBLE matrix (column-major â†’ block copy).
+// First `k` columns of a DOUBLE matrix (column-major → block copy).
 Value firstCols(const Value &A, size_t k, std::pmr::memory_resource *mr)
 {
     const size_t r = A.dims().rows();
@@ -139,7 +139,7 @@ Value firstCols(const Value &A, size_t k, std::pmr::memory_resource *mr)
     return out;
 }
 
-// Top-left krÃ—kc block of a DOUBLE matrix.
+// Top-left kr×kc block of a DOUBLE matrix.
 Value topLeftBlock(const Value &A, size_t kr, size_t kc, std::pmr::memory_resource *mr)
 {
     const size_t r = A.dims().rows();
@@ -152,8 +152,8 @@ Value topLeftBlock(const Value &A, size_t kr, size_t kc, std::pmr::memory_resour
     return out;
 }
 
-// Convert a permutation matrix P (nÃ—n, PÂ·A = LÂ·U) to a 1-based row-index
-// row vector p such that A(p,:) = LÂ·U.
+// Convert a permutation matrix P (n×n, P·A = L·U) to a 1-based row-index
+// row vector p such that A(p,:) = L·U.
 Value permMatrixToVector(const Value &P, std::pmr::memory_resource *mr)
 {
     const size_t n = P.dims().rows();
@@ -232,7 +232,7 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
 {
     auto *mr = ctx.engine->resource();
 
-    // Options: 'econ' or 0 â†’ economy; 'vector'/'matrix' â†’ P form (3-output only).
+    // Options: 'econ' or 0 → economy; 'vector'/'matrix' → P form (3-output only).
     bool econ = false, vectorP = false;
     for (size_t i = 1; i < args.size(); ++i) {
         const Value &o = args[i];
@@ -256,7 +256,7 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
     const size_t m = args[0].dims().rows(), n = args[0].dims().cols();
 
     if (nargout >= 3) {
-        // Column-pivoted QR: AÂ·P = QÂ·R. econ + 3-output â†’ P as a vector (MATLAB).
+        // Column-pivoted QR: A·P = Q·R. econ + 3-output → P as a vector (MATLAB).
         std::vector<std::size_t> perm;
         auto [Q, R] = qr_pivoted(args[0], perm, mr);
         if (econ) {
@@ -286,8 +286,8 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
         auto [Q, R] = qr_decompose(args[0], mr);
         if (econ) {
             const size_t k = std::min(m, n);
-            Q = firstCols(Q, k, mr);                // mÃ—k
-            R = topLeftBlock(R, k, n, mr);          // kÃ—n
+            Q = firstCols(Q, k, mr);                // m×k
+            R = topLeftBlock(R, k, n, mr);          // k×n
         }
         outs[0] = std::move(Q);
         outs[1] = std::move(R);
@@ -307,9 +307,9 @@ void svd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         if (econ) {
             const size_t m = args[0].dims().rows(), n = args[0].dims().cols();
             const size_t k = std::min(m, n);
-            U = firstCols(U, k, mr);                // mÃ—k
-            S = topLeftBlock(S, k, k, mr);          // kÃ—k
-            V = firstCols(V, k, mr);                // nÃ—k
+            U = firstCols(U, k, mr);                // m×k
+            S = topLeftBlock(S, k, k, mr);          // k×k
+            V = firstCols(V, k, mr);                // n×k
         }
         outs[0] = std::move(U);
         outs[1] = std::move(S);
@@ -332,12 +332,12 @@ void qrupdate_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
     if (args.size() < 4 || args.size() > 5)
-        throw Error("qrinsert: requires (Q, R, k, x[, 'col']) â€” row form is not yet supported",
+        throw Error("qrinsert: requires (Q, R, k, x[, 'col']) — row form is not yet supported",
                     0, 0, "qrinsert", "", "numkit:qrinsert:nargin");
     if (args.size() == 5) {
         if (!(args[4].isChar() || args[4].isString())
             || args[4].toString() != "col")
-            throw Error("qrinsert: row form not supported in v1 â€” pass 'col' or omit",
+            throw Error("qrinsert: row form not supported in v1 — pass 'col' or omit",
                         0, 0, "qrinsert", "", "numkit:qrinsert:rowDeferred");
     }
     const double kd = args[2].toScalar();
@@ -354,12 +354,12 @@ void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 void qrdelete_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
     if (args.size() < 3 || args.size() > 4)
-        throw Error("qrdelete: requires (Q, R, k[, 'col']) â€” row form is not yet supported",
+        throw Error("qrdelete: requires (Q, R, k[, 'col']) — row form is not yet supported",
                     0, 0, "qrdelete", "", "numkit:qrdelete:nargin");
     if (args.size() == 4) {
         if (!(args[3].isChar() || args[3].isString())
             || args[3].toString() != "col")
-            throw Error("qrdelete: row form not supported in v1 â€” pass 'col' or omit",
+            throw Error("qrdelete: row form not supported in v1 — pass 'col' or omit",
                         0, 0, "qrdelete", "", "numkit:qrdelete:rowDeferred");
     }
     const double kd = args[2].toScalar();

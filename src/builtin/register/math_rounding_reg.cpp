@@ -9,10 +9,10 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include "elfun/_unary_hint.hpp"  // 3-arg abs hint overload
+#include <numkit/builtin/detail/elfun/_unary_hint.hpp>  // 3-arg abs hint overload
 #include <numkit/ops/helpers.hpp>
-#include "elfun/rounding.hpp"      // detail::doubleCeilLoop / FloorLoop / RoundLoop / FixLoop
-#include "elfun/rounding_detail.hpp"
+#include <numkit/builtin/detail/elfun/rounding.hpp>      // detail::doubleCeilLoop / FloorLoop / RoundLoop / FixLoop
+#include <numkit/builtin/detail/elfun/rounding_detail.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>

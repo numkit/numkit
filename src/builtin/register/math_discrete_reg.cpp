@@ -10,7 +10,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
-#include "datafun/discrete_detail.hpp"
+#include <numkit/builtin/detail/datafun/discrete_detail.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 #include <numkit/value/error.hpp>

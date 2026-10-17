@@ -12,7 +12,7 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp>
 #include <numkit/ops/helpers.hpp>
-#include "ops/int_math_detail.hpp"
+#include <numkit/builtin/detail/ops/int_math_detail.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>
