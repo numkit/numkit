@@ -2712,4 +2712,69 @@ TEST_P(DisplayTest, FprintfBareCallSetsNoAns)
     EXPECT_EQ(engine.getVariable("ans"), nullptr);
 }
 
+TEST_P(DisplayTest, GraphicsHandleSurfaceGaps)
+{
+    // 1. Direct chart class construction via dotted package path.
+    eval("close all;");
+    eval("h = matlab.graphics.chart.primitive.Line();");
+    eval("cls = class(h);");
+    EXPECT_EQ(getVarPtr("cls")->toString(), "matlab.graphics.chart.primitive.Line");
+    EXPECT_TRUE(evalBool("isgraphics(h);"));
+    eval("xd = get(h, 'XData'); yd = get(h, 'YData');");
+    ASSERT_EQ(getVarPtr("xd")->numel(), 2u);
+    EXPECT_DOUBLE_EQ(getVarPtr("xd")->doubleData()[0], 0.0);
+    EXPECT_DOUBLE_EQ(getVarPtr("xd")->doubleData()[1], 1.0);
+    ASSERT_EQ(getVarPtr("yd")->numel(), 2u);
+    EXPECT_DOUBLE_EQ(getVarPtr("yd")->doubleData()[0], 0.0);
+    EXPECT_DOUBLE_EQ(getVarPtr("yd")->doubleData()[1], 1.0);
+
+    // Constructor with Name-Value pairs.
+    eval("h2 = matlab.graphics.chart.primitive.Line('XData', [10 20 30], 'YData', [1 2 3], 'LineWidth', 2.5);");
+    eval("xd2 = h2.XData; lw2 = h2.LineWidth;");
+    ASSERT_EQ(getVarPtr("xd2")->numel(), 3u);
+    EXPECT_DOUBLE_EQ(getVarPtr("xd2")->doubleData()[1], 20.0);
+    EXPECT_DOUBLE_EQ(getVar("lw2"), 2.5);
+
+    // 2. set(h) 1-arg and 2-arg property catalog listing and struct/cell return.
+    capturedOutput.clear();
+    eval("set(h);");
+    EXPECT_NE(capturedOutput.find("Color"), std::string::npos);
+    EXPECT_NE(capturedOutput.find("LineStyle"), std::string::npos);
+    EXPECT_NE(capturedOutput.find("XData"), std::string::npos);
+
+    eval("cat = set(h); opts = set(h, 'LineStyle');");
+    EXPECT_TRUE(getVarPtr("cat")->isStruct());
+    EXPECT_TRUE(getVarPtr("opts")->isCell());
+    EXPECT_GT(getVarPtr("opts")->numel(), 0u);
+
+    // 3. get(s, 'ZData') and s.ZData on surface and contour records (2-D matrix payload).
+    eval("s = surf(peaks(10)); Z = get(s, 'ZData'); Zdot = s.ZData; P = peaks(10);");
+    auto *Z = getVarPtr("Z");
+    auto *Zdot = getVarPtr("Zdot");
+    auto *P = getVarPtr("P");
+    ASSERT_NE(Z, nullptr);
+    ASSERT_EQ(rows(*Z), 10u);
+    ASSERT_EQ(cols(*Z), 10u);
+    ASSERT_EQ(rows(*Zdot), 10u);
+    ASSERT_EQ(cols(*Zdot), 10u);
+    EXPECT_NEAR((*Z)(0, 0), (*P)(0, 0), 1e-4);
+    EXPECT_NEAR((*Z)(4, 7), (*P)(4, 7), 1e-4);
+    EXPECT_NEAR((*Zdot)(9, 9), (*P)(9, 9), 1e-4);
+
+    // Mutating ZData via set(s, 'ZData', ...) round-trips 2-D matrix.
+    eval("set(s, 'ZData', [1 2 3; 4 5 6]); Zm = get(s, 'ZData');");
+    auto *Zm = getVarPtr("Zm");
+    ASSERT_NE(Zm, nullptr);
+    ASSERT_EQ(rows(*Zm), 2u);
+    ASSERT_EQ(cols(*Zm), 3u);
+    EXPECT_DOUBLE_EQ((*Zm)(0, 2), 3.0);
+    EXPECT_DOUBLE_EQ((*Zm)(1, 0), 4.0);
+
+    eval("c = contour(peaks(8)); Zc = get(c, 'ZData');");
+    auto *Zc = getVarPtr("Zc");
+    ASSERT_NE(Zc, nullptr);
+    EXPECT_EQ(rows(*Zc), 8u);
+    EXPECT_EQ(cols(*Zc), 8u);
+}
+
 INSTANTIATE_DUAL(DisplayTest);

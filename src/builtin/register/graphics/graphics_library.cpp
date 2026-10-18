@@ -160,6 +160,23 @@ std::string encodeProp(const Value &v)
         return formatPropDouble(v.toScalar());
     if (v.isLogical() && v.numel() == 1)
         return v.toBool() ? "1" : "0";
+    if (v.isNumeric() && v.dims().rows() > 1 && v.dims().cols() > 1) {
+        const size_t R = v.dims().rows();
+        const size_t C = v.dims().cols();
+        std::string s = "[";
+        for (size_t r = 0; r < R; ++r) {
+            if (r) s += ",";
+            s += "[";
+            for (size_t c = 0; c < C; ++c) {
+                if (c) s += ",";
+                const double x = v.elemAsDouble(c * R + r);
+                if (std::isfinite(x)) s += formatPropDouble(x);
+                else s += "null";
+            }
+            s += "]";
+        }
+        return s + "]";
+    }
     if (v.isNumeric() && v.numel() >= 2) {
         std::string s = "[";
         for (size_t i = 0; i < v.numel(); ++i) {
@@ -173,6 +190,19 @@ std::string encodeProp(const Value &v)
 
 Value decodeProp(const std::string &s, std::pmr::memory_resource *mr)
 {
+    if (s.size() >= 2 && s[0] == '[' && s[1] == '[') {
+        std::vector<double> zf;
+        size_t rows = 0, cols = 0;
+        figrender::parseNestedDoubles(s, zf, rows, cols);
+        if (rows > 0 && cols > 0 && zf.size() >= rows * cols) {
+            auto r = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
+            double *rd = r.doubleDataMut();
+            for (size_t rr = 0; rr < rows; ++rr)
+                for (size_t cc = 0; cc < cols; ++cc)
+                    rd[cc * rows + rr] = zf[rr * cols + cc];
+            return r;
+        }
+    }
     if (!s.empty() && s[0] == '[') {
         std::vector<double> vals;
         std::string num;
@@ -343,6 +373,19 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (ds->xJson.empty()) ds->xJson = "[]";
         if (ds->yJson.empty()) ds->yJson = "[]";
         fm.maybeDownsampleSeries(*ds);
+    } else if (name == "ZData" && val.isNumeric()) {
+        if (val.dims().rows() > 1 && val.dims().cols() > 1
+            && (ds->type == "surf" || ds->type == "waterfall"
+                || ds->type == "contour3")) {
+            ds->zJson = encodeProp(val);
+        } else if (val.dims().rows() == 1 || val.dims().cols() == 1) {
+            std::vector<double> zs(val.numel());
+            for (size_t i = 0; i < val.numel(); ++i)
+                zs[i] = val.elemAsDouble(i);
+            ds->zJson = figdetail::serializeFlatDoubles(zs);
+        } else {
+            touched = false;
+        }
     } else {
         touched = false;   // stored in rec->props only
     }
@@ -626,16 +669,30 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     return Value();
 }
 
-// XData/YData for chart records read from the live dataset (xRaw holds
-// the full series when it was downsampled; xJson only the preview).
+// XData/YData/ZData for chart records read from the live dataset (xRaw holds
+// the full series when it was downsampled; xJson only the preview; zJson
+// carries nested 2-D rows for surface/waterfall/contour3 or flat 1-D values).
 Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     const std::string &name, std::pmr::memory_resource *mr)
 {
-    if (name != "XData" && name != "YData")
+    if (name != "XData" && name != "YData" && name != "ZData")
         return Value();
     DatasetInfo *ds = fm.datasetOf(*rec);
     if (!ds)
         return Value();
+    if (name == "ZData") {
+        if (ds->zJson.empty())
+            return Value::matrix(1, 0, ValueType::DOUBLE, mr);
+        if (ds->zJson.size() >= 2 && ds->zJson[0] == '[' && ds->zJson[1] == '[')
+            return decodeProp(ds->zJson, mr);
+        std::vector<double> zvals = figdetail::parseFlatDoubles(ds->zJson);
+        if (zvals.empty())
+            return Value::matrix(1, 0, ValueType::DOUBLE, mr);
+        auto v = Value::matrix(1, zvals.size(), ValueType::DOUBLE, mr);
+        for (size_t i = 0; i < zvals.size(); ++i)
+            v.doubleDataMut()[i] = zvals[i];
+        return v;
+    }
     const std::vector<double> &raw = (name == "XData") ? ds->xRaw : ds->yRaw;
     std::vector<double> vals;
     if (!raw.empty()) {
@@ -1066,17 +1123,179 @@ namespace {
 
 void registerHandleAccessors(Engine &engine)
 {
-    // set(h, â€¦)
+    auto settableCatalogFor = [](const std::string &type)
+        -> std::map<std::string, std::vector<std::string>> {
+        if (type == "figure") {
+            return {
+                {"Color", {}},
+                {"Name", {}},
+                {"NumberTitle", {"on", "off"}},
+                {"Position", {}},
+                {"Units", {"pixels", "normalized", "inches", "centimeters", "points"}},
+                {"Visible", {"on", "off"}},
+            };
+        }
+        if (type == "axes") {
+            return {
+                {"Box", {"on", "off"}},
+                {"CLim", {}},
+                {"CLimMode", {"auto", "manual"}},
+                {"FontName", {}},
+                {"FontSize", {}},
+                {"FontWeight", {"normal", "bold"}},
+                {"LineWidth", {}},
+                {"Title", {}},
+                {"Visible", {"on", "off"}},
+                {"XDir", {"normal", "reverse"}},
+                {"XGrid", {"on", "off"}},
+                {"XLabel", {}},
+                {"XLim", {}},
+                {"XScale", {"linear", "log"}},
+                {"XTick", {}},
+                {"XTickLabel", {}},
+                {"XTickLabelMode", {"auto", "manual"}},
+                {"XTickMode", {"auto", "manual"}},
+                {"YDir", {"normal", "reverse"}},
+                {"YGrid", {"on", "off"}},
+                {"YLabel", {}},
+                {"YLim", {}},
+                {"YScale", {"linear", "log"}},
+                {"YTick", {}},
+                {"YTickLabel", {}},
+                {"YTickLabelMode", {"auto", "manual"}},
+                {"YTickMode", {"auto", "manual"}},
+                {"ZLabel", {}},
+                {"ZLim", {}},
+                {"ZTick", {}},
+            };
+        }
+        if (type == "text") {
+            return {
+                {"Color", {}},
+                {"FontName", {}},
+                {"FontSize", {}},
+                {"FontWeight", {"normal", "bold"}},
+                {"String", {}},
+                {"Visible", {"on", "off"}},
+            };
+        }
+        if (type == "legend") {
+            return {
+                {"Box", {"on", "off"}},
+                {"Location", {"north", "south", "east", "west", "northeast",
+                              "northwest", "southeast", "southwest", "best"}},
+                {"String", {}},
+                {"Visible", {"on", "off"}},
+            };
+        }
+        if (type == "root") {
+            return {};
+        }
+        // Chart records (line, scatter, bar, surface, contour, ...).
+        std::map<std::string, std::vector<std::string>> m = {
+            {"Color", {}},
+            {"DisplayName", {}},
+            {"LineStyle", {"-", "--", ":", "-.", "none"}},
+            {"LineWidth", {}},
+            {"Marker", {"o", "+", "*", ".", "x", "square", "diamond",
+                        "^", "v", ">", "<", "pentagram", "hexagram", "none"}},
+            {"MarkerSize", {}},
+            {"Visible", {"on", "off"}},
+            {"XData", {}},
+            {"YData", {}},
+            {"ZData", {}},
+        };
+        if (type == "scatter")
+            m["SizeData"] = {};
+        if (type == "bar") {
+            m["BarWidth"] = {};
+            m["BaseValue"] = {};
+        }
+        if (type == "stem" || type == "area")
+            m["BaseValue"] = {};
+        return m;
+    };
+
+    // set(h, ...)
     {
-        ExternalFunc fn = [&engine](
-                Span<const Value> args, size_t,
-                Span<Value> outs, CallContext &) {
+        ExternalFunc fn = [&engine, settableCatalogFor](
+                Span<const Value> args, size_t nargout,
+                Span<Value> outs, CallContext &ctx) {
             if (args.empty()) { outs[0] = Value(); return; }
             const int id = graphicsHandleIdOf(args[0]);
             if (id < 0) { outs[0] = Value(); return; }
             auto *rec = engine.figureManager().findHandle(id);
             if (!rec)
                 throw std::runtime_error("Invalid or deleted object.");
+            auto *mr = ctx.engine->resource();
+            if (args.size() == 1) {
+                const auto cat = settableCatalogFor(rec->type);
+                if (nargout == 0) {
+                    std::string text;
+                    for (const auto &[k, choices] : cat) {
+                        text += "    " + k;
+                        if (!choices.empty()) {
+                            text += ": [ ";
+                            for (size_t i = 0; i < choices.size(); ++i) {
+                                if (i) text += " | ";
+                                if (i == 0) text += "{" + choices[i] + "}";
+                                else text += choices[i];
+                            }
+                            text += " ]";
+                        }
+                        text += "\n";
+                    }
+                    ctx.engine->outputText(text);
+                    outs[0] = Value();
+                    return;
+                }
+                Value st = Value::structure(mr);
+                for (const auto &[k, choices] : cat) {
+                    if (choices.empty()) {
+                        st.setFieldAll(k, Value::cell(1, 0, mr));
+                    } else {
+                        Value c = Value::cell(choices.size(), 1, mr);
+                        for (size_t i = 0; i < choices.size(); ++i)
+                            c.cellAt(i) = Value::fromString(choices[i], mr);
+                        st.setFieldAll(k, std::move(c));
+                    }
+                }
+                outs[0] = std::move(st);
+                return;
+            }
+            if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
+                const std::string prop = args[1].toString();
+                const auto cat = settableCatalogFor(rec->type);
+                auto it = cat.find(prop);
+                const std::vector<std::string> emptyChoices;
+                const auto &choices = (it != cat.end()) ? it->second : emptyChoices;
+                if (nargout == 0) {
+                    std::string text;
+                    if (!choices.empty()) {
+                        text += "[ ";
+                        for (size_t i = 0; i < choices.size(); ++i) {
+                            if (i) text += " | ";
+                            if (i == 0) text += "{" + choices[i] + "}";
+                            else text += choices[i];
+                        }
+                        text += " ]\n";
+                    } else {
+                        text += "Property does not have a fixed set of property values.\n";
+                    }
+                    ctx.engine->outputText(text);
+                    outs[0] = Value();
+                    return;
+                }
+                if (choices.empty()) {
+                    outs[0] = Value::cell(1, 0, mr);
+                } else {
+                    Value c = Value::cell(choices.size(), 1, mr);
+                    for (size_t i = 0; i < choices.size(); ++i)
+                        c.cellAt(i) = Value::fromString(choices[i], mr);
+                    outs[0] = std::move(c);
+                }
+                return;
+            }
             for (size_t i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
                 recordSetProp(engine.figureManager(), rec,
@@ -1087,7 +1306,7 @@ void registerHandleAccessors(Engine &engine)
         };
         engine.registerFunction("", "set", std::move(fn));
     }
-    // get(h [, 'Prop']) â€” without a property name: struct of all
+    // get(h [, 'Prop']) — without a property name: struct of all
     {
         ExternalFunc fn = [&engine](
                 Span<const Value> args, size_t,
@@ -1095,7 +1314,7 @@ void registerHandleAccessors(Engine &engine)
             if (args.empty()) { outs[0] = Value(); return; }
             const int id = graphicsHandleIdOf(args[0]);
             if (id < 0) {
-                // Not a handle (legacy figure-number contract) â†’ 1.
+                // Not a handle (legacy figure-number contract) → 1.
                 outs[0] = Value::scalar(1.0, engine.resource());
                 return;
             }
@@ -1107,7 +1326,7 @@ void registerHandleAccessors(Engine &engine)
                                         args[1].toString(), engine.resource());
                 return;
             }
-            // get(h) â†’ struct: stored props âˆª documented defaults.
+            // get(h) → struct: stored props ∪ documented defaults.
             auto *mr = engine.resource();
             Value st = Value::structure(mr);
             std::map<std::string, std::string> fields(rec->props);
@@ -1121,6 +1340,14 @@ void registerHandleAccessors(Engine &engine)
                                          : Value();
                 if (!d.isEmpty())
                     fields[p] = encodeProp(d);
+            }
+            if (rec->isChart()) {
+                for (const char *dp : {"XData", "YData", "ZData"}) {
+                    if (fields.count(dp)) continue;
+                    Value dv = chartDataProp(engine.figureManager(), rec, dp, mr);
+                    if (!dv.isEmpty())
+                        fields[dp] = encodeProp(dv);
+                }
             }
             if (rec->type == "figure") {
                 fields["Number"] = std::to_string(rec->figureId);
@@ -1154,13 +1381,7 @@ void registerHandleAccessors(Engine &engine)
         };
         engine.registerFunction("", "get", std::move(fn));
     }
-    // findobj([h][, 'Prop', value, ...] | '-property', Name) â€” MATLAB
-    // R2025b probes: no handle â†’ ROOT scope (every record across
-    // figures, registry order); a figure/axes handle scopes to its
-    // descendants; 'Type' matches the MATLAB class family
-    // (line/axes/figure/text/legend); Name-Value pairs compare via
-    // recordGetProp (chars exact, numerics element-wise within 1e-9).
-    // Deferred: '-regexp', '-depth', hidden handles.
+    // findobj([h][, 'Prop', value, ...] | '-property', Name)
     {
         ExternalFunc fn = [&engine](
                 Span<const Value> args, size_t, Span<Value> outs,
@@ -1184,11 +1405,11 @@ void registerHandleAccessors(Engine &engine)
                             scopeFig = rec->figureId;
                             scopeAxes = (int)rec->axesIndex;
                         } else {
-                            // chart/text/legend handle: MATLAB returns
+                            // chart/text/legend handle: returns
                             // the handle itself (no children modeled).
                             if (!args.empty() && args.size() > 1
                                 && args[1].isChar()) {
-                                // has filters â€” evaluate them on itself
+                                // has filters — evaluate them on itself
                                 scopeFig = rec->figureId;
                                 scopeAxes = (int)rec->axesIndex;
                                 scopeSelf = hid;
@@ -1238,7 +1459,7 @@ void registerHandleAccessors(Engine &engine)
                 if (t == "figure" || t == "axes" || t == "text"
                     || t == "line" || t == "legend" || t == "image")
                     return t;
-                // chart records carry dataset-ish types (scatter, barâ€¦)
+                // chart records carry dataset-ish types (scatter, bar…)
                 return std::string("line");
             };
 
@@ -1247,9 +1468,7 @@ void registerHandleAccessors(Engine &engine)
                 auto *rec = &kv.second;
                 if (!rec || rec->deleted)
                     continue;
-                // MATLAB hides title/label text objects from findobj
-                // (hidden handles; probe: findobj('Type','text') == 0
-                // next to a title). Slot-bound Texts follow suit;
+                // Hide slot-bound title/label text objects from findobj;
                 // user text() stays findable.
                 if (rec->type == "text" && !rec->slot.empty())
                     continue;
@@ -1287,8 +1506,8 @@ void registerHandleAccessors(Engine &engine)
                         pass = false;
                         break;
                     }
-                    // Colour shorthand: MATLAB compares findobj(
-                    // 'Color','r') against the RGB triplet [1 0 0].
+                    // Colour shorthand: compares findobj('Color','r')
+                    // against the RGB triplet [1 0 0].
                     if (f.want.isChar() && !v.isChar()
                         && v.numel() == 3
                         && (f.prop == "Color" || f.prop == "EdgeColor"
@@ -1378,7 +1597,7 @@ void registerHandleAccessors(Engine &engine)
         };
         engine.registerFunction("", "isgraphics", std::move(fn));
     }
-    // groot â€” the root graphics object (figure.Parent).
+    // groot — the root graphics object (figure.Parent).
     {
         ExternalFunc fn = [&engine](
                 Span<const Value>, size_t,
@@ -1405,24 +1624,77 @@ void registerHandleAccessors(Engine &engine)
 }
 
 // ============================================================
-// BuiltinClass per MATLAB class â€” dot-syntax + isa + eq
+// BuiltinClass per graphics class — construct + dot-syntax + isa + eq
 // ============================================================
 void registerGraphicsClasses(Engine &engine)
 {
-    // Distinct MATLAB class names across the chart table + axes + figure
-    // + text/legend/root records.
-    std::unordered_set<std::string> names = {kFigureClass, kAxesClass,
-                                             kTextClass, kLegendClass,
-                                             kRootClass};
+    // Distinct class names across the chart table + axes + figure
+    // + text/legend/root records, plus class -> internal type mapping.
+    std::unordered_map<std::string, std::string> classToType = {
+        {kFigureClass, "figure"},
+        {kAxesClass,   "axes"},
+        {kTextClass,   "text"},
+        {kLegendClass, "legend"},
+        {kRootClass,   "root"},
+    };
     for (const auto &kv : handleTypes())
-        names.insert(kv.second.second);
+        classToType.emplace(kv.second.second, kv.second.first);
 
-    for (const std::string &clsName : names) {
+    for (const auto &[clsName, recType] : classToType) {
         BuiltinClass cls;
         cls.name = clsName;
         cls.isHandle = true;
         cls.superclasses = {"matlab.mixin.Handle", "handle"};
-        // propGet / propSet mirror set()/get() exactly â€” one shared body
+        cls.construct = [&engine, clsName, recType](
+                Span<const Value> args, CallContext &ctx) -> Value {
+            auto &fm = ctx.engine->figureManager();
+            auto *mr = ctx.engine->resource();
+            Value h;
+            if (recType == "figure") {
+                h = makeFigureHandle(fm, mr);
+            } else if (recType == "axes") {
+                h = makeAxesHandle(fm, mr);
+            } else if (recType == "text") {
+                const int fid = fm.currentFigureId();
+                const size_t aidx = static_cast<size_t>(fm.current().currentAxes);
+                const int id = fm.createHandleAt(fid, aidx, "text", kTextClass);
+                h = makeGraphicsHandleValue(kTextClass, id, mr);
+            } else if (recType == "legend") {
+                const int fid = fm.currentFigureId();
+                const size_t aidx = static_cast<size_t>(fm.current().currentAxes);
+                h = makeLegendHandleFor(fm, fid, aidx, mr);
+            } else if (recType == "root") {
+                h = makeRootHandle(fm, mr);
+            } else {
+                AxesState &ax = fm.currentAxes();
+                const size_t dsIdx = ax.datasets.size();
+                DatasetInfo ds;
+                if (recType == "surface") {
+                    ds.type = "surf";
+                    ds.xJson = "[1,2,3]";
+                    ds.yJson = "[1,2,3]";
+                    ds.zJson = "[[1,0,0],[0,1,0],[0,0,1]]";
+                } else {
+                    ds.type = recType;
+                    ds.xJson = "[0,1]";
+                    ds.yJson = "[0,1]";
+                }
+                ax.datasets.push_back(std::move(ds));
+                const int id = fm.createHandle(recType, clsName, dsIdx);
+                h = makeGraphicsHandleValue(clsName, id, mr);
+            }
+            const int hid = graphicsHandleIdOf(h);
+            if (auto *rec = fm.findHandle(hid)) {
+                for (size_t i = 0; i + 1 < args.size(); i += 2) {
+                    if (args[i].isChar() || args[i].isString())
+                        recordSetProp(fm, rec, args[i].toString(), args[i + 1]);
+                }
+            }
+            fm.emitModified();
+            (void)engine;
+            return h;
+        };
+        // propGet / propSet mirror set()/get() exactly — one shared body
         // (recordGetProp / recordSetProp), same registry, same defaults,
         // same render-effect.
         cls.propGet = [&engine](const Value &self, const std::string &name,
@@ -1436,7 +1708,7 @@ void registerGraphicsClasses(Engine &engine)
             Value v = recordGetProp(engine.figureManager(), rec, name,
                                     engine.resource(), /*strict=*/true);
             if (v.isEmpty())
-                return false;   // unknown prop â†’ engine's MATLAB error
+                return false;   // unknown prop → engine's error
             out = std::move(v);
             return true;
         };
@@ -1452,8 +1724,8 @@ void registerGraphicsClasses(Engine &engine)
             engine.figureManager().emitModified();
             return true;
         };
-        // Handle identity comparison (h1 == h2 â‡” same registry record).
-        // args carries (lhs, rhs) in source order â€” self is a copy of the
+        // Handle identity comparison (h1 == h2 ⇔ same registry record).
+        // args carries (lhs, rhs) in source order — self is a copy of the
         // dominant operand, NOT an extra argument.
         cls.ops["eq"] = [](Value &, Span<const Value> args, size_t,
                            Span<Value> outs, CallContext &) {
@@ -1513,7 +1785,7 @@ void GraphicsLibrary::install(Engine &engine)
     std::vector<PlotEntry> table;
     buildPlotTable(table);
 
-    // Handle-accessor names registered above â€” skip their (noop)
+    // Handle-accessor names registered above — skip their (noop)
     // table entries (registerFunctionImpl_ throws on duplicates).
     static const std::unordered_set<std::string> kHandleAccessorNames = {
         "set", "get", "isgraphics", "ishandle", "isvalid",
@@ -1541,7 +1813,7 @@ void GraphicsLibrary::install(Engine &engine)
                 auto &fm = ctx.engine->figureManager();
                 // Chart calls only: snapshot the handle base. Calling this
                 // unconditionally would materialise a default figure before
-                // `figure`'s own body runs â€” and the first figure() would
+                // `figure`'s own body runs — and the first figure() would
                 // then number itself 2 instead of 1 (regression caught by
                 // the handle smokes).
                 if (hasHandle)
@@ -1553,7 +1825,7 @@ void GraphicsLibrary::install(Engine &engine)
                 GraphicsContext gc{
                     fm,
                     ctx.engine->resource(),
-                    // callBuiltin â€” forward to another registered plot builtin.
+                    // callBuiltin — forward to another registered plot builtin.
                     [&ctx](std::string_view nm, Span<const Value> a,
                            std::size_t no, Span<Value> o) -> bool {
                         const ExternalFunc *cf =
@@ -1563,7 +1835,7 @@ void GraphicsLibrary::install(Engine &engine)
                         (*cf)(a, no, o, ctx);
                         return true;
                     },
-                    // callHandle â€” evaluate a user function-handle value.
+                    // callHandle — evaluate a user function-handle value.
                     [&ctx](const Value &fh, Span<const Value> a) -> Value {
                         return ctx.engine->callFunctionHandle(fh, a);
                     },
@@ -1572,18 +1844,47 @@ void GraphicsLibrary::install(Engine &engine)
 
                 // Post-hook: bind the handle object(s) so h = plot(...)
                 // works (bugs/closed/graphics/plot-family-no-return-value.md).
-                // Statement calls get the handle in `ans`, like MATLAB.
+                // Statement calls get the handle in `ans`, like the reference.
                 if (hasHandle) {
                     const size_t base = fm.chartCallBase();
                     const size_t after = fm.currentAxes().datasets.size();
                     if (after > base) {
                         const auto &types = handleTypes();
                         auto hit = types.find(name);
-                        const int nnew = static_cast<int>(after - base);
+                        const bool isSurfOrContour =
+                            (hit->second.first == "surface"
+                             || hit->second.first == "contour");
+                        const int nnew = isSurfOrContour
+                                             ? 1
+                                             : static_cast<int>(after - base);
                         if (nnew == 1) {
                             const int id = fm.createHandle(hit->second.first,
                                                            hit->second.second,
                                                            base);
+                            if (isSurfOrContour) {
+                                const Value *zArg = nullptr;
+                                if (args.size() == 1 || args.size() == 2) {
+                                    zArg = &args[0];
+                                } else if (args.size() >= 3) {
+                                    zArg = (args[2].isNumeric()
+                                            && args[2].dims().rows() >= 2
+                                            && args[2].dims().cols() >= 2)
+                                               ? &args[2]
+                                               : &args[0];
+                                }
+                                if (zArg && zArg->isNumeric()
+                                    && zArg->dims().rows() >= 1
+                                    && zArg->dims().cols() >= 1) {
+                                    if (auto *rec = fm.findHandle(id)) {
+                                        DatasetInfo *ds = fm.datasetOf(*rec);
+                                        if (!ds || ds->zJson.size() < 2
+                                            || ds->zJson[0] != '['
+                                            || ds->zJson[1] != '[') {
+                                            rec->props["ZData"] = encodeProp(*zArg);
+                                        }
+                                    }
+                                }
+                            }
                             outs[0] = makeGraphicsHandleValue(
                                 hit->second.second, id, ctx.engine->resource());
                         } else {
@@ -1606,8 +1907,8 @@ void GraphicsLibrary::install(Engine &engine)
                         }
                     }
                 } else if (wrapHandle) {
-                    // figure/gcf â†’ Figure, gca/axes â†’ Axes, the title/
-                    // label family â†’ slot-bound Text, legend â†’ Legend.
+                    // figure/gcf → Figure, gca/axes → Axes, the title/
+                    // label family → slot-bound Text, legend → Legend.
                     auto *mr = ctx.engine->resource();
                     if (name == "figure" || name == "gcf") {
                         outs[0] = makeFigureHandle(fm, mr);
