@@ -1322,14 +1322,14 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             maxR = std::max(maxR, r + 1);
         for (auto c : colIdx)
             maxC = std::max(maxC, c + 1);
-        if (var->isEmpty() && !rhs.isScalar()) {
+        if (var->isEmpty()) {
             if (riIsColon && ciIsColon) {
                 maxR = rhs.dims().rows();
                 maxC = rhs.dims().cols();
             } else if (riIsColon) {
-                maxR = (colIdx.size() == 1 && rhs.dims().isVector()) ? rhs.numel() : rhs.dims().rows();
+                maxR = (colIdx.size() == 1) ? rhs.numel() : rhs.dims().rows();
             } else if (ciIsColon) {
-                maxC = (rowIdx.size() == 1 && rhs.dims().isVector()) ? rhs.numel() : rhs.dims().cols();
+                maxC = (rowIdx.size() == 1) ? rhs.numel() : rhs.dims().cols();
             }
         }
         if (maxR > var->dims().rows() || maxC > var->dims().cols())
@@ -2455,8 +2455,15 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
         }
         auto indices = Value::resolveIndices(idxVal, var.numel());
         Value res = var.indexGet(indices.data(), indices.size(), engine_.mr_);
-        if (indices.size() > 1 && idxVal.dims().rows() > 1 && idxVal.dims().cols() > 1)
-            res = res.reshape(idxVal.dims().rows(), idxVal.dims().cols(), engine_.mr_);
+        const bool varIsNonScalarVec = !var.dims().is3D() && var.dims().ndim() == 2
+            && ((var.dims().rows() == 1 && var.dims().cols() > 1)
+                || (var.dims().cols() == 1 && var.dims().rows() > 1));
+        const bool ixIsVec = !idxVal.dims().is3D() && idxVal.dims().ndim() == 2
+            && (idxVal.dims().rows() == 1 || idxVal.dims().cols() == 1);
+        if (indices.size() > 1 && (!varIsNonScalarVec || !ixIsVec)) {
+            if (res.dims().rows() != idxVal.dims().rows() || res.dims().cols() != idxVal.dims().cols())
+                res = res.reshape(idxVal.dims().rows(), idxVal.dims().cols(), engine_.mr_);
+        }
         return res;
     }
     if (nargs == 2) {

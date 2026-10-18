@@ -517,27 +517,21 @@ ASTNodePtr Parser::parseExpressionStatement()
             }
         }
 
-        // FIX #12: Различаем x = [] (обычное присваивание пустой матрицы)
-        // и A(idx) = [] (удаление элементов)
-        if (check(TokenType::LBRACKET) && peekToken(1).type == TokenType::RBRACKET) {
-            advance();  // [
-            advance();  // ]
-            // Если LHS — индексное выражение (CALL или CELL_INDEX),
-            // то это удаление элементов. FIELD_ACCESS (s.field = [])
-            // — это обычное присваивание пустой матрицы полю структуры.
-            bool isIndexedLhs = (expr->type == NodeType::CALL || expr->type == NodeType::CELL_INDEX);
-            if (isIndexedLhs) {
+        // FIX #12: Distinguish `A(idx) = []` (delete elements, only when `[]`
+        // is the entire RHS expression) from `x = []` / `x = []'` (normal
+        // expression assignment handled by parseExpression()).
+        bool isIndexedLhs = (expr->type == NodeType::CALL || expr->type == NodeType::CELL_INDEX);
+        if (isIndexedLhs && check(TokenType::LBRACKET) && peekToken(1).type == TokenType::RBRACKET) {
+            TokenType afterEmpty = peekToken(2).type;
+            if (afterEmpty == TokenType::SEMICOLON || afterEmpty == TokenType::COMMA
+                || afterEmpty == TokenType::NEWLINE || afterEmpty == TokenType::END_OF_INPUT
+                || afterEmpty == TokenType::KW_END || afterEmpty == TokenType::KW_ELSE
+                || afterEmpty == TokenType::KW_ELSEIF || afterEmpty == TokenType::KW_CATCH
+                || afterEmpty == TokenType::KW_CASE || afterEmpty == TokenType::KW_OTHERWISE) {
+                advance();  // [
+                advance();  // ]
                 auto node = makeNode(NodeType::DELETE_ASSIGN, startLine, startCol);
                 node->children.push_back(std::move(expr));
-                node->suppressOutput = consumeStmtTerminator(*node);
-                skipNewlines();
-                return node;
-            } else {
-                // x = [] — обычное присваивание пустой матрицы
-                auto emptyMat = makeNode(NodeType::MATRIX_LITERAL, startLine, startCol);
-                auto node = makeNode(NodeType::ASSIGN, startLine, startCol);
-                node->children.push_back(std::move(expr));
-                node->children.push_back(std::move(emptyMat));
                 node->suppressOutput = consumeStmtTerminator(*node);
                 skipNewlines();
                 return node;

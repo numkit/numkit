@@ -693,7 +693,7 @@ public:
     // without having to call setCwd, while still letting in-engine
     // `cd` calls take precedence once they happen.
     const std::string &cwd() const { return fsCtx_.cwd(); }
-    void setCwd(const std::string &p) { fsCtx_.setCwd(p); }
+    void setCwd(const std::string &p) { mFileMissCache_.clear(); fsCtx_.setCwd(p); }
 
     // The path-resolution result type lives on FsContext (fs/, L0); aliased
     // here so existing callers keep writing Engine::ResolvedPath.
@@ -723,8 +723,8 @@ public:
     using OpenFile = FsContext::OpenFile;
     int openFile(const std::string &userPath, const std::string &mode)
     { return fsCtx_.openFile(userPath, mode); }
-    bool closeFile(int fid) { return fsCtx_.closeFile(fid); }
-    void closeAllFiles() { fsCtx_.closeAllFiles(); }
+    bool closeFile(int fid) { mFileMissCache_.clear(); return fsCtx_.closeFile(fid); }
+    void closeAllFiles() { mFileMissCache_.clear(); fsCtx_.closeAllFiles(); }
     OpenFile *findFile(int fid) { return fsCtx_.findFile(fid); }
     std::vector<int> openFileIds() const { return fsCtx_.openFileIds(); }
     const std::string &lastFopenError() const { return fsCtx_.lastFopenError(); }
@@ -863,6 +863,7 @@ private:
         bool hasExternal = false;   // true when resolveMFile_ registered externalFuncs_[name]
     };
     std::unordered_map<std::string, MFileCacheEntry> mFileCache_;
+    std::unordered_set<std::string> mFileMissCache_;
     // Helper â€” returns nullptr if `name`.m can't be located in any of
     // (script-origin, mPath_-list) or fails to parse. On success caches
     // the parsed UserFunction in userFuncs_ and the compiled chunk in

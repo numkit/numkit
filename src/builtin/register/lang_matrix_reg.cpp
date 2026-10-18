@@ -198,6 +198,105 @@ void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     }
 }
 
+void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 4, "spdiags");
+    auto *mr = ctx.engine->resource();
+
+    // 1 or 2 arguments: [B, d] = spdiags(A) or B = spdiags(A, d)
+    if (args.size() <= 2) {
+        const Value &A = args[0];
+        const long long m = static_cast<long long>(A.dims().rows());
+        const long long n = static_cast<long long>(A.dims().cols());
+        const long long pLen = std::min(m, n);
+
+        std::vector<long long> diags;
+        if (args.size() == 1) {
+            for (long long k = -(m - 1); k <= n - 1; ++k) {
+                bool anyNz = false;
+                const long long iStart = std::max(0LL, -k);
+                const long long iEnd = std::min(m - 1, n - 1 - k);
+                for (long long i = iStart; i <= iEnd; ++i) {
+                    const long long j = i + k;
+                    if (A.elemAsDouble(static_cast<size_t>(i + j * m)) != 0.0) {
+                        anyNz = true;
+                        break;
+                    }
+                }
+                if (anyNz) diags.push_back(k);
+            }
+        } else {
+            const Value &dVal = args[1];
+            diags.resize(dVal.numel());
+            for (size_t idx = 0; idx < dVal.numel(); ++idx)
+                diags[idx] = static_cast<long long>(dVal.elemAsDouble(idx));
+        }
+
+        const size_t numD = diags.size();
+        Value B = Value::matrix(static_cast<size_t>(pLen), numD, ValueType::DOUBLE, mr);
+        double *bd = B.doubleDataMut();
+        for (size_t col = 0; col < numD; ++col) {
+            const long long k = diags[col];
+            const long long iStart = std::max(0LL, -k);
+            const long long iEnd = std::min(m - 1, n - 1 - k);
+            for (long long i = iStart; i <= iEnd; ++i) {
+                const long long j = i + k;
+                const long long rowB = (m >= n) ? j : i;
+                if (rowB >= 0 && rowB < pLen)
+                    bd[static_cast<size_t>(rowB) + col * static_cast<size_t>(pLen)] =
+                        A.elemAsDouble(static_cast<size_t>(i + j * m));
+            }
+        }
+        outs[0] = std::move(B);
+        if (nargout >= 2 && args.size() == 1) {
+            Value dOut = Value::matrix(numD, 1, ValueType::DOUBLE, mr);
+            double *dd = dOut.doubleDataMut();
+            for (size_t idx = 0; idx < numD; ++idx)
+                dd[idx] = static_cast<double>(diags[idx]);
+            outs[1] = std::move(dOut);
+        }
+        return;
+    }
+
+    // 3 or 4 arguments: A = spdiags(B, d, A_old) or A = spdiags(B, d, m, n)
+    const Value &B = args[0];
+    const Value &dVal = args[1];
+    long long m = 0, n = 0;
+    Value out;
+    if (args.size() == 3) {
+        const Value &Aold = args[2];
+        m = static_cast<long long>(Aold.dims().rows());
+        n = static_cast<long long>(Aold.dims().cols());
+        out = Value::matrix(static_cast<size_t>(m), static_cast<size_t>(n), ValueType::DOUBLE, mr);
+        double *od = out.doubleDataMut();
+        for (size_t idx = 0; idx < Aold.numel(); ++idx)
+            od[idx] = Aold.elemAsDouble(idx);
+    } else {
+        m = static_cast<long long>(argcheck::arrayDim(args[2], "spdiags"));
+        n = static_cast<long long>(argcheck::arrayDim(args[3], "spdiags"));
+        out = Value::matrix(static_cast<size_t>(m), static_cast<size_t>(n), ValueType::DOUBLE, mr);
+    }
+
+    double *od = out.doubleDataMut();
+    const long long bRows = static_cast<long long>(B.dims().rows());
+    const long long bCols = static_cast<long long>(B.dims().cols());
+    const size_t numD = dVal.numel();
+    for (size_t col = 0; col < numD && static_cast<long long>(col) < bCols; ++col) {
+        const long long k = static_cast<long long>(dVal.elemAsDouble(col));
+        const long long iStart = std::max(0LL, -k);
+        const long long iEnd = std::min(m - 1, n - 1 - k);
+        for (long long i = iStart; i <= iEnd; ++i) {
+            const long long j = i + k;
+            const long long rowB = (m >= n) ? j : i;
+            const double val = (rowB >= 0 && rowB < bRows)
+                                   ? B.elemAsDouble(static_cast<size_t>(rowB + static_cast<long long>(col) * bRows))
+                                   : 0.0;
+            od[static_cast<size_t>(i + j * m)] = val;
+        }
+    }
+    outs[0] = std::move(out);
+}
+
 // Zero-fill incomplete Cholesky factorization ichol(A [, opts]):
 // returns lower-triangular L preserving the sparsity pattern of A.
 void ichol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)

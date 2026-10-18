@@ -458,16 +458,45 @@ void ordschur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void eigs_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 4, "eigs");
-    std::size_t k = (args.size() >= 2 && !args[1].isEmpty())
-        ? static_cast<std::size_t>(argcheck::expectedPositiveInteger(
-            argcheck::expectedReal(args[1], 2, "k", "eigs"), 2, "k", "eigs")) : 6;
+    argcheck::checkNargin(args.size(), 1, 6, "eigs");
+    auto *mr = ctx.engine->resource();
+    const Value &A = args[0];
+
+    bool hasB = false;
+    if (args.size() >= 2 && !args[1].isEmpty() &&
+        !args[1].isChar() && !args[1].isString() && !args[1].isStruct()) {
+        if (!args[1].isScalar()) {
+            hasB = true;
+        } else if (A.dims().rows() == 1 && A.dims().cols() == 1 &&
+                   args.size() >= 3 && args[2].isNumeric() && args[2].isScalar()) {
+            hasB = true;
+        }
+    }
+
+    const std::size_t kIdx = hasB ? 2 : 1;
+    const std::size_t sigmaIdx = hasB ? 3 : 2;
+
+    std::size_t k = 6;
+    if (args.size() > kIdx && !args[kIdx].isEmpty() && !args[kIdx].isStruct()) {
+        k = static_cast<std::size_t>(argcheck::expectedPositiveInteger(
+            argcheck::expectedReal(args[kIdx], static_cast<int>(kIdx + 1), "k", "eigs"),
+            static_cast<int>(kIdx + 1), "k", "eigs"));
+    }
+
+    Value sigma;
+    if (args.size() > sigmaIdx && !args[sigmaIdx].isEmpty() && !args[sigmaIdx].isStruct()) {
+        sigma = args[sigmaIdx];
+    }
+
     if (nargout <= 1) {
-        outs[0] = eigs_values(args[0], k, ctx.engine->resource());
+        outs[0] = hasB ? eigs_generalized_values(A, args[1], k, sigma, mr)
+                       : eigs_values(A, k, sigma, mr);
     } else {
-        auto [V, D] = eigs(args[0], k, ctx.engine->resource());
+        auto [V, D] = hasB ? eigs_generalized(A, args[1], k, sigma, mr)
+                           : eigs(A, k, sigma, mr);
         outs[0] = std::move(V);
         if (outs.size() >= 2) outs[1] = std::move(D);
+        if (nargout >= 3 && outs.size() >= 3) outs[2] = Value::scalar(0.0);
     }
 }
 

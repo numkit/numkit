@@ -40,6 +40,14 @@ struct ResolvedSubscript {
         return vec.data();
     }
 
+    size_t maxPlusOne(size_t currentMax) const noexcept {
+        if (isColon) return currentMax;
+        if (isSingle) return std::max(currentMax, single + 1);
+        for (size_t v : vec)
+            currentMax = std::max(currentMax, v + 1);
+        return currentMax;
+    }
+
     static ResolvedSubscript resolve(const Value &idx, size_t dimSize) {
         ResolvedSubscript r;
         if (idx.isChar() && idx.numel() == 1 && idx.charData()[0] == ':') {
@@ -57,6 +65,23 @@ struct ResolvedSubscript {
             return r;
         }
         r.vec = Value::resolveIndices(idx, dimSize);
+        r.count = r.vec.size();
+        return r;
+    }
+
+    static ResolvedSubscript resolveUnchecked(const Value &idx) {
+        ResolvedSubscript r;
+        if (idx.isChar() && idx.numel() == 1 && idx.charData()[0] == ':') {
+            r.isColon = true;
+            return r;
+        }
+        if (idx.isDoubleScalar()) {
+            r.single = Value::checkedScalarIndex(idx.scalarVal());
+            r.isSingle = true;
+            r.count = 1;
+            return r;
+        }
+        r.vec = Value::resolveIndicesUnchecked(idx);
         r.count = r.vec.size();
         return r;
     }
@@ -1314,8 +1339,15 @@ enter_frame:
                 } else {
                     auto indices = Value::resolveIndices(ix, mv.numel());
                     Value res = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
-                    if (indices.size() > 1 && ix.dims().rows() > 1 && ix.dims().cols() > 1)
-                        res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+                    const bool mvIsNonScalarVec = !mv.dims().is3D() && mv.dims().ndim() == 2
+                        && ((mv.dims().rows() == 1 && mv.dims().cols() > 1)
+                            || (mv.dims().cols() == 1 && mv.dims().rows() > 1));
+                    const bool ixIsVec = !ix.dims().is3D() && ix.dims().ndim() == 2
+                        && (ix.dims().rows() == 1 || ix.dims().cols() == 1);
+                    if (indices.size() > 1 && (!mvIsNonScalarVec || !ixIsVec)) {
+                        if (res.dims().rows() != ix.dims().rows() || res.dims().cols() != ix.dims().cols())
+                            res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+                    }
                     R[I.a] = std::move(res);
                 }
                 break;
@@ -1405,9 +1437,9 @@ enter_frame:
                 if (R[I.a].isObject())
                     throw std::runtime_error("'()' assignment is not defined for class '"
                                              + R[I.a].objectClassName() + "'");
-                if (ix.isDoubleScalar() || ix.isLogicalScalar()) {
+                if (ix.isDoubleScalar()) {
                     // Fast path: scalar index
-                    size_t i = (size_t) ix.toScalar() - 1;
+                    size_t i = Value::checkedScalarIndex(ix.scalarVal());
                     Value &dst = R[I.a];
                     const Value &rhs = R[I.c];
 
@@ -1505,11 +1537,13 @@ enter_frame:
                 } else {
                     // Vector or logical index
                     auto indices = Value::resolveIndicesUnchecked(ix);
-                    // Auto-grow if needed
-                    size_t maxIdx = 0;
-                    for (size_t idx : indices) maxIdx = std::max(maxIdx, idx);
-                    if (R[I.a].isEmpty() || maxIdx >= R[I.a].numel())
-                        R[I.a].ensureSize(maxIdx, engine_.mr_);
+                    if (!indices.empty()) {
+                        // Auto-grow if needed
+                        size_t maxIdx = 0;
+                        for (size_t idx : indices) maxIdx = std::max(maxIdx, idx);
+                        if (R[I.a].isEmpty() || maxIdx >= R[I.a].numel())
+                            R[I.a].ensureSize(maxIdx, engine_.mr_);
+                    }
                     R[I.a].indexSet(indices.data(), indices.size(), R[I.c]);
                 }
                 break;
@@ -1556,35 +1590,31 @@ enter_frame:
                     break;
                 }
 
-                bool riIsColon = ri.isChar() && ri.numel() == 1 && ri.charData()[0] == ':';
-                bool ciIsColon = ci.isChar() && ci.numel() == 1 && ci.charData()[0] == ':';
-                // Resolve without bounds check — auto-expand may be needed
-                auto rowIds = riIsColon ? std::vector<size_t>()
-                                        : Value::resolveIndicesUnchecked(ri);
-                auto colIds = ciIsColon ? std::vector<size_t>()
-                                        : Value::resolveIndicesUnchecked(ci);
+                auto rowIds = ResolvedSubscript::resolveUnchecked(ri);
+                auto colIds = ResolvedSubscript::resolveUnchecked(ci);
+                bool riIsColon = rowIds.isColon;
+                bool ciIsColon = colIds.isColon;
 
                 // Grow if needed
-                size_t maxR = R[I.a].dims().rows(), maxC = R[I.a].dims().cols();
-                for (size_t r : rowIds) maxR = std::max(maxR, r + 1);
-                for (size_t c : colIds) maxC = std::max(maxC, c + 1);
-                if (R[I.a].isEmpty() && !val.isScalar()) {
+                size_t maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
+                size_t maxC = colIds.maxPlusOne(R[I.a].dims().cols());
+                if (R[I.a].isEmpty()) {
                     if (riIsColon && ciIsColon) {
                         maxR = val.dims().rows();
                         maxC = val.dims().cols();
                     } else if (riIsColon) {
-                        maxR = (colIds.size() == 1 && val.dims().isVector()) ? val.numel() : val.dims().rows();
+                        maxR = (colIds.count == 1) ? val.numel() : val.dims().rows();
                     } else if (ciIsColon) {
-                        maxC = (rowIds.size() == 1 && val.dims().isVector()) ? val.numel() : val.dims().cols();
+                        maxC = (rowIds.count == 1) ? val.numel() : val.dims().cols();
                     }
                 }
                 if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols())
                     R[I.a].resize(maxR, maxC, engine_.mr_);
 
-                R[I.a].indexSet2D(riIsColon ? nullptr : rowIds.data(),
-                                  riIsColon ? R[I.a].dims().rows() : rowIds.size(),
-                                  ciIsColon ? nullptr : colIds.data(),
-                                  ciIsColon ? R[I.a].dims().cols() : colIds.size(), val);
+                R[I.a].indexSet2D(rowIds.data(),
+                                  riIsColon ? R[I.a].dims().rows() : rowIds.count,
+                                  colIds.data(),
+                                  ciIsColon ? R[I.a].dims().cols() : colIds.count, val);
                 break;
             }
 
@@ -1661,34 +1691,23 @@ enter_frame:
                     }
                 }
                 if (ndims == 3) {
-                    auto isColon = [](const Value &v) {
-                        return v.isChar() && v.numel() == 1 && v.charData()[0] == ':';
-                    };
-                    bool riColon = isColon(R[base]);
-                    bool ciColon = isColon(R[base + 1]);
-                    bool piColon = isColon(R[base + 2]);
-
-                    // Resolve non-colon indices (unchecked for auto-expand)
-                    auto rowIds = riColon ? std::vector<size_t>()
-                                          : Value::resolveIndicesUnchecked(R[base]);
-                    auto colIds = ciColon ? std::vector<size_t>()
-                                          : Value::resolveIndicesUnchecked(R[base + 1]);
-                    auto pageIds = piColon ? std::vector<size_t>()
-                                           : Value::resolveIndicesUnchecked(R[base + 2]);
+                    auto rowIds = ResolvedSubscript::resolveUnchecked(R[base]);
+                    auto colIds = ResolvedSubscript::resolveUnchecked(R[base + 1]);
+                    auto pageIds = ResolvedSubscript::resolveUnchecked(R[base + 2]);
+                    bool riColon = rowIds.isColon;
+                    bool ciColon = colIds.isColon;
+                    bool piColon = pageIds.isColon;
 
                     // Grow if needed
                     const Value &val = R[I.e];
-                    size_t maxR = R[I.a].dims().rows();
-                    size_t maxC = R[I.a].dims().cols();
-                    size_t maxP = R[I.a].dims().pages();
-                    for (size_t r : rowIds) maxR = std::max(maxR, r + 1);
-                    for (size_t c : colIds) maxC = std::max(maxC, c + 1);
-                    for (size_t p : pageIds) maxP = std::max(maxP, p + 1);
+                    size_t maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
+                    size_t maxC = colIds.maxPlusOne(R[I.a].dims().cols());
+                    size_t maxP = pageIds.maxPlusOne(R[I.a].dims().pages());
                     if (R[I.a].isEmpty() && !val.isScalar()) {
                         const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
-                        const size_t nonColonProd = (riColon ? 1 : rowIds.size())
-                                                  * (ciColon ? 1 : colIds.size())
-                                                  * (piColon ? 1 : pageIds.size());
+                        const size_t nonColonProd = (riColon ? 1 : rowIds.count)
+                                                  * (ciColon ? 1 : colIds.count)
+                                                  * (piColon ? 1 : pageIds.count);
                         if (nColons == 1 && nonColonProd == 1 && val.dims().isVector()) {
                             if (riColon) maxR = val.numel();
                             else if (ciColon) maxC = val.numel();
@@ -1720,12 +1739,12 @@ enter_frame:
                         || maxP > R[I.a].dims().pages())
                         R[I.a].resize3d(maxR, maxC, maxP, engine_.mr_);
 
-                    R[I.a].indexSet3D(riColon ? nullptr : rowIds.data(),
-                                      riColon ? R[I.a].dims().rows() : rowIds.size(),
-                                      ciColon ? nullptr : colIds.data(),
-                                      ciColon ? R[I.a].dims().cols() : colIds.size(),
-                                      piColon ? nullptr : pageIds.data(),
-                                      piColon ? R[I.a].dims().pages() : pageIds.size(),
+                    R[I.a].indexSet3D(rowIds.data(),
+                                      riColon ? R[I.a].dims().rows() : rowIds.count,
+                                      colIds.data(),
+                                      ciColon ? R[I.a].dims().cols() : colIds.count,
+                                      pageIds.data(),
+                                      piColon ? R[I.a].dims().pages() : pageIds.count,
                                       val);
                 } else {
                     // ND write (≥4): grow the target *first* so the
@@ -4677,8 +4696,15 @@ void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB,
             // and silently truncated fractional indices.)
             auto indices = Value::resolveIndices(ix, mv.numel());
             Value res = mv.indexGet(indices.data(), indices.size(), engine_.mr_);
-            if (indices.size() > 1 && ix.dims().rows() > 1 && ix.dims().cols() > 1)
-                res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+            const bool mvIsNonScalarVec = !mv.dims().is3D() && mv.dims().ndim() == 2
+                && ((mv.dims().rows() == 1 && mv.dims().cols() > 1)
+                    || (mv.dims().cols() == 1 && mv.dims().rows() > 1));
+            const bool ixIsVec = !ix.dims().is3D() && ix.dims().ndim() == 2
+                && (ix.dims().rows() == 1 || ix.dims().cols() == 1);
+            if (indices.size() > 1 && (!mvIsNonScalarVec || !ixIsVec)) {
+                if (res.dims().rows() != ix.dims().rows() || res.dims().cols() != ix.dims().cols())
+                    res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
+            }
             R[dstReg] = std::move(res);
         }
     } else if (na == 2) {

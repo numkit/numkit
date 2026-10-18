@@ -79,6 +79,7 @@ void rot90_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void shiftdim_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void size_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void sparse_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void spdiags_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void sphere_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void squeeze_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void sub2ind_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -166,6 +167,7 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("shiftdim",   &::numkit::builtin::detail::shiftdim_reg);
     engine.registerFunction("size",       &::numkit::builtin::detail::size_reg);
     engine.registerFunction("sparse",     &::numkit::builtin::detail::sparse_reg);
+    engine.registerFunction("spdiags",    &::numkit::builtin::detail::spdiags_reg);
     engine.registerFunction("sphere",     &::numkit::builtin::detail::sphere_reg);
     engine.registerFunction("squeeze",    &::numkit::builtin::detail::squeeze_reg);
     engine.registerFunction("sub2ind",    &::numkit::builtin::detail::sub2ind_reg);

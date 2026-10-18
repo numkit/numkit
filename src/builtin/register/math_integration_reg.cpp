@@ -180,14 +180,18 @@ void gk15_nodes_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> 
     if (outs.size() >= 3) outs[2] = std::move(wg);
 }
 
+static bool isCallableHandleArg(const Value &v)
+{
+    return v.isFuncHandle()
+        || (v.isCell() && v.numel() >= 1 && v.cellAt(0).isFuncHandle());
+}
+
 void integral_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
     if (args.size() < 3)
         throw Error("integral: requires at least 3 arguments (fn, a, b)",
                      0, 0, "integral", "", "numkit:integral:nargin");
-    if (!args[0].isFuncHandle()
-        && !(args[0].isCell() && args[0].numel() >= 1
-             && args[0].cellAt(0).isFuncHandle()))
+    if (!isCallableHandleArg(args[0]))
         throw Error("integral: 1st argument must be a function handle",
                      0, 0, "integral", "", "numkit:integral:fnType");
     const double a = args[1].toScalar();
@@ -230,7 +234,7 @@ static double integral2AbsTol(Span<const Value> args, size_t firstOpt)
 void integral2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 5, "integral2");
-    if (!args[0].isFuncHandle())
+    if (!isCallableHandleArg(args[0]))
         throw Error("integral2: 1st argument must be a function handle",
                      0, 0, "integral2", "", "numkit:integral2:fnType");
     const double a = args[1].toScalar(), b = args[2].toScalar();
@@ -250,7 +254,7 @@ void integral3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
 {
     argcheck::checkNargin(args.size(), 1, 7, "integral3");
     argcheck::checkNargin(args.size(), 7, 7, "integral3");
-    if (!args[0].isFuncHandle())
+    if (!isCallableHandleArg(args[0]))
         throw Error("integral3: 1st argument must be a function handle",
                      0, 0, "integral3", "", "numkit:integral3:fnType");
     const double a = args[1].toScalar(), b = args[2].toScalar();
@@ -273,7 +277,7 @@ void integral3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
 void quadgk_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, "quadgk");
-    if (!args[0].isFuncHandle())
+    if (!isCallableHandleArg(args[0]))
         throw Error("quadgk: 1st argument must be a function handle",
                      0, 0, "quadgk", "", "numkit:quadgk:fnType");
     const double a = args[1].toScalar(), b = args[2].toScalar();
@@ -293,7 +297,7 @@ void quadgk_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
 void quad2d_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 5, "quad2d");
-    if (!args[0].isFuncHandle())
+    if (!isCallableHandleArg(args[0]))
         throw Error("quad2d: 1st argument must be a function handle",
                      0, 0, "quad2d", "", "numkit:quad2d:fnType");
     const double a = args[1].toScalar(), b = args[2].toScalar();

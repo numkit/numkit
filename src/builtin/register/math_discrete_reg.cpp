@@ -308,6 +308,27 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
         std::copy(src, src + ne, e.doubleDataMut());
         outs[1] = e;
     }
+
+    // [n, edges, bin] = histcounts(...): 1-based bin index per element of X.
+    if (nargout >= 3 && outs.size() >= 3) {
+        const Value &x = args[0];
+        const size_t nx = x.numel();
+        const size_t ne = edges.numel();
+        const size_t nbins = (ne >= 2) ? (ne - 1) : 0;
+        const double *ed = edges.doubleData();
+        Value binOut = createLike(x, ValueType::DOUBLE, mr);
+        double *bd = binOut.doubleDataMut();
+        for (size_t idx = 0; idx < nx; ++idx) {
+            const double v = x.elemAsDouble(idx);
+            if (nbins == 0 || std::isnan(v) || v < ed[0] || v > ed[nbins]) {
+                bd[idx] = 0.0;
+            } else {
+                const size_t b = static_cast<size_t>(std::upper_bound(ed, ed + nbins, v) - ed);
+                bd[idx] = static_cast<double>(b);
+            }
+        }
+        outs[2] = std::move(binOut);
+    }
 }
 
 // histc(x, edges): legacy bin counts (length(edges) bins, last = exact
@@ -747,7 +768,8 @@ void setdiff_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         narrowOut();
         return;
     }
-    outs[0] = setDiff(A, B, wantsStable(args, 2), mr);
+    const bool cIsRow = !A.dims().is3D() && A.dims().rows() == 1;
+    outs[0] = orientUniqueVec(setDiff(A, B, wantsStable(args, 2), mr), !cIsRow, mr);
     if (nargout >= 2)
         emitSetopIndices(SetOpKind::Setdiff, A, B, outs[0], nargout, outs,
                          mr, "setdiff");

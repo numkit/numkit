@@ -71,3 +71,113 @@ TEST_F(LangTest, DirectCppLangAPI) {
     builtin::setenv("NUMKIT_CPP_API_TEST", "");
     EXPECT_EQ(builtin::getenv("NUMKIT_CPP_API_TEST"), "");
 }
+
+TEST_F(LangTest, DualEngineEmptyTransposeAndLogicalFalseAssign) {
+    for (Engine::Backend mode : {Engine::Backend::TreeWalker, Engine::Backend::VM}) {
+        auto eng = makeStandardEngine();
+        eng->setBackend(mode);
+        // 1. = []' parser regression
+        Value v = eng->eval("x = []'; size(x, 1) + size(x, 2)");
+        EXPECT_DOUBLE_EQ(v.toScalar(), 0.0);
+
+        // 2. s(false) = a(false) 0xC0000005 underflow regression
+        Value s = eng->eval("a = [10, 20]; s = [1, 2]; idx = (1 > 2); s(idx) = a(idx); s");
+        EXPECT_EQ(s.dims().rows(), 1u);
+        EXPECT_EQ(s.dims().cols(), 2u);
+        EXPECT_DOUBLE_EQ(s.elemAsDouble(0), 1.0);
+        EXPECT_DOUBLE_EQ(s.elemAsDouble(1), 2.0);
+
+        // 3. Empty-target 2D colon assignment with scalar and 3D (1x1xN) RHS
+        Value uySz = eng->eval("clear uy; for m = 1:4, uy(m, :) = m + 1i; end; size(uy)");
+        EXPECT_DOUBLE_EQ(uySz.elemAsDouble(0), 4.0);
+        EXPECT_DOUBLE_EQ(uySz.elemAsDouble(1), 1.0);
+
+        Value mseSz = eng->eval(
+            "clear mse_ol; e_ol = reshape(1:60, 4, 3, 5); "
+            "for m = 1:4, mse_ol(m, :) = mean(e_ol(m, :, :), 2); end; size(mse_ol)");
+        EXPECT_DOUBLE_EQ(mseSz.elemAsDouble(0), 4.0);
+        EXPECT_DOUBLE_EQ(mseSz.elemAsDouble(1), 5.0);
+
+        // 4. 1D linear indexing of matrix/scalar by row/column vector
+        Value rSz = eng->eval("A = reshape(1:12, 3, 4); size(A(1:3))");
+        EXPECT_DOUBLE_EQ(rSz.elemAsDouble(0), 1.0);
+        EXPECT_DOUBLE_EQ(rSz.elemAsDouble(1), 3.0);
+
+        Value cSz = eng->eval("A = reshape(1:12, 3, 4); size(A([1; 2; 3]))");
+        EXPECT_DOUBLE_EQ(cSz.elemAsDouble(0), 3.0);
+        EXPECT_DOUBLE_EQ(cSz.elemAsDouble(1), 1.0);
+
+        Value scSz = eng->eval("s = 7; size(s([1; 1; 1; 1]))");
+        EXPECT_DOUBLE_EQ(scSz.elemAsDouble(0), 4.0);
+        EXPECT_DOUBLE_EQ(scSz.elemAsDouble(1), 1.0);
+    }
+}
+
+TEST_F(LangTest, TextbookBatch2Builtins) {
+    // 1. 2-arg polygamma psi(k, X)
+    EXPECT_NEAR(engine->eval("psi(0, 1)").toScalar(), -0.57721566490153286, 1e-10);
+    EXPECT_NEAR(engine->eval("psi(1, 1)").toScalar(), 1.6449340668482264, 1e-12);
+    EXPECT_NEAR(engine->eval("psi(2, 2)").toScalar(), -0.40411380631918857, 1e-12);
+
+    // 2. spdiags (4-arg and 2-arg)
+    Value spd = engine->eval("B = [10 20; 30 40; 50 60]; A = spdiags(B, [-1 1], 3, 3); A");
+    EXPECT_DOUBLE_EQ(spd.elemAsDouble(1 + 0 * 3), 10.0); // (2,1)
+    EXPECT_DOUBLE_EQ(spd.elemAsDouble(2 + 1 * 3), 30.0); // (3,2)
+    EXPECT_DOUBLE_EQ(spd.elemAsDouble(0 + 1 * 3), 40.0); // (1,2)
+    EXPECT_DOUBLE_EQ(spd.elemAsDouble(1 + 2 * 3), 60.0); // (2,3)
+
+    // 3. Generalized eig(A, B) and eigs(A, B, k, 'sm')
+    Value geigErr = engine->eval(
+        "K = [4 -1 0; -1 4 -1; 0 -1 4]; M = [2 0 0; 0 3 0; 0 0 4]; "
+        "[V, D] = eig(K, M); norm(K * V - M * V * D)");
+    EXPECT_LT(geigErr.toScalar(), 1e-12);
+
+    Value geigsD = engine->eval(
+        "K = [4 -1 0; -1 4 -1; 0 -1 4]; M = [2 0 0; 0 3 0; 0 0 4]; "
+        "d1 = sort(eig(K, M)); d2 = sort(eigs(K, M, 2, 'sm')); max(abs(d1(1:2) - d2))");
+    EXPECT_LT(geigsD.toScalar(), 1e-12);
+
+    // 4. setdiff orientation preservation
+    Value sdCol = engine->eval("size(setdiff([1; 2; 3; 4], [2; 4]))");
+    EXPECT_DOUBLE_EQ(sdCol.elemAsDouble(0), 2.0);
+    EXPECT_DOUBLE_EQ(sdCol.elemAsDouble(1), 1.0);
+    Value sdRow = engine->eval("size(setdiff([1 2 3 4], [2; 4]))");
+    EXPECT_DOUBLE_EQ(sdRow.elemAsDouble(0), 1.0);
+    EXPECT_DOUBLE_EQ(sdRow.elemAsDouble(1), 2.0);
+
+    // 5. dist and latc2tf
+    Value dVal = engine->eval("W = [1 2 3; 4 5 6]; P = [1 0; 2 1; 3 2]; dist(W, P)");
+    EXPECT_NEAR(dVal.elemAsDouble(0), 0.0, 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(1), std::sqrt(27.0), 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(2), std::sqrt(3.0), 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(3), std::sqrt(48.0), 1e-12);
+
+    Value lVal = engine->eval("[n, d] = latc2tf([0.1; 0.2; 0.3], [1; 2; 3; 4]); [n, d]");
+    EXPECT_NEAR(lVal.elemAsDouble(0), 3.0, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(1), 3.304, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(2), 3.72, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(3), 4.0, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(4), 1.0, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(5), 0.18, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(6), 0.236, 1e-12);
+    EXPECT_NEAR(lVal.elemAsDouble(7), 0.3, 1e-12);
+
+    // 6. Complex multi-RHS mldivide (nrhs >= 4 fastpath backward substitution)
+    Value cSolveRes = engine->eval(
+        "R = toeplitz([1, 0.7+0.3i, 0.4+0.5i, 0.1+0.6i]); "
+        "A = 10*R + eye(4); X = A \\ R; norm(A * X - R, 'fro')");
+    EXPECT_LT(cSolveRes.toScalar(), 1e-12);
+
+    // 7. Complex Hermitian eig returns real ascending eigenvalues and unitary eigenvectors
+    Value hEigVals = engine->eval(
+        "R = toeplitz([1, 0.7+0.3i, 0.4+0.5i, 0.1+0.6i]); e = eig(R); e");
+    EXPECT_FALSE(hEigVals.isComplex());
+    EXPECT_LE(hEigVals.elemAsDouble(0), hEigVals.elemAsDouble(1));
+    EXPECT_LE(hEigVals.elemAsDouble(1), hEigVals.elemAsDouble(2));
+    EXPECT_LE(hEigVals.elemAsDouble(2), hEigVals.elemAsDouble(3));
+    Value hEigVD = engine->eval(
+        "R = toeplitz([1, 0.7+0.3i, 0.4+0.5i, 0.1+0.6i]); [V, D] = eig(R); "
+        "max(norm(R * V - V * D, 'fro'), norm(V' * V - eye(4), 'fro'))");
+    EXPECT_LT(hEigVD.toScalar(), 1e-12);
+}
+

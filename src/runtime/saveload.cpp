@@ -11,6 +11,7 @@
 #include <numkit/core/environment.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/sys/vfs.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -128,6 +129,37 @@ void load(Engine &engine, Environment &env, Span<const Value> args,
             throw Error("load: -v7.3 (HDF5) is not supported in this build");
         if (!s.empty() && s.front() == '-')
             throw Error("load: unsupported flag '" + s + "'");
+    }
+
+    auto fileExists = [&](const std::string &cand) -> bool {
+        try {
+            auto rp = engine.resolvePath(cand);
+            return rp.fs && rp.fs->exists(rp.path);
+        } catch (...) {
+            return false;
+        }
+    };
+
+    if (!fileExists(filename)) {
+        // MATLAB: if `load foo` has no existing exact file `foo`, check `foo.mat`
+        // in the current directory and along the search path.
+        if (!endsWithIgnoreCase(filename, ".mat") && fileExists(filename + ".mat")) {
+            filename += ".mat";
+        } else {
+            for (const auto &dir : engine.path()) {
+                std::string prefix = dir;
+                if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\')
+                    prefix += '/';
+                if (fileExists(prefix + filename)) {
+                    filename = prefix + filename;
+                    break;
+                }
+                if (!endsWithIgnoreCase(filename, ".mat") && fileExists(prefix + filename + ".mat")) {
+                    filename = prefix + filename + ".mat";
+                    break;
+                }
+            }
+        }
     }
 
     if (mode == Mode::Auto)

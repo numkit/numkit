@@ -44,6 +44,7 @@ void tf2zp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void trapz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void unmkpp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void zp2tf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void latc2tf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 
@@ -83,6 +84,7 @@ void register_polyfun(Engine &engine) {
     engine.registerFunction("trapz",     &::numkit::builtin::detail::trapz_reg);
     engine.registerFunction("unmkpp",    &::numkit::builtin::detail::unmkpp_reg);
     engine.registerFunction("zp2tf",     &::numkit::builtin::detail::zp2tf_reg);
+    engine.registerFunction("latc2tf",   &::numkit::builtin::detail::latc2tf_reg);
 }
 
 } // namespace numkit::builtin::detail

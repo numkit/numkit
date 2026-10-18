@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” contour.cpp
+// nk/graphics â€” contour.cpp
 //
 // graphics.contour.* builders (contour / contourf), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -203,7 +203,12 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             fm.pushDataset(std::move(ds));
         }
         fm.emitModified();
-        outs[0] = Value();
+        outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
+        if (nargout >= 2 && outs.size() >= 2) {
+            Value h = Value::structure();
+            h.setField(0, "LineWidth", Value::scalar(0.5));
+            outs[1] = std::move(h);
+        }
     };
     reg("contour", "contour", contourImpl);
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -222,7 +227,14 @@ void buildContourPlots(std::vector<PlotEntry> &table)
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     auto contourfImpl = [](Span<const Value> args, size_t nargout,
                            Span<Value> outs, GraphicsContext &gc) {
-        (void)nargout;
+        auto setOutputs = [&]() {
+            outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
+            if (nargout >= 2 && outs.size() >= 2) {
+                Value h = Value::structure();
+                h.setField(0, "LineWidth", Value::scalar(0.5));
+                outs[1] = std::move(h);
+            }
+        };
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
@@ -237,11 +249,11 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             X_arg = &args[0]; Y_arg = &args[1]; Z_arg = &args[2];
             levels_arg = &args[3];
         }
-        if (!Z_arg) { outs[0] = Value(); return; }
+        if (!Z_arg) { setOutputs(); return; }
 
         const size_t R = Z_arg->dims().rows();
         const size_t C = Z_arg->dims().cols();
-        if (R < 2 || C < 2) { outs[0] = Value(); return; }
+        if (R < 2 || C < 2) { setOutputs(); return; }
 
         const auto Zat = [&](size_t r, size_t c) {
             return Z_arg->elemAsDouble(c * R + r);
@@ -418,7 +430,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             fm.pushDataset(std::move(ds));
         }
         fm.emitModified();
-        outs[0] = Value();
+        setOutputs();
     };
     reg("contour", "contourf", contourfImpl);
 }

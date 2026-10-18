@@ -115,6 +115,17 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 ax.holdOn = (args[0].toString() == "on");
             outs[0] = Value();
         });
+    regCore("layout", "ishold",
+        [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            outs[0] = Value::logicalScalar(gc.fm.currentAxes().holdOn);
+        });
+    regCore("layout", "colordef",
+        [](Span<const Value> /*args*/, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            if (nargout >= 1)
+                outs[0] = Value::scalar(static_cast<double>(gc.fm.current().id));
+            else
+                outs[0] = Value();
+        });
     reg("layout", "subplot",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) {

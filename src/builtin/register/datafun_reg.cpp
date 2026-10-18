@@ -430,6 +430,90 @@ void register_datafun(Engine &engine) {
             outs[0] = args[0];
         });
 
+    engine.registerFunction("dist",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "dist");
+            auto *mr = ctx.engine->resource();
+            if (args.size() == 1) {
+                const Value &P = args[0];
+                const size_t R = P.dims().rows();
+                const size_t Q = P.dims().cols();
+                if (P.isComplex()) {
+                    Value Z = Value::matrix(Q, Q, ValueType::COMPLEX, mr);
+                    auto *zd = Z.complexDataMut();
+                    const auto *pd = P.complexData();
+                    for (size_t q2 = 0; q2 < Q; ++q2) {
+                        for (size_t q1 = 0; q1 < Q; ++q1) {
+                            std::complex<double> acc(0.0, 0.0);
+                            for (size_t r = 0; r < R; ++r) {
+                                const auto diff = pd[r + q1 * R] - pd[r + q2 * R];
+                                acc += diff * diff;
+                            }
+                            zd[q1 + q2 * Q] = std::sqrt(acc);
+                        }
+                    }
+                    outs[0] = std::move(Z);
+                } else {
+                    Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
+                    double *zd = Z.doubleDataMut();
+                    for (size_t q2 = 0; q2 < Q; ++q2) {
+                        for (size_t q1 = 0; q1 < Q; ++q1) {
+                            double acc = 0.0;
+                            for (size_t r = 0; r < R; ++r) {
+                                const double diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
+                                acc += diff * diff;
+                            }
+                            zd[q1 + q2 * Q] = std::sqrt(acc);
+                        }
+                    }
+                    outs[0] = std::move(Z);
+                }
+                return;
+            }
+            const Value &W = args[0];
+            const Value &P = args[1];
+            const size_t S = W.dims().rows();
+            const size_t R = W.dims().cols();
+            if (P.dims().rows() != R) {
+                throw Error("dist: inner matrix dimensions must agree (size(W,2) must equal size(P,1))",
+                            0, 0, "dist", "", "numkit:dist:dimMismatch");
+            }
+            const size_t Q = P.dims().cols();
+            if (W.isComplex() || P.isComplex()) {
+                Value Z = Value::matrix(S, Q, ValueType::COMPLEX, mr);
+                auto *zd = Z.complexDataMut();
+                auto readCx = [](const Value &v, size_t idx) -> std::complex<double> {
+                    return v.isComplex() ? v.complexData()[idx]
+                                         : std::complex<double>(v.elemAsDouble(idx), 0.0);
+                };
+                for (size_t q = 0; q < Q; ++q) {
+                    for (size_t s = 0; s < S; ++s) {
+                        std::complex<double> acc(0.0, 0.0);
+                        for (size_t r = 0; r < R; ++r) {
+                            const auto diff = std::conj(readCx(W, s + r * S)) - readCx(P, r + q * R);
+                            acc += diff * diff;
+                        }
+                        zd[s + q * S] = std::sqrt(acc);
+                    }
+                }
+                outs[0] = std::move(Z);
+            } else {
+                Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
+                double *zd = Z.doubleDataMut();
+                for (size_t q = 0; q < Q; ++q) {
+                    for (size_t s = 0; s < S; ++s) {
+                        double acc = 0.0;
+                        for (size_t r = 0; r < R; ++r) {
+                            const double diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
+                            acc += diff * diff;
+                        }
+                        zd[s + q * S] = std::sqrt(acc);
+                    }
+                }
+                outs[0] = std::move(Z);
+            }
+        });
+
     // Base Fourier transforms & helpers (MATLAB datafun / elfun)
     engine.registerFunction("fft",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {

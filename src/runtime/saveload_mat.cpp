@@ -1,4 +1,4 @@
-﻿// runtime/src/saveload_mat.cpp
+// runtime/src/saveload_mat.cpp
 //
 // In-tree autonomous zero-dependency MATLAB .mat file codec (Level 4 & Level 5).
 // Supports uncompressed Level 5 (-v6), compressed Level 5 (-v7 via in-tree zlib),
@@ -546,32 +546,110 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 
         auto realTag = ir.readTag();
 
+        auto readTagElemAsDouble = [](const MatReader::Tag &tag, std::size_t idx) -> double {
+            if (!tag.payload) return 0.0;
+            switch (tag.type) {
+                case miDOUBLE: return reinterpret_cast<const double*>(tag.payload)[idx];
+                case miSINGLE: return static_cast<double>(reinterpret_cast<const float*>(tag.payload)[idx]);
+                case miINT8:   return static_cast<double>(reinterpret_cast<const std::int8_t*>(tag.payload)[idx]);
+                case miUINT8:  return static_cast<double>(reinterpret_cast<const std::uint8_t*>(tag.payload)[idx]);
+                case miINT16:  return static_cast<double>(reinterpret_cast<const std::int16_t*>(tag.payload)[idx]);
+                case miUINT16: return static_cast<double>(reinterpret_cast<const std::uint16_t*>(tag.payload)[idx]);
+                case miINT32:  return static_cast<double>(reinterpret_cast<const std::int32_t*>(tag.payload)[idx]);
+                case miUINT32: return static_cast<double>(reinterpret_cast<const std::uint32_t*>(tag.payload)[idx]);
+                case miINT64:  return static_cast<double>(reinterpret_cast<const std::int64_t*>(tag.payload)[idx]);
+                case miUINT64: return static_cast<double>(reinterpret_cast<const std::uint64_t*>(tag.payload)[idx]);
+                default:       return 0.0;
+            }
+        };
+
         if (isComplex) {
             auto imagTag = ir.readTag();
             result = createComplexMatrix(shape, mem);
             auto *cdata = result.complexDataMut();
-
-            // Real
-            if (realTag.type == miDOUBLE) {
-                const auto *rp = reinterpret_cast<const double*>(realTag.payload);
-                for (std::size_t i = 0; i < numElems; ++i) cdata[i] = std::complex<double>(rp[i], cdata[i].imag());
-            } else if (realTag.type == miSINGLE) {
-                const auto *rp = reinterpret_cast<const float*>(realTag.payload);
-                for (std::size_t i = 0; i < numElems; ++i) cdata[i] = std::complex<double>(rp[i], cdata[i].imag());
-            }
-            // Imag
-            if (imagTag.type == miDOUBLE) {
-                const auto *ip = reinterpret_cast<const double*>(imagTag.payload);
-                for (std::size_t i = 0; i < numElems; ++i) cdata[i] = std::complex<double>(cdata[i].real(), ip[i]);
-            } else if (imagTag.type == miSINGLE) {
-                const auto *ip = reinterpret_cast<const float*>(imagTag.payload);
-                for (std::size_t i = 0; i < numElems; ++i) cdata[i] = std::complex<double>(cdata[i].real(), ip[i]);
+            for (std::size_t i = 0; i < numElems; ++i) {
+                cdata[i] = std::complex<double>(readTagElemAsDouble(realTag, i),
+                                                readTagElemAsDouble(imagTag, i));
             }
         } else {
             result = createMatrix(shape, vt, mem);
             if (numElems > 0 && realTag.payload) {
-                std::size_t copyBytes = std::min<std::size_t>(result.rawBytes(), realTag.byteCount);
-                std::memcpy(result.rawDataMut(), realTag.payload, copyBytes);
+                const bool exactMatch =
+                    (vt == ValueType::DOUBLE && realTag.type == miDOUBLE) ||
+                    (vt == ValueType::SINGLE && realTag.type == miSINGLE) ||
+                    (vt == ValueType::INT8   && realTag.type == miINT8)   ||
+                    (vt == ValueType::UINT8  && realTag.type == miUINT8)  ||
+                    (vt == ValueType::INT16  && realTag.type == miINT16)  ||
+                    (vt == ValueType::UINT16 && realTag.type == miUINT16) ||
+                    (vt == ValueType::INT32  && realTag.type == miINT32)  ||
+                    (vt == ValueType::UINT32 && realTag.type == miUINT32) ||
+                    (vt == ValueType::INT64  && realTag.type == miINT64)  ||
+                    (vt == ValueType::UINT64 && realTag.type == miUINT64) ||
+                    (vt == ValueType::LOGICAL && (realTag.type == miUINT8 || realTag.type == miINT8));
+                if (exactMatch && realTag.byteCount >= result.rawBytes()) {
+                    std::memcpy(result.rawDataMut(), realTag.payload, result.rawBytes());
+                } else {
+                    // MAT5 automatic numeric compression: storage tag differs from array class
+                    switch (vt) {
+                        case ValueType::DOUBLE: {
+                            double *dst = result.doubleDataMut();
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = readTagElemAsDouble(realTag, i);
+                            break;
+                        }
+                        case ValueType::SINGLE: {
+                            float *dst = result.singleDataMut();
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<float>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::LOGICAL: {
+                            std::uint8_t *dst = result.logicalDataMut();
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = (readTagElemAsDouble(realTag, i) != 0.0) ? 1 : 0;
+                            break;
+                        }
+                        case ValueType::INT8: {
+                            auto *dst = reinterpret_cast<std::int8_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int8_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::UINT8: {
+                            auto *dst = reinterpret_cast<std::uint8_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint8_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::INT16: {
+                            auto *dst = reinterpret_cast<std::int16_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int16_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::UINT16: {
+                            auto *dst = reinterpret_cast<std::uint16_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint16_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::INT32: {
+                            auto *dst = reinterpret_cast<std::int32_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int32_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::UINT32: {
+                            auto *dst = reinterpret_cast<std::uint32_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint32_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::INT64: {
+                            auto *dst = reinterpret_cast<std::int64_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int64_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        case ValueType::UINT64: {
+                            auto *dst = reinterpret_cast<std::uint64_t*>(result.rawDataMut());
+                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint64_t>(readTagElemAsDouble(realTag, i));
+                            break;
+                        }
+                        default:
+                            break;
+                    }
+                }
             }
         }
     }

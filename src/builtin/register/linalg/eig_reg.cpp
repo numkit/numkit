@@ -183,17 +183,30 @@ void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
 
     const bool wantSingle = (A->type() == ValueType::SINGLE ||
                              (B && B->type() == ValueType::SINGLE));
-    Value M;
     if (B) {
-        detail::requireDoubleInput(*A, "eig");
-        detail::requireDoubleInput(*B, "eig", "B");
-        Value Aw = detail::widenSingleToDouble(*A, mr);
-        Value Bw = detail::widenSingleToDouble(*B, mr);
-        M = numkit::builtin::mtimes(inv(Bw, mr), Aw, mr);
-    } else {
-        M = *A;
+        if (nargout >= 2) {
+            auto [V, D] = eig_generalized_VD(*A, *B, mr);
+            if (nargout >= 3) {
+                Value Aw = detail::widenSingleToDouble(*A, mr);
+                Value Bw = detail::widenSingleToDouble(*B, mr);
+                Value M = numkit::builtin::mtimes(inv(Bw, mr), Aw, mr);
+                outs[2] = detail::narrowDoubleToSingleIf(leftEigenvectors(M, D, mr), wantSingle, mr);
+            }
+            outs[0] = std::move(V);
+            outs[1] = std::move(D);
+            return;
+        }
+        if (wantMatrix) {
+            auto [V, D] = eig_generalized_VD(*A, *B, mr);
+            (void)V;
+            outs[0] = std::move(D);
+            return;
+        }
+        outs[0] = eig_generalized_values(*A, *B, mr);
+        return;
     }
 
+    const Value &M = *A;
     if (nargout >= 2) {
         auto [V, D] = eigVDAuto(M, mr);
         if (nargout >= 3)

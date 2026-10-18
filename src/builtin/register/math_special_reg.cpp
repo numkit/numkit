@@ -47,9 +47,83 @@ NUMKIT_UNARY_ADAPTER(erfinv,  erfinv)
 NUMKIT_UNARY_ADAPTER(erfcinv, erfcinv)
 NUMKIT_UNARY_ADAPTER(erfcx,   erfcx)
 NUMKIT_UNARY_ADAPTER(expint,  expint)
-NUMKIT_UNARY_ADAPTER(psi,     psi)
 
 #undef NUMKIT_UNARY_ADAPTER
+
+namespace {
+
+double polygammaScalar(int k, double x)
+{
+    if (std::isnan(x)) return x;
+    if (x <= 0.0 && x == std::floor(x)) {
+        return (k % 2 == 1) ? std::numeric_limits<double>::infinity()
+                            : -std::numeric_limits<double>::infinity();
+    }
+    double factK = 1.0;
+    for (int i = 2; i <= k; ++i) factK *= static_cast<double>(i);
+    const double sign = (k % 2 == 1) ? 1.0 : -1.0;
+
+    double r = 0.0;
+    double y = x;
+    while (y < 12.0) {
+        r += sign * factK / std::pow(y, k + 1);
+        y += 1.0;
+    }
+    const double invY = 1.0 / y;
+    const double invY2 = invY * invY;
+    const double yk = std::pow(invY, k);
+    const double factKm1 = factK / static_cast<double>(k);
+
+    // Bernoulli numbers B_2..B_10
+    static constexpr double B[5] = {
+        1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0
+    };
+    double series = factKm1 + 0.5 * factK * invY;
+    double powY2 = invY2;
+    double binomNum = factKm1; // (2m + k - 1)! / (2m)! starts at (k - 1)! for m = 0
+    for (int m = 1; m <= 5; ++m) {
+        const int twoM = 2 * m;
+        binomNum *= static_cast<double>((twoM + k - 2) * (twoM + k - 1))
+                  / static_cast<double>((twoM - 1) * twoM);
+        series += B[m - 1] * binomNum * powY2;
+        powY2 *= invY2;
+    }
+    return r + sign * yk * series;
+}
+
+} // namespace
+
+void psi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 2, "psi");
+    auto *mr = ctx.engine->resource();
+    if (args.size() == 1) {
+        outs[0] = psi(args[0], mr);
+        return;
+    }
+    const double kv = argcheck::expectedReal(args[0], 1, "k", "psi");
+    argcheck::expectedInteger(kv, 1, "k", "psi");
+    argcheck::expectedNonNegative(kv, 1, "k", "psi");
+    const int k = static_cast<int>(kv);
+    if (k == 0) {
+        outs[0] = psi(args[1], mr);
+        return;
+    }
+    const Value &X = args[1];
+    Value out = ops::createLike(X, ValueType::DOUBLE, mr);
+    double *od = out.doubleDataMut();
+    for (size_t i = 0; i < X.numel(); ++i)
+        od[i] = polygammaScalar(k, X.elemAsDouble(i));
+    if (X.type() == ValueType::SINGLE) {
+        Value sOut = ops::createLike(X, ValueType::SINGLE, mr);
+        float *sd = sOut.singleDataMut();
+        for (size_t i = 0; i < X.numel(); ++i)
+            sd[i] = static_cast<float>(od[i]);
+        outs[0] = std::move(sOut);
+    } else {
+        outs[0] = std::move(out);
+    }
+}
 
 void beta_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
               CallContext &ctx)

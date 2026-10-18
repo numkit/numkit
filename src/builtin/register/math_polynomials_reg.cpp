@@ -399,6 +399,122 @@ void residuez_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     if (nargout > 2) outs[2] = std::move(res.k);
 }
 
+void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 2, "latc2tf");
+    auto *mr = ctx.engine->resource();
+    const Value &K = args[0];
+    const bool hasSecond = (args.size() >= 2);
+    const bool secondIsStr = hasSecond && (args[1].isChar() || args[1].isString());
+    const bool hasLadder = hasSecond && !secondIsStr;
+
+    std::string mode = "fir";
+    if (secondIsStr) {
+        mode = args[1].toString();
+        for (char &c : mode)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (mode != "fir" && mode != "iir" && mode != "allpole" &&
+            mode != "allpass" && mode != "min" && mode != "max") {
+            throw Error("latc2tf: unknown option '" + args[1].toString() + "'",
+                        0, 0, "latc2tf", "", "numkit:latc2tf:badOption");
+        }
+    }
+
+    const size_t nK_in = K.numel();
+    const size_t nV_in = hasLadder ? args[1].numel() : 0;
+    if (nK_in == 0 && (!hasLadder || nV_in == 0)) {
+        outs[0] = Value::Empty;
+        if (nargout > 1) outs[1] = Value::Empty;
+        return;
+    }
+
+    const size_t M = hasLadder ? std::max(nK_in, (nV_in > 0 ? nV_in - 1 : size_t(0))) : nK_in;
+    const bool isCx = K.isComplex() || (hasLadder && args[1].isComplex());
+
+    auto readCx = [](const Value &v, size_t idx) -> std::complex<double> {
+        return v.isComplex() ? v.complexData()[idx]
+                             : std::complex<double>(v.elemAsDouble(idx), 0.0);
+    };
+
+    // Step-up Levinson recursion:
+    // J^{(0)} = [1]; for m = 1..M:
+    //   B^{(m-1)} = conj(flip(J^{(m-1)}))
+    //   J^{(m)}   = [J^{(m-1)}, 0] + K_m * [0, B^{(m-1)}]
+    // For ladder V, row m (0..M) of the lower-triangular reverse matrix is B^{(m)}.
+    std::vector<std::complex<double>> J(1, std::complex<double>(1.0, 0.0));
+    std::vector<std::vector<std::complex<double>>> Brows;
+    if (hasLadder) {
+        Brows.reserve(M + 1);
+        Brows.push_back(J); // B^{(0)} = [1]
+    }
+
+    for (size_t m = 1; m <= M; ++m) {
+        const std::complex<double> km = (m - 1 < nK_in) ? readCx(K, m - 1) : std::complex<double>(0.0, 0.0);
+        std::vector<std::complex<double>> Bprev(m);
+        for (size_t j = 0; j < m; ++j)
+            Bprev[j] = std::conj(J[m - 1 - j]);
+        std::vector<std::complex<double>> Jnext(m + 1, std::complex<double>(0.0, 0.0));
+        for (size_t j = 0; j < m; ++j)
+            Jnext[j] += J[j];
+        for (size_t j = 0; j < m; ++j)
+            Jnext[j + 1] += km * Bprev[j];
+        J = std::move(Jnext);
+        if (hasLadder) {
+            std::vector<std::complex<double>> Bm(m + 1);
+            for (size_t j = 0; j <= m; ++j)
+                Bm[j] = std::conj(J[m - j]);
+            Brows.push_back(std::move(Bm));
+        }
+    }
+
+    auto makeRow = [&](const std::vector<std::complex<double>> &vec) -> Value {
+        if (isCx) {
+            Value out = Value::matrix(1, vec.size(), ValueType::COMPLEX, mr);
+            std::copy(vec.begin(), vec.end(), out.complexDataMut());
+            return out;
+        }
+        Value out = Value::matrix(1, vec.size(), ValueType::DOUBLE, mr);
+        double *d = out.doubleDataMut();
+        for (size_t i = 0; i < vec.size(); ++i) d[i] = vec[i].real();
+        return out;
+    };
+
+    if (hasLadder) {
+        const Value &V = args[1];
+        std::vector<std::complex<double>> numVec(M + 1, std::complex<double>(0.0, 0.0));
+        for (size_t m = 0; m <= M; ++m) {
+            const std::complex<double> vm = (m < nV_in) ? readCx(V, m) : std::complex<double>(0.0, 0.0);
+            const auto &row = Brows[m];
+            for (size_t j = 0; j < row.size(); ++j)
+                numVec[j] += vm * row[j];
+        }
+        outs[0] = makeRow(numVec);
+        if (nargout > 1) outs[1] = makeRow(J);
+        return;
+    }
+
+    std::vector<std::complex<double>> Jrev(M + 1);
+    for (size_t j = 0; j <= M; ++j)
+        Jrev[j] = std::conj(J[M - j]);
+
+    if (mode == "allpole" || mode == "iir") {
+        std::vector<std::complex<double>> numVec(M + 1, std::complex<double>(0.0, 0.0));
+        numVec[0] = std::complex<double>(1.0, 0.0);
+        outs[0] = makeRow(numVec);
+        if (nargout > 1) outs[1] = makeRow(J);
+    } else if (mode == "allpass") {
+        outs[0] = makeRow(Jrev);
+        if (nargout > 1) outs[1] = makeRow(J);
+    } else if (mode == "max") {
+        outs[0] = makeRow(Jrev);
+        if (nargout > 1) outs[1] = Value::scalar(1.0, mr);
+    } else {
+        // "fir" or "min"
+        outs[0] = makeRow(J);
+        if (nargout > 1) outs[1] = Value::scalar(1.0, mr);
+    }
+}
+
 } // namespace detail
 
 } // namespace numkit::builtin

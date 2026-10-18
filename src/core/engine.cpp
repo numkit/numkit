@@ -2160,17 +2160,49 @@ const UserFunction *Engine::lookupUserFunction(const std::string &name,
 
 void Engine::addPath(const std::string &dir)
 {
+    if (dir.find(';') != std::string::npos) {
+        size_t start = 0;
+        while (start <= dir.size()) {
+            size_t pos = dir.find(';', start);
+            std::string part = (pos == std::string::npos)
+                ? dir.substr(start)
+                : dir.substr(start, pos - start);
+            if (!part.empty()) addPath(part);
+            if (pos == std::string::npos) break;
+            start = pos + 1;
+        }
+        return;
+    }
+    if (dir.empty() || dir == "-begin" || dir == "-end" || dir == "-frozen")
+        return;
     // De-dup: ignore if already present.
     for (const auto &p : mPath_) {
         if (p == dir) return;
     }
+    mFileMissCache_.clear();
     mPath_.push_back(dir);
 }
 
 void Engine::rmPath(const std::string &dir)
 {
+    if (dir.find(';') != std::string::npos) {
+        size_t start = 0;
+        while (start <= dir.size()) {
+            size_t pos = dir.find(';', start);
+            std::string part = (pos == std::string::npos)
+                ? dir.substr(start)
+                : dir.substr(start, pos - start);
+            if (!part.empty()) rmPath(part);
+            if (pos == std::string::npos) break;
+            start = pos + 1;
+        }
+        return;
+    }
     auto it = std::find(mPath_.begin(), mPath_.end(), dir);
-    if (it != mPath_.end()) mPath_.erase(it);
+    if (it != mPath_.end()) {
+        mFileMissCache_.clear();
+        mPath_.erase(it);
+    }
 }
 
 void Engine::adoptUserFunction(const std::string &name,
@@ -2313,6 +2345,7 @@ void Engine::rehashMFiles()
         }
     }
     mFileCache_.clear();
+    mFileMissCache_.clear();
 
     // An INLINE subclass of a just-unregistered file base survives rehash still
     // holding the old base snapshot (it is not in mFileCache_, so the loop above
@@ -2323,6 +2356,7 @@ void Engine::rehashMFiles()
 
 void Engine::refreshStaleMFiles()
 {
+    mFileMissCache_.clear();
     if (mFileCache_.empty())
         return;
     std::vector<std::string> stale;
@@ -2394,6 +2428,13 @@ void Engine::reloadEvictedClassBases_(const std::vector<std::string> &bases)
 
 const UserFunction *Engine::resolveMFile_(const std::string &name)
 {
+    // Negative-lookup fast path: avoid walking searchDirs and hitting OS
+    // filesystem stat/exists on every builtin call inside a hot loop.
+    const std::string *curDir = currentScriptDir();
+    std::string missKey = (curDir && !curDir->empty()) ? (*curDir + '\n' + name) : name;
+    if (mFileMissCache_.count(missKey) > 0)
+        return nullptr;
+
     // Build search-path list: script-dir first (if any), then mPath_.
     // The implicit script-dir entry is what makes sibling lookup work
     // without addpath — `caller.m` calling `helper(x)` resolves against
@@ -2401,8 +2442,8 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
     // script's FS via `resolvePath` (which also falls back to the
     // origin's fsName when the relative path has no scheme).
     std::vector<std::string> searchDirs;
-    if (auto *dir = currentScriptDir(); dir && !dir->empty())
-        searchDirs.push_back(*dir);
+    if (curDir && !curDir->empty())
+        searchDirs.push_back(*curDir);
     searchDirs.insert(searchDirs.end(), mPath_.begin(), mPath_.end());
 
     // Decompose dotted name. "pkg.sub.foo" → +pkg/+sub/foo.m. The leaf
@@ -2702,6 +2743,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
 
         return &userFuncs_[name];
     }
+    mFileMissCache_.insert(std::move(missKey));
     return nullptr;
 }
 
