@@ -4,6 +4,7 @@
 #include <numkit/optim/local/fzero.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/scratch.hpp>
@@ -57,9 +58,7 @@ void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
 
 void fzero_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("fzero: requires at least 2 arguments (fn, x0 or [a, b])",
-                     0, 0, "fzero", "", "numkit:fzero:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "fzero");
     requireFuncHandle(args[0], "fzero");
     auto handle = args[0];
     auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
@@ -84,9 +83,7 @@ void fzero_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 
 void fminbnd_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3)
-        throw Error("fminbnd: requires (fn, lo, hi[, tol])",
-                     0, 0, "fminbnd", "", "numkit:fminbnd:nargin");
+    argcheck::checkNargin(args.size(), 3, 4, "fminbnd");
     requireFuncHandle(args[0], "fminbnd");
     const double lo = args[1].toScalar();
     const double hi = args[2].toScalar();
@@ -104,9 +101,7 @@ void fminbnd_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
 
 void fminsearch_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("fminsearch: requires (fn, x0[, tol])",
-                     0, 0, "fminsearch", "", "numkit:fminsearch:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "fminsearch");
     requireFuncHandle(args[0], "fminsearch");
     const double tol = (args.size() >= 3 && !args[2].isEmpty()) ? args[2].toScalar() : 1e-4;
     auto handle = args[0];

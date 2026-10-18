@@ -4,6 +4,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 #include <numkit/value/scratch.hpp>
@@ -55,14 +56,10 @@ void register_lang(Engine &engine) {
 
     
 // ── Pack 13: function handles ─────────────────────────────────────
-    // feval(handle_or_name, args...) — invoke through the engine's
-    // existing handle-call path. Accepts either a real function handle
-    // or a name/string (str2func it on the fly).
     engine.registerFunction("feval",
                             [](Span<const Value> args, size_t nargout,
                                Span<Value> outs, CallContext &ctx) {
-                                if (args.empty())
-                                    throw std::runtime_error("feval requires at least 1 argument");
+                                argcheck::checkNargin(args.size(), 1, "feval");
                                 Value handle;
                                 if (args[0].isFuncHandle()) {
                                     handle = args[0];
@@ -83,29 +80,16 @@ void register_lang(Engine &engine) {
                                         outs[i] = std::move(rs[i]);
                                 }
                             });
-    // feval into a user-code handle runs as a pausable VM frame; a name/string
-    // handle or multi-output falls back to the synchronous feval above.
     engine.registerCallbackBuiltin(
         "feval", std::make_shared<::numkit::builtin::detail::FevalCallbackBuiltin>());
 
-    // __numkit_fwd_call__(n, fname, args...) — internal helper for anonymous
-    // multi-output forwarding: call `fname` with nargout = n and return the
-    // n results packed into a 1×n cell. The compiler lowers a multi-output
-    // anonymous body `@(p) g(...)` to `varargout = __numkit_fwd_call__(nargout,
-    // 'g', ...)`, so the varargout cell expands to as many outputs as the
-    // caller's nargout asked for (anonymous nargout forwarding).
     auto fwdCallFn = [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
                         CallContext &ctx) {
-        if (args.size() < 2)
-            throw std::runtime_error(
-                "__numkit_fwd_call__: requires (n, fname, args...)");
+        argcheck::checkNargin(args.size(), 2, "__numkit_fwd_call__");
         long long nll = static_cast<long long>(args[0].toScalar());
         size_t n = (nll > 0) ? static_cast<size_t>(nll) : 1;
         Span<const Value> callArgs(args.data() + 2, args.size() - 2);
         std::vector<Value> rs;
-        // Resolve the callee the SAME way a direct call does — `findExternal`
-        // is import/namespace-aware.
-        // Only fall back to the handle path for user / anonymous functions.
         bool done = false;
         if (args[1].isChar() || args[1].isString()) {
             const std::string fname = args[1].toString();
@@ -129,21 +113,15 @@ void register_lang(Engine &engine) {
     };
     engine.registerFunction("__numkit_fwd_call__", fwdCallFn);
 
-    // str2func / func2str moved to the runtime layer
-    // (runtime/src/function_handles.cpp, registerFunctionHandles) — they
-    // operate the engine (anon-source eval / handle minting / name read), not
-    // a math toolbox. feval stays here for now: its pausable
-    // FevalCallbackBuiltin adapter travels with the callback adapters that
-    // move to bundle in step F.
-    // iskeyword() / iskeyword(s) — list MATLAB reserved words / test one.
     engine.registerFunction("iskeyword",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 1, "iskeyword");
             outs[0] = ::numkit::builtin::iskeyword(args, ctx.engine->resource());
         });
 
-    // isvarname(s) — true if s is a valid MATLAB variable name.
     engine.registerFunction("isvarname",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "isvarname");
             outs[0] = ::numkit::builtin::isvarname(args, ctx.engine->resource());
         });
 

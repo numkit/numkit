@@ -17,6 +17,7 @@
 #include <numkit/builtin/ops.hpp>  // mtimes (eig(A,B))
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
@@ -32,17 +33,13 @@ namespace detail {
 
 void ordeig_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("ordeig: requires (T)",
-                    0, 0, "ordeig", "", "numkit:ordeig:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "ordeig");
     outs[0] = ordeig(args[0], ctx.engine->resource());
 }
 
 void polyeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("polyeig: requires at least 2 coefficient matrices",
-                    0, 0, "polyeig", "", "numkit:polyeig:nargin");
+    argcheck::checkNargin(args.size(), 2, "polyeig");
     auto *mr = ctx.engine->resource();
     if (nargout >= 2) {
         auto [V, e] = polyeig_VE(args, mr);
@@ -159,9 +156,7 @@ static Value leftEigenvectors(const Value &M, const Value &D,
 
 void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || args.size() > 3)
-        throw Error("eig: requires 1 to 3 arguments",
-                    0, 0, "eig", "", "numkit:eig:nargin");
+    argcheck::checkNargin(args.size(), 1, 3, "eig");
     auto *mr = ctx.engine->resource();
 
     const Value *A = &args[0];
@@ -218,9 +213,7 @@ void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
 
 void hess_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("hess: requires exactly 1 argument",
-                    0, 0, "hess", "", "numkit:hess:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "hess");
     auto *mr = ctx.engine->resource();
     if (nargout >= 2) {
         auto [P, H] = hess(args[0], mr);
@@ -233,13 +226,8 @@ void hess_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 void schur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("schur: requires exactly 1 argument",
-                    0, 0, "schur", "", "numkit:schur:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "schur");
     auto *mr = ctx.engine->resource();
-    // Complex input never routes through the double-only symmetric path â€”
-    // isSymmetricApprox early-falses complex; the complex-Schur pipeline
-    // handles it. Compute owns the type/shape contract.
     auto [U, T] = (!args[0].isComplex() && isSymmetricApprox(args[0], 1e-10))
                       ? schur_sym(args[0], mr)
                       : schur_general(args[0], mr);
@@ -253,11 +241,7 @@ void schur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
 
 void sylvester_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 3)
-        throw Error("sylvester: requires (A, B, C)",
-                    0, 0, "sylvester", "", "numkit:sylvester:nargin");
-    // General Schur-based solver (real/complex, symmetric or not) â€” the
-    // compute entry owns the type contract.
+    argcheck::checkNargin(args.size(), 3, 3, "sylvester");
     outs[0] = sylvester(args[0], args[1], args[2], ctx.engine->resource());
 }
 

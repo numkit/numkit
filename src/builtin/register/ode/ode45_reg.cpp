@@ -5,21 +5,18 @@
 #include <numkit/ode/options.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
 namespace numkit::ode {
-
-// â”€â”€ Engine adapter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 namespace detail {
 
 void ode45_reg(Span<const Value> args, size_t nargout,
                Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3)
-        throw Error("ode45: requires (f, tspan, y0[, opts])",
-                    0, 0, "ode45", "", "numkit:ode45:nargin");
+    argcheck::checkNargin(args.size(), 3, 4, "ode45");
     auto *mr = ctx.engine->resource();
     const Value opts_v = (args.size() > 3) ? args[3] : Value::Empty;
     // Bridge the MATLAB function-handle into an Engine-free FnHandle: the

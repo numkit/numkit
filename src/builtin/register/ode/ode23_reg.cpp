@@ -5,21 +5,18 @@
 #include <numkit/ode/options.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
 namespace numkit::ode {
-
-// â”€â”€ Engine adapter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 namespace detail {
 
 void ode23_reg(Span<const Value> args, size_t nargout,
                Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3)
-        throw Error("ode23: requires (f, tspan, y0[, opts])",
-                    0, 0, "ode23", "", "numkit:ode23:nargin");
+    argcheck::checkNargin(args.size(), 3, 4, "ode23");
     auto *mr = ctx.engine->resource();
     const Value opts_v = (args.size() > 3) ? args[3] : Value::Empty;
     const Value handle = args[0];

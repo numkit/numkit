@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/ldl_reg.cpp
+// toolboxes/linalg/src/ldl_reg.cpp
 //
 // Register half of the ldl builtin: the CallContext wrapper that parses the
 // lower/upper/matrix/vector options and delegates to the engine-free ldl
@@ -9,6 +9,7 @@
 #include <numkit/linalg/ldl.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
@@ -20,9 +21,7 @@ namespace detail {
 void ldl_reg(Span<const Value> args, size_t nargout,
              Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("ldl: requires (A [, opt...])",
-                    0, 0, "ldl", "", "numkit:ldl:nargin");
+    argcheck::checkNargin(args.size(), 1, 3, "ldl");
 
     bool upper = false;
     bool vec_perm = false;

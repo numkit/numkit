@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/predicates_reg.cpp
+// toolboxes/linalg/src/predicates_reg.cpp
 //
 // Register half of the matrix-predicate builtins: the CallContext wrappers
 // issymmetric / ishermitian / isbanded / isdiag / istril / istriu /
@@ -35,9 +35,7 @@ static bool parseSkewOpt(const Value &v, const char *who)
 void issymmetric_reg(Span<const Value> args, size_t /*nargout*/,
                      Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("issymmetric: requires (A)",
-                    0, 0, "issymmetric", "", "numkit:issymmetric:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "issymmetric");
     bool skew = (args.size() >= 2) && parseSkewOpt(args[1], "issymmetric");
     outs[0] = issymmetric(args[0], skew, ctx.engine->resource());
 }
@@ -45,9 +43,7 @@ void issymmetric_reg(Span<const Value> args, size_t /*nargout*/,
 void ishermitian_reg(Span<const Value> args, size_t /*nargout*/,
                      Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("ishermitian: requires (A)",
-                    0, 0, "ishermitian", "", "numkit:ishermitian:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "ishermitian");
     bool skew = (args.size() >= 2) && parseSkewOpt(args[1], "ishermitian");
     outs[0] = ishermitian(args[0], skew, ctx.engine->resource());
 }
@@ -55,9 +51,7 @@ void ishermitian_reg(Span<const Value> args, size_t /*nargout*/,
 void isbanded_reg(Span<const Value> args, size_t /*nargout*/,
                   Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3)
-        throw Error("isbanded: requires (A, lower, upper)",
-                    0, 0, "isbanded", "", "numkit:isbanded:nargin");
+    argcheck::checkNargin(args.size(), 3, 3, "isbanded");
     long lower = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "lower", "isbanded"), 2, "lower", "isbanded");
     long upper = argcheck::expectedInteger(
@@ -68,33 +62,28 @@ void isbanded_reg(Span<const Value> args, size_t /*nargout*/,
 void isdiag_reg(Span<const Value> args, size_t /*nargout*/,
                 Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("isdiag: requires (A)", 0, 0, "isdiag", "", "numkit:isdiag:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "isdiag");
     outs[0] = isdiag(args[0], ctx.engine->resource());
 }
 
 void istril_reg(Span<const Value> args, size_t /*nargout*/,
                 Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("istril: requires (A)", 0, 0, "istril", "", "numkit:istril:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "istril");
     outs[0] = istril(args[0], ctx.engine->resource());
 }
 
 void istriu_reg(Span<const Value> args, size_t /*nargout*/,
                 Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("istriu: requires (A)", 0, 0, "istriu", "", "numkit:istriu:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "istriu");
     outs[0] = istriu(args[0], ctx.engine->resource());
 }
 
 void bandwidth_reg(Span<const Value> args, size_t nargout,
                    Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("bandwidth: requires (A) or (A, opt)",
-                    0, 0, "bandwidth", "", "numkit:bandwidth:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "bandwidth");
     if (args.size() == 1) {
         auto [lo, up] = bandwidth(args[0], ctx.engine->resource());
         outs[0] = lo;

@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/vector_ops_reg.cpp
+// toolboxes/linalg/src/vector_ops_reg.cpp
 //
 // Register half of the vector builtins: the CallContext wrappers cross /
 // dot / kron that delegate to the engine-free compute in vector_ops.cpp.
@@ -18,9 +18,7 @@ namespace detail {
 
 void cross_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("cross: requires 2 arguments",
-                     0, 0, "cross", "", "numkit:cross:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "cross");
     // cross(A, B, dim): cross along the given dimension (default: first
     // dimension of length 3).
     const int dim = (args.size() >= 3 && !args[2].isEmpty())
@@ -31,15 +29,13 @@ void cross_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 
 void dot_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("dot: requires 2 arguments",
-                     0, 0, "dot", "", "numkit:dot:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "dot");
     // dot(A, B, dim): reduce along the given dimension (default: vector ->
     // scalar, matrix -> per-column).
     const int dim = (args.size() >= 3 && !args[2].isEmpty())
                         ? argcheck::dimArg(args[2], "dot") : 0;
     outs[0] = numkit::narrowComplex(dot(args[0], args[1], dim, ctx.engine->resource()),
-                                    ctx.engine->resource());
+                                     ctx.engine->resource());
 }
 
 void kron_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)

@@ -1,10 +1,11 @@
-﻿// bundle/src/register/io/paths_reg.cpp
+// bundle/src/register/io/paths_reg.cpp
 // CallContext adapters for io.paths filesep/fullfile/fileparts/tempdir/tempname.
 // Compute is Engine-free in toolboxes/io/src/paths/paths.cpp; these bridge via
 // engine.fsContext()/resource(). IoLibrary::install registers them by name.
 #include <numkit/io/paths/paths.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
@@ -13,8 +14,9 @@
 
 namespace numkit::io::detail {
 
-void filesep_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void filesep_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 0, 0, "filesep");
     outs[0] = filesep(ctx.engine->resource());
 }
 
@@ -37,7 +39,8 @@ void fullfile_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
 
 void fileparts_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+    argcheck::checkNargin(args.size(), 1, 1, "fileparts");
+    if (!args[0].isChar() && !args[0].isString())
         throw Error("fileparts: requires a string path",
                      0, 0, "fileparts", "", "numkit:fileparts:nargin");
     auto [folder, name, ext] = fileparts(args[0].toString(), ctx.engine->resource());
@@ -46,13 +49,15 @@ void fileparts_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
     if (nargout > 2) outs[2] = std::move(ext);
 }
 
-void tempdir_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void tempdir_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 0, 0, "tempdir");
     outs[0] = tempdir(ctx.engine->fsContext(), ctx.engine->resource());
 }
 
-void tempname_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void tempname_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 0, 1, "tempname");
     outs[0] = tempname(ctx.engine->fsContext(), ctx.engine->resource());
 }
 
@@ -84,7 +89,8 @@ void genpathCollect(Engine &eng, const std::string &dir, std::string &out)
 
 void genpath_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || !args[0].isChar())
+    argcheck::checkNargin(args.size(), 1, 1, "genpath");
+    if (!args[0].isChar())
         throw Error("genpath: requires a string directory name",
                      0, 0, "genpath", "", "numkit:genpath:nargin");
     std::string result;

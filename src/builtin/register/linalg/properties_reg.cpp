@@ -13,6 +13,7 @@
 #include <numkit/linalg/eig.hpp>     // eig_symmetric / eig_general_VD (condeig [V,D])
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
@@ -27,42 +28,32 @@ namespace detail {
 
 void inv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("inv: requires exactly 1 argument",
-                    0, 0, "inv", "", "numkit:inv:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "inv");
     outs[0] = inv(args[0], ctx.engine->resource());
 }
 
 void trace_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("trace: requires exactly 1 argument",
-                    0, 0, "trace", "", "numkit:trace:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "trace");
     outs[0] = trace(args[0], ctx.engine->resource());
 }
 
 void det_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("det: requires exactly 1 argument",
-                    0, 0, "det", "", "numkit:det:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "det");
     outs[0] = det(args[0], ctx.engine->resource());
 }
 
 void rank_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 1 || args.size() > 2)
-        throw Error("rank: requires (A) or (A, tol)",
-                    0, 0, "rank", "", "numkit:rank:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "rank");
     const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
     outs[0] = rank_of(args[0], tol, ctx.engine->resource());
 }
 
 void cond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || args.size() > 2)
-        throw Error("cond: requires (A) or (A, p)",
-                    0, 0, "cond", "", "numkit:cond:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "cond");
     auto *mr = ctx.engine->resource();
     if (args.size() == 1) {
         outs[0] = cond_2norm(args[0], mr);
@@ -89,38 +80,25 @@ void cond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
 
 void normest_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("normest: requires exactly 1 argument",
-                    0, 0, "normest", "", "numkit:normest:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "normest");
     outs[0] = normest(args[0], ctx.engine->resource());
 }
 
 void rcond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("rcond: requires (A)",
-                    0, 0, "rcond", "", "numkit:rcond:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "rcond");
     outs[0] = rcond(args[0], ctx.engine->resource());
 }
 
 void condest_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("condest: requires (A)",
-                    0, 0, "condest", "", "numkit:condest:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "condest");
     outs[0] = condest(args[0], ctx.engine->resource());
 }
 
-// condeig has three calling forms:
-//   s            = condeig(A)
-//   [V, D, s]    = condeig(A)        â€” V, D from eig(A), s as above.
-// The 2-output `[V, D] = condeig(A)` is documented in MATLAB only as
-// the same as `eig(A)`. Dispatch matches.
 void condeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("condeig: requires (A)",
-                    0, 0, "condeig", "", "numkit:condeig:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "condeig");
     auto *mr = ctx.engine->resource();
     if (nargout <= 1) {
         outs[0] = condeig(args[0], mr);

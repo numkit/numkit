@@ -19,47 +19,32 @@ namespace detail {
 
 void expm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("expm: requires exactly 1 argument",
-                    0, 0, "expm", "", "numkit:expm:nargin");
+    argcheck::checkNargin(args.size(), 1, 1, "expm");
     outs[0] = expm(args[0], ctx.engine->resource());
 }
 
 void logm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("logm: requires exactly 1 argument",
-                    0, 0, "logm", "", "numkit:logm:nargin");
-    // General Schur-based solver (real/complex, symmetric or not) — the
-    // compute entry owns the type contract.
+    argcheck::checkNargin(args.size(), 1, 1, "logm");
     outs[0] = logm(args[0], ctx.engine->resource());
 }
 
 void sqrtm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 1)
-        throw Error("sqrtm: requires exactly 1 argument",
-                    0, 0, "sqrtm", "", "numkit:sqrtm:nargin");
-    // General Schur-based solver (real/complex, symmetric or not) — the
-    // compute entry owns the type contract.
+    argcheck::checkNargin(args.size(), 1, 1, "sqrtm");
     outs[0] = sqrtm(args[0], ctx.engine->resource());
 }
 
-// Reference signature: w = expmv(t, A, v) — three positional args, t first.
-// Some flavours (e.g. expmv from Higham's package) use (A, v) and an
-// optional t; we mirror the documented order with t leading.
 void expmv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 3)
-        throw Error("expmv: requires (t, A, v)",
-                    0, 0, "expmv", "", "numkit:expmv:nargin");
+    argcheck::checkNargin(args.size(), 3, 3, "expmv");
     const double t = args[0].toScalar();
     outs[0] = expmv(t, args[1], args[2], ctx.engine->resource());
 }
 
 void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 2, "funm");
+    argcheck::checkNargin(args.size(), 2, 2, "funm");
     auto *mr = ctx.engine->resource();
     const Value &A = args[0];
     const Value &fnArg = args[1];

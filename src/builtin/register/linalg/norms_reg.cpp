@@ -1,4 +1,4 @@
-﻿// toolboxes/linalg/src/norms_reg.cpp
+// toolboxes/linalg/src/norms_reg.cpp
 //
 // Register half of the norm builtins: the CallContext wrappers norm /
 // vecnorm that parse the p / dim arguments and delegate to the engine-free
@@ -21,9 +21,7 @@ namespace detail {
 
 void norm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || args.size() > 2)
-        throw Error("norm: requires (X) or (X, p)",
-                    0, 0, "norm", "", "numkit:norm:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "norm");
     auto *mr = ctx.engine->resource();
     if (args.size() == 1) {
         outs[0] = norm_value(args[0], 2.0, mr);
@@ -49,9 +47,6 @@ void norm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
             outs[0] = norm_inf(args[0], mr);
             return;
         }
-        // p = -Inf is a VECTOR norm only: min(|v|). MATLAB rejects it for
-        // matrices ("the only matrix norms are 1, 2, Inf, 'fro'"). Previously
-        // both +Inf and -Inf fell through to norm_inf (max) â€” wrong for -Inf.
         const Value &X = args[0];
         const bool isVec = !X.dims().is3D()
                            && (X.dims().rows() <= 1 || X.dims().cols() <= 1);
@@ -68,9 +63,7 @@ void norm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
 void vecnorm_reg(Span<const Value> args, size_t /*nargout*/,
                  Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("vecnorm: requires (A [, p [, dim]])",
-                    0, 0, "vecnorm", "", "numkit:vecnorm:nargin");
+    argcheck::checkNargin(args.size(), 1, 3, "vecnorm");
     double p = 2.0;
     int dim = 0;
     if (args.size() >= 2) p = args[1].toScalar();

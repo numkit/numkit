@@ -11,6 +11,7 @@
 #include <numkit/linalg/detail/linalg_detail.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
@@ -24,9 +25,7 @@ namespace detail {
 void balance_reg(Span<const Value> args, size_t nargout,
                  Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("balance: requires (A [, 'noperm'])",
-                    0, 0, "balance", "", "numkit:balance:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "balance");
     bool noperm = false;
     if (args.size() >= 2) {
         if (!args[1].isChar() && !args[1].isString())

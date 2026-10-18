@@ -40,9 +40,7 @@ namespace detail {
 
 void chol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("chol: requires at least 1 argument",
-                    0, 0, "chol", "", "numkit:chol:nargin");
+    argcheck::checkNargin(args.size(), 1, 3, "chol");
     auto *mr = ctx.engine->resource();
     const Value &A = args[0];
     // This entry carries the [R,p]/'lower' forms locally (raw-buffer
@@ -219,9 +217,7 @@ bool wantsEcon(Span<const Value> args, const char *fn)
 
 void lu_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty() || args.size() > 2)
-        throw Error("lu: requires 1 or 2 arguments",
-                    0, 0, "lu", "", "numkit:lu:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "lu");
     auto *mr = ctx.engine->resource();
 
     bool vectorP = false;
@@ -252,6 +248,7 @@ void lu_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
 
 void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 1, 3, "qr");
     auto *mr = ctx.engine->resource();
 
     bool econ = false, vectorP = false;
@@ -306,8 +303,8 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
         auto [Q, R] = qr_decompose(args[0], mr);
         if (econ) {
             const size_t k = std::min(m, n);
-            Q = firstCols(Q, k, mr);                // m×k
-            R = topLeftBlock(R, k, n, mr);          // k×n
+            Q = firstCols(Q, k, mr);
+            R = topLeftBlock(R, k, n, mr);
         }
         outs[0] = std::move(Q);
         outs[1] = std::move(R);
@@ -320,6 +317,7 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
 
 void svd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 1, 2, "svd");
     const bool econ = wantsEcon(args, "svd");
     auto *mr = ctx.engine->resource();
     if (nargout >= 2) {
@@ -327,23 +325,21 @@ void svd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         if (econ) {
             const size_t m = args[0].dims().rows(), n = args[0].dims().cols();
             const size_t k = std::min(m, n);
-            U = firstCols(U, k, mr);                // m×k
-            S = topLeftBlock(S, k, k, mr);          // k×k
-            V = firstCols(V, k, mr);                // n×k
+            U = firstCols(U, k, mr);
+            S = topLeftBlock(S, k, k, mr);
+            V = firstCols(V, k, mr);
         }
         outs[0] = std::move(U);
         outs[1] = std::move(S);
         if (nargout >= 3) outs[2] = std::move(V);
     } else {
-        outs[0] = svd_values(args[0], mr);          // 'econ' irrelevant for sv vector
+        outs[0] = svd_values(args[0], mr);
     }
 }
 
 void qrupdate_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() != 4)
-        throw Error("qrupdate: requires (Q, R, u, v)",
-                    0, 0, "qrupdate", "", "numkit:qrupdate:nargin");
+    argcheck::checkNargin(args.size(), 4, 4, "qrupdate");
     auto [Q1, R1] = qrupdate(args[0], args[1], args[2], args[3], ctx.engine->resource());
     outs[0] = std::move(Q1);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
@@ -351,13 +347,11 @@ void qrupdate_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 4 || args.size() > 5)
-        throw Error("qrinsert: requires (Q, R, k, x[, 'col']) — row form is not yet supported",
-                    0, 0, "qrinsert", "", "numkit:qrinsert:nargin");
+    argcheck::checkNargin(args.size(), 4, 5, "qrinsert");
     if (args.size() == 5) {
         if (!(args[4].isChar() || args[4].isString())
             || args[4].toString() != "col")
-            throw Error("qrinsert: row form not supported in v1 — pass 'col' or omit",
+            throw Error("qrinsert: row form not supported in v1 -- pass 'col' or omit",
                         0, 0, "qrinsert", "", "numkit:qrinsert:rowDeferred");
     }
     const double kd = args[2].toScalar();
@@ -373,13 +367,11 @@ void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void qrdelete_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3 || args.size() > 4)
-        throw Error("qrdelete: requires (Q, R, k[, 'col']) — row form is not yet supported",
-                    0, 0, "qrdelete", "", "numkit:qrdelete:nargin");
+    argcheck::checkNargin(args.size(), 3, 4, "qrdelete");
     if (args.size() == 4) {
         if (!(args[3].isChar() || args[3].isString())
             || args[3].toString() != "col")
-            throw Error("qrdelete: row form not supported in v1 — pass 'col' or omit",
+            throw Error("qrdelete: row form not supported in v1 -- pass 'col' or omit",
                         0, 0, "qrdelete", "", "numkit:qrdelete:rowDeferred");
     }
     const double kd = args[2].toScalar();
@@ -395,9 +387,7 @@ void qrdelete_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void cholupdate_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2 || args.size() > 3)
-        throw Error("cholupdate: requires (R, x[, sign])",
-                    0, 0, "cholupdate", "", "numkit:cholupdate:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "cholupdate");
     int sign = 1;
     if (args.size() == 3) {
         if (args[2].isChar() || args[2].isString()) {
@@ -415,8 +405,7 @@ void cholupdate_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
 
 void qz_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("qz: requires at least 2 arguments (A, B)", 0, 0, "qz", "", "numkit:qz:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "qz");
     auto [AA, BB, Q, Z] = qz(args[0], args[1], ctx.engine->resource());
     outs[0] = std::move(AA);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(BB);
@@ -426,8 +415,7 @@ void qz_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
 
 void gsvd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 2)
-        throw Error("gsvd: requires at least 2 arguments (A, B)", 0, 0, "gsvd", "", "numkit:gsvd:nargin");
+    argcheck::checkNargin(args.size(), 2, 3, "gsvd");
     if (nargout <= 1) {
         outs[0] = gsvd_values(args[0], args[1], ctx.engine->resource());
     } else {
@@ -442,8 +430,7 @@ void gsvd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 void ordqz_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 5)
-        throw Error("ordqz: requires 5 arguments (AA, BB, Q, Z, select/domain)", 0, 0, "ordqz", "", "numkit:ordqz:nargin");
+    argcheck::checkNargin(args.size(), 5, 5, "ordqz");
     Value AA, BB, Q, Z;
     if (args[4].isChar() || args[4].isString()) {
         std::tie(AA, BB, Q, Z) = ordqz(args[0], args[1], args[2], args[3], args[4].toString(), ctx.engine->resource());
@@ -458,8 +445,7 @@ void ordqz_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
 
 void ordschur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 3)
-        throw Error("ordschur: requires at least 3 arguments (U, T, select/domain)", 0, 0, "ordschur", "", "numkit:ordschur:nargin");
+    argcheck::checkNargin(args.size(), 3, 3, "ordschur");
     Value U, T;
     if (args[2].isChar() || args[2].isString()) {
         std::tie(U, T) = ordschur(args[0], args[1], args[2].toString(), ctx.engine->resource());
@@ -472,8 +458,7 @@ void ordschur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void eigs_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("eigs: requires at least 1 argument", 0, 0, "eigs", "", "numkit:eigs:nargin");
+    argcheck::checkNargin(args.size(), 1, 4, "eigs");
     std::size_t k = (args.size() >= 2 && !args[1].isEmpty())
         ? static_cast<std::size_t>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[1], 2, "k", "eigs"), 2, "k", "eigs")) : 6;
@@ -488,8 +473,7 @@ void eigs_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 void svds_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("svds: requires at least 1 argument", 0, 0, "svds", "", "numkit:svds:nargin");
+    argcheck::checkNargin(args.size(), 1, 4, "svds");
     std::size_t k = (args.size() >= 2 && !args[1].isEmpty())
         ? static_cast<std::size_t>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[1], 2, "k", "svds"), 2, "k", "svds")) : 6;
@@ -505,8 +489,7 @@ void svds_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
 
 void svdsketch_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.empty())
-        throw Error("svdsketch: requires at least 1 argument (A)", 0, 0, "svdsketch", "", "numkit:svdsketch:nargin");
+    argcheck::checkNargin(args.size(), 1, 2, "svdsketch");
     double tol = (args.size() >= 2 && !args[1].isEmpty()) ? args[1].toScalar() : 1e-6;
     auto [U, S, V] = svdsketch(args[0], tol, ctx.engine->resource());
     outs[0] = std::move(U);
@@ -516,8 +499,7 @@ void svdsketch_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
 
 void svdappend_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    if (args.size() < 4)
-        throw Error("svdappend: requires 4 arguments (U, S, V, A_new)", 0, 0, "svdappend", "", "numkit:svdappend:nargin");
+    argcheck::checkNargin(args.size(), 4, 4, "svdappend");
     auto [U, S, V] = svdappend(args[0], args[1], args[2], args[3], ctx.engine->resource());
     outs[0] = std::move(U);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(S);

@@ -249,8 +249,7 @@ void registerFigureExport(Engine &engine)
     {
         ExternalFunc fn = [&engine](Span<const Value> args, size_t,
                                     Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 1)
-                throw std::runtime_error("saveas: requires (h, filename)");
+            argcheck::checkNargin(args.size(), 1, 3, "saveas");
             // saveas(filename) targets the current figure.
             bool firstIsTarget = args[0].isObject()
                                  || (args[0].isScalar() && !args[0].isChar());
@@ -261,13 +260,11 @@ void registerFigureExport(Engine &engine)
         };
         engine.registerFunction("", "saveas", std::move(fn));
     }
-    // exportgraphics(obj, filename [, Name,Valueâ€¦])
+    // exportgraphics(obj, filename [, Name,Value])
     {
         ExternalFunc fn = [](Span<const Value> args, size_t,
                              Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 2)
-                throw std::runtime_error(
-                    "exportgraphics: requires (obj, filename)");
+            argcheck::checkNargin(args.size(), 2, "exportgraphics");
             ExportArgs ea = parseExportArgs(*ctx.engine, args,
                                             "exportgraphics",
                                             /*needTarget=*/false);
@@ -282,6 +279,7 @@ void registerFigureExport(Engine &engine)
         ExternalFunc fn = [&engine](Span<const Value> args, size_t,
                                     Span<Value> outs, CallContext &ctx) {
             (void)engine;
+            argcheck::checkNargin(args.size(), 1, "print");
             ExportArgs ea = parseExportArgs(*ctx.engine, args, "print",
                                             /*needTarget=*/true);
             runExport(*ctx.engine, ea, "print");
@@ -312,6 +310,7 @@ void registerFigureExport(Engine &engine)
     {
         ExternalFunc fn = [](Span<const Value> args, size_t,
                              Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 2, "getframe");
             auto *mr = ctx.engine->resource();
             const FigureState *fig = nullptr;
             if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);

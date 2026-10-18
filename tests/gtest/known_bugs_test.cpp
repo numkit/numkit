@@ -701,7 +701,7 @@ TEST_F(BuiltinKnownBug, MaxVecdimEmptyFlag)
     EXPECT_DOUBLE_EQ(evalScalar("mx"), 9.0);
 }
 
-// bugs/opened/lang/reg-max-arity.md — extra positional arguments must be
+// bugs/closed/lang/reg-max-arity.md — extra positional arguments must be
 // rejected ("Too many input arguments" in the reference), not silently
 // dropped.
 TEST_F(BuiltinKnownBug, TriuMaxArity)
@@ -713,6 +713,56 @@ TEST_F(BuiltinKnownBug, StrncmpMaxArity)
 {
     EXPECT_THROW(eval("r = strncmp('a', 'b', 1, 1);"), std::exception);
 }
+
+TEST_F(BuiltinKnownBug, RegMaxArityBounds)
+{
+    struct Case {
+        const char *fn;
+        int max_args;
+    };
+    static const Case cases[] = {
+        // linalg
+        {"inv", 1}, {"det", 1}, {"trace", 1}, {"lu", 3}, {"svd", 3},
+        {"qr", 3}, {"chol", 3}, {"eig", 3}, {"expm", 1}, {"norm", 2},
+        {"vecnorm", 3}, {"pinv", 2}, {"linsolve", 3}, {"kron", 2},
+        {"cross", 3}, {"dot", 3}, {"balance", 2}, {"ldl", 3},
+        {"schur", 2}, {"rsf2csf", 2}, {"cdf2rdf", 2}, {"ordschur", 3},
+        {"ordqz", 5}, {"sylvester", 3}, {"subspace", 2}, {"orth", 2},
+        {"null", 2}, {"rref", 2}, {"rank", 2}, {"cond", 2},
+        {"rcond", 1}, {"condest", 2}, {"condeig", 1}, {"normest", 2},
+        {"ishermitian", 2}, {"issymmetric", 2}, {"isbanded", 3},
+        {"isdiag", 1}, {"istriu", 1}, {"istril", 1}, {"bandwidth", 2},
+        {"pagemtimes", 4}, {"pagetranspose", 1}, {"pageinv", 1},
+        // io
+        {"fileread", 1}, {"readlines", 1}, {"writelines", 2},
+        {"readmatrix", 1}, {"writematrix", 2}, {"csvread", 4},
+        {"csvwrite", 4}, {"fopen", 4}, {"fclose", 1}, {"fgetl", 1},
+        {"fgets", 2}, {"feof", 1}, {"ferror", 2}, {"ftell", 1},
+        {"fseek", 3}, {"frewind", 1}, {"fread", 5}, {"fwrite", 5},
+        {"filesep", 0}, {"fileparts", 1}, {"tempdir", 0},
+        {"tempname", 1}, {"genpath", 1}, {"type", 1},
+        // ode / optim / graphics / matfun / timefun / lang
+        {"odeget", 4}, {"fminbnd", 4}, {"saveas", 3}, {"getframe", 2},
+        {"idivide", 3}, {"etime", 2}, {"eomday", 2},
+        {"isvarname", 1}, {"iskeyword", 1},
+    };
+    for (const auto &c : cases) {
+        std::string args;
+        for (int i = 0; i < c.max_args + 1; ++i) {
+            if (i > 0) args += ", ";
+            args += "[]";
+        }
+        const std::string expr = std::string(c.fn) + "(" + args + ");";
+        try {
+            eval(expr);
+            FAIL() << "Expected numkit:" << c.fn << ":maxnargin for " << expr;
+        } catch (const Error &e) {
+            EXPECT_EQ(e.identifier(), std::string("numkit:") + c.fn + ":maxnargin")
+                << "for " << expr;
+        }
+    }
+}
+
 
 // bugs/closed/lang/reshape-cellnd.md — cell/string arrays reshape >3-D
 TEST_F(BuiltinKnownBug, ReshapeCellND)

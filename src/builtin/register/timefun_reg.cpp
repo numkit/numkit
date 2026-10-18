@@ -3,6 +3,7 @@
 #include <numkit/builtin/timefun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
@@ -17,24 +18,28 @@ namespace numkit::builtin::detail {
 
 void register_timefun(Engine &engine) {
     engine.registerFunction("clock",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 0, "clock");
             outs[0] = numkit::builtin::clock(ctx.engine->resource());
         });
 
     engine.registerFunction("date",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 0, "date");
             outs[0] = Value::fromString(numkit::builtin::date(), ctx.engine->resource());
         });
 
     engine.registerFunction("pause",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &) {
+            argcheck::checkNargin(args.size(), 0, 1, "pause");
             double s = args.empty() ? 0.0 : args[0].toScalar();
             numkit::builtin::pause(s);
             outs[0] = Value();
         });
 
     engine.registerFunction("tic",
-        [](Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 0, "tic");
             auto now = Clock::now();
             ctx.engine->setTicTimer(now);
             if (nargout > 0) {
@@ -49,6 +54,7 @@ void register_timefun(Engine &engine) {
 
     engine.registerFunction("toc",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 1, "toc");
             auto now = Clock::now();
             TimePoint start;
             if (!args.empty() && args[0].isScalar()) {
@@ -71,43 +77,44 @@ void register_timefun(Engine &engine) {
         });
 
     engine.registerFunction("cputime",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 0, "cputime");
             outs[0] = Value::scalar(numkit::builtin::cputime(), ctx.engine->resource());
         });
 
     engine.registerFunction("now",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 0, "now");
             outs[0] = Value::scalar(numkit::builtin::now(), ctx.engine->resource());
         });
 
     engine.registerFunction("etime",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 2)
-                throw std::runtime_error("etime: requires two date vectors (t2, t1)");
+            argcheck::checkNargin(args.size(), 2, 2, "etime");
             outs[0] = numkit::builtin::etime(args[0], args[1], ctx.engine->resource());
         });
 
     engine.registerFunction("weeknum",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 3, "weeknum");
             outs[0] = numkit::builtin::weeknum(args, ctx.engine->resource());
         });
 
     engine.registerFunction("addtodate",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 3)
-                throw std::runtime_error("addtodate: requires (D, quantity, units)");
+            argcheck::checkNargin(args.size(), 3, 3, "addtodate");
             outs[0] = numkit::builtin::addtodate(args[0], args[1].toScalar(), args[2].toString(), ctx.engine->resource());
         });
 
     engine.registerFunction("datenum",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 6, "datenum");
             outs[0] = numkit::builtin::datenum(args, ctx.engine->resource());
         });
 
     engine.registerFunction("weekday",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
-            if (args.empty())
-                throw std::runtime_error("weekday requires at least one input");
+            argcheck::checkNargin(args.size(), 1, 3, "weekday");
             auto *mr = ctx.engine->resource();
             outs[0] = numkit::builtin::weekday(args[0], mr);
             if (nargout > 1) {
@@ -134,30 +141,31 @@ void register_timefun(Engine &engine) {
 
     engine.registerFunction("juliandate",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 6, "juliandate");
             outs[0] = numkit::builtin::juliandate(args, ctx.engine->resource());
         });
 
     engine.registerFunction("eomday",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.size() < 2)
-                throw std::runtime_error("eomday: requires year and month");
+            argcheck::checkNargin(args.size(), 2, 2, "eomday");
             outs[0] = numkit::builtin::eomday(args[0], args[1], ctx.engine->resource());
         });
 
     engine.registerFunction("calendar",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 0, 2, "calendar");
             outs[0] = numkit::builtin::calendar(args, ctx.engine->resource());
         });
 
     engine.registerFunction("datestr",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 3, "datestr");
             outs[0] = numkit::builtin::datestr(args, ctx.engine->resource());
         });
 
     engine.registerFunction("datevec",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
-            if (args.empty())
-                throw std::runtime_error("datevec requires at least one argument");
+            argcheck::checkNargin(args.size(), 1, 3, "datevec");
             auto *mr = ctx.engine->resource();
             Value dv = numkit::builtin::datevec(args, mr);
             if (nargout <= 1) {
@@ -181,11 +189,13 @@ void register_timefun(Engine &engine) {
 
     engine.registerFunction("yyyymmdd",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "yyyymmdd");
             outs[0] = numkit::builtin::yyyymmdd(args, ctx.engine->resource());
         });
 
     engine.registerFunction("mjuliandate",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 6, "mjuliandate");
             outs[0] = numkit::builtin::mjuliandate(args, ctx.engine->resource());
         });
 }
