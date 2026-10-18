@@ -192,6 +192,28 @@ TEST_P(MatrixTest, StringConcatInMatrix)
     EXPECT_EQ(s->toString(), "hello world");
 }
 
+// Regression guard for LuPanelDoubleKernel SIMD pivot-search tail:
+// When m - (j + 1) >= N (N = 4 on AVX2) and the SIMD chunks have max <= pmax,
+// the remaining < N tail elements [i, m) must still be scanned for the pivot.
+TEST_P(MatrixTest, LuPivotSearchSimdTail)
+{
+    eval("A = eye(6); A([1 6], :) = A([6 1], :); b = (1:6)'; x = linsolve(A, b); y = A \\ b;");
+    EXPECT_DOUBLE_EQ(evalScalar("x(1)"), 6.0);
+    EXPECT_DOUBLE_EQ(evalScalar("x(6)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("max(abs(x - y))"), 0.0);
+
+    // 8x8 KKT polish in linprog with 2 equality + 2 active bound constraints
+    eval("c = [-2; 4; -2; 2];"
+         "Aineq = [-2 0 -3 0; -3 2 0 -4]; bineq = [-6; -8];"
+         "Aeq = [4 -3 8 -1; 4 0 -1 4]; beq = [20; 18];"
+         "lb = [1 0 2 0]; ub = [Inf Inf 10 Inf];"
+         "[xlp, fval] = linprog(c, Aineq, bineq, Aeq, beq, lb, ub);");
+    EXPECT_NEAR(evalScalar("fval"), -1.2, 1e-10);
+    EXPECT_NEAR(evalScalar("xlp(1)"), 1.8, 1e-9);
+    EXPECT_NEAR(evalScalar("xlp(3)"), 2.0, 1e-9);
+    EXPECT_NEAR(evalScalar("xlp(4)"), 3.2, 1e-9);
+}
+
 INSTANTIATE_DUAL(MatrixTest);
 
 // ============================================================
