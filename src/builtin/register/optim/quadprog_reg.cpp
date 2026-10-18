@@ -1,4 +1,4 @@
-﻿// quadprog_reg.cpp â€” quadprog (quadratic program) as an embedded `.m`.
+// quadprog_reg.cpp â€” quadprog (quadratic program) as an embedded `.m`.
 //
 // min 0.5Â·xáµ€Hx + fáµ€x  s.t.  AÂ·x â‰¤ b,  AeqÂ·x = beq,  lb â‰¤ x â‰¤ ub.
 //
@@ -14,11 +14,16 @@
 // other optim solvers.
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kQuadprogMSource = R"NKM(
 function [x, fval, exitflag] = quadprog(H, f, A, b, Aeq, beq, lb, ub, x0)
+  if nargin < 2
+    error('numkit:quadprog:nargin', 'quadprog requires at least 2 input arguments');
+  end
   n = size(H, 1);
   f = reshape(f, n, 1);
   C = zeros(0, n); d = zeros(0, 1);

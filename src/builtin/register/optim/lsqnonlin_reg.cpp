@@ -12,11 +12,16 @@
 // Bound constraints (lb/ub) are deferred â€” rejected with a clear error.
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kLsqnonlinMSource = R"NKM(
 function [p, resnorm, residual, exitflag] = lsqnonlin(fn, p0, lb, ub, varargin)
+  if nargin < 2
+    error('numkit:lsqnonlin:nargin', 'lsqnonlin requires at least 2 input arguments');
+  end
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:lsqnonlin:fnType', 'lsqnonlin: 1st argument must be a function handle');
   end
@@ -41,6 +46,9 @@ function [p, resnorm, residual, exitflag] = lsqnonlin(fn, p0, lb, ub, varargin)
 end
 
 function [p, resnorm, residual, exitflag] = lsqcurvefit(fn, p0, xdata, ydata, lb, ub, varargin)
+  if nargin < 4
+    error('numkit:lsqcurvefit:nargin', 'lsqcurvefit requires at least 4 input arguments');
+  end
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:lsqcurvefit:fnType', 'lsqcurvefit: 1st argument must be a function handle');
   end

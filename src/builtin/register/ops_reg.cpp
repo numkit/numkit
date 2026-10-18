@@ -4,9 +4,11 @@
 #include <numkit/builtin/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
+// Each registered adapter in ops/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
 void all_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void and_reg(Span<const Value>, size_t, Span<Value>, CallContext&);

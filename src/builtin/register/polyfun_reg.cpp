@@ -2,9 +2,11 @@
 
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
+// Each registered adapter in polyfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin {
 void registerIntegralM(Engine &engine);
 void registerInlineImpulseM(Engine &engine);

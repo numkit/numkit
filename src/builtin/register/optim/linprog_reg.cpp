@@ -1,4 +1,4 @@
-﻿// linprog_reg.cpp â€” linprog (linear program) as an embedded `.m`.
+// linprog_reg.cpp â€” linprog (linear program) as an embedded `.m`.
 //
 // min fáµ€x  s.t.  AÂ·x â‰¤ b,  AeqÂ·x = beq,  lb â‰¤ x â‰¤ ub.
 //
@@ -19,11 +19,16 @@
 //     2-phase simplex would be the exact follow-up.
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kLinprogMSource = R"NKM(
 function [x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub, x0)
+  if nargin < 1
+    error('numkit:linprog:nargin', 'linprog requires at least 1 input argument');
+  end
   n = numel(f);
   fc = reshape(f, n, 1);
   if nargin < 2, A = []; end

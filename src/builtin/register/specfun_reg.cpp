@@ -2,9 +2,11 @@
 
 #include <numkit/builtin/specfun.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
+// Each registered adapter in specfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
 
 void airy_reg(Span<const Value>, size_t, Span<Value>, CallContext&);

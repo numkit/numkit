@@ -13,11 +13,16 @@
 // gradient â€” faster on smooth problems.
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kFminuncMSource = R"NKM(
 function [x, fval, exitflag] = fminunc(fn, x0, varargin)
+  if nargin < 2
+    error('numkit:fminunc:nargin', 'fminunc requires at least 2 input arguments');
+  end
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:fminunc:fnType', 'fminunc: 1st argument must be a function handle');
   end

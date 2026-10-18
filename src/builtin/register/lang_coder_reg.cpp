@@ -8,6 +8,7 @@
 #include <numkit/core/types.hpp>
 #include <numkit/sys/env.hpp>
 #include <numkit/sys/process.hpp>
+#include <numkit/value/argcheck.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -42,12 +43,12 @@ void system_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
     }
     return;
 #else
-    if (args.empty() || !isCharArg(args[0]))
+    argcheck::checkNargin(args.size(), 1, 2, "system");
+    if (!isCharArg(args[0]))
         throw Error("system: argument must be a char command string",
                     0, 0, "system", "", "numkit:system:nargin");
     const auto r = numkit::sys::runProcess(charArg(args[0]));
-    // MATLAB: status = system(cmd) returns just the exit code; with two
-    // outputs [status, cmdout] returns both. Single-output → status.
+    // Single-output returns status; two outputs [status, cmdout] return both.
     outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->resource());
     if (nargout >= 2)
         outs[1] = Value::fromString(r.output, ctx.engine->resource());
@@ -72,7 +73,8 @@ void runNative_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
     }
     return;
 #else
-    if (args.empty() || !isCharArg(args[0]))
+    argcheck::checkNargin(args.size(), 1, 1, "runNative");
+    if (!isCharArg(args[0]))
         throw Error("runNative: argument must be a char script path",
                     0, 0, "runNative", "", "numkit:runNative:nargin");
     const char *interp = std::getenv("NUMKIT_INTERP");

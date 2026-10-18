@@ -6,11 +6,10 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/iofun.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/span.hpp>
 
 #include <algorithm>
@@ -30,6 +29,7 @@ namespace detail {
 
 void sprintf_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
 {
+    argcheck::checkNargin(args.size(), 0, 256, "sprintf");
     std::pmr::memory_resource *mr = ctx.engine->resource();
     if (args.empty()) {
         outs[0] = Value::fromString("", mr);

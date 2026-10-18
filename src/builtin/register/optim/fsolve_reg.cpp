@@ -12,11 +12,16 @@
 // solver lands on the same point.
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kFsolveMSource = R"NKM(
 function [x, fval, exitflag] = fsolve(fn, x0, varargin)
+  if nargin < 2
+    error('numkit:fsolve:nargin', 'fsolve requires at least 2 input arguments');
+  end
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:fsolve:fnType', 'fsolve: 1st argument must be a function handle');
   end

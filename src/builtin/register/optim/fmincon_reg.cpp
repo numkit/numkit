@@ -20,11 +20,16 @@
 // nonlcon both run as bytecode, pausable).
 
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 
 namespace numkit::optim {
 
+// Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kFminconMSource = R"NKM(
 function [x, fval, exitflag] = fmincon(fn, x0, A, b, Aeq, beq, lb, ub, nonlcon, varargin)
+  if nargin < 2
+    error('numkit:fmincon:nargin', 'fmincon requires at least 2 input arguments');
+  end
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:fmincon:fnType', 'fmincon: 1st argument must be a function handle');
   end

@@ -3,9 +3,11 @@
 #include <numkit/builtin/iofun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
+// Each registered adapter in iofun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
 void disp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void fprintf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);

@@ -2,6 +2,7 @@
 
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
 
@@ -87,8 +88,7 @@ namespace numkit::builtin::detail {
 void register_strfun(Engine &engine) {
     engine.registerFunction("convertContainedStringsToChars",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            if (args.empty())
-                throw std::runtime_error("convertContainedStringsToChars: requires 1 argument");
+            argcheck::checkNargin(args.size(), 1, 1, "convertContainedStringsToChars");
             outs[0] = numkit::builtin::convertContainedStringsToChars(args[0], ctx.engine->resource());
         });
 
