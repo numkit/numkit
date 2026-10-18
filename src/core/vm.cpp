@@ -27,6 +27,41 @@ void rdivideLoop(const double *a, const double *b, double *out, std::size_t n);
 
 namespace numkit {
 
+struct ResolvedSubscript {
+    size_t single = 0;
+    std::vector<size_t> vec;
+    size_t count = 0;
+    bool isColon = false;
+    bool isSingle = false;
+
+    const size_t *data() const noexcept {
+        if (isColon) return nullptr;
+        if (isSingle) return &single;
+        return vec.data();
+    }
+
+    static ResolvedSubscript resolve(const Value &idx, size_t dimSize) {
+        ResolvedSubscript r;
+        if (idx.isChar() && idx.numel() == 1 && idx.charData()[0] == ':') {
+            r.isColon = true;
+            r.count = dimSize;
+            return r;
+        }
+        if (idx.isDoubleScalar()) {
+            size_t ii = Value::checkedScalarIndex(idx.scalarVal());
+            if (ii >= dimSize)
+                throw std::runtime_error("Index exceeds array dimensions");
+            r.single = ii;
+            r.isSingle = true;
+            r.count = 1;
+            return r;
+        }
+        r.vec = Value::resolveIndices(idx, dimSize);
+        r.count = r.vec.size();
+        return r;
+    }
+};
+
 // Resolve a call's argument list: the compile-time registers
 // [base, base + n) with any runtime CSL splice (`c{:}`) expanded in
 // place. A pure splice passes the CSL's storage through untouched
@@ -166,6 +201,15 @@ static inline double asScalar(const Value &v)
 
 static inline size_t checkedIndex(double idx, size_t numel)
 {
+    if (idx >= 1.0 && idx <= 9007199254740992.0) {
+        size_t u = static_cast<size_t>(idx);
+        if (static_cast<double>(u) == idx) {
+            if (u - 1 < numel)
+                return u - 1;
+            throw std::runtime_error("Index " + std::to_string(u) + " exceeds array size "
+                                     + std::to_string(numel));
+        }
+    }
     size_t i = Value::checkedScalarIndex(idx);
     if (i >= numel)
         throw std::runtime_error("Index " + std::to_string((size_t) idx) + " exceeds array size "
@@ -889,12 +933,26 @@ enter_frame:
                 ip += I.d;
                 continue;
             case OpCode::JMP_TRUE:
+                if (R[I.a].isLogicalScalar()) {
+                    if (R[I.a].isLogicalTrue()) {
+                        ip += I.d;
+                        continue;
+                    }
+                    break;
+                }
                 if (R[I.a].toBool()) {
                     ip += I.d;
                     continue;
                 }
                 break;
             case OpCode::JMP_FALSE:
+                if (R[I.a].isLogicalScalar()) {
+                    if (R[I.a].isLogicalFalse()) {
+                        ip += I.d;
+                        continue;
+                    }
+                    break;
+                }
                 if (!R[I.a].toBool()) {
                     ip += I.d;
                     continue;
@@ -1213,8 +1271,13 @@ enter_frame:
                 // straight into an inline scalar register. (Argument is read
                 // before the write, so a dst==src register alias is safe.)
                 if (mv.isHeapDouble() && ix.isDoubleScalar()) {
-                    size_t i = checkedIndex(ix.scalarVal(), mv.numel());
-                    R[I.a].setScalarFast(mv.doubleData()[i]);
+                    size_t i = checkedIndex(ix.scalarVal(), mv.heapDims().numel());
+                    R[I.a].setScalarFast(mv.doubleDataFast()[i]);
+                    break;
+                }
+                if (mv.isDoubleScalar() && ix.isDoubleScalar()) {
+                    checkedIndex(ix.scalarVal(), 1);
+                    R[I.a].setScalarFast(mv.scalarVal());
                     break;
                 }
                 // OBJECT: obj(i) dispatches to the class subsref overload.
@@ -1281,10 +1344,10 @@ enter_frame:
                     R[I.a].setScalarFast(mv.doubleDataFast()[mv.heapDims().sub2ind(r, c)]);
                     break;
                 }
-                auto rowIds = Value::resolveIndices(R[I.c], mv.dims().rows());
-                auto colIds = Value::resolveIndices(R[I.e], mv.dims().cols());
-                R[I.a] = mv.indexGet2D(rowIds.data(), rowIds.size(),
-                                        colIds.data(), colIds.size(),
+                auto rowIds = ResolvedSubscript::resolve(R[I.c], mv.dims().rows());
+                auto colIds = ResolvedSubscript::resolve(R[I.e], mv.dims().cols());
+                R[I.a] = mv.indexGet2D(rowIds.data(), rowIds.count,
+                                        colIds.data(), colIds.count,
                                         engine_.mr_);
                 break;
             }
@@ -1297,9 +1360,9 @@ enter_frame:
                 // directly. Out-of-bounds / shared / non-scalar fall through.
                 if (R[I.a].isHeapDouble() && R[I.a].heapRefCount() == 1
                     && ix.isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    size_t i = Value::checkedScalarIndex(ix.scalarVal());
-                    if (i < R[I.a].numel()) {
-                        R[I.a].doubleDataMut()[i] = R[I.c].scalarVal();
+                    size_t i = checkedIndex(ix.scalarVal(), SIZE_MAX);
+                    if (i < R[I.a].heapDims().numel()) {
+                        R[I.a].doubleDataMutFast()[i] = R[I.c].scalarVal();
                         break;
                     }
                 }
@@ -1518,12 +1581,10 @@ enter_frame:
                 if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols())
                     R[I.a].resize(maxR, maxC, engine_.mr_);
 
-                // Resolve colon-all after resize (needs final dims)
-                if (riIsColon) rowIds = Value::resolveIndices(ri, R[I.a].dims().rows());
-                if (ciIsColon) colIds = Value::resolveIndices(ci, R[I.a].dims().cols());
-
-                R[I.a].indexSet2D(rowIds.data(), rowIds.size(),
-                                  colIds.data(), colIds.size(), val);
+                R[I.a].indexSet2D(riIsColon ? nullptr : rowIds.data(),
+                                  riIsColon ? R[I.a].dims().rows() : rowIds.size(),
+                                  ciIsColon ? nullptr : colIds.data(),
+                                  ciIsColon ? R[I.a].dims().cols() : colIds.size(), val);
                 break;
             }
 
@@ -1550,12 +1611,12 @@ enter_frame:
                     }
                 }
                 if (ndims == 3) {
-                    auto rowIds = Value::resolveIndices(R[base], mv.dims().rows());
-                    auto colIds = Value::resolveIndices(R[base + 1], mv.dims().cols());
-                    auto pageIds = Value::resolveIndices(R[base + 2], mv.dims().pages());
-                    R[I.a] = mv.indexGet3D(rowIds.data(), rowIds.size(),
-                                           colIds.data(), colIds.size(),
-                                           pageIds.data(), pageIds.size(),
+                    auto rowIds = ResolvedSubscript::resolve(R[base], mv.dims().rows());
+                    auto colIds = ResolvedSubscript::resolve(R[base + 1], mv.dims().cols());
+                    auto pageIds = ResolvedSubscript::resolve(R[base + 2], mv.dims().pages());
+                    R[I.a] = mv.indexGet3D(rowIds.data(), rowIds.count,
+                                           colIds.data(), colIds.count,
+                                           pageIds.data(), pageIds.count,
                                            engine_.mr_);
                 } else {
                     // ND read (≥4): CELL handled by indexGetND directly now.
@@ -1616,25 +1677,56 @@ enter_frame:
                                            : Value::resolveIndicesUnchecked(R[base + 2]);
 
                     // Grow if needed
+                    const Value &val = R[I.e];
                     size_t maxR = R[I.a].dims().rows();
                     size_t maxC = R[I.a].dims().cols();
                     size_t maxP = R[I.a].dims().pages();
                     for (size_t r : rowIds) maxR = std::max(maxR, r + 1);
                     for (size_t c : colIds) maxC = std::max(maxC, c + 1);
                     for (size_t p : pageIds) maxP = std::max(maxP, p + 1);
+                    if (R[I.a].isEmpty() && !val.isScalar()) {
+                        const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
+                        const size_t nonColonProd = (riColon ? 1 : rowIds.size())
+                                                  * (ciColon ? 1 : colIds.size())
+                                                  * (piColon ? 1 : pageIds.size());
+                        if (nColons == 1 && nonColonProd == 1 && val.dims().isVector()) {
+                            if (riColon) maxR = val.numel();
+                            else if (ciColon) maxC = val.numel();
+                            else if (piColon) maxP = val.numel();
+                        } else if (riColon && ciColon && piColon) {
+                            maxR = val.dims().rows();
+                            maxC = val.dims().cols();
+                            maxP = val.dims().pages();
+                        } else if (nColons > 0) {
+                            size_t rCursor = 0;
+                            int colonsLeft = nColons;
+                            auto nextRhsDim = [&]() -> size_t {
+                                while (rCursor < static_cast<size_t>(val.dims().ndim())
+                                       && val.dims().dim(static_cast<int>(rCursor)) == 1
+                                       && (static_cast<size_t>(val.dims().ndim()) - rCursor) > static_cast<size_t>(colonsLeft)) {
+                                    ++rCursor;
+                                }
+                                --colonsLeft;
+                                return (rCursor < static_cast<size_t>(val.dims().ndim()))
+                                           ? val.dims().dim(static_cast<int>(rCursor++))
+                                           : 1;
+                            };
+                            if (riColon) maxR = nextRhsDim();
+                            if (ciColon) maxC = nextRhsDim();
+                            if (piColon) maxP = nextRhsDim();
+                        }
+                    }
                     if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols()
                         || maxP > R[I.a].dims().pages())
                         R[I.a].resize3d(maxR, maxC, maxP, engine_.mr_);
 
-                    // Resolve colon-all after resize (needs final dims)
-                    if (riColon) rowIds = Value::resolveIndices(R[base], R[I.a].dims().rows());
-                    if (ciColon) colIds = Value::resolveIndices(R[base + 1], R[I.a].dims().cols());
-                    if (piColon) pageIds = Value::resolveIndices(R[base + 2], R[I.a].dims().pages());
-
-                    R[I.a].indexSet3D(rowIds.data(), rowIds.size(),
-                                      colIds.data(), colIds.size(),
-                                      pageIds.data(), pageIds.size(),
-                                      R[I.e]);
+                    R[I.a].indexSet3D(riColon ? nullptr : rowIds.data(),
+                                      riColon ? R[I.a].dims().rows() : rowIds.size(),
+                                      ciColon ? nullptr : colIds.data(),
+                                      ciColon ? R[I.a].dims().cols() : colIds.size(),
+                                      piColon ? nullptr : pageIds.data(),
+                                      piColon ? R[I.a].dims().pages() : pageIds.size(),
+                                      val);
                 } else {
                     // ND write (≥4): grow the target *first* so the
                     // subsequent resolveIndices bounds checks succeed.
@@ -2425,7 +2517,7 @@ enter_frame:
                         // outs[0] — same observable behaviour, the
                         // moved-out heap is freed when ob[0] is
                         // overwritten.
-                        bool canHint = R[I.a].hasHeap();
+                        bool canHint = nargout_val > 0 && R[I.a].hasHeap();
                         for (uint8_t i = 0; i < na && canHint; ++i)
                             if (&R[argBase + i] == &R[I.a])
                                 canHint = false;
@@ -3068,6 +3160,26 @@ enter_frame:
                             chunk.strings[I.d]);
                         if (lv && !lv->isUnset() && !lv->isDeleted()) {
                             R[I.a] = *lv;
+                            break;
+                        }
+                    }
+                    {
+                        const std::string &nn = chunk.strings[I.d];
+                        if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
+                            if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
+                                frame.ip = ip + 1;
+                                pushCallFrame(*found, nullptr, 0, I.a, 1);
+                                goto enter_frame;
+                            }
+                            callTwOnlySingle(R, *uf, nullptr, 0, I.a);
+                            break;
+                        }
+                        if (const ExternalFunc *fnPtr = engine_.findExternal(nn, currentCallEnv())) {
+                            Value ob[1];
+                            Span<Value> os(ob, 1);
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*fnPtr)(Span<const Value>(nullptr, 0), 0, os, ctx);
+                            R[I.a] = std::move(ob[0]);
                             break;
                         }
                     }
@@ -4572,10 +4684,10 @@ void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB,
     } else if (na == 2) {
         const Value &ri = AB[0];
         const Value &ci = AB[1];
-        auto rowIds = Value::resolveIndices(ri, mv.dims().rows());
-        auto colIds = Value::resolveIndices(ci, mv.dims().cols());
-        R[dstReg] = mv.indexGet2D(rowIds.data(), rowIds.size(),
-                               colIds.data(), colIds.size(),
+        auto rowIds = ResolvedSubscript::resolve(ri, mv.dims().rows());
+        auto colIds = ResolvedSubscript::resolve(ci, mv.dims().cols());
+        R[dstReg] = mv.indexGet2D(rowIds.data(), rowIds.count,
+                               colIds.data(), colIds.count,
                                engine_.mr_);
     } else if (na == 3) {
         if (mv.isCell()) {
@@ -4584,12 +4696,12 @@ void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB,
             size_t p = (size_t) AB[2].toScalar() - 1;
             R[dstReg] = mv.cellAt(mv.dims().sub2indChecked(r, c, p));
         } else {
-            auto rowIds = Value::resolveIndices(AB[0], mv.dims().rows());
-            auto colIds = Value::resolveIndices(AB[1], mv.dims().cols());
-            auto pageIds = Value::resolveIndices(AB[2], mv.dims().pages());
-            R[dstReg] = mv.indexGet3D(rowIds.data(), rowIds.size(),
-                                   colIds.data(), colIds.size(),
-                                   pageIds.data(), pageIds.size(),
+            auto rowIds = ResolvedSubscript::resolve(AB[0], mv.dims().rows());
+            auto colIds = ResolvedSubscript::resolve(AB[1], mv.dims().cols());
+            auto pageIds = ResolvedSubscript::resolve(AB[2], mv.dims().pages());
+            R[dstReg] = mv.indexGet3D(rowIds.data(), rowIds.count,
+                                   colIds.data(), colIds.count,
+                                   pageIds.data(), pageIds.count,
                                    engine_.mr_);
         }
     } else {

@@ -2294,7 +2294,7 @@ void Engine::rehashMFiles()
     // key — NOT clearCompiledFuncs(), which would also nuke script-defined
     // compiled functions (contradicting the "kept" promise above).
     std::vector<std::string> unregisteredClasses;
-    for (const auto &[name, _] : mFileCache_) {
+    for (const auto &[name, entry] : mFileCache_) {
         userFuncs_.erase(name);
         if (compiler_)
             compiler_->eraseCompiledFunc(name);
@@ -2308,6 +2308,8 @@ void Engine::rehashMFiles()
             dropFileClassCtorExternal_(name);
             unregisterClassDef(name);
             unregisteredClasses.push_back(name);
+        } else if (entry.hasExternal) {
+            dropFileClassCtorExternal_(name);
         }
     }
     mFileCache_.clear();
@@ -2361,6 +2363,8 @@ void Engine::refreshStaleMFiles()
                 dropFileClassCtorExternal_(name);
                 unregisterClassDef(name);
                 evictedClasses.push_back(name);
+            } else if (it->second.hasExternal) {
+                dropFileClassCtorExternal_(name);
             }
             mFileCache_.erase(it);
         }
@@ -2445,8 +2449,12 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
             if (curMtime != 0 && curMtime == cit->second.mtime) {
                 if (auto *uf = lookupUserFunctionLocal(name))
                     return uf;
+                if (cit->second.hasExternal && externalFuncs_.count(name))
+                    return nullptr;
             }
             // Stale or no mtime — drop and re-parse.
+            if (cit->second.hasExternal)
+                dropFileClassCtorExternal_(name);
             mFileCache_.erase(cit);
             userFuncs_.erase(name);
         }
@@ -2547,8 +2555,46 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 if (auto st = rp.fs->stat(rp.path))
                     ce.mtime = st->mtime;
                 ce.sourceCode = std::make_shared<const std::string>(std::move(content));
+                ce.hasExternal = true;
                 mFileCache_[name] = std::move(ce);
                 return nullptr; // class + ctor-external resolve the call
+            }
+            if (!hasExternalFunction(name) && !findExternal(name, nullptr)) {
+                const std::string scriptName = leafName;
+                const std::string fsName = rp.fs->name();
+                const std::string sDir = scriptDir;
+                const std::string sPath = rp.path;
+                auto srcPtr = std::make_shared<const std::string>(std::move(content));
+                registerFunction(name, [scriptName, fsName, sDir, sPath, srcPtr](
+                                           Span<const Value> args, size_t nargout,
+                                           Span<Value> outs, CallContext &ctx) {
+                    if (!args.empty() || nargout > 0)
+                        throw Error("Attempt to execute SCRIPT " + scriptName + " as a function.",
+                                    0, 0, scriptName, "", "numkit:script:CalledAsFunction");
+                    Environment *scope = ctx.env ? ctx.env : &ctx.engine->workspaceEnv();
+                    ctx.engine->pushScriptOrigin(fsName, sDir, sPath);
+                    try {
+                        ctx.engine->eval(*srcPtr, scope);
+                    } catch (...) {
+                        ctx.engine->popScriptOrigin();
+                        throw;
+                    }
+                    ctx.engine->popScriptOrigin();
+                    if (!outs.empty()) {
+                        const Value *ansVal = scope->getLocal("ans");
+                        outs[0] = (ansVal && !ansVal->isUnset() && !ansVal->isDeleted())
+                                      ? *ansVal
+                                      : Value();
+                    }
+                });
+                MFileCacheEntry ce;
+                ce.fullPath = userPath;
+                if (auto st = rp.fs->stat(rp.path))
+                    ce.mtime = st->mtime;
+                ce.sourceCode = std::move(srcPtr);
+                ce.hasExternal = true;
+                mFileCache_[name] = std::move(ce);
+                return nullptr;
             }
             continue;
         }
@@ -3218,13 +3264,17 @@ void Engine::syncVMToWorkspace()
 {
     if (clearAllCalled_) {
         workspaceEnv_->clearAll();
+        clearAllCalled_ = false;
     }
     for (auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             workspaceEnv_->remove(name);
         } else {
             Value *gsVal = globalsEnv_->get(name);
-            workspaceEnv_->set(name, gsVal ? *gsVal : val);
+            const Value &finalVal = gsVal ? *gsVal : val;
+            workspaceEnv_->set(name, finalVal);
+            if (vm_ && backend_ == Backend::VM)
+                vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, finalVal);
         }
     }
 }
@@ -3237,6 +3287,7 @@ void Engine::syncVMToScope(Environment *scope)
     }
     if (clearAllCalled_) {
         scope->clearAll();
+        clearAllCalled_ = false;
     }
     for (auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {

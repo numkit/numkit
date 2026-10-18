@@ -2048,5 +2048,28 @@ TEST_P(GridKronTest, EpsFunctionAndRandiParity)
     EXPECT_DOUBLE_EQ(evalScalar("r(6)"), -3.0);
 }
 
-INSTANTIATE_DUAL(GridKronTest);
+TEST_P(GridKronTest, ThreeDSliceAutoGrowAndMultiSeriesLogPlot)
+{
+    // 2-colon 3D slice into undefined variable: PPS(:,:,5) = 2x2 matrix
+    eval("P = [1 2; 3 4]; PPS(:,:,5) = P;");
+    EXPECT_DOUBLE_EQ(evalScalar("size(PPS, 1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(PPS, 2)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(PPS, 3)"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("PPS(1, 2, 5)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("PPS(2, 1, 5)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("PPS(1, 1, 1)"), 0.0);
 
+    // 1-colon 3D slice into undefined variable: V(:,2,3) = 3x1 vector
+    eval("V(:, 2, 3) = [10; 20; 30];");
+    EXPECT_DOUBLE_EQ(evalScalar("size(V, 1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(V, 2)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(V, 3)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("V(2, 2, 3)"), 20.0);
+
+    // Multi-series semilogy returning Line handles
+    eval("h = semilogy([1 2 3], [1 10 100], 'b-', [1 3], [5 50], 'b--', [1 2 3], [2 20 200], 'r-');");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(h)"), 3.0);
+    eval("set(h(1:2), 'LineWidth', 2);");
+}
+
+INSTANTIATE_DUAL(GridKronTest);

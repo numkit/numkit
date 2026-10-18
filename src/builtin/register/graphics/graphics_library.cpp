@@ -137,6 +137,9 @@ handleTypes()
         {"feather",     {"feather", "matlab.graphics.chart.primitive.Feather"}},
         {"histogram",   {"histogram","matlab.graphics.chart.histogram.Histogram"}},
         {"fplot",       {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"semilogx",    {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"semilogy",    {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"loglog",      {"line",    "matlab.graphics.chart.primitive.Line"}},
     };
     return m;
 }

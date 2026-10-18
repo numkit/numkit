@@ -860,6 +860,7 @@ private:
         int64_t mtime = 0;          // 0 if backend can't supply mtime
         std::string contentHash;    // fallback when mtime is unavailable
         std::shared_ptr<const std::string> sourceCode;  // keeps AST live
+        bool hasExternal = false;   // true when resolveMFile_ registered externalFuncs_[name]
     };
     std::unordered_map<std::string, MFileCacheEntry> mFileCache_;
     // Helper â€” returns nullptr if `name`.m can't be located in any of

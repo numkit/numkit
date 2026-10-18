@@ -280,6 +280,7 @@ private:
     // top-level script (via preImportGlobals) and every user function
     // (compileFunction) so they allocate identically.
     void preallocateAssignedVars(const ASTNode *body);
+    void preallocatePinnedConstants(const ASTNode *body);
     // Allocate a temporary register
     uint8_t tempReg();
 
@@ -422,10 +423,17 @@ private:
     // Constant register cache: avoid redundant LOAD_CONST in loops
     // Maps constant pool index → register that already holds the value
     std::unordered_map<int16_t, uint8_t> constRegCache_;
+    // Pinned constant registers allocated at chunk entry (< maxVarReg_)
+    std::unordered_map<int16_t, uint8_t> pinnedConstRegs_;
 
     // Scalar register tracking: registers known to hold double scalars
     // Enables emission of type-check-free _SS opcodes
     std::bitset<256> scalarRegs_;
+
+    // Defined register tracking: variable registers known to be defined
+    // along all paths reaching the current point (eliminates redundant ASSERT_DEF).
+    std::bitset<256> definedRegs_;
+    bool mayClear_ = false;
 
     // Peephole optimization pass
     void peepholeOptimize();

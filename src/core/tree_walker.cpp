@@ -1359,22 +1359,65 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             }
         }
 
-        auto rowIdx = resolveIndex(lhs->children[1].get(), *var, 0, 3, env);
-        auto colIdx = resolveIndex(lhs->children[2].get(), *var, 1, 3, env);
-        auto pageIdx = resolveIndex(lhs->children[3].get(), *var, 2, 3, env);
+        const ASTNode *rSub = lhs->children[1].get();
+        const ASTNode *cSub = lhs->children[2].get();
+        const ASTNode *pSub = lhs->children[3].get();
+        bool riColon = (rSub->type == NodeType::COLON_EXPR && rSub->children.empty());
+        bool ciColon = (cSub->type == NodeType::COLON_EXPR && cSub->children.empty());
+        bool piColon = (pSub->type == NodeType::COLON_EXPR && pSub->children.empty());
 
-        size_t maxR = 0, maxC = 0, maxP = 0;
+        auto rowIdx = riColon ? std::vector<size_t>() : resolveIndex(rSub, *var, 0, 3, env);
+        auto colIdx = ciColon ? std::vector<size_t>() : resolveIndex(cSub, *var, 1, 3, env);
+        auto pageIdx = piColon ? std::vector<size_t>() : resolveIndex(pSub, *var, 2, 3, env);
+
+        size_t maxR = var->dims().rows(), maxC = var->dims().cols(), maxP = var->dims().pages();
         for (auto r : rowIdx)
             maxR = std::max(maxR, r + 1);
         for (auto c : colIdx)
             maxC = std::max(maxC, c + 1);
         for (auto p : pageIdx)
             maxP = std::max(maxP, p + 1);
+        if (var->isEmpty() && !rhs.isScalar()) {
+            const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
+            const size_t nonColonProd = (riColon ? 1 : rowIdx.size())
+                                      * (ciColon ? 1 : colIdx.size())
+                                      * (piColon ? 1 : pageIdx.size());
+            if (nColons == 1 && nonColonProd == 1 && rhs.dims().isVector()) {
+                if (riColon) maxR = rhs.numel();
+                else if (ciColon) maxC = rhs.numel();
+                else if (piColon) maxP = rhs.numel();
+            } else if (riColon && ciColon && piColon) {
+                maxR = rhs.dims().rows();
+                maxC = rhs.dims().cols();
+                maxP = rhs.dims().pages();
+            } else if (nColons > 0) {
+                size_t rCursor = 0;
+                int colonsLeft = nColons;
+                auto nextRhsDim = [&]() -> size_t {
+                    while (rCursor < static_cast<size_t>(rhs.dims().ndim())
+                           && rhs.dims().dim(static_cast<int>(rCursor)) == 1
+                           && (static_cast<size_t>(rhs.dims().ndim()) - rCursor) > static_cast<size_t>(colonsLeft)) {
+                        ++rCursor;
+                    }
+                    --colonsLeft;
+                    return (rCursor < static_cast<size_t>(rhs.dims().ndim()))
+                               ? rhs.dims().dim(static_cast<int>(rCursor++))
+                               : 1;
+                };
+                if (riColon) maxR = nextRhsDim();
+                if (ciColon) maxC = nextRhsDim();
+                if (piColon) maxP = nextRhsDim();
+            }
+        }
         if (maxR > var->dims().rows() || maxC > var->dims().cols() || maxP > var->dims().pages())
             var->resize3d(std::max(var->dims().rows(), maxR),
                           std::max(var->dims().cols(), maxC),
                           std::max(var->dims().pages(), maxP),
                           engine_.mr_);
+
+        if (riColon) rowIdx = resolveIndex(rSub, *var, 0, 3, env);
+        if (ciColon) colIdx = resolveIndex(cSub, *var, 1, 3, env);
+        if (piColon) pageIdx = resolveIndex(pSub, *var, 2, 3, env);
 
         var->indexSet3D(rowIdx.data(), rowIdx.size(),
                         colIdx.data(), colIdx.size(),

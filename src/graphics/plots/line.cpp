@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” line.cpp
+// nk/graphics â€” line.cpp
 //
 // graphics.line.* builders (plot / plot3 / stem / stairs / area / errorbar / semilog* / fplot / comet / geoplot / xline), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -960,6 +960,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             [xscale, yscale](
                 Span<const Value> args, size_t nargout, Span<Value> outs,
                 GraphicsContext &gc) {
+                (void)nargout;
                 if (args.empty()) {
                     outs[0] = Value();
                     return;
@@ -968,11 +969,50 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 fm.prepareForPlot();
                 fm.currentAxes().xscale = xscale;
                 fm.currentAxes().yscale = yscale;
-                DatasetInfo ds;
-                ds.type = "line";
-                size_t nvStart = parsePlotXYStyle(args, ds);
-                parsePlotArgs(args, nvStart, ds);
-                fm.pushDataset(std::move(ds));
+                auto isSpec = [](const Value &v) {
+                    if (!v.isChar()) return false;
+                    static const std::string alpha = "-:.o+*xsd^v<>phrgbcymw";
+                    std::string s = v.toString();
+                    if (s.empty()) return false;
+                    for (char c : s)
+                        if (alpha.find(c) == std::string::npos) return false;
+                    return true;
+                };
+                auto isData = [](const Value &v) {
+                    return v.isNumeric() || v.isLogical();
+                };
+                size_t i = 0;
+                while (i < args.size()) {
+                    DatasetInfo ds;
+                    ds.type = "line";
+                    if (i + 1 < args.size() && isData(args[i]) && isData(args[i + 1])) {
+                        ds.xJson = vecToJson(args[i]);
+                        ds.yJson = vecToJson(args[i + 1]);
+                        i += 2;
+                    } else if (isData(args[i])) {
+                        ds.xJson = makeIndexJson(args[i].numel());
+                        ds.yJson = vecToJson(args[i]);
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                    if (i < args.size() && isSpec(args[i])) {
+                        ds.style = args[i].toString();
+                        ++i;
+                    }
+                    while (i + 1 < args.size() && args[i].isChar()
+                           && !isSpec(args[i])) {
+                        std::string key = args[i].toString();
+                        for (auto &c : key)
+                            c = (char)std::tolower((unsigned char)c);
+                        if (key == "linewidth")
+                            ds.lineWidth = args[i + 1].toScalar();
+                        else if (key == "markersize")
+                            ds.markerSize = args[i + 1].toScalar();
+                        i += 2;
+                    }
+                    fm.pushDataset(std::move(ds));
+                }
                 fm.emitModified();
                 outs[0] = Value();
             });

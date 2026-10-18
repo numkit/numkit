@@ -51,7 +51,10 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();
+    pinnedConstRegs_.clear();
     scalarRegs_.reset();
+    definedRegs_.reset();
+    mayClear_ = false;
     nextReg_ = 0;
     peakReg_ = 0;
     maxVarReg_ = 0;
@@ -123,6 +126,7 @@ void Compiler::preImportGlobals(const ASTNode *ast)
             varRegisters_[name] = r;
             int16_t idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
+            definedRegs_.set(r);
         }
     }
 
@@ -137,6 +141,7 @@ void Compiler::preImportGlobals(const ASTNode *ast)
     // the high range free for transient temps. No code is emitted —
     // values land via assignment as usual.
     preallocateAssignedVars(ast);
+    preallocatePinnedConstants(ast);
 }
 
 void Compiler::preallocateAssignedVars(const ASTNode *body)
@@ -155,6 +160,70 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         varRegisters_[name] = r;
+    }
+}
+
+namespace {
+void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
+                             std::vector<double> &loopNums)
+{
+    if (!node)
+        return;
+    if (node->type == NodeType::FUNCTION_DEF || node->type == NodeType::ANON_FUNC)
+        return;
+    if (node->type == NodeType::IDENTIFIER || node->type == NodeType::COMMAND_CALL) {
+        const std::string &s = node->strValue;
+        if (s == "clear" || s == "eval" || s == "evalin")
+            mayClear = true;
+    } else if (node->type == NodeType::CALL && !node->children.empty()
+               && node->children[0]->type == NodeType::IDENTIFIER) {
+        const std::string &s = node->children[0]->strValue;
+        if (s == "clear" || s == "eval" || s == "evalin")
+            mayClear = true;
+    } else if (inLoop && node->type == NodeType::NUMBER_LITERAL && loopNums.size() < 16) {
+        bool exists = false;
+        for (double v : loopNums) {
+            if (v == node->numValue) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+            loopNums.push_back(node->numValue);
+    }
+
+    const bool childInLoop = inLoop || node->type == NodeType::FOR_STMT
+                             || node->type == NodeType::WHILE_STMT;
+    for (const auto &child : node->children)
+        scanAstForLoopsAndClear(child.get(), childInLoop, mayClear, loopNums);
+    for (const auto &t : node->lhsTargets)
+        scanAstForLoopsAndClear(t.get(), childInLoop, mayClear, loopNums);
+    for (const auto &[cond, body] : node->branches) {
+        scanAstForLoopsAndClear(cond.get(), childInLoop, mayClear, loopNums);
+        scanAstForLoopsAndClear(body.get(), childInLoop, mayClear, loopNums);
+    }
+    if (node->elseBranch)
+        scanAstForLoopsAndClear(node->elseBranch.get(), childInLoop, mayClear, loopNums);
+}
+} // namespace
+
+void Compiler::preallocatePinnedConstants(const ASTNode *body)
+{
+    std::vector<double> loopNums;
+    scanAstForLoopsAndClear(body, false, mayClear_, loopNums);
+    if (mayClear_)
+        definedRegs_.reset();
+    for (double v : loopNums) {
+        if (nextReg_ >= 200 || pinnedConstRegs_.size() >= 16)
+            break;
+        int16_t idx = addConstant(v);
+        if (pinnedConstRegs_.count(idx))
+            continue;
+        uint8_t r = static_cast<uint8_t>(nextReg_++);
+        if (nextReg_ > peakReg_) peakReg_ = nextReg_;
+        if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
+        emitAD(OpCode::LOAD_CONST, r, idx);
+        pinnedConstRegs_[idx] = r;
     }
 }
 
@@ -260,12 +329,13 @@ uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     auto it = varRegisters_.find(name);
     if (it != varRegisters_.end())
         return it->second;
-    if (nextReg_ >= 255)
+    int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
+    if (allocReg >= 255)
         throw RegisterExhaustionError(
             "Compiler: register exhaustion (>255 registers needed in chunk)");
-    uint8_t r = static_cast<uint8_t>(nextReg_++);
-    if (nextReg_ > peakReg_)
-        peakReg_ = nextReg_;
+    uint8_t r = static_cast<uint8_t>(allocReg);
+    peakReg_ = allocReg + 1;
+    nextReg_ = allocReg + 1;
     if (nextReg_ > maxVarReg_)
         maxVarReg_ = nextReg_;
     varRegisters_[name] = r;
@@ -280,6 +350,8 @@ uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
         if (existing && !existing->isEmpty()) {
             int16_t idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
+            if (!mayClear_)
+                definedRegs_.set(r);
         }
     }
 
@@ -293,10 +365,15 @@ uint8_t Compiler::varRegRead(const std::string &name)
     if (it != varRegisters_.end()) {
         // Emit runtime check — variable may be unset (e.g. clear x,
         // conditional assignment, or not yet assigned).
-        // Skip for builtin constants (pi, eps, inf, etc.) — always defined.
+        // Skip for builtin constants (pi, eps, inf, etc.) — always defined,
+        // and skip when definedRegs_ proves the variable is already defined.
         if (!engine_.isReservedName(name)) {
-            int16_t nameIdx = addStringConstant(name);
-            emitAD(OpCode::ASSERT_DEF, it->second, nameIdx);
+            if (mayClear_ || !definedRegs_.test(it->second)) {
+                int16_t nameIdx = addStringConstant(name);
+                emitAD(OpCode::ASSERT_DEF, it->second, nameIdx);
+                if (!mayClear_ && it->second < chunk_.numParams)
+                    definedRegs_.set(it->second);
+            }
         }
         return it->second;
     }
@@ -655,8 +732,6 @@ uint8_t Compiler::compileBlock(const ASTNode *node)
         last = compileNode(child.get());
         const int floor = entryNext > maxVarReg_ ? entryNext : maxVarReg_;
         if (nextReg_ > floor) {
-            for (int r = floor; r < nextReg_; ++r)
-                emitA(OpCode::CLEAR_VAR, static_cast<uint8_t>(r));
             nextReg_ = floor;
             constRegCache_.clear();
             scalarRegs_.reset();
@@ -668,6 +743,11 @@ uint8_t Compiler::compileBlock(const ASTNode *node)
 uint8_t Compiler::compileNumber(const ASTNode *node)
 {
     int16_t idx = addConstant(node->numValue);
+    auto pit = pinnedConstRegs_.find(idx);
+    if (pit != pinnedConstRegs_.end()) {
+        scalarRegs_.set(pit->second);
+        return pit->second;
+    }
     // Reuse register if this constant was already loaded
     auto it = constRegCache_.find(idx);
     if (it != constRegCache_.end()) {
@@ -729,6 +809,8 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
             markAssigned(lhs->strValue);
             emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
             scalarRegs_.reset(dst);  // result is no longer scalar
+            if (!mayClear_)
+                definedRegs_.set(dst);
             if (!node->suppressOutput) {
                 int16_t nameIdx = addStringConstant(lhs->strValue);
                 emitAD(OpCode::DISPLAY, dst, nameIdx);
@@ -785,6 +867,8 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
             scalarRegs_.set(dst);
         else
             scalarRegs_.reset(dst);
+        if (!mayClear_)
+            definedRegs_.set(dst);
 
         // Display if no semicolon
         if (!node->suppressOutput) {
@@ -816,6 +900,8 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
         uint8_t val = compileNode(node->children[1].get());
         uint8_t nameReg = compileNode(lhs->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, val);
+        if (!mayClear_)
+            definedRegs_.set(obj);
         if (!node->suppressOutput) {
             int16_t dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
@@ -885,6 +971,8 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
             emitAB(OpCode::MOVE, dst, src);
         if (scalarRegs_.test(src)) scalarRegs_.set(dst);
         else scalarRegs_.reset(dst);
+        if (!mayClear_ && !node->returnNames.empty() && node->returnNames[0] != "~")
+            definedRegs_.set(dst);
         if (!node->suppressOutput && !node->returnNames.empty()
             && node->returnNames[0] != "~") {
             int16_t nameIdx = addStringConstant(node->returnNames[0]);
@@ -905,9 +993,12 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
             }
             return;
         }
-        for (size_t i = 0; i < nout; ++i)
+        for (size_t i = 0; i < nout; ++i) {
             if (outRegs[i] != outBase + i)
                 emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<uint8_t>(i));
+            if (!mayClear_ && i < node->returnNames.size() && node->returnNames[i] != "~")
+                definedRegs_.set(outRegs[i]);
+        }
         if (!node->suppressOutput) {
             for (size_t i = 0; i < node->returnNames.size(); ++i)
                 if (node->returnNames[i] != "~") {
@@ -1214,11 +1305,13 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
         decltype(constRegCache_) savedConsts;
         savedConsts.swap(constRegCache_);
         auto savedScalars = scalarRegs_;
+        auto savedDefined = definedRegs_;
         uint8_t right = compileNode(node->children[1].get());
         emitAB(OpCode::MOVE, dst, right);
         patchJump(jumpPos, currentPos() - jumpPos);
         constRegCache_.swap(savedConsts);
         scalarRegs_ = savedScalars;
+        definedRegs_ = savedDefined;
         return dst;
     }
 
@@ -1248,6 +1341,11 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
         else folded = false;
         if (folded) {
             int16_t idx = addConstant(result);
+            auto pit = pinnedConstRegs_.find(idx);
+            if (pit != pinnedConstRegs_.end()) {
+                scalarRegs_.set(pit->second);
+                return pit->second;
+            }
             auto it = constRegCache_.find(idx);
             if (it != constRegCache_.end()) {
                 scalarRegs_.set(it->second);
@@ -1508,7 +1606,10 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
                 isKnownVar = true;
         }
 
-        if (!isKnownVar && (engine_.isKnownLeafName(name) || engine_.hasFunction(name))) {
+        if (!isKnownVar
+            && (engine_.isKnownLeafName(name) || engine_.hasFunction(name)
+                || engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr
+                || engine_.hasFunction(name))) {
             // Workspace builtins inside functions → opcodes
             if (!isTopLevel_) {
                 if (name == "who") {
@@ -1604,12 +1705,14 @@ uint8_t Compiler::compileIf(const ASTNode *node)
     // L_end:
 
     std::vector<size_t> endJumps; // positions of JMP → L_end
+    auto savedDefined = definedRegs_;
 
     for (size_t i = 0; i < node->branches.size(); ++i) {
         auto &[cond, body] = node->branches[i];
 
         // Clear cache: previous branch body may have been skipped
         constRegCache_.clear(); scalarRegs_.reset();
+        definedRegs_ = savedDefined;
         // Compile condition
         uint8_t condReg = compileNode(cond.get());
 
@@ -1633,6 +1736,7 @@ uint8_t Compiler::compileIf(const ASTNode *node)
     // Compile else branch if present
     if (node->elseBranch) {
         constRegCache_.clear(); scalarRegs_.reset();
+        definedRegs_ = savedDefined;
         compileNode(node->elseBranch.get());
     }
 
@@ -1649,6 +1753,7 @@ uint8_t Compiler::compileIf(const ASTNode *node)
     }
 
     constRegCache_.clear(); scalarRegs_.reset(); // don't know which branch ran
+    definedRegs_ = savedDefined;
     return 0;
 }
 
@@ -1686,9 +1791,11 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
     uint8_t cmpReg = tempReg();
 
     std::vector<size_t> endJumps;
+    auto savedDefined = definedRegs_;
 
     for (size_t i = 0; i < node->branches.size(); ++i) {
         auto &[caseExpr, caseBody] = node->branches[i];
+        definedRegs_ = savedDefined;
 
         if (caseExpr->type == NodeType::CELL_LITERAL) {
             // Cell case {val1, val2, ...}: match if switchReg == any element
@@ -1734,6 +1841,7 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
 
     // Compile otherwise
     if (node->elseBranch) {
+        definedRegs_ = savedDefined;
         compileNode(node->elseBranch.get());
     }
 
@@ -1749,6 +1857,7 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
         patchJump(pos, endNopPos - pos);
     }
 
+    definedRegs_ = savedDefined;
     return 0;
 }
 
@@ -1789,6 +1898,8 @@ uint8_t Compiler::compileTryCatch(const ASTNode *node)
     //   ... catch body ...
     // L_end:
 
+    auto savedDefined = definedRegs_;
+
     // Register for exception variable (if named)
     uint8_t exReg = 0;
     if (!node->strValue.empty()) {
@@ -1815,9 +1926,13 @@ uint8_t Compiler::compileTryCatch(const ASTNode *node)
     patchJump(tryBeginPos, currentPos() - tryBeginPos);
 
     // Compile catch body
+    definedRegs_ = savedDefined;
+    if (!node->strValue.empty() && !mayClear_)
+        definedRegs_.set(exReg);
     if (node->children.size() > 1) {
         compileNode(node->children[1].get());
     }
+    definedRegs_ = savedDefined;
 
     // Emit NOP for the 'end' keyword so breakpoints on it fire
     size_t endNopPos = currentPos();
@@ -1849,14 +1964,21 @@ uint8_t Compiler::compileWhile(const ASTNode *node)
     size_t loopStart = currentPos();
 
     // Compile condition
+    const int condMark = nextReg_;
     uint8_t condReg = compileNode(node->children[0].get());
 
     // JMP_FALSE to end (placeholder)
     size_t exitPos = currentPos();
     emitAD(OpCode::JMP_FALSE, condReg, 0);
 
+    const int condFloor = condMark > maxVarReg_ ? condMark : maxVarReg_;
+    if (nextReg_ > condFloor)
+        nextReg_ = condFloor;
+
     // Compile body
+    auto savedDefined = definedRegs_;
     compileNode(node->children[1].get());
+    definedRegs_ = savedDefined;
 
     // Patch continue targets → jump to loopStart (re-evaluate condition)
     for (size_t pos : loopStack_.back().continuePatches) {
@@ -1982,7 +2104,11 @@ uint8_t Compiler::compileFor(const ASTNode *node)
     size_t bodyStart = currentPos();
 
     // Compile body
+    auto savedDefined = definedRegs_;
+    if (!mayClear_)
+        definedRegs_.set(vReg);
     compileNode(node->children[1].get());
+    definedRegs_ = savedDefined;
 
     // Patch continue targets → jump to FOR_NEXT
     size_t forNextPos = currentPos();
@@ -2153,10 +2279,9 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
             for (auto &elem : row->children) {
                 uint8_t v = compileNode(elem.get());
                 emitAB(OpCode::HORZCAT_APPEND, dst, v);
-                if (nextReg_ > mark) {
-                    for (int r = mark; r < nextReg_; ++r)
-                        emitA(OpCode::CLEAR_VAR, static_cast<uint8_t>(r));
-                    nextReg_ = mark;
+                const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
+                if (nextReg_ > floor) {
+                    nextReg_ = floor;
                     constRegCache_.clear();
                     scalarRegs_.reset();
                 }
@@ -2198,10 +2323,9 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
         for (auto &row : node->children) {
             uint8_t rr = compileRow(row.get());
             emitAB(OpCode::VERTCAT_APPEND, dst, rr);
-            if (nextReg_ > mark) {
-                for (int r = mark; r < nextReg_; ++r)
-                    emitA(OpCode::CLEAR_VAR, static_cast<uint8_t>(r));
-                nextReg_ = mark;
+            const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
+            if (nextReg_ > floor) {
+                nextReg_ = floor;
                 constRegCache_.clear();
                 scalarRegs_.reset();
             }
@@ -2359,6 +2483,8 @@ uint8_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
         }
     } // guard restores index context
 
+    if (!mayClear_)
+        definedRegs_.set(arr);
     if (!suppress) {
         int16_t nameIdx = addStringConstant(name);
         emitAD(OpCode::DISPLAY, arr, nameIdx);
@@ -2507,6 +2633,8 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         int16_t nameIdx = addStringConstant(fieldChain[0]);
         emit(Instruction::make_abcde(OpCode::STRUCT_ELEM_FIELD_SET,
                                      rootReg, idxReg, valReg, nameIdx, 0));
+        if (!mayClear_)
+            definedRegs_.set(rootReg);
         if (!suppress) {
             int16_t dispIdx = addStringConstant(rootName);
             emitAD(OpCode::DISPLAY, rootReg, dispIdx);
@@ -2564,6 +2692,8 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         }
     }
 
+    if (!mayClear_)
+        definedRegs_.set(rootReg);
     if (!suppress) {
         int16_t dispIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, dispIdx);
@@ -2756,6 +2886,8 @@ uint8_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
                                      safeVal));
     }
 
+    if (!mayClear_)
+        definedRegs_.set(cell);
     if (!suppress) {
         int16_t nameIdx = addStringConstant(target->strValue);
         emitAD(OpCode::DISPLAY, cell, nameIdx);
@@ -2781,6 +2913,8 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool su
             scalarRegs_.set(dst);
         else
             scalarRegs_.reset(dst);
+        if (!mayClear_)
+            definedRegs_.set(dst);
         if (!suppress) {
             int16_t nameIdx = addStringConstant(target->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
@@ -2805,6 +2939,8 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool su
         uint8_t obj = varRegWrite(objNode->strValue);
         uint8_t nameReg = compileNode(target->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, valReg);
+        if (!mayClear_)
+            definedRegs_.set(obj);
         if (!suppress) {
             int16_t dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
@@ -3024,6 +3160,8 @@ uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
     for (size_t k = n - 1; k-- > 0;)
         emitSet(k, regs[k + 1]);
 
+    if (!mayClear_)
+        definedRegs_.set(rootReg);
     if (!suppress) {
         int16_t nameIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, nameIdx);
@@ -4279,7 +4417,10 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     auto savedVarRegs = std::move(varRegisters_);
     auto savedLoopStack = std::move(loopStack_);
     auto savedConstCache = std::move(constRegCache_);
+    auto savedPinnedConsts = std::move(pinnedConstRegs_);
     auto savedScalarRegs = scalarRegs_;
+    auto savedDefinedRegs = definedRegs_;
+    bool savedMayClear = mayClear_;
     int savedNextReg = nextReg_;
     int savedPeakReg = peakReg_;
     int savedMaxVarReg = maxVarReg_;
@@ -4304,7 +4445,10 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();
+    pinnedConstRegs_.clear();
     scalarRegs_.reset();
+    definedRegs_.reset();
+    mayClear_ = false;
     nextReg_ = 0;
     peakReg_ = 0;
     maxVarReg_ = 0;
@@ -4324,8 +4468,8 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     // Always allocate nargin/nargout so they're visible in debugger (pre-
     // loaded by the VM on entry). Not user-assigned; assignedVars is left
     // untouched so the snapshot still hides them via kBuiltinNames.
-    varRegLookup("nargin");
-    varRegLookup("nargout");
+    uint8_t narginReg = varRegLookup("nargin");
+    uint8_t nargoutReg = varRegLookup("nargout");
 
     // Cluster all body-assigned locals at low contiguous slots BEFORE compiling
     // the body — same pass the top-level script gets via preImportGlobals.
@@ -4335,6 +4479,11 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     // exhaustion. (params/returns/nargin/nargout are already allocated above and
     // skipped by the count() guard.)
     preallocateAssignedVars(funcDef->children[0].get());
+    preallocatePinnedConstants(funcDef->children[0].get());
+    if (!mayClear_) {
+        definedRegs_.set(narginReg);
+        definedRegs_.set(nargoutReg);
+    }
 
     // Compile body
     compileNode(funcDef->children[0].get());
@@ -4392,7 +4541,10 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     varRegisters_ = std::move(savedVarRegs);
     loopStack_ = std::move(savedLoopStack);
     constRegCache_ = std::move(savedConstCache);
+    pinnedConstRegs_ = std::move(savedPinnedConsts);
     scalarRegs_ = savedScalarRegs;
+    definedRegs_ = savedDefinedRegs;
+    mayClear_ = savedMayClear;
     nextReg_ = savedNextReg;
     peakReg_ = savedPeakReg;
     maxVarReg_ = savedMaxVarReg;
