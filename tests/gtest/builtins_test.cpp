@@ -2817,5 +2817,102 @@ TEST_P(DisplayTest, FigureExportGaps)
     EXPECT_NE(getVarPtr("yySvg")->toString().find("300"), std::string::npos);
 }
 
-INSTANTIATE_DUAL(DisplayTest);
+TEST_P(DisplayTest, DatetimeAndDuration)
+{
+    // 1. datetime constructors, properties, and components
+    eval("d = datetime(2026, 9, 12);");
+    EXPECT_DOUBLE_EQ(evalScalar("d.Year"), 2026.0);
+    EXPECT_DOUBLE_EQ(evalScalar("d.Month"), 9.0);
+    EXPECT_DOUBLE_EQ(evalScalar("d.Day"), 12.0);
+    EXPECT_DOUBLE_EQ(evalScalar("year(d)"), 2026.0);
+    EXPECT_DOUBLE_EQ(evalScalar("month(d)"), 9.0);
+    EXPECT_DOUBLE_EQ(evalScalar("day(d)"), 12.0);
+    EXPECT_TRUE(evalBool("isdatetime(d)"));
+    EXPECT_FALSE(evalBool("isnat(d)"));
 
+    // 2. String parsing, duration arithmetic, and comparisons
+    eval("d1 = datetime('2026-09-12'); "
+         "d2 = d1 + days(5) + hours(12); "
+         "dt = d2 - d1;");
+    EXPECT_TRUE(evalBool("isduration(dt)"));
+    EXPECT_DOUBLE_EQ(evalScalar("days(dt)"), 5.5);
+    EXPECT_DOUBLE_EQ(evalScalar("hours(dt)"), 132.0);
+    EXPECT_TRUE(evalBool("d2 > d1"));
+    EXPECT_TRUE(evalBool("d1 < d2"));
+    EXPECT_TRUE(evalBool("d1 ~= d2"));
+    EXPECT_TRUE(evalBool("d1 == datetime(2026, 9, 12)"));
+
+    // 3. Colon range and calendarDuration arithmetic
+    eval("seq = datetime(2026, 9, 1) : days(2) : datetime(2026, 9, 7);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(seq)"), 4.0);
+    eval("dm = datetime(2026, 1, 31) + calmonths(1);");
+    EXPECT_DOUBLE_EQ(evalScalar("dm.Year"), 2026.0);
+    EXPECT_DOUBLE_EQ(evalScalar("dm.Month"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("dm.Day"), 28.0);
+    EXPECT_TRUE(evalBool("iscalendarduration(calmonths(1))"));
+
+    // 4. NaT and isnat
+    eval("n = NaT(1, 2);");
+    EXPECT_TRUE(evalBool("all(isnat(n))"));
+}
+
+TEST_P(DisplayTest, TableContainer)
+{
+    // 1. Constructor, Properties.VariableNames, height, width, size, istable
+    eval("t = table([1; 2; 3], [10; 20; 30]); "
+         "vn = t.Properties.VariableNames;");
+    EXPECT_TRUE(evalBool("istable(t)"));
+    EXPECT_TRUE(evalBool("istabular(t)"));
+    EXPECT_DOUBLE_EQ(evalScalar("height(t)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("width(t)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(t)"), 6.0);
+    EXPECT_EQ(eval("vn{1}").toString(), "Var1");
+    EXPECT_EQ(eval("vn{2}").toString(), "Var2");
+
+    // 2. Dot access, property rename, dynamic field access, and adding column
+    eval("t.Properties.VariableNames = {'A', 'B'}; "
+         "t.C = t.A + t.B; "
+         "colName = 'C'; "
+         "sC = sum(t.(colName));");
+    EXPECT_DOUBLE_EQ(evalScalar("width(t)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sC"), 66.0);
+
+    // 3. Parenthesis sub-table indexing (numeric, logical, variable name, end)
+    eval("sub = t(t.A >= 2, {'B', 'C'});");
+    EXPECT_TRUE(evalBool("istable(sub)"));
+    EXPECT_DOUBLE_EQ(evalScalar("height(sub)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("width(sub)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sub.B(end)"), 30.0);
+
+    // 4. Brace indexing t{r, c} and assignment t{r, c} = rhs
+    eval("M = t{1:2, {'A', 'B'}}; "
+         "t{3, 'A'} = 99;");
+    EXPECT_DOUBLE_EQ(evalScalar("M(2, 2)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("t.A(3)"), 99.0);
+
+    // 5. Conversion family: table2array, array2table, cell2table, table2cell, struct2table, table2struct
+    eval("arr = table2array(t); "
+         "t2 = array2table([1 2; 3 4], 'VariableNames', {'X', 'Y'}); "
+         "tc = cell2table({1, 'a'; 2, 'b'}, 'VariableNames', {'Id', 'Label'}); "
+         "cOut = table2cell(tc); "
+         "stOut = table2struct(t2); "
+         "tFromSt = struct2table(stOut);");
+    EXPECT_DOUBLE_EQ(evalScalar("arr(3, 1)"), 99.0);
+    EXPECT_DOUBLE_EQ(evalScalar("t2.Y(2)"), 4.0);
+    EXPECT_EQ(eval("cOut{2, 2}").toString(), "b");
+    EXPECT_DOUBLE_EQ(evalScalar("tFromSt.X(2)"), 3.0);
+
+    // 6. sortrows, addvars, removevars, renamevars, horzcat, vertcat
+    eval("ts = sortrows(t2, 'Y', 'descend'); "
+         "ta = addvars(t2, [5; 6], 'NewVariableNames', 'Z'); "
+         "tr = removevars(ta, 'X'); "
+         "tn = renamevars(tr, 'Y', 'W'); "
+         "tv = [t2; t2];");
+    EXPECT_DOUBLE_EQ(evalScalar("ts.Y(1)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("width(ta)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("width(tr)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tn.W(1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("height(tv)"), 4.0);
+}
+
+INSTANTIATE_DUAL(DisplayTest);

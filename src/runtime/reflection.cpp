@@ -311,12 +311,7 @@ void registerReflectionRuntime(Engine &engine)
             outs[0] = Value::logicalScalar(false, ctx.engine->resource());
         };
     engine.registerFunction("iscategorical",     alwaysFalsePredicate);
-    engine.registerFunction("istable",           alwaysFalsePredicate);
     engine.registerFunction("istimetable",       alwaysFalsePredicate);
-    engine.registerFunction("istabular",         alwaysFalsePredicate);
-    engine.registerFunction("isdatetime",        alwaysFalsePredicate);
-    engine.registerFunction("isduration",        alwaysFalsePredicate);
-    engine.registerFunction("iscalendarduration",alwaysFalsePredicate);
 }
 
 } // namespace numkit::runtime

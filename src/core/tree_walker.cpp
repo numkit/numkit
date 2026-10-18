@@ -228,9 +228,11 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
         return execFieldAccess(node, env);
     case NodeType::DYNAMIC_FIELD_ACCESS: {
         auto obj = execNode(node->children[0].get(), env);
+        std::string fname = execNode(node->children[1].get(), env).toString();
+        if (obj.isObject())
+            return objectPropGet(obj, fname, env);
         if (!obj.isStruct())
             throw std::runtime_error("Dot indexing requires a struct");
-        std::string fname = execNode(node->children[1].get(), env).toString();
         if (!obj.hasField(fname))
             throw std::runtime_error("Reference to non-existent field '" + fname + "'");
         return obj.field(fname);
@@ -279,6 +281,20 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
     case NodeType::END_VAL: {
         if (!indexContextStack_.empty()) {
             auto &ctx = indexContextStack_.back();
+            if (ctx.array && ctx.array->isObject()) {
+                const BuiltinClass *cls = engine_.findClass(ctx.array->objectClassName());
+                if (cls && cls->methods.count("__end")) {
+                    Value self = *ctx.array;
+                    Value eargs[2] = {
+                        Value::scalar(static_cast<double>(ctx.dimension), engine_.mr_),
+                        Value::scalar(static_cast<double>(ctx.ndims), engine_.mr_)};
+                    Value out[1];
+                    CallContext cctx{&engine_, env};
+                    cls->methods.at("__end")(self, Span<const Value>(eargs, 2), 1,
+                                             Span<Value>(out, 1), cctx);
+                    return out[0];
+                }
+            }
             size_t sz = (ctx.ndims == 1) ? ctx.array->numel()
                                          : ctx.array->dims().dimSize(ctx.dimension);
             return Value::scalar(static_cast<double>(sz), engine_.mr_);
@@ -1122,6 +1138,7 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
 {
     if (lhs->type == NodeType::IDENTIFIER) {
         env->set(lhs->strValue, rhs);
+        return;
     } else if (lhs->type == NodeType::CALL) {
         execIndexedAssign(lhs, rhs, env);
     } else if (lhs->type == NodeType::FIELD_ACCESS) {
@@ -1136,6 +1153,10 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
                 env->set(objNode->strValue, Value::structure());
                 var = env->get(objNode->strValue);
             }
+            if (var->isObject()) {
+                objectPropSet(*var, fname, rhs, env);
+                return;
+            }
             if (!var->isStruct())
                 *var = Value::structure();
             var->field(fname) = rhs;
@@ -1146,6 +1167,29 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
         execCellAssign(lhs, rhs, env);
     } else {
         throw std::runtime_error("Invalid assignment target");
+    }
+
+    // If a nested mutation (`obj.Prop.Sub = v`, `obj.Prop(i) = v`,
+    // `obj.Prop{i} = v`) modified a cached property slot on an object with a
+    // custom `propSet` hook, propagate the updated property value back through
+    // `objectPropSet`.
+    const ASTNode *cur = lhs->children.empty() ? nullptr : lhs->children[0].get();
+    while (cur && !cur->children.empty()) {
+        if (cur->type == NodeType::FIELD_ACCESS
+            && (cur->children[0]->type == NodeType::IDENTIFIER
+                || cur->children[0]->type == NodeType::FIELD_ACCESS)) {
+            Value &baseObj = resolveObjectSlot(cur->children[0].get(), env);
+            if (baseObj.isObject()) {
+                const BuiltinClass *cls = engine_.findClass(baseObj.objectClassName());
+                const auto *st = baseObj.objectStateConst();
+                if (cls && cls->propSet && st && st->props.count(cur->strValue)) {
+                    Value updated = st->props.at(cur->strValue);
+                    objectPropSet(baseObj, cur->strValue, updated, env);
+                    break;
+                }
+            }
+        }
+        cur = cur->children[0].get();
     }
 }
 
@@ -1169,8 +1213,11 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         if (cls && cls->subsasgn) {
             std::vector<Value> args;
             args.reserve(nargs + 1);
-            for (size_t i = 0; i < nargs; ++i)
+            for (size_t i = 0; i < nargs; ++i) {
+                IndexContextGuard guard(indexContextStack_,
+                                        {var, static_cast<int>(i), static_cast<int>(nargs)});
                 args.push_back(execNode(lhs->children[i + 1].get(), env));
+            }
             args.push_back(rhs);
             Value outBuf[1];
             CallContext ctx{&engine_, env};
@@ -1458,6 +1505,13 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
     // bypassed here.)
     if (parent.isObject()) {
         auto *st = parent.objectStateMut();
+        const BuiltinClass *cls = engine_.findClass(parent.objectClassName());
+        if (cls && cls->propGet) {
+            CallContext ctx{&engine_, env};
+            Value cur;
+            if (cls->propGet(parent, fieldName, cur, ctx))
+                st->props[fieldName] = std::move(cur);
+        }
         return st->props[fieldName];
     }
     if (!parent.isStruct())
@@ -1467,11 +1521,6 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
 
 void TreeWalker::execFieldAssign(const ASTNode *lhs, const Value &rhs, Environment *env)
 {
-    // OBJECT: obj.Prop = v sets via the class property hook. Only peek
-    // when the parent is a slot resolveObjectSlot can address (a CALL
-    // parent is `d(i).field` — a struct-array element write, handled
-    // below; object arrays are a later phase). propSet detaches the slot
-    // (COW) so the value/handle rule applies and the variable updates.
     {
         const ASTNode *objNode = lhs->children[0].get();
         if (objNode->type == NodeType::IDENTIFIER
@@ -1485,10 +1534,6 @@ void TreeWalker::execFieldAssign(const ASTNode *lhs, const Value &rhs, Environme
             }
         }
     }
-    // Broadcast write: `s.f = val` where s is a multi-element struct
-    // array sets f on every element. MATLAB semantics. The single-
-    // struct path stays the same (resolveFieldLValue throws on multi-
-    // element by design — that contract is what we're side-stepping).
     if (lhs->children.size() == 1
         && lhs->children[0]->type == NodeType::IDENTIFIER) {
         auto *var = env->get(lhs->children[0]->strValue);
@@ -1503,9 +1548,30 @@ void TreeWalker::execFieldAssign(const ASTNode *lhs, const Value &rhs, Environme
 
 void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environment *env)
 {
-    // c{i} = rhs assigns the addressed content. resolveCellSlot handles
-    // container coercion, grow and N-D subscripts for any cell lvalue
-    // (`c{i}`, `s.c{i}`, `a.b{i,j}`, …).
+    if (!lhs->children.empty()
+        && (lhs->children[0]->type == NodeType::IDENTIFIER
+            || lhs->children[0]->type == NodeType::FIELD_ACCESS)) {
+        Value &baseObj = resolveObjectSlot(lhs->children[0].get(), env);
+        if (baseObj.isObject()) {
+            const BuiltinClass *cls = engine_.findClass(baseObj.objectClassName());
+            if (cls && cls->methods.count("__brace_set")) {
+                const size_t nidx = lhs->children.size() - 1;
+                std::vector<Value> args;
+                args.reserve(nidx + 1);
+                for (size_t i = 0; i < nidx; ++i) {
+                    IndexContextGuard guard(indexContextStack_,
+                                            {&baseObj, static_cast<int>(i), static_cast<int>(nidx)});
+                    args.push_back(execNode(lhs->children[i + 1].get(), env));
+                }
+                args.push_back(rhs);
+                Value outBuf[1];
+                CallContext ctx{&engine_, env};
+                cls->methods.at("__brace_set")(baseObj, Span<const Value>(args.data(), args.size()),
+                                               0, Span<Value>(outBuf, 1), ctx);
+                return;
+            }
+        }
+    }
     resolveObjectSlot(lhs, env) = rhs;
 }
 
@@ -2193,7 +2259,19 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
         if (var->isObject()) {
             const BuiltinClass *cls = engine_.findClass(var->objectClassName());
             if (cls && cls->subsref) {
-                auto args = buildArgs();
+                const size_t nsub = node->children.size() - 1;
+                std::vector<Value> args;
+                args.reserve(nsub);
+                for (size_t i = 0; i < nsub; ++i) {
+                    IndexContextGuard guard(indexContextStack_,
+                                            {var, static_cast<int>(i), static_cast<int>(nsub)});
+                    Value v = execNodeExpand(node->children[i + 1].get(), env);
+                    if (v.isCsl())
+                        for (size_t k = 0; k < v.cslCount(); ++k)
+                            args.push_back(std::move(v.cslAt(k)));
+                    else
+                        args.push_back(std::move(v));
+                }
                 Value self = *var;
                 Value outBuf[1];
                 CallContext ctx{&engine_, env};
@@ -2463,6 +2541,24 @@ std::vector<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
     // 1-based, bounds-checked; `end` resolves per dim through the index-context guard.
     // The base is evaluated ONCE here. 3-D+ is refused (same message as multi-assign).
     Value obj = execNode(node->children[0].get(), env);
+    if (obj.isObject()) {
+        const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+        if (cls && cls->methods.count("__brace_get")) {
+            size_t nidx = node->children.size() - 1;
+            std::vector<Value> args;
+            args.reserve(nidx);
+            for (size_t i = 0; i < nidx; ++i) {
+                IndexContextGuard guard(indexContextStack_,
+                                        {&obj, static_cast<int>(i), static_cast<int>(nidx)});
+                args.push_back(execNode(node->children[i + 1].get(), env));
+            }
+            Value outBuf[1];
+            CallContext ctx{&engine_, env};
+            cls->methods.at("__brace_get")(obj, Span<const Value>(args.data(), args.size()),
+                                           1, Span<Value>(outBuf, 1), ctx);
+            return {std::move(outBuf[0])};
+        }
+    }
     if (!obj.isCell())
         throw std::runtime_error("Cell contents indexing requires a cell array");
     std::vector<Value> out;
@@ -2694,17 +2790,38 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
         return result;
     }
 
-    // Numeric: horzcat each row, then vertcat all rows
+    // Numeric / object: horzcat each row, then vertcat all rows
+    auto concatWithHook = [&](const char *opName, const Value *elems, size_t count) -> Value {
+        if (count == 1)
+            return elems[0];
+        for (size_t i = 0; i < count; ++i) {
+            if (elems[i].isObject()) {
+                const BuiltinClass *cls = engine_.findClass(elems[i].objectClassName());
+                if (cls && cls->ops.count(opName)) {
+                    Value self = elems[0];
+                    Value outBuf[1];
+                    CallContext ctx{&engine_, env};
+                    cls->ops.at(opName)(self, Span<const Value>(elems + 1, count - 1), 1,
+                                        Span<Value>(outBuf, 1), ctx);
+                    return outBuf[0];
+                }
+                break;
+            }
+        }
+        return (std::string(opName) == "horzcat")
+                   ? Value::horzcat(elems, count, engine_.mr_)
+                   : Value::vertcat(elems, count, engine_.mr_);
+    };
+
     std::vector<Value> rowValues;
     rowValues.reserve(rows.size());
     for (auto &rowElems : rows)
-        rowValues.push_back(
-            Value::horzcat(rowElems.data(), rowElems.size(), engine_.mr_));
+        rowValues.push_back(concatWithHook("horzcat", rowElems.data(), rowElems.size()));
 
     if (rowValues.size() == 1)
         return std::move(rowValues[0]);
 
-    return Value::vertcat(rowValues.data(), rowValues.size(), engine_.mr_);
+    return concatWithHook("vertcat", rowValues.data(), rowValues.size());
 }
 
 Value TreeWalker::execCellLiteral(const ASTNode *node, Environment *env)
@@ -2754,13 +2871,6 @@ Value TreeWalker::execCellLiteral(const ASTNode *node, Environment *env)
     return cell;
 }
 
-// ============================================================
-// Pick the dominant non-double type among colon operands. MATLAB rule:
-//   - If all operands are double → return DOUBLE.
-//   - If exactly one non-double type T appears (others may be DOUBLE) → T.
-//   - Two different non-double types → throw (matches MATLAB:
-//     "Colon operands must be all the same type, or mixed with real
-//     scalar doubles").
 static ValueType colonOutputType(const Value *ops, size_t n)
 {
     ValueType nonDouble = ValueType::DOUBLE;
@@ -2787,6 +2897,18 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
         Value a = execNode(node->children[0].get(), env);
         Value b = execNode(node->children[1].get(), env);
         Value ops[2] = {a, b};
+        if (a.isObject() || b.isObject()) {
+            const Value &dom = a.isObject() ? a : b;
+            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+            if (cls && cls->ops.count("colon")) {
+                Value self = dom;
+                Value outBuf[1];
+                CallContext ctx{&engine_, env};
+                cls->ops.at("colon")(self, Span<const Value>(ops, 2), 1,
+                                     Span<Value>(outBuf, 1), ctx);
+                return outBuf[0];
+            }
+        }
         ValueType t = colonOutputType(ops, 2);
         return Value::colonRangeTyped(a.toScalar(), b.toScalar(), t, engine_.mr_);
     }
@@ -2796,6 +2918,18 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
         Value b = execNode(node->children[1].get(), env);
         Value c = execNode(node->children[2].get(), env);
         Value ops[3] = {a, b, c};
+        if (a.isObject() || b.isObject() || c.isObject()) {
+            const Value &dom = a.isObject() ? a : (c.isObject() ? c : b);
+            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+            if (cls && cls->ops.count("colon")) {
+                Value self = dom;
+                Value outBuf[1];
+                CallContext ctx{&engine_, env};
+                cls->ops.at("colon")(self, Span<const Value>(ops, 3), 1,
+                                     Span<Value>(outBuf, 1), ctx);
+                return outBuf[0];
+            }
+        }
         ValueType t = colonOutputType(ops, 3);
         return Value::colonRangeTyped(a.toScalar(), b.toScalar(), c.toScalar(),
                                        t, engine_.mr_);

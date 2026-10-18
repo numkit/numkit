@@ -583,8 +583,23 @@ enter_frame:
             case OpCode::LOAD_END: {
                 // a=dst, b=arrReg, c=dim (0-based), d=ndims
                 const Value &arr = R[I.b];
-                size_t sz;
                 int ndims = I.d;
+                if (arr.isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(arr.objectClassName());
+                    if (cls && cls->methods.count("__end")) {
+                        Value self = arr;
+                        Value eargs[2] = {
+                            Value::scalar(static_cast<double>(I.c), engine_.mr_),
+                            Value::scalar(static_cast<double>(ndims), engine_.mr_)};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->methods.at("__end")(self, Span<const Value>(eargs, 2), 1,
+                                                 Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
+                size_t sz;
                 if (ndims <= 1) {
                     // Linear indexing: end = numel
                     sz = arr.numel();
@@ -961,6 +976,20 @@ enter_frame:
             //   * one non-double type T (others double) → T
             //   * two different non-double types → throw
             case OpCode::COLON: {
+                if (R[I.b].isObject() || R[I.c].isObject()) {
+                    const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
+                    const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                    if (cls && cls->ops.count("colon")) {
+                        Value self = dom;
+                        Value ops[2] = {R[I.b], R[I.c]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->ops.at("colon")(self, Span<const Value>(ops, 2), 1,
+                                             Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 ValueType ta = R[I.b].type(), tb = R[I.c].type();
                 ValueType t = (ta != ValueType::DOUBLE) ? ta
                             : (tb != ValueType::DOUBLE) ? tb
@@ -974,6 +1003,21 @@ enter_frame:
                 break;
             }
             case OpCode::COLON3: {
+                if (R[I.b].isObject() || R[I.c].isObject() || R[I.e].isObject()) {
+                    const Value &dom = R[I.b].isObject() ? R[I.b]
+                                     : (R[I.e].isObject() ? R[I.e] : R[I.c]);
+                    const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                    if (cls && cls->ops.count("colon")) {
+                        Value self = dom;
+                        Value ops[3] = {R[I.b], R[I.c], R[I.e]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->ops.at("colon")(self, Span<const Value>(ops, 3), 1,
+                                             Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 ValueType ta = R[I.b].type(), tb = R[I.c].type(), tc = R[I.e].type();
                 ValueType t = ValueType::DOUBLE;
                 ValueType nondefs[3] = {ta, tb, tc};
@@ -992,18 +1036,32 @@ enter_frame:
             }
 
             // ── Array construction ───────────────────────────────
-            case OpCode::HORZCAT:
-                R[I.a] = Value::horzcat(&R[I.b], I.c, engine_.mr_);
+            case OpCode::HORZCAT: {
+                if (I.c == 1) {
+                    R[I.a] = R[I.b];
+                    break;
+                }
+                bool handled = false;
+                for (uint8_t k = 0; k < I.c; ++k) {
+                    if (R[I.b + k].isObject()) {
+                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
+                        if (cls && cls->ops.count("horzcat")) {
+                            Value self = R[I.b];
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            cls->ops.at("horzcat")(self, Span<const Value>(&R[I.b + 1], I.c - 1), 1,
+                                                   Span<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            handled = true;
+                        }
+                        break;
+                    }
+                }
+                if (!handled)
+                    R[I.a] = Value::horzcat(&R[I.b], I.c, engine_.mr_);
                 break;
+            }
             case OpCode::HORZCAT_APPEND: {
-                // Specialised `dst = [dst, val]` — emitted by the
-                // compiler when it sees `A = [A, x]` (the canonical
-                // MATLAB grow-by-one anti-pattern). Routes through
-                // appendScalar (geometric capacity → amortised O(1))
-                // when dst is empty / row-vector heap double, val is a
-                // real scalar, and dst's heap is uniquely owned.
-                // Anything else falls back to the generic two-element
-                // horzcat — same shape semantics as before, just slow.
                 Value &dst = R[I.a];
                 const Value &val = R[I.b];
                 if (val.isScalar() && !val.isComplex()
@@ -1014,12 +1072,46 @@ enter_frame:
                     break;
                 }
                 Value elems[2] = { dst, val };
+                if (dst.isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(dst.objectClassName());
+                    if (cls && cls->ops.count("horzcat")) {
+                        Value self = dst;
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->ops.at("horzcat")(self, Span<const Value>(&elems[1], 1), 1,
+                                               Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 R[I.a] = Value::horzcat(elems, 2, engine_.mr_);
                 break;
             }
-            case OpCode::VERTCAT:
-                R[I.a] = Value::vertcat(&R[I.b], I.c, engine_.mr_);
+            case OpCode::VERTCAT: {
+                if (I.c == 1) {
+                    R[I.a] = R[I.b];
+                    break;
+                }
+                bool handled = false;
+                for (uint8_t k = 0; k < I.c; ++k) {
+                    if (R[I.b + k].isObject()) {
+                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
+                        if (cls && cls->ops.count("vertcat")) {
+                            Value self = R[I.b];
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            cls->ops.at("vertcat")(self, Span<const Value>(&R[I.b + 1], I.c - 1), 1,
+                                                   Span<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            handled = true;
+                        }
+                        break;
+                    }
+                }
+                if (!handled)
+                    R[I.a] = Value::vertcat(&R[I.b], I.c, engine_.mr_);
                 break;
+            }
             case OpCode::VERTCAT_APPEND: {
                 // dst = [dst; val] — vertical twin of HORZCAT_APPEND:
                 // appendScalarCol fast path when dst is an (or empty)
@@ -1035,6 +1127,18 @@ enter_frame:
                     break;
                 }
                 Value elems[2] = { dst, val };
+                if (dst.isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(dst.objectClassName());
+                    if (cls && cls->ops.count("vertcat")) {
+                        Value self = dst;
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->ops.at("vertcat")(self, Span<const Value>(&elems[1], 1), 1,
+                                               Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 R[I.a] = Value::vertcat(elems, 2, engine_.mr_);
                 break;
             }
@@ -1806,6 +1910,19 @@ enter_frame:
             case OpCode::FIELD_GET_DYN: {
                 // a=dst, b=obj, c=nameReg — s.(R[nameReg])
                 std::string fname = R[I.c].toString();
+                if (R[I.b].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    if (cls && cls->propGet) {
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        Value out;
+                        if (cls->propGet(R[I.b], fname, out, ctx)) {
+                            R[I.a] = std::move(out);
+                            break;
+                        }
+                    }
+                    throw std::runtime_error("No appropriate property '" + fname
+                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
                 if (!R[I.b].hasField(fname))
@@ -1816,6 +1933,19 @@ enter_frame:
             case OpCode::FIELD_GET_OR_CREATE_DYN: {
                 // a=dst, b=obj (in/out), c=nameReg — lvalue dynamic field
                 std::string fname = R[I.c].toString();
+                if (R[I.b].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    if (cls && cls->propGet) {
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        Value out;
+                        if (cls->propGet(R[I.b], fname, out, ctx)) {
+                            R[I.a] = std::move(out);
+                            break;
+                        }
+                    }
+                    throw std::runtime_error("No appropriate property '" + fname
+                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                }
                 if (R[I.b].isEmpty())
                     R[I.b] = Value::structure();
                 if (!R[I.b].isStruct())
@@ -1826,6 +1956,16 @@ enter_frame:
             case OpCode::FIELD_SET_DYN: {
                 // a=obj, b=nameReg, c=val — s.(R[nameReg]) = R[val]
                 std::string fname = R[I.b].toString();
+                if (R[I.a].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    if (cls && cls->propSet) {
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        if (cls->propSet(R[I.a], fname, R[I.c], ctx))
+                            break;
+                    }
+                    throw std::runtime_error("Cannot set property '" + fname
+                                             + "' on class '" + R[I.a].objectClassName() + "'");
+                }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::structure();
                 if (!R[I.a].isStruct())
@@ -1837,11 +1977,6 @@ enter_frame:
             // ── Cell operations ──────────────────────────────────
             case OpCode::CELL_LITERAL: {
                 uint8_t base = I.b, count = I.c;
-                // MATLAB: the empty literal {} is 0x0 (not 1x0) — with 1x0,
-                // `end` in a growth subscript (x{end+1,1}=v) sees 1 row and
-                // the value lands in a freshly grown EMPTY slot
-                // (bugs/opened/lang/cell-growth-loses-value.md; 1x0 also
-                // diverged from TreeWalker's execCellLiteral, which is 0x0).
                 auto cell = Value::cell(count == 0 ? 0 : 1, count);
                 for (uint8_t i = 0; i < count; ++i) {
                     cell.cellAt(i) = R[base + i];
@@ -1850,9 +1985,6 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_APPEND_FLATTEN: {
-                // a=acc (in/out), b=elem. First-class cell-literal builder: if R[elem] is
-                // a CSL, append all its items; else append it as one element. Driven by
-                // the runtime value, so {a, c{idx}, b} flattens for any subscript.
                 Value &acc = R[I.a];
                 if (!acc.isCell())
                     acc = Value::cell(1, 0);
@@ -1876,20 +2008,27 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_GET: {
+                if (R[I.b].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    if (cls && cls->methods.count("__brace_get")) {
+                        Value self = R[I.b];
+                        Value args[1] = {R[I.c]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->methods.at("__brace_get")(self, Span<const Value>(args, 1), 1,
+                                                       Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
                 const Value &cell = R[I.b];
                 const Value &sub  = R[I.c];
-                // Hot path: a scalar numeric subscript c{i} -> the bare element, no CSL,
-                // no resolveIndices allocation.
                 if (sub.isDoubleScalar()) {
                     R[I.a] = cell.cellAt(Value::checkedScalarIndex(sub.scalarVal()));
                     break;
                 }
-                // Multi-select c{:} / c{vec} / c{range}: one selected index is still a
-                // bare single value; N!=1 is a comma-separated list. In a single-value
-                // context the compiler-inserted COLLAPSE collapses it (brick 5a); splice
-                // consumers flatten it. See dev-docs/memory/csl_first_class.md.
                 auto ids = Value::resolveIndices(sub, cell.numel());
                 if (ids.size() == 1) {
                     R[I.a] = cell.cellAt(ids[0]);
@@ -1902,9 +2041,6 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_GET_OR_CREATE: {
-                // a=dst, b=cell (in/out), c=base, e=nargs — c{i…} as a
-                // compound-lvalue container: coerce to cell, auto-grow
-                // (any rank), return the content slot.
                 Value &cell = R[I.b];
                 const int nargs = I.e;
                 size_t coords[Dims::kMaxRank];
@@ -1915,21 +2051,30 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_GET_2D: {
+                if (R[I.b].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    if (cls && cls->methods.count("__brace_get")) {
+                        Value self = R[I.b];
+                        Value args[2] = {R[I.c], R[I.e]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->methods.at("__brace_get")(self, Span<const Value>(args, 2), 1,
+                                                       Span<Value>(out, 1), ctx);
+                        R[I.a] = std::move(out[0]);
+                        break;
+                    }
+                }
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
                 const Value &cell = R[I.b];
                 const Value &rsub = R[I.c];
                 const Value &csub = R[I.e];
-                // Hot path: both scalar c{i,j} -> the bare element.
                 if (rsub.isDoubleScalar() && csub.isDoubleScalar()) {
                     size_t r = Value::checkedScalarIndex(rsub.scalarVal());
                     size_t c = Value::checkedScalarIndex(csub.scalarVal());
                     R[I.a] = cell.cellAt(cell.dims().sub2ind(r, c));
                     break;
                 }
-                // Multi-select slice c{r,:} / c{:,j}: resolveIndices per dim, column-
-                // major. 1 selected -> bare element; N!=1 -> a CSL (collapsed in a
-                // single-value context, flattened by a splice consumer).
                 auto rows = Value::resolveIndices(rsub, cell.dims().rows());
                 auto cols = Value::resolveIndices(csub, cell.dims().cols());
                 if (rows.size() * cols.size() == 1) {
@@ -1945,7 +2090,6 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_GET_MULTI: {
-                // a=outBase, b=cell, c=idx, e=nout
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
                 auto indices = Value::resolveIndices(R[I.c], R[I.b].numel());
@@ -1955,9 +2099,6 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_GET_MULTI_2D: {
-                // a=outBase, b=cell, c=rowSub, d=colSub, e=nout. resolveIndices per
-                // dim + sub2ind, column-major (matches the TreeWalker order). Assigns
-                // up to nout selected contents (parity with the 1-D path's truncation).
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
                 const Value &cell   = R[I.b];
@@ -1975,6 +2116,17 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_SET: {
+                if (R[I.a].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    if (cls && cls->methods.count("__brace_set")) {
+                        Value args[2] = {R[I.b], R[I.c]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->methods.at("__brace_set")(R[I.a], Span<const Value>(args, 2), 0,
+                                                       Span<Value>(out, 1), ctx);
+                        break;
+                    }
+                }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
@@ -1991,6 +2143,17 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_SET_2D: {
+                if (R[I.a].isObject()) {
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    if (cls && cls->methods.count("__brace_set")) {
+                        Value args[3] = {R[I.b], R[I.c], R[I.e]};
+                        Value out[1];
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        cls->methods.at("__brace_set")(R[I.a], Span<const Value>(args, 3), 0,
+                                                       Span<Value>(out, 1), ctx);
+                        break;
+                    }
+                }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
