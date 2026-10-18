@@ -1986,5 +1986,67 @@ TEST_P(GridKronTest, DotAlongDim)
     EXPECT_DOUBLE_EQ(evalScalar("dd(2)"), 12.0);
 }
 
+TEST_P(GridKronTest, BinaryMinusAndSlashWithoutSpacesNotCommandCall)
+{
+    eval("C1 = 5; C2 = 9;\nC1-sqrt(C2);");
+    EXPECT_DOUBLE_EQ(evalScalar("ans"), 2.0);
+    eval("RHS = 10; LHS = 4;\nRHS-LHS;");
+    EXPECT_DOUBLE_EQ(evalScalar("ans"), 6.0);
+    eval("N = 8;\nN/2;");
+    EXPECT_DOUBLE_EQ(evalScalar("ans"), 4.0);
+}
+
+TEST_P(GridKronTest, LuRectangularAndSingular)
+{
+    // Tall 4x3 rectangular matrix
+    eval("A = [1 2 3; 4 5 6; 7 8 10; 2 1 3]; [L, U, P] = lu(A);");
+    EXPECT_DOUBLE_EQ(evalScalar("size(L, 1)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(L, 2)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(U, 1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(U, 2)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(P, 1)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(P, 2)"), 4.0);
+    EXPECT_LT(evalScalar("max(max(abs(P * A - L * U)))"), 1e-12);
+
+    // Wide 3x4 rectangular matrix
+    eval("Aw = A'; [Lw, Uw, Pw] = lu(Aw);");
+    EXPECT_DOUBLE_EQ(evalScalar("size(Lw, 1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(Lw, 2)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(Uw, 1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(Uw, 2)"), 4.0);
+    EXPECT_LT(evalScalar("max(max(abs(Pw * Aw - Lw * Uw)))"), 1e-12);
+
+    // Singular matrix does not throw
+    eval("As = [1 2; 2 4]; [Ls, Us, Ps] = lu(As);");
+    EXPECT_LT(evalScalar("max(max(abs(Ps * As - Ls * Us)))"), 1e-12);
+}
+
+TEST_P(GridKronTest, SvdTallSkinnyHouseholderCompletion)
+{
+    eval("X = [linspace(1, 10, 200)', sin(1:200)']; [U, S, V] = svd(X);");
+    EXPECT_DOUBLE_EQ(evalScalar("size(U, 1)"), 200.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(U, 2)"), 200.0);
+    EXPECT_LT(evalScalar("max(max(abs(U' * U - eye(200))))"), 1e-12);
+    EXPECT_LT(evalScalar("max(max(abs(U * S * V' - X)))"), 1e-11);
+}
+
+TEST_P(GridKronTest, EpsFunctionAndRandiParity)
+{
+    EXPECT_DOUBLE_EQ(evalScalar("eps"), 2.2204460492503131e-16);
+    EXPECT_DOUBLE_EQ(evalScalar("eps(1)"), 2.2204460492503131e-16);
+    EXPECT_DOUBLE_EQ(evalScalar("eps(2)"), 4.4408920985006262e-16);
+    EXPECT_EQ(eval("class(eps('single'))").toString(), "single");
+    EXPECT_EQ(eval("class(eps(single(4)))").toString(), "single");
+
+    // Bit-exact randi parity with reference engine under rng(0, 'twister')
+    eval("rng(0, 'twister'); r = randi([-3, 3], 1, 6);");
+    EXPECT_DOUBLE_EQ(evalScalar("r(1)"),  2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r(2)"),  3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r(3)"), -3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r(4)"),  3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r(5)"),  1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("r(6)"), -3.0);
+}
+
 INSTANTIATE_DUAL(GridKronTest);
 

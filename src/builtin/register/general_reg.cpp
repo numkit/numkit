@@ -71,6 +71,12 @@ void register_general(Engine &engine) {
             outs[0] = Value::scalar(0.0);
         });
 
+// ── edit: headless CLI no-op (matches batch mode) ──────────
+    engine.registerFunction("edit",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+            outs[0] = Value();
+        });
+
     // who / whos extracted to the runtime language-runtime layer:
     //   runtime/src/workspace.cpp → numkit::runtime::registerWorkspaceRuntime
     // (composed by installRuntimeLibrary, called by bundle/installStandardLibrary).

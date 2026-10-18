@@ -283,30 +283,57 @@ void register_elmat(Engine &engine) {
             if (x.isChar() || x.isString()) {
                 std::string s = x.toString();
                 if (s == "single") {
-                    outs[0] = Value::scalar(static_cast<double>(std::numeric_limits<float>::epsilon()), mr);
-                } else {
+                    Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
+                    out.singleDataMut()[0] = std::numeric_limits<float>::epsilon();
+                    outs[0] = std::move(out);
+                } else if (s == "double") {
                     outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
+                } else {
+                    throw Error("eps: class name must be 'double' or 'single'",
+                                0, 0, "eps", "", "numkit:eps:invalidClassName");
                 }
                 return;
             }
+            const ValueType outType = (x.type() == ValueType::SINGLE) ? ValueType::SINGLE : ValueType::DOUBLE;
             if (x.isEmpty()) {
-                outs[0] = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+                size_t dArr[Dims::kMaxRank];
+                int nd = x.dims().ndims();
+                for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+                outs[0] = Value::matrixND(dArr, nd, outType, mr);
                 return;
             }
             size_t dArr[Dims::kMaxRank];
             int nd = x.dims().ndims();
             for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
-            Value out = Value::matrixND(dArr, nd, ValueType::DOUBLE, mr);
-            double *dst = out.doubleDataMut();
+            Value out = Value::matrixND(dArr, nd, outType, mr);
             const size_t n = x.numel();
-            for (size_t i = 0; i < n; ++i) {
-                double v = std::abs(x.elemAsDouble(i));
-                if (std::isnan(v) || std::isinf(v)) {
-                    dst[i] = std::numeric_limits<double>::quiet_NaN();
-                } else if (v <= std::numeric_limits<double>::min()) {
-                    dst[i] = std::numeric_limits<double>::denorm_min();
-                } else {
-                    dst[i] = std::nextafter(v, std::numeric_limits<double>::infinity()) - v;
+            if (outType == ValueType::SINGLE) {
+                float *dst = out.singleDataMut();
+                for (size_t i = 0; i < n; ++i) {
+                    float v = x.isComplex()
+                        ? static_cast<float>(std::abs(x.complexData()[i]))
+                        : std::abs(static_cast<float>(x.elemAsDouble(i)));
+                    if (std::isnan(v) || std::isinf(v)) {
+                        dst[i] = std::numeric_limits<float>::quiet_NaN();
+                    } else if (v <= std::numeric_limits<float>::min()) {
+                        dst[i] = std::numeric_limits<float>::denorm_min();
+                    } else {
+                        dst[i] = std::nextafter(v, std::numeric_limits<float>::infinity()) - v;
+                    }
+                }
+            } else {
+                double *dst = out.doubleDataMut();
+                for (size_t i = 0; i < n; ++i) {
+                    double v = x.isComplex()
+                        ? std::abs(x.complexData()[i])
+                        : std::abs(x.elemAsDouble(i));
+                    if (std::isnan(v) || std::isinf(v)) {
+                        dst[i] = std::numeric_limits<double>::quiet_NaN();
+                    } else if (v <= std::numeric_limits<double>::min()) {
+                        dst[i] = std::numeric_limits<double>::denorm_min();
+                    } else {
+                        dst[i] = std::nextafter(v, std::numeric_limits<double>::infinity()) - v;
+                    }
                 }
             }
             outs[0] = std::move(out);

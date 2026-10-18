@@ -88,7 +88,7 @@ void loadAscii(Engine &engine, Environment &env,
         ScratchVec<double> row(&scratch);
         size_t q = ws;
         while (q < line.size()) {
-            while (q < line.size() && std::isspace(static_cast<unsigned char>(line[q]))) ++q;
+            while (q < line.size() && (std::isspace(static_cast<unsigned char>(line[q])) || line[q] == ',')) ++q;
             if (q >= line.size()) break;
             const char *start = line.c_str() + q;
             char *endp = nullptr;

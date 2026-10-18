@@ -27,11 +27,10 @@ namespace numkit {
 // Reserved names — see types.hpp for per-set semantics.
 // ============================================================
 const std::unordered_set<std::string> kBuiltinConstants = {
-    // `true`/`false`/`nan`/`NaN`/`inf`/`Inf` are MATLAB built-in
-    // functions, not constants — they support shape forms
-    // `nan(M, N, 'single')`, `Inf(N)` etc. See library.cpp /
-    // matrix.cpp:nan_reg/inf_reg/true_reg/false_reg and BUGS.md #30.
-    "pi", "eps", "i", "j",
+    // `true`/`false`/`nan`/`NaN`/`inf`/`Inf`/`eps` are built-in
+    // functions, not constants — they support argument forms
+    // `nan(M, N, 'single')`, `Inf(N)`, `eps(X)`, `eps('single')`, etc.
+    "pi", "i", "j",
 };
 
 const std::unordered_set<std::string> kPseudoVars = {
@@ -100,7 +99,6 @@ Engine::~Engine()
 void Engine::reinstallConstants()
 {
     constantsEnv_->set("pi", Value::scalar(3.14159265358979323846, mr_));
-    constantsEnv_->set("eps", Value::scalar(2.2204460492503131e-16, mr_));
     // `nan` / `NaN` / `inf` / `Inf` are MATLAB built-in functions, not
     // constants. Bare `nan` calls nan() → scalar NaN; `nan(M, N)` calls
     // nan(M, N) → MxN matrix of NaN; `nan(M, N, 'single')` returns

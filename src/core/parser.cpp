@@ -329,11 +329,15 @@ bool Parser::isCommandStyleCall() const
 
     // Command args may START with a glued '-' or '/': `which -all sin`,
     // `cd /path`, `web -broswer http://…` (the fieldtest corpus idiom).
-    // Distinguished from binary expressions (`x - 1`, `a / b`) by the
-    // absence of a space after the operator — the operand is glued to it.
+    // Distinguished from binary expressions (`x - 1`, `a / b`, `C1-sqrt(C2)`,
+    // `N/2`) by requiring whitespace between the command head and the
+    // operator AND the operand being glued to the operator.
     if (next.type == TokenType::MINUS || next.type == TokenType::SLASH) {
+        const int headEnd = current().col + static_cast<int>(current().value.size());
         const Token &operand = peekToken(2);
-        return operand.line == next.line
+        return next.line == current().line
+            && next.col > headEnd
+            && operand.line == next.line
             && operand.col == next.col + static_cast<int>(next.value.size())
             && (operand.type == TokenType::IDENTIFIER
                 || operand.type == TokenType::NUMBER
