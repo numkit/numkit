@@ -204,7 +204,7 @@ inline Value allocReduceOutput(const Value &x, int redDim, ValueType outType, st
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
         ScratchArena scratch(mr);
-        auto shape = numkit::ops::outShapeForDimND(&scratch, x, redDim);
+        auto shape = numkit::ops::outShapeForDimND(x, redDim, &scratch);
         return Value::matrixND(shape.data(), (int) shape.size(), outType, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);
@@ -330,7 +330,7 @@ inline Value allocComplexReduceOutput(const Value &x, int redDim, std::pmr::memo
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
         ScratchArena scratch(mr);
-        auto shape = numkit::ops::outShapeForDimND(&scratch, x, redDim);
+        auto shape = numkit::ops::outShapeForDimND(x, redDim, &scratch);
         return Value::matrixND(shape.data(), (int) shape.size(), ValueType::COMPLEX, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);

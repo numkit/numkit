@@ -660,7 +660,7 @@ void strings_reg(Span<const Value> args, size_t, Span<Value> outs,
 {
     auto *mr = ctx.engine->resource();
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, args, "strings");
+    auto d = parseDimsArgsND(args, "strings", &scratch);
     outs[0] = stringsND(Span<const size_t>(d.data(), d.size()), mr);
 }
 

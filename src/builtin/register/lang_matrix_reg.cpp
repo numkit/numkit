@@ -46,7 +46,7 @@ void zeros_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, dimArgs, "zeros");
+    auto d = parseDimsArgsND(dimArgs, "zeros", &scratch);
     stripTrailingOnes(d);
     // Value::matrix*/matrixND zero-fill the buffer for any type, so
     // createMatrixND with the requested type IS the zeros() output.
@@ -81,7 +81,7 @@ void ones_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, dimArgs, "ones");
+    auto d = parseDimsArgsND(dimArgs, "ones", &scratch);
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     fillOnes(m, t);
@@ -263,7 +263,7 @@ void nan_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
         throw Error("nan: type must be 'double' or 'single' (NaN is float-only)",
                     0, 0, "nan", "", "numkit:nan:badType");
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, dimArgs, "nan");
+    auto d = parseDimsArgsND(dimArgs, "nan", &scratch);
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, std::numeric_limits<double>::quiet_NaN(),
@@ -284,7 +284,7 @@ void inf_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
         throw Error("inf: type must be 'double' or 'single' (Inf is float-only)",
                     0, 0, "inf", "", "numkit:inf:badType");
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, dimArgs, "inf");
+    auto d = parseDimsArgsND(dimArgs, "inf", &scratch);
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, std::numeric_limits<double>::infinity(),
@@ -304,7 +304,7 @@ void true_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
         return;
     }
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, args, "true");
+    auto d = parseDimsArgsND(args, "true", &scratch);
     stripTrailingOnes(d);
     auto v = createMatrixND(d.data(), d.size(), ValueType::LOGICAL, mr);
     uint8_t *p = v.logicalDataMut();
@@ -320,7 +320,7 @@ void false_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
         return;
     }
     ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(&scratch, args, "false");
+    auto d = parseDimsArgsND(args, "false", &scratch);
     stripTrailingOnes(d);
     // createMatrixND zero-fills LOGICAL by default.
     outs[0] = createMatrixND(d.data(), d.size(), ValueType::LOGICAL, mr);

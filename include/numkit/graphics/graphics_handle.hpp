@@ -1,4 +1,4 @@
-﻿// include/nk/graphics/graphics_handle.hpp
+// include/nk/graphics/graphics_handle.hpp
 //
 // Graphics-handle object payload â€” the Value-side half of the handle
 // registry (bugs/closed/graphics/plot-family-no-return-value.md).
@@ -50,7 +50,7 @@ inline int graphicsHandleIdOf(const Value &v)
 // Handle object Value wrapping registry id `id` with MATLAB class name
 // `className` (that string is what class()/isa() report).
 inline Value makeGraphicsHandleValue(const std::string &className, int id,
-                                     std::pmr::memory_resource *mr)
+                                     std::pmr::memory_resource *mr = nullptr)
 {
     auto st = std::make_shared<ObjectState>(mr);
     auto payload = std::make_shared<GraphicsHandlePayload>();

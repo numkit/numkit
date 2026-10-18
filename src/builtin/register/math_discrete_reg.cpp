@@ -613,7 +613,7 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
               [ad, ac, ar](size_t a, size_t b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
     nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
     if (nonNan.empty()) return emptyRowsResult(cols, mr);
-    return numkit::ops::collectRowsByIndex(mr, A, nonNan.data(), nonNan.size());
+    return numkit::ops::collectRowsByIndex(A, nonNan.data(), nonNan.size(), mr);
 }
 
 // Row-wise setxor (MATLAB setxor(A,B,'rows')): the symmetric difference of the
@@ -672,7 +672,7 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
               [cdp, cols, nr](size_t a, size_t b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
     nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
     if (nonNan.empty()) return emptyRowsResult(cols, mr);
-    return numkit::ops::collectRowsByIndex(mr, combined, nonNan.data(), nonNan.size());
+    return numkit::ops::collectRowsByIndex(combined, nonNan.data(), nonNan.size(), mr);
 }
 } // namespace
 

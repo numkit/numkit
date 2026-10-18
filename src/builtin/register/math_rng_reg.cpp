@@ -100,7 +100,7 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         }
     }
     ScratchArena scratch(mr);
-    auto dims = parseDimsArgsND(&scratch, dimArgs, "rand");
+    auto dims = parseDimsArgsND(dimArgs, "rand", &scratch);
     stripTrailingOnes(dims);
     Value out;
     {
@@ -155,7 +155,7 @@ void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         }
     }
     ScratchArena scratch(mr);
-    auto dims = parseDimsArgsND(&scratch, dimArgs, "randn");
+    auto dims = parseDimsArgsND(dimArgs, "randn", &scratch);
     stripTrailingOnes(dims);
     Value out;
     {
@@ -243,7 +243,7 @@ void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         dbl_out = randi(ctx.engine->rng(), imin, imax, 1, 1, 0, mr);
     } else {
         ScratchArena scratch(mr);
-        auto dims = parseDimsArgsND(&scratch, dimArgs, "randi");
+        auto dims = parseDimsArgsND(dimArgs, "randi", &scratch);
         stripTrailingOnes(dims);
         if (dims.size() <= 3) {
             const size_t r = dims.size() >= 1 ? dims[0] : 1;
