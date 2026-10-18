@@ -2777,4 +2777,45 @@ TEST_P(DisplayTest, GraphicsHandleSurfaceGaps)
     EXPECT_EQ(cols(*Zc), 8u);
 }
 
+TEST_P(DisplayTest, FigureExportGaps)
+{
+    // 1. Vector PDF and EPS export (including 3-D surf).
+    eval("close all; surf(peaks(6)); "
+         "saveas(gcf, 'nk_test_surf.pdf'); "
+         "saveas(gcf, 'nk_test_surf.eps'); "
+         "pdfTxt = fileread('nk_test_surf.pdf'); "
+         "epsTxt = fileread('nk_test_surf.eps'); "
+         "delete('nk_test_surf.pdf'); delete('nk_test_surf.eps');");
+    ASSERT_NE(getVarPtr("pdfTxt"), nullptr);
+    ASSERT_NE(getVarPtr("epsTxt"), nullptr);
+    EXPECT_EQ(getVarPtr("pdfTxt")->toString().substr(0, 8), "%PDF-1.4");
+    EXPECT_NE(getVarPtr("pdfTxt")->toString().find("%%EOF"), std::string::npos);
+    EXPECT_EQ(getVarPtr("epsTxt")->toString().substr(0, 14), "%!PS-Adobe-3.0");
+    EXPECT_NE(getVarPtr("epsTxt")->toString().find("%%EOF"), std::string::npos);
+
+    // 2. Quiver, polarplot, and yyaxis right rendering in exported figures.
+    eval("close all; quiver([0 1], [0 1], [2 -1], [1 2]); "
+         "exportgraphics(gcf, 'nk_test_quiver.svg'); "
+         "qSvg = fileread('nk_test_quiver.svg'); delete('nk_test_quiver.svg');");
+    ASSERT_NE(getVarPtr("qSvg"), nullptr);
+    EXPECT_NE(getVarPtr("qSvg")->toString().find("<polyline"), std::string::npos);
+
+    eval("close all; polarplot([0 pi/2 pi], [1 2 4]); title('PolarChart'); "
+         "saveas(gcf, 'nk_test_polar.svg'); "
+         "pSvg = fileread('nk_test_polar.svg'); delete('nk_test_polar.svg');");
+    ASSERT_NE(getVarPtr("pSvg"), nullptr);
+    EXPECT_NE(getVarPtr("pSvg")->toString().find("PolarChart"), std::string::npos);
+    EXPECT_NE(getVarPtr("pSvg")->toString().find("330"), std::string::npos);
+
+    eval("close all; yyaxis left; plot([1 2 3], [1 2 3]); ylabel('LeftAxis'); "
+         "yyaxis right; plot([1 2 3], [100 200 300]); ylabel('RightAxis'); "
+         "saveas(gcf, 'nk_test_yy.svg'); "
+         "yySvg = fileread('nk_test_yy.svg'); delete('nk_test_yy.svg');");
+    ASSERT_NE(getVarPtr("yySvg"), nullptr);
+    EXPECT_NE(getVarPtr("yySvg")->toString().find("LeftAxis"), std::string::npos);
+    EXPECT_NE(getVarPtr("yySvg")->toString().find("RightAxis"), std::string::npos);
+    EXPECT_NE(getVarPtr("yySvg")->toString().find("300"), std::string::npos);
+}
+
 INSTANTIATE_DUAL(DisplayTest);
+

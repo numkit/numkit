@@ -1,4 +1,4 @@
-﻿/// @file figure_manager.hpp
+/// @file figure_manager.hpp
 /// @ingroup group_graphics
 #pragma once
 
@@ -803,6 +803,35 @@ public:
         auto &fig = current();
         auto &ax = fig.cur();
         if (!ax.holdOn) {
+            if (ax.yyEnabled) {
+                const std::string side = ax.activeYside.empty() ? "left" : ax.activeYside;
+                for (size_t idx = ax.datasets.size(); idx-- > 0;) {
+                    const std::string dsSide = ax.datasets[idx].yside.empty()
+                                                   ? "left"
+                                                   : ax.datasets[idx].yside;
+                    if (dsSide == side) {
+                        for (auto &[hid, rec] : handleRegistry_) {
+                            if (rec.deleted || rec.figureId != fig.id
+                                || rec.axesIndex != static_cast<size_t>(fig.currentAxes)
+                                || !rec.isChart())
+                                continue;
+                            if (rec.datasetIndex == idx)
+                                rec.deleted = true;
+                            else if (rec.datasetIndex > idx)
+                                --rec.datasetIndex;
+                        }
+                        ax.datasets.erase(ax.datasets.begin() + static_cast<std::ptrdiff_t>(idx));
+                    }
+                }
+                if (side == "right") {
+                    ax.ylim2Json.clear();
+                } else {
+                    ax.ylimJson.clear();
+                }
+                chartCallBase_ = ax.datasets.size();
+                fig.modified = true;
+                return;
+            }
             // The previous charts die with the fresh axes â€” their handles
             // go stale (MATLAB: hold off + plot invalidates old Lines).
             // The axes itself (and the figure) survive the content reset.

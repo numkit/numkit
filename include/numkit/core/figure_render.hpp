@@ -737,6 +737,8 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         else if (cbSide == "north")
             mt += 34;
     }
+    if (ax.yyEnabled)
+        mr += 48;
     Rect plot{box.x0 + ml, box.y0 + mt, box.x1 - mr, box.y1 - mb};
     if (!ax.axisVisible) {
         plot = Rect{box.x0 + 4, box.y0 + 4, box.x1 - 4, box.y1 - 4};
@@ -744,7 +746,6 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             plot.y0 += 18;
     }
 
-    // â”€â”€ Collect series data â†’ ranges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     auto applyLim = [](const std::string &json, double &lo, double &hi) {
         if (json.empty())
             return;
@@ -754,7 +755,165 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             hi = v[1];
         }
     };
+
+    if (ax.polar) {
+        const double kPi = 3.14159265358979323846;
+        double rlo = 0.0, rhi = 0.0;
+        for (const auto &ds : ax.datasets) {
+            if (!ds.visible)
+                continue;
+            for (double rv : parseVec(ds.yJson))
+                if (std::isfinite(rv))
+                    rhi = std::max(rhi, rv);
+        }
+        if (!(rhi > rlo))
+            rhi = rlo + 1.0;
+        applyLim(ax.rlimJson, rlo, rhi);
+        if (!(rhi > rlo))
+            rhi = rlo + 1.0;
+
+        const double cx = (plot.x0 + plot.x1) / 2.0;
+        const double cy = (plot.y0 + plot.y1) / 2.0;
+        const double R  = 0.42 * std::min(plot.x1 - plot.x0, plot.y1 - plot.y0);
+        const double theta0 = ax.thetaZeroLocation == "top"    ?  kPi / 2.0
+                            : ax.thetaZeroLocation == "left"   ?  kPi
+                            : ax.thetaZeroLocation == "bottom" ? -kPi / 2.0
+                                                               :  0.0;
+        const bool cw = ax.thetaDir == "clockwise";
+        auto polarPt = [&](double theta, double rho, double &px, double &py) {
+            double rn = std::max(0.0, (rho - rlo) / (rhi - rlo)) * R;
+            double ang = theta0 + (cw ? -theta : theta);
+            px = cx + rn * std::cos(ang);
+            py = cy - rn * std::sin(ang);
+        };
+
+        if (ax.axisVisible) {
+            auto rticks = !ax.rticksJson.empty() ? parseVec(ax.rticksJson)
+                                                 : niceTicks(rlo, rhi, 4);
+            for (double rv : rticks) {
+                if (rv <= rlo || rv > rhi + 1e-9)
+                    continue;
+                double rn = ((rv - rlo) / (rhi - rlo)) * R;
+                std::vector<double> rx, ry;
+                for (int k = 0; k <= 64; ++k) {
+                    double a = 2.0 * kPi * k / 64.0;
+                    rx.push_back(cx + rn * std::cos(a));
+                    ry.push_back(cy - rn * std::sin(a));
+                }
+                addLine(out, rx, ry, kGridCol, 0.75, false);
+                double lx, ly;
+                polarPt(80.0 * kPi / 180.0, rv, lx, ly);
+                addText(out, tickLabel(rv), lx + 3, ly, ax.fontSize * 0.9, kTextCol);
+            }
+            std::vector<double> ox, oy;
+            for (int k = 0; k <= 64; ++k) {
+                double a = 2.0 * kPi * k / 64.0;
+                ox.push_back(cx + R * std::cos(a));
+                oy.push_back(cy - R * std::sin(a));
+            }
+            addLine(out, ox, oy, kAxisCol, std::max(0.75, ax.lineWidth), false);
+            std::vector<double> tticks = !ax.thetaticksJson.empty()
+                ? parseVec(ax.thetaticksJson)
+                : std::vector<double>{0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330};
+            std::vector<std::string> ttLab;
+            if (!ax.thetaticklabelsJson.empty())
+                ttLab = parseTickLabelVec(ax.thetaticklabelsJson);
+            for (size_t k = 0; k < tticks.size(); ++k) {
+                double deg = tticks[k];
+                double rad = deg * kPi / 180.0;
+                double sx, sy, lx, ly;
+                polarPt(rad, rhi, sx, sy);
+                addLine(out, {cx, sx}, {cy, sy}, kGridCol, 0.75, false);
+                polarPt(rad, rlo + (rhi - rlo) * 1.12, lx, ly);
+                std::string lab = k < ttLab.size() ? ttLab[k] : tickLabel(deg);
+                addText(out, lab, lx - 3.0 * lab.size(), ly + 3.5, ax.fontSize * 0.9, kTextCol);
+            }
+        }
+
+        size_t pIdx = 0;
+        for (const auto &ds : ax.datasets) {
+            if (!ds.visible)
+                continue;
+            auto tv = parseVec(ds.xJson);
+            auto rv = parseVec(ds.yJson);
+            size_t n = std::min(tv.size(), rv.size());
+            if (n == 0)
+                continue;
+            StyleParts st = parseStyle(ds.style);
+            if (!st.hasColor)
+                st.color = palette()[pIdx % palette().size()];
+            ++pIdx;
+            Rgb col = st.color;
+            double lw = ds.lineWidth > 0 ? ds.lineWidth : 1.4;
+            double ms = ds.markerSize > 0 ? ds.markerSize * 1.4 : 6.0;
+            bool dashed = st.lineStyle == "--" || st.lineStyle == ":" || st.lineStyle == "-.";
+            if (ds.type == "compass") {
+                for (size_t k = 0; k < n; ++k) {
+                    if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]))
+                        continue;
+                    double x1, y1;
+                    polarPt(tv[k], rv[k], x1, y1);
+                    addLine(out, {cx, x1}, {cy, y1}, col, lw, false);
+                    double dx = x1 - cx, dy = y1 - cy, len = std::hypot(dx, dy);
+                    if (len > 1e-9) {
+                        double hl = std::max(4.0, len * 0.12);
+                        double ux = dx / len, uy = dy / len;
+                        double c1 = std::cos(0.45), s1 = std::sin(0.45);
+                        addLine(out, {x1 - hl * (ux * c1 - uy * s1), x1},
+                                {y1 - hl * (uy * c1 + ux * s1), y1}, col, lw, false);
+                        addLine(out, {x1 - hl * (ux * c1 + uy * s1), x1},
+                                {y1 - hl * (uy * c1 - ux * s1), y1}, col, lw, false);
+                    }
+                }
+            } else if (ds.type == "bar" || ds.type == "rose") {
+                double bw = n > 1 ? std::abs(tv[1] - tv[0]) : (2.0 * kPi / std::max<size_t>(1, n));
+                for (size_t k = 0; k < n; ++k) {
+                    if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]) || rv[k] <= rlo)
+                        continue;
+                    std::vector<double> wx = {cx}, wy = {cy};
+                    for (int s = 0; s <= 6; ++s) {
+                        double th = tv[k] - bw * 0.45 + (bw * 0.9 * s) / 6.0;
+                        double px, py;
+                        polarPt(th, rv[k], px, py);
+                        wx.push_back(px);
+                        wy.push_back(py);
+                    }
+                    addPoly(out, wx, wy, col, true);
+                }
+            } else if (ds.type == "scatter" || ds.type == "bubble") {
+                for (size_t k = 0; k < n; ++k) {
+                    if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]))
+                        continue;
+                    double px, py;
+                    polarPt(tv[k], rv[k], px, py);
+                    addMarker(out, px, py, ms, col, st.marker.empty() ? "o" : st.marker);
+                }
+            } else {
+                std::vector<double> px, py;
+                for (size_t k = 0; k < n; ++k) {
+                    if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]))
+                        continue;
+                    double xk, yk;
+                    polarPt(tv[k], rv[k], xk, yk);
+                    px.push_back(xk);
+                    py.push_back(yk);
+                }
+                if (st.lineStyle != "none" && px.size() >= 2)
+                    addLine(out, px, py, col, lw, dashed);
+                if (!st.marker.empty())
+                    for (size_t k = 0; k < px.size(); ++k)
+                        addMarker(out, px[k], py[k], ms, col, st.marker);
+            }
+        }
+        if (!ax.title.empty())
+            addText(out, ax.title, (plot.x0 + plot.x1) / 2 - 3.2 * ax.title.size(),
+                    plot.y0 - 18, ax.fontSize * 1.1 + 2, kTextCol, false,
+                    ax.fontWeight == "bold", ax.fontName);
+        return;
+    }
+
     double xlo = +INFINITY, xhi = -INFINITY, ylo = +INFINITY, yhi = -INFINITY;
+    double y2lo = +INFINITY, y2hi = -INFINITY;
     std::vector<std::vector<double>> xs(ax.datasets.size()), ys(ax.datasets.size());
     int imgDatasets = 0, seriesDatasets = 0;
 
@@ -821,9 +980,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         dataRange(xs[i], a, b);
         xlo = std::min(xlo, a);
         xhi = std::max(xhi, b);
+        const bool isRightY = ax.yyEnabled && ds.yside == "right";
+        double &curYlo = isRightY ? y2lo : ylo;
+        double &curYhi = isRightY ? y2hi : yhi;
         dataRange(ys[i], a, b);
-        ylo = std::min(ylo, a);
-        yhi = std::max(yhi, a * 0 + b);
+        curYlo = std::min(curYlo, a);
+        curYhi = std::max(curYhi, a * 0 + b);
         // quiver: arrow tips extend the data range (u/v offsets).
         if (ds.type == "quiver") {
             auto uv = parseVec(ds.uJson);
@@ -834,8 +996,8 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 xhi = std::max(xhi, xs[i][k] + uv[k]);
             }
             for (size_t k = 0; k < nq && k < vv.size(); ++k) {
-                ylo = std::min(ylo, ys[i][k] + vv[k]);
-                yhi = std::max(yhi, ys[i][k] + vv[k]);
+                curYlo = std::min(curYlo, ys[i][k] + vv[k]);
+                curYhi = std::max(curYhi, ys[i][k] + vv[k]);
             }
         }
         // errorbar extents
@@ -844,16 +1006,16 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             if (e.empty())
                 return;
             for (size_t k = 0; k < e.size() && k < ys[i].size(); ++k) {
-                ylo = std::min(ylo, ys[i][k] - (pos ? 0 : e[k]));
-                yhi = std::max(yhi, ys[i][k] + (pos ? e[k] : 0));
+                curYlo = std::min(curYlo, ys[i][k] - (pos ? 0 : e[k]));
+                curYhi = std::max(curYhi, ys[i][k] + (pos ? e[k] : 0));
             }
         };
         ext(ds.eJson, true);
         ext(ds.eNegJson, false);
         ext(ds.ePosJson, true);
         if (ds.type == "stem") {
-            ylo = std::min(ylo, 0.0);
-            yhi = std::max(yhi, 0.0);
+            curYlo = std::min(curYlo, 0.0);
+            curYhi = std::max(curYhi, 0.0);
         }
     }
     if (!(xhi > xlo)) {
@@ -861,13 +1023,18 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         xhi = xhi > xlo ? xhi : xlo + 1;
     }
     if (!(yhi > ylo)) {
-        double mid = ylo;
+        double mid = std::isfinite(ylo) ? ylo : 0.5;
         ylo = mid - 0.5;
         yhi = mid + 0.5;
     }
+    if (!(y2hi > y2lo)) {
+        double mid = std::isfinite(y2lo) ? y2lo : 0.5;
+        y2lo = mid - 0.5;
+        y2hi = mid + 0.5;
+    }
     applyLim(ax.xlimJson, xlo, xhi);
     applyLim(ax.ylimJson, ylo, yhi);
-    // 5% padding on non-explicit ranges (MATLAB-style breathing room).
+    applyLim(ax.ylim2Json, y2lo, y2hi);
     auto pad = [](double &lo, double &hi, const std::string &lim) {
         if (!lim.empty())
             return;
@@ -875,14 +1042,11 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         lo -= d;
         hi += d;
     };
-    // Image-only axes keep MATLAB's exact image limits (probe: XLim
-    // [0.5 4.5] for a 3x4 â€” NO extra 5% breathing room). Mixed
-    // image+series axes approximate MATLAB's union algorithm with the
-    // usual 5% pad on top (rare in practice; noted in memory).
     bool imageOnly = imgDatasets > 0 && seriesDatasets == 0;
     if (!imageOnly) {
         pad(xlo, xhi, ax.xlimJson);
         pad(ylo, yhi, ax.ylimJson);
+        pad(y2lo, y2hi, ax.ylim2Json);
     }
     if (ax.xscale == "log") {
         xlo = std::max(xlo, 1e-12);
@@ -894,10 +1058,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         if (!(yhi > ylo))
             yhi = ylo * 100;
     }
+    if (ax.yscale2 == "log") {
+        y2lo = std::max(y2lo, 1e-12);
+        if (!(y2hi > y2lo))
+            y2hi = y2lo * 100;
+    }
 
-    // axis image / axis equal â€” equal data units per pixel on both
-    // axes: shrink the plot rect to the data aspect (MATLAB keeps the
-    // box centered-ish; probe: imshow renders undistorted cells).
     if (ax.axisMode == "image" || ax.axisMode == "equal") {
         double dataAspect = (xhi - xlo) / (yhi - ylo);
         double pxAspect = (plot.x1 - plot.x0) / (plot.y1 - plot.y0);
@@ -918,6 +1084,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
 
     AxisRange XR{xlo, xhi, ax.xscale == "log"};
     AxisRange YR{ylo, yhi, ax.yscale == "log"};
+    AxisRange YR2{y2lo, y2hi, ax.yscale2 == "log"};
     double px0 = plot.x0, px1 = plot.x1;
     double py0 = plot.y1, py1 = plot.y0;   // y DOWN: data-up = pixel-up
     if (ax.xDir == "reverse")
@@ -926,6 +1093,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         std::swap(py0, py1);
     auto X = [&](double v) { return XR.map(v, px0, px1); };
     auto Y = [&](double v) { return YR.map(v, py0, py1); };
+    auto Y2 = [&](double v) { return YR2.map(v, py0, py1); };
 
     // â”€â”€ Grid (under the data) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (ax.gridMajor && ax.gridUserTouched) {
@@ -1310,11 +1478,10 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         bool dashed = st.lineStyle == "--" || st.lineStyle == ":" || st.lineStyle == "-.";
         const size_t n = std::min(xs[i].size(), ys[i].size());
         const std::string &t = ds.type;
+        const AxisRange &YRs = (ax.yyEnabled && ds.yside == "right") ? YR2 : YR;
+        auto Ys = [&](double v) { return YRs.map(v, py0, py1); };
 
         if (t == "line" || t == "comet" || t == "animatedline") {
-            // Non-finite points (null separators â€” contour level
-            // segments) SPLIT the polyline: dropping them would join
-            // unrelated segments with spurious chords.
             std::vector<double> px, py;
             auto flushRun = [&]() {
                 if (st.lineStyle != "none" && px.size() >= 2)
@@ -1325,7 +1492,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             for (size_t k = 0; k < n; ++k) {
                 if (std::isfinite(xs[i][k]) && std::isfinite(ys[i][k])) {
                     px.push_back(X(xs[i][k]));
-                    py.push_back(Y(ys[i][k]));
+                    py.push_back(Ys(ys[i][k]));
                 } else {
                     flushRun();
                 }
@@ -1342,42 +1509,34 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                     py.push_back(py.back());
                 }
                 px.push_back(X(xs[i][k]));
-                py.push_back(Y(ys[i][k]));
+                py.push_back(Ys(ys[i][k]));
             }
             if (px.size() >= 2)
                 addLine(out, px, py, col, lw, dashed);
             if (!st.marker.empty())
                 for (size_t k = 0; k < n; ++k)
-                    addMarker(out, X(xs[i][k]), Y(ys[i][k]), ms, col, st.marker);
+                    addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms, col, st.marker);
         } else if (t == "stem") {
             double base = 0;
-            if (base >= YR.lo && base <= YR.hi)
+            if (base >= YRs.lo && base <= YRs.hi)
                 for (size_t k = 0; k < n; ++k)
                     addLine(out, {X(xs[i][k]), X(xs[i][k])},
-                            {Y(base), Y(ys[i][k])}, col, lw, dashed);
+                            {Ys(base), Ys(ys[i][k])}, col, lw, dashed);
             for (size_t k = 0; k < n; ++k)
-                addMarker(out, X(xs[i][k]), Y(ys[i][k]), ms,
+                addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms,
                           col, st.marker.empty() ? "o" : st.marker);
         } else if (t == "scatter" || t == "bubble") {
             std::vector<double> sz;
             if (!ds.sizeJson.empty())
                 sz = parseVec(ds.sizeJson);
             for (size_t k = 0; k < n; ++k)
-                addMarker(out, X(xs[i][k]), Y(ys[i][k]),
+                addMarker(out, X(xs[i][k]), Ys(ys[i][k]),
                           sz.empty() ? ms : std::max(3.0, std::sqrt(sz[k] / 3.14) * 1.6),
                           col, "o");
         } else if (t == "histogram") {
-            // MATLAB histogram: bars TOUCH (full bin width), FaceColor
-            // 'auto' = (0,0.447,0.741), light-gray edge, LW 0.5
-            // (probe-verified R2025b). binWidth kv when the engine
-            // packed it; otherwise derive from consecutive spacing.
             Rgb face = st.hasFaceColor ? st.faceColor : Rgb(0x00, 0x72, 0xbd);
             Rgb edge = st.edgeColor;
             if (st.faceAlpha < 1) {
-                // MATLAB default FaceAlpha 0.6 composites with the
-                // (white) canvas: 0.6Â·face + 0.4Â·white â€” probe-verified
-                // mechanism (dark-theme renders were the SAME alpha over
-                // a dark background, not a colour tint).
                 double a = std::min(1.0, std::max(0.0, st.faceAlpha));
                 face = Rgb((std::uint8_t)std::lround(a * face.r + (1 - a) * 255),
                            (std::uint8_t)std::lround(a * face.g + (1 - a) * 255),
@@ -1389,30 +1548,25 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             for (size_t k = 0; k < n; ++k) {
                 double x0p = X(xs[i][k] - bw / 2);
                 double x1p = X(xs[i][k] + bw / 2);
-                double yBase = Y(std::min(std::max(0.0, YR.lo), YR.hi));
-                double yTop = Y(ys[i][k]);
+                double yBase = Ys(std::min(std::max(0.0, YRs.lo), YRs.hi));
+                double yTop = Ys(ys[i][k]);
                 addPoly(out, {x0p, x1p, x1p, x0p},
                         {yBase, yBase, yTop, yTop}, face, true);
                 addLine(out, {x0p, x1p}, {yTop, yTop}, edge, 0.75, false);
             }
         } else if (t == "bar") {
-            // Grouped vertical bars, width 0.8 of slot.
             const int groups = (int)n;
-            const int series = 1;   // per-dataset grouping (adjacent bar
-                                    // datasets share slots below)
+            const int series = 1;
             for (size_t k = 0; k < n; ++k) {
                 double slot = groups > 1 ? (xhi - xlo) / (groups - 1) : 1;
                 double w = std::min(slot * 0.8, (plot.x1 - plot.x0) * 0.05) / series;
                 double x0p = X(xs[i][k]) - w / 2;
-                double yBase = Y(std::min(std::max(0.0, YR.lo), YR.hi));
-                double yTop = Y(ys[i][k]);
+                double yBase = Ys(std::min(std::max(0.0, YRs.lo), YRs.hi));
+                double yTop = Ys(ys[i][k]);
                 addPoly(out, {x0p, x0p + w, x0p + w, x0p},
                         {yBase, yBase, yTop, yTop}, col, true);
             }
         } else if (t == "quiver") {
-            // Arrows: shaft (x,y)â†’(x+u,y+v) plus a chevron head at the
-            // tip (two strokes ~25Â° back, length = max(4px, 12% of the
-            // on-screen arrow length). NaN breaks skip the arrow.
             auto uv = parseVec(ds.uJson);
             auto vv = parseVec(ds.vJson);
             for (size_t k = 0; k < n; ++k) {
@@ -1421,8 +1575,8 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 if (!std::isfinite(xs[i][k]) || !std::isfinite(ys[i][k])
                     || !std::isfinite(u) || !std::isfinite(v))
                     continue;
-                double x0 = X(xs[i][k]), y0 = Y(ys[i][k]);
-                double x1 = X(xs[i][k] + u), y1 = Y(ys[i][k] + v);
+                double x0 = X(xs[i][k]), y0 = Ys(ys[i][k]);
+                double x1 = X(xs[i][k] + u), y1 = Ys(ys[i][k] + v);
                 addLine(out, {x0, x1}, {y0, y1}, col, 1.2, false);
                 double dx = x1 - x0, dy = y1 - y0;
                 double len = std::hypot(dx, dy);
@@ -1430,8 +1584,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                     continue;
                 double hl = std::max(4.0, len * 0.12);
                 double ux = dx / len, uy = dy / len;
-                // Back-left / back-right head strokes.
-                double a1 = 0.45;   // ~26 degrees off the shaft
+                double a1 = 0.45;
                 double c1 = std::cos(a1), s1 = std::sin(a1);
                 double bxl = x1 - hl * (ux * c1 - uy * s1);
                 double byl = y1 - hl * (uy * c1 + ux * s1);
@@ -1441,8 +1594,6 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 addLine(out, {bxr, x1}, {byr, y1}, col, 1.2, false);
             }
         } else if (t == "polygon") {
-            // Filled rings (contourf bands, patch) â€” null-separated in
-            // one dataset; each ring fills with the dataset colour.
             std::vector<double> px, py;
             auto flushRing = [&]() {
                 if (px.size() >= 3)
@@ -1453,7 +1604,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             for (size_t k = 0; k < n; ++k) {
                 if (std::isfinite(xs[i][k]) && std::isfinite(ys[i][k])) {
                     px.push_back(X(xs[i][k]));
-                    py.push_back(Y(ys[i][k]));
+                    py.push_back(Ys(ys[i][k]));
                 } else {
                     flushRing();
                 }
@@ -1461,12 +1612,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             flushRing();
         } else if (t == "area") {
             std::vector<double> px, py;
-            double yBase = Y(std::min(std::max(0.0, YR.lo), YR.hi));
+            double yBase = Ys(std::min(std::max(0.0, YRs.lo), YRs.hi));
             px.push_back(X(xs[i].front()));
             py.push_back(yBase);
             for (size_t k = 0; k < n; ++k) {
                 px.push_back(X(xs[i][k]));
-                py.push_back(Y(ys[i][k]));
+                py.push_back(Ys(ys[i][k]));
             }
             px.push_back(X(xs[i][n - 1]));
             py.push_back(yBase);
@@ -1486,22 +1637,17 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 if (k < epos.size())
                     hiV = ys[i][k] + epos[k];
                 double pxk = X(xs[i][k]);
-                addLine(out, {pxk, pxk}, {Y(loV), Y(hiV)}, col, 1, false);
+                addLine(out, {pxk, pxk}, {Ys(loV), Ys(hiV)}, col, 1, false);
                 double cap = 4;
-                addLine(out, {pxk - cap, pxk + cap}, {Y(loV), Y(loV)}, col, 1, false);
-                addLine(out, {pxk - cap, pxk + cap}, {Y(hiV), Y(hiV)}, col, 1, false);
+                addLine(out, {pxk - cap, pxk + cap}, {Ys(loV), Ys(loV)}, col, 1, false);
+                addLine(out, {pxk - cap, pxk + cap}, {Ys(hiV), Ys(hiV)}, col, 1, false);
             }
             if (!st.marker.empty())
                 for (size_t k = 0; k < n; ++k)
-                    addMarker(out, X(xs[i][k]), Y(ys[i][k]), ms, col, st.marker);
+                    addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms, col, st.marker);
         }
-        // Unhandled types (quiver/feather/pie/â€¦) silently skipped â€” see
-        // the portion-32 export-gaps bug.
     }
 
-    // â”€â”€ text() annotations (portion 38; drawn OVER the series like â”€â”€
-    // MATLAB). Defaults probe-verified R2025b: FontSize 10,
-    // HorizontalAlignment LEFT, VerticalAlignment middle, black.
     for (size_t i = 0; i < ax.datasets.size(); ++i) {
         const DatasetInfo &ds = ax.datasets[i];
         if (!ds.visible || ds.type != "text")
@@ -1515,16 +1661,11 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         double w = 6.0 * scale * ds.label.size();
         double x = X(xv[0]) - (te.halign == 1 ? w / 2
                           : te.halign == 2 ? w : 0.0);
-        // Raster text() anchors at the glyph-box TOP; middle alignment
-        // lifts the anchor by half the glyph height.
         double y = Y(yv[0]) - 3.5 * scale;
         addText(out, ds.label, x, y, te.fontSize, te.color, false, false,
                 "");
     }
 
-    // â”€â”€ Box + ticks + labels (portion 34: custom ticks/labels, fonts,
-    // frame width â€” all MATLAB-probe-verified). `axis off` (imshow,
-    // `axis off`) skips every decoration except the title. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const double boxW = std::max(0.75, ax.lineWidth);
     const double tickFS = ax.fontSize;
     const double labelFS = ax.fontSize * 1.1;
@@ -1577,6 +1718,21 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         double w = 6.0 * lab.size();
         addText(out, lab, plot.x0 - 8 - w, p + 4, tickFS, kTextCol, false,
                 fBold, fam);
+    }
+    if (ax.yyEnabled) {
+        auto ty2 = YR2.log ? logTicks(y2lo, y2hi) : niceTicks(y2lo, y2hi);
+        for (size_t k = 0; k < ty2.size(); ++k) {
+            const double v = ty2[k];
+            double p = Y2(v);
+            addLine(out, {plot.x1, plot.x1 + 4}, {p, p}, kAxisCol, boxW, false);
+            std::string lab = tickLabel(v);
+            addText(out, lab, plot.x1 + 8, p + 4, tickFS, kTextCol, false,
+                    fBold, fam);
+        }
+        if (!ax.ylabel2.empty())
+            addText(out, ax.ylabel2, plot.x1 + 42,
+                    (plot.y0 + plot.y1) / 2 + 3.2 * ax.ylabel2.size(), labelFS,
+                    kTextCol, /*rot90=*/true, fBold, fam);
     }
     if (!ax.xlabel.empty())
         addText(out, ax.xlabel, (plot.x0 + plot.x1) / 2 - 3.2 * ax.xlabel.size(),
@@ -1975,7 +2131,23 @@ inline std::string renderFigureEps(const FigureState &fig, int W, int H)
         std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f setrgbcolor\n",
                       c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
         s += buf;
-        if (c.kind == Cmd::TEXT) {
+        if (c.kind == Cmd::IMAGE) {
+            std::vector<std::uint8_t> rgb = imageCmdRgb(c);
+            double sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
+            double sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
+            int pw = std::max(1, (int)std::lround(sx1 - sx0));
+            int ph = std::max(1, (int)std::lround(sy1 - sy0));
+            std::snprintf(buf, sizeof buf,
+                          "gsave %.1f %.1f translate %.1f %.1f scale %d %d 8 [%d 0 0 -%d 0 %d] {<",
+                          sx0, H - sy1, sx1 - sx0, sy1 - sy0, pw, ph, pw, ph, ph);
+            s += buf;
+            static const char kHex[] = "0123456789abcdef";
+            for (std::uint8_t b : rgb) {
+                s += kHex[(b >> 4) & 0xF];
+                s += kHex[b & 0xF];
+            }
+            s += ">} false 3 colorimage grestore\n";
+        } else if (c.kind == Cmd::TEXT) {
             std::snprintf(buf, sizeof buf, "/Courier findfont %.1f scalefont setfont %.1f %.1f moveto (%s) show\n",
                           c.fontSize, c.x, H - c.y, escPs(c.text).c_str());
             s += buf;
@@ -2015,7 +2187,23 @@ inline std::string renderFigurePdf(const FigureState &fig, int W, int H)
     char buf[160];
     for (const Cmd &c : cmds) {
         double r = c.color.r / 255.0, g = c.color.g / 255.0, b = c.color.b / 255.0;
-        if (c.kind == Cmd::TEXT) {
+        if (c.kind == Cmd::IMAGE) {
+            std::vector<std::uint8_t> rgb = imageCmdRgb(c);
+            double sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
+            double sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
+            int pw = std::max(1, (int)std::lround(sx1 - sx0));
+            int ph = std::max(1, (int)std::lround(sy1 - sy0));
+            std::snprintf(buf, sizeof buf,
+                          "q %.1f 0 0 %.1f %.1f %.1f cm BI /W %d /H %d /CS /RGB /BPC 8 /F /AHx ID ",
+                          sx1 - sx0, sy1 - sy0, sx0, H - sy1, pw, ph);
+            stream += buf;
+            static const char kHex[] = "0123456789abcdef";
+            for (std::uint8_t by : rgb) {
+                stream += kHex[(by >> 4) & 0xF];
+                stream += kHex[by & 0xF];
+            }
+            stream += "> EI Q\n";
+        } else if (c.kind == Cmd::TEXT) {
             std::snprintf(buf, sizeof buf, "BT /F1 %.1f Tf %.3f %.3f %.3f rg %.1f %.1f Td (%s) Tj ET\n",
                           c.fontSize, r, g, b, c.x, H - c.y, escPdf(c.text).c_str());
             stream += buf;
