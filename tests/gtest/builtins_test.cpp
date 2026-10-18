@@ -2902,17 +2902,59 @@ TEST_P(DisplayTest, TableContainer)
     EXPECT_EQ(eval("cOut{2, 2}").toString(), "b");
     EXPECT_DOUBLE_EQ(evalScalar("tFromSt.X(2)"), 3.0);
 
-    // 6. sortrows, addvars, removevars, renamevars, horzcat, vertcat
+    // 6. sortrows, topkrows, colon, addvars, removevars, renamevars, horzcat, vertcat
     eval("ts = sortrows(t2, 'Y', 'descend'); "
+         "tk = topkrows(t2, 1, 'Y'); "
          "ta = addvars(t2, [5; 6], 'NewVariableNames', 'Z'); "
          "tr = removevars(ta, 'X'); "
          "tn = renamevars(tr, 'Y', 'W'); "
-         "tv = [t2; t2];");
+         "tv = [t2; t2]; "
+         "cr = colon(1, 2, 5); "
+         "[tkA, tkIdx] = topkrows([1 10; 1 20; 2 5], 2, [1 2], {'ascend', 'descend'}); "
+         "tkC = topkrows([1+2i; 3+1i; 2+0i], 2, 'ComparisonMethod', 'real');");
     EXPECT_DOUBLE_EQ(evalScalar("ts.Y(1)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("height(tk)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tk.Y(1)"), 4.0);
     EXPECT_DOUBLE_EQ(evalScalar("width(ta)"), 3.0);
     EXPECT_DOUBLE_EQ(evalScalar("width(tr)"), 2.0);
     EXPECT_DOUBLE_EQ(evalScalar("tn.W(1)"), 2.0);
     EXPECT_DOUBLE_EQ(evalScalar("height(tv)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sum(cr)"), 9.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tkA(1, 2)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tkIdx(1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("real(tkC(1))"), 3.0);
+}
+
+TEST_P(DisplayTest, SingleComplexStorageAndOperations)
+{
+    eval("z = single(complex(1:4, -(1:4))); "
+         "z2 = complex(single([1 2]), single([3 4])); "
+         "zt = z'; "
+         "zr = real(z); "
+         "zi = imag(z); "
+         "za = abs(z); "
+         "zang = angle(z); "
+         "zc = conj(z); "
+         "zsum = z + 1; "
+         "zidx = z(2:3); "
+         "zcat = [z2, single(5+6i)]; "
+         "zd = double(z);");
+    EXPECT_EQ(eval("class(z)").toString(), "single");
+    EXPECT_EQ(eval("class(z2)").toString(), "single");
+    EXPECT_TRUE(evalBool("issingle(z)"));
+    EXPECT_TRUE(evalBool("isa(z, 'single')"));
+    EXPECT_TRUE(evalBool("isa(z, 'float')"));
+    EXPECT_FALSE(evalBool("isa(z, 'double')"));
+    EXPECT_EQ(eval("class(zt)").toString(), "single");
+    EXPECT_EQ(eval("class(zr)").toString(), "single");
+    EXPECT_EQ(eval("class(zi)").toString(), "single");
+    EXPECT_EQ(eval("class(za)").toString(), "single");
+    EXPECT_EQ(eval("class(zang)").toString(), "single");
+    EXPECT_EQ(eval("class(zc)").toString(), "single");
+    EXPECT_EQ(eval("class(zsum)").toString(), "single");
+    EXPECT_EQ(eval("class(zidx)").toString(), "single");
+    EXPECT_EQ(eval("class(zcat)").toString(), "single");
+    EXPECT_EQ(eval("class(zd)").toString(), "double");
 }
 
 INSTANTIATE_DUAL(DisplayTest);

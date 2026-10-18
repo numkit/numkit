@@ -435,7 +435,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         if (d.is3D())
                                             sizeStr += "x" + std::to_string(d.pages());
                                         std::string bytesStr = std::to_string(val->deepBytes());
-                                        std::string classStr = mtypeName(val->type());
+                                        std::string classStr = val->isSingleComplex() ? "single" : std::string(mtypeName(val->type()));
                                         std::string attrStr;
                                         if (env->isGlobal(n))
                                             attrStr = "global";

@@ -1522,6 +1522,96 @@ void registerContainersRuntime(Engine &engine)
             }
         };
 
+        tbl.methods["topkrows"] = [](Value &self, Span<const Value> args, size_t nargout,
+                                     Span<Value> out, CallContext &ctx) {
+            const TablePayload *p = tableCst(self);
+            auto *mr = ctx.engine->resource();
+            if (args.empty())
+                throw Error("topkrows: requires k argument",
+                            0, 0, "topkrows", "", "numkit:topkrows:nargin");
+            const double kd = args[0].toScalar();
+            if (kd < 0.0 || kd != std::floor(kd))
+                throw Error("topkrows: k must be a non-negative integer",
+                            0, 0, "topkrows", "", "numkit:topkrows:badK");
+            const size_t kTake = std::min(static_cast<size_t>(kd), p->nrows);
+
+            std::vector<size_t> sortCols;
+            std::vector<bool> descend;
+            bool defaultDesc = true; // topkrows defaults to 'descend'
+            size_t i = 1;
+            if (i < args.size()) {
+                bool isDirOnly = false;
+                if (args[i].isChar() || (args[i].isString() && args[i].numel() == 1)) {
+                    std::string s = args[i].toString();
+                    if (iequalsTableOpt(s, "ascend") || iequalsTableOpt(s, "descend"))
+                        isDirOnly = true;
+                }
+                if (!isDirOnly) {
+                    if ((args[i].isChar() || args[i].isString())
+                        && iequalsTableOpt(args[i].toString(), "RowNames")) {
+                        sortCols.clear();
+                    } else {
+                        sortCols = resolveTableSubscript(args[i], p->width(), p->varNames, true, "topkrows");
+                    }
+                    ++i;
+                }
+            }
+            if (sortCols.empty() && (args.size() < 2
+                || !((args[1].isChar() || args[1].isString())
+                     && iequalsTableOpt(args[1].toString(), "RowNames")))) {
+                sortCols.resize(p->width());
+                std::iota(sortCols.begin(), sortCols.end(), 0);
+            }
+            if (i < args.size()) {
+                const Value &dirVal = args[i];
+                if (dirVal.isChar() || (dirVal.isString() && dirVal.numel() == 1)) {
+                    std::string d = dirVal.toString();
+                    if (!iequalsTableOpt(d, "ComparisonMethod"))
+                        defaultDesc = iequalsTableOpt(d, "descend");
+                } else if (dirVal.isCell() || dirVal.isString()) {
+                    auto dirs = TablePayload::extractNames(dirVal, "topkrows", "direction");
+                    for (const auto &d : dirs)
+                        descend.push_back(iequalsTableOpt(d, "descend"));
+                }
+            }
+            while (descend.size() < sortCols.size())
+                descend.push_back(defaultDesc);
+
+            std::vector<size_t> ord(p->nrows);
+            std::iota(ord.begin(), ord.end(), 0);
+            std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) {
+                if (sortCols.empty() && !p->rowNames.empty()) {
+                    int cmp = p->rowNames[a] < p->rowNames[b] ? -1
+                            : (p->rowNames[a] > p->rowNames[b] ? 1 : 0);
+                    return defaultDesc ? (cmp > 0) : (cmp < 0);
+                }
+                for (size_t k = 0; k < sortCols.size(); ++k) {
+                    int cmp = compareColumnRows(p->cols[sortCols[k]], a, b);
+                    if (cmp != 0)
+                        return descend[k] ? (cmp > 0) : (cmp < 0);
+                }
+                return false;
+            });
+            ord.resize(kTake);
+
+            auto sub = std::make_shared<TablePayload>(*p);
+            sub->nrows = kTake;
+            for (size_t j = 0; j < sub->cols.size(); ++j)
+                sub->cols[j] = sliceColumnRows(p->cols[j], ord, mr);
+            if (!sub->rowNames.empty()) {
+                std::vector<std::string> nrn;
+                for (size_t r : ord) nrn.push_back(p->rowNames[r]);
+                sub->rowNames = std::move(nrn);
+            }
+            out[0] = makeTableValue(std::move(sub), mr);
+            if (nargout >= 2) {
+                Value idx = Value::matrix(ord.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t r = 0; r < ord.size(); ++r)
+                    idx.doubleDataMut()[r] = static_cast<double>(ord[r] + 1);
+                out[1] = std::move(idx);
+            }
+        };
+
         tbl.ops["horzcat"] = [](Value &lhs, Span<const Value> args, size_t,
                                 Span<Value> outs, CallContext &ctx) {
             const TablePayload *lp = tableCst(lhs);

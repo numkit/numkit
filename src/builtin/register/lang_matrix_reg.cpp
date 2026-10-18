@@ -111,8 +111,19 @@ namespace { ValueType colonOutType(const Value *ops, size_t n)
 
 void colon_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 3, "colon");
+    argcheck::checkNargin(args.size(), 2, 3, "colon");
     auto *mr = ctx.engine->resource();
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i].isObject()) {
+            const BuiltinClass *cls = ctx.engine->findClass(args[i].objectClassName());
+            if (cls && cls->ops.count("colon")) {
+                Value self = args[i];
+                cls->ops.at("colon")(self, args, 1, outs, ctx);
+                return;
+            }
+            break;
+        }
+    }
     if (args.size() == 2) {
         ValueType t = colonOutType(args.data(), 2);
         outs[0] = Value::colonRangeTyped(args[0].toScalar(),
@@ -122,9 +133,6 @@ void colon_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
         outs[0] = Value::colonRangeTyped(args[0].toScalar(),
                                           args[1].toScalar(),
                                           args[2].toScalar(), t, mr);
-    } else {
-        throw Error("colon: requires 2 or 3 arguments",
-                    0, 0, "colon", "", "numkit:colon:nargin");
     }
 }
 
@@ -487,14 +495,25 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                     0, 0, "topkrows", "", "numkit:topkrows:badK");
     auto *mr = ctx.engine->resource();
 
-    // Parse `col` (positive int / vector) and `direction` (string /
-    // string vector). 'ComparisonMethod' NV pair (auto/real/abs) is
-    // accept-and-ignore — nk only supports real numeric input here.
+    auto toLower = [](std::string s) {
+        for (char &ch : s)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return s;
+    };
+    auto parseDirStr = [&](const std::string &raw) -> std::uint8_t {
+        std::string s = toLower(raw);
+        if (s == "descend") return 1u;
+        if (s == "ascend")  return 0u;
+        throw Error("topkrows: direction must be 'ascend' or 'descend'",
+                    0, 0, "topkrows", "", "numkit:topkrows:badDir");
+    };
+
     std::vector<std::size_t> cols;
     std::vector<std::uint8_t> desc;
+    std::string compMethod = "auto";
     size_t i = 2;
-    if (i < args.size() && !args[i].isChar() && !args[i].isString()) {
-        // Treat as col vector.
+    if (i < args.size() && !args[i].isChar() && !args[i].isString() && !args[i].isCell()) {
+        // Numeric col vector.
         const Value &c = args[i];
         cols.reserve(c.numel());
         for (std::size_t kk = 0; kk < c.numel(); ++kk) {
@@ -507,27 +526,118 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
         }
         ++i;
     }
-    if (i < args.size() && (args[i].isChar() || args[i].isString())) {
-        const std::string s = args[i].toString();
-        if (s == "ComparisonMethod") {
-            // accept-and-ignore; consume value
-            i += 2;
-        } else {
-            if (s == "descend")      desc.push_back(1);
-            else if (s == "ascend")  desc.push_back(0);
-            else
-                throw Error("topkrows: direction must be 'ascend' or "
-                            "'descend'",
-                            0, 0, "topkrows", "", "numkit:topkrows:badDir");
+    if (i < args.size()) {
+        if (args[i].isCell() || (args[i].isString() && args[i].numel() > 1)) {
+            const auto &vec = args[i].cellDataVec();
+            desc.reserve(vec.size());
+            for (const auto &el : vec)
+                desc.push_back(parseDirStr(el.toString()));
             ++i;
+        } else if (args[i].isChar() || args[i].isString()) {
+            const std::string s = toLower(args[i].toString());
+            if (s == "comparisonmethod") {
+                if (i + 1 >= args.size() || (!args[i + 1].isChar() && !args[i + 1].isString()))
+                    throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
+                                0, 0, "topkrows", "", "numkit:topkrows:badCompMethod");
+                compMethod = toLower(args[i + 1].toString());
+                if (compMethod != "auto" && compMethod != "real" && compMethod != "abs")
+                    throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
+                                0, 0, "topkrows", "", "numkit:topkrows:badCompMethod");
+                i += 2;
+            } else {
+                desc.push_back(parseDirStr(s));
+                ++i;
+            }
         }
     }
     // Optional trailing 'ComparisonMethod' NV (after dir).
     while (i + 1 < args.size() && (args[i].isChar() || args[i].isString())) {
-        const std::string nm = args[i].toString();
-        if (nm == "ComparisonMethod") { i += 2; continue; }
-        throw Error("topkrows: unexpected argument '" + nm + "'",
+        const std::string nm = toLower(args[i].toString());
+        if (nm == "comparisonmethod") {
+            if (!args[i + 1].isChar() && !args[i + 1].isString())
+                throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
+                            0, 0, "topkrows", "", "numkit:topkrows:badCompMethod");
+            compMethod = toLower(args[i + 1].toString());
+            if (compMethod != "auto" && compMethod != "real" && compMethod != "abs")
+                throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
+                            0, 0, "topkrows", "", "numkit:topkrows:badCompMethod");
+            i += 2;
+            continue;
+        }
+        throw Error("topkrows: unexpected argument '" + args[i].toString() + "'",
                     0, 0, "topkrows", "", "numkit:topkrows:badArg");
+    }
+
+    const Value &A = args[0];
+    if (A.isComplex() || compMethod == "abs") {
+        if (A.dims().ndim() != 2)
+            throw Error("topkrows: input must be a 2D matrix",
+                        0, 0, "topkrows", "", "numkit:topkrows:notMatrix");
+        const std::size_t m = A.dims().rows();
+        const std::size_t n = A.dims().cols();
+        const std::size_t kk = std::min(static_cast<std::size_t>(kd), m);
+        if (cols.empty()) {
+            cols.reserve(n);
+            for (std::size_t j = 0; j < n; ++j) cols.push_back(j);
+        }
+        for (std::size_t j : cols)
+            if (j >= n)
+                throw Error("topkrows: column index out of range",
+                            0, 0, "topkrows", "", "numkit:topkrows:badCol");
+        if (desc.empty()) desc.assign(cols.size(), 1u);
+        else if (desc.size() == 1) desc.assign(cols.size(), desc[0]);
+        else if (desc.size() != cols.size())
+            throw Error("topkrows: direction must be a scalar or match the length of col",
+                        0, 0, "topkrows", "", "numkit:topkrows:dirSize");
+
+        std::vector<std::size_t> ord(m);
+        for (std::size_t r = 0; r < m; ++r) ord[r] = r;
+        const bool isCplx = A.isComplex();
+        const bool useReal = (compMethod == "real") || (compMethod == "auto" && !isCplx);
+        auto getCplx = [&](std::size_t r, std::size_t c) -> Complex {
+            return isCplx ? A.complexData()[r + c * m] : Complex(A.elemAsDouble(r + c * m), 0.0);
+        };
+        std::stable_sort(ord.begin(), ord.end(), [&](std::size_t a, std::size_t b) {
+            for (std::size_t k2 = 0; k2 < cols.size(); ++k2) {
+                const std::size_t j = cols[k2];
+                const Complex za = getCplx(a, j);
+                const Complex zb = getCplx(b, j);
+                double ka1, ka2, kb1, kb2;
+                if (useReal) {
+                    ka1 = za.real(); ka2 = za.imag();
+                    kb1 = zb.real(); kb2 = zb.imag();
+                } else {
+                    ka1 = std::abs(za); ka2 = std::atan2(za.imag(), za.real());
+                    kb1 = std::abs(zb); kb2 = std::atan2(zb.imag(), zb.real());
+                }
+                if (ka1 != kb1) return desc[k2] ? (ka1 > kb1) : (ka1 < kb1);
+                if (ka2 != kb2) return desc[k2] ? (ka2 > kb2) : (ka2 < kb2);
+            }
+            return false;
+        });
+
+        Value out = (n == 0) ? Value::matrix(kk, 0, A.type(), mr)
+                             : Value::matrix(kk, n, A.type(), mr);
+        for (std::size_t r = 0; r < kk; ++r) {
+            const std::size_t srcR = ord[r];
+            for (std::size_t j = 0; j < n; ++j) {
+                const std::size_t srcLin = srcR + j * m;
+                const std::size_t dstLin = r + j * kk;
+                if (isCplx)
+                    out.complexDataMut()[dstLin] = A.complexData()[srcLin];
+                else
+                    out.doubleDataMut()[dstLin] = A.elemAsDouble(srcLin);
+            }
+        }
+        outs[0] = std::move(out);
+        if (nargout >= 2) {
+            auto I = Value::matrix(kk, 1, ValueType::DOUBLE, mr);
+            double *id = I.doubleDataMut();
+            for (std::size_t k2 = 0; k2 < kk; ++k2)
+                id[k2] = static_cast<double>(ord[k2] + 1);
+            outs[1] = std::move(I);
+        }
+        return;
     }
 
     std::vector<std::size_t> idx_out;

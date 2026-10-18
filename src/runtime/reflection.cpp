@@ -102,8 +102,9 @@ void registerReflectionRuntime(Engine &engine)
             if (args.empty())
                 throw std::runtime_error("class requires an argument");
             outs[0] = Value::fromString(
-                args[0].isObject() ? args[0].objectClassName()
-                                   : mtypeName(args[0].type()),
+                args[0].isObject()          ? args[0].objectClassName()
+                : args[0].isSingleComplex() ? "single"
+                                            : mtypeName(args[0].type()),
                 ctx.engine->resource());
         });
 
@@ -129,7 +130,7 @@ void registerReflectionRuntime(Engine &engine)
                     result = true;
             } else {
                 const ValueType t = x.type();
-                const std::string tn = mtypeName(t);
+                const std::string tn = x.isSingleComplex() ? "single" : std::string(mtypeName(t));
                 const bool isFloat = (t == ValueType::DOUBLE || t == ValueType::SINGLE
                                       || t == ValueType::COMPLEX);
                 const bool isInt = (t == ValueType::INT8 || t == ValueType::INT16

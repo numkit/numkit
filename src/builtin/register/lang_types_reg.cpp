@@ -201,10 +201,13 @@ void cast_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx
     // 'like' form: cast(x, 'like', y) — pull class name from y.
     if (args[1].toString() == "like") {
         argcheck::checkNargin(args.size(), 3, 3, "cast");
-        // mtypeName mirrors MATLAB's class() output (double / single /
-        // int*/ uint* / logical / char / string); cast() dispatches on
-        // these strings.
-        outs[0] = cast(args[0], mtypeName(args[2].type()), mr);
+        const std::string cname = args[2].isSingleComplex()
+                                      ? "single"
+                                      : std::string(mtypeName(args[2].type()));
+        Value r = cast(args[0], cname, mr);
+        if (args[2].isComplex() && !r.isComplex())
+            r = complex(r, mr);
+        outs[0] = std::move(r);
         return;
     }
     outs[0] = cast(args[0], args[1].toString(), mr);
