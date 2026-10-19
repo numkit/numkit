@@ -346,6 +346,23 @@ bool Parser::isCommandStyleCall() const
                 || operand.type == TokenType::DQSTRING);
     }
 
+    // Relative path in command form: e.g. `load ../sampleEEGdata` or `load ./foo`
+    if (next.type == TokenType::DOT || next.type == TokenType::DOT_SLASH
+        || next.type == TokenType::DOT_BACKSLASH) {
+        const int headEnd = current().col + static_cast<int>(current().value.size());
+        const Token &operand = peekToken(2);
+        return next.line == current().line
+            && next.col > headEnd
+            && operand.line == next.line
+            && operand.col == next.col + static_cast<int>(next.value.size())
+            && (operand.type == TokenType::DOT
+                || operand.type == TokenType::DOT_SLASH
+                || operand.type == TokenType::DOT_BACKSLASH
+                || operand.type == TokenType::SLASH
+                || operand.type == TokenType::BACKSLASH
+                || operand.type == TokenType::IDENTIFIER);
+    }
+
     // Если следующий токен — оператор, скобка, присваивание, терминатор
     // или конец файла — это НЕ command-style.
     switch (next.type) {
@@ -456,7 +473,7 @@ ASTNodePtr Parser::parseCommandStyleCall()
     };
 
     while (!isAtEnd() && !check(TokenType::NEWLINE) && !check(TokenType::SEMICOLON)
-           && current().line == cmdLine) {
+           && !check(TokenType::COMMA) && current().line == cmdLine) {
         const Token &tok = current();
         // A whitespace gap before this token starts a new argument.
         if (haveArg && tok.col > prevEnd)
@@ -652,6 +669,10 @@ void promoteCondShortCircuitAnd(ASTNode *node)
         return;
     if (node->strValue == "&" || node->strValue == "&&") {
         node->strValue = "&&";
+        for (auto &ch : node->children)
+            promoteCondShortCircuitAnd(ch.get());
+    } else if (node->strValue == "|" || node->strValue == "||") {
+        node->strValue = "||";
         for (auto &ch : node->children)
             promoteCondShortCircuitAnd(ch.get());
     }

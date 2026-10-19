@@ -609,6 +609,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     continue;
                 }
                 if (!args[i].isChar()) {
+                    if (i == 0 && (args[i].isObject() || args[i].isNumeric()))
+                        continue;
+                    if (i > 0 && (args[i].isNumeric() || args[i].isLogical()))
+                        throw std::runtime_error("legend: invalid argument (numeric location syntax is not supported)");
                     ax.legendLabels.push_back(argStr(args[i]));
                     continue;
                 }

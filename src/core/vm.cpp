@@ -405,6 +405,18 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, Span<const Valu
 
 std::unique_ptr<VM::PausedState> VM::savePausedState()
 {
+    for (const auto &f : frames_) {
+        if (!f.chunk) continue;
+        for (const auto &gname : f.chunk->globalNames) {
+            for (const auto &[vname, reg] : f.chunk->varMap) {
+                if (vname == gname && reg < f.nregs) {
+                    if (!f.R[reg].isUnset() && !f.R[reg].isDeleted())
+                        engine_.globalsEnv_->set(gname, f.R[reg]);
+                    break;
+                }
+            }
+        }
+    }
     auto s = std::make_unique<PausedState>();
     // Move (not copy) — CallFrame holds a unique_ptr<Environment>. The
     // inner re-entrant execution will clear frames_ in startExecution()
@@ -449,8 +461,20 @@ void VM::restorePausedState(std::unique_ptr<PausedState> s)
     std::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
     // Fix R pointers in frames (they pointed into regStack_)
     R_ = regStack_.data();
-    for (auto &f : frames_)
+    for (auto &f : frames_) {
         f.R = &regStack_[f.regBase];
+        if (f.chunk) {
+            for (const auto &gname : f.chunk->globalNames) {
+                for (const auto &[vname, reg] : f.chunk->varMap) {
+                    if (vname == gname && reg < f.nregs) {
+                        if (Value *gval = engine_.globalsEnv_->get(gname))
+                            f.R[reg] = *gval;
+                        break;
+                    }
+                }
+            }
+        }
+    }
     // Fix ForState data pointers (they point into ForState::range).
     // Lazy ranges (FOR_INIT_RANGE) don't have a backing range Value —
     // the iteration value is recomputed from lazyStart/lazyStep each
@@ -672,6 +696,11 @@ enter_frame:
                 if (ndims <= 1) {
                     // Linear indexing: end = numel
                     sz = arr.numel();
+                } else if (I.c == ndims - 1 && arr.dims().ndim() > static_cast<size_t>(ndims)) {
+                    size_t prod = 1;
+                    for (size_t d = static_cast<size_t>(I.c); d < arr.dims().ndim(); ++d)
+                        prod *= arr.dims().dimSize(d);
+                    sz = prod;
                 } else {
                     // Dimensional indexing: end = size along dimension c
                     sz = arr.dims().dimSize(I.c);
@@ -1399,7 +1428,10 @@ enter_frame:
                     break;
                 }
                 auto rowIds = ResolvedSubscript::resolve(R[I.c], mv.dims().rows());
-                auto colIds = ResolvedSubscript::resolve(R[I.e], mv.dims().cols());
+                size_t colDim = mv.dims().ndim() > 2
+                    ? (mv.dims().rows() > 0 ? mv.dims().numel() / mv.dims().rows() : mv.dims().cols())
+                    : mv.dims().cols();
+                auto colIds = ResolvedSubscript::resolve(R[I.e], colDim);
                 R[I.a] = mv.indexGet2D(rowIds.data(), rowIds.count,
                                         colIds.data(), colIds.count,
                                         engine_.mr_);
@@ -3770,15 +3802,42 @@ void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
                                  const Value &val)
 {
     if (!env) return;
-    for (auto &f : frames_) {
-        if (f.env.get() != env) continue;
+    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+        auto &f = frames_[fi];
+        Environment *fEnv = f.env ? f.env.get()
+                                  : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                                             : nullptr);
+        if (fEnv != env) continue;
         for (const auto &entry : f.chunk->varMap) {
             if (entry.first == name && entry.second < f.nregs) {
                 f.R[entry.second] = val;
-                return;
+                break;
             }
         }
-        return;  // matching frame found but no slot — no-op
+    }
+}
+
+void VM::flushWorkspaceFrame()
+{
+    if (frames_.empty()) return;
+    const auto &f = frames_[0];
+    if (!f.chunk || f.env) return;
+    Environment &ws = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+    for (const auto &entry : f.chunk->varMap) {
+        if (entry.second < f.nregs) {
+            const Value &v = f.R[entry.second];
+            if (!v.isUnset() && !v.isDeleted())
+                ws.set(entry.first, v);
+        }
+    }
+    for (const auto &gname : f.chunk->globalNames) {
+        for (const auto &[vname, reg] : f.chunk->varMap) {
+            if (vname == gname && reg < f.nregs) {
+                if (!f.R[reg].isUnset() && !f.R[reg].isDeleted())
+                    engine_.globalsEnv_->set(gname, f.R[reg]);
+                break;
+            }
+        }
     }
 }
 
@@ -3788,8 +3847,12 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
     if (!frameEnv) return out;
     // Find the frame that owns this env.
     const CallFrame *match = nullptr;
-    for (const auto &f : frames_) {
-        if (f.env.get() == frameEnv) { match = &f; break; }
+    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+        const auto &f = frames_[fi];
+        Environment *fEnv = f.env ? f.env.get()
+                                  : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                                             : nullptr);
+        if (fEnv == frameEnv) { match = &f; break; }
     }
     if (match) {
         // Statically-allocated locals (live in registers).
@@ -4786,7 +4849,10 @@ void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB,
         const Value &ri = AB[0];
         const Value &ci = AB[1];
         auto rowIds = ResolvedSubscript::resolve(ri, mv.dims().rows());
-        auto colIds = ResolvedSubscript::resolve(ci, mv.dims().cols());
+        size_t colDim = mv.dims().ndim() > 2
+            ? (mv.dims().rows() > 0 ? mv.dims().numel() / mv.dims().rows() : mv.dims().cols())
+            : mv.dims().cols();
+        auto colIds = ResolvedSubscript::resolve(ci, colDim);
         R[dstReg] = mv.indexGet2D(rowIds.data(), rowIds.count,
                                colIds.data(), colIds.count,
                                engine_.mr_);

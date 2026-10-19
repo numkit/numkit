@@ -126,6 +126,9 @@ handleTypes()
         {"pie",         {"pie",     "matlab.graphics.chart.primitive.Pie"}},
         {"compass",     {"compass", "matlab.graphics.chart.primitive.Compass"}},
         {"polarplot",   {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"polar",       {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"patch",       {"polygon", "matlab.graphics.primitive.Patch"}},
+        {"fill",        {"polygon", "matlab.graphics.primitive.Patch"}},
         {"surf",        {"surface", "matlab.graphics.chart.surface.Surface"}},
         {"mesh",        {"surface", "matlab.graphics.chart.surface.Surface"}},
         {"waterfall",   {"surface", "matlab.graphics.chart.surface.Waterfall"}},
@@ -1341,10 +1344,26 @@ void registerHandleAccessors(Engine &engine)
                 }
                 return;
             }
-            for (size_t i = 1; i + 1 < args.size(); i += 2) {
-                if (!args[i].isChar() && !args[i].isString()) continue;
-                recordSetProp(engine.figureManager(), rec,
-                              args[i].toString(), args[i + 1]);
+            if (args[0].isObject() && args[0].objectCount() > 1) {
+                for (size_t k = 0; k < args[0].objectCount(); ++k) {
+                    const ObjectState *st = args[0].objectStateAt(k);
+                    if (!st || !st->native) continue;
+                    auto *p = dynamic_cast<const GraphicsHandlePayload *>(st->native.get());
+                    if (!p) continue;
+                    auto *r = engine.figureManager().findHandle(p->handleId);
+                    if (!r) continue;
+                    for (size_t i = 1; i + 1 < args.size(); i += 2) {
+                        if (!args[i].isChar() && !args[i].isString()) continue;
+                        recordSetProp(engine.figureManager(), r,
+                                      args[i].toString(), args[i + 1]);
+                    }
+                }
+            } else {
+                for (size_t i = 1; i + 1 < args.size(); i += 2) {
+                    if (!args[i].isChar() && !args[i].isString()) continue;
+                    recordSetProp(engine.figureManager(), rec,
+                                  args[i].toString(), args[i + 1]);
+                }
             }
             engine.figureManager().emitModified();
             outs[0] = Value();
@@ -1361,17 +1380,52 @@ void registerHandleAccessors(Engine &engine)
             if (id < 0) {
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
                     std::string prop = args[1].toString();
-                    if (prop == "PointerLocation") {
+                    std::string lprop = prop;
+                    for (char &ch : lprop)
+                        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    if (lprop == "pointerlocation") {
                         Value v = Value::matrix(1, 2, ValueType::DOUBLE, engine.resource());
                         v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
                         outs[0] = std::move(v);
                         return;
                     }
-                    if (prop == "Position" || prop == "OuterPosition" || prop == "ScreenSize") {
+                    if (lprop == "position" || lprop == "outerposition" || lprop == "screensize") {
                         Value v = Value::matrix(1, 4, ValueType::DOUBLE, engine.resource());
                         v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
                         v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
                         outs[0] = std::move(v);
+                        return;
+                    }
+                    if (lprop == "nextplot") {
+                        outs[0] = Value::fromString("replace", engine.resource());
+                        return;
+                    }
+                    if (lprop == "xcolor" || lprop == "ycolor" || lprop == "zcolor" || lprop == "color") {
+                        outs[0] = Value::fromString("k", engine.resource());
+                        return;
+                    }
+                    if (lprop == "xlim" || lprop == "ylim" || lprop == "zlim" || lprop == "clim") {
+                        Value v = Value::matrix(1, 2, ValueType::DOUBLE, engine.resource());
+                        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
+                        outs[0] = std::move(v);
+                        return;
+                    }
+                    if (lprop == "xtick" || lprop == "ytick" || lprop == "ztick") {
+                        Value v = Value::matrix(1, 3, ValueType::DOUBLE, engine.resource());
+                        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.5; v.doubleDataMut()[2] = 1.0;
+                        outs[0] = std::move(v);
+                        return;
+                    }
+                    if (lprop.find("fontangle") != std::string::npos || lprop.find("fontweight") != std::string::npos) {
+                        outs[0] = Value::fromString("normal", engine.resource());
+                        return;
+                    }
+                    if (lprop.find("fontname") != std::string::npos) {
+                        outs[0] = Value::fromString("Helvetica", engine.resource());
+                        return;
+                    }
+                    if (lprop.find("fontsize") != std::string::npos) {
+                        outs[0] = Value::scalar(10.0, engine.resource());
                         return;
                     }
                 }
@@ -1857,7 +1911,7 @@ void GraphicsLibrary::install(Engine &engine)
     static const std::unordered_set<std::string> kHandleReturning = {
         "figure", "gcf", "gca", "axes",
         "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
-        "legend",
+        "legend", "text",
     };
 
     for (PlotEntry &entry : table) {
@@ -1933,7 +1987,7 @@ void GraphicsLibrary::install(Engine &engine)
                                             && args[2].dims().cols() >= 2)
                                                ? &args[2]
                                                : &args[0];
-                                }
+                                                                }
                                 if (zArg && zArg->isNumeric()
                                     && zArg->dims().rows() >= 1
                                     && zArg->dims().cols() >= 1) {
@@ -1998,6 +2052,11 @@ void GraphicsLibrary::install(Engine &engine)
                                       static_cast<size_t>(
                                           fm.current().currentAxes),
                                       slot, mr);
+                    } else if (name == "text") {
+                        outs[0] = makeTextHandleFor(
+                            fm, fm.currentFigureId(),
+                            static_cast<size_t>(fm.current().currentAxes),
+                            "text", mr);
                     } else if (name == "legend") {
                         outs[0] = makeLegendHandleFor(
                             fm, fm.currentFigureId(),

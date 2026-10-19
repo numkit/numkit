@@ -87,7 +87,17 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
     if (indexExpr->type == NodeType::IDENTIFIER) {
         const std::string &name = indexExpr->strValue;
         if (name == "end") {
-            outIdx = ((ndims == 1) ? array.numel() : array.dims().dimSize(dim)) - 1;
+            size_t sz;
+            if (ndims == 1) {
+                sz = array.numel();
+            } else if (dim == ndims - 1 && array.dims().ndim() > static_cast<size_t>(ndims)) {
+                sz = 1;
+                for (size_t d = static_cast<size_t>(dim); d < array.dims().ndim(); ++d)
+                    sz *= array.dims().dimSize(d);
+            } else {
+                sz = array.dims().dimSize(dim);
+            }
+            outIdx = sz - 1;
             return true;
         }
         auto *val = env->get(name);
@@ -158,7 +168,16 @@ std::vector<size_t> TreeWalker::resolveIndex(
     std::vector<size_t> indices;
 
     if (val.isChar() && val.toString() == ":") {
-        size_t sz = (ndims == 1) ? array.numel() : array.dims().dimSize(dim);
+        size_t sz;
+        if (ndims == 1) {
+            sz = array.numel();
+        } else if (dim == ndims - 1 && array.dims().ndim() > static_cast<size_t>(ndims)) {
+            sz = 1;
+            for (size_t d = static_cast<size_t>(dim); d < array.dims().ndim(); ++d)
+                sz *= array.dims().dimSize(d);
+        } else {
+            sz = array.dims().dimSize(dim);
+        }
         indices.resize(sz);
         for (size_t i = 0; i < sz; ++i)
             indices[i] = i;
@@ -1531,7 +1550,7 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
                 var->setField(linear, fieldName, Value{});
             }
         }
-        return fieldMap[fieldName];
+        return var->structArrayElem(linear)[fieldName];
     }
 
     // General case: the object is any other addressable lvalue
@@ -2476,10 +2495,13 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
                     throw std::runtime_error("Index exceeds array dimensions (row index: "
                                              + std::to_string(sri + 1) + " > "
                                              + std::to_string(var.dims().rows()) + ")");
-                if (sci >= var.dims().cols())
+                const size_t colDim = var.dims().ndim() > 2
+                    ? (var.dims().rows() > 0 ? var.dims().numel() / var.dims().rows() : var.dims().cols())
+                    : var.dims().cols();
+                if (sci >= colDim)
                     throw std::runtime_error("Index exceeds array dimensions (column index: "
                                              + std::to_string(sci + 1) + " > "
-                                             + std::to_string(var.dims().cols()) + ")");
+                                             + std::to_string(colDim) + ")");
                 // Cell () returns 1×1 sub-cell
                 if (var.isCell()) {
                     auto result = Value::cell(1, 1);
@@ -2492,8 +2514,11 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
 
         auto ri = resolveIndex(callNode->children[1].get(), var, 0, 2, env);
         auto ci = resolveIndex(callNode->children[2].get(), var, 1, 2, env);
+        const size_t colDim = var.dims().ndim() > 2
+            ? (var.dims().rows() > 0 ? var.dims().numel() / var.dims().rows() : var.dims().cols())
+            : var.dims().cols();
         checkBounds(ri, var.dims().rows(), "row index");
-        checkBounds(ci, var.dims().cols(), "column index");
+        checkBounds(ci, colDim, "column index");
         return var.indexGet2D(ri.data(), ri.size(), ci.data(), ci.size(), engine_.mr_);
     }
     if (nargs == 3) {

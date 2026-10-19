@@ -83,54 +83,68 @@ void register_general(Engine &engine) {
 
     // ── which ──────────────────────────────────────────────────
     engine.registerFunction("which",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("which requires a name argument");
-                                std::string qname = args[0].isChar() ? args[0].toString() : "";
+                                std::string qname = (args[0].isChar() || args[0].isString()) ? args[0].toString() : "";
+                                std::string baseName = qname;
+                                if (baseName.size() > 2 && baseName.substr(baseName.size() - 2) == ".m")
+                                    baseName = baseName.substr(0, baseName.size() - 2);
                                 auto *env = ctx.env;
 
-                                std::ostringstream os;
-                                if (env->getLocal(qname)
-                                    || (env->isGlobal(qname) && env->globalsEnv()
-                                        && env->globalsEnv()->get(qname)))
-                                    os << qname << " is a variable.\n";
-                                else if (ctx.engine->hasUserFunction(qname))
-                                    os << qname << " is a user-defined function.\n";
-                                else if (ctx.engine->hasExternalFunction(qname))
-                                    os << "built-in (" << qname << ")\n";
+                                std::string res;
+                                bool isFound = true;
+                                if (env->getLocal(baseName)
+                                    || (env->isGlobal(baseName) && env->globalsEnv()
+                                        && env->globalsEnv()->get(baseName)))
+                                    res = "variable";
+                                else if (ctx.engine->hasUserFunction(baseName))
+                                    res = baseName + " is a user-defined function.";
+                                else if (ctx.engine->hasExternalFunction(baseName))
+                                    res = "built-in (" + baseName + ")";
                                 else {
-                                    // Bare-name resolver: find the qualified
-                                    // namespace path (e.g. signal.transforms.fft).
-                                    auto *ext = ctx.engine->findExternal(qname, env);
+                                    auto *ext = ctx.engine->findExternal(baseName, env);
                                     if (ext) {
-                                        auto qualified = ctx.engine->bareNameSource(qname);
-                                        os << (qualified.empty()
-                                                  ? "built-in (" + qname + ")"
-                                                  : qualified)
-                                           << "\n";
+                                        auto qualified = ctx.engine->bareNameSource(baseName);
+                                        res = qualified.empty() ? "built-in (" + baseName + ")" : qualified;
                                     } else {
-                                        // M-file lookup via Engine path registry.
                                         bool found = false;
-                                        for (const auto &dir : ctx.engine->path()) {
-                                            std::string p = dir;
-                                            if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
-                                            p += qname + ".m";
-                                            try {
-                                                auto rp = ctx.engine->resolvePath(p);
-                                                if (rp.fs && rp.fs->exists(rp.path)) {
-                                                    os << p << "\n";
-                                                    found = true;
-                                                    break;
-                                                }
-                                            } catch (...) {}
+                                        try {
+                                            std::string cur = baseName + ".m";
+                                            auto rp = ctx.engine->resolvePath(cur);
+                                            if (rp.fs && rp.fs->exists(rp.path)) {
+                                                res = rp.path;
+                                                found = true;
+                                            }
+                                        } catch (...) {}
+                                        if (!found) {
+                                            for (const auto &dir : ctx.engine->path()) {
+                                                std::string p = dir;
+                                                if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
+                                                p += baseName + ".m";
+                                                try {
+                                                    auto rp = ctx.engine->resolvePath(p);
+                                                    if (rp.fs && rp.fs->exists(rp.path)) {
+                                                        res = p;
+                                                        found = true;
+                                                        break;
+                                                    }
+                                                } catch (...) {}
+                                            }
                                         }
-                                        if (!found)
-                                            os << "'" << qname << "' not found.\n";
+                                        if (!found) {
+                                            isFound = false;
+                                            res = "'" + qname + "' not found.";
+                                        }
                                     }
                                 }
 
-                                ctx.engine->outputText(os.str());
-                                outs[0] = Value();
+                                if (nargout == 0) {
+                                    ctx.engine->outputText(res + "\n");
+                                    outs[0] = Value();
+                                } else {
+                                    outs[0] = Value::fromString(isFound ? res : "", ctx.engine->resource());
+                                }
                             });
 
     // exist extracted to the runtime language-runtime layer:
@@ -362,7 +376,9 @@ void register_general(Engine &engine) {
                                         }
                                         continue;
                                     }
-                                    if (!a.isChar())
+                                    if (a.isNumeric() || a.isEmpty())
+                                        continue;
+                                    if (!a.isChar() && !a.isString())
                                         throw std::runtime_error("delete: filename must be a string");
                                     std::string p = a.toString();
                                     auto rp = ctx.engine->resolvePath(p);
@@ -375,6 +391,11 @@ void register_general(Engine &engine) {
                                 // emitted its own marker.
                                 if (!anyFigureClosed)
                                     fm.emitModified();
+                                outs[0] = Value();
+                            });
+
+    engine.registerFunction("diary",
+                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
                                 outs[0] = Value();
                             });
 

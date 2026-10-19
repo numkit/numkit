@@ -108,6 +108,20 @@ void polyfitCore(const double *xx, const double *yd, size_t m, int deg,
                  ScratchArena &scratch)
 {
     const int np = deg + 1;
+    if (static_cast<size_t>(np) > m && m > 0) {
+        const int subNp = static_cast<int>(m);
+        auto subP = ScratchVec<double>(m, &scratch);
+        auto subR = ScratchVec<double>(m * m, &scratch);
+        polyfitCore(xx, yd, m, subNp - 1, subP.data(), subR.data(), normr, df, scratch);
+        const int offset = np - subNp;
+        for (int j = 0; j < offset; ++j) pOut[j] = 0.0;
+        for (int j = 0; j < subNp; ++j) pOut[offset + j] = subP[j];
+        for (int i = 0; i < np * np; ++i) Rout[i] = 0.0;
+        for (int c = 0; c < subNp; ++c)
+            for (int r = 0; r < subNp; ++r)
+                Rout[(offset + r) + (offset + c) * np] = subR[r + c * subNp];
+        return;
+    }
     auto V = ScratchVec<double>(m * static_cast<size_t>(np), &scratch);
     for (size_t i = 0; i < m; ++i)
         for (int j = 0; j < np; ++j)
@@ -208,7 +222,7 @@ void polyfit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
 
     const size_t m = x.numel();
     const int np = deg + 1;
-    if (static_cast<size_t>(np) > m)
+    if (m == 0)
         throw Error("polyfit: not enough data points",
                      0, 0, "polyfit", "", "numkit:polyfit:tooFewPoints");
 

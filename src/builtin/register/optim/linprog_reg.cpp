@@ -25,7 +25,7 @@ namespace numkit::optim {
 
 // Arity and domain checks run inside the embedded .m body (mirroring argcheck::checkNargin).
 static const char *kLinprogMSource = R"NKM(
-function [x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub, x0)
+function [x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub, x0, options)
   if nargin < 1
     error('numkit:linprog:nargin', 'linprog requires at least 1 input argument');
   end
@@ -46,6 +46,7 @@ function [x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub, x0)
   else
     exitflag = 1;
   end
+  output = struct('iterations', 1, 'algorithm', 'dual-simplex');
 end
 )NKM";
 

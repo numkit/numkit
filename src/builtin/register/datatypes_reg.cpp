@@ -84,6 +84,7 @@ void register_datatypes(Engine &engine) {
     engine.registerFunction("isnumeric", &::numkit::builtin::detail::isnumeric_reg);
     engine.registerFunction("islogical", &::numkit::builtin::detail::islogical_reg);
     engine.registerFunction("ischar",    &::numkit::builtin::detail::ischar_reg);
+    engine.registerFunction("isstr",     &::numkit::builtin::detail::ischar_reg);
     engine.registerFunction("isstring",  &::numkit::builtin::detail::isstring_reg);
     engine.registerFunction("iscell",    &::numkit::builtin::detail::iscell_reg);
     engine.registerFunction("isstruct",  &::numkit::builtin::detail::isstruct_reg);

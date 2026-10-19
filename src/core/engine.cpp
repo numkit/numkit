@@ -2481,6 +2481,23 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         }
         if (!rp.fs || !rp.fs->exists(rp.path))
             continue;
+        {
+            const std::string wantFile = leafName + ".m";
+            auto slashPos = rp.path.find_last_of("/\\");
+            const std::string parentDir = (slashPos == std::string::npos) ? "." : rp.path.substr(0, slashPos);
+            auto entries = rp.fs->listDir(parentDir);
+            if (!entries.empty()) {
+                bool exactFound = false;
+                for (const auto &ent : entries) {
+                    if (ent.name == wantFile) {
+                        exactFound = true;
+                        break;
+                    }
+                }
+                if (!exactFound)
+                    continue;
+            }
+        }
 
         // Cache hit? Validate via mtime; re-parse if stale.
         auto cit = mFileCache_.find(name);
@@ -3146,6 +3163,8 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
 Value Engine::eval(const std::string &code, bool suppressTopLevelDisplay)
 {
     refreshStaleMFiles();
+    if (backend_ == Backend::VM && vm_)
+        vm_->flushWorkspaceFrame();
 
     Lexer lexer(code);
     auto tokens = lexer.tokenize();
@@ -3315,6 +3334,8 @@ void Engine::syncVMToWorkspace()
     for (auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             workspaceEnv_->remove(name);
+            if (vm_ && backend_ == Backend::VM)
+                vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
         } else {
             Value *gsVal = globalsEnv_->get(name);
             const Value &finalVal = gsVal ? *gsVal : val;
@@ -3338,6 +3359,8 @@ void Engine::syncVMToScope(Environment *scope)
     for (auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             scope->remove(name);
+            if (vm_ && backend_ == Backend::VM)
+                vm_->writeToFrameMatchingEnv(scope, name, val);
             continue;
         }
         scope->set(name, val);

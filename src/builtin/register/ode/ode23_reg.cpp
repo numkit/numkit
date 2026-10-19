@@ -301,9 +301,204 @@ function [t, y] = ode113(fn, tspan, y0, opts, varargin)
 end
 )NKM";
 
+static const char *kDde23MSource = R"NKM(
+function sol = dde23(ddefun, lags, history, tspan, opts, varargin)
+  if ischar(ddefun) || isstring(ddefun), ddefun = str2func(ddefun); end
+  if nargin < 5, opts = []; end
+  rel_tol = 1e-3; abs_tol = 1e-6; max_step = inf; initial_step = 0;
+  if isstruct(opts)
+    if isfield(opts,'RelTol')      && ~isempty(opts.RelTol),      rel_tol = opts.RelTol; end
+    if isfield(opts,'AbsTol')      && ~isempty(opts.AbsTol),      abs_tol = opts.AbsTol(:); end
+    if isfield(opts,'MaxStep')     && ~isempty(opts.MaxStep),     max_step = opts.MaxStep; end
+    if isfield(opts,'InitialStep') && ~isempty(opts.InitialStep), initial_step = opts.InitialStep; end
+  end
+  ts = tspan(:); t0 = ts(1); tf = ts(end);
+  lags = lags(:); nlags = numel(lags);
+  if isa(history, 'function_handle')
+    yc = history(t0, varargin{:});
+  elseif ischar(history) || isstring(history)
+    hfn = str2func(history); yc = hfn(t0, varargin{:});
+  elseif isstruct(history)
+    yc = deval(history, t0);
+  else
+    yc = history(:);
+  end
+  yc = yc(:); d = numel(yc);
+  Z0 = NUMKIT_dde_lags(t0, lags, t0, history, t0, yc, zeros(d, 1), varargin{:});
+  k1 = ddefun(t0, yc, Z0, varargin{:}); k1 = k1(:);
+  X = t0; Y = yc; YP = k1;
+  min_lag = inf;
+  if nlags > 0
+    pos_lags = lags(lags > 0);
+    if ~isempty(pos_lags), min_lag = min(pos_lags); end
+  end
+  max_step = min(max_step, min_lag);
+  h = initial_step;
+  if ~(h > 0)
+    sc0 = abs_tol + rel_tol*abs(yc);
+    r0 = max(abs(k1 ./ sc0));
+    if r0 > 1e-12, h = 0.1 * (rel_tol^(1/3)) / r0; else, h = 1e-3 * abs(tf - t0); end
+    h = min([h, max_step, abs(tf - t0)]);
+    if ~(h > 0), h = max(1e-6, abs(tf - t0)*1e-3); end
+  end
+  tc = t0; max_steps = 100000; step_count = 0; failed = 0;
+  while tc < tf - 1e-14 * max(1, abs(tf)) && step_count < max_steps
+    step_count = step_count + 1;
+    th = min([h, tf - tc, max_step]);
+    for j = 1:nlags
+      if lags(j) > 0
+        for m = 1:4
+          tdisc = t0 + m * lags(j);
+          if tdisc > tc + 1e-12 && tdisc < tc + th
+            th = tdisc - tc;
+          end
+        end
+      end
+    end
+    [ynew, err_norm, k4] = NUMKIT_dde23_step(ddefun, tc, yc, th, k1, rel_tol, abs_tol, lags, t0, history, X, Y, YP, varargin{:});
+    if err_norm <= 1
+      tc = tc + th; yc = ynew; k1 = k4; failed = 0;
+      X = [X, tc]; Y = [Y, yc]; YP = [YP, k1];
+      if err_norm < 1e-300, fac = 5; else, fac = 0.9*(1/err_norm)^(1/3); end
+      fac = min(5, max(0.2, fac));
+      h = min(th*fac, max_step);
+    else
+      failed = failed + 1;
+      fac = max(0.1, 0.9*(1/err_norm)^(1/3));
+      h = th*fac;
+      if failed > 25, error('numkit:dde23:tooManyFailures', 'dde23: too many step rejections'); end
+    end
+  end
+  sol = struct('solver', 'dde23', 'x', X, 'y', Y, 'yp', YP, 'history', history);
+end
+
+function [ynew, err_norm, k4] = NUMKIT_dde23_step(ddefun, tc, yc, h, k1, rel_tol, abs_tol, lags, t0, history, X, Y, YP, varargin)
+  t2 = tc + 0.5*h; y2 = yc + 0.5*h*k1;
+  Z2 = NUMKIT_dde_lags(t2, lags, t0, history, X, Y, YP, varargin{:});
+  k2 = ddefun(t2, y2, Z2, varargin{:}); k2 = k2(:);
+  t3 = tc + 0.75*h; y3 = yc + 0.75*h*k2;
+  Z3 = NUMKIT_dde_lags(t3, lags, t0, history, X, Y, YP, varargin{:});
+  k3 = ddefun(t3, y3, Z3, varargin{:}); k3 = k3(:);
+  t4 = tc + h; ynew = yc + h*((2/9)*k1 + (1/3)*k2 + (4/9)*k3);
+  Xtmp = [X, t4]; Ytmp = [Y, ynew]; YPtmp = [YP, k3];
+  Z4 = NUMKIT_dde_lags(t4, lags, t0, history, Xtmp, Ytmp, YPtmp, varargin{:});
+  k4 = ddefun(t4, ynew, Z4, varargin{:}); k4 = k4(:);
+  sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
+  er = h*((2/9 - 7/24)*k1 + (1/3 - 1/4)*k2 + (4/9 - 1/3)*k3 - (1/8)*k4);
+  err_norm = sqrt(sum((er ./ sc).^2) / numel(yc));
+end
+
+function Z = NUMKIT_dde_lags(t, lags, t0, history, X, Y, YP, varargin)
+  d = size(Y, 1); nlags = numel(lags);
+  Z = zeros(d, nlags);
+  npts = numel(X);
+  for j = 1:nlags
+    tlag = t - lags(j);
+    if tlag <= t0
+      if isa(history, 'function_handle')
+        zj = history(tlag, varargin{:});
+      elseif ischar(history) || isstring(history)
+        hfn = str2func(history); zj = hfn(tlag, varargin{:});
+      elseif isstruct(history)
+        zj = deval(history, tlag);
+      else
+        zj = history(:);
+      end
+      Z(:, j) = zj(:);
+    elseif npts == 1 || tlag <= X(1)
+      Z(:, j) = Y(:, 1);
+    elseif tlag >= X(npts)
+      Z(:, j) = Y(:, npts) + (tlag - X(npts)) * YP(:, npts);
+    else
+      idx = find(X <= tlag, 1, 'last');
+      if idx >= npts, idx = npts - 1; end
+      hseg = X(idx+1) - X(idx);
+      if hseg <= 0
+        Z(:, j) = Y(:, idx);
+      else
+        theta = (tlag - X(idx)) / hseg;
+        Z(:, j) = NUMKIT_bs23_hermite(theta, 1, hseg, Y(:, idx), Y(:, idx+1), YP(:, idx), YP(:, idx+1));
+      end
+    end
+  end
+end
+
+function [Sxint, Spxint] = deval(sol, tint, idx)
+  if ~isstruct(sol) && isstruct(tint)
+    tmp = sol; sol = tint; tint = tmp;
+  end
+  X = sol.x(:)'; Y = sol.y; YP = sol.yp;
+  d = size(Y, 1); npts = numel(X);
+  tvec = tint(:)'; nt = numel(tvec);
+  Sxint = zeros(d, nt); Spxint = zeros(d, nt);
+  for j = 1:nt
+    tq = tvec(j);
+    if npts == 1 || tq <= X(1)
+      Sxint(:, j) = Y(:, 1); Spxint(:, j) = YP(:, 1);
+    elseif tq >= X(npts)
+      Sxint(:, j) = Y(:, npts); Spxint(:, j) = YP(:, npts);
+    else
+      k = find(X <= tq, 1, 'last');
+      if k >= npts, k = npts - 1; end
+      h = X(k+1) - X(k);
+      if abs(h) < 1e-15
+        Sxint(:, j) = Y(:, k); Spxint(:, j) = YP(:, k);
+      else
+        theta = (tq - X(k)) / h;
+        Sxint(:, j) = NUMKIT_bs23_hermite(theta, 1, h, Y(:, k), Y(:, k+1), YP(:, k), YP(:, k+1));
+        dy = Y(:, k+1) - Y(:, k); f0 = YP(:, k); f1 = YP(:, k+1);
+        Spxint(:, j) = (6*theta*(1 - theta)/h)*dy + (1 - 4*theta + 3*theta^2)*f0 + theta*(3*theta - 2)*f1;
+      end
+    end
+  end
+  if nargin >= 3 && ~isempty(idx)
+    Sxint = Sxint(idx, :); Spxint = Spxint(idx, :);
+  end
+end
+
+function opts = ddeset(varargin)
+  opts = odeset(varargin{:});
+end
+
+function val = ddeget(varargin)
+  val = odeget(varargin{:});
+end
+
+function [center, U, obj_fcn] = fcm(data, cluster_n, options)
+  expo = 2.0; max_iter = 100; min_impro = 1e-5;
+  if nargin >= 3 && ~isempty(options)
+    if numel(options) >= 1 && ~isnan(options(1)), expo = options(1); end
+    if numel(options) >= 2 && ~isnan(options(2)), max_iter = options(2); end
+    if numel(options) >= 3 && ~isnan(options(3)), min_impro = options(3); end
+  end
+  data_n = size(data, 1);
+  U = rand(cluster_n, data_n);
+  col_sum = sum(U, 1);
+  U = U ./ (ones(cluster_n, 1) * col_sum);
+  obj_fcn = zeros(max_iter, 1);
+  for i = 1:max_iter
+    mf = U .^ expo;
+    center = (mf * data) ./ (sum(mf, 2) * ones(1, size(data, 2)));
+    dist = zeros(cluster_n, data_n);
+    for k = 1:cluster_n
+      diff = data - ones(data_n, 1) * center(k, :);
+      dist(k, :) = sqrt(sum(diff .^ 2, 2))';
+    end
+    obj_fcn(i) = sum(sum((dist .^ 2) .* mf));
+    tmp = max(dist, 1e-12) .^ (-2 / (expo - 1));
+    U = tmp ./ (ones(cluster_n, 1) * sum(tmp, 1));
+    if i > 1 && abs(obj_fcn(i) - obj_fcn(i - 1)) < min_impro
+      obj_fcn = obj_fcn(1:i);
+      break;
+    end
+  end
+end
+)NKM";
+
 void registerOde23M(Engine &engine)
 {
     engine.registerBuiltinMSource(kOde23MSource);
+    engine.registerBuiltinMSource(kDde23MSource);
 }
 
 

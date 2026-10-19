@@ -66,16 +66,21 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             while (i < args.size()) {
                 DatasetInfo ds;
                 ds.type = "line";
+                const Value *xArg = nullptr;
+                const Value *yArg = nullptr;
                 if (i + 1 < args.size() && isData(args[i]) && isData(args[i + 1])) {
-                    ds.xJson = vecToJson(args[i]);
-                    ds.yJson = vecToJson(args[i + 1]);
+                    xArg = &args[i];
+                    yArg = &args[i + 1];
+                    ds.xJson = vecToJson(*xArg);
+                    ds.yJson = vecToJson(*yArg);
                     i += 2;
                 } else if (isData(args[i])) {
-                    ds.xJson = makeIndexJson(args[i].numel());
-                    ds.yJson = vecToJson(args[i]);
+                    yArg = &args[i];
+                    ds.xJson = makeIndexJson(yArg->numel());
+                    ds.yJson = vecToJson(*yArg);
                     i += 1;
                 } else {
-                    break;   // leading non-data arg â€” nothing plottable
+                    break;
                 }
                 if (i < args.size() && isSpec(args[i])) {
                     ds.style = args[i].toString();
@@ -91,6 +96,43 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     else if (key == "markersize")
                         ds.markerSize = args[i + 1].toScalar();
                     i += 2;   // unknown names consumed silently (lenient)
+                }
+                if (xArg && yArg
+                    && (xArg->dims().rows() == 1 || xArg->dims().cols() == 1)
+                    && xArg->numel() > 1
+                    && yArg->dims().rows() > 1 && yArg->dims().cols() > 1) {
+                    const size_t Nx = xArg->numel();
+                    const size_t Yr = yArg->dims().rows();
+                    const size_t Yc = yArg->dims().cols();
+                    if (Yr == Nx) {
+                        for (size_t c = 0; c < Yc; ++c) {
+                            DatasetInfo colDs = ds;
+                            std::ostringstream ys;
+                            ys << '[';
+                            for (size_t r = 0; r < Yr; ++r) {
+                                if (r > 0) ys << ',';
+                                ys << yArg->elemAsDouble(c * Yr + r);
+                            }
+                            ys << ']';
+                            colDs.yJson = ys.str();
+                            fm.pushDataset(std::move(colDs));
+                        }
+                        continue;
+                    } else if (Yc == Nx) {
+                        for (size_t r = 0; r < Yr; ++r) {
+                            DatasetInfo rowDs = ds;
+                            std::ostringstream ys;
+                            ys << '[';
+                            for (size_t c = 0; c < Yc; ++c) {
+                                if (c > 0) ys << ',';
+                                ys << yArg->elemAsDouble(c * Yr + r);
+                            }
+                            ys << ']';
+                            rowDs.yJson = ys.str();
+                            fm.pushDataset(std::move(rowDs));
+                        }
+                        continue;
+                    }
                 }
                 fm.pushDataset(std::move(ds));
             }

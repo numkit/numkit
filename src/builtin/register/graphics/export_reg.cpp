@@ -331,6 +331,80 @@ void registerFigureExport(Engine &engine)
         };
         engine.registerFunction("", "getframe", std::move(fn));
     }
+    // frame2im(F) -> [X, Map] and im2frame(X [, map]) -> F
+    {
+        ExternalFunc f2i = [](Span<const Value> args, size_t nargout,
+                              Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "frame2im");
+            auto *mr = ctx.engine->resource();
+            const Value &f = args[0];
+            Value cdata = Value::matrix3d(1, 1, 3, ValueType::UINT8, mr);
+            Value cmap = Value::Empty;
+            if (f.isStruct() && f.numel() >= 1) {
+                if (f.hasField("cdata"))
+                    cdata = f.field("cdata");
+                if (f.hasField("colormap"))
+                    cmap = f.field("colormap");
+            }
+            if (!outs.empty()) outs[0] = std::move(cdata);
+            if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(cmap);
+        };
+        engine.registerFunction("", "frame2im", std::move(f2i));
+
+        ExternalFunc i2f = [](Span<const Value> args, size_t,
+                              Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "im2frame");
+            auto *mr = ctx.engine->resource();
+            Value s = Value::structure(mr);
+            s.field("cdata") = args[0];
+            s.field("colormap") = (args.size() >= 2) ? args[1] : Value::Empty;
+            if (!outs.empty()) outs[0] = std::move(s);
+        };
+        engine.registerFunction("", "im2frame", std::move(i2f));
+    }
+    // High-level chart & viewer helpers: imtool, implay, boxchart, heatmap, probplot, dendrogram
+    {
+        ExternalFunc chartNoop = [](Span<const Value>, size_t nargout,
+                                    Span<Value> outs, CallContext &ctx) {
+            ctx.engine->figureManager().current();
+            if (!outs.empty())
+                outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->resource()) : Value();
+        };
+        engine.registerFunction("", "imtool", chartNoop);
+        engine.registerFunction("", "implay", chartNoop);
+        engine.registerFunction("", "boxchart", chartNoop);
+        engine.registerFunction("", "heatmap", chartNoop);
+        engine.registerFunction("", "probplot", chartNoop);
+        engine.registerFunction("", "newplot", chartNoop);
+        engine.registerFunction("", "zoom", chartNoop);
+        engine.registerFunction("", "pan", chartNoop);
+        engine.registerFunction("", "rotate3d", chartNoop);
+
+        ExternalFunc dendroFn = [](Span<const Value> args, size_t nargout,
+                                   Span<Value> outs, CallContext &ctx) {
+            ctx.engine->figureManager().current();
+            auto *mr = ctx.engine->resource();
+            size_t m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
+            if (nargout == 0) {
+                if (!outs.empty()) outs[0] = Value();
+                return;
+            }
+            Value H = Value::matrix(m, 1, ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
+            outs[0] = std::move(H);
+            if (nargout >= 2 && outs.size() >= 2) {
+                Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i <= m; ++i) T.doubleDataMut()[i] = static_cast<double>(i + 1);
+                outs[1] = std::move(T);
+            }
+            if (nargout >= 3 && outs.size() >= 3) {
+                Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i <= m; ++i) P.doubleDataMut()[i] = static_cast<double>(i + 1);
+                outs[2] = std::move(P);
+            }
+        };
+        engine.registerFunction("", "dendrogram", std::move(dendroFn));
+    }
     // Colormap palette functions: parula([m]), jet([m]), hot([m]), etc. -> m x 3 double [0,1]
     {
         static const char *kCmapFns[] = {

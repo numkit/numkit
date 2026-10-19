@@ -466,7 +466,24 @@ classdef inline
             obj.expr = exprstr;
             obj.args = varargin;
             if isempty(varargin)
-                obj.fh = str2func(['@(x) ' exprstr]);
+                toks = regexp(exprstr, '[0-9.]*[A-Za-z][A-Za-z0-9_]*', 'match');
+                vname = 'x';
+                for m = 1:numel(toks)
+                    tk = toks{m};
+                    if tk(1) <= '9'
+                        continue;
+                    end
+                    if ~isempty(strfind(exprstr, [tk '(']))
+                        continue;
+                    end
+                    if strcmp(tk, 'pi') || strcmp(tk, 'i') || strcmp(tk, 'j') || strcmp(tk, 'inf') || strcmp(tk, 'Inf') || strcmp(tk, 'nan') || strcmp(tk, 'NaN') || strcmp(tk, 'eps')
+                        continue;
+                    end
+                    vname = tk;
+                    break;
+                end
+                obj.args = {vname};
+                obj.fh = str2func(['@(' vname ') ' exprstr]);
             else
                 args = '';
                 for k = 1:numel(varargin)

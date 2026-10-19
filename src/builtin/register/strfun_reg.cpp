@@ -7,6 +7,7 @@
 #include <numkit/value/span.hpp>
 
 #include <stdexcept>
+#include <vector>
 
 namespace numkit::builtin::detail {
 
@@ -174,6 +175,30 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("regexpi",    &::numkit::builtin::detail::regexpi_reg);
     engine.registerFunction("regexprep",  &::numkit::builtin::detail::regexprep_reg);
     engine.registerFunction("regexptranslate", &::numkit::builtin::detail::regexptranslate_reg);
+    engine.registerFunction("setstr",     &::numkit::builtin::detail::char_reg);
+    engine.registerFunction("strvcat",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            std::vector<Value> nonEmpty;
+            for (const auto &a : args) {
+                if (!a.isEmpty())
+                    nonEmpty.push_back(a);
+            }
+            if (nonEmpty.empty()) {
+                outs[0] = Value::matrix(0, 0, ValueType::CHAR, ctx.engine->resource());
+                return;
+            }
+            char_reg(Span<const Value>(nonEmpty.data(), nonEmpty.size()), nargout, outs, ctx);
+        });
+    engine.registerFunction("findstr",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 2, "findstr");
+            if (args[0].numel() < args[1].numel()) {
+                Value swapped[2] = {args[1], args[0]};
+                strfind_reg(Span<const Value>(swapped, 2), nargout, outs, ctx);
+            } else {
+                strfind_reg(args, nargout, outs, ctx);
+            }
+        });
 }
 
 } // namespace numkit::builtin::detail

@@ -1,4 +1,4 @@
-﻿// toolboxes/builtin/src/data_io/fileio.cpp
+// toolboxes/builtin/src/data_io/fileio.cpp
 //
 // Simple file-I/O builtins (fopen/fclose/fgetl/fgets/feof/ferror/
 // ftell/fseek/frewind). fread/fwrite + scan family live elsewhere
@@ -350,6 +350,9 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     }
 
     const Value &A = args[1];
+    if (A.isObject() || A.isStruct() || A.isCell() || A.isFuncHandle())
+        throw Error("fwrite: cannot write value of unsupported class",
+                    0, 0, "fwrite", "", "numkit:fwrite:unsupportedClass");
     size_t numel = A.numel();
 
     // Accept any numeric element type â€” `Value::elemAsDouble` handles

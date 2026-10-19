@@ -36,6 +36,7 @@ void deg2rad_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void del2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void delaunay_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void discretize_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void dsearchn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void expm1_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void findgroups_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void gradient_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -375,6 +376,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("polyarea",   &::numkit::builtin::detail::polyarea_reg);
     engine.registerFunction("boundary",   &::numkit::builtin::detail::boundary_reg);
     engine.registerFunction("delaunay",   &::numkit::builtin::detail::delaunay_reg);
+    engine.registerFunction("dsearchn",   &::numkit::builtin::detail::dsearchn_reg);
     engine.registerFunction("histcounts2",&::numkit::builtin::detail::histcounts2_reg);
     engine.registerFunction("griddata",   &::numkit::builtin::detail::griddata_reg);
     engine.registerFunction("griddatan",  &::numkit::builtin::detail::griddatan_reg);

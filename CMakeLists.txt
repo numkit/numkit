@@ -144,7 +144,10 @@ endif()
 # ── Executables: numkit CLI / REPL & numkit_codegen ──────────────────────
 if(NUMKIT_BUILD_CLI)
     add_executable(numkit_cli apps/numkit/main.cpp)
-    set_target_properties(numkit_cli PROPERTIES OUTPUT_NAME numkit)
+    set_target_properties(numkit_cli PROPERTIES
+        RUNTIME_OUTPUT_NAME numkit
+        ARCHIVE_OUTPUT_NAME numkit_cli
+    )
     target_link_libraries(numkit_cli PRIVATE numkit)
 
     if(NOT EMSCRIPTEN)

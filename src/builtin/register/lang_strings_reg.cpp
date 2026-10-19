@@ -69,27 +69,62 @@ void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     argcheck::checkNargin(args.size(), 1, "str2num");
     // MATLAB str2num evaluates the (bracket-wrapped) string as an expression,
     // so it parses matrices, ranges and arithmetic — str2num('[1 2;3 4]')=
-    // [1 2;3 4], '1:5'=1..5, '2+3'=5. Any parse/eval failure (or a non-numeric
-    // result) yields [] (0x0 double); the optional 2nd output is a logical
-    // success flag: [X, tf] = str2num(s). (The engine-free Value str2num()
-    // overload remains a scalar-only fallback for embedders without eval.)
+    // [1 2;3 4], '1:5'=1..5, '2+3'=5. For a multi-row char matrix, each row
+    // forms a row of the numeric output (separated by ';'). Any parse/eval
+    // failure (or a non-numeric result) yields [] (0x0 double); the optional
+    // 2nd output is a logical success flag: [X, tf] = str2num(s).
     bool ok = false;
     Value result = Value::Empty;
+    auto *mr = ctx.engine->resource();
     if (args[0].isChar() || args[0].isString()) {
-        try {
-            Value v = ctx.engine->eval("[" + args[0].toString() + "]",
-                                       /*suppressTopLevelDisplay=*/true);
-            if (v.isNumeric() || v.isLogical()) {
-                result = std::move(v);
+        const Value &s = args[0];
+        const size_t rows = s.dims().rows();
+        const size_t cols = s.dims().cols();
+        if (s.isChar() && !s.dims().is3D() && rows > 1 && cols == 1) {
+            const char *cd = s.charData();
+            bool allDigits = true;
+            for (size_t r = 0; r < rows; ++r) {
+                if (cd[r] < '0' || cd[r] > '9') {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) {
+                result = Value::matrix(rows, 1, ValueType::DOUBLE, mr);
+                double *dd = result.doubleDataMut();
+                for (size_t r = 0; r < rows; ++r)
+                    dd[r] = static_cast<double>(cd[r] - '0');
                 ok = true;
             }
-        } catch (...) {
-            ok = false;
+        }
+        if (!ok) {
+            try {
+                std::string expr = "[";
+                if (s.isChar() && !s.dims().is3D() && rows > 1) {
+                    const char *cd = s.charData();
+                    expr.reserve(rows * (cols + 1) + 2);
+                    for (size_t r = 0; r < rows; ++r) {
+                        if (r > 0) expr.push_back(';');
+                        for (size_t c = 0; c < cols; ++c)
+                            expr.push_back(cd[r + c * rows]);
+                    }
+                } else {
+                    expr += s.toString();
+                }
+                expr.push_back(']');
+                Value v = ctx.engine->eval(expr, /*suppressTopLevelDisplay=*/true);
+                if (v.isNumeric() || v.isLogical()) {
+                    result = std::move(v);
+                    ok = true;
+                }
+            } catch (...) {
+                ok = false;
+            }
         }
     }
     outs[0] = ok ? std::move(result) : Value::Empty;
     if (nargout >= 2 && outs.size() >= 2)
-        outs[1] = Value::logicalScalar(ok, ctx.engine->resource());
+        outs[1] = Value::logicalScalar(ok, mr);
 }
 
 void str2double_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)

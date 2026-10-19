@@ -358,7 +358,10 @@ uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     // have injected into workspaceEnv (e.g. the debug-console eval
     // injecting `nargin` so the user can inspect it from K>>).
     if (preloadReserved && engine_.isReservedName(name)) {
-        Value *existing = engine_.getVariable(name);
+        Value *existing = isTopLevel_ ? engine_.getVariable(name)
+                                      : engine_.constantsEnv().get(name);
+        if (!existing)
+            existing = engine_.getVariable(name);
         if (existing && !existing->isEmpty()) {
             int16_t idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
@@ -2209,7 +2212,8 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // path).
     auto isCslCandidate = [](const ASTNode *elem) {
         return (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty()
-                && elem->children[0]->type == NodeType::IDENTIFIER)
+                && (elem->children[0]->type == NodeType::IDENTIFIER
+                    || elem->children[0]->type == NodeType::CALL))
             // a cell brace-index: 1-D c{:} / c{vec} / c{i} or 2-D c{r,:} / c{:,j} (CSL)
             || (elem->type == NodeType::CELL_INDEX
                 && (elem->children.size() == 2 || elem->children.size() == 3));
@@ -4501,6 +4505,27 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     // floor) until a moderately large function false-positives on register
     // exhaustion. (params/returns/nargin/nargout are already allocated above and
     // skipped by the count() guard.)
+    // Pre-load referenced built-in constants (pi, eps, inf, i, j, ...) at
+    // function entry when they are not shadowed by parameters, returns, or
+    // body assignments. Without this, if the first lexical read of `pi` in a
+    // function sits inside a conditional branch (`elseif c <= -1, q = pi;`)
+    // that is not taken at runtime, the lazy LOAD_CONST emitted inside that
+    // branch is skipped and subsequent reads of `pi` see an unset register.
+    {
+        std::vector<std::string> assignedVec;
+        collectAssignedNames(funcDef->children[0].get(), assignedVec);
+        std::unordered_set<std::string> assignedSet(assignedVec.begin(), assignedVec.end());
+        std::unordered_set<std::string> identifiers;
+        collectAllIdentifiers(funcDef->children[0].get(), identifiers);
+        for (const auto &name : identifiers) {
+            if (varRegisters_.count(name) || assignedSet.count(name))
+                continue;
+            if (engine_.isReservedName(name)) {
+                varRegLookup(name, /*preloadReserved=*/true);
+            }
+        }
+    }
+
     preallocateAssignedVars(funcDef->children[0].get());
     preallocatePinnedConstants(funcDef->children[0].get());
     if (!mayClear_) {

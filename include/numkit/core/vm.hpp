@@ -210,6 +210,7 @@ public:
     // inner-eval results back into the outer caller's static slots.
     void writeToFrameMatchingEnv(Environment *env, const std::string &name,
                                  const Value &val);
+    void flushWorkspaceFrame();
 
     // Caller arg names of the innermost user-function frame (the
     // function that contains the running builtin's call site). Empty

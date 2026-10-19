@@ -339,6 +339,48 @@ void matchpairs_reg(Span<const Value> args, size_t nargout,
     if (nargout > 2) outs[2] = std::move(r.uC);
 }
 
+void dsearchn_reg(Span<const Value> args, size_t nargout,
+                  Span<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 2, 4, "dsearchn");
+    auto *mr = ctx.engine->resource();
+    const Value &P = args[0];
+    // Forms:
+    //   dsearchn(P, PQ)
+    //   dsearchn(P, PQ, outind)
+    //   dsearchn(P, T, PQ)
+    //   dsearchn(P, T, PQ, outind)
+    const Value &PQ = (args.size() >= 3 && args[1].dims().cols() != P.dims().cols())
+                          ? args[2]
+                          : args[1];
+    const size_t nPts = P.dims().rows();
+    const size_t nDim = P.dims().cols();
+    const size_t nQ   = PQ.dims().rows();
+    Value K = Value::matrix(nQ, 1, ValueType::DOUBLE, mr);
+    Value D = (nargout >= 2) ? Value::matrix(nQ, 1, ValueType::DOUBLE, mr) : Value();
+    for (size_t q = 0; q < nQ; ++q) {
+        double bestDistSq = std::numeric_limits<double>::infinity();
+        size_t bestIdx = 1;
+        for (size_t p = 0; p < nPts; ++p) {
+            double dsq = 0.0;
+            for (size_t d = 0; d < nDim; ++d) {
+                const double diff = PQ.elemAsDouble(q + d * nQ) - P.elemAsDouble(p + d * nPts);
+                dsq += diff * diff;
+            }
+            if (dsq < bestDistSq) {
+                bestDistSq = dsq;
+                bestIdx = p + 1;
+            }
+        }
+        K.doubleDataMut()[q] = static_cast<double>(bestIdx);
+        if (nargout >= 2)
+            D.doubleDataMut()[q] = std::sqrt(bestDistSq);
+    }
+    outs[0] = std::move(K);
+    if (nargout >= 2 && outs.size() >= 2)
+        outs[1] = std::move(D);
+}
+
 } // namespace detail
 
 } // namespace numkit::builtin

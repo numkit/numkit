@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” polar.cpp
+// nk/graphics â€” polar.cpp
 //
 // graphics.polar.* builders (polarplot / polarscatter / polarhistogram / rlim / theta* / r*), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -90,30 +90,32 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     // â”€â”€ Polar â€” graphics.polar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    reg("polar", "polarplot",
-        [](Span<const Value> args, size_t nargout,
-                                   Span<Value> outs, GraphicsContext &gc) {
-            if (args.size() < 2) {
-                outs[0] = Value();
-                return;
-            }
-            auto &fm = gc.fm;
-            fm.prepareForPlot();
-            fm.currentAxes().polar = true;
-            DatasetInfo ds;
-            ds.type = "line";
-            ds.xJson = vecToJson(args[0]);
-            ds.yJson = vecToJson(args[1]);
-            size_t nvStart = 2;
-            if (args.size() >= 3 && args[2].isChar()) {
-                ds.style = args[2].toString();
-                nvStart = 3;
-            }
-            parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
-            fm.emitModified();
+    auto polarPlotFn = [](Span<const Value> args, size_t nargout,
+                          Span<Value> outs, GraphicsContext &gc) {
+        (void)nargout;
+        if (args.size() < 2) {
             outs[0] = Value();
-        });
+            return;
+        }
+        auto &fm = gc.fm;
+        fm.prepareForPlot();
+        fm.currentAxes().polar = true;
+        DatasetInfo ds;
+        ds.type = "line";
+        ds.xJson = vecToJson(args[0]);
+        ds.yJson = vecToJson(args[1]);
+        size_t nvStart = 2;
+        if (args.size() >= 3 && args[2].isChar()) {
+            ds.style = args[2].toString();
+            nvStart = 3;
+        }
+        parsePlotArgs(args, nvStart, ds);
+        fm.pushDataset(std::move(ds));
+        fm.emitModified();
+        outs[0] = Value();
+    };
+    reg("polar", "polarplot", polarPlotFn);
+    reg("polar", "polar", std::move(polarPlotFn));
     // polarscatter(theta, rho) â€” markers at each (Î¸, Ï) on the polar
     // axes. Same wire format as polarplot but type='scatter' so the
     // PolarPlot renderer draws circles instead of polylines.

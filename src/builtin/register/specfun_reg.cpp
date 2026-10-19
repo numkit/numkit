@@ -5,6 +5,9 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/span.hpp>
+#include <cmath>
+#include <complex>
+#include <limits>
 
 // Each registered adapter in specfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
@@ -95,6 +98,108 @@ void register_specfun(Engine &engine) {
                 else               dst[i] = 1.0;
             }
             outs[0] = std::move(out);
+        });
+    engine.registerFunction("sinint",
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "sinint");
+            std::pmr::memory_resource *mr = ctx.engine->resource();
+            const Value &x = args[0];
+            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+            double *dst = out.doubleDataMut();
+            const size_t n = x.numel();
+            constexpr double kPi2 = 1.57079632679489661923;
+            for (size_t i = 0; i < n; ++i) {
+                double v = x.elemAsDouble(i);
+                if (std::isnan(v)) { dst[i] = v; continue; }
+                if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
+                if (v == 0.0) { dst[i] = 0.0; continue; }
+                double sgn = (v < 0.0) ? -1.0 : 1.0;
+                double ax = std::abs(v);
+                double si = 0.0;
+                if (ax <= 4.0) {
+                    si = ax;
+                    double p = ax;
+                    for (int k = 1; k < 60; ++k) {
+                        p *= -ax * ax / (static_cast<double>(2 * k) * static_cast<double>(2 * k + 1));
+                        double term = p / static_cast<double>(2 * k + 1);
+                        si += term;
+                        if (std::abs(term) < 1e-16 * std::abs(si)) break;
+                    }
+                } else {
+                    std::complex<double> z(0.0, ax);
+                    std::complex<double> cf(0.0, 0.0);
+                    for (int k = 120; k >= 1; --k) {
+                        double kk = static_cast<double>(k);
+                        cf = std::complex<double>(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                    }
+                    std::complex<double> h = 1.0 / (z + 1.0 + cf);
+                    double f = -h.imag();
+                    double g = h.real();
+                    si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
+                }
+                dst[i] = sgn * si;
+            }
+            outs[0] = std::move(out);
+        });
+    engine.registerFunction("cosint",
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "cosint");
+            std::pmr::memory_resource *mr = ctx.engine->resource();
+            const Value &x = args[0];
+            const size_t n = x.numel();
+            bool hasNeg = false;
+            for (size_t i = 0; i < n; ++i) {
+                if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
+            }
+            constexpr double kGamma = 0.57721566490153286060651209;
+            constexpr double kPi = 3.14159265358979323846;
+            auto evalPosCi = [&](double ax) -> double {
+                if (ax <= 4.0) {
+                    double ci = kGamma + std::log(ax);
+                    double p = 1.0;
+                    for (int k = 1; k < 60; ++k) {
+                        p *= -ax * ax / (static_cast<double>(2 * k - 1) * static_cast<double>(2 * k));
+                        double term = p / static_cast<double>(2 * k);
+                        ci += term;
+                        if (std::abs(term) < 1e-16 * std::abs(ci)) break;
+                    }
+                    return ci;
+                } else {
+                    std::complex<double> z(0.0, ax);
+                    std::complex<double> cf(0.0, 0.0);
+                    for (int k = 120; k >= 1; --k) {
+                        double kk = static_cast<double>(k);
+                        cf = std::complex<double>(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                    }
+                    std::complex<double> h = 1.0 / (z + 1.0 + cf);
+                    double f = -h.imag();
+                    double g = h.real();
+                    return f * std::sin(ax) - g * std::cos(ax);
+                }
+            };
+            if (!hasNeg) {
+                Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+                double *dst = out.doubleDataMut();
+                for (size_t i = 0; i < n; ++i) {
+                    double v = x.elemAsDouble(i);
+                    if (std::isnan(v)) dst[i] = v;
+                    else if (v == 0.0) dst[i] = -std::numeric_limits<double>::infinity();
+                    else if (std::isinf(v)) dst[i] = 0.0;
+                    else dst[i] = evalPosCi(v);
+                }
+                outs[0] = std::move(out);
+            } else {
+                Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
+                auto *dst = out.complexDataMut();
+                for (size_t i = 0; i < n; ++i) {
+                    double v = x.elemAsDouble(i);
+                    if (std::isnan(v)) dst[i] = {v, v};
+                    else if (v == 0.0) dst[i] = {-std::numeric_limits<double>::infinity(), 0.0};
+                    else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
+                    else dst[i] = {evalPosCi(std::abs(v)), (v < 0.0) ? kPi : 0.0};
+                }
+                outs[0] = std::move(out);
+            }
         });
     auto noopFn = [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &/*ctx*/) {
         outs[0] = Value();

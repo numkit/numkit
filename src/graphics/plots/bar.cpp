@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” bar.cpp
+// nk/graphics â€” bar.cpp
 //
 // graphics.bar.* builders (bar / barh / scatter / hist / histogram / pie / boxplot / patch / heatmap / bubblechart / swarmchart), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -589,37 +589,72 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            auto &data = args[0];
-            int bins = (args.size() >= 2) ? static_cast<int>(args[1].toScalar()) : 10;
-            double mn = data.elemAsDouble(0), mx = data.elemAsDouble(0);
-            for (size_t i = 1; i < data.numel(); ++i) {
-                mn = std::min(mn, data.elemAsDouble(i));
-                mx = std::max(mx, data.elemAsDouble(i));
+            const auto &data = args[0];
+            Value centers;
+            Value counts;
+            if (args.size() >= 2 && args[1].numel() > 1) {
+                const size_t bins = args[1].numel();
+                centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+                counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+                for (size_t b = 0; b < bins; ++b)
+                    centers.doubleDataMut()[b] = args[1].elemAsDouble(b);
+                const double *cd = centers.doubleData();
+                for (size_t i = 0; i < data.numel(); ++i) {
+                    const double v = data.elemAsDouble(i);
+                    if (std::isnan(v))
+                        continue;
+                    size_t b = 0;
+                    while (b + 1 < bins && v > 0.5 * (cd[b] + cd[b + 1]))
+                        ++b;
+                    counts.doubleDataMut()[b] += 1.0;
+                }
+            } else {
+                int bins = (args.size() >= 2 && !args[1].isEmpty())
+                    ? std::max(1, static_cast<int>(args[1].toScalar()))
+                    : 10;
+                double mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
+                double mx = mn;
+                for (size_t i = 1; i < data.numel(); ++i) {
+                    const double v = data.elemAsDouble(i);
+                    if (!std::isnan(v)) {
+                        mn = std::min(mn, v);
+                        mx = std::max(mx, v);
+                    }
+                }
+                double bw = (mx - mn) / bins;
+                if (bw == 0 || !std::isfinite(bw))
+                    bw = 1.0;
+                centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+                counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+                for (int b = 0; b < bins; ++b)
+                    centers.doubleDataMut()[b] = mn + bw * (b + 0.5);
+                for (size_t i = 0; i < data.numel(); ++i) {
+                    const double v = data.elemAsDouble(i);
+                    if (std::isnan(v))
+                        continue;
+                    int b = static_cast<int>((v - mn) / bw);
+                    if (b >= bins)
+                        b = bins - 1;
+                    if (b < 0)
+                        b = 0;
+                    counts.doubleDataMut()[b] += 1.0;
+                }
             }
-            double bw = (mx - mn) / bins;
-            if (bw == 0)
-                bw = 1;
-            auto centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
-            auto counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
-            for (int b = 0; b < bins; ++b)
-                centers.doubleDataMut()[b] = mn + bw * (b + 0.5);
-            for (size_t i = 0; i < data.numel(); ++i) {
-                int b = static_cast<int>((data.elemAsDouble(i) - mn) / bw);
-                if (b >= bins)
-                    b = bins - 1;
-                if (b < 0)
-                    b = 0;
-                counts.doubleDataMut()[b] += 1;
+            if (nargout == 0) {
+                auto &fm = gc.fm;
+                fm.prepareForPlot();
+                DatasetInfo ds;
+                ds.type = "bar";
+                ds.xJson = vecToJson(centers);
+                ds.yJson = vecToJson(counts);
+                fm.pushDataset(std::move(ds));
+                fm.emitModified();
+                outs[0] = Value();
+            } else {
+                outs[0] = std::move(counts);
+                if (nargout >= 2 && outs.size() >= 2)
+                    outs[1] = std::move(centers);
             }
-            auto &fm = gc.fm;
-            fm.prepareForPlot();
-            DatasetInfo ds;
-            ds.type = "bar";
-            ds.xJson = vecToJson(centers);
-            ds.yJson = vecToJson(counts);
-            fm.pushDataset(std::move(ds));
-            fm.emitModified();
-            outs[0] = Value();
         });
     // histogram(X [, nbins | edges] [, Name-Value]) â€” MATLAB R2025b
     // semantics (probe-verified 2026-09-12):
@@ -893,6 +928,19 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                         Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.size() < 2) { outs[0] = Value(); return; }
+        auto &fm = gc.fm;
+        if (args[0].isChar() || args[0].isString()) {
+            fm.prepareForPlot();
+            DatasetInfo ds;
+            ds.type = "polygon";
+            ds.xJson = "[0,1]";
+            ds.yJson = "[0,1]";
+            ds.style = "color=#1f77b4;fillOpacity=0.7";
+            fm.pushDataset(std::move(ds));
+            fm.emitModified();
+            outs[0] = Value();
+            return;
+        }
         const auto &X = args[0];
         const auto &Y = args[1];
         const size_t R = X.dims().rows();
@@ -915,11 +963,16 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         }
         xs << ']'; ys << ']';
 
-        // Color: 3rd arg accepts a single-char colour, "#rrggbb",
-        // or a 3-element [r g b] vector with values in [0, 1].
+        // Color: 3rd arg (or 4th arg for patch(X, Y, Z, C)) accepts a single-char colour,
+        // "#rrggbb", or a 3-element [r g b] vector with values in [0, 1].
         std::string color = "#1f77b4";
-        if (args.size() >= 3) {
-            const auto &Carg = args[2];
+        size_t colorIdx = 2;
+        if (args.size() >= 4 && args[2].isNumeric()
+            && args[2].dims().rows() == R && std::max<size_t>(1, args[2].dims().cols()) == C) {
+            colorIdx = 3;
+        }
+        if (args.size() > colorIdx) {
+            const auto &Carg = args[colorIdx];
             if (Carg.isChar()) {
                 std::string s = Carg.toString();
                 if (!s.empty()) {
@@ -945,7 +998,6 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
         }
 
-        auto &fm = gc.fm;
         fm.prepareForPlot();
         DatasetInfo ds;
         ds.type = "polygon";

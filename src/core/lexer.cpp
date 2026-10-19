@@ -307,7 +307,7 @@ void Lexer::skipSpacesAndComments()
 {
     while (pos_ < src_.size()) {
         char c = peek();
-        if (c == ' ' || c == '\t' || c == '\r') {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\x1a') {
             if (inMatrixContext() && (c == ' ' || c == '\t')) {
                 while (pos_ < src_.size() && (peek() == ' ' || peek() == '\t'))
                     advance();
