@@ -2923,6 +2923,20 @@ TEST_P(DisplayTest, TableContainer)
     EXPECT_DOUBLE_EQ(evalScalar("tkA(1, 2)"), 20.0);
     EXPECT_DOUBLE_EQ(evalScalar("tkIdx(1)"), 2.0);
     EXPECT_DOUBLE_EQ(evalScalar("real(tkC(1))"), 3.0);
+
+    // 7. Variable name inference, rmmissing, groupsummary, makeValidName, categorical, subplot Position
+    eval("Day = [1; 1; 2; 2]; Score = [10; 20; 30; NaN]; "
+         "tInf = table(Day, Score); "
+         "tClean = rmmissing(tInf); "
+         "tGrp = groupsummary(tClean, 'Day', 'mean', 'Score'); "
+         "vId = matlab.lang.makeValidName('1st Col$Name'); "
+         "catCol = categorical([true; false], [false true], {'Low', 'High'}); "
+         "hSub = subplot(2, 1, 1); pSub = get(hSub, 'Position');");
+    EXPECT_DOUBLE_EQ(evalScalar("height(tClean)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tGrp.mean_Score(1)"), 15.0);
+    EXPECT_EQ(eval("vId").toString(), "x1st_Col_Name");
+    EXPECT_EQ(eval("catCol(1)").stringElem(0), "High");
+    EXPECT_NEAR(evalScalar("pSub(1)"), 0.13, 1e-9);
 }
 
 TEST_P(DisplayTest, SingleComplexStorageAndOperations)

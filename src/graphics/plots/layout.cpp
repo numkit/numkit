@@ -184,8 +184,20 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
             }
             if (dmin <= dmax) {
-                lo = dmin;
-                hi = (dmax > dmin) ? dmax : dmin + 1.0;
+                if (dmax > dmin) {
+                    const double span = dmax - dmin;
+                    const double p10 = std::pow(10.0, std::floor(std::log10(span)));
+                    const double s = span / p10;
+                    const double step = (s <= 1.5) ? 0.2 * p10
+                                      : (s <= 3.0) ? 0.5 * p10
+                                      : (s <= 7.0) ? 1.0 * p10
+                                                   : 2.0 * p10;
+                    lo = std::floor(dmin / step + 1e-12) * step;
+                    hi = std::ceil(dmax / step - 1e-12) * step;
+                } else {
+                    lo = dmin - 1.0;
+                    hi = dmin + 1.0;
+                }
             }
         }
         Value res = Value::matrix(1, 2, ValueType::DOUBLE);
@@ -218,14 +230,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     reg("layout", "subplot",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (args.size() < 3) {
+            (void)nargout;
+            if (args.size() < 3 || args[0].isEmpty() || args[1].isEmpty() || args[2].isEmpty()) {
                 outs[0] = Value();
                 return;
             }
             auto &fm = gc.fm;
-            int m = static_cast<int>(args[0].toScalar());
-            int n = static_cast<int>(args[1].toScalar());
-            int p = static_cast<int>(args[2].toScalar());
+            int m = static_cast<int>(args[0].elemAsDouble(0));
+            int n = static_cast<int>(args[1].elemAsDouble(0));
+            int p = static_cast<int>(args[2].elemAsDouble(0));
             fm.setSubplot(m, n, p);
             outs[0] = Value();
         });

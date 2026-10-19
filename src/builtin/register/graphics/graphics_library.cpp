@@ -619,9 +619,29 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         return v;
     }
     if (name == "Position" || name == "OuterPosition") {
+        auto it = rec->props.find(name);
+        if (it != rec->props.end())
+            return decodeProp(it->second, mr);
+        const FigureState *fig = fm.figureOf(rec->figureId);
+        int m = (fig && fig->subplotRows >= 1) ? fig->subplotRows : 1;
+        int n = (fig && fig->subplotCols >= 1) ? fig->subplotCols : 1;
+        int p = (ax && ax->subplotIndex >= 1) ? ax->subplotIndex : 1;
+        double left = 0.13, bottom = 0.11, width = 0.775, height = 0.815;
+        if (m > 1 || n > 1) {
+            int r = (p - 1) / n;
+            int c = (p - 1) % n;
+            double stepX = 0.775 / (n - 0.24);
+            double stepY = 0.815 / (m - 0.28);
+            width  = (n == 1) ? 0.775 : 0.76 * stepX;
+            height = (m == 1) ? 0.815 : 0.72 * stepY;
+            left   = 0.13 + c * stepX;
+            bottom = 0.11 + (m - 1 - r) * stepY;
+        }
         Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
-        v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
-        v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
+        v.doubleDataMut()[0] = left;
+        v.doubleDataMut()[1] = bottom;
+        v.doubleDataMut()[2] = width;
+        v.doubleDataMut()[3] = height;
         return v;
     }
     if (name == "XScale") return str(ax->xscale.c_str());
@@ -1986,6 +2006,8 @@ void GraphicsLibrary::install(Engine &engine)
                     } else {
                         outs[0] = makeAxesHandle(fm, mr);
                     }
+                } else if (name == "subplot" && nargout >= 1) {
+                    outs[0] = makeAxesHandle(fm, ctx.engine->resource());
                 }
             };
 

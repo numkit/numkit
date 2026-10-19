@@ -11,6 +11,10 @@
 // hooks (construct/subsref/subsasgn/methods) are thin adapters over it.
 #include <numkit/runtime/containers.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/core/environment.hpp>
+#include <numkit/ops/deflate.hpp>
+#include <numkit/sys/fs_context.hpp>
+#include <numkit/sys/vfs.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/object.hpp>
 
@@ -980,6 +984,7 @@ void registerContainersRuntime(Engine &engine)
                 dataEnd -= 2;
             }
 
+            Environment *caller = ctx.engine ? ctx.engine->callerEnv(0) : ctx.env;
             for (size_t j = 0; j < dataEnd; ++j) {
                 const Value &col = args[j];
                 size_t r = col.dims().rows();
@@ -992,7 +997,25 @@ void registerContainersRuntime(Engine &engine)
                                 0, 0, "table", "", "numkit:table:rowCountMismatch");
                 }
                 p->cols.push_back(col);
-                p->varNames.push_back("Var" + std::to_string(j + 1));
+                std::string inferredName;
+                if (caller) {
+                    caller->forEachLocal([&](const std::string &vname, const Value &vval) {
+                        if (!inferredName.empty() || vname == "ans")
+                            return;
+                        bool samePtr = false;
+                        if (!col.isScalar() && !vval.isScalar() && col.type() == vval.type()
+                            && col.isComplex() == vval.isComplex()
+                            && (col.isNumeric() || col.isLogical() || col.isChar())
+                            && col.rawData() != nullptr) {
+                            samePtr = (vval.rawData() == col.rawData());
+                        } else if (col.isObject() && col.objectStateConst() != nullptr && vval.isObject()) {
+                            samePtr = (vval.objectStateConst() == col.objectStateConst());
+                        }
+                        if (samePtr && std::find(p->varNames.begin(), p->varNames.end(), vname) == p->varNames.end())
+                            inferredName = vname;
+                    });
+                }
+                p->varNames.push_back(inferredName.empty() ? ("Var" + std::to_string(j + 1)) : inferredName);
             }
 
             for (size_t i = dataEnd; i + 1 < args.size(); i += 2) {
@@ -1610,6 +1633,222 @@ void registerContainersRuntime(Engine &engine)
                     idx.doubleDataMut()[r] = static_cast<double>(ord[r] + 1);
                 out[1] = std::move(idx);
             }
+        };
+
+        tbl.methods["rmmissing"] = [](Value &self, Span<const Value> args, size_t nargout,
+                                      Span<Value> out, CallContext &ctx) {
+            const TablePayload *p = tableCst(self);
+            auto *mr = ctx.engine->resource();
+            std::vector<size_t> checkCols;
+            size_t minNumMissing = 1;
+            for (size_t i = 0; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString())
+                    continue;
+                std::string key = args[i].toString();
+                if (iequalsTableOpt(key, "DataVariables")) {
+                    checkCols = resolveTableSubscript(args[i + 1], p->width(), p->varNames, true, "rmmissing");
+                } else if (iequalsTableOpt(key, "MinNumMissing")) {
+                    minNumMissing = static_cast<size_t>(std::max(1.0, args[i + 1].elemAsDouble(0)));
+                }
+            }
+            if (checkCols.empty()) {
+                checkCols.resize(p->width());
+                std::iota(checkCols.begin(), checkCols.end(), 0);
+            }
+            auto isCellElemMissing = [&](const Value &col, size_t r) -> bool {
+                size_t nr = col.dims().rows();
+                size_t nc = col.dims().cols();
+                if (r >= nr || nc == 0)
+                    return false;
+                if (col.isNumeric()) {
+                    for (size_t c = 0; c < nc; ++c)
+                        if (std::isnan(col.elemAsDouble(r + c * nr)))
+                            return true;
+                    return false;
+                }
+                if (col.isString()) {
+                    for (size_t c = 0; c < nc; ++c)
+                        if (col.stringElem(r + c * nr).empty())
+                            return true;
+                    return false;
+                }
+                if (col.isCell()) {
+                    for (size_t c = 0; c < nc; ++c) {
+                        const Value &el = col.cellAt(r + c * nr);
+                        if (el.isEmpty())
+                            return true;
+                        if ((el.isChar() || el.isString()) && el.toString().empty())
+                            return true;
+                        if (el.isNumeric() && el.isScalar() && std::isnan(el.toScalar()))
+                            return true;
+                    }
+                    return false;
+                }
+                return false;
+            };
+            std::vector<size_t> keepRows;
+            keepRows.reserve(p->nrows);
+            Value tfRemoved = Value::matrix(p->nrows, 1, ValueType::LOGICAL, mr);
+            for (size_t r = 0; r < p->nrows; ++r) {
+                size_t nMiss = 0;
+                for (size_t ci : checkCols) {
+                    if (ci < p->cols.size() && isCellElemMissing(p->cols[ci], r))
+                        ++nMiss;
+                }
+                if (nMiss >= minNumMissing) {
+                    tfRemoved.logicalDataMut()[r] = 1;
+                } else {
+                    tfRemoved.logicalDataMut()[r] = 0;
+                    keepRows.push_back(r);
+                }
+            }
+            auto sub = std::make_shared<TablePayload>(*p);
+            sub->nrows = keepRows.size();
+            for (size_t j = 0; j < sub->cols.size(); ++j)
+                sub->cols[j] = sliceColumnRows(p->cols[j], keepRows, mr);
+            if (!sub->rowNames.empty()) {
+                std::vector<std::string> nrn;
+                for (size_t r : keepRows) nrn.push_back(p->rowNames[r]);
+                sub->rowNames = std::move(nrn);
+            }
+            out[0] = makeTableValue(std::move(sub), mr);
+            if (nargout >= 2 && out.size() >= 2)
+                out[1] = std::move(tfRemoved);
+        };
+
+        tbl.methods["groupsummary"] = [](Value &self, Span<const Value> args, size_t,
+                                         Span<Value> out, CallContext &ctx) {
+            const TablePayload *p = tableCst(self);
+            auto *mr = ctx.engine->resource();
+            if (args.empty())
+                throw Error("groupsummary: requires at least groupvars argument",
+                            0, 0, "groupsummary", "", "numkit:groupsummary:minrhs");
+            std::vector<size_t> groupCols =
+                resolveTableSubscript(args[0], p->width(), p->varNames, true, "groupsummary");
+            std::vector<std::string> methods;
+            if (args.size() >= 2) {
+                if (args[1].isChar() || (args[1].isString() && args[1].numel() == 1))
+                    methods.push_back(args[1].toString());
+                else if (args[1].isCell() || args[1].isString())
+                    methods = TablePayload::extractNames(args[1], "groupsummary", "method");
+            }
+            if (methods.empty())
+                methods.push_back("mean");
+            std::vector<size_t> dataCols;
+            if (args.size() >= 3) {
+                dataCols = resolveTableSubscript(args[2], p->width(), p->varNames, true, "groupsummary");
+            } else {
+                std::vector<uint8_t> isGrp(p->width(), 0);
+                for (size_t gi : groupCols)
+                    if (gi < p->width()) isGrp[gi] = 1;
+                for (size_t j = 0; j < p->width(); ++j)
+                    if (!isGrp[j] && p->cols[j].isNumeric())
+                        dataCols.push_back(j);
+            }
+
+            std::vector<size_t> ord(p->nrows);
+            std::iota(ord.begin(), ord.end(), 0);
+            std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) {
+                for (size_t gc : groupCols) {
+                    int cmp = compareColumnRows(p->cols[gc], a, b);
+                    if (cmp != 0)
+                        return cmp < 0;
+                }
+                return false;
+            });
+
+            std::vector<size_t> repRows;
+            std::vector<std::vector<size_t>> groupMembers;
+            for (size_t idx : ord) {
+                if (repRows.empty()) {
+                    repRows.push_back(idx);
+                    groupMembers.push_back({idx});
+                } else {
+                    size_t prev = repRows.back();
+                    bool same = true;
+                    for (size_t gc : groupCols) {
+                        if (compareColumnRows(p->cols[gc], prev, idx) != 0) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) {
+                        groupMembers.back().push_back(idx);
+                    } else {
+                        repRows.push_back(idx);
+                        groupMembers.push_back({idx});
+                    }
+                }
+            }
+
+            size_t ng = repRows.size();
+            auto res = std::make_shared<TablePayload>();
+            res->nrows = ng;
+            for (size_t gc : groupCols) {
+                res->varNames.push_back(p->varNames[gc]);
+                res->cols.push_back(sliceColumnRows(p->cols[gc], repRows, mr));
+            }
+            Value gcCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
+            for (size_t g = 0; g < ng; ++g)
+                gcCol.doubleDataMut()[g] = static_cast<double>(groupMembers[g].size());
+            res->varNames.push_back("GroupCount");
+            res->cols.push_back(std::move(gcCol));
+
+            for (const std::string &m : methods) {
+                for (size_t dc : dataCols) {
+                    const Value &col = p->cols[dc];
+                    Value statCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
+                    double *dst = statCol.doubleDataMut();
+                    for (size_t g = 0; g < ng; ++g) {
+                        const auto &rows = groupMembers[g];
+                        std::vector<double> vals;
+                        vals.reserve(rows.size());
+                        for (size_t r : rows) {
+                            if (col.isNumeric() && r < col.numel()) {
+                                double v = col.elemAsDouble(r);
+                                if (!std::isnan(v))
+                                    vals.push_back(v);
+                            }
+                        }
+                        double val = std::numeric_limits<double>::quiet_NaN();
+                        if (iequalsTableOpt(m, "sum")) {
+                            val = 0.0;
+                            for (double v : vals) val += v;
+                        } else if (iequalsTableOpt(m, "nnz")) {
+                            val = 0.0;
+                            for (double v : vals) if (v != 0.0) val += 1.0;
+                        } else if (iequalsTableOpt(m, "nummissing")) {
+                            val = static_cast<double>(rows.size() - vals.size());
+                        } else if (!vals.empty()) {
+                            if (iequalsTableOpt(m, "mean")) {
+                                double s = 0.0;
+                                for (double v : vals) s += v;
+                                val = s / static_cast<double>(vals.size());
+                            } else if (iequalsTableOpt(m, "min")) {
+                                val = *std::min_element(vals.begin(), vals.end());
+                            } else if (iequalsTableOpt(m, "max")) {
+                                val = *std::max_element(vals.begin(), vals.end());
+                            } else if (iequalsTableOpt(m, "median")) {
+                                std::sort(vals.begin(), vals.end());
+                                size_t n = vals.size();
+                                val = (n % 2 == 1) ? vals[n / 2] : 0.5 * (vals[n / 2 - 1] + vals[n / 2]);
+                            } else if (iequalsTableOpt(m, "std") || iequalsTableOpt(m, "var")) {
+                                double s = 0.0;
+                                for (double v : vals) s += v;
+                                double mu = s / static_cast<double>(vals.size());
+                                double ss = 0.0;
+                                for (double v : vals) ss += (v - mu) * (v - mu);
+                                double vstat = (vals.size() > 1) ? ss / static_cast<double>(vals.size() - 1) : 0.0;
+                                val = iequalsTableOpt(m, "std") ? std::sqrt(vstat) : vstat;
+                            }
+                        }
+                        dst[g] = val;
+                    }
+                    res->varNames.push_back(m + "_" + p->varNames[dc]);
+                    res->cols.push_back(std::move(statCol));
+                }
+            }
+            out[0] = makeTableValue(std::move(res), mr);
         };
 
         tbl.ops["horzcat"] = [](Value &lhs, Span<const Value> args, size_t,
@@ -2253,6 +2492,861 @@ void registerContainersRuntime(Engine &engine)
                 out->cols.push_back(p->cols[j]);
             }
             outs[0] = makeTableValue(std::move(out), ctx.engine->resource());
+        });
+
+    // ── Identifier sanitization + Spreadsheet / Delimited Table I/O ──────────
+    static auto makeValidIdStr = [](const std::string &raw) -> std::string {
+        size_t a = 0, b = raw.size();
+        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) ++a;
+        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) --b;
+        std::string s;
+        s.reserve(b - a);
+        for (size_t i = a; i < b; ++i) {
+            unsigned char ch = static_cast<unsigned char>(raw[i]);
+            if (std::isalnum(ch) || ch == '_')
+                s.push_back(static_cast<char>(ch));
+            else
+                s.push_back('_');
+        }
+        if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0])))
+            s = "x" + s;
+        return s;
+    };
+
+    auto makeValidNameFn = [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        argcheck::checkNargin(args.size(), 1, 5, "makeValidName");
+        auto *mr = ctx.engine->resource();
+        const Value &in = args[0];
+        bool modified = false;
+        auto convOne = [&](const std::string &s) -> std::string {
+            std::string v = makeValidIdStr(s);
+            if (v != s) modified = true;
+            return v;
+        };
+        if (in.isChar()) {
+            outs[0] = Value::fromString(convOne(in.toString()), mr);
+        } else if (in.isString()) {
+            Value out = Value::stringArray(in.dims().rows(), in.dims().cols(), mr);
+            for (size_t i = 0; i < in.numel(); ++i)
+                out.stringElemSet(i, convOne(in.stringElem(i)));
+            outs[0] = std::move(out);
+        } else if (in.isCell()) {
+            Value out = Value::cell(in.dims().rows(), in.dims().cols(), mr);
+            for (size_t i = 0; i < in.numel(); ++i)
+                out.cellAt(i) = Value::fromString(convOne(in.cellAt(i).toString()), mr);
+            outs[0] = std::move(out);
+        } else {
+            throw Error("makeValidName: input must be a char vector, string array, or cell array of char vectors",
+                        0, 0, "makeValidName", "", "numkit:makeValidName:invalidInput");
+        }
+        if (nargout >= 2 && outs.size() >= 2)
+            outs[1] = Value::logicalScalar(modified, mr);
+    };
+    engine.registerFunction("matlab.lang", "makeValidName", makeValidNameFn);
+    engine.registerFunction("", "makeValidName", makeValidNameFn);
+
+    struct GridCell {
+        bool present = false;
+        bool isStr = false;
+        std::string text;
+    };
+
+    static auto unescapeXmlStr = [](const std::string &s) -> std::string {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '&') {
+                if (s.compare(i, 5, "&amp;") == 0) { out.push_back('&'); i += 4; continue; }
+                if (s.compare(i, 4, "&lt;") == 0) { out.push_back('<'); i += 3; continue; }
+                if (s.compare(i, 4, "&gt;") == 0) { out.push_back('>'); i += 3; continue; }
+                if (s.compare(i, 6, "&quot;") == 0) { out.push_back('"'); i += 5; continue; }
+                if (s.compare(i, 6, "&apos;") == 0) { out.push_back('\''); i += 5; continue; }
+            }
+            out.push_back(s[i]);
+        }
+        return out;
+    };
+
+    static auto parseXlsxGrid = [](const std::string &bytes, const std::string &sheetSpec,
+                                   int sheetNumSpec) -> std::vector<std::vector<GridCell>> {
+        auto u16 = [&](size_t off) -> uint16_t {
+            if (off + 2 > bytes.size()) return 0;
+            const auto *p = reinterpret_cast<const uint8_t *>(bytes.data() + off);
+            return static_cast<uint16_t>(p[0] | (p[1] << 8));
+        };
+        auto u32 = [&](size_t off) -> uint32_t {
+            if (off + 4 > bytes.size()) return 0;
+            const auto *p = reinterpret_cast<const uint8_t *>(bytes.data() + off);
+            return static_cast<uint32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
+        };
+        if (bytes.size() < 22)
+            return {};
+        size_t eocd = std::string::npos;
+        size_t minOff = (bytes.size() > 65557) ? (bytes.size() - 65557) : 0;
+        for (size_t pos = bytes.size() - 22; ; --pos) {
+            if (u32(pos) == 0x06054b50u) {
+                eocd = pos;
+                break;
+            }
+            if (pos == minOff) break;
+        }
+        if (eocd == std::string::npos)
+            return {};
+        uint16_t numEntries = u16(eocd + 10);
+        uint32_t cdPos = u32(eocd + 16);
+        struct ZipEntry { uint16_t method; uint32_t compSz, uncompSz, localOff; };
+        std::unordered_map<std::string, ZipEntry> entries;
+        for (uint16_t idx = 0; idx < numEntries && cdPos + 46 <= bytes.size(); ++idx) {
+            if (u32(cdPos) != 0x02014b50u) break;
+            uint16_t method = u16(cdPos + 10);
+            uint32_t compSz = u32(cdPos + 20);
+            uint32_t uncompSz = u32(cdPos + 24);
+            uint16_t nameLen = u16(cdPos + 28);
+            uint16_t extraLen = u16(cdPos + 30);
+            uint16_t commentLen = u16(cdPos + 32);
+            uint32_t localOff = u32(cdPos + 42);
+            if (cdPos + 46 + nameLen <= bytes.size()) {
+                std::string name = bytes.substr(cdPos + 46, nameLen);
+                entries[name] = {method, compSz, uncompSz, localOff};
+            }
+            cdPos += 46 + nameLen + extraLen + commentLen;
+        }
+        auto readEntry = [&](const std::string &name) -> std::string {
+            auto it = entries.find(name);
+            if (it == entries.end()) return {};
+            const auto &e = it->second;
+            if (e.localOff + 30 > bytes.size() || u32(e.localOff) != 0x04034b50u) return {};
+            uint16_t ln = u16(e.localOff + 26);
+            uint16_t le = u16(e.localOff + 28);
+            size_t dataOff = e.localOff + 30 + ln + le;
+            if (dataOff + e.compSz > bytes.size()) return {};
+            if (e.method == 0)
+                return bytes.substr(dataOff, e.compSz);
+            if (e.method == 8) {
+                auto dec = numkit::ops::inflateRaw(
+                    reinterpret_cast<const uint8_t *>(bytes.data() + dataOff),
+                    e.compSz, e.uncompSz);
+                return std::string(reinterpret_cast<const char *>(dec.data()), dec.size());
+            }
+            return {};
+        };
+
+        std::vector<std::string> sst;
+        std::string sstXml = readEntry("xl/sharedStrings.xml");
+        if (!sstXml.empty()) {
+            size_t pos = 0;
+            while (pos < sstXml.size()) {
+                size_t siStart = sstXml.find("<si", pos);
+                if (siStart == std::string::npos) break;
+                size_t siOpenEnd = sstXml.find('>', siStart);
+                size_t siClose = sstXml.find("</si>", siStart);
+                if (siOpenEnd == std::string::npos || siClose == std::string::npos) break;
+                std::string accum;
+                size_t tPos = siOpenEnd + 1;
+                while (tPos < siClose) {
+                    size_t tStart = sstXml.find("<t", tPos);
+                    if (tStart == std::string::npos || tStart >= siClose) break;
+                    char nextCh = (tStart + 2 < sstXml.size()) ? sstXml[tStart + 2] : '\0';
+                    if (nextCh != '>' && nextCh != ' ' && nextCh != '/') {
+                        tPos = tStart + 2;
+                        continue;
+                    }
+                    size_t tOpenEnd = sstXml.find('>', tStart);
+                    if (tOpenEnd == std::string::npos || tOpenEnd >= siClose) break;
+                    if (sstXml[tOpenEnd - 1] == '/') {
+                        tPos = tOpenEnd + 1;
+                        continue;
+                    }
+                    size_t tClose = sstXml.find("</t>", tOpenEnd + 1);
+                    if (tClose == std::string::npos || tClose > siClose) break;
+                    accum += unescapeXmlStr(sstXml.substr(tOpenEnd + 1, tClose - (tOpenEnd + 1)));
+                    tPos = tClose + 4;
+                }
+                sst.push_back(std::move(accum));
+                pos = siClose + 5;
+            }
+        }
+
+        int sheetIdx = (sheetNumSpec >= 1) ? sheetNumSpec : 1;
+        if (!sheetSpec.empty()) {
+            std::string wbXml = readEntry("xl/workbook.xml");
+            size_t pos = 0;
+            int idx = 1;
+            while (pos < wbXml.size()) {
+                size_t shStart = wbXml.find("<sheet ", pos);
+                if (shStart == std::string::npos) break;
+                size_t shEnd = wbXml.find('>', shStart);
+                if (shEnd == std::string::npos) break;
+                std::string tag = wbXml.substr(shStart, shEnd - shStart);
+                size_t nmPos = tag.find("name=\"");
+                if (nmPos != std::string::npos) {
+                    size_t nmEnd = tag.find('"', nmPos + 6);
+                    if (nmEnd != std::string::npos) {
+                        std::string nm = unescapeXmlStr(tag.substr(nmPos + 6, nmEnd - (nmPos + 6)));
+                        if (nm == sheetSpec) {
+                            sheetIdx = idx;
+                            break;
+                        }
+                    }
+                }
+                ++idx;
+                pos = shEnd + 1;
+            }
+        }
+
+        std::string wsXml = readEntry("xl/worksheets/sheet" + std::to_string(sheetIdx) + ".xml");
+        if (wsXml.empty() && sheetIdx != 1)
+            wsXml = readEntry("xl/worksheets/sheet1.xml");
+        if (wsXml.empty())
+            return {};
+
+        struct RawCell { size_t r, c; bool isStr; std::string text; };
+        std::vector<RawCell> cells;
+        size_t maxR = 0, maxC = 0;
+        size_t pos = 0;
+        while (pos < wsXml.size()) {
+            size_t cStart = wsXml.find("<c ", pos);
+            if (cStart == std::string::npos) break;
+            size_t cOpenEnd = wsXml.find('>', cStart);
+            if (cOpenEnd == std::string::npos) break;
+            if (wsXml[cOpenEnd - 1] == '/') {
+                pos = cOpenEnd + 1;
+                continue;
+            }
+            size_t cClose = wsXml.find("</c>", cOpenEnd + 1);
+            if (cClose == std::string::npos) break;
+            std::string openTag = wsXml.substr(cStart, cOpenEnd - cStart);
+            std::string body = wsXml.substr(cOpenEnd + 1, cClose - (cOpenEnd + 1));
+            pos = cClose + 4;
+
+            auto getAttr = [&](const char *attr) -> std::string {
+                std::string key = std::string(" ") + attr + "=\"";
+                size_t p = openTag.find(key);
+                if (p == std::string::npos) return {};
+                p += key.size();
+                size_t e = openTag.find('"', p);
+                return (e == std::string::npos) ? std::string{} : openTag.substr(p, e - p);
+            };
+            std::string ref = getAttr("r");
+            std::string tAttr = getAttr("t");
+            if (ref.empty() || tAttr == "e")
+                continue;
+
+            size_t colNum = 0, rowNum = 0, k = 0;
+            while (k < ref.size() && std::isalpha(static_cast<unsigned char>(ref[k]))) {
+                colNum = colNum * 26 + (std::toupper(static_cast<unsigned char>(ref[k])) - 'A' + 1);
+                ++k;
+            }
+            while (k < ref.size() && std::isdigit(static_cast<unsigned char>(ref[k]))) {
+                rowNum = rowNum * 10 + (ref[k] - '0');
+                ++k;
+            }
+            if (colNum == 0 || rowNum == 0)
+                continue;
+
+            std::string valText;
+            bool isStr = false;
+            if (tAttr == "inlineStr") {
+                size_t tOpen = body.find("<t");
+                if (tOpen != std::string::npos) {
+                    size_t tGt = body.find('>', tOpen);
+                    size_t tEnd = body.find("</t>", tGt);
+                    if (tGt != std::string::npos && tEnd != std::string::npos) {
+                        valText = unescapeXmlStr(body.substr(tGt + 1, tEnd - (tGt + 1)));
+                        isStr = true;
+                    }
+                }
+            } else {
+                size_t vOpen = body.find("<v>");
+                size_t vBodyStart = (vOpen != std::string::npos) ? (vOpen + 3) : std::string::npos;
+                if (vBodyStart == std::string::npos) {
+                    size_t vTag = body.find("<v ");
+                    if (vTag != std::string::npos) {
+                        size_t vGt = body.find('>', vTag);
+                        if (vGt != std::string::npos && body[vGt - 1] != '/')
+                            vBodyStart = vGt + 1;
+                    }
+                }
+                if (vBodyStart == std::string::npos)
+                    continue;
+                size_t vClose = body.find("</v>", vBodyStart);
+                if (vClose == std::string::npos)
+                    continue;
+                std::string rawV = body.substr(vBodyStart, vClose - vBodyStart);
+                if (rawV.empty())
+                    continue;
+                if (tAttr == "s") {
+                    int sidx = -1;
+                    try { sidx = std::stoi(rawV); } catch (...) {}
+                    if (sidx >= 0 && static_cast<size_t>(sidx) < sst.size())
+                        valText = sst[static_cast<size_t>(sidx)];
+                    isStr = true;
+                } else {
+                    valText = unescapeXmlStr(rawV);
+                    isStr = (tAttr == "str");
+                }
+            }
+            size_t r0 = rowNum - 1, c0 = colNum - 1;
+            cells.push_back({r0, c0, isStr, std::move(valText)});
+            if (r0 + 1 > maxR) maxR = r0 + 1;
+            if (c0 + 1 > maxC) maxC = c0 + 1;
+        }
+        std::vector<std::vector<GridCell>> grid(maxR, std::vector<GridCell>(maxC));
+        for (auto &cell : cells)
+            grid[cell.r][cell.c] = {true, cell.isStr, std::move(cell.text)};
+        return grid;
+    };
+
+    static auto parseCsvGrid = [](const std::string &content) -> std::vector<std::vector<GridCell>> {
+        std::vector<std::vector<GridCell>> rows;
+        size_t maxC = 0;
+        size_t pos = 0;
+        while (pos < content.size()) {
+            size_t nl = content.find('\n', pos);
+            size_t end = (nl == std::string::npos) ? content.size() : nl;
+            std::string line = content.substr(pos, end - pos);
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            pos = (nl == std::string::npos) ? content.size() : (nl + 1);
+            bool allWs = true;
+            for (char ch : line)
+                if (!std::isspace(static_cast<unsigned char>(ch))) { allWs = false; break; }
+            if (allWs)
+                continue;
+
+            std::vector<GridCell> row;
+            size_t i = 0;
+            while (i <= line.size()) {
+                if (i == line.size()) {
+                    if (! line.empty() && (line.back() == ',' || line.back() == '\t'))
+                        row.push_back({false, false, ""});
+                    break;
+                }
+                if (line[i] == '"') {
+                    std::string tok;
+                    ++i;
+                    while (i < line.size()) {
+                        if (line[i] == '"') {
+                            if (i + 1 < line.size() && line[i + 1] == '"') {
+                                tok.push_back('"');
+                                i += 2;
+                            } else {
+                                ++i;
+                                break;
+                            }
+                        } else {
+                            tok.push_back(line[i++]);
+                        }
+                    }
+                    while (i < line.size() && line[i] != ',' && line[i] != '\t')
+                        ++i;
+                    if (i < line.size()) ++i;
+                    row.push_back({!tok.empty(), true, std::move(tok)});
+                } else {
+                    size_t nextSep = i;
+                    while (nextSep < line.size() && line[nextSep] != ',' && line[nextSep] != '\t')
+                        ++nextSep;
+                    std::string tok = line.substr(i, nextSep - i);
+                    size_t a = 0, b = tok.size();
+                    while (a < b && std::isspace(static_cast<unsigned char>(tok[a]))) ++a;
+                    while (b > a && std::isspace(static_cast<unsigned char>(tok[b - 1]))) --b;
+                    tok = tok.substr(a, b - a);
+                    row.push_back({!tok.empty(), false, std::move(tok)});
+                    if (nextSep == line.size())
+                        break;
+                    i = nextSep + 1;
+                }
+            }
+            if (row.size() > maxC) maxC = row.size();
+            rows.push_back(std::move(row));
+        }
+        for (auto &r : rows)
+            r.resize(maxC);
+        return rows;
+    };
+
+    static auto tryParseCellDouble = [](const std::string &s, double &out) -> bool {
+        if (s.empty()) return false;
+        const char *cs = s.c_str();
+        char *end = nullptr;
+        double v = std::strtod(cs, &end);
+        if (end == cs) return false;
+        while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end)))
+            ++end;
+        if (*end != '\0') return false;
+        out = v;
+        return true;
+    };
+
+    static auto readRawFileBytes = [](CallContext &ctx, const std::string &filename,
+                                      const char *fnName) -> std::string {
+        FsContext::ResolvedPath resolved{};
+        try {
+            resolved = ctx.engine->resolvePath(filename);
+        } catch (const std::exception &e) {
+            throw Error(e.what());
+        }
+        if (!resolved.fs)
+            throw Error(std::string(fnName) + ": cannot resolve '" + filename + "'",
+                        0, 0, fnName, "", std::string("numkit:") + fnName + ":noFs");
+        try {
+            return resolved.fs->readFile(resolved.path);
+        } catch (const std::exception &e) {
+            throw Error(std::string(fnName) + ": " + e.what(),
+                        0, 0, fnName, "", std::string("numkit:") + fnName + ":readFailed");
+        }
+    };
+
+    engine.registerFunction("readtable",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 15, "readtable");
+            if (!args[0].isChar() && !args[0].isString())
+                throw Error("readtable: first argument must be a filename",
+                            0, 0, "readtable", "", "numkit:readtable:invalidFilename");
+            auto *mr = ctx.engine->resource();
+            std::string filename = args[0].toString();
+            std::string sheetName;
+            int sheetNum = 1;
+            bool preserveNames = false;
+            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString())
+                    continue;
+                std::string k = args[i].toString();
+                if (iequalsTableOpt(k, "Sheet")) {
+                    if (args[i + 1].isNumeric())
+                        sheetNum = static_cast<int>(args[i + 1].elemAsDouble(0));
+                    else
+                        sheetName = args[i + 1].toString();
+                } else if (iequalsTableOpt(k, "VariableNamingRule")) {
+                    preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
+                }
+            }
+
+            std::string raw = readRawFileBytes(ctx, filename, "readtable");
+            bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
+                      && raw[2] == '\x03' && raw[3] == '\x04';
+            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
+                              : parseCsvGrid(raw);
+            auto p = std::make_shared<TablePayload>();
+            if (grid.empty()) {
+                outs[0] = makeTableValue(std::move(p), mr);
+                return;
+            }
+            const size_t maxR = grid.size();
+            const size_t maxC = grid[0].size();
+            const size_t nrows = (maxR > 1) ? (maxR - 1) : 0;
+            p->nrows = nrows;
+
+            for (size_t c = 0; c < maxC; ++c) {
+                std::string nm = grid[0][c].text;
+                if (!preserveNames && !nm.empty())
+                    nm = makeValidIdStr(nm);
+                if (nm.empty())
+                    nm = "Var" + std::to_string(c + 1);
+                std::string base = nm;
+                int suffix = 1;
+                while (p->findVar(nm) >= 0) {
+                    nm = base + "_" + std::to_string(suffix++);
+                }
+                p->varNames.push_back(std::move(nm));
+
+                size_t numCount = 0, strCount = 0;
+                for (size_t r = 1; r < maxR; ++r) {
+                    const auto &cell = grid[r][c];
+                    if (!cell.present || cell.text.empty())
+                        continue;
+                    double dummy = 0.0;
+                    if (!cell.isStr && tryParseCellDouble(cell.text, dummy))
+                        ++numCount;
+                    else
+                        ++strCount;
+                }
+                bool isNumCol = (numCount > 0 && numCount >= strCount)
+                             || (numCount == 0 && strCount == 0);
+                if (isNumCol) {
+                    Value col = Value::matrix(nrows, 1, ValueType::DOUBLE, mr);
+                    double *dst = col.doubleDataMut();
+                    const double nan = std::numeric_limits<double>::quiet_NaN();
+                    for (size_t r = 1; r < maxR; ++r) {
+                        const auto &cell = grid[r][c];
+                        double d = nan;
+                        if (cell.present && !cell.isStr && !cell.text.empty())
+                            tryParseCellDouble(cell.text, d);
+                        dst[r - 1] = d;
+                    }
+                    p->cols.push_back(std::move(col));
+                } else {
+                    Value col = Value::cell(nrows, 1, mr);
+                    for (size_t r = 1; r < maxR; ++r)
+                        col.cellAt(r - 1) = Value::fromString(grid[r][c].text, mr);
+                    p->cols.push_back(std::move(col));
+                }
+            }
+            outs[0] = makeTableValue(std::move(p), mr);
+        });
+
+    engine.registerFunction("categorical",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 5, "categorical");
+            auto *mr = ctx.engine->resource();
+            const Value &A = args[0];
+            size_t nr = A.dims().rows(), nc = A.dims().cols();
+            Value out = Value::stringArray(nr, nc, mr);
+            if (args.size() >= 3) {
+                const Value &vset = args[1];
+                auto cnames = TablePayload::extractNames(args[2], "categorical", "catnames");
+                size_t nset = std::min(vset.numel(), cnames.size());
+                for (size_t i = 0; i < A.numel(); ++i) {
+                    std::string mapped;
+                    if (A.isNumeric() || A.isLogical()) {
+                        double av = A.elemAsDouble(i);
+                        for (size_t k = 0; k < nset; ++k) {
+                            if (vset.elemAsDouble(k) == av) {
+                                mapped = cnames[k];
+                                break;
+                            }
+                        }
+                    } else {
+                        std::string as = A.isString() ? A.stringElem(i)
+                                       : (A.isCell() ? A.cellAt(i).toString() : A.toString());
+                        auto vnames = TablePayload::extractNames(vset, "categorical", "valueset");
+                        for (size_t k = 0; k < std::min(vnames.size(), cnames.size()); ++k) {
+                            if (vnames[k] == as) {
+                                mapped = cnames[k];
+                                break;
+                            }
+                        }
+                    }
+                    out.stringElemSet(i, std::move(mapped));
+                }
+            } else {
+                for (size_t i = 0; i < A.numel(); ++i) {
+                    if (A.isString())
+                        out.stringElemSet(i, A.stringElem(i));
+                    else if (A.isCell())
+                        out.stringElemSet(i, A.cellAt(i).toString());
+                    else if (A.isLogical())
+                        out.stringElemSet(i, A.logicalData()[i] ? "true" : "false");
+                    else if (A.isNumeric()) {
+                        std::ostringstream os;
+                        os << A.elemAsDouble(i);
+                        out.stringElemSet(i, os.str());
+                    }
+                }
+            }
+            outs[0] = std::move(out);
+        });
+
+    static auto buildXlsxBytes = [](const TablePayload *p) -> std::string {
+        auto xmlEsc = [](const std::string &s) -> std::string {
+            std::string r;
+            r.reserve(s.size());
+            for (char c : s) {
+                if (c == '&') r += "&amp;";
+                else if (c == '<') r += "&lt;";
+                else if (c == '>') r += "&gt;";
+                else if (c == '"') r += "&quot;";
+                else r.push_back(c);
+            }
+            return r;
+        };
+        auto colLetters = [](size_t c) -> std::string {
+            std::string s;
+            size_t n = c + 1;
+            while (n > 0) {
+                size_t rem = (n - 1) % 26;
+                s.insert(s.begin(), static_cast<char>('A' + rem));
+                n = (n - 1) / 26;
+            }
+            return s;
+        };
+        std::vector<std::string> shared;
+        auto addShared = [&](const std::string &s) -> size_t {
+            size_t idx = shared.size();
+            shared.push_back(s);
+            return idx;
+        };
+        std::ostringstream sh;
+        sh.precision(15);
+        sh << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+           << "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+           << "<sheetData>";
+        const size_t nc = p->width();
+        sh << "<row r=\"1\">";
+        for (size_t j = 0; j < nc; ++j) {
+            size_t si = addShared(p->varNames[j]);
+            sh << "<c r=\"" << colLetters(j) << "1\" t=\"s\"><v>" << si << "</v></c>";
+        }
+        sh << "</row>";
+        for (size_t r = 0; r < p->nrows; ++r) {
+            size_t rowNum = r + 2;
+            sh << "<row r=\"" << rowNum << "\">";
+            for (size_t j = 0; j < nc; ++j) {
+                const Value &col = p->cols[j];
+                std::string ref = colLetters(j) + std::to_string(rowNum);
+                if (col.isNumeric()) {
+                    double d = col.elemAsDouble(r);
+                    if (std::isfinite(d))
+                        sh << "<c r=\"" << ref << "\"><v>" << d << "</v></c>";
+                } else {
+                    std::string sv;
+                    if (col.isString()) sv = col.stringElem(r);
+                    else if (col.isCell()) {
+                        const Value &el = col.cellAt(r);
+                        if (el.isChar() || el.isString()) sv = el.toString();
+                    } else sv = formatTableCell(col, r);
+                    if (!sv.empty()) {
+                        size_t si = addShared(sv);
+                        sh << "<c r=\"" << ref << "\" t=\"s\"><v>" << si << "</v></c>";
+                    }
+                }
+            }
+            sh << "</row>";
+        }
+        sh << "</sheetData></worksheet>";
+
+        std::ostringstream ss;
+        ss << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+           << "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\""
+           << shared.size() << "\" uniqueCount=\"" << shared.size() << "\">";
+        for (const auto &s : shared)
+            ss << "<si><t>" << xmlEsc(s) << "</t></si>";
+        ss << "</sst>";
+
+        struct Entry { std::string name; std::string data; };
+        std::vector<Entry> files = {
+            {"[Content_Types].xml",
+             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+             "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+             "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+             "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+             "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+             "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
+             "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>"
+             "</Types>"},
+            {"_rels/.rels",
+             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+             "</Relationships>"},
+            {"xl/workbook.xml",
+             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+             "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+             "<sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"},
+            {"xl/_rels/workbook.xml.rels",
+             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+             "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
+             "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/>"
+             "</Relationships>"},
+            {"xl/styles.xml",
+             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+             "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+             "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>"
+             "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>"
+             "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
+             "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
+             "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>"
+             "</styleSheet>"},
+            {"xl/sharedStrings.xml", ss.str()},
+            {"xl/worksheets/sheet1.xml", sh.str()}
+        };
+
+        auto crc32Buf = [](const std::string &buf) -> uint32_t {
+            uint32_t crc = 0xFFFFFFFFu;
+            for (unsigned char b : buf) {
+                crc ^= b;
+                for (int k = 0; k < 8; ++k)
+                    crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+            }
+            return ~crc;
+        };
+        std::string zip;
+        auto put16 = [&](uint16_t v) {
+            zip.push_back(static_cast<char>(v & 0xFF));
+            zip.push_back(static_cast<char>((v >> 8) & 0xFF));
+        };
+        auto put32 = [&](uint32_t v) {
+            zip.push_back(static_cast<char>(v & 0xFF));
+            zip.push_back(static_cast<char>((v >> 8) & 0xFF));
+            zip.push_back(static_cast<char>((v >> 16) & 0xFF));
+            zip.push_back(static_cast<char>((v >> 24) & 0xFF));
+        };
+        std::vector<uint32_t> offsets, crcs;
+        for (const auto &f : files) {
+            offsets.push_back(static_cast<uint32_t>(zip.size()));
+            uint32_t crc = crc32Buf(f.data);
+            crcs.push_back(crc);
+            uint32_t sz = static_cast<uint32_t>(f.data.size());
+            put32(0x04034b50u);
+            put16(20); put16(0); put16(0); put16(0); put16(0);
+            put32(crc); put32(sz); put32(sz);
+            put16(static_cast<uint16_t>(f.name.size())); put16(0);
+            zip += f.name;
+            zip += f.data;
+        }
+        uint32_t cdOffset = static_cast<uint32_t>(zip.size());
+        for (size_t i = 0; i < files.size(); ++i) {
+            const auto &f = files[i];
+            uint32_t sz = static_cast<uint32_t>(f.data.size());
+            put32(0x02014b50u);
+            put16(20); put16(20); put16(0); put16(0); put16(0); put16(0);
+            put32(crcs[i]); put32(sz); put32(sz);
+            put16(static_cast<uint16_t>(f.name.size())); put16(0); put16(0);
+            put16(0); put16(0); put32(0); put32(offsets[i]);
+            zip += f.name;
+        }
+        uint32_t cdSize = static_cast<uint32_t>(zip.size()) - cdOffset;
+        put32(0x06054b50u);
+        put16(0); put16(0);
+        put16(static_cast<uint16_t>(files.size()));
+        put16(static_cast<uint16_t>(files.size()));
+        put32(cdSize); put32(cdOffset); put16(0);
+        return zip;
+    };
+
+    engine.registerFunction("writetable",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 15, "writetable");
+            const TablePayload *p = tableCst(args[0]);
+            if (!p)
+                throw Error("writetable: first argument must be a table",
+                            0, 0, "writetable", "", "numkit:writetable:notATable");
+            std::string filename = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                                 ? args[1].toString()
+                                 : "table.txt";
+            bool isXlsx = filename.size() >= 5
+                       && iequalsTableOpt(filename.substr(filename.size() - 5), ".xlsx");
+            std::string payload;
+            if (isXlsx) {
+                payload = buildXlsxBytes(p);
+            } else {
+                std::ostringstream os;
+                os.precision(15);
+                const size_t nc = p->width();
+                for (size_t j = 0; j < nc; ++j) {
+                    if (j > 0) os << ',';
+                    os << p->varNames[j];
+                }
+                os << '\n';
+                for (size_t r = 0; r < p->nrows; ++r) {
+                    for (size_t j = 0; j < nc; ++j) {
+                        if (j > 0) os << ',';
+                        const Value &col = p->cols[j];
+                        if (col.isNumeric()) {
+                            double d = col.elemAsDouble(r);
+                            if (!std::isnan(d)) os << d;
+                        } else if (col.isString()) {
+                            os << col.stringElem(r);
+                        } else if (col.isCell()) {
+                            const Value &el = col.cellAt(r);
+                            if (el.isChar() || el.isString()) os << el.toString();
+                            else if (el.isNumeric() && el.isScalar() && !std::isnan(el.toScalar()))
+                                os << el.toScalar();
+                        } else {
+                            os << formatTableCell(col, r);
+                        }
+                    }
+                    os << '\n';
+                }
+                payload = os.str();
+            }
+            FsContext::ResolvedPath resolved{};
+            try {
+                resolved = ctx.engine->fsContext().resolvePath(filename);
+                if (resolved.fs)
+                    resolved.fs->writeFile(resolved.path, payload);
+            } catch (const std::exception &e) {
+                throw Error(std::string("writetable: ") + e.what(),
+                            0, 0, "writetable", "", "numkit:writetable:writeFailed");
+            }
+            outs[0] = Value();
+        });
+
+    engine.registerFunction("xlsread",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 5, "xlsread");
+            if (!args[0].isChar() && !args[0].isString())
+                throw Error("xlsread: first argument must be a filename",
+                            0, 0, "xlsread", "", "numkit:xlsread:invalidFilename");
+            auto *mr = ctx.engine->resource();
+            std::string filename = args[0].toString();
+            std::string sheetName;
+            int sheetNum = 1;
+            if (args.size() >= 2) {
+                if (args[1].isNumeric() && !args[1].isEmpty())
+                    sheetNum = static_cast<int>(args[1].elemAsDouble(0));
+                else if (args[1].isChar() || args[1].isString())
+                    sheetName = args[1].toString();
+            }
+            std::string raw = readRawFileBytes(ctx, filename, "xlsread");
+            bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
+                      && raw[2] == '\x03' && raw[3] == '\x04';
+            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
+                              : parseCsvGrid(raw);
+            const size_t maxR = grid.size();
+            const size_t maxC = maxR > 0 ? grid[0].size() : 0;
+            size_t rMin = maxR, rMax = 0, cMin = maxC, cMax = 0;
+            for (size_t r = 0; r < maxR; ++r) {
+                for (size_t c = 0; c < maxC; ++c) {
+                    double d = 0.0;
+                    if (grid[r][c].present && !grid[r][c].isStr
+                        && tryParseCellDouble(grid[r][c].text, d)) {
+                        rMin = std::min(rMin, r);
+                        rMax = std::max(rMax, r + 1);
+                        cMin = std::min(cMin, c);
+                        cMax = std::max(cMax, c + 1);
+                    }
+                }
+            }
+            if (rMin < rMax && cMin < cMax) {
+                size_t nr = rMax - rMin, nc = cMax - cMin;
+                Value num = Value::matrix(nr, nc, ValueType::DOUBLE, mr);
+                double *dst = num.doubleDataMut();
+                const double nan = std::numeric_limits<double>::quiet_NaN();
+                for (size_t c = 0; c < nc; ++c) {
+                    for (size_t r = 0; r < nr; ++r) {
+                        const auto &cell = grid[rMin + r][cMin + c];
+                        double d = nan;
+                        if (cell.present && !cell.isStr)
+                            tryParseCellDouble(cell.text, d);
+                        dst[c * nr + r] = d;
+                    }
+                }
+                outs[0] = std::move(num);
+            } else {
+                outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
+            }
+            if (nargout >= 2 && outs.size() >= 2) {
+                Value txt = Value::cell(maxR, maxC, mr);
+                for (size_t c = 0; c < maxC; ++c)
+                    for (size_t r = 0; r < maxR; ++r) {
+                        double d = 0.0;
+                        bool isNum = grid[r][c].present && !grid[r][c].isStr
+                                  && tryParseCellDouble(grid[r][c].text, d);
+                        txt.cellAt(c * maxR + r) = Value::fromString(
+                            (grid[r][c].present && !isNum) ? grid[r][c].text : "", mr);
+                    }
+                outs[1] = std::move(txt);
+            }
+            if (nargout >= 3 && outs.size() >= 3) {
+                Value rawOut = Value::cell(maxR, maxC, mr);
+                const double nan = std::numeric_limits<double>::quiet_NaN();
+                for (size_t c = 0; c < maxC; ++c)
+                    for (size_t r = 0; r < maxR; ++r) {
+                        const auto &cell = grid[r][c];
+                        double d = 0.0;
+                        if (!cell.present || cell.text.empty())
+                            rawOut.cellAt(c * maxR + r) = Value::scalar(nan, mr);
+                        else if (!cell.isStr && tryParseCellDouble(cell.text, d))
+                            rawOut.cellAt(c * maxR + r) = Value::scalar(d, mr);
+                        else
+                            rawOut.cellAt(c * maxR + r) = Value::fromString(cell.text, mr);
+                    }
+                outs[2] = std::move(rawOut);
+            }
         });
 }
 
