@@ -48,6 +48,27 @@ void gradient_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     const bool isND = shape.is3D() || shape.ndim() > 2;
 
     if (!isND) {
+        if (args.size() >= 2 && !args[1].isScalar() &&
+            (shape.rows() == 1 || shape.cols() == 1) &&
+            args[0].numel() == args[1].numel() && args[0].numel() >= 1) {
+            const size_t n = args[0].numel();
+            Value f = toDoubleCopy(args[0], mr);
+            Value x = toDoubleCopy(args[1], mr);
+            Value res = Value::matrix(shape.rows(), shape.cols(), ValueType::DOUBLE, mr);
+            const double *fp = f.doubleData();
+            const double *xp = x.doubleData();
+            double *rp = res.doubleDataMut();
+            if (n == 1) {
+                rp[0] = 0.0;
+            } else {
+                rp[0] = (fp[1] - fp[0]) / (xp[1] - xp[0]);
+                for (size_t i = 1; i + 1 < n; ++i)
+                    rp[i] = (fp[i + 1] - fp[i - 1]) / (xp[i + 1] - xp[i - 1]);
+                rp[n - 1] = (fp[n - 1] - fp[n - 2]) / (xp[n - 1] - xp[n - 2]);
+            }
+            outs[0] = std::move(res);
+            return;
+        }
         // Vector / 2-D matrix — unchanged fast paths.
         double hx = 1.0, hy = 1.0;
         if (args.size() >= 2) hx = args[1].toScalar();

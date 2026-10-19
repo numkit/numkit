@@ -2543,7 +2543,11 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     break;
                 }
             }
-        } else if (ast->type == NodeType::FUNCTION_DEF && ast->strValue == leafName) {
+            if (!funcDef && !ast->children.empty() && ast->children[0]
+                && ast->children[0]->type == NodeType::FUNCTION_DEF) {
+                funcDef = ast->children[0].get();
+            }
+        } else if (ast->type == NodeType::FUNCTION_DEF) {
             funcDef = ast.get();
         }
 
@@ -3578,7 +3582,22 @@ Engine::ResolvedPath Engine::resolvePath(const std::string &userPath) const
     // filesystems; rethrow as numkit::Error so the MATLAB-visible error type
     // (and message) is exactly what in-engine callers saw before.
     try {
-        return fsCtx_.resolvePath(userPath);
+        ResolvedPath rp = fsCtx_.resolvePath(userPath);
+        if ((!rp.fs || !rp.fs->exists(rp.path)) &&
+            !userPath.empty() &&
+            userPath.find_first_of("/\\:") == std::string::npos) {
+            for (const auto &dir : mPath_) {
+                if (dir.empty()) continue;
+                std::string candPath = dir;
+                if (candPath.back() != '/' && candPath.back() != '\\')
+                    candPath += '/';
+                candPath += userPath;
+                ResolvedPath cand = fsCtx_.resolvePath(candPath);
+                if (cand.fs && cand.fs->exists(cand.path))
+                    return cand;
+            }
+        }
+        return rp;
     } catch (const std::runtime_error &e) {
         throw Error(e.what());
     }

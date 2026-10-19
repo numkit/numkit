@@ -80,10 +80,29 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     throw std::runtime_error("Invalid or deleted object.");
                 if (rec->type == "figure")
                     fm.closeFigureNotify(rec->figureId);
+                else if (rec->type == "waitbar")
+                    rec->deleted = true;
             } else {
                 int id = static_cast<int>(args[0].toScalar());
                 fm.closeFigureNotify(id);
             }
+            outs[0] = Value();
+        });
+    regCore("layout", "waitbar",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            (void)args;
+            if (nargout >= 1) {
+                const int hid = gc.fm.createHandleAt(
+                    0, FigureManager::HandleRecord::kNoAxes, "waitbar", "matlab.ui.Figure");
+                outs[0] = makeGraphicsHandleValue("matlab.ui.Figure", hid, gc.mr);
+            } else {
+                outs[0] = Value();
+            }
+        });
+    regCore("layout", "whitebg",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &) {
+            (void)args;
+            (void)nargout;
             outs[0] = Value();
         });
     reg("layout", "clf",
@@ -106,13 +125,84 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
+    auto queryOrSetLim = [](FigureManager &fm, std::string &limJson,
+                            Span<const Value> args, size_t nargout, Span<Value> outs,
+                            char axisChar) {
+        size_t idx = (args.size() >= 1 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+        if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() >= 2) {
+            limJson = vecToJson(args[idx]);
+            fm.current().modified = true;
+            fm.emitModified();
+            outs[0] = Value();
+            return;
+        }
+        if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
+            std::string mode = argStr(args[idx]);
+            if (mode == "auto") {
+                limJson.clear();
+                fm.current().modified = true;
+                fm.emitModified();
+            }
+            if (nargout == 0) {
+                outs[0] = Value();
+                return;
+            }
+        }
+        double lo = 0.0, hi = 1.0;
+        bool parsed = false;
+        if (!limJson.empty()) {
+            size_t b = limJson.find('[');
+            size_t c = limJson.find(',');
+            size_t e = limJson.find(']');
+            if (b != std::string::npos && c != std::string::npos && e != std::string::npos && b < c && c < e) {
+                try {
+                    lo = std::stod(limJson.substr(b + 1, c - b - 1));
+                    hi = std::stod(limJson.substr(c + 1, e - c - 1));
+                    parsed = true;
+                } catch (...) {}
+            }
+        }
+        if (!parsed) {
+            double dmin = 1e300, dmax = -1e300;
+            for (const auto &ds : fm.currentAxes().datasets) {
+                const std::string &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
+                size_t pos = 0;
+                while (pos < j.size()) {
+                    if (std::isdigit((unsigned char)j[pos]) || j[pos] == '-' || j[pos] == '+') {
+                        size_t endp = 0;
+                        try {
+                            double v = std::stod(j.substr(pos), &endp);
+                            if (endp > 0 && std::isfinite(v)) {
+                                if (v < dmin) dmin = v;
+                                if (v > dmax) dmax = v;
+                                pos += endp;
+                                continue;
+                            }
+                        } catch (...) {}
+                    }
+                    ++pos;
+                }
+            }
+            if (dmin <= dmax) {
+                lo = dmin;
+                hi = (dmax > dmin) ? dmax : dmin + 1.0;
+            }
+        }
+        Value res = Value::matrix(1, 2, ValueType::DOUBLE);
+        res.doubleDataMut()[0] = lo;
+        res.doubleDataMut()[1] = hi;
+        outs[0] = std::move(res);
+    };
     regCore("layout", "hold",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
             auto &ax = gc.fm.currentAxes();
-            if (args.empty())
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx >= args.size())
                 ax.holdOn = !ax.holdOn;
-            else
-                ax.holdOn = (args[0].toString() == "on");
+            else {
+                std::string s = argStr(args[idx]);
+                ax.holdOn = (s == "on" || s == "all");
+            }
             outs[0] = Value();
         });
     regCore("layout", "ishold",
@@ -185,32 +275,29 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "title",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty()) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx < args.size()) {
                 auto &fm = gc.fm;
-                fm.currentAxes().title = argStr(args[0]);
+                fm.currentAxes().title = argStr(args[idx]);
                 fm.current().modified = true;
                 fm.emitModified();
             }
             outs[0] = Value();
         });
     reg("layout", "subtitle",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty()) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx < args.size()) {
                 auto &fm = gc.fm;
-                fm.currentAxes().subtitle = argStr(args[0]);
+                fm.currentAxes().subtitle = argStr(args[idx]);
                 fm.current().modified = true;
                 fm.emitModified();
             }
             outs[0] = Value();
         });
-    // sgtitle â€” figure-level "super title". Writes to
-    // FigureState.superTitle (a dedicated slot, separate from per-axes
-    // Title.String). For non-subplot figures the IDE still renders it
-    // as the panel's top header; for subplots it spans the whole grid
-    // above the cell row â€” matching MATLAB R2025b's sgtitle behaviour.
     reg("layout", "sgtitle",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
             if (!args.empty()) {
                 auto &fm = gc.fm;
                 fm.current().superTitle = argStr(args[0]);
@@ -220,10 +307,11 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "xlabel",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty()) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx < args.size()) {
                 auto &fm = gc.fm;
-                fm.currentAxes().xlabel = argStr(args[0]);
+                fm.currentAxes().xlabel = argStr(args[idx]);
                 fm.current().modified = true;
                 fm.emitModified();
             }
@@ -355,19 +443,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             ys << "[" << yv.elemAsDouble(0) << "]";
             ds.xJson = xs.str();
             ds.yJson = ys.str();
-            ds.label = argStr(args[2]);
-            // Parse trailing name-value pairs. Packed into ds.style as a
-            // compact "key=val;key=val" string â€” IDE side splits it.
-            //   color:  char (name / short / #hex) or numeric 1x3 triplet
-            //           â†’ "color=<raw>" / "rgb=r,g,b" (argStr on the
-            //           numeric form would throw "Not a char array").
-            //   fontSize, horizontalalignment: scalar / char.
+            size_t strIdx = (args.size() >= 4 && args[2].isNumeric() &&
+                             (args[3].isChar() || args[3].isString() || args[3].isCell())) ? 3 : 2;
+            ds.label = argStr(args[strIdx]);
             std::string extras;
             auto addExtra = [&](const std::string &kv) {
                 if (!extras.empty()) extras += ";";
                 extras += kv;
             };
-            for (size_t i = 3; i + 1 < args.size(); i += 2) {
+            for (size_t i = strIdx + 1; i + 1 < args.size(); i += 2) {
                 std::string key = argStr(args[i]);
                 for (auto &c : key) c = std::tolower(c);
                 const Value &val = args[i + 1];
@@ -398,43 +482,29 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "ylabel",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty()) {
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            size_t idx = (args.size() >= 2 && (graphicsHandleIdOf(args[0]) >= 0 || args[0].isNumeric())) ? 1 : 0;
+            if (idx < args.size()) {
                 auto &fm = gc.fm;
                 auto &ax = fm.currentAxes();
-                // yyaxis: route to the active side's label slot.
                 if (ax.yyEnabled && ax.activeYside == "right")
-                    ax.ylabel2 = argStr(args[0]);
+                    ax.ylabel2 = argStr(args[idx]);
                 else
-                    ax.ylabel = argStr(args[0]);
+                    ax.ylabel = argStr(args[idx]);
                 fm.current().modified = true;
                 fm.emitModified();
             }
             outs[0] = Value();
         });
     reg("layout", "xlim",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty() && args[0].numel() >= 2) {
-                auto &fm = gc.fm;
-                fm.currentAxes().xlimJson = vecToJson(args[0]);
-                fm.current().modified = true;
-                fm.emitModified();
-            }
-            outs[0] = Value();
+        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            queryOrSetLim(gc.fm, gc.fm.currentAxes().xlimJson, args, nargout, outs, 'x');
         });
     reg("layout", "ylim",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty() && args[0].numel() >= 2) {
-                auto &fm = gc.fm;
-                auto &ax = fm.currentAxes();
-                if (ax.yyEnabled && ax.activeYside == "right")
-                    ax.ylim2Json = vecToJson(args[0]);
-                else
-                    ax.ylimJson = vecToJson(args[0]);
-                fm.current().modified = true;
-                fm.emitModified();
-            }
-            outs[0] = Value();
+        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            auto &ax = gc.fm.currentAxes();
+            std::string &lim = (ax.yyEnabled && ax.activeYside == "right") ? ax.ylim2Json : ax.ylimJson;
+            queryOrSetLim(gc.fm, lim, args, nargout, outs, 'y');
         });
     reg("layout", "grid",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -447,10 +517,11 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             //   grid minor    â†’ toggle MINOR (major untouched)
             // Major and minor are independent booleans; the script can
             // hold "minor only" (rare but valid in MATLAB).
-            if (args.empty()) {
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx >= args.size()) {
                 ax.gridMajor = !ax.gridMajor;
-            } else if (args[0].isChar()) {
-                std::string arg = args[0].toString();
+            } else if (args[idx].isChar() || args[idx].isString()) {
+                std::string arg = argStr(args[idx]);
                 for (auto &c : arg) c = (char)std::tolower((unsigned char)c);
                 if      (arg == "on")    { ax.gridMajor = true; }
                 else if (arg == "off")   { ax.gridMajor = false; ax.gridMinor = false; }
@@ -610,17 +681,22 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             fm.current().modified = true;
             fm.emitModified();
-            outs[0] = Value();
+            if (nargout >= 1) {
+                Value s = Value::structure(gc.mr);
+                s.setField(0, "Layout", Value::structure(gc.mr));
+                s.setField(0, "Label", Value::structure(gc.mr));
+                outs[0] = std::move(s);
+            } else {
+                outs[0] = Value();
+            }
         });
     reg("layout", "axis",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (!args.empty() && args[0].isChar()) {
-                auto &fm = gc.fm;
-                auto &ax = fm.currentAxes();
+        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
+            auto &fm = gc.fm;
+            auto &ax = fm.currentAxes();
+            if (!args.empty() && (args[0].isChar() || args[0].isString())) {
                 std::string mode = args[0].toString();
-                // `axis off` / `axis on` flip axisVisible without
-                // touching axisMode; MATLAB allows them to coexist
-                // with `axis equal`/`image`/etc. via successive calls.
                 if (mode == "off") {
                     ax.axisVisible = false;
                 } else if (mode == "on") {
@@ -632,8 +708,34 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 fm.current().modified = true;
                 fm.emitModified();
+                outs[0] = Value();
+                return;
             }
-            outs[0] = Value();
+            if (!args.empty() && args[0].isNumeric() && args[0].numel() >= 4) {
+                std::ostringstream xs, ys;
+                xs << "[" << args[0].elemAsDouble(0) << "," << args[0].elemAsDouble(1) << "]";
+                ys << "[" << args[0].elemAsDouble(2) << "," << args[0].elemAsDouble(3) << "]";
+                ax.xlimJson = xs.str();
+                ax.ylimJson = ys.str();
+                if (args[0].numel() >= 6) {
+                    std::ostringstream zs;
+                    zs << "[" << args[0].elemAsDouble(4) << "," << args[0].elemAsDouble(5) << "]";
+                    ax.zlimJson = zs.str();
+                }
+                fm.current().modified = true;
+                fm.emitModified();
+                outs[0] = Value();
+                return;
+            }
+            Value xl, yl;
+            queryOrSetLim(fm, ax.xlimJson, Span<const Value>{}, 1, Span<Value>(&xl, 1), 'x');
+            queryOrSetLim(fm, ax.ylimJson, Span<const Value>{}, 1, Span<Value>(&yl, 1), 'y');
+            Value out = Value::matrix(1, 4, ValueType::DOUBLE, gc.mr);
+            out.doubleDataMut()[0] = xl.elemAsDouble(0);
+            out.doubleDataMut()[1] = xl.elemAsDouble(1);
+            out.doubleDataMut()[2] = yl.elemAsDouble(0);
+            out.doubleDataMut()[3] = yl.elemAsDouble(1);
+            outs[0] = std::move(out);
         });
     // xdir / ydir â€” direct setters. MATLAB also accepts
     // set(gca, 'XDir', 'reverse'); we ship the direct form here,
@@ -721,7 +823,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             fm.current().modified = true;
             fm.emitModified();
-            outs[0] = Value();
+            outs[0] = (nargout >= 1 && !args.empty() && args[0].isNumeric()) ? args[0] : Value();
         });
     // colorscale('log' | 'linear') â€” must be called BEFORE imagesc(M).
     // Sets the axes' colorScale state, which survives prepareForPlot so
@@ -1263,23 +1365,18 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "zlabel",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             (void)nargout;
-            if (args.empty()) { outs[0] = Value(); return; }
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx >= args.size()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
-            fm.currentAxes().zlabel = argStr(args[0]);
+            fm.currentAxes().zlabel = argStr(args[idx]);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
         });
     // zlim([z0, z1]) â€” 3-D Z-axis limits.
     reg("layout", "zlim",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            (void)nargout;
-            if (args.empty() || args[0].numel() < 2) { outs[0] = Value(); return; }
-            auto &fm = gc.fm;
-            fm.currentAxes().zlimJson = vecToJson(args[0]);
-            fm.current().modified = true;
-            fm.emitModified();
-            outs[0] = Value();
+        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            queryOrSetLim(gc.fm, gc.fm.currentAxes().zlimJson, args, nargout, outs, 'z');
         });
     // view(az, el) â€” set the 3-D camera azimuth/elevation in degrees.
     // Both args required for the (az, el) form; 2-element vector also
@@ -1293,18 +1390,20 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             double az = 0, el = 0;
             bool ok = false;
             // view(2) / view(3) â€” preset top-down / default 3-D views.
-            if (args.size() == 1 && args[0].numel() == 1 && !args[0].isChar()) {
-                const int n = (int)args[0].toScalar();
+            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            if (idx >= args.size()) { outs[0] = Value(); return; }
+            if (args.size() - idx == 1 && args[idx].numel() == 1 && !args[idx].isChar()) {
+                const int n = (int)args[idx].toScalar();
                 if (n == 2) { az = 0;     el = 90; ok = true; }    // top-down
                 else if (n == 3) { az = -37.5; el = 30; ok = true; } // default 3-D
             }
-            if (!ok && args.size() >= 2 && args[0].numel() == 1 && args[1].numel() == 1) {
-                az = args[0].toScalar();
-                el = args[1].toScalar();
+            if (!ok && args.size() - idx >= 2 && args[idx].numel() == 1 && args[idx + 1].numel() == 1) {
+                az = args[idx].toScalar();
+                el = args[idx + 1].toScalar();
                 ok = true;
-            } else if (!ok && args[0].numel() >= 2) {
-                az = args[0].elemAsDouble(0);
-                el = args[0].elemAsDouble(1);
+            } else if (!ok && args[idx].numel() >= 2) {
+                az = args[idx].elemAsDouble(0);
+                el = args[idx].elemAsDouble(1);
                 ok = true;
             }
             if (!ok) { outs[0] = Value(); return; }

@@ -115,7 +115,8 @@ Token Parser::consume(TokenType t, const std::string &msg)
 
 void Parser::skipNewlines()
 {
-    while (!isAtEnd() && (check(TokenType::NEWLINE) || check(TokenType::SEMICOLON)))
+    while (!isAtEnd()
+           && (check(TokenType::NEWLINE) || check(TokenType::SEMICOLON) || check(TokenType::COMMA)))
         advance();
 }
 
@@ -406,6 +407,8 @@ bool Parser::isCommandStyleCall() const
     case TokenType::KW_FALSE:
     case TokenType::KW_GLOBAL:
         return true;
+    case TokenType::KW_IF:
+        return current().value == "dbstop" || current().value == "dbclear";
     default:
         return false;
     }
@@ -642,6 +645,19 @@ ASTNodePtr Parser::tryMultiAssign()
 // Control flow
 // ============================================================
 
+namespace {
+void promoteCondShortCircuitAnd(ASTNode *node)
+{
+    if (!node || node->type != NodeType::BINARY_OP)
+        return;
+    if (node->strValue == "&" || node->strValue == "&&") {
+        node->strValue = "&&";
+        for (auto &ch : node->children)
+            promoteCondShortCircuitAnd(ch.get());
+    }
+}
+} // namespace
+
 ASTNodePtr Parser::parseIf()
 {
     NestingGuard guard(*this);
@@ -650,6 +666,7 @@ ASTNodePtr Parser::parseIf()
     consume(TokenType::KW_IF, "if");
 
     auto cond = parseExpression();
+    promoteCondShortCircuitAnd(cond.get());
     skipTerminators();
     auto body = parseBlock({TokenType::KW_ELSEIF, TokenType::KW_ELSE, TokenType::KW_END});
     node->branches.push_back({std::move(cond), std::move(body)});
@@ -657,6 +674,7 @@ ASTNodePtr Parser::parseIf()
     while (check(TokenType::KW_ELSEIF)) {
         advance();
         auto c = parseExpression();
+        promoteCondShortCircuitAnd(c.get());
         skipTerminators();
         auto b = parseBlock({TokenType::KW_ELSEIF, TokenType::KW_ELSE, TokenType::KW_END});
         node->branches.push_back({std::move(c), std::move(b)});
@@ -699,7 +717,9 @@ ASTNodePtr Parser::parseWhile()
     auto node = makeNode(NodeType::WHILE_STMT, ln, cl);
     consume(TokenType::KW_WHILE, "while");
 
-    node->children.push_back(parseExpression());
+    auto cond = parseExpression();
+    promoteCondShortCircuitAnd(cond.get());
+    node->children.push_back(std::move(cond));
     skipTerminators();
 
     node->children.push_back(parseBlock({TokenType::KW_END}));
@@ -836,10 +856,15 @@ ASTNodePtr Parser::parseFunctionDef()
     }
 
     if (match(TokenType::LPAREN)) {
+        auto consumeParam = [&]() -> std::string {
+            if (match(TokenType::TILDE))
+                return "__unused_" + std::to_string(node->paramNames.size());
+            return consume(TokenType::IDENTIFIER, "param").value;
+        };
         if (!check(TokenType::RPAREN)) {
-            node->paramNames.push_back(consume(TokenType::IDENTIFIER, "param").value);
+            node->paramNames.push_back(consumeParam());
             while (match(TokenType::COMMA))
-                node->paramNames.push_back(consume(TokenType::IDENTIFIER, "param").value);
+                node->paramNames.push_back(consumeParam());
         }
         consume(TokenType::RPAREN, ")");
     }
@@ -1255,10 +1280,21 @@ ASTNodePtr Parser::parsePostfix()
             advance();
             auto cn = makeNode(NodeType::CALL, ln, cl);
             cn->children.push_back(std::move(node));
-            if (!check(TokenType::RPAREN)) {
+            auto parseCallArg = [&]() {
+                if (check(TokenType::IDENTIFIER) && peekToken(1).type == TokenType::ASSIGN) {
+                    auto [aln, acl] = loc();
+                    auto k = makeNode(NodeType::STRING_LITERAL, aln, acl);
+                    k->strValue = current().value;
+                    advance(); // IDENT
+                    advance(); // '='
+                    cn->children.push_back(std::move(k));
+                }
                 cn->children.push_back(parseExpression());
+            };
+            if (!check(TokenType::RPAREN)) {
+                parseCallArg();
                 while (match(TokenType::COMMA))
-                    cn->children.push_back(parseExpression());
+                    parseCallArg();
             }
             consume(TokenType::RPAREN, ")");
             node = std::move(cn);
@@ -1430,10 +1466,15 @@ ASTNodePtr Parser::parseAnonFunc()
     // @(params) expr — анонимная функция
     auto n = makeNode(NodeType::ANON_FUNC, ln, cl);
     consume(TokenType::LPAREN, "(");
+    auto consumeAnonParam = [&]() -> std::string {
+        if (match(TokenType::TILDE))
+            return "__unused_" + std::to_string(n->paramNames.size());
+        return consume(TokenType::IDENTIFIER, "param").value;
+    };
     if (!check(TokenType::RPAREN)) {
-        n->paramNames.push_back(consume(TokenType::IDENTIFIER, "param").value);
+        n->paramNames.push_back(consumeAnonParam());
         while (match(TokenType::COMMA))
-            n->paramNames.push_back(consume(TokenType::IDENTIFIER, "param").value);
+            n->paramNames.push_back(consumeAnonParam());
     }
     consume(TokenType::RPAREN, ")");
     n->children.push_back(parseExpression());

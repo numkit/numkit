@@ -113,6 +113,7 @@ handleTypes()
         std::pair<std::string, std::string>> m = {
         {"plot",        {"line",    "matlab.graphics.chart.primitive.Line"}},
         {"plot3",       {"line",    "matlab.graphics.chart.primitive.Line"}},
+        {"line",        {"line",    "matlab.graphics.chart.primitive.Line"}},
         {"scatter",     {"scatter", "matlab.graphics.chart.scatter.Scatter"}},
         {"scatter3",    {"scatter", "matlab.graphics.chart.scatter.Scatter"}},
         {"stem",        {"stem",    "matlab.graphics.chart.primitive.Stem"}},
@@ -599,9 +600,30 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return Value();
-    if (name == "XLim" && !ax->xlimJson.empty()) return decodeProp(ax->xlimJson, mr);
-    if (name == "YLim" && !ax->ylimJson.empty()) return decodeProp(ax->ylimJson, mr);
-    if (name == "ZLim" && !ax->zlimJson.empty()) return decodeProp(ax->zlimJson, mr);
+    if (name == "XLim") {
+        if (!ax->xlimJson.empty()) return decodeProp(ax->xlimJson, mr);
+        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
+        return v;
+    }
+    if (name == "YLim") {
+        if (!ax->ylimJson.empty()) return decodeProp(ax->ylimJson, mr);
+        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
+        return v;
+    }
+    if (name == "ZLim") {
+        if (!ax->zlimJson.empty()) return decodeProp(ax->zlimJson, mr);
+        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
+        return v;
+    }
+    if (name == "Position" || name == "OuterPosition") {
+        Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
+        v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
+        v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
+        return v;
+    }
     if (name == "XScale") return str(ax->xscale.c_str());
     if (name == "YScale") return str(ax->yscale.c_str());
     if (name == "XLabel") return str(ax->xlabel.c_str());
@@ -1317,7 +1339,22 @@ void registerHandleAccessors(Engine &engine)
             if (args.empty()) { outs[0] = Value(); return; }
             const int id = graphicsHandleIdOf(args[0]);
             if (id < 0) {
-                // Not a handle (legacy figure-number contract) → 1.
+                if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
+                    std::string prop = args[1].toString();
+                    if (prop == "PointerLocation") {
+                        Value v = Value::matrix(1, 2, ValueType::DOUBLE, engine.resource());
+                        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
+                        outs[0] = std::move(v);
+                        return;
+                    }
+                    if (prop == "Position" || prop == "OuterPosition" || prop == "ScreenSize") {
+                        Value v = Value::matrix(1, 4, ValueType::DOUBLE, engine.resource());
+                        v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
+                        v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
+                        outs[0] = std::move(v);
+                        return;
+                    }
+                }
                 outs[0] = Value::scalar(1.0, engine.resource());
                 return;
             }
@@ -1577,7 +1614,8 @@ void registerHandleAccessors(Engine &engine)
             outs[0] = makeHandleArray(cls, hits, mr);
             (void)engine;
         };
-        engine.registerFunction("", "findobj", std::move(fn));
+        engine.registerFunction("", "findobj", fn);
+        engine.registerFunction("", "findall", std::move(fn));
     }
     // isgraphics(h [, type])
     {
@@ -1639,6 +1677,7 @@ void registerGraphicsClasses(Engine &engine)
         {kTextClass,   "text"},
         {kLegendClass, "legend"},
         {kRootClass,   "root"},
+        {"matlab.graphics.Graphics", "line"},
     };
     for (const auto &kv : handleTypes())
         classToType.emplace(kv.second.second, kv.second.first);

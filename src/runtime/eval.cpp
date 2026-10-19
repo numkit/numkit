@@ -67,16 +67,18 @@ void registerEvalFamily(Engine &engine)
             // nullary-function-file.md; MATLAB-verified via the corpus).
             std::string primaryFn;
             bool isFunctionFile = numkit::runtime::primaryFunctionOfFile(content, primaryFn);
+            Environment *scope = resolveEvalScope(ctx);
             try {
-                ctx.engine->eval(content, resolveEvalScope(ctx));
+                ctx.engine->eval(content, scope);
                 if (isFunctionFile)
-                    ctx.engine->eval(primaryFn + ";", resolveEvalScope(ctx));
+                    ctx.engine->eval(primaryFn + ";", scope);
             } catch (...) {
                 ctx.engine->popScriptOrigin();
                 throw;
             }
             ctx.engine->popScriptOrigin();
-            outs[0] = Value();
+            const Value *ansVal = scope ? scope->getLocal("ans") : nullptr;
+            outs[0] = (ansVal && !ansVal->isDeleted()) ? *ansVal : Value();
         });
 
     // ── mfilename ─────────────────────────────────────────────

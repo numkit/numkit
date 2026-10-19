@@ -237,6 +237,10 @@ public:
     {
         nextFrameDynVars_ = dv;
     }
+    std::unordered_map<std::string, Value> *nextFrameDynVars() const
+    {
+        return nextFrameDynVars_;
+    }
 
 private:
     Engine &engine_;

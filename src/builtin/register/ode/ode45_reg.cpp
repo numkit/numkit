@@ -45,6 +45,12 @@ void ode45_reg(Span<const Value> args, size_t nargout,
 static const char *kOde45MSource = R"NKM(
 function [t, y] = ode45(fn, tspan, y0, opts, varargin)
   if ischar(fn) || isstring(fn), fn = str2func(fn); end
+  orig_fn0 = fn;
+  has_extra = ~isempty(varargin);
+  if has_extra
+    extra_args = varargin;
+    fn = @(t, y) orig_fn0(t, y, extra_args{:});
+  end
   rel_tol = 1e-3; abs_tol = 1e-6; max_step = inf; initial_step = 0; refine = 4;
   if nargin >= 4 && isstruct(opts)
     if isfield(opts,'RelTol')      && ~isempty(opts.RelTol),      rel_tol = opts.RelTol; end
@@ -54,6 +60,25 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
     if isfield(opts,'Refine')      && ~isempty(opts.Refine)
       rr = opts.Refine;
       if rr >= 1, refine = floor(rr); else, refine = 1; end
+    end
+    if isfield(opts,'Mass') && ~isempty(opts.Mass)
+      mass_opt = opts.Mass;
+      rhs_fn = fn;
+      if ischar(mass_opt) || isstring(mass_opt)
+        if has_extra
+          fn = @(t, y) (orig_fn0(t, y, 'mass', extra_args{:}) \ orig_fn0(t, y, '', extra_args{:}));
+        else
+          fn = @(t, y) (orig_fn0(t, y, 'mass') \ orig_fn0(t, y, ''));
+        end
+      elseif isa(mass_opt, 'function_handle')
+        if has_extra
+          fn = @(t, y) (mass_opt(t, y, extra_args{:}) \ rhs_fn(t, y));
+        else
+          fn = @(t, y) (mass_opt(t, y) \ rhs_fn(t, y));
+        end
+      elseif isnumeric(mass_opt)
+        fn = @(t, y) (mass_opt \ rhs_fn(t, y));
+      end
     end
   end
   ts = tspan(:); nspan = numel(ts);
@@ -70,7 +95,7 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
   if numel(abs_tol) ~= 1 && numel(abs_tol) ~= d
     error('numkit:ode45:absTolSize', 'ode45: AbsTol must be scalar or match length(y0)');
   end
-  k1 = fn(t0, yc, varargin{:}); k1 = k1(:);
+  k1 = fn(t0, yc); k1 = k1(:);
   if numel(k1) ~= d, error('numkit:ode45:badRhsSize', 'ode45: RHS size mismatch'); end
   h = initial_step;
   if ~(h > 0)
@@ -79,34 +104,61 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
     d1 = sqrt(sum((k1 ./ sc0).^2) / d);
     if d0 < 1e-5 || d1 < 1e-5, h0 = 1e-6; else, h0 = 0.01*d0/d1; end
     h0 = min(h0, abs(tf - t0));
-    k2t = fn(t0 + dir*h0, yc + dir*h0*k1, varargin{:}); k2t = k2t(:);
+    k2t = fn(t0 + dir*h0, yc + dir*h0*k1); k2t = k2t(:);
     d2 = sqrt(sum(((k2t - k1) ./ sc0).^2) / d) / h0;
     if max(d1, d2) < 1e-15, h1 = max(1e-6, h0*1e-3); else, h1 = (0.01/max(d1,d2))^(1/5); end
     h = min([100*h0, h1, max_step, abs(tf - t0)]);
     if ~(h > 0), h = max(1e-6, abs(tf - t0)*1e-3); end
   end
-  T = t0; Y = yc';
   emit_at_tspan = (nspan > 2);
-  if emit_at_tspan, refine = 1; else, refine = max(1, refine); end
+  if emit_at_tspan
+    refine = 1;
+    T = zeros(nspan, 1); Y = zeros(nspan, d);
+    T(1) = t0; Y(1, :) = yc';
+    out_idx = 1;
+  else
+    refine = max(1, refine);
+    T = t0; Y = yc';
+  end
   next_span = 2;
-  tc = t0; max_steps = 100000; step_count = 0; failed = 0;
+  c2 = 1/5; c3 = 3/10; c4 = 4/5; c5 = 8/9;
+  a21 = 1/5;
+  a31 = 3/40; a32 = 9/40;
+  a41 = 44/45; a42 = -56/15; a43 = 32/9;
+  a51 = 19372/6561; a52 = -25360/2187; a53 = 64448/6561; a54 = -212/729;
+  a61 = 9017/3168; a62 = -355/33; a63 = 46732/5247; a64 = 49/176; a65 = -5103/18656;
+  b1 = 35/384; b3 = 500/1113; b4 = 125/192; b5 = -2187/6784; b6 = 11/84;
+  e1 = 71/57600; e3 = -71/16695; e4 = 71/1920; e5 = -17253/339200; e6 = 22/525; e7 = -1/40;
+  tc = t0; max_steps = 2000000; step_count = 0; failed = 0;
   while ((dir > 0 && tc < tf) || (dir < 0 && tc > tf)) && step_count < max_steps
     step_count = step_count + 1;
     th = min(min(h, (tf - tc)*dir), max_step);
-    [ynew, err_norm, k7, k3, k4, k5, k6] = NUMKIT_dopri5_step(fn, tc, yc, th, dir, k1, rel_tol, abs_tol, varargin{:});
+    dh = dir * th;
+    k2 = fn(tc + c2*dh, yc + dh*(a21*k1)); k2 = k2(:);
+    k3 = fn(tc + c3*dh, yc + dh*(a31*k1 + a32*k2)); k3 = k3(:);
+    k4 = fn(tc + c4*dh, yc + dh*(a41*k1 + a42*k2 + a43*k3)); k4 = k4(:);
+    k5 = fn(tc + c5*dh, yc + dh*(a51*k1 + a52*k2 + a53*k3 + a54*k4)); k5 = k5(:);
+    k6 = fn(tc + dh, yc + dh*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5)); k6 = k6(:);
+    ynew = yc + dh*(b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6);
+    k7 = fn(tc + dh, ynew); k7 = k7(:);
+    sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
+    er = dh*(e1*k1 + e3*k3 + e4*k4 + e5*k5 + e6*k6 + e7*k7);
+    err_norm = sqrt(sum((er ./ sc).^2) / d);
     if err_norm <= 1
-      t_old = tc; t_new = tc + dir*th;
+      t_old = tc; t_new = tc + dh;
       if emit_at_tspan
         while next_span <= nspan
           tt = ts(next_span);
-          theta = (tt - t_old) / (dir*th);
+          theta = (tt - t_old) / dh;
           if theta > 1 + 1e-12, break; end
           cl = max(0, min(1, theta));
+          out_idx = out_idx + 1;
+          T(out_idx) = tt;
           if abs(cl - 1) < 1e-15
-            T = [T; tt]; Y = [Y; ynew'];
+            Y(out_idx, :) = ynew';
           else
             yint = NUMKIT_ode_dense(cl, dir, th, yc, k1, k3, k4, k5, k6, k7);
-            T = [T; tt]; Y = [Y; yint'];
+            Y(out_idx, :) = yint';
           end
           next_span = next_span + 1;
         end
@@ -114,7 +166,7 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
         for r = 1:(refine-1)
           theta = r/refine;
           yint = NUMKIT_ode_dense(theta, dir, th, yc, k1, k3, k4, k5, k6, k7);
-          T = [T; t_old + dir*th*theta]; Y = [Y; yint'];
+          T = [T; t_old + dh*theta]; Y = [Y; yint'];
         end
         T = [T; t_new]; Y = [Y; ynew'];
       else
@@ -133,28 +185,10 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
     end
   end
   if step_count >= max_steps, error('numkit:ode45:tooManySteps', 'ode45: exceeded integration steps'); end
+  if emit_at_tspan && out_idx < nspan
+    T = T(1:out_idx); Y = Y(1:out_idx, :);
+  end
   t = T; y = Y;
-end
-
-function [ynew, err_norm, k7, k3, k4, k5, k6] = NUMKIT_dopri5_step(fn, tc, yc, h, dir, k1, rel_tol, abs_tol, varargin)
-  c2 = 1/5; c3 = 3/10; c4 = 4/5; c5 = 8/9;
-  a21 = 1/5;
-  a31 = 3/40; a32 = 9/40;
-  a41 = 44/45; a42 = -56/15; a43 = 32/9;
-  a51 = 19372/6561; a52 = -25360/2187; a53 = 64448/6561; a54 = -212/729;
-  a61 = 9017/3168; a62 = -355/33; a63 = 46732/5247; a64 = 49/176; a65 = -5103/18656;
-  b1 = 35/384; b3 = 500/1113; b4 = 125/192; b5 = -2187/6784; b6 = 11/84;
-  e1 = 71/57600; e3 = -71/16695; e4 = 71/1920; e5 = -17253/339200; e6 = 22/525; e7 = -1/40;
-  k2 = fn(tc + dir*c2*h, yc + dir*h*(a21*k1), varargin{:}); k2 = k2(:);
-  k3 = fn(tc + dir*c3*h, yc + dir*h*(a31*k1 + a32*k2), varargin{:}); k3 = k3(:);
-  k4 = fn(tc + dir*c4*h, yc + dir*h*(a41*k1 + a42*k2 + a43*k3), varargin{:}); k4 = k4(:);
-  k5 = fn(tc + dir*c5*h, yc + dir*h*(a51*k1 + a52*k2 + a53*k3 + a54*k4), varargin{:}); k5 = k5(:);
-  k6 = fn(tc + dir*h, yc + dir*h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5), varargin{:}); k6 = k6(:);
-  ynew = yc + dir*h*(b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6);
-  k7 = fn(tc + dir*h, ynew, varargin{:}); k7 = k7(:);
-  sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
-  er = dir*h*(e1*k1 + e3*k3 + e4*k4 + e5*k5 + e6*k6 + e7*k7);
-  err_norm = sqrt(sum((er ./ sc).^2) / numel(yc));
 end
 
 function out = NUMKIT_ode_dense(theta, dir, h, yn, k1, k3, k4, k5, k6, k7)

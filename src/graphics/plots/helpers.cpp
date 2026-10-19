@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” plots/helpers.cpp
+// nk/graphics â€” plots/helpers.cpp
 //
 // Definitions of the pure JSON/parse helpers declared in plot_internal.hpp.
 // Core-free, no figure side effects: data -> JSON string and option parsing,
@@ -59,12 +59,33 @@ std::string makeIndexJson(std::size_t n)
     return xs.str();
 }
 
-std::string argStr(const Value &v) { return v.toString(); }
+std::string argStr(const Value &v)
+{
+    if (v.isCell()) {
+        std::string out;
+        for (size_t i = 0; i < v.numel(); ++i) {
+            if (i) out += "\n";
+            out += argStr(v.cellAt(i));
+        }
+        return out;
+    }
+    if (v.isString()) {
+        std::string out;
+        for (size_t i = 0; i < v.numel(); ++i) {
+            if (i) out += "\n";
+            out += v.stringElem(i);
+        }
+        return out;
+    }
+    if (v.isChar())
+        return v.toString();
+    return "";
+}
 
 void parsePlotArgs(Span<const Value> args, std::size_t startIdx, DatasetInfo &ds)
 {
     for (size_t i = startIdx; i + 1 < args.size(); i += 2) {
-        if (!args[i].isChar())
+        if (!args[i].isChar() && !args[i].isString())
             continue;
         std::string key = args[i].toString();
         for (auto &c : key)
@@ -79,17 +100,17 @@ void parsePlotArgs(Span<const Value> args, std::size_t startIdx, DatasetInfo &ds
 std::size_t parsePlotXYStyle(Span<const Value> args, DatasetInfo &ds)
 {
     size_t nvStart = 2;
-    if (args.size() >= 2 && !args[1].isChar()) {
+    if (args.size() >= 2 && !args[1].isChar() && !args[1].isString()) {
         ds.xJson = vecToJson(args[0]);
         ds.yJson = vecToJson(args[1]);
-        if (args.size() >= 3 && args[2].isChar()) {
+        if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
             ds.style = args[2].toString();
             nvStart = 3;
         }
     } else {
         ds.xJson = makeIndexJson(args[0].numel());
         ds.yJson = vecToJson(args[0]);
-        if (args.size() >= 2 && args[1].isChar()) {
+        if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
             ds.style = args[1].toString();
             nvStart = 2;
         } else {

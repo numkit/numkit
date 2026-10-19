@@ -2,6 +2,7 @@
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
+#include <numkit/core/vm.hpp>
 
 #include <stdexcept>
 #include <unordered_set>
@@ -113,7 +114,18 @@ void Compiler::preImportGlobals(const ASTNode *ast)
         if (varRegisters_.count(name))
             continue; // already allocated
 
-        Value *existing = engine_.getVariable(name);
+        Value *existing = nullptr;
+        if (engine_.vm_ && engine_.vm_->inheritedScope_) {
+            if (auto *dv = engine_.vm_->nextFrameDynVars()) {
+                auto it = dv->find(name);
+                if (it != dv->end())
+                    existing = &it->second;
+            }
+            if (!existing)
+                existing = engine_.vm_->inheritedScope_->get(name);
+        } else {
+            existing = engine_.getVariable(name);
+        }
         // Import any defined value (including `[]` empty matrices, which
         // are legal MATLAB values). Only unset / deleted slots get skipped.
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
@@ -3591,9 +3603,20 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     auto it = varRegisters_.find(name);
     bool isKnownVar = (it != varRegisters_.end());
 
-    // Also check workspaceEnv for variables from previous eval() calls
+    // Also check workspaceEnv (or scoped eval caller vars) for variables from previous eval() calls
     if (!isKnownVar && isTopLevel_ && !engine_.isReservedName(name)) {
-        Value *existing = engine_.getVariable(name);
+        Value *existing = nullptr;
+        if (engine_.vm_ && engine_.vm_->inheritedScope_) {
+            if (auto *dv = engine_.vm_->nextFrameDynVars()) {
+                auto it2 = dv->find(name);
+                if (it2 != dv->end())
+                    existing = &it2->second;
+            }
+            if (!existing)
+                existing = engine_.vm_->inheritedScope_->get(name);
+        } else {
+            existing = engine_.getVariable(name);
+        }
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
             // Variable exists — check if it's a callable (funcHandle or closure cell)
             // Callable variables take priority over same-name external functions

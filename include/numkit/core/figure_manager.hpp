@@ -869,6 +869,21 @@ public:
                 continue;
             fig.modified = false;
 
+            bool skipIncrementalEmit = false;
+            for (const auto &ax : fig.axes) {
+                if (ax.datasets.size() > 16) {
+                    skipIncrementalEmit = true;
+                    break;
+                }
+                if (ax.datasets.size() > 2 &&
+                    (!ax.datasets[0].rgbJson.empty() || !ax.datasets[0].zQuantized.empty())) {
+                    skipIncrementalEmit = true;
+                    break;
+                }
+            }
+            if (skipIncrementalEmit)
+                continue;
+
             std::ostringstream os;
             os << "__FIGURE_DATA__:{\"id\":" << fig.id;
 

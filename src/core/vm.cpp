@@ -1020,10 +1020,18 @@ enter_frame:
                 // No COLON allocation: start/step/count live in the
                 // ForState, the loop var is recomputed as start + index*step
                 // each iteration.
-                const double start = R[I.b].toScalar();
-                const double stop  = R[I.c].toScalar();
+                auto colonScalar = [](const Value &v) -> double {
+                    return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
+                };
+                if (R[I.b].isEmpty() || R[I.c].isEmpty()
+                    || (I.e != 0xFF && R[I.e].isEmpty())) {
+                    ip += I.d;
+                    continue;
+                }
+                const double start = colonScalar(R[I.b]);
+                const double stop  = colonScalar(R[I.c]);
                 const double step  = (I.e == 0xFF) ? 1.0
-                                                   : R[I.e].toScalar();
+                                                   : colonScalar(R[I.e]);
                 const size_t count = Value::colonCount(start, step, stop);
                 if (count == 0) {
                     ip += I.d;
@@ -1081,7 +1089,14 @@ enter_frame:
                     throw std::runtime_error(
                         "Colon operands must be all the same type, "
                         "or mixed with real scalar doubles");
-                double start = R[I.b].toScalar(), stop = R[I.c].toScalar();
+                if (R[I.b].isEmpty() || R[I.c].isEmpty()) {
+                    R[I.a] = Value::matrix(1, 0, t, engine_.mr_);
+                    break;
+                }
+                auto colonScalar = [](const Value &v) -> double {
+                    return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
+                };
+                double start = colonScalar(R[I.b]), stop = colonScalar(R[I.c]);
                 R[I.a] = Value::colonRangeTyped(start, stop, t, engine_.mr_);
                 break;
             }
@@ -1112,8 +1127,15 @@ enter_frame:
                             "Colon operands must be all the same type, "
                             "or mixed with real scalar doubles");
                 }
-                double start = R[I.b].toScalar(), step = R[I.c].toScalar(),
-                       stop = R[I.e].toScalar();
+                if (R[I.b].isEmpty() || R[I.c].isEmpty() || R[I.e].isEmpty()) {
+                    R[I.a] = Value::matrix(1, 0, t, engine_.mr_);
+                    break;
+                }
+                auto colonScalar = [](const Value &v) -> double {
+                    return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
+                };
+                double start = colonScalar(R[I.b]), step = colonScalar(R[I.c]),
+                       stop = colonScalar(R[I.e]);
                 R[I.a] = Value::colonRangeTyped(start, step, stop, t, engine_.mr_);
                 break;
             }
@@ -1703,7 +1725,7 @@ enter_frame:
                     size_t maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
                     size_t maxC = colIds.maxPlusOne(R[I.a].dims().cols());
                     size_t maxP = pageIds.maxPlusOne(R[I.a].dims().pages());
-                    if (R[I.a].isEmpty() && !val.isScalar()) {
+                    if (R[I.a].isEmpty() && (!val.isScalar() || (R[I.a].dims().rows() == 0 && R[I.a].dims().cols() == 0 && !val.isEmpty()))) {
                         const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
                         const size_t nonColonProd = (riColon ? 1 : rowIds.count)
                                                   * (ciColon ? 1 : colIds.count)
@@ -2547,6 +2569,59 @@ enter_frame:
                         (*fnPtr)(as, nargout_val, os, ctx);
                         R[I.a] = std::move(ob[0]);
                         break;
+                    }
+                    size_t dot = funcName.find('.');
+                    if (dot != std::string::npos && na == 0) {
+                        std::string root = funcName.substr(0, dot);
+                        const Value *rootVal = nullptr;
+                        if (frame.dynVars) {
+                            auto it = frame.dynVars->find(root);
+                            if (it != frame.dynVars->end() && !it->second.isDeleted())
+                                rootVal = &it->second;
+                        }
+                        if (!rootVal && currentCallEnv())
+                            rootVal = currentCallEnv()->get(root);
+                        if (!rootVal)
+                            rootVal = engine_.workspaceEnv().get(root);
+                        if (rootVal && !rootVal->isUnset()) {
+                            Value cur = *rootVal;
+                            size_t pos = dot + 1;
+                            while (pos < funcName.size()) {
+                                size_t nextDot = funcName.find('.', pos);
+                                std::string seg = (nextDot == std::string::npos)
+                                                      ? funcName.substr(pos)
+                                                      : funcName.substr(pos, nextDot - pos);
+                                if (!cur.isStruct())
+                                    throw std::runtime_error("Dot indexing requires a struct");
+                                if (!cur.hasField(seg))
+                                    throw std::runtime_error("Reference to non-existent field '" + seg + "'");
+                                Value nextVal = cur.field(seg);
+                                cur = std::move(nextVal);
+                                if (nextDot == std::string::npos)
+                                    break;
+                                pos = nextDot + 1;
+                            }
+                            R[I.a] = std::move(cur);
+                            break;
+                        }
+                    }
+                    if (dot == std::string::npos && na > 0) {
+                        const Value *varVal = nullptr;
+                        if (frame.dynVars) {
+                            auto it = frame.dynVars->find(funcName);
+                            if (it != frame.dynVars->end() && !it->second.isDeleted())
+                                varVal = &it->second;
+                        }
+                        if (!varVal && currentCallEnv())
+                            varVal = currentCallEnv()->get(funcName);
+                        if (!varVal)
+                            varVal = engine_.workspaceEnv().get(funcName);
+                        if (varVal && !varVal->isUnset() && !varVal->isDeleted()) {
+                            Value target = *varVal;
+                            if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
+                                goto enter_frame;
+                            break;
+                        }
                     }
                     throw std::runtime_error(
                         engine_.formatUndefinedFunctionError(

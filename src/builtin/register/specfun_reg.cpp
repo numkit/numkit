@@ -79,6 +79,32 @@ void register_specfun(Engine &engine) {
     engine.registerFunction("perms",       &::numkit::builtin::detail::perms_reg);
     engine.registerFunction("primes",      &::numkit::builtin::detail::primes_reg);
     engine.registerFunction("psi",         &::numkit::builtin::detail::psi_reg);
+    engine.registerFunction("heaviside",
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "heaviside");
+            std::pmr::memory_resource *mr = ctx.engine->resource();
+            const Value &x = args[0];
+            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+            double *dst = out.doubleDataMut();
+            const size_t n = x.numel();
+            for (size_t i = 0; i < n; ++i) {
+                double v = x.elemAsDouble(i);
+                if (std::isnan(v)) dst[i] = v;
+                else if (v < 0.0)  dst[i] = 0.0;
+                else if (v == 0.0) dst[i] = 0.5;
+                else               dst[i] = 1.0;
+            }
+            outs[0] = std::move(out);
+        });
+    auto noopFn = [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &/*ctx*/) {
+        outs[0] = Value();
+    };
+    engine.registerFunction("dbstop",   noopFn);
+    engine.registerFunction("dbclear",  noopFn);
+    engine.registerFunction("dbstatus", noopFn);
+    engine.registerFunction("dbcont",   noopFn);
+    engine.registerFunction("dbquit",   noopFn);
+    engine.registerFunction("keyboard", noopFn);
 }
 
 } // namespace numkit::builtin::detail

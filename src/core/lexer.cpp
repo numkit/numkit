@@ -193,24 +193,26 @@ void Lexer::insertImplicitComma()
     if (!inMatrixContext() || tokens_.empty())
         return;
 
-    auto prev = tokens_.back().type;
+    int prevIdx = static_cast<int>(tokens_.size()) - 1;
+    while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
+        --prevIdx;
+    if (prevIdx < 0)
+        return;
+
+    auto prev = tokens_[prevIdx].type;
     if (!isValueToken(prev))
         return;
 
-    // Не вставляем запятую после ')' закрывающей @(params) —
-    // следующий токен — это тело анонимной функции, а не новый элемент.
     if (prev == TokenType::RPAREN) {
-        // Ищем соответствующую '(' и проверяем, стоит ли перед ней '@'
         int depth = 0;
-        for (int i = static_cast<int>(tokens_.size()) - 1; i >= 0; --i) {
+        for (int i = prevIdx; i >= 0; --i) {
             if (tokens_[i].type == TokenType::RPAREN)
                 depth++;
             else if (tokens_[i].type == TokenType::LPAREN)
                 depth--;
             if (depth == 0) {
-                // Нашли соответствующую '(' — проверяем что перед ней '@'
                 if (i > 0 && tokens_[i - 1].type == TokenType::AT)
-                    return; // Это @(params) — не вставляем запятую
+                    return;
                 break;
             }
         }
@@ -775,7 +777,10 @@ std::vector<Token> Lexer::tokenize()
 
             if (bracketDepth() > 0) {
                 if (inMatrixContext()) {
-                    if (!tokens_.empty() && isValueToken(tokens_.back().type)) {
+                    int prevIdx = static_cast<int>(tokens_.size()) - 1;
+                    while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
+                        --prevIdx;
+                    if (prevIdx >= 0 && isValueToken(tokens_[prevIdx].type)) {
                         addToken(TokenType::SEMICOLON, ";", nl, nc);
                     }
                 }

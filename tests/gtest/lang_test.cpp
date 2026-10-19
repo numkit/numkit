@@ -181,3 +181,69 @@ TEST_F(LangTest, TextbookBatch2Builtins) {
     EXPECT_LT(hEigVD.toScalar(), 1e-12);
 }
 
+TEST_F(LangTest, TextbookBatch3Builtins) {
+    for (Engine::Backend mode : {Engine::Backend::TreeWalker, Engine::Backend::VM}) {
+        auto eng = makeStandardEngine();
+        eng->setBackend(mode);
+        // 1. Line-end comment inside matrix literal preserves row separator
+        Value matCmt = eng->eval("M = [[1 2] % row 1\n [3 4]]; size(M)");
+        EXPECT_DOUBLE_EQ(matCmt.elemAsDouble(0), 2.0);
+        EXPECT_DOUBLE_EQ(matCmt.elemAsDouble(1), 2.0);
+
+        // 2. Consecutive statement separators ;,
+        Value sepVal = eng->eval("a = 10;, b = 20;, a + b");
+        EXPECT_DOUBLE_EQ(sepVal.toScalar(), 30.0);
+
+        // 3. Top-level & in if/while condition short-circuits like &&
+        Value scVal = eng->eval(
+            "arr = [10]; k = 1; r = 0; "
+            "if k > 1 & arr(k - 1) > 0, r = 1; else, r = 2; end; r");
+        EXPECT_DOUBLE_EQ(scVal.toScalar(), 2.0);
+
+        // 4. Ignored parameter ~ in anonymous function and function definition
+        Value tildeAnon = eng->eval("f = @(~, y) y * 3; f(999, 7)");
+        EXPECT_DOUBLE_EQ(tildeAnon.toScalar(), 21.0);
+
+        // 5. Non-scalar and empty operands to colon operator
+        Value colNonScalar = eng->eval("v = 1:[4 2]; numel(v)");
+        EXPECT_DOUBLE_EQ(colNonScalar.toScalar(), 4.0);
+        Value colEmpty = eng->eval("v = 1:[]; isempty(v)");
+        EXPECT_TRUE(colEmpty.toBool());
+
+        // 6. 3D slice assignment S(:,:,1) = 0.2 on unset variable
+        Value slice3d = eng->eval("clear S3; S3(:,:,1) = [0.2]; S3(:,:,2) = [0.5]; S3(1,1,2)");
+        EXPECT_DOUBLE_EQ(slice3d.toScalar(), 0.5);
+
+        // 7. Scoped eval inside function indexes caller register variables
+        Value evalFn = eng->eval(
+            "function y = test_eval_idx(c1, idx)\n"
+            "  eval('y = sum(c1(idx, :));');\n"
+            "end\n"
+            "test_eval_idx([1 2 3; 4 5 6], 2)");
+        EXPECT_DOUBLE_EQ(evalFn.toScalar(), 15.0);
+    }
+
+    // 7. Matrix power mpower: negative integer, fractional (-0.5), and complex
+    Value mpNeg = engine->eval("A = [2 1; 1 1]; norm(A^(-2) - inv(A*A), 'fro')");
+    EXPECT_LT(mpNeg.toScalar(), 1e-12);
+    Value mpHalf = engine->eval("A = [4 1; 1 3]; B = A^(-0.5); norm(B * B * A - eye(2), 'fro')");
+    EXPECT_LT(mpHalf.toScalar(), 1e-12);
+
+    // 8. inv on singular matrix returns Inf
+    Value singInv = engine->eval("B = inv([1 2; 2 4]); all(isinf(B(:)))");
+    EXPECT_TRUE(singInv.toBool());
+
+    // 9. repmat on struct
+    Value repSt = engine->eval("s.x = 5; r = repmat(s, 2, 3); numel(r)");
+    EXPECT_DOUBLE_EQ(repSt.toScalar(), 6.0);
+
+    // 10. gradient with vector coordinates and heaviside
+    Value gradVec = engine->eval("x = [0 0.5 1.5 3.0]; f = 2 * x; max(abs(gradient(f, x) - 2))");
+    EXPECT_LT(gradVec.toScalar(), 1e-12);
+    Value hvVal = engine->eval("heaviside([-2 0 3])");
+    EXPECT_DOUBLE_EQ(hvVal.elemAsDouble(0), 0.0);
+    EXPECT_DOUBLE_EQ(hvVal.elemAsDouble(1), 0.5);
+    EXPECT_DOUBLE_EQ(hvVal.elemAsDouble(2), 1.0);
+}
+
+

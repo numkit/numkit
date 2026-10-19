@@ -1377,7 +1377,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             maxC = std::max(maxC, c + 1);
         for (auto p : pageIdx)
             maxP = std::max(maxP, p + 1);
-        if (var->isEmpty() && !rhs.isScalar()) {
+        if (var->isEmpty() && (!rhs.isScalar() || (var->dims().rows() == 0 && var->dims().cols() == 0 && !rhs.isEmpty()))) {
             const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
             const size_t nonColonProd = (riColon ? 1 : rowIdx.size())
                                       * (ciColon ? 1 : colIdx.size())
@@ -2943,6 +2943,10 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
     if (node->children.empty())
         return Value::fromString(":", engine_.mr_);
 
+    auto colonScalar = [](const Value &v) -> double {
+        return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
+    };
+
     if (node->children.size() == 2) {
         Value a = execNode(node->children[0].get(), env);
         Value b = execNode(node->children[1].get(), env);
@@ -2960,7 +2964,9 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
             }
         }
         ValueType t = colonOutputType(ops, 2);
-        return Value::colonRangeTyped(a.toScalar(), b.toScalar(), t, engine_.mr_);
+        if (a.isEmpty() || b.isEmpty())
+            return Value::matrix(1, 0, t, engine_.mr_);
+        return Value::colonRangeTyped(colonScalar(a), colonScalar(b), t, engine_.mr_);
     }
 
     if (node->children.size() == 3) {
@@ -2981,7 +2987,9 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
             }
         }
         ValueType t = colonOutputType(ops, 3);
-        return Value::colonRangeTyped(a.toScalar(), b.toScalar(), c.toScalar(),
+        if (a.isEmpty() || b.isEmpty() || c.isEmpty())
+            return Value::matrix(1, 0, t, engine_.mr_);
+        return Value::colonRangeTyped(colonScalar(a), colonScalar(b), colonScalar(c),
                                        t, engine_.mr_);
     }
 

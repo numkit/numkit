@@ -1397,6 +1397,47 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     };
     reg("line", "xline", refLineImpl("xline"));
     reg("line", "yline", refLineImpl("yline"));
+    reg("line", "line",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
+            auto &fm = gc.fm;
+            DatasetInfo ds;
+            ds.type = "line";
+            ds.xJson = "[0,1]";
+            ds.yJson = "[0,1]";
+            size_t i = 0;
+            if (args.size() >= 2 && (args[0].isNumeric() || args[0].isLogical())
+                && (args[1].isNumeric() || args[1].isLogical())) {
+                ds.xJson = vecToJson(args[0]);
+                ds.yJson = vecToJson(args[1]);
+                i = 2;
+                if (args.size() >= 3 && (args[2].isNumeric() || args[2].isLogical())) {
+                    ds.type = "plot3";
+                    ds.zJson = vecToJson(args[2]);
+                    i = 3;
+                }
+            }
+            for (; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString()) continue;
+                std::string key = args[i].toString();
+                for (auto &c : key) c = (char)std::tolower((unsigned char)c);
+                if (key == "xdata" && args[i + 1].isNumeric())
+                    ds.xJson = vecToJson(args[i + 1]);
+                else if (key == "ydata" && args[i + 1].isNumeric())
+                    ds.yJson = vecToJson(args[i + 1]);
+                else if (key == "zdata" && args[i + 1].isNumeric()) {
+                    ds.type = "plot3";
+                    ds.zJson = vecToJson(args[i + 1]);
+                } else if (key == "linewidth" && args[i + 1].isNumeric())
+                    ds.lineWidth = args[i + 1].toScalar();
+                else if (key == "markersize" && args[i + 1].isNumeric())
+                    ds.markerSize = args[i + 1].toScalar();
+            }
+            fm.pushDataset(std::move(ds));
+            fm.current().modified = true;
+            fm.emitModified();
+            outs[0] = Value();
+        });
 }
 
 }  // namespace numkit

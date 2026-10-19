@@ -270,9 +270,10 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     };
     inner.writeTag(miUINT32, flagsBuf, 8);
 
-    // 2. Dimensions Array (at least 2 dims [rows, cols])
+    // 2. Dimensions Array (at least 2 dims [rows, cols]; strip trailing singletons > 2)
     const Dims &d = v.dims();
     int nd = d.ndims();
+    while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
     std::vector<std::int32_t> dimsVec(nd, 1);
     for (int i = 0; i < nd; ++i) {
