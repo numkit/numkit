@@ -1,5 +1,6 @@
 #include <numkit/core/parser.hpp>
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -1357,11 +1358,15 @@ ASTNodePtr Parser::parsePostfix()
             sn->strValue = consume(TokenType::IDENTIFIER, "superclass").value;
             sn->children.push_back(std::move(node));
             node = std::move(sn);
-        } else if (check(TokenType::DOT) && peekToken(1).type == TokenType::IDENTIFIER) {
+        } else if (check(TokenType::DOT)
+                   && (peekToken(1).type == TokenType::IDENTIFIER
+                       || (!peekToken(1).value.empty()
+                           && std::isalpha(static_cast<unsigned char>(peekToken(1).value[0]))))) {
             auto [ln, cl] = loc();
             advance();
             auto fn = makeNode(NodeType::FIELD_ACCESS, ln, cl);
-            fn->strValue = consume(TokenType::IDENTIFIER, "field").value;
+            fn->strValue = current().value;
+            advance();
             fn->children.push_back(std::move(node));
             node = std::move(fn);
         } else if (check(TokenType::DOT) && peekToken(1).type == TokenType::LPAREN) {

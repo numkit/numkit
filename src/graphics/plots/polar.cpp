@@ -116,6 +116,15 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     };
     reg("polar", "polarplot", polarPlotFn);
     reg("polar", "polar", std::move(polarPlotFn));
+    table.push_back(PlotEntry{"polar", "polaraxes", /*core=*/true,
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            (void)args; (void)nargout;
+            auto &fm = gc.fm;
+            fm.prepareForPlot();
+            fm.currentAxes().polar = true;
+            fm.emitModified();
+            outs[0] = Value();
+        }});
     // polarscatter(theta, rho) â€” markers at each (Î¸, Ï) on the polar
     // axes. Same wire format as polarplot but type='scatter' so the
     // PolarPlot renderer draws circles instead of polylines.

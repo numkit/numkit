@@ -286,6 +286,8 @@ struct DatetimeElemPayload : NativePayload
     {
         return std::make_shared<DatetimeElemPayload>(*this);
     }
+
+    double asDouble() const override { return serialDay; }
 };
 
 struct DurationElemPayload : NativePayload
@@ -301,6 +303,8 @@ struct DurationElemPayload : NativePayload
     {
         return std::make_shared<DurationElemPayload>(*this);
     }
+
+    double asDouble() const override { return seconds; }
 };
 
 struct CalDurElemPayload : NativePayload
@@ -1462,6 +1466,23 @@ void register_timefun(Engine &engine) {
                 return makeDatetimeArray(Dims(1, 1), {numkit::builtin::now()}, fmt, tz, mr);
             }
 
+            // datetime(dt_obj [, 'Format', fmt, 'TimeZone', tz])
+            if (nPos == 1 && args[0].isObject() && args[0].objectClassName() == "datetime") {
+                const size_t n = args[0].objectCount();
+                std::vector<double> sds(n);
+                std::string f0 = fmt;
+                std::string tz0 = tz;
+                for (size_t i = 0; i < n; ++i) {
+                    const auto *p = dtElem(args[0], i);
+                    sds[i] = p ? p->serialDay : std::numeric_limits<double>::quiet_NaN();
+                    if (i == 0 && p) {
+                        if (f0.empty()) f0 = p->format;
+                        if (tz0.empty()) tz0 = p->timeZone;
+                    }
+                }
+                return makeDatetimeArray(args[0].dims(), sds, f0, tz0, mr);
+            }
+
             // datetime(x, 'ConvertFrom', type)
             if (!convFrom.empty()) {
                 if (nPos != 1 || (!args[0].isNumeric() && !args[0].isLogical()))
@@ -1534,14 +1555,31 @@ void register_timefun(Engine &engine) {
                 }
             }
 
-            // datetime(datevecMatrix) where cols == 3 or cols == 6
+            // datetime(datevecMatrix) where cols == 3 or cols == 6, or Excel serial date column vector
             if (nPos == 1 && args[0].isNumeric()) {
                 const size_t R = args[0].dims().rows();
                 const size_t C = args[0].dims().cols();
                 if (R == 0 && C == 0)
                     return makeDatetimeArray(Dims(0, 0), {}, fmt, tz, mr);
-                if (C != 3 && C != 6)
+                if (C != 3 && C != 6) {
+                    // If a 1D vector of Excel serial dates (e.g. from readtable on .xlsx)
+                    // is passed directly to datetime(), convert Excel serial dates when values
+                    // lie in [1, 200000].
+                    if ((C == 1 || R == 1) && args[0].numel() >= 1) {
+                        double v0 = args[0].elemAsDouble(0);
+                        if (std::isfinite(v0) && v0 >= 1.0 && v0 <= 200000.0) {
+                            const size_t n = args[0].numel();
+                            std::vector<double> sds(n);
+                            for (size_t i = 0; i < n; ++i) {
+                                double v = args[0].elemAsDouble(i);
+                                sds[i] = std::isfinite(v) ? (v + 693960.0)
+                                                          : std::numeric_limits<double>::quiet_NaN();
+                            }
+                            return makeDatetimeArray(args[0].dims(), sds, fmt, tz, mr);
+                        }
+                    }
                     throw std::runtime_error("nk:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
+                }
                 std::vector<double> sds(R);
                 for (size_t r = 0; r < R; ++r) {
                     double y = args[0].elemAsDouble(r);

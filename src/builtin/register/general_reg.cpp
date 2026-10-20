@@ -695,6 +695,101 @@ void register_general(Engine &engine) {
                 throw std::runtime_error("freqspace: 2-vec input requires 2 output args");
             outs[0] = whole ? whole_vec(n_rows) : half_vec(n_rows);
         });
+
+    // isfile(path) / isfolder(path) — filesystem existence predicates.
+    engine.registerFunction("isfile",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "isfile");
+            auto *mr = ctx.engine->resource();
+            auto checkOne = [&](const std::string &p) -> bool {
+                try {
+                    auto rp = ctx.engine->resolvePath(p);
+                    if (!rp.fs) return false;
+                    auto st = rp.fs->stat(rp.path);
+                    return st && st->kind == FileStat::Kind::File;
+                } catch (...) {
+                    return false;
+                }
+            };
+            if (args[0].isChar()) {
+                outs[0] = Value::logicalScalar(checkOne(args[0].toString()), mr);
+            } else if (args[0].isString()) {
+                Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
+                for (size_t i = 0; i < args[0].numel(); ++i)
+                    res.logicalDataMut()[i] = checkOne(args[0].stringElem(i)) ? 1 : 0;
+                outs[0] = std::move(res);
+            } else if (args[0].isCell()) {
+                Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
+                for (size_t i = 0; i < args[0].numel(); ++i)
+                    res.logicalDataMut()[i] = checkOne(args[0].cellAt(i).toString()) ? 1 : 0;
+                outs[0] = std::move(res);
+            } else {
+                outs[0] = Value::logicalScalar(false, mr);
+            }
+        });
+
+    engine.registerFunction("isfolder",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 1, "isfolder");
+            auto *mr = ctx.engine->resource();
+            auto checkOne = [&](const std::string &p) -> bool {
+                try {
+                    auto rp = ctx.engine->resolvePath(p);
+                    if (!rp.fs) return false;
+                    auto st = rp.fs->stat(rp.path);
+                    return st && st->kind == FileStat::Kind::Directory;
+                } catch (...) {
+                    return false;
+                }
+            };
+            if (args[0].isChar()) {
+                outs[0] = Value::logicalScalar(checkOne(args[0].toString()), mr);
+            } else if (args[0].isString()) {
+                Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
+                for (size_t i = 0; i < args[0].numel(); ++i)
+                    res.logicalDataMut()[i] = checkOne(args[0].stringElem(i)) ? 1 : 0;
+                outs[0] = std::move(res);
+            } else if (args[0].isCell()) {
+                Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
+                for (size_t i = 0; i < args[0].numel(); ++i)
+                    res.logicalDataMut()[i] = checkOne(args[0].cellAt(i).toString()) ? 1 : 0;
+                outs[0] = std::move(res);
+            } else {
+                outs[0] = Value::logicalScalar(false, mr);
+            }
+        });
+
+    // echo / profile / lsline — headless CLI compatibility builtins.
+    engine.registerFunction("echo",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+            outs[0] = Value();
+        });
+
+    engine.registerFunction("profile",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            if (nargout >= 1) {
+                auto *mr = ctx.engine->resource();
+                Value s = Value::structure(mr);
+                s.field("FunctionTable") = Value::structArray(0, 1, mr);
+                s.field("ProfilerStatus") = Value::fromString("off", mr);
+                outs[0] = std::move(s);
+            } else {
+                (void)args;
+                outs[0] = Value();
+            }
+        });
+
+    engine.registerFunction("lsline",
+        [](Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            if (nargout >= 1) {
+                const int hid = ctx.engine->figureManager().createHandle(
+                    "line", "matlab.graphics.chart.primitive.Line");
+                outs[0] = makeGraphicsHandleValue(
+                    "matlab.graphics.chart.primitive.Line", hid, ctx.engine->resource());
+            } else {
+                outs[0] = Value();
+            }
+        });
 }
 
 } // namespace numkit::builtin::detail

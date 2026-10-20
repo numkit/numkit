@@ -134,15 +134,18 @@ void load(Engine &engine, Environment &env, Span<const Value> args,
     auto fileExists = [&](const std::string &cand) -> bool {
         try {
             auto rp = engine.resolvePath(cand);
-            return rp.fs && rp.fs->exists(rp.path);
+            if (!rp.fs || !rp.fs->exists(rp.path)) return false;
+            auto st = rp.fs->stat(rp.path);
+            return st && st->kind == FileStat::Kind::File;
         } catch (...) {
             return false;
         }
     };
 
-    if (!fileExists(filename)) {
-        // MATLAB: if `load foo` has no existing exact file `foo`, check `foo.mat`
-        // in the current directory and along the search path.
+    const bool hasExt = filename.find('.') != std::string::npos;
+    if (!hasExt && fileExists(filename + ".mat")) {
+        filename += ".mat";
+    } else if (!fileExists(filename)) {
         if (!endsWithIgnoreCase(filename, ".mat") && fileExists(filename + ".mat")) {
             filename += ".mat";
         } else {
@@ -150,12 +153,12 @@ void load(Engine &engine, Environment &env, Span<const Value> args,
                 std::string prefix = dir;
                 if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\')
                     prefix += '/';
-                if (fileExists(prefix + filename)) {
-                    filename = prefix + filename;
-                    break;
-                }
                 if (!endsWithIgnoreCase(filename, ".mat") && fileExists(prefix + filename + ".mat")) {
                     filename = prefix + filename + ".mat";
+                    break;
+                }
+                if (fileExists(prefix + filename)) {
+                    filename = prefix + filename;
                     break;
                 }
             }

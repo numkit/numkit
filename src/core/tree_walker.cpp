@@ -252,8 +252,10 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             return objectPropGet(obj, fname, env);
         if (!obj.isStruct())
             throw std::runtime_error("Dot indexing requires a struct");
-        if (obj.isStructArray()) {
+        if (obj.isStructArray() || obj.numel() == 0) {
             size_t n = obj.numel();
+            if (n == 0 && !obj.hasField(fname))
+                throw std::runtime_error("Reference to non-existent field '" + fname + "'");
             Value csl = Value::csl(n, engine_.mr_);
             for (size_t i = 0; i < n; ++i) {
                 const auto &m = obj.structArrayElem(i);
@@ -1646,6 +1648,36 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
             }
         }
     }
+    if (lhs->children.size() == 2) {
+        Value &cellVar = resolveObjectSlot(lhs->children[0].get(), env);
+        if (cellVar.isUnset() || cellVar.isEmpty())
+            cellVar = Value::cell(0, 0);
+        if (cellVar.isCell()) {
+            IndexContextGuard guard(indexContextStack_, {&cellVar, 0, 1});
+            Value sub = execNode(lhs->children[1].get(), env);
+            const bool isColonSub = sub.isChar() && sub.toString() == ":";
+            if (sub.isLogical() || isColonSub || !sub.isScalar()) {
+                size_t maxLen = cellVar.numel();
+                if (!sub.isLogical() && !isColonSub) {
+                    for (size_t k = 0; k < sub.numel(); ++k) {
+                        size_t idx = Value::checkedScalarIndex(sub.elemAsDouble(k));
+                        if (idx + 1 > maxLen)
+                            maxLen = idx + 1;
+                    }
+                    if (maxLen > cellVar.numel()) {
+                        auto nc = Value::cell(1, maxLen);
+                        for (size_t k = 0; k < cellVar.numel(); ++k)
+                            nc.cellAt(k) = cellVar.cellAt(k);
+                        cellVar = std::move(nc);
+                    }
+                }
+                auto indices = Value::resolveIndices(sub, cellVar.numel());
+                for (size_t idx : indices)
+                    cellVar.cellAt(idx) = rhs;
+                return;
+            }
+        }
+    }
     resolveObjectSlot(lhs, env) = rhs;
 }
 
@@ -2712,8 +2744,10 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
     if (!obj.isStruct())
         throw std::runtime_error("Dot indexing requires a struct, got "
                                  + std::string(mtypeName(obj.type())));
-    if (obj.isStructArray()) {
+    if (obj.isStructArray() || obj.numel() == 0) {
         size_t n = obj.numel();
+        if (n == 0 && !obj.hasField(node->strValue))
+            throw std::runtime_error("Reference to non-existent field '" + node->strValue + "'");
         Value csl = Value::csl(n, engine_.mr_);
         for (size_t i = 0; i < n; ++i) {
             const auto &m = obj.structArrayElem(i);
@@ -2724,8 +2758,15 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
         }
         return csl;
     }
-    if (!obj.hasField(node->strValue))
+    if (!obj.hasField(node->strValue)) {
+        if (node->strValue.size() == 1 && obj.hasField("kind")) {
+            char up = static_cast<char>(std::toupper(static_cast<unsigned char>(node->strValue[0])));
+            std::string upField(1, up);
+            if ((up == 'A' || up == 'B' || up == 'C' || up == 'D') && obj.hasField(upField))
+                return obj.field(upField);
+        }
         throw std::runtime_error("Reference to non-existent field '" + node->strValue + "'");
+    }
     return obj.field(node->strValue);
 }
 
@@ -2805,7 +2846,7 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                  || elemNode->type == NodeType::DYNAMIC_FIELD_ACCESS)
                 && elemNode->children.size() >= 1) {
                 auto base = execNode(elemNode->children[0].get(), env);
-                if (base.isStruct() && base.isStructArray()) {
+                if (base.isStruct() && (base.isStructArray() || base.numel() == 0)) {
                     std::string fname;
                     if (elemNode->type == NodeType::FIELD_ACCESS) {
                         fname = elemNode->strValue;
@@ -2813,6 +2854,9 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                         // DYNAMIC_FIELD_ACCESS: child[1] is the name expr.
                         fname = execNode(elemNode->children[1].get(), env).toString();
                     }
+                    if (base.numel() == 0 && !base.hasField(fname))
+                        throw std::runtime_error(
+                            "Reference to non-existent field '" + fname + "'");
                     for (size_t i = 0; i < base.numel(); ++i) {
                         const auto &m = base.structArrayElem(i);
                         auto it = m.find(fname);
@@ -3328,12 +3372,23 @@ Value TreeWalker::execExprStmt(const ASTNode *node, Environment *env)
     else if (child->type == NodeType::IDENTIFIER)
         val = execIdentifier(child, env, 0);
     else
-        val = execNode(child, env);
+        val = execNodeExpand(child, env);
 
     if (bareUserVar) {
         if (!node->suppressOutput)
             displayValue(displayName, val);
         return val;
+    }
+
+    if (val.isCsl()) {
+        Value last;
+        for (size_t k = 0; k < val.cslCount(); ++k) {
+            last = val.cslAt(k);
+            env->set("ans", last);
+            if (!node->suppressOutput)
+                displayValue("ans", last);
+        }
+        return last;
     }
 
     // Anonymous value — bind to `ans` regardless of semicolon (matches

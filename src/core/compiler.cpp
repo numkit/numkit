@@ -1674,7 +1674,7 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
         }
     }
 
-    uint8_t reg = compileNode(child);
+    uint8_t reg = compileNodeExpand(child);
 
     if (bareUserVar) {
         // Display-by-name; no ans store — reading an existing name should
@@ -1686,14 +1686,13 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
         return reg;
     }
 
-    // Non-bare expression — bind to `ans` unconditionally.
-    uint8_t ansReg = varRegWrite("ans");
-    if (ansReg != reg)
-        emitAB(OpCode::MOVE, ansReg, reg);
+    // Non-bare expression — display each element if CSL, then bind to `ans`.
     if (!node->suppressOutput) {
         int16_t nameIdx = addStringConstant("ans");
-        emitAD(OpCode::DISPLAY, ansReg, nameIdx);
+        emitAD(OpCode::DISPLAY, reg, nameIdx);
     }
+    uint8_t ansReg = varRegWrite("ans");
+    emitABC(OpCode::COLLAPSE, ansReg, reg, 1);
     return ansReg;
 }
 
@@ -2213,9 +2212,8 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // struct array yields a single-value horzcat — same as the regular
     // path).
     auto isCslCandidate = [](const ASTNode *elem) {
-        return (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty()
-                && (elem->children[0]->type == NodeType::IDENTIFIER
-                    || elem->children[0]->type == NodeType::CALL))
+        return (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty())
+            || (elem->type == NodeType::DYNAMIC_FIELD_ACCESS && !elem->children.empty())
             // a cell brace-index: 1-D c{:} / c{vec} / c{i} or 2-D c{r,:} / c{:,j} (CSL)
             || (elem->type == NodeType::CELL_INDEX
                 && (elem->children.size() == 2 || elem->children.size() == 3));
@@ -2250,17 +2248,14 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
             uint8_t dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             for (auto &elem : row->children) {
-                if (elem->type == NodeType::CELL_INDEX) {
-                    // cell CSL c{:} / c{vec} / c{idx} / c{r,:}: compileNodeExpand
-                    // preserves a CSL (CELL_GET / CELL_GET_2D produce one for a
-                    // multi-select, incl. a variable subscript); the `end` context is
-                    // set up inside compileCellIndex. HORZCAT_APPEND_FLATTEN appends all
-                    // of a CSL or one of a non-CSL at runtime. See csl_first_class.md.
+                if (elem->type == NodeType::CELL_INDEX || elem->type == NodeType::DYNAMIC_FIELD_ACCESS) {
+                    // cell CSL c{:} / c{vec} / c{idx} / c{r,:} or s.(f): compileNodeExpand
+                    // preserves a CSL; HORZCAT_APPEND_FLATTEN appends all of a CSL or one
+                    // of a non-CSL at runtime. See csl_first_class.md.
                     uint8_t v = compileNodeExpand(elem.get());
                     emitAB(OpCode::HORZCAT_APPEND_FLATTEN, dst, v);
-                } else if (isCslCandidate(elem.get())) {
-                    // struct-array field [s.field] -- a different (not-yet-first-class)
-                    // producer, still on the campaign HORZCAT_APPEND_CSL.
+                } else if (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty()) {
+                    // struct-array field [s.field] or chained [s.sub.field]
                     uint8_t baseReg = compileNode(elem->children[0].get());
                     int16_t nameIdx = addStringConstant(elem->strValue);
                     emit(Instruction::make_abcde(
@@ -3341,7 +3336,13 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     // time we compile statement N, workspaceEnv reflects 1..N-1's
     // assignments. If split-mode is ever removed, this check needs to
     // be runtime-driven via a new opcode.
-    if (funcNode->type == NodeType::FIELD_ACCESS) {
+    bool argHasEnd = false;
+    for (size_t i = 1; i < node->children.size(); ++i)
+        if (refsTopLevelEnd(node->children[i].get())) {
+            argHasEnd = true;
+            break;
+        }
+    if (funcNode->type == NodeType::FIELD_ACCESS && !argHasEnd) {
         const ASTNode *rootIdent = nullptr;
         std::string qualified = tryBuildQualifiedName(funcNode, &rootIdent);
         if (!qualified.empty()) {
@@ -3414,12 +3415,6 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     // through to the FIELD_GET + CALL_INDIRECT path below, which binds
     // `end` to the materialised field value. `end` in a method arg is
     // not meaningful, so objects lose nothing.
-    bool argHasEnd = false;
-    for (size_t i = 1; i < node->children.size(); ++i)
-        if (refsTopLevelEnd(node->children[i].get())) {
-            argHasEnd = true;
-            break;
-        }
     if (funcNode->type == NodeType::FIELD_ACCESS && !argHasEnd) {
         uint8_t objReg = compileNode(funcNode->children[0].get());
         const size_t nargs = node->children.size() - 1;
@@ -3540,15 +3535,25 @@ uint8_t Compiler::compileCall(const ASTNode *node)
 
     // clear(expr) works both inside functions and at top-level
     if (name == "clear") {
+        bool anyBrace = false;
+        std::vector<uint8_t> argRegs;
+        argRegs.reserve(nargs);
         for (size_t i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
                 auto it = varRegisters_.find(argNode->strValue);
                 if (it != varRegisters_.end() && engine_.isReservedName(argNode->strValue) == 0)
                     emitA(OpCode::CLEAR_VAR, it->second);
+                if (isTopLevel_)
+                    argRegs.push_back(compileNode(argNode));
             } else {
-                uint8_t nameReg = compileNode(argNode);
-                emitA(OpCode::CLEAR_DYN, nameReg);
+                const bool isBrace = (argNode->type == NodeType::CELL_INDEX);
+                if (isBrace)
+                    anyBrace = true;
+                uint8_t nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
+                emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<uint8_t>(nargs));
+                if (isTopLevel_)
+                    argRegs.push_back(nameReg);
             }
         }
         if (nargs == 0) {
@@ -3564,10 +3569,6 @@ uint8_t Compiler::compileCall(const ASTNode *node)
         // `clear('-regexp', '^foo')` because intermediate temps from
         // compileNode displaced subsequent slots.
         if (isTopLevel_) {
-            std::vector<uint8_t> argRegs;
-            argRegs.reserve(nargs);
-            for (size_t i = 1; i <= nargs; ++i)
-                argRegs.push_back(compileNode(node->children[i].get()));
             uint8_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
                 uint8_t slot = tempReg();
@@ -3576,7 +3577,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             }
             uint8_t dst = tempReg();
             int16_t funcIdx = addStringConstant(name);
-            emit(Instruction::make_abcde(OpCode::CALL,
+            emit(Instruction::make_abcde(anyBrace ? OpCode::CALL_FLATTEN : OpCode::CALL,
                                          dst,
                                          argBase,
                                          static_cast<uint8_t>(nargs),
@@ -4217,10 +4218,15 @@ uint8_t Compiler::compileFunctionDef(const ASTNode *node)
     // bucket it lands in depends on whether we're inside a script
     // scope — script-local functions live in their own store so
     // `clear all` can't touch them (MATLAB parity).
+    const std::string enclosingFunc =
+        (!isTopLevel_ && !chunk_.name.empty() && chunk_.name != "<script>")
+            ? (chunk_.parentFuncName.empty() ? chunk_.name : chunk_.parentFuncName)
+            : std::string();
     BytecodeChunk funcChunk;
     bool twOnly = false;
     try {
         funcChunk = compileFunction(node);
+        funcChunk.parentFuncName = enclosingFunc;
     } catch (const CompilerLimitError &) {
         // Schema/body exceeds the VM operand space (registers or the
         // 255-param schema). Register the function TreeWalker-only — the
@@ -4358,9 +4364,8 @@ void Compiler::eraseCompiledFuncsForClass(const std::string &className)
 
 const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
 {
-    auto it = compiledFuncs_.find(uf.name);
-    if (it != compiledFuncs_.end())
-        return &it->second;
+    if (const BytecodeChunk *existing = findCompiled(uf.name))
+        return existing;
     if (uncompilableClassMethods_.count(uf.name))
         return nullptr; // a construct the VM can't compile yet → use the TW hook
     // Reconstruct a FUNCTION_DEF from the UserFunction and compile it into the

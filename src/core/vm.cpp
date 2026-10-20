@@ -403,6 +403,8 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, Span<const Valu
 
 // ── Paused state save/restore (for debug eval) ────────────
 
+static thread_local std::vector<VM::PausedState *> s_activePausedStates;
+
 std::unique_ptr<VM::PausedState> VM::savePausedState()
 {
     for (const auto &f : frames_) {
@@ -435,12 +437,15 @@ std::unique_ptr<VM::PausedState> VM::savePausedState()
     s->regSnapshot.assign(regStack_.begin(), regStack_.begin() + regStackTop_);
     s->wasReentrantEval = inReentrantEval_;
     inReentrantEval_ = true;
+    s_activePausedStates.push_back(s.get());
     return s;
 }
 
 void VM::restorePausedState(std::unique_ptr<PausedState> s)
 {
     if (!s) return;
+    if (!s_activePausedStates.empty() && s_activePausedStates.back() == s.get())
+        s_activePausedStates.pop_back();
     // The frames being replaced belong to an inner, abandoned run — drop
     // their origin pushes before the outer's frames (whose pushes are still
     // on the stack) become current again.
@@ -667,7 +672,20 @@ enter_frame:
                 break;
             case OpCode::COLLAPSE:
                 // Collapse a CSL reaching a single-value sink (no-op on a non-CSL).
-                // Emitted only by the dataflow pass; inert until producers make CSLs.
+                // When I.c == 1 (statement-level sink to ans), bind the last CSL element
+                // (or leave R[I.a] untouched if 0-element CSL).
+                if (I.c == 1) {
+                    if (R[I.b].isCsl()) {
+                        size_t n = R[I.b].cslCount();
+                        if (n > 0)
+                            R[I.a] = R[I.b].cslAt(n - 1);
+                        else if (I.a == I.b)
+                            R[I.a] = Value();
+                    } else if (I.a != I.b) {
+                        R[I.a] = R[I.b];
+                    }
+                    break;
+                }
                 R[I.a] = collapseCsl(std::move(R[I.b]));
                 break;
             case OpCode::COLON_ALL:
@@ -1289,6 +1307,9 @@ enter_frame:
                 elems.push_back(dst);
                 if (src.isStruct()) {
                     size_t n = src.numel();
+                    if (n == 0 && !src.hasField(fname))
+                        throw std::runtime_error(
+                            "Reference to non-existent field '" + fname + "'");
                     elems.reserve(n + 1);
                     for (size_t i = 0; i < n; ++i) {
                         const auto &m = src.structArrayElem(i);
@@ -1933,8 +1954,10 @@ enter_frame:
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
-                if (R[I.b].isStructArray()) {
+                if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
                     size_t n = R[I.b].numel();
+                    if (n == 0 && !R[I.b].hasField(fname))
+                        throw std::runtime_error("Reference to non-existent field '" + fname + "'");
                     Value csl = Value::csl(n, engine_.mr_);
                     for (size_t i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
@@ -1946,8 +1969,17 @@ enter_frame:
                     R[I.a] = std::move(csl);
                     break;
                 }
-                if (!R[I.b].hasField(fname))
+                if (!R[I.b].hasField(fname)) {
+                    if (fname.size() == 1 && R[I.b].hasField("kind")) {
+                        char up = static_cast<char>(std::toupper(static_cast<unsigned char>(fname[0])));
+                        std::string upField(1, up);
+                        if ((up == 'A' || up == 'B' || up == 'C' || up == 'D') && R[I.b].hasField(upField)) {
+                            R[I.a] = R[I.b].field(upField);
+                            break;
+                        }
+                    }
                     throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                }
                 R[I.a] = R[I.b].field(fname);
                 break;
             }
@@ -2105,8 +2137,10 @@ enter_frame:
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
-                if (R[I.b].isStructArray()) {
+                if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
                     size_t n = R[I.b].numel();
+                    if (n == 0 && !R[I.b].hasField(fname))
+                        throw std::runtime_error("Reference to non-existent field '" + fname + "'");
                     Value csl = Value::csl(n, engine_.mr_);
                     for (size_t i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
@@ -2324,6 +2358,27 @@ enter_frame:
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
+                const bool isColonSub = R[I.b].isChar() && R[I.b].toString() == ":";
+                if (R[I.b].isLogical() || isColonSub || !R[I.b].isScalar()) {
+                    size_t maxLen = R[I.a].numel();
+                    if (!R[I.b].isLogical() && !isColonSub) {
+                        for (size_t k = 0; k < R[I.b].numel(); ++k) {
+                            size_t idx = Value::checkedScalarIndex(R[I.b].elemAsDouble(k));
+                            if (idx + 1 > maxLen)
+                                maxLen = idx + 1;
+                        }
+                        if (maxLen > R[I.a].numel()) {
+                            auto nc = Value::cell(1, maxLen);
+                            for (size_t k = 0; k < R[I.a].numel(); ++k)
+                                nc.cellAt(k) = R[I.a].cellAt(k);
+                            R[I.a] = std::move(nc);
+                        }
+                    }
+                    auto indices = Value::resolveIndices(R[I.b], R[I.a].numel());
+                    for (size_t idx : indices)
+                        R[I.a].cellAt(idx) = R[I.c];
+                    break;
+                }
                 size_t i = Value::checkedScalarIndex(R[I.b].toScalar());
                 if (i >= R[I.a].numel()) {
                     size_t ns = i + 1;
@@ -2630,8 +2685,43 @@ enter_frame:
                         R[I.a] = std::move(ob[0]);
                         break;
                     }
+                    auto findParentVar = [&](const std::string &varName) -> const Value * {
+                        if (chunk.parentFuncName.empty())
+                            return nullptr;
+                        for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                            const CallFrame &pf = frames_[fi];
+                            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                                continue;
+                            for (const auto &[vname, reg] : pf.chunk->varMap) {
+                                if (vname == varName && reg < pf.nregs) {
+                                    if (!pf.R[reg].isUnset() && !pf.R[reg].isDeleted())
+                                        return &pf.R[reg];
+                                    break;
+                                }
+                            }
+                        }
+                        for (int psi = static_cast<int>(s_activePausedStates.size()) - 1; psi >= 0; --psi) {
+                            const VM::PausedState *ps = s_activePausedStates[psi];
+                            if (!ps) continue;
+                            for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                                const CallFrame &pf = ps->frames[fi];
+                                if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                                    continue;
+                                for (const auto &[vname, reg] : pf.chunk->varMap) {
+                                    if (vname == varName && reg < pf.nregs
+                                        && pf.regBase + reg < ps->regSnapshot.size()) {
+                                        const Value &v = ps->regSnapshot[pf.regBase + reg];
+                                        if (!v.isUnset() && !v.isDeleted())
+                                            return &v;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        return nullptr;
+                    };
                     size_t dot = funcName.find('.');
-                    if (dot != std::string::npos && na == 0) {
+                    if (dot != std::string::npos) {
                         std::string root = funcName.substr(0, dot);
                         const Value *rootVal = nullptr;
                         if (frame.dynVars) {
@@ -2639,11 +2729,13 @@ enter_frame:
                             if (it != frame.dynVars->end() && !it->second.isDeleted())
                                 rootVal = &it->second;
                         }
+                        if (!rootVal)
+                            rootVal = findParentVar(root);
                         if (!rootVal && currentCallEnv())
                             rootVal = currentCallEnv()->get(root);
                         if (!rootVal)
                             rootVal = engine_.workspaceEnv().get(root);
-                        if (rootVal && !rootVal->isUnset()) {
+                        if (rootVal && !rootVal->isUnset() && !rootVal->isDeleted()) {
                             Value cur = *rootVal;
                             size_t pos = dot + 1;
                             while (pos < funcName.size()) {
@@ -2661,7 +2753,12 @@ enter_frame:
                                     break;
                                 pos = nextDot + 1;
                             }
-                            R[I.a] = std::move(cur);
+                            if (na == 0) {
+                                R[I.a] = std::move(cur);
+                            } else {
+                                if (execCallIndirectSpan(cur, I.a, &R[argBase], na, R, frame, ip))
+                                    goto enter_frame;
+                            }
                             break;
                         }
                     }
@@ -2672,6 +2769,8 @@ enter_frame:
                             if (it != frame.dynVars->end() && !it->second.isDeleted())
                                 varVal = &it->second;
                         }
+                        if (!varVal)
+                            varVal = findParentVar(funcName);
                         if (!varVal && currentCallEnv())
                             varVal = currentCallEnv()->get(funcName);
                         if (!varVal)
@@ -3318,6 +3417,52 @@ enter_frame:
                             break;
                         }
                     }
+                    if (!chunk.parentFuncName.empty()) {
+                        const std::string &nn = chunk.strings[I.d];
+                        bool foundInParent = false;
+                        for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                            const CallFrame &pf = frames_[fi];
+                            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                                continue;
+                            for (const auto &[vname, reg] : pf.chunk->varMap) {
+                                if (vname == nn && reg < pf.nregs) {
+                                    if (!pf.R[reg].isUnset() && !pf.R[reg].isDeleted()) {
+                                        R[I.a] = pf.R[reg];
+                                        foundInParent = true;
+                                    }
+                                    break;
+                                }
+                            }
+                            if (foundInParent)
+                                break;
+                        }
+                        if (!foundInParent) {
+                            for (int psi = static_cast<int>(s_activePausedStates.size()) - 1; psi >= 0 && !foundInParent; --psi) {
+                                const VM::PausedState *ps = s_activePausedStates[psi];
+                                if (!ps) continue;
+                                for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                                    const CallFrame &pf = ps->frames[fi];
+                                    if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                                        continue;
+                                    for (const auto &[vname, reg] : pf.chunk->varMap) {
+                                        if (vname == nn && reg < pf.nregs
+                                            && pf.regBase + reg < ps->regSnapshot.size()) {
+                                            const Value &v = ps->regSnapshot[pf.regBase + reg];
+                                            if (!v.isUnset() && !v.isDeleted()) {
+                                                R[I.a] = v;
+                                                foundInParent = true;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    if (foundInParent)
+                                        break;
+                                }
+                            }
+                        }
+                        if (foundInParent)
+                            break;
+                    }
                     {
                         const std::string &nn = chunk.strings[I.d];
                         if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
@@ -3348,6 +3493,26 @@ enter_frame:
                 break;
 
             case OpCode::CLEAR_DYN: {
+                if (R[I.a].isCsl()) {
+                    const size_t n = R[I.a].cslCount();
+                    if (n == 0 && I.b <= 1) {
+                        for (auto &[vn, reg] : chunk.varMap) {
+                            if (reg < chunk.numRegisters && engine_.isReservedName(vn) == 0)
+                                R[reg] = Value::deleted();
+                        }
+                    } else {
+                        for (size_t k = 0; k < n; ++k) {
+                            std::string varName = R[I.a].cslAt(k).toString();
+                            for (auto &[vn, reg] : chunk.varMap) {
+                                if (vn == varName && reg < chunk.numRegisters) {
+                                    R[reg] = Value::deleted();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
                 std::string varName = R[I.a].toString();
                 for (auto &[vn, reg] : chunk.varMap) {
                     if (vn == varName && reg < chunk.numRegisters) {
@@ -3992,13 +4157,15 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
         }
     }
 
-    // Import global variables from globalsEnv
+    // Import global/persistent variables from globalsEnv (seed [] if uninitialized)
     for (auto &gname : funcChunk.globalNames) {
         for (auto &[vname, reg] : funcChunk.varMap) {
             if (vname == gname && reg < nregs) {
                 Value *gval = engine_.globalsEnv_->get(gname);
-                if (gval)
+                if (gval && !gval->isUnset() && !gval->isDeleted())
                     newR[reg] = *gval;
+                else
+                    newR[reg] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                 break;
             }
         }
@@ -4921,6 +5088,18 @@ void VM::execDisplay(const Instruction &I, Value *R, const BytecodeChunk &chunk)
     if (R[I.a].isUnset())
         return;
     const std::string &name = chunk.strings[I.d];
+    if (R[I.a].isCsl()) {
+        for (size_t k = 0; k < R[I.a].cslCount(); ++k) {
+            const Value &elem = R[I.a].cslAt(k);
+            if (elem.isUnset())
+                continue;
+            if (elem.isObject())
+                engine_.displayObject(name, elem);
+            else
+                engine_.outputText(elem.formatDisplay(name));
+        }
+        return;
+    }
     if (R[I.a].isObject()) {
         engine_.displayObject(name, R[I.a]); // honours class disp/display override
         return;

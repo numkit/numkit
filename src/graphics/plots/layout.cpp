@@ -67,24 +67,30 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     regCore("layout", "close",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             auto &fm = gc.fm;
             if (args.empty()) {
                 fm.closeCurrentNotify();
-            } else if (args[0].isChar() && args[0].toString() == "all") {
+            } else if ((args[0].isChar() || args[0].isString()) && args[0].toString() == "all") {
                 fm.closeAllNotify();
-            } else if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
-                // close(f) with a handle â€” close that figure. A deleted /
-                // non-figure handle errors (MATLAB: "Invalid object handle").
-                auto *rec = fm.findHandle(hid);
-                if (!rec)
-                    throw std::runtime_error("Invalid or deleted object.");
-                if (rec->type == "figure")
-                    fm.closeFigureNotify(rec->figureId);
-                else if (rec->type == "waitbar")
-                    rec->deleted = true;
-            } else {
-                int id = static_cast<int>(args[0].toScalar());
-                fm.closeFigureNotify(id);
+            } else if (args[0].isObject()) {
+                for (size_t k = 0; k < args[0].objectCount(); ++k) {
+                    Value elem = args[0].objectSubArray({k}, gc.mr);
+                    const int hid = graphicsHandleIdOf(elem);
+                    if (hid < 0) continue;
+                    auto *rec = fm.findHandle(hid);
+                    if (!rec)
+                        throw std::runtime_error("Invalid or deleted object.");
+                    if (rec->type == "figure")
+                        fm.closeFigureNotify(rec->figureId);
+                    else if (rec->type == "waitbar")
+                        rec->deleted = true;
+                }
+            } else if (args[0].isNumeric()) {
+                for (size_t k = 0; k < args[0].numel(); ++k) {
+                    int id = static_cast<int>(args[0].elemAsDouble(k));
+                    fm.closeFigureNotify(id);
+                }
             }
             outs[0] = Value();
         });

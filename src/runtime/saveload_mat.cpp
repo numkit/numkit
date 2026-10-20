@@ -144,8 +144,10 @@ public:
             if (byteCount > 0 && data) {
                 writeBytes(data, byteCount);
             }
-            std::size_t pad = ((byteCount + 7) & ~7) - byteCount;
-            for (std::size_t i = 0; i < pad; ++i) writeU8(0);
+            if (type != miCOMPRESSED) {
+                std::size_t pad = ((byteCount + 7) & ~7) - byteCount;
+                for (std::size_t i = 0; i < pad; ++i) writeU8(0);
+            }
         }
     }
 };
@@ -262,6 +264,17 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 // ============================================================================
 
 void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
+    if (v.type() == ValueType::STRING) {
+        if (v.numel() <= 1) {
+            encodeMat5Matrix(mw, name, Value::fromString(v.numel() == 1 ? v.stringElem(0) : ""));
+            return;
+        }
+        Value c = createCell(v.dims(), nullptr);
+        for (std::size_t i = 0; i < v.numel(); ++i)
+            c.cellAt(i) = Value::fromString(v.stringElem(i));
+        encodeMat5Matrix(mw, name, c);
+        return;
+    }
     MatWriter inner;
 
     // 1. Array Flags
@@ -374,7 +387,7 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
         for (std::size_t i = 0; i < numElems; ++i) {
             utf16[i] = static_cast<std::uint8_t>(src[i]);
         }
-        inner.writeTag(miUINT16, utf16.data(), static_cast<std::uint32_t>(numElems * sizeof(std::uint16_t)));
+        inner.writeTag(miUTF16, utf16.data(), static_cast<std::uint32_t>(numElems * sizeof(std::uint16_t)));
     } else if (v.type() == ValueType::COMPLEX) {
         // Split complex into real and imaginary arrays
         std::vector<double> realPart(numElems);
@@ -502,14 +515,18 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         }
 
         if (arrayClass == mxSTRUCT_CLASS) {
-            if (numElems <= 1) {
+            if (numElems == 1) {
                 result = Value::structure(mem);
             } else {
                 result = Value::structArray(shape.rows(), shape.cols(), mem);
             }
             for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
-                for (std::size_t ei = 0; ei < numElems; ++ei) {
-                    result.setField(ei, fnames[fi], fieldVals[fi][ei]);
+                if (numElems == 0) {
+                    result.setFieldAll(fnames[fi], Value{});
+                } else {
+                    for (std::size_t ei = 0; ei < numElems; ++ei) {
+                        result.setField(ei, fnames[fi], fieldVals[fi][ei]);
+                    }
                 }
             }
         } else {
@@ -537,7 +554,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         auto dataTag = ir.readTag();
         result = createMatrix(shape, ValueType::CHAR, mem);
         char *out = result.charDataMut();
-        if (dataTag.type == miUINT16) {
+        if (dataTag.type == miUINT16 || dataTag.type == miUTF16) {
             std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount / 2));
             for (std::size_t i = 0; i < charCount; ++i) {
                 out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
@@ -974,7 +991,10 @@ void loadMat(Engine &engine, Environment &env,
                     auto [name, v] = decodeMat5Matrix(decompReader, mr);
                     if (!name.empty()) {
                         if (nargout > 0) asStruct.setField(0, name, v);
-                        else env.set(name, std::move(v));
+                        else {
+                            env.set(name, v);
+                            engine.assignToCaller(0, name, std::move(v));
+                        }
                         ++loadedCount;
                     }
                 }
@@ -983,7 +1003,10 @@ void loadMat(Engine &engine, Environment &env,
                 auto [name, v] = decodeMat5Matrix(subReader, mr);
                 if (!name.empty()) {
                     if (nargout > 0) asStruct.setField(0, name, v);
-                    else env.set(name, std::move(v));
+                    else {
+                        env.set(name, v);
+                        engine.assignToCaller(0, name, std::move(v));
+                    }
                     ++loadedCount;
                 }
             }

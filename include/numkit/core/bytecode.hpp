@@ -377,6 +377,7 @@ struct BytecodeChunk
 
     // Metadata
     std::string name;         // function name or "<script>"
+    std::string parentFuncName; // enclosing function name for nested functions
     uint8_t numRegisters = 0; // total registers needed
     uint8_t numParams = 0;
     uint8_t numReturns = 0;

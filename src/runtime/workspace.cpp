@@ -296,7 +296,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
     // â”€â”€ who â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("who",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
 
                                 // -file <fname>: in our ASCII save format the file
@@ -353,6 +353,15 @@ void registerWorkspaceRuntime(Engine &engine)
                                 }
                                 std::sort(names.begin(), names.end());
 
+                                if (nargout > 0) {
+                                    auto *mr = ctx.engine->resource();
+                                    Value c = Value::cell(names.size(), 1, mr);
+                                    for (size_t i = 0; i < names.size(); ++i)
+                                        c.cellAt(i) = Value::fromString(names[i], mr);
+                                    outs[0] = std::move(c);
+                                    return;
+                                }
+
                                 std::ostringstream os;
                                 if (!names.empty()) {
                                     os << "\nYour variables are:\n\n";
@@ -366,7 +375,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
     // â”€â”€ whos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     engine.registerFunction("whos",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
 
                                 // -file <fname>: ASCII save format holds a single matrix
@@ -419,6 +428,41 @@ void registerWorkspaceRuntime(Engine &engine)
                                     }
                                 }
                                 std::sort(names.begin(), names.end());
+
+                                if (nargout > 0) {
+                                    auto *mr = ctx.engine->resource();
+                                    std::vector<std::pair<std::string, const Value *>> valid;
+                                    valid.reserve(names.size());
+                                    for (auto &n : names) {
+                                        if (auto *val = env->get(n))
+                                            valid.emplace_back(n, val);
+                                    }
+                                    Value sa = Value::structArray(valid.size(), 1, mr);
+                                    for (size_t idx = 0; idx < valid.size(); ++idx) {
+                                        const auto &[n, val] = valid[idx];
+                                        auto &d = val->dims();
+                                        const int nd = std::max(2, d.ndim());
+                                        Value sz = Value::matrix(1, static_cast<size_t>(nd), ValueType::DOUBLE, mr);
+                                        for (int k = 0; k < nd; ++k)
+                                            sz.doubleDataMut()[k] = static_cast<double>(d.dim(k));
+                                        std::string classStr = val->isSingleComplex()
+                                            ? "single" : std::string(mtypeName(val->type()));
+                                        Value nest = Value::structure(mr);
+                                        nest.field("function") = Value::fromString("", mr);
+                                        nest.field("level") = Value::scalar(0.0, mr);
+                                        sa.setField(idx, "name", Value::fromString(n, mr));
+                                        sa.setField(idx, "size", std::move(sz));
+                                        sa.setField(idx, "bytes", Value::scalar(static_cast<double>(val->deepBytes()), mr));
+                                        sa.setField(idx, "class", Value::fromString(classStr, mr));
+                                        sa.setField(idx, "global", Value::logicalScalar(env->isGlobal(n), mr));
+                                        sa.setField(idx, "sparse", Value::logicalScalar(false, mr));
+                                        sa.setField(idx, "complex", Value::logicalScalar(val->isComplex() || val->isSingleComplex(), mr));
+                                        sa.setField(idx, "nesting", std::move(nest));
+                                        sa.setField(idx, "persistent", Value::logicalScalar(false, mr));
+                                    }
+                                    outs[0] = std::move(sa);
+                                    return;
+                                }
 
                                 std::ostringstream os;
                                 if (!names.empty()) {

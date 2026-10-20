@@ -423,9 +423,30 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
     } else {
         lo = +INFINITY;
         hi = -INFINITY;
+        int imgDatasets = 0, seriesDatasets = 0;
         for (const auto &ds : ax->datasets) {
             if (!ds.visible)
                 continue;
+            if (ds.type == "imagesc" || ds.type == "image-rgb") {
+                ++imgDatasets;
+                size_t cells = (axis == 'x')
+                                   ? (ds.originalCols ? ds.originalCols : 1)
+                                   : (ds.originalRows ? ds.originalRows : 1);
+                auto v = figdetail::parseFlatDoubles(axis == 'x' ? ds.xJson : ds.yJson);
+                if (v.size() < 2 || cells == 0) {
+                    lo = std::min(lo, 0.5);
+                    hi = std::max(hi, cells > 0 ? cells + 0.5 : 1.5);
+                } else {
+                    double span = v.back() - v.front();
+                    double sp = cells > 1 ? span / (double)(cells - 1) : (span > 0 ? span : 1.0);
+                    lo = std::min(lo, v.front() - sp / 2);
+                    hi = std::max(hi, v.back() + sp / 2);
+                }
+                continue;
+            }
+            if (ds.type == "text")
+                continue;
+            ++seriesDatasets;
             const std::string &j = axis == 'x' ? ds.xJson : ds.yJson;
             for (double v : figdetail::parseFlatDoubles(j))
                 if (std::isfinite(v)) {
@@ -437,9 +458,12 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
             lo = 0;
             hi = 1;
         }
-        double d = (hi - lo) * 0.05;
-        lo -= d;
-        hi += d;
+        bool imageOnly = imgDatasets > 0 && seriesDatasets == 0;
+        if (!imageOnly) {
+            double d = (hi - lo) * 0.05;
+            lo -= d;
+            hi += d;
+        }
     }
     if (log) {
         if (!(lo > 0) || !(hi > lo))
@@ -605,23 +629,51 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return Value();
+    auto autoLim = [&](char axisChar) {
+        double lo = 0.0, hi = 1.0;
+        double dmin = 1e300, dmax = -1e300;
+        for (const auto &ds : ax->datasets) {
+            if (!ds.visible) continue;
+            const std::string &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
+            for (double v : figdetail::parseFlatDoubles(j)) {
+                if (std::isfinite(v)) {
+                    if (v < dmin) dmin = v;
+                    if (v > dmax) dmax = v;
+                }
+            }
+        }
+        if (dmin <= dmax) {
+            if (dmax > dmin) {
+                const double span = dmax - dmin;
+                const double p10 = std::pow(10.0, std::floor(std::log10(span)));
+                const double s = span / p10;
+                const double step = (s <= 1.5) ? 0.2 * p10
+                                  : (s <= 3.0) ? 0.5 * p10
+                                  : (s <= 7.0) ? 1.0 * p10
+                                               : 2.0 * p10;
+                lo = std::floor(dmin / step + 1e-12) * step;
+                hi = std::ceil(dmax / step - 1e-12) * step;
+            } else {
+                lo = dmin - 1.0;
+                hi = dmin + 1.0;
+            }
+        }
+        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        v.doubleDataMut()[0] = lo;
+        v.doubleDataMut()[1] = hi;
+        return v;
+    };
     if (name == "XLim") {
         if (!ax->xlimJson.empty()) return decodeProp(ax->xlimJson, mr);
-        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
-        return v;
+        return autoLim('x');
     }
     if (name == "YLim") {
         if (!ax->ylimJson.empty()) return decodeProp(ax->ylimJson, mr);
-        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
-        return v;
+        return autoLim('y');
     }
     if (name == "ZLim") {
         if (!ax->zlimJson.empty()) return decodeProp(ax->zlimJson, mr);
-        Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-        v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
-        return v;
+        return autoLim('z');
     }
     if (name == "Position" || name == "OuterPosition") {
         auto it = rec->props.find(name);
@@ -690,10 +742,26 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         return str(ax->xTickLabelsJson.empty() ? "auto" : "manual");
     if (name == "YTickLabelMode")
         return str(ax->yTickLabelsJson.empty() ? "auto" : "manual");
-    if (!ax->xTickLabelsJson.empty() && name == "XTickLabel")
-        return decodeTickLabels(ax->xTickLabelsJson, mr);
-    if (!ax->yTickLabelsJson.empty() && name == "YTickLabel")
-        return decodeTickLabels(ax->yTickLabelsJson, mr);
+    if (name == "XTickLabel") {
+        if (!ax->xTickLabelsJson.empty())
+            return decodeTickLabels(ax->xTickLabelsJson, mr);
+        auto v = !ax->xTicksAuto ? figdetail::parseFlatDoubles(ax->xTicksJson)
+                                 : axesAutoTicks(fm, rec, 'x');
+        Value c = Value::cell(v.size(), 1, mr);
+        for (size_t i = 0; i < v.size(); ++i)
+            c.cellAt(i) = Value::fromString(figrender::tickLabel(v[i]), mr);
+        return c;
+    }
+    if (name == "YTickLabel") {
+        if (!ax->yTickLabelsJson.empty())
+            return decodeTickLabels(ax->yTickLabelsJson, mr);
+        auto v = !ax->yTicksAuto ? figdetail::parseFlatDoubles(ax->yTicksJson)
+                                 : axesAutoTicks(fm, rec, 'y');
+        Value c = Value::cell(v.size(), 1, mr);
+        for (size_t i = 0; i < v.size(); ++i)
+            c.cellAt(i) = Value::fromString(figrender::tickLabel(v[i]), mr);
+        return c;
+    }
     if (name == "CLim") {
         if (!ax->climJson.empty())
             return decodeProp(ax->climJson, mr);
@@ -919,10 +987,51 @@ Value makeHandleArray(const std::string &className,
 // (Text.String, Legend.Location/Box/Visible, chart XData) read from the
 // figure state; everything user-set lives in rec->props; documented
 // MATLAB defaults fill the rest.
+std::string canonicalPropName(const std::string &raw)
+{
+    std::string low = raw;
+    for (char &ch : low)
+        if (ch >= 'A' && ch <= 'Z')
+            ch = static_cast<char>(ch - 'A' + 'a');
+    static const std::pair<const char *, const char *> kNames[] = {
+        {"xlim", "XLim"}, {"ylim", "YLim"}, {"zlim", "ZLim"}, {"clim", "CLim"},
+        {"xtick", "XTick"}, {"ytick", "YTick"}, {"ztick", "ZTick"},
+        {"xticklabel", "XTickLabel"}, {"yticklabel", "YTickLabel"}, {"zticklabel", "ZTickLabel"},
+        {"xticklabels", "XTickLabel"}, {"yticklabels", "YTickLabel"}, {"zticklabels", "ZTickLabel"},
+        {"xtickmode", "XTickMode"}, {"ytickmode", "YTickMode"}, {"ztickmode", "ZTickMode"},
+        {"xticklabelmode", "XTickLabelMode"}, {"yticklabelmode", "YTickLabelMode"}, {"zticklabelmode", "ZTickLabelMode"},
+        {"xscale", "XScale"}, {"yscale", "YScale"}, {"zscale", "ZScale"},
+        {"xgrid", "XGrid"}, {"ygrid", "YGrid"}, {"zgrid", "ZGrid"},
+        {"xlabel", "XLabel"}, {"ylabel", "YLabel"}, {"zlabel", "ZLabel"},
+        {"xdir", "XDir"}, {"ydir", "YDir"}, {"zdir", "ZDir"},
+        {"climmode", "CLimMode"}, {"title", "Title"},
+        {"fontsize", "FontSize"}, {"fontweight", "FontWeight"}, {"fontname", "FontName"},
+        {"linewidth", "LineWidth"}, {"linestyle", "LineStyle"},
+        {"marker", "Marker"}, {"markersize", "MarkerSize"},
+        {"color", "Color"}, {"visible", "Visible"}, {"displayname", "DisplayName"},
+        {"xdata", "XData"}, {"ydata", "YData"}, {"zdata", "ZData"},
+        {"sizedata", "SizeData"}, {"barwidth", "BarWidth"}, {"basevalue", "BaseValue"},
+        {"binedges", "BinEdges"}, {"values", "Values"}, {"bincounts", "BinCounts"},
+        {"numbins", "NumBins"}, {"binwidth", "BinWidth"}, {"binlimits", "BinLimits"},
+        {"data", "Data"}, {"type", "Type"}, {"parent", "Parent"}, {"children", "Children"},
+        {"number", "Number"}, {"currentaxes", "CurrentAxes"},
+        {"position", "Position"}, {"outerposition", "OuterPosition"},
+        {"string", "String"}, {"location", "Location"}, {"box", "Box"},
+        {"units", "Units"}, {"paperunits", "PaperUnits"}, {"papersize", "PaperSize"},
+        {"paperposition", "PaperPosition"}, {"papertype", "PaperType"},
+        {"numbertitle", "NumberTitle"}, {"name", "Name"},
+    };
+    for (const auto &kv : kNames)
+        if (low == kv.first)
+            return kv.second;
+    return raw;
+}
+
 Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                    const std::string &name, std::pmr::memory_resource *mr,
+                    const std::string &rawName, std::pmr::memory_resource *mr,
                     bool strict = false)
 {
+    const std::string name = canonicalPropName(rawName);
     auto str = [&](const char *s) { return Value::fromString(s, mr); };
     auto num = [&](double d) { return Value::scalar(d, mr); };
     auto rgb = [&](double r, double g, double b) {
@@ -1198,8 +1307,9 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 
 // Returns true when the property is known/accepted (stored at minimum).
 bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                   const std::string &name, const Value &val)
+                   const std::string &rawName, const Value &val)
 {
+    const std::string name = canonicalPropName(rawName);
     if (name == "XData" || name == "YData") {
         rec->props.erase(name);
     } else if (!(val.isNumeric() && val.numel() > 1024 && name != "ZData")) {
@@ -1993,7 +2103,7 @@ void GraphicsLibrary::install(Engine &engine)
     // Layout functions whose RESULT the adapter wraps into a handle
     // object (the core-free body only prepares the state / label field).
     static const std::unordered_set<std::string> kHandleReturning = {
-        "figure", "gcf", "gca", "axes",
+        "figure", "gcf", "gca", "axes", "polaraxes",
         "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
         "legend", "text",
     };

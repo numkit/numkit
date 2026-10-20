@@ -465,7 +465,7 @@ void Lexer::readNumber()
     bool hasDigits = false;
 
     size_t intStart = pos_;
-    while (pos_ < src_.size() && (isDigit(peek()) || peek() == '_')) {
+    while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1))))) {
         if (peek() != '_')
             hasDigits = true;
         advance();
@@ -480,12 +480,15 @@ void Lexer::readNumber()
         bool isDotOperator = (next == '*' || next == '/' || next == '^' || next == '\''
                               || next == '\\' || next == '.');
 
-        bool isFieldAccess = (isAlpha(next) && next != 'e' && next != 'E');
+        bool isExponent = (next == 'e' || next == 'E')
+                          && (isDigit(peek(2))
+                              || ((peek(2) == '+' || peek(2) == '-') && isDigit(peek(3))));
+        bool isFieldAccess = isAlpha(next) && !isExponent;
 
         if (!isDotOperator && !isFieldAccess) {
             advance(); // '.'
             size_t fracStart = pos_;
-            while (pos_ < src_.size() && (isDigit(peek()) || peek() == '_')) {
+            while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1))))) {
                 if (peek() != '_')
                     hasDigits = true;
                 advance();
@@ -506,7 +509,7 @@ void Lexer::readNumber()
         if (pos_ >= src_.size() || !isDigit(peek()))
             error("Invalid number exponent", startLine, startCol);
         size_t expStart = pos_;
-        while (pos_ < src_.size() && (isDigit(peek()) || peek() == '_'))
+        while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1)))))
             advance();
         if (pos_ > expStart)
             validateUnderscores(expStart, pos_, startLine, startCol);
