@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -129,7 +130,7 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     bool last    = false;   // 'last': ia selects the LAST occurrence (sorted)
     for (size_t i = 1; i < args.size(); ++i) {
         const Value &a = args[i];
-        if (a.type() != ValueType::CHAR)
+        if (!a.isChar() && !a.isString())
             throw Error("unique: extra arguments must be string flags",
                          0, 0, "unique", "", "numkit:unique:badArg");
         std::string s = a.toString();
@@ -144,6 +145,88 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
             throw Error("unique: unknown flag '" + s + "'",
                          0, 0, "unique", "", "numkit:unique:badFlag");
         }
+    }
+
+    if (origType == ValueType::CELL || origType == ValueType::STRING) {
+        const Value &in = args[0];
+        const size_t n = in.numel();
+        const bool isRow = !in.dims().is3D() && in.dims().rows() == 1 && in.dims().cols() > 1;
+        auto getElemStr = [&](size_t idx) -> std::string {
+            if (origType == ValueType::STRING)
+                return std::string(in.stringElem(idx));
+            const Value &el = in.cellAt(idx);
+            if (el.isChar() || el.isString())
+                return el.toString();
+            throw Error("unique: cell array elements must be character vectors",
+                        0, 0, "unique", "", "numkit:unique:cellNotChar");
+        };
+        std::vector<std::string> uniqStrs;
+        std::vector<size_t> iaVec;
+        std::vector<double> icVec(n, 0.0);
+        if (stable) {
+            std::unordered_map<std::string, size_t> seen;
+            for (size_t i = 0; i < n; ++i) {
+                std::string s = getElemStr(i);
+                auto it = seen.find(s);
+                if (it == seen.end()) {
+                    size_t pos = uniqStrs.size();
+                    seen.emplace(s, pos);
+                    uniqStrs.push_back(std::move(s));
+                    iaVec.push_back(i);
+                    icVec[i] = static_cast<double>(pos + 1);
+                } else {
+                    if (last) iaVec[it->second] = i;
+                    icVec[i] = static_cast<double>(it->second + 1);
+                }
+            }
+        } else {
+            std::unordered_map<std::string, size_t> idxMap;
+            for (size_t i = 0; i < n; ++i) {
+                std::string s = getElemStr(i);
+                if (last) idxMap[s] = i;
+                else idxMap.try_emplace(s, i);
+            }
+            std::vector<std::pair<std::string, size_t>> sorted;
+            sorted.reserve(idxMap.size());
+            for (const auto &kv : idxMap)
+                sorted.push_back(kv);
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const auto &a, const auto &b) { return a.first < b.first; });
+            std::unordered_map<std::string, size_t> rankMap;
+            for (size_t k = 0; k < sorted.size(); ++k) {
+                rankMap[sorted[k].first] = k;
+                uniqStrs.push_back(sorted[k].first);
+                iaVec.push_back(sorted[k].second);
+            }
+            for (size_t i = 0; i < n; ++i)
+                icVec[i] = static_cast<double>(rankMap[getElemStr(i)] + 1);
+        }
+        const size_t k = uniqStrs.size();
+        const size_t outR = (n == 0) ? 0 : (isRow ? 1 : k);
+        const size_t outC = (n == 0) ? 0 : (isRow ? k : 1);
+        Value cOut = (origType == ValueType::STRING)
+            ? Value::stringArray(outR, outC, mr)
+            : Value::cell(outR, outC, mr);
+        for (size_t j = 0; j < k; ++j) {
+            if (origType == ValueType::STRING)
+                cOut.stringElemSet(j, uniqStrs[j]);
+            else
+                cOut.cellAt(j) = Value::fromString(uniqStrs[j], mr);
+        }
+        outs[0] = std::move(cOut);
+        if (nargout > 1) {
+            Value iaOut = Value::matrix(k, k == 0 ? 0 : 1, ValueType::DOUBLE, mr);
+            for (size_t j = 0; j < k; ++j)
+                iaOut.doubleDataMut()[j] = static_cast<double>(iaVec[j] + 1);
+            outs[1] = std::move(iaOut);
+        }
+        if (nargout > 2) {
+            Value icOut = Value::matrix(n, n == 0 ? 0 : 1, ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < n; ++i)
+                icOut.doubleDataMut()[i] = icVec[i];
+            outs[2] = std::move(icOut);
+        }
+        return;
     }
     // NOTE: 'last' is honoured for the default (sorted) setOrder across the
     // vector, complex and 'rows' paths. With 'stable' the occurrence ORDER

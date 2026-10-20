@@ -425,15 +425,70 @@ void registerFigureExport(Engine &engine)
                 }
                 Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
                 if (m > 0) {
-                    int tableN = 256;
-                    const std::uint8_t *tbl = figrender::namedPalette(paletteName, tableN);
                     double *d = C.doubleDataMut();
-                    for (size_t i = 0; i < m; ++i) {
-                        double t = (m == 1) ? 0.0 : static_cast<double>(i) / static_cast<double>(m - 1);
-                        int idx = std::min(tableN - 1, std::max(0, static_cast<int>(std::lround(t * (tableN - 1)))));
-                        d[i]         = tbl[idx * 3 + 0] / 255.0;
-                        d[i + m]     = tbl[idx * 3 + 1] / 255.0;
-                        d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;
+                    if (paletteName == "jet") {
+                        std::fill(d, d + 3 * m, 0.0);
+                        const int mi = static_cast<int>(m);
+                        const int n = (mi + 3) / 4;
+                        const int ulen = n + (n - 1) + n;
+                        auto u_at = [&](int idx1) -> double {
+                            if (idx1 <= n) return double(idx1) / double(n);
+                            if (idx1 <= 2 * n - 1) return 1.0;
+                            return double(2 * n - 1 + n - (idx1 - 1)) / double(n);
+                        };
+                        const int gbase = (n + 1) / 2 - (mi % 4 == 1 ? 1 : 0);
+                        int rcount = 0, gcount = 0, bcount = 0;
+                        for (int k = 1; k <= ulen; ++k) {
+                            const int g = gbase + k;
+                            const int r = g + n;
+                            const int b = g - n;
+                            if (r >= 1 && r <= mi) {
+                                ++rcount;
+                                d[0 * m + static_cast<size_t>(r - 1)] = u_at(rcount);
+                            }
+                            if (g >= 1 && g <= mi) {
+                                ++gcount;
+                                d[1 * m + static_cast<size_t>(g - 1)] = u_at(gcount);
+                            }
+                            if (b >= 1 && b <= mi) ++bcount;
+                        }
+                        int bsofar = 0;
+                        for (int k = 1; k <= ulen; ++k) {
+                            const int g = gbase + k;
+                            const int b = g - n;
+                            if (b >= 1 && b <= mi) {
+                                ++bsofar;
+                                d[2 * m + static_cast<size_t>(b - 1)] = u_at(ulen - bcount + bsofar);
+                            }
+                        }
+                    } else if (paletteName == "gray") {
+                        for (size_t i = 0; i < m; ++i) {
+                            double g = (m == 1) ? 0.0 : double(i) / double(m - 1);
+                            d[i] = d[i + m] = d[i + 2 * m] = g;
+                        }
+                    } else if (paletteName == "cool") {
+                        for (size_t i = 0; i < m; ++i) {
+                            double r = (m == 1) ? 0.0 : double(i) / double(m - 1);
+                            d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
+                        }
+                    } else if (paletteName == "hot") {
+                        const int mi = static_cast<int>(m);
+                        const int n = (3 * mi) / 8;
+                        for (int i = 0; i < mi; ++i) {
+                            d[i]         = (i < n) ? double(i + 1) / double(n) : 1.0;
+                            d[i + m]     = (i < n) ? 0.0 : (i < 2 * n ? double(i - n + 1) / double(n) : 1.0);
+                            d[i + 2 * m] = (i < 2 * n) ? 0.0 : double(i - 2 * n + 1) / double(mi - 2 * n);
+                        }
+                    } else {
+                        int tableN = 256;
+                        const std::uint8_t *tbl = figrender::namedPalette(paletteName, tableN);
+                        for (size_t i = 0; i < m; ++i) {
+                            double t = (m == 1) ? 0.0 : static_cast<double>(i) / static_cast<double>(m - 1);
+                            int idx = std::min(tableN - 1, std::max(0, static_cast<int>(std::lround(t * (tableN - 1)))));
+                            d[i]         = tbl[idx * 3 + 0] / 255.0;
+                            d[i + m]     = tbl[idx * 3 + 1] / 255.0;
+                            d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;
+                        }
                     }
                 }
                 if (!outs.empty()) outs[0] = std::move(C);

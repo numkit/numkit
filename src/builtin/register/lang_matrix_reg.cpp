@@ -1298,13 +1298,33 @@ void nonzeros_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     outs[0] = nonzeros(args[0], ctx.engine->resource());
 }
 
-void horzcat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void horzcat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
+    if (!args.empty() && args[0].isObject()) {
+        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
+            auto it = bc->ops.find("horzcat");
+            if (it != bc->ops.end()) {
+                Value lhs = args[0];
+                it->second(lhs, args.subspan(1), nargout, outs, ctx);
+                return;
+            }
+        }
+    }
     outs[0] = horzcat(args, ctx.engine->resource());
 }
 
-void vertcat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void vertcat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
+    if (!args.empty() && args[0].isObject()) {
+        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
+            auto it = bc->ops.find("vertcat");
+            if (it != bc->ops.end()) {
+                Value lhs = args[0];
+                it->second(lhs, args.subspan(1), nargout, outs, ctx);
+                return;
+            }
+        }
+    }
     outs[0] = vertcat(args, ctx.engine->resource());
 }
 
