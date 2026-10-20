@@ -1269,8 +1269,12 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     // subscript selects a single element.
     if (rhs.isObject()) {
         const bool newable = !var->isObject() && (var->isUnset() || var->isEmpty());
+        auto isGfxCls = [](const std::string &c) {
+            return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+        };
         const bool sameArr =
-            var->isObject() && var->objectClassName() == rhs.objectClassName();
+            var->isObject() && (var->objectClassName() == rhs.objectClassName()
+                                || (isGfxCls(var->objectClassName()) && isGfxCls(rhs.objectClassName())));
         if (newable || sameArr) {
             // Resolve each subscript to its full index list (scalar, range,
             // vector, logical, `:` or `end` — resolveIndex handles all and is
@@ -1841,6 +1845,17 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
     auto *var = env->get(funcName);
     if (var && var->isFuncHandle())
         return callFuncHandleMulti(*var, args, env, nout, node);
+    if (var && var->isObject()) {
+        const BuiltinClass *cls = engine_.findClass(var->objectClassName());
+        if (cls && cls->subsref) {
+            Value self = *var;
+            std::vector<Value> outBuf(nout);
+            CallContext ctx{&engine_, env};
+            cls->subsref(self, Span<const Value>(args.data(), args.size()), nout,
+                         Span<Value>(outBuf), ctx);
+            return outBuf;
+        }
+    }
 
     // OBJECT function-form multi-output: [a,b] = m(obj, ...). A class
     // method on the dominant (first) object argument beats a path function.
@@ -2730,6 +2745,10 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
                     CallContext ctx{&engine_, env};
                     (*fn)({}, 1, Span<Value>(outBuf, 1), ctx);
                     return outBuf[0];
+                }
+                if (const BuiltinClass *cls = engine_.findClass(qualified); cls && cls->construct) {
+                    CallContext ctx{&engine_, env};
+                    return engine_.constructChecked(cls, {}, ctx);
                 }
             }
             obj = execNode(rootNode, env); // produces the proper undefined error

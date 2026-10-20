@@ -165,7 +165,7 @@ std::string encodeProp(const Value &v)
 {
     if (v.isChar() || v.isString())
         return v.toString();
-    if (v.isScalar())
+    if (v.isNumeric() && v.isScalar())
         return formatPropDouble(v.toScalar());
     if (v.isLogical() && v.numel() == 1)
         return v.toBool() ? "1" : "0";
@@ -649,7 +649,7 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 const double s = span / p10;
                 const double step = (s <= 1.5) ? 0.2 * p10
                                   : (s <= 3.0) ? 0.5 * p10
-                                  : (s <= 7.0) ? 1.0 * p10
+                                  : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                : 2.0 * p10;
                 lo = std::floor(dmin / step + 1e-12) * step;
                 hi = std::ceil(dmax / step - 1e-12) * step;
@@ -897,7 +897,7 @@ Value makeFigureHandleFor(FigureManager &fm, int figureId,
                           std::pmr::memory_resource *mr)
 {
     if (auto *rec = findRecordBy(fm, "figure", figureId, 0))
-        return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), mr);
+        return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), mr, figureId);
     // createHandle stamps the CURRENT figure â€” switch, create, switch back.
     const int saved = fm.currentFigureId();
     if (saved != figureId)
@@ -905,7 +905,7 @@ Value makeFigureHandleFor(FigureManager &fm, int figureId,
     const int id = fm.createHandle("figure", kFigureClass);
     if (saved != figureId)
         fm.setFigure(saved);
-    return makeGraphicsHandleValue(kFigureClass, id, mr);
+    return makeGraphicsHandleValue(kFigureClass, id, mr, figureId);
 }
 
 Value makeFigureHandle(FigureManager &fm, std::pmr::memory_resource *mr)
@@ -1310,6 +1310,8 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                    const std::string &rawName, const Value &val)
 {
     const std::string name = canonicalPropName(rawName);
+    if (name == "Parent" || val.isObject())
+        return true;
     if (name == "XData" || name == "YData") {
         rec->props.erase(name);
     } else if (!(val.isNumeric() && val.numel() > 1024 && name != "ZData")) {
@@ -1916,6 +1918,38 @@ void registerHandleAccessors(Engine &engine)
         };
         engine.registerFunction("", "groot", std::move(fn));
     }
+    // gobjects([m, n, ...]) ? array of placeholder graphics objects.
+    {
+        ExternalFunc fn = [](Span<const Value> args, size_t,
+                             Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            size_t r = 1, c = 1;
+            if (args.size() == 1 && args[0].isNumeric()) {
+                if (args[0].numel() == 1) {
+                    r = c = static_cast<size_t>(std::max(0.0, args[0].toScalar()));
+                } else if (args[0].numel() >= 2) {
+                    r = static_cast<size_t>(std::max(0.0, args[0].elemAsDouble(0)));
+                    c = static_cast<size_t>(std::max(0.0, args[0].elemAsDouble(1)));
+                }
+            } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
+                r = static_cast<size_t>(std::max(0.0, args[0].toScalar()));
+                c = static_cast<size_t>(std::max(0.0, args[1].toScalar()));
+            }
+            size_t n = r * c;
+            std::vector<std::shared_ptr<ObjectState>> states(n);
+            for (size_t i = 0; i < n; ++i) {
+                auto payload = std::make_shared<GraphicsHandlePayload>();
+                payload->handleId = 0;
+                auto st = std::make_shared<ObjectState>(mr);
+                st->native = std::move(payload);
+                states[i] = std::move(st);
+            }
+            outs[0] = Value::objectArray("matlab.graphics.GraphicsPlaceholder",
+                                         Dims(r, c), std::move(states),
+                                         /*isHandle=*/true, mr);
+        };
+        engine.registerFunction("", "gobjects", std::move(fn));
+    }
     // ishandle(h) / isvalid(h)
     {
         ExternalFunc fn = [&engine](
@@ -1946,6 +1980,7 @@ void registerGraphicsClasses(Engine &engine)
         {kLegendClass, "legend"},
         {kRootClass,   "root"},
         {"matlab.graphics.Graphics", "line"},
+        {"matlab.graphics.GraphicsPlaceholder", "line"},
     };
     for (const auto &kv : handleTypes())
         classToType.emplace(kv.second.second, kv.second.first);

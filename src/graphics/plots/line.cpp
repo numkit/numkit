@@ -48,11 +48,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // pair is its own dataset â†’ its own Line handle
             // (plot(x,y,x2,y2) returns a 1Ã—2 Line array).
             // Discriminator: a char arg that is entirely linespec alphabet
-            // ("-:.o+*xsd^v<>phrgbcymw") is a LineSpec; any other char
+            // ("-:.o+*xsd^v<>phrgbcymwk") is a LineSpec; any other char
             // starts an N/V pair ('LineWidth', 2, â€¦).
             auto isSpec = [](const Value &v) {
                 if (!v.isChar()) return false;
-                static const std::string alpha = "-:.o+*xsd^v<>phrgbcymw";
+                static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
                 std::string s = v.toString();
                 if (s.empty()) return false;
                 for (char c : s)
@@ -60,7 +60,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 return true;
             };
             auto isData = [](const Value &v) {
-                return v.isNumeric() || v.isLogical();
+                return v.isNumeric() || v.isLogical() || v.isObject();
             };
             size_t i = 0;
             while (i < args.size()) {
@@ -160,7 +160,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         // [, N/Vâ€¦])* â€” same spec/N/V discriminator as plot().
         auto isSpec = [](const Value &v) {
             if (!v.isChar()) return false;
-            static const std::string alpha = "-:.o+*xsd^v<>phrgbcymw";
+            static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
             std::string s = v.toString();
             if (s.empty()) return false;
             for (char c : s)
@@ -168,7 +168,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             return true;
         };
         auto isData = [](const Value &v) {
-            return v.isNumeric() || v.isLogical();
+            return v.isNumeric() || v.isLogical() || v.isObject();
         };
         size_t i = 0;
         while (i + 2 < args.size()) {
@@ -1013,7 +1013,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 fm.currentAxes().yscale = yscale;
                 auto isSpec = [](const Value &v) {
                     if (!v.isChar()) return false;
-                    static const std::string alpha = "-:.o+*xsd^v<>phrgbcymw";
+                    static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
                     std::string s = v.toString();
                     if (s.empty()) return false;
                     for (char c : s)
@@ -1021,7 +1021,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     return true;
                 };
                 auto isData = [](const Value &v) {
-                    return v.isNumeric() || v.isLogical();
+                    return v.isNumeric() || v.isLogical() || v.isObject();
                 };
                 size_t i = 0;
                 while (i < args.size()) {

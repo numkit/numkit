@@ -13,6 +13,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/ops/deflate.hpp>
+#include <numkit/ops/rng.hpp>
 #include <numkit/sys/fs_context.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <complex>
 #include <iomanip>
 #include <memory>
 #include <numeric>
@@ -441,6 +443,9 @@ void registerContainersRuntime(Engine &engine)
         std::string description;
         std::vector<std::string> varUnits;
         std::vector<std::string> varDescriptions;
+        bool isTimetable = false;
+        Value rowTimes;
+        std::string rowTimesName = "Time";
 
         std::shared_ptr<NativePayload> clone() const override
         {
@@ -630,14 +635,14 @@ void registerContainersRuntime(Engine &engine)
     };
 
     static auto tableCst = [](const Value &v) -> const TablePayload * {
-        if (!v.isObject() || v.objectClassName() != "table")
+        if (!v.isObject() || (v.objectClassName() != "table" && v.objectClassName() != "timetable"))
             return nullptr;
         const auto *st = v.objectStateConst();
         return st ? static_cast<const TablePayload *>(st->native.get()) : nullptr;
     };
 
     static auto tableMut = [](Value &v) -> TablePayload * {
-        if (!v.isObject() || v.objectClassName() != "table")
+        if (!v.isObject() || (v.objectClassName() != "table" && v.objectClassName() != "timetable"))
             return nullptr;
         auto *st = v.objectStateMut();
         return st ? static_cast<TablePayload *>(st->native.get()) : nullptr;
@@ -648,8 +653,9 @@ void registerContainersRuntime(Engine &engine)
         if (!mr)
             mr = std::pmr::get_default_resource();
         auto st = std::make_shared<ObjectState>(mr);
+        const char *clsName = (payload && payload->isTimetable) ? "timetable" : "table";
         st->native = std::move(payload);
-        return Value::object("table", std::move(st), false, mr);
+        return Value::object(clsName, std::move(st), false, mr);
     };
 
     static auto iequalsTableOpt = [](const std::string &a, const char *b) -> bool {
@@ -891,6 +897,20 @@ void registerContainersRuntime(Engine &engine)
                 return (a < b) ? -1 : (a > b ? 1 : 0);
             }
         }
+        if (col.isObject()) {
+            const auto *s1 = col.objectStateAt(r1);
+            const auto *s2 = col.objectStateAt(r2);
+            if (s1 && s1->native && s2 && s2->native) {
+                try {
+                    double a = s1->native->asDouble();
+                    double b = s2->native->asDouble();
+                    if (std::isnan(a) && std::isnan(b)) return 0;
+                    if (std::isnan(a)) return 1;
+                    if (std::isnan(b)) return -1;
+                    return (std::abs(a - b) <= 1e-12) ? 0 : ((a < b) ? -1 : 1);
+                } catch (...) {}
+            }
+        }
         std::string sa = formatTableCell(col, r1);
         std::string sb = formatTableCell(col, r2);
         return sa < sb ? -1 : (sa > sb ? 1 : 0);
@@ -1057,6 +1077,10 @@ void registerContainersRuntime(Engine &engine)
                 out = p->buildProperties(mr);
                 return true;
             }
+            if (p->isTimetable && (name == p->rowTimesName || name == "Time")) {
+                out = p->rowTimes;
+                return true;
+            }
             if (!p->dimNames.empty() && name == p->dimNames[0]) {
                 if (p->rowNames.empty()) {
                     out = Value::cell(0, 0, mr);
@@ -1084,6 +1108,18 @@ void registerContainersRuntime(Engine &engine)
                 out = p->cols[static_cast<size_t>(idx)];
                 return true;
             }
+            if (p->isTimetable) {
+                std::string low = name;
+                for (auto &ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                if (low.find("date") != std::string::npos || low.find("time") != std::string::npos) {
+                    out = p->rowTimes;
+                    return true;
+                }
+                if (p->width() == 1 && p->varNames[0] == "Var1") {
+                    out = p->cols[0];
+                    return true;
+                }
+            }
             return false;
         };
 
@@ -1094,6 +1130,10 @@ void registerContainersRuntime(Engine &engine)
                 return false;
             if (name == "Properties") {
                 p->applyProperties(val);
+                return true;
+            }
+            if (p->isTimetable && (name == p->rowTimesName || name == "Time")) {
+                p->rowTimes = val;
                 return true;
             }
             if (!p->dimNames.empty() && name == p->dimNames[0]) {
@@ -1157,6 +1197,10 @@ void registerContainersRuntime(Engine &engine)
             sub->nrows = rIdx.size();
             sub->dimNames = p->dimNames;
             sub->description = p->description;
+            sub->isTimetable = p->isTimetable;
+            sub->rowTimesName = p->rowTimesName;
+            if (!p->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
             for (size_t ci : cIdx) {
                 sub->varNames.push_back(p->varNames[ci]);
                 sub->cols.push_back(sliceColumnRows(p->cols[ci], rIdx, mr));
@@ -1411,6 +1455,8 @@ void registerContainersRuntime(Engine &engine)
             sub->nrows = take;
             for (size_t j = 0; j < sub->cols.size(); ++j)
                 sub->cols[j] = sliceColumnRows(p->cols[j], rIdx, mr);
+            if (!sub->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
             if (!sub->rowNames.empty())
                 sub->rowNames.resize(take);
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1429,6 +1475,8 @@ void registerContainersRuntime(Engine &engine)
             sub->nrows = take;
             for (size_t j = 0; j < sub->cols.size(); ++j)
                 sub->cols[j] = sliceColumnRows(p->cols[j], rIdx, mr);
+            if (!sub->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
             if (!sub->rowNames.empty()) {
                 std::vector<std::string> nrn;
                 for (size_t r : rIdx) nrn.push_back(p->rowNames[r]);
@@ -1531,6 +1579,8 @@ void registerContainersRuntime(Engine &engine)
             auto sub = std::make_shared<TablePayload>(*p);
             for (size_t j = 0; j < sub->cols.size(); ++j)
                 sub->cols[j] = sliceColumnRows(p->cols[j], ord, mr);
+            if (!sub->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, ord, mr);
             if (!sub->rowNames.empty()) {
                 std::vector<std::string> nrn;
                 for (size_t r : ord) nrn.push_back(p->rowNames[r]);
@@ -1621,6 +1671,8 @@ void registerContainersRuntime(Engine &engine)
             sub->nrows = kTake;
             for (size_t j = 0; j < sub->cols.size(); ++j)
                 sub->cols[j] = sliceColumnRows(p->cols[j], ord, mr);
+            if (!sub->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, ord, mr);
             if (!sub->rowNames.empty()) {
                 std::vector<std::string> nrn;
                 for (size_t r : ord) nrn.push_back(p->rowNames[r]);
@@ -1706,6 +1758,8 @@ void registerContainersRuntime(Engine &engine)
             sub->nrows = keepRows.size();
             for (size_t j = 0; j < sub->cols.size(); ++j)
                 sub->cols[j] = sliceColumnRows(p->cols[j], keepRows, mr);
+            if (!sub->rowTimes.isEmpty())
+                sub->rowTimes = sliceColumnRows(p->rowTimes, keepRows, mr);
             if (!sub->rowNames.empty()) {
                 std::vector<std::string> nrn;
                 for (size_t r : keepRows) nrn.push_back(p->rowNames[r]);
@@ -2030,8 +2084,668 @@ void registerContainersRuntime(Engine &engine)
             return os.str();
         };
 
+        tbl.methods["ismissing"] = [](Value &self, Span<const Value>, size_t,
+                                      Span<Value> out, CallContext &ctx) {
+            const TablePayload *p = tableCst(self);
+            auto *mr = ctx.engine->resource();
+            if (!p) {
+                out[0] = Value::logicalScalar(false, mr);
+                return;
+            }
+            size_t nr = p->nrows, nc = p->width();
+            Value tf = Value::matrix(nr, nc, ValueType::LOGICAL, mr);
+            uint8_t *dst = tf.logicalDataMut();
+            for (size_t j = 0; j < nc; ++j) {
+                const Value &col = p->cols[j];
+                for (size_t i = 0; i < nr; ++i) {
+                    bool miss = false;
+                    if (col.isNumeric() && i < col.numel()) {
+                        miss = std::isnan(col.elemAsDouble(i));
+                    } else if (col.isString() && i < col.numel()) {
+                        miss = col.stringElem(i).empty();
+                    } else if (col.isCell() && i < col.numel()) {
+                        const Value &el = col.cellAt(i);
+                        miss = el.isEmpty() || ((el.isChar() || el.isString()) && el.toString().empty())
+                            || (el.isNumeric() && el.isScalar() && std::isnan(el.toScalar()));
+                    } else if (col.isObject() && i < col.numel()) {
+                        const auto *st = col.objectStateAt(i);
+                        if (st && st->native) {
+                            try { miss = std::isnan(st->native->asDouble()); } catch (...) {}
+                        }
+                    }
+                    dst[i + j * nr] = miss ? 1 : 0;
+                }
+            }
+            out[0] = std::move(tf);
+        };
+
+        auto innerjoinImpl = [](const TablePayload *lp, const TablePayload *rp,
+                                Span<const Value> optArgs, size_t nargout,
+                                Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            std::vector<std::string> leftKeys, rightKeys;
+            for (size_t i = 0; i + 1 < optArgs.size(); i += 2) {
+                if (!optArgs[i].isChar() && !optArgs[i].isString())
+                    continue;
+                std::string k = optArgs[i].toString();
+                if (iequalsTableOpt(k, "Keys")) {
+                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "Keys");
+                    rightKeys = leftKeys;
+                } else if (iequalsTableOpt(k, "LeftKeys")) {
+                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "LeftKeys");
+                } else if (iequalsTableOpt(k, "RightKeys")) {
+                    rightKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "RightKeys");
+                }
+            }
+            if (leftKeys.empty()) {
+                for (const auto &vn : lp->varNames) {
+                    if (rp->findVar(vn) >= 0) {
+                        leftKeys.push_back(vn);
+                        rightKeys.push_back(vn);
+                    }
+                }
+            }
+            std::vector<size_t> lKeyCols, rKeyCols;
+            for (const auto &kn : leftKeys) {
+                int idx = lp->findVar(kn);
+                if (idx >= 0) lKeyCols.push_back(static_cast<size_t>(idx));
+            }
+            for (const auto &kn : rightKeys) {
+                int idx = rp->findVar(kn);
+                if (idx >= 0) rKeyCols.push_back(static_cast<size_t>(idx));
+            }
+            size_t nKeys = std::min(lKeyCols.size(), rKeyCols.size());
+            auto rowsMatch = [&](size_t lr, size_t rr) -> bool {
+                for (size_t k = 0; k < nKeys; ++k) {
+                    const Value &lc = lp->cols[lKeyCols[k]];
+                    const Value &rc = rp->cols[rKeyCols[k]];
+                    if (lc.isObject() && rc.isObject()) {
+                        const auto *s1 = lc.objectStateAt(lr);
+                        const auto *s2 = rc.objectStateAt(rr);
+                        if (s1 && s1->native && s2 && s2->native) {
+                            double d1 = s1->native->asDouble();
+                            double d2 = s2->native->asDouble();
+                            if (std::isnan(d1) || std::isnan(d2) || std::abs(d1 - d2) > 1e-9)
+                                return false;
+                            continue;
+                        }
+                    }
+                    if ((lc.isNumeric() || lc.isLogical()) && (rc.isNumeric() || rc.isLogical())) {
+                        double d1 = lc.elemAsDouble(lr);
+                        double d2 = rc.elemAsDouble(rr);
+                        if (std::isnan(d1) || std::isnan(d2) || d1 != d2)
+                            return false;
+                        continue;
+                    }
+                    if (formatTableCell(lc, lr) != formatTableCell(rc, rr))
+                        return false;
+                }
+                return true;
+            };
+            std::vector<size_t> lMatch, rMatch;
+            for (size_t lr = 0; lr < lp->nrows; ++lr) {
+                for (size_t rr = 0; rr < rp->nrows; ++rr) {
+                    if (rowsMatch(lr, rr)) {
+                        lMatch.push_back(lr);
+                        rMatch.push_back(rr);
+                    }
+                }
+            }
+            auto res = std::make_shared<TablePayload>();
+            res->nrows = lMatch.size();
+            res->isTimetable = lp->isTimetable;
+            res->rowTimesName = lp->rowTimesName;
+            if (!lp->rowTimes.isEmpty())
+                res->rowTimes = sliceColumnRows(lp->rowTimes, lMatch, mr);
+            for (size_t j = 0; j < lp->width(); ++j) {
+                res->varNames.push_back(lp->varNames[j]);
+                res->cols.push_back(sliceColumnRows(lp->cols[j], lMatch, mr));
+            }
+            for (size_t j = 0; j < rp->width(); ++j) {
+                bool isKey = std::find(rKeyCols.begin(), rKeyCols.end(), j) != rKeyCols.end();
+                if (isKey)
+                    continue;
+                std::string vn = rp->varNames[j];
+                if (res->findVar(vn) >= 0)
+                    vn += "_right";
+                res->varNames.push_back(std::move(vn));
+                res->cols.push_back(sliceColumnRows(rp->cols[j], rMatch, mr));
+            }
+            outs[0] = makeTableValue(std::move(res), mr);
+            if (nargout >= 2 && outs.size() >= 2) {
+                Value ia = Value::matrix(lMatch.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < lMatch.size(); ++i)
+                    ia.doubleDataMut()[i] = static_cast<double>(lMatch[i] + 1);
+                outs[1] = std::move(ia);
+            }
+            if (nargout >= 3 && outs.size() >= 3) {
+                Value ib = Value::matrix(rMatch.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < rMatch.size(); ++i)
+                    ib.doubleDataMut()[i] = static_cast<double>(rMatch[i] + 1);
+                outs[2] = std::move(ib);
+            }
+        };
+
+        tbl.methods["innerjoin"] = [innerjoinImpl](Value &self, Span<const Value> args, size_t nargout,
+                                                   Span<Value> outs, CallContext &ctx) {
+            if (args.empty())
+                throw Error("innerjoin: requires right table", 0, 0, "innerjoin", "", "numkit:innerjoin:minrhs");
+            const TablePayload *lp = tableCst(self);
+            const TablePayload *rp = tableCst(args[0]);
+            if (!lp || !rp)
+                throw Error("innerjoin: inputs must be tables", 0, 0, "innerjoin", "", "numkit:innerjoin:notATable");
+            innerjoinImpl(lp, rp, args.subspan(1), nargout, outs, ctx);
+        };
+
+        BuiltinClass tt = tbl;
+        tt.name = "timetable";
+        tt.construct = [](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto p = std::make_shared<TablePayload>();
+            p->isTimetable = true;
+            if (args.empty())
+                return makeTableValue(std::move(p), mr);
+            size_t dataEnd = args.size();
+            while (dataEnd >= 2 && (args[dataEnd - 2].isChar() || args[dataEnd - 2].isString())
+                   && (isKnownTableOption(args[dataEnd - 2]) || iequalsTableOpt(args[dataEnd - 2].toString(), "RowTimes"))) {
+                dataEnd -= 2;
+            }
+            size_t startCol = 0;
+            if (dataEnd > 0 && args[0].isObject()
+                && (args[0].objectClassName() == "datetime" || args[0].objectClassName() == "duration")) {
+                p->rowTimes = (args[0].dims().rows() == 1 && args[0].dims().cols() > 1)
+                            ? args[0].objectReshape(Dims(args[0].numel(), 1), mr)
+                            : args[0];
+                p->nrows = args[0].numel();
+                startCol = 1;
+            }
+            for (size_t j = startCol; j < dataEnd; ++j) {
+                const Value &col = args[j];
+                size_t r = col.dims().rows();
+                if (j == startCol && p->rowTimes.isEmpty())
+                    p->nrows = r;
+                p->cols.push_back(col);
+                p->varNames.push_back("Var" + std::to_string(j - startCol + 1));
+            }
+            for (size_t i = dataEnd; i + 1 < args.size(); i += 2) {
+                std::string key = args[i].toString();
+                const Value &val = args[i + 1];
+                if (iequalsTableOpt(key, "VariableNames")) {
+                    p->varNames = TablePayload::extractNames(val, "timetable", "VariableNames");
+                } else if (iequalsTableOpt(key, "RowTimes")) {
+                    p->rowTimes = val;
+                    p->nrows = val.numel();
+                } else if (iequalsTableOpt(key, "DimensionNames")) {
+                    p->dimNames = TablePayload::extractNames(val, "timetable", "DimensionNames");
+                    if (!p->dimNames.empty())
+                        p->rowTimesName = p->dimNames[0];
+                }
+            }
+            return makeTableValue(std::move(p), mr);
+        };
+
+        auto retimeOne = [](const TablePayload *p, const std::string &newTimeBasis,
+                            const std::string &method, std::pmr::memory_resource *mr) -> std::shared_ptr<TablePayload> {
+            if (!p || p->rowTimes.isEmpty() || !p->rowTimes.isObject())
+                return std::make_shared<TablePayload>(*p);
+            size_t nr = p->nrows;
+            auto getYMD = [&](size_t r, int &y, int &m, int &q) {
+                const auto *st = p->rowTimes.objectStateAt(r);
+                double sd = (st && st->native) ? st->native->asDouble() : 0.0;
+                int64_t days = static_cast<int64_t>(std::floor(sd - 719529.0));
+                int64_t z = days + 719468;
+                int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+                unsigned doe = static_cast<unsigned>(z - era * 146097);
+                unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+                int64_t yr = static_cast<int64_t>(yoe) + era * 400;
+                unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                unsigned mp = (5 * doy + 2) / 153;
+                unsigned mon = mp + (mp < 10 ? 3 : -9);
+                yr += (mon <= 2);
+                y = static_cast<int>(yr);
+                m = static_cast<int>(mon);
+                q = (m - 1) / 3 + 1;
+            };
+            auto makeQuarterStart = [&](int y, int q) -> Value {
+                int m = (q - 1) * 3 + 1;
+                int64_t yr = y - (m <= 2);
+                int64_t era = (yr >= 0 ? yr : yr - 399) / 400;
+                unsigned yoe = static_cast<unsigned>(yr - era * 400);
+                unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5;
+                unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+                double sd = static_cast<double>(era * 146097 + static_cast<int64_t>(doe) - 719468) + 719529.0;
+                const auto *origSt = p->rowTimes.objectStateAt(0);
+                auto st = std::make_shared<ObjectState>(mr);
+                if (origSt) {
+                    st->props = origSt->props;
+                    if (origSt->native) {
+                        st->native = origSt->native->clone();
+                    }
+                }
+                if (st->native) {
+                    double *dptr = reinterpret_cast<double *>(reinterpret_cast<char *>(st->native.get()) + sizeof(void *));
+                    *dptr = sd;
+                }
+                return Value::object("datetime", std::move(st), false, mr);
+            };
+            bool quarterly = iequalsTableOpt(newTimeBasis, "quarterly");
+            bool yearly = iequalsTableOpt(newTimeBasis, "yearly") || iequalsTableOpt(newTimeBasis, "annual");
+            if (!quarterly && !yearly)
+                return std::make_shared<TablePayload>(*p);
+
+            struct Bucket { int y; int b; std::vector<size_t> rows; };
+            std::vector<Bucket> buckets;
+            for (size_t r = 0; r < nr; ++r) {
+                int y = 0, m = 0, q = 0;
+                getYMD(r, y, m, q);
+                int bKey = quarterly ? q : 1;
+                if (buckets.empty() || buckets.back().y != y || buckets.back().b != bKey)
+                    buckets.push_back({y, bKey, {r}});
+                else
+                    buckets.back().rows.push_back(r);
+            }
+            size_t nb = buckets.size();
+            auto res = std::make_shared<TablePayload>();
+            res->isTimetable = true;
+            res->rowTimesName = p->rowTimesName;
+            res->dimNames = p->dimNames;
+            res->varNames = p->varNames;
+            res->nrows = nb;
+            std::vector<Value> rtElems;
+            rtElems.reserve(nb);
+            for (size_t g = 0; g < nb; ++g)
+                rtElems.push_back(makeQuarterStart(buckets[g].y, quarterly ? buckets[g].b : 1));
+            res->rowTimes = Value::vertcat(rtElems.data(), rtElems.size(), mr);
+
+            for (size_t j = 0; j < p->width(); ++j) {
+                const Value &col = p->cols[j];
+                Value outCol = Value::matrix(nb, 1, ValueType::DOUBLE, mr);
+                double *dst = outCol.doubleDataMut();
+                for (size_t g = 0; g < nb; ++g) {
+                    std::vector<double> vals;
+                    for (size_t r : buckets[g].rows) {
+                        if (col.isNumeric() && r < col.numel()) {
+                            double v = col.elemAsDouble(r);
+                            if (!std::isnan(v)) vals.push_back(v);
+                        }
+                    }
+                    double val = std::numeric_limits<double>::quiet_NaN();
+                    if (!vals.empty()) {
+                        if (iequalsTableOpt(method, "firstvalue")) val = vals.front();
+                        else if (iequalsTableOpt(method, "lastvalue")) val = vals.back();
+                        else if (iequalsTableOpt(method, "sum")) { val = 0.0; for (double v : vals) val += v; }
+                        else if (iequalsTableOpt(method, "min")) val = *std::min_element(vals.begin(), vals.end());
+                        else if (iequalsTableOpt(method, "max")) val = *std::max_element(vals.begin(), vals.end());
+                        else { double s = 0.0; for (double v : vals) s += v; val = s / static_cast<double>(vals.size()); }
+                    }
+                    dst[g] = val;
+                }
+                res->cols.push_back(std::move(outCol));
+            }
+            return res;
+        };
+
+        tt.methods["retime"] = [retimeOne](Value &self, Span<const Value> args, size_t,
+                                           Span<Value> outs, CallContext &ctx) {
+            const TablePayload *p = tableCst(self);
+            std::string basis = args.size() >= 1 ? args[0].toString() : "quarterly";
+            std::string method = args.size() >= 2 ? args[1].toString() : "mean";
+            outs[0] = makeTableValue(retimeOne(p, basis, method, ctx.engine->resource()), ctx.engine->resource());
+        };
+
+        auto syncImpl = [](Span<const Value> allArgs, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            std::vector<const TablePayload *> tables;
+            bool intersectMode = false;
+            for (const auto &a : allArgs) {
+                if (const TablePayload *tp = tableCst(a)) {
+                    tables.push_back(tp);
+                } else if (a.isChar() || a.isString()) {
+                    if (iequalsTableOpt(a.toString(), "intersection"))
+                        intersectMode = true;
+                }
+            }
+            if (tables.empty())
+                throw Error("synchronize: requires at least one timetable", 0, 0, "synchronize", "", "numkit:synchronize:minrhs");
+            auto getSd = [](const Value &rt, size_t r) -> double {
+                const auto *st = rt.objectStateAt(r);
+                return (st && st->native) ? st->native->asDouble() : std::numeric_limits<double>::quiet_NaN();
+            };
+            std::vector<double> allSd;
+            std::vector<Value> allDt;
+            auto addTimes = [&](const Value &rt, size_t n) {
+                for (size_t r = 0; r < n; ++r) {
+                    double sd = getSd(rt, r);
+                    if (std::isnan(sd)) continue;
+                    bool found = false;
+                    for (double m : allSd) {
+                        if (std::abs(m - sd) < 1e-6) { found = true; break; }
+                    }
+                    if (!found) {
+                        allSd.push_back(sd);
+                        std::vector<size_t> ri = {r};
+                        allDt.push_back(sliceColumnRows(rt, ri, mr));
+                    }
+                }
+            };
+            for (const auto *tp : tables)
+                addTimes(tp->rowTimes, tp->nrows);
+            if (intersectMode) {
+                std::vector<double> filtSd;
+                std::vector<Value> filtDt;
+                for (size_t k = 0; k < allSd.size(); ++k) {
+                    double sd = allSd[k];
+                    bool inAll = true;
+                    for (const auto *tp : tables) {
+                        bool inThis = false;
+                        for (size_t r = 0; r < tp->nrows; ++r) {
+                            double tsd = getSd(tp->rowTimes, r);
+                            if (!std::isnan(tsd) && std::abs(tsd - sd) < 1e-6) {
+                                inThis = true;
+                                break;
+                            }
+                        }
+                        if (!inThis) { inAll = false; break; }
+                    }
+                    if (inAll) {
+                        filtSd.push_back(sd);
+                        filtDt.push_back(allDt[k]);
+                    }
+                }
+                allSd = std::move(filtSd);
+                allDt = std::move(filtDt);
+            }
+            std::vector<size_t> ord(allSd.size());
+            std::iota(ord.begin(), ord.end(), 0);
+            std::sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return allSd[a] < allSd[b]; });
+
+            size_t nr = ord.size();
+            auto res = std::make_shared<TablePayload>();
+            res->isTimetable = true;
+            res->rowTimesName = tables[0]->rowTimesName;
+            res->nrows = nr;
+            std::vector<Value> sortedDt(nr);
+            std::vector<double> sortedSd(nr);
+            for (size_t i = 0; i < nr; ++i) {
+                sortedDt[i] = allDt[ord[i]];
+                sortedSd[i] = allSd[ord[i]];
+            }
+            res->rowTimes = Value::vertcat(sortedDt.data(), sortedDt.size(), mr);
+
+            auto appendTableCols = [&](const TablePayload *tp) {
+                std::vector<int> rowMap(nr, -1);
+                for (size_t r = 0; r < tp->nrows; ++r) {
+                    double sd = getSd(tp->rowTimes, r);
+                    for (size_t i = 0; i < nr; ++i) {
+                        if (std::abs(sortedSd[i] - sd) < 1e-6) {
+                            rowMap[i] = static_cast<int>(r);
+                            break;
+                        }
+                    }
+                }
+                for (size_t j = 0; j < tp->width(); ++j) {
+                    std::string vn = tp->varNames[j];
+                    if (res->findVar(vn) >= 0) vn += "_2";
+                    res->varNames.push_back(std::move(vn));
+                    const Value &src = tp->cols[j];
+                    Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
+                    double *dst = col.doubleDataMut();
+                    for (size_t i = 0; i < nr; ++i) {
+                        dst[i] = (rowMap[i] >= 0 && src.isNumeric())
+                               ? src.elemAsDouble(static_cast<size_t>(rowMap[i]))
+                               : std::numeric_limits<double>::quiet_NaN();
+                    }
+                    res->cols.push_back(std::move(col));
+                }
+            };
+            for (const auto *tp : tables)
+                appendTableCols(tp);
+            outs[0] = makeTableValue(std::move(res), mr);
+        };
+
+        tt.methods["synchronize"] = [syncImpl](Value &self, Span<const Value> args, size_t,
+                                               Span<Value> outs, CallContext &ctx) {
+            std::vector<Value> all;
+            all.reserve(args.size() + 1);
+            all.push_back(self);
+            all.insert(all.end(), args.begin(), args.end());
+            syncImpl(Span<const Value>(all.data(), all.size()), outs, ctx);
+        };
+
+        tbl.methods["ismissing"] = [](Value &self, Span<const Value>, size_t,
+                                      Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            if (const TablePayload *p = tableCst(self)) {
+                size_t nr = p->nrows, nc = p->width();
+                Value tf = Value::matrix(nr, nc, ValueType::LOGICAL, mr);
+                uint8_t *dst = tf.logicalDataMut();
+                for (size_t j = 0; j < nc; ++j) {
+                    const Value &col = p->cols[j];
+                    for (size_t i = 0; i < nr; ++i) {
+                        bool miss = false;
+                        if (col.isNumeric() && i < col.numel()) miss = std::isnan(col.elemAsDouble(i));
+                        else if (col.isString() && i < col.numel()) miss = col.stringElem(i).empty();
+                        dst[i + j * nr] = miss ? 1 : 0;
+                    }
+                }
+                outs[0] = std::move(tf);
+                return;
+            }
+            outs[0] = Value::matrix(0, 0, ValueType::LOGICAL, mr);
+        };
+        tt.methods["ismissing"] = tbl.methods["ismissing"];
+
         engine.registerClass(std::move(tbl));
+        engine.registerClass(std::move(tt));
+
+        engine.registerFunction("innerjoin",
+            [innerjoinImpl](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                argcheck::checkNargin(args.size(), 2, 16, "innerjoin");
+                const TablePayload *lp = tableCst(args[0]);
+                const TablePayload *rp = tableCst(args[1]);
+                if (!lp || !rp)
+                    throw Error("innerjoin: first two arguments must be tables", 0, 0, "innerjoin", "", "numkit:innerjoin:notATable");
+                innerjoinImpl(lp, rp, args.subspan(2), nargout, outs, ctx);
+            });
+        engine.registerFunction("retime",
+            [retimeOne](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                argcheck::checkNargin(args.size(), 2, 8, "retime");
+                const TablePayload *p = tableCst(args[0]);
+                std::string basis = args[1].toString();
+                std::string method = args.size() >= 3 ? args[2].toString() : "mean";
+                outs[0] = makeTableValue(retimeOne(p, basis, method, ctx.engine->resource()), ctx.engine->resource());
+            });
+        engine.registerFunction("synchronize",
+            [syncImpl](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                argcheck::checkNargin(args.size(), 2, 16, "synchronize");
+                syncImpl(args, outs, ctx);
+            });
     }
+
+    engine.registerFunction("adftest",
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 12, "adftest");
+            auto *mr = ctx.engine->resource();
+            const Value &yIn = args[0];
+            std::vector<double> y;
+            for (size_t i = 0; i < yIn.numel(); ++i) {
+                double v = yIn.elemAsDouble(i);
+                if (!std::isnan(v))
+                    y.push_back(v);
+            }
+            std::string model = "AR";
+            int lags = 0;
+            double alpha = 0.05;
+            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString()) continue;
+                std::string k = args[i].toString();
+                if (iequalsTableOpt(k, "Model")) model = args[i + 1].toString();
+                else if (iequalsTableOpt(k, "Lags")) lags = static_cast<int>(args[i + 1].elemAsDouble(0));
+                else if (iequalsTableOpt(k, "Alpha")) alpha = args[i + 1].elemAsDouble(0);
+            }
+            const size_t N = y.size();
+            const size_t p = static_cast<size_t>(std::max(0, lags));
+            if (N <= p + 2)
+                throw Error("adftest: insufficient sample size", 0, 0, "adftest", "", "numkit:adftest:smallSample");
+            const size_t T = N - (p + 1);
+            bool isARD = iequalsTableOpt(model, "ARD");
+            bool isTS  = iequalsTableOpt(model, "TS");
+            size_t numNonDelta = isTS ? 3 : (isARD ? 2 : 1);
+            size_t numParams = numNonDelta + p;
+            size_t aIdx = numNonDelta - 1;
+
+            // Build X (T x numParams) and testY (T x 1) for t = p+1 .. N-1 (0-based)
+            std::vector<double> X(T * numParams, 0.0);
+            std::vector<double> testY(T, 0.0);
+            for (size_t r = 0; r < T; ++r) {
+                size_t t = (p + 1) + r;
+                testY[r] = y[t];
+                size_t col = 0;
+                if (isARD || isTS) X[r + (col++) * T] = 1.0;
+                if (isTS)          X[r + (col++) * T] = static_cast<double>(r + 1);
+                X[r + (col++) * T] = y[t - 1];
+                for (size_t k = 1; k <= p; ++k)
+                    X[r + (col++) * T] = y[t - k] - y[t - k - 1];
+            }
+            // Solve normal equations (X'*X) * beta = X'*testY and invert X'*X
+            std::vector<double> XtX(numParams * numParams, 0.0);
+            std::vector<double> Xty(numParams, 0.0);
+            for (size_t i = 0; i < numParams; ++i) {
+                for (size_t r = 0; r < T; ++r)
+                    Xty[i] += X[r + i * T] * testY[r];
+                for (size_t j = 0; j < numParams; ++j) {
+                    double s = 0.0;
+                    for (size_t r = 0; r < T; ++r)
+                        s += X[r + i * T] * X[r + j * T];
+                    XtX[i + j * numParams] = s;
+                }
+            }
+            // Gauss-Jordan to get inv(XtX) and beta
+            std::vector<double> aug(numParams * 2 * numParams, 0.0);
+            for (size_t i = 0; i < numParams; ++i) {
+                for (size_t j = 0; j < numParams; ++j)
+                    aug[i * (2 * numParams) + j] = XtX[i + j * numParams];
+                aug[i * (2 * numParams) + numParams + i] = 1.0;
+            }
+            for (size_t k = 0; k < numParams; ++k) {
+                size_t piv = k;
+                for (size_t i = k + 1; i < numParams; ++i)
+                    if (std::abs(aug[i * 2 * numParams + k]) > std::abs(aug[piv * 2 * numParams + k]))
+                        piv = i;
+                if (piv != k) {
+                    for (size_t j = 0; j < 2 * numParams; ++j)
+                        std::swap(aug[k * 2 * numParams + j], aug[piv * 2 * numParams + j]);
+                }
+                double diag = aug[k * 2 * numParams + k];
+                for (size_t j = 0; j < 2 * numParams; ++j)
+                    aug[k * 2 * numParams + j] /= diag;
+                for (size_t i = 0; i < numParams; ++i) {
+                    if (i == k) continue;
+                    double f = aug[i * 2 * numParams + k];
+                    for (size_t j = 0; j < 2 * numParams; ++j)
+                        aug[i * 2 * numParams + j] -= f * aug[k * 2 * numParams + j];
+                }
+            }
+            std::vector<double> beta(numParams, 0.0);
+            for (size_t i = 0; i < numParams; ++i) {
+                for (size_t j = 0; j < numParams; ++j)
+                    beta[i] += aug[i * (2 * numParams) + numParams + j] * Xty[j];
+            }
+            double SSE = 0.0;
+            for (size_t r = 0; r < T; ++r) {
+                double yhat = 0.0;
+                for (size_t j = 0; j < numParams; ++j)
+                    yhat += X[r + j * T] * beta[j];
+                double e = testY[r] - yhat;
+                SSE += e * e;
+            }
+            double MSE = SSE / static_cast<double>(T - numParams);
+            double invXtX_aa = aug[aIdx * (2 * numParams) + numParams + aIdx];
+            double se_a = std::sqrt(MSE * invXtX_aa);
+            double testStat = (beta[aIdx] - 1.0) / se_a;
+
+            static const double sampSizes[15] = {10,15,20,25,30,40,50,75,100,150,200,300,500,1000,10000};
+            static const double sigLevels[50] = {
+                0.001, 0.005, 0.010, 0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045,
+                0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095,
+                0.100, 0.125, 0.150, 0.175, 0.200, 0.800, 0.825, 0.850, 0.875, 0.900,
+                0.905, 0.910, 0.915, 0.920, 0.925, 0.930, 0.935, 0.940, 0.945, 0.950,
+                0.955, 0.960, 0.965, 0.970, 0.975, 0.980, 0.985, 0.990, 0.995, 0.999
+            };
+            static const double cvAR[15][50] = {
+                {-3.9976,-3.1423,-2.7891,-2.5834,-2.4351,-2.3201,-2.2260,-2.1460,-2.0766,-2.0148,-1.9594,-1.9095,-1.8629,-1.8201,-1.7799,-1.7427,-1.7075,-1.6744,-1.6427,-1.6126,-1.5839,-1.4569,-1.3501,-1.2567,-1.1730,0.4848,0.5897,0.7056,0.8373,0.9913,1.0258,1.0621,1.0996,1.1392,1.1810,1.2254,1.2722,1.3230,1.3775,1.4361,1.5004,1.5720,1.6520,1.7437,1.8514,1.9818,2.1485,2.3836,2.7840,3.7494},
+                {-3.7444,-3.0262,-2.7138,-2.5289,-2.3954,-2.2909,-2.2044,-2.1305,-2.0659,-2.0083,-1.9560,-1.9084,-1.8648,-1.8239,-1.7858,-1.7501,-1.7161,-1.6841,-1.6537,-1.6248,-1.5970,-1.4738,-1.3690,-1.2773,-1.1950,0.4548,0.5589,0.6733,0.8024,0.9521,0.9856,1.0203,1.0568,1.0946,1.1352,1.1775,1.2225,1.2703,1.3218,1.3771,1.4378,1.5044,1.5790,1.6643,1.7627,1.8807,2.0310,2.2387,2.5818,3.3667},
+                {-3.6182,-2.9694,-2.6777,-2.5029,-2.3760,-2.2757,-2.1928,-2.1217,-2.0590,-2.0034,-1.9524,-1.9061,-1.8635,-1.8237,-1.7866,-1.7517,-1.7187,-1.6872,-1.6578,-1.6292,-1.6020,-1.4806,-1.3773,-1.2862,-1.2043,0.4428,0.5465,0.6604,0.7883,0.9363,0.9691,1.0033,1.0390,1.0768,1.1162,1.1577,1.2017,1.2485,1.2988,1.3529,1.4115,1.4756,1.5478,1.6301,1.7244,1.8376,1.9796,2.1742,2.4956,3.2078},
+                {-3.5489,-2.9338,-2.6541,-2.4850,-2.3620,-2.2652,-2.1845,-2.1150,-2.0538,-1.9992,-1.9496,-1.9043,-1.8626,-1.8236,-1.7870,-1.7523,-1.7200,-1.6892,-1.6598,-1.6319,-1.6052,-1.4850,-1.3824,-1.2917,-1.2102,0.4344,0.5376,0.6513,0.7788,0.9264,0.9589,0.9929,1.0284,1.0654,1.1042,1.1451,1.1885,1.2352,1.2846,1.3380,1.3957,1.4600,1.5303,1.6107,1.7031,1.8140,1.9527,2.1397,2.4475,3.1150},
+                {-3.5090,-2.9118,-2.6402,-2.4762,-2.3565,-2.2604,-2.1810,-2.1130,-2.0532,-1.9992,-1.9501,-1.9054,-1.8639,-1.8250,-1.7888,-1.7544,-1.7221,-1.6913,-1.6620,-1.6340,-1.6074,-1.4881,-1.3863,-1.2960,-1.2147,0.4294,0.5324,0.6457,0.7725,0.9192,0.9515,0.9853,1.0204,1.0575,1.0962,1.1370,1.1801,1.2262,1.2756,1.3288,1.3863,1.4495,1.5186,1.5973,1.6889,1.7965,1.9325,2.1164,2.4142,3.0575},
+                {-3.4538,-2.8850,-2.6232,-2.4629,-2.3456,-2.2530,-2.1756,-2.1085,-2.0488,-1.9957,-1.9476,-1.9034,-1.8624,-1.8244,-1.7889,-1.7552,-1.7233,-1.6932,-1.6645,-1.6368,-1.6106,-1.4925,-1.3910,-1.3014,-1.2202,0.4217,0.5246,0.6375,0.7640,0.9097,0.9422,0.9756,1.0109,1.0475,1.0859,1.1262,1.1690,1.2142,1.2631,1.3153,1.3718,1.4342,1.5024,1.5796,1.6692,1.7762,1.9088,2.0896,2.3777,2.9899},
+                {-3.4129,-2.8678,-2.6112,-2.4535,-2.3384,-2.2473,-2.1709,-2.1051,-2.0467,-1.9940,-1.9466,-1.9029,-1.8623,-1.8244,-1.7890,-1.7556,-1.7240,-1.6940,-1.6653,-1.6381,-1.6117,-1.4942,-1.3932,-1.3037,-1.2230,0.4188,0.5217,0.6346,0.7603,0.9061,0.9383,0.9716,1.0066,1.0428,1.0813,1.1214,1.1638,1.2092,1.2573,1.3092,1.3655,1.4270,1.4955,1.5726,1.6606,1.7655,1.8970,2.0726,2.3564,2.9504},
+                {-3.3676,-2.8431,-2.5968,-2.4432,-2.3307,-2.2404,-2.1650,-2.1000,-2.0425,-1.9913,-1.9446,-1.9014,-1.8608,-1.8238,-1.7890,-1.7557,-1.7244,-1.6945,-1.6664,-1.6393,-1.6132,-1.4961,-1.3956,-1.3068,-1.2260,0.4143,0.5171,0.6296,0.7555,0.9004,0.9323,0.9656,1.0001,1.0361,1.0743,1.1143,1.1568,1.2020,1.2501,1.3016,1.3576,1.4188,1.4862,1.5618,1.6495,1.7530,1.8808,2.0535,2.3300,2.9151},
+                {-3.3462,-2.8336,-2.5892,-2.4383,-2.3265,-2.2375,-2.1634,-2.0988,-2.0421,-1.9910,-1.9444,-1.9012,-1.8611,-1.8239,-1.7892,-1.7565,-1.7254,-1.6959,-1.6676,-1.6405,-1.6143,-1.4978,-1.3975,-1.3088,-1.2284,0.4114,0.5144,0.6268,0.7524,0.8970,0.9289,0.9621,0.9966,1.0326,1.0705,1.1106,1.1528,1.1974,1.2452,1.2962,1.3517,1.4121,1.4793,1.5554,1.6418,1.7454,1.8726,2.0433,2.3199,2.8880},
+                {-3.3259,-2.8200,-2.5810,-2.4314,-2.3210,-2.2333,-2.1593,-2.0960,-2.0396,-1.9888,-1.9425,-1.9001,-1.8606,-1.8239,-1.7890,-1.7565,-1.7256,-1.6962,-1.6682,-1.6414,-1.6153,-1.4990,-1.3992,-1.3104,-1.2304,0.4089,0.5113,0.6237,0.7492,0.8933,0.9255,0.9586,0.9930,1.0291,1.0671,1.1067,1.1486,1.1930,1.2407,1.2918,1.3470,1.4075,1.4745,1.5493,1.6354,1.7375,1.8630,2.0324,2.3030,2.8613},
+                {-3.3187,-2.8136,-2.5753,-2.4281,-2.3189,-2.2319,-2.1588,-2.0952,-2.0390,-1.9883,-1.9423,-1.9000,-1.8605,-1.8233,-1.7890,-1.7563,-1.7256,-1.6962,-1.6684,-1.6416,-1.6158,-1.4998,-1.3999,-1.3113,-1.2313,0.4073,0.5095,0.6218,0.7477,0.8919,0.9236,0.9569,0.9914,1.0273,1.0649,1.1047,1.1467,1.1910,1.2384,1.2892,1.3441,1.4042,1.4704,1.5455,1.6312,1.7329,1.8586,2.0276,2.2977,2.8536},
+                {-3.3051,-2.8137,-2.5759,-2.4289,-2.3199,-2.2322,-2.1583,-2.0949,-2.0382,-1.9875,-1.9417,-1.8995,-1.8607,-1.8242,-1.7897,-1.7573,-1.7265,-1.6970,-1.6690,-1.6422,-1.6165,-1.5005,-1.4009,-1.3125,-1.2326,0.4065,0.5091,0.6214,0.7467,0.8903,0.9224,0.9552,0.9895,1.0253,1.0627,1.1025,1.1443,1.1887,1.2363,1.2870,1.3418,1.4019,1.4681,1.5423,1.6276,1.7291,1.8553,2.0237,2.2924,2.8395},
+                {-3.2997,-2.8061,-2.5701,-2.4239,-2.3157,-2.2291,-2.1562,-2.0930,-2.0371,-1.9870,-1.9411,-1.8991,-1.8600,-1.8233,-1.7890,-1.7565,-1.7258,-1.6966,-1.6687,-1.6416,-1.6160,-1.5005,-1.4008,-1.3127,-1.2328,0.4054,0.5082,0.6202,0.7454,0.8897,0.9215,0.9546,0.9889,1.0247,1.0624,1.1019,1.1435,1.1878,1.2347,1.2855,1.3398,1.3999,1.4655,1.5402,1.6257,1.7273,1.8518,2.0192,2.2854,2.8322},
+                {-3.2900,-2.8030,-2.5694,-2.4235,-2.3156,-2.2298,-2.1571,-2.0938,-2.0381,-1.9872,-1.9416,-1.8994,-1.8603,-1.8238,-1.7894,-1.7568,-1.7262,-1.6970,-1.6691,-1.6425,-1.6167,-1.5015,-1.4018,-1.3138,-1.2337,0.4040,0.5069,0.6193,0.7441,0.8883,0.9202,0.9531,0.9875,1.0232,1.0609,1.1006,1.1426,1.1868,1.2346,1.2856,1.3405,1.4000,1.4665,1.5405,1.6259,1.7268,1.8514,2.0181,2.2840,2.8320},
+                {-3.2864,-2.7999,-2.5662,-2.4229,-2.3155,-2.2289,-2.1562,-2.0936,-2.0376,-1.9873,-1.9416,-1.8994,-1.8604,-1.8241,-1.7898,-1.7575,-1.7268,-1.6977,-1.6697,-1.6430,-1.6175,-1.5022,-1.4025,-1.3144,-1.2343,0.4048,0.5074,0.6198,0.7448,0.8889,0.9208,0.9535,0.9878,1.0239,1.0614,1.1009,1.1424,1.1866,1.2336,1.2843,1.3388,1.3989,1.4646,1.5387,1.6239,1.7250,1.8489,2.0156,2.2816,2.8240}
+            };
+            static const double cvARD[15][50] = {
+                {-6.1728,-4.8563,-4.3427,-4.0541,-3.8538,-3.6994,-3.5751,-3.4691,-3.3782,-3.2976,-3.2260,-3.1609,-3.1022,-3.0484,-2.9978,-2.9510,-2.9071,-2.8657,-2.8268,-2.7900,-2.7552,-2.6001,-2.4713,-2.3608,-2.2633,-0.7119,-0.6179,-0.5134,-0.3960,-0.2595,-0.2292,-0.1974,-0.1644,-0.1299,-0.0930,-0.0546,-0.0139,0.0303,0.0768,0.1279,0.1836,0.2433,0.3110,0.3881,0.4772,0.5851,0.7205,0.9090,1.2323,1.9914},
+                {-5.2336,-4.3409,-3.9642,-3.7444,-3.5882,-3.4673,-3.3673,-3.2817,-3.2073,-3.1422,-3.0831,-3.0287,-2.9793,-2.9341,-2.8917,-2.8519,-2.8148,-2.7791,-2.7453,-2.7132,-2.6830,-2.5474,-2.4334,-2.3345,-2.2459,-0.7656,-0.6733,-0.5711,-0.4560,-0.3226,-0.2929,-0.2618,-0.2295,-0.1954,-0.1593,-0.1218,-0.0820,-0.0395,0.0057,0.0547,0.1079,0.1666,0.2323,0.3054,0.3906,0.4916,0.6203,0.7972,1.0849,1.7257},
+                {-4.8765,-4.1350,-3.8106,-3.6175,-3.4789,-3.3702,-3.2803,-3.2034,-3.1356,-3.0750,-3.0215,-2.9724,-2.9270,-2.8848,-2.8452,-2.8083,-2.7736,-2.7405,-2.7093,-2.6793,-2.6507,-2.5243,-2.4173,-2.3231,-2.2388,-0.7911,-0.6996,-0.5989,-0.4851,-0.3515,-0.3221,-0.2915,-0.2594,-0.2259,-0.1907,-0.1531,-0.1139,-0.0723,-0.0276,0.0211,0.0730,0.1306,0.1943,0.2669,0.3512,0.4514,0.5753,0.7454,1.0240,1.6287},
+                {-4.6989,-4.0165,-3.7208,-3.5416,-3.4119,-3.3118,-3.2278,-3.1547,-3.0912,-3.0349,-2.9846,-2.9376,-2.8946,-2.8546,-2.8171,-2.7819,-2.7482,-2.7167,-2.6865,-2.6577,-2.6307,-2.5087,-2.4056,-2.3144,-2.2327,-0.8056,-0.7154,-0.6153,-0.5026,-0.3705,-0.3411,-0.3107,-0.2787,-0.2454,-0.2101,-0.1731,-0.1338,-0.0922,-0.0477,0.0003,0.0523,0.1094,0.1730,0.2453,0.3274,0.4254,0.5484,0.7128,0.9842,1.5729},
+                {-4.5788,-3.9518,-3.6686,-3.4995,-3.3770,-3.2792,-3.1977,-3.1285,-3.0677,-3.0129,-2.9634,-2.9182,-2.8765,-2.8379,-2.8015,-2.7675,-2.7354,-2.7048,-2.6756,-2.6477,-2.6209,-2.5020,-2.4004,-2.3110,-2.2310,-0.8151,-0.7256,-0.6264,-0.5132,-0.3814,-0.3519,-0.3219,-0.2901,-0.2571,-0.2222,-0.1855,-0.1469,-0.1056,-0.0613,-0.0135,0.0381,0.0949,0.1579,0.2288,0.3112,0.4100,0.5302,0.6966,0.9632,1.5302},
+                {-4.4417,-3.8676,-3.6060,-3.4472,-3.3307,-3.2382,-3.1603,-3.0944,-3.0365,-2.9845,-2.9376,-2.8941,-2.8544,-2.8163,-2.7812,-2.7484,-2.7171,-2.6878,-2.6594,-2.6327,-2.6069,-2.4910,-2.3929,-2.3065,-2.2278,-0.8288,-0.7399,-0.6411,-0.5286,-0.3981,-0.3693,-0.3391,-0.3077,-0.2745,-0.2395,-0.2032,-0.1646,-0.1232,-0.0789,-0.0317,0.0195,0.0757,0.1386,0.2094,0.2900,0.3865,0.5064,0.6694,0.9330,1.4861},
+                {-4.3679,-3.8235,-3.5693,-3.4173,-3.3048,-3.2155,-3.1405,-3.0758,-3.0194,-2.9683,-2.9219,-2.8790,-2.8400,-2.8036,-2.7694,-2.7369,-2.7064,-2.6776,-2.6503,-2.6243,-2.5990,-2.4857,-2.3887,-2.3031,-2.2260,-0.8364,-0.7476,-0.6488,-0.5372,-0.4063,-0.3773,-0.3473,-0.3156,-0.2825,-0.2477,-0.2109,-0.1722,-0.1307,-0.0865,-0.0390,0.0119,0.0685,0.1309,0.2019,0.2832,0.3788,0.4972,0.6595,0.9215,1.4687},
+                {-4.2748,-3.7604,-3.5208,-3.3747,-3.2665,-3.1812,-3.1099,-3.0479,-2.9931,-2.9443,-2.9002,-2.8592,-2.8215,-2.7860,-2.7528,-2.7217,-2.6925,-2.6644,-2.6377,-2.6120,-2.5875,-2.4774,-2.3830,-2.2992,-2.2236,-0.8450,-0.7573,-0.6588,-0.5477,-0.4181,-0.3893,-0.3593,-0.3283,-0.2951,-0.2602,-0.2240,-0.1854,-0.1451,-0.1011,-0.0544,-0.0032,0.0532,0.1146,0.1844,0.2649,0.3600,0.4805,0.6393,0.8977,1.4358},
+                {-4.2214,-3.7298,-3.4980,-3.3565,-3.2505,-3.1667,-3.0962,-3.0355,-2.9816,-2.9334,-2.8897,-2.8497,-2.8123,-2.7776,-2.7450,-2.7141,-2.6846,-2.6571,-2.6305,-2.6054,-2.5811,-2.4721,-2.3782,-2.2956,-2.2205,-0.8493,-0.7611,-0.6633,-0.5517,-0.4222,-0.3936,-0.3634,-0.3319,-0.2997,-0.2652,-0.2287,-0.1900,-0.1487,-0.1047,-0.0575,-0.0063,0.0498,0.1111,0.1809,0.2608,0.3551,0.4735,0.6323,0.8853,1.4156},
+                {-4.1862,-3.7032,-3.4774,-3.3387,-3.2348,-3.1526,-3.0834,-3.0241,-2.9716,-2.9242,-2.8812,-2.8416,-2.8049,-2.7705,-2.7382,-2.7077,-2.6791,-2.6519,-2.6256,-2.6008,-2.5769,-2.4694,-2.3770,-2.2952,-2.2209,-0.8553,-0.7679,-0.6700,-0.5592,-0.4306,-0.4022,-0.3720,-0.3407,-0.3078,-0.2734,-0.2372,-0.1986,-0.1576,-0.1141,-0.0671,-0.0164,0.0392,0.1012,0.1707,0.2508,0.3451,0.4634,0.6217,0.8745,1.4054},
+                {-4.1587,-3.6859,-3.4616,-3.3261,-3.2248,-3.1442,-3.0760,-3.0177,-2.9651,-2.9186,-2.8760,-2.8371,-2.8006,-2.7668,-2.7351,-2.7047,-2.6761,-2.6489,-2.6229,-2.5982,-2.5744,-2.4671,-2.3750,-2.2935,-2.2194,-0.8562,-0.7686,-0.6711,-0.5604,-0.4311,-0.4026,-0.3727,-0.3417,-0.3091,-0.2748,-0.2384,-0.2003,-0.1599,-0.1163,-0.0698,-0.0191,0.0361,0.0972,0.1669,0.2475,0.3430,0.4603,0.6176,0.8710,1.3933},
+                {-4.1353,-3.6751,-3.4561,-3.3198,-3.2183,-3.1371,-3.0700,-3.0116,-2.9595,-2.9135,-2.8708,-2.8322,-2.7961,-2.7625,-2.7308,-2.7010,-2.6729,-2.6461,-2.6207,-2.5959,-2.5722,-2.4658,-2.3743,-2.2929,-2.2193,-0.8597,-0.7726,-0.6748,-0.5639,-0.4350,-0.4061,-0.3758,-0.3446,-0.3122,-0.2776,-0.2413,-0.2030,-0.1622,-0.1188,-0.0721,-0.0210,0.0351,0.0967,0.1661,0.2454,0.3405,0.4578,0.6164,0.8683,1.3894},
+                {-4.1168,-3.6611,-3.4423,-3.3084,-3.2097,-3.1314,-3.0651,-3.0073,-2.9562,-2.9099,-2.8680,-2.8293,-2.7931,-2.7599,-2.7286,-2.6988,-2.6708,-2.6440,-2.6183,-2.5937,-2.5702,-2.4647,-2.3736,-2.2928,-2.2195,-0.8623,-0.7747,-0.6769,-0.5663,-0.4371,-0.4080,-0.3779,-0.3468,-0.3141,-0.2797,-0.2434,-0.2050,-0.1647,-0.1213,-0.0744,-0.0236,0.0319,0.0930,0.1624,0.2417,0.3363,0.4534,0.6111,0.8627,1.3812},
+                {-4.0982,-3.6539,-3.4378,-3.3035,-3.2051,-3.1266,-3.0606,-3.0035,-2.9529,-2.9066,-2.8648,-2.8258,-2.7902,-2.7569,-2.7259,-2.6963,-2.6686,-2.6420,-2.6166,-2.5923,-2.5686,-2.4625,-2.3718,-2.2912,-2.2182,-0.8630,-0.7754,-0.6780,-0.5669,-0.4380,-0.4090,-0.3793,-0.3482,-0.3158,-0.2813,-0.2452,-0.2068,-0.1662,-0.1226,-0.0757,-0.0250,0.0302,0.0906,0.1606,0.2396,0.3339,0.4504,0.6087,0.8628,1.3790},
+                {-4.0932,-3.6446,-3.4307,-3.2987,-3.2005,-3.1217,-3.0563,-2.9990,-2.9483,-2.9028,-2.8610,-2.8227,-2.7875,-2.7544,-2.7231,-2.6940,-2.6663,-2.6395,-2.6142,-2.5899,-2.5666,-2.4615,-2.3713,-2.2904,-2.2174,-0.8630,-0.7756,-0.6782,-0.5669,-0.4378,-0.4094,-0.3796,-0.3481,-0.3153,-0.2814,-0.2455,-0.2073,-0.1672,-0.1238,-0.0778,-0.0275,0.0276,0.0898,0.1593,0.2395,0.3342,0.4515,0.6093,0.8588,1.3761}
+            };
+            const auto &cvTbl = isARD ? cvARD : cvAR;
+            double Td = static_cast<double>(T);
+            size_t r0 = 0;
+            while (r0 + 1 < 14 && sampSizes[r0 + 1] < Td) ++r0;
+            double tFrac = (Td <= sampSizes[0]) ? 0.0
+                         : (Td >= sampSizes[14]) ? 1.0
+                         : (Td - sampSizes[r0]) / (sampSizes[r0 + 1] - sampSizes[r0]);
+            double rowT[50];
+            for (size_t c = 0; c < 50; ++c)
+                rowT[c] = (1.0 - tFrac) * cvTbl[r0][c] + tFrac * cvTbl[r0 + 1][c];
+
+            // Interpolate cValue at alpha
+            size_t c0 = 0;
+            while (c0 + 1 < 49 && sigLevels[c0 + 1] < alpha) ++c0;
+            double aFrac = (alpha <= sigLevels[0]) ? 0.0
+                         : (alpha >= sigLevels[49]) ? 1.0
+                         : (alpha - sigLevels[c0]) / (sigLevels[c0 + 1] - sigLevels[c0]);
+            double cValue = (1.0 - aFrac) * rowT[c0] + aFrac * rowT[c0 + 1];
+
+            // Interpolate pValue at testStat
+            double pValue = 0.999;
+            if (testStat <= rowT[0]) {
+                pValue = sigLevels[0];
+            } else if (testStat >= rowT[49]) {
+                pValue = sigLevels[49];
+            } else {
+                for (size_t c = 0; c < 49; ++c) {
+                    if (testStat >= rowT[c] && testStat <= rowT[c + 1]) {
+                        double frac = (testStat - rowT[c]) / (rowT[c + 1] - rowT[c]);
+                        pValue = (1.0 - frac) * sigLevels[c] + frac * sigLevels[c + 1];
+                        break;
+                    }
+                }
+            }
+            bool h = (testStat < cValue);
+            outs[0] = Value::logicalScalar(h, mr);
+            if (nargout >= 2 && outs.size() >= 2) outs[1] = Value::scalar(pValue, mr);
+            if (nargout >= 3 && outs.size() >= 3) outs[2] = Value::scalar(testStat, mr);
+            if (nargout >= 4 && outs.size() >= 4) outs[3] = Value::scalar(cValue, mr);
+        });
 
     // ── Table predicates, inspection, and conversion functions ───────────────
     engine.registerFunction("istable",
@@ -2897,6 +3611,92 @@ void registerContainersRuntime(Engine &engine)
         }
     };
 
+    engine.registerFunction("detectImportOptions",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 15, "detectImportOptions");
+            auto *mr = ctx.engine->resource();
+            std::string filename = args[0].toString();
+            std::string sheetName;
+            int sheetNum = 1;
+            bool preserveNames = false;
+            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString()) continue;
+                std::string k = args[i].toString();
+                if (iequalsTableOpt(k, "Sheet")) {
+                    if (args[i + 1].isNumeric()) sheetNum = static_cast<int>(args[i + 1].elemAsDouble(0));
+                    else sheetName = args[i + 1].toString();
+                } else if (iequalsTableOpt(k, "VariableNamingRule")) {
+                    preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
+                }
+            }
+            std::string raw = readRawFileBytes(ctx, filename, "detectImportOptions");
+            bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
+                      && raw[2] == '\x03' && raw[3] == '\x04';
+            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
+                              : parseCsvGrid(raw);
+            std::vector<std::string> varNames;
+            if (!grid.empty()) {
+                for (size_t c = 0; c < grid[0].size(); ++c) {
+                    std::string nm = grid[0][c].text;
+                    if (!preserveNames && !nm.empty()) nm = makeValidIdStr(nm);
+                    if (nm.empty()) nm = "Var" + std::to_string(c + 1);
+                    std::string base = nm;
+                    int suffix = 1;
+                    while (std::find(varNames.begin(), varNames.end(), nm) != varNames.end())
+                        nm = base + "_" + std::to_string(suffix++);
+                    varNames.push_back(std::move(nm));
+                }
+            }
+            Value vnCell = Value::cell(1, varNames.size(), mr);
+            Value vtCell = Value::cell(1, varNames.size(), mr);
+            for (size_t c = 0; c < varNames.size(); ++c) {
+                vnCell.cellAt(c) = Value::fromString(varNames[c], mr);
+                vtCell.cellAt(c) = Value::fromString("double", mr);
+            }
+            Value vnOrigCell = Value::cell(1, grid.empty() ? 0 : grid[0].size(), mr);
+            if (!grid.empty()) {
+                for (size_t c = 0; c < grid[0].size(); ++c)
+                    vnOrigCell.cellAt(c) = Value::fromString(grid[0][c].text, mr);
+            }
+            Value opts = Value::structure(mr);
+            opts.field("VariableNames") = vnCell;
+            opts.field("OriginalVariableNames") = std::move(vnOrigCell);
+            opts.field("SelectedVariableNames") = vnCell;
+            opts.field("VariableTypes") = std::move(vtCell);
+            opts.field("Sheet") = Value::fromString(sheetName, mr);
+            opts.field("SheetNum") = Value::scalar(static_cast<double>(sheetNum), mr);
+            opts.field("PreserveVariableNames") = Value::logicalScalar(preserveNames, mr);
+            opts.field("VariableNamingRule") = Value::fromString(preserveNames ? "preserve" : "modify", mr);
+            opts.field("TreatAsMissing") = Value::cell(0, 0, mr);
+            outs[0] = std::move(opts);
+        });
+
+    engine.registerFunction("setvaropts",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 3, 15, "setvaropts");
+            auto *mr = ctx.engine->resource();
+            Value opts = args[0];
+            if (!opts.isStruct()) {
+                outs[0] = opts;
+                return;
+            }
+            size_t kvStart = 1;
+            if (args.size() % 2 == 0)
+                kvStart = 2;
+            for (size_t i = kvStart; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString()) continue;
+                std::string k = args[i].toString();
+                if (iequalsTableOpt(k, "TreatAsMissing")) {
+                    auto tokens = TablePayload::extractNames(args[i + 1], "setvaropts", "TreatAsMissing");
+                    Value c = Value::cell(1, tokens.size(), mr);
+                    for (size_t j = 0; j < tokens.size(); ++j)
+                        c.cellAt(j) = Value::fromString(tokens[j], mr);
+                    opts.field("TreatAsMissing") = std::move(c);
+                }
+            }
+            outs[0] = std::move(opts);
+        });
+
     engine.registerFunction("readtable",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 15, "readtable");
@@ -2908,7 +3708,24 @@ void registerContainersRuntime(Engine &engine)
             std::string sheetName;
             int sheetNum = 1;
             bool preserveNames = false;
-            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+            std::vector<std::string> treatAsMissing;
+            size_t kvStart = 1;
+            if (args.size() >= 2 && args[1].isStruct()) {
+                const Value &opts = args[1];
+                if (opts.hasField("Sheet") && !opts.field("Sheet").toString().empty())
+                    sheetName = opts.field("Sheet").toString();
+                if (opts.hasField("SheetNum") && opts.field("SheetNum").isNumeric())
+                    sheetNum = static_cast<int>(opts.field("SheetNum").elemAsDouble(0));
+                if (opts.hasField("PreserveVariableNames") && opts.field("PreserveVariableNames").toBool())
+                    preserveNames = true;
+                if (opts.hasField("VariableNamingRule")
+                    && iequalsTableOpt(opts.field("VariableNamingRule").toString(), "preserve"))
+                    preserveNames = true;
+                if (opts.hasField("TreatAsMissing") && !opts.field("TreatAsMissing").isEmpty())
+                    treatAsMissing = TablePayload::extractNames(opts.field("TreatAsMissing"), "readtable", "TreatAsMissing");
+                kvStart = 2;
+            }
+            for (size_t i = kvStart; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString())
                     continue;
                 std::string k = args[i].toString();
@@ -2919,8 +3736,15 @@ void registerContainersRuntime(Engine &engine)
                         sheetName = args[i + 1].toString();
                 } else if (iequalsTableOpt(k, "VariableNamingRule")) {
                     preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
+                } else if (iequalsTableOpt(k, "TreatAsMissing")) {
+                    treatAsMissing = TablePayload::extractNames(args[i + 1], "readtable", "TreatAsMissing");
                 }
             }
+            auto isMissingToken = [&](const std::string &tok) -> bool {
+                for (const auto &m : treatAsMissing)
+                    if (tok == m) return true;
+                return false;
+            };
 
             std::string raw = readRawFileBytes(ctx, filename, "readtable");
             bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
@@ -2953,7 +3777,7 @@ void registerContainersRuntime(Engine &engine)
                 size_t numCount = 0, strCount = 0;
                 for (size_t r = 1; r < maxR; ++r) {
                     const auto &cell = grid[r][c];
-                    if (!cell.present || cell.text.empty())
+                    if (!cell.present || cell.text.empty() || isMissingToken(cell.text))
                         continue;
                     double dummy = 0.0;
                     if (!cell.isStr && tryParseCellDouble(cell.text, dummy))
@@ -2970,7 +3794,7 @@ void registerContainersRuntime(Engine &engine)
                     for (size_t r = 1; r < maxR; ++r) {
                         const auto &cell = grid[r][c];
                         double d = nan;
-                        if (cell.present && !cell.isStr && !cell.text.empty())
+                        if (cell.present && !cell.isStr && !cell.text.empty() && !isMissingToken(cell.text))
                             tryParseCellDouble(cell.text, d);
                         dst[r - 1] = d;
                     }
@@ -3625,6 +4449,1181 @@ void registerContainersRuntime(Engine &engine)
             }
             outs[0] = std::move(ypred);
         });
+
+    // ── comm.* and dsp.* System Objects + eyediagram ──
+    auto applySysObjNV = [](ObjectState &st, Span<const Value> args, size_t startIdx) {
+        for (size_t i = startIdx; i + 1 < args.size(); i += 2) {
+            if (args[i].isChar() || args[i].isString()) {
+                st.props[args[i].toString()] = args[i + 1];
+            }
+        }
+    };
+    auto sysObjPropGet = [](const Value &self, const std::string &name, Value &out, CallContext &) -> bool {
+        const auto &st = (*self.objectStateConst());
+        auto it = st.props.find(name);
+        if (it == st.props.end())
+            return false;
+        out = it->second;
+        return true;
+    };
+    auto sysObjPropSet = [](Value &self, const std::string &name, const Value &val, CallContext &) -> bool {
+        if (auto *st = self.objectStateMut()) {
+            st->props[name] = val;
+            return true;
+        }
+        return false;
+    };
+    auto wireSysObjBase = [sysObjPropGet, sysObjPropSet](BuiltinClass &bc, const char *clsName) {
+        bc.name = clsName;
+        bc.isHandle = true;
+        bc.propGet = sysObjPropGet;
+        bc.propSet = sysObjPropSet;
+        std::string cn(clsName);
+        bc.methods["release"] = [](Value &, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (!outs.empty())
+                outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.methods["clone"] = [cn](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            outs[0] = Value::object(cn, (*self.objectStateConst()).deepCopy(mr), true, mr);
+        };
+    };
+
+    for (const char *plotFn : {"eyediagram", "scatterplot"}) {
+        engine.registerFunction(plotFn,
+            [](Span<const Value> /*args*/, size_t, Span<Value> outs, CallContext &ctx) {
+                if (!outs.empty())
+                    outs[0] = Value::scalar(1.0, ctx.engine->resource());
+            });
+    }
+
+    engine.registerFunction("iqimbal",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "iqimbal");
+            auto *mr = ctx.engine->resource();
+            const Value &x = args[0];
+            const double ampDb = args[1].toScalar();
+            const double phDeg = (args.size() >= 3) ? args[2].toScalar() : 0.0;
+            const double gI = std::pow(10.0, ampDb / 40.0);
+            const double gQ = std::pow(10.0, -ampDb / 40.0);
+            const double theta = phDeg * (3.14159265358979323846 / 360.0);
+            const double c = std::cos(theta);
+            const double s = std::sin(theta);
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
+            Complex *yc = y.complexDataMut();
+            for (size_t i = 0; i < N; ++i) {
+                double re = isCplx ? xc[i].real() : x.elemAsDouble(i);
+                double im = isCplx ? xc[i].imag() : 0.0;
+                double yRe = gI * re * c - gQ * im * s;
+                double yIm = -gI * re * s + gQ * im * c;
+                yc[i] = Complex(yRe, yIm);
+            }
+            outs[0] = std::move(y);
+        });
+
+    // 1. comm.BarkerCode
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.BarkerCode");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["Length"] = Value::scalar(13.0, mr);
+            st->props["SamplesPerFrame"] = Value::scalar(1.0, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("comm.BarkerCode", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> /*args*/, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const auto &st = (*self.objectStateConst());
+            int len = 13;
+            size_t spf = 1;
+            if (st.props.count("Length") && !st.props.at("Length").isEmpty())
+                len = static_cast<int>(st.props.at("Length").toScalar());
+            if (st.props.count("SamplesPerFrame") && !st.props.at("SamplesPerFrame").isEmpty())
+                spf = static_cast<size_t>(std::max(1.0, st.props.at("SamplesPerFrame").toScalar()));
+            std::vector<double> code;
+            switch (len) {
+            case 1:  code = {-1}; break;
+            case 2:  code = {-1, 1}; break;
+            case 3:  code = {-1, -1, 1}; break;
+            case 4:  code = {-1, -1, 1, -1}; break;
+            case 5:  code = {-1, -1, -1, 1, -1}; break;
+            case 7:  code = {-1, -1, -1, 1, 1, -1, 1}; break;
+            case 11: code = {-1, -1, -1, 1, 1, 1, -1, 1, 1, -1, 1}; break;
+            default: code = {-1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1}; break;
+            }
+            Value out = Value::matrix(spf, 1, ValueType::DOUBLE, mr);
+            double *od = out.doubleDataMut();
+            for (size_t i = 0; i < spf; ++i)
+                od[i] = code[i % code.size()];
+            outs[0] = std::move(out);
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 2. comm.DBPSKModulator & comm.DBPSKDemodulator
+    struct DBPSKState : NativePayload {
+        double prevPhase = 0.0;
+        std::complex<double> prevSym{1.0, 0.0};
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<DBPSKState>();
+        }
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.DBPSKModulator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<DBPSKState>();
+            st->props["PhaseRotation"] = Value::scalar(0.0, mr);
+            if (!args.empty() && args[0].isNumeric()) {
+                st->props["PhaseRotation"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.DBPSKModulator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<DBPSKState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<DBPSKState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            double phaseRot = st->props.count("PhaseRotation") ? st->props.at("PhaseRotation").toScalar() : 0.0;
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
+            Complex *yd = y.complexDataMut();
+            constexpr double kPi = 3.14159265358979323846;
+            constexpr double kTwoPi = 2.0 * kPi;
+            for (size_t i = 0; i < N; ++i) {
+                double b = x.elemAsDouble(i);
+                nst->prevPhase = std::fmod(nst->prevPhase + ((b != 0.0) ? kPi : 0.0) + phaseRot, kTwoPi);
+                if (nst->prevPhase < 0.0) nst->prevPhase += kTwoPi;
+                yd[i] = Complex(std::cos(nst->prevPhase), std::sin(nst->prevPhase));
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<DBPSKState *>(st->native.get())) {
+                    nst->prevPhase = 0.0;
+                    nst->prevSym = {1.0, 0.0};
+                }
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.DBPSKDemodulator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<DBPSKState>();
+            st->props["PhaseRotation"] = Value::scalar(0.0, mr);
+            if (!args.empty() && args[0].isNumeric()) {
+                st->props["PhaseRotation"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.DBPSKDemodulator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<DBPSKState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<DBPSKState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            double phaseRot = st->props.count("PhaseRotation") ? st->props.at("PhaseRotation").toScalar() : 0.0;
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+            double *yd = y.doubleDataMut();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            std::complex<double> rotConj = std::polar(1.0, -phaseRot);
+            for (size_t i = 0; i < N; ++i) {
+                std::complex<double> cur = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                std::complex<double> prod = cur * std::conj(nst->prevSym) * rotConj;
+                double dphi = std::atan2(prod.imag(), prod.real());
+                yd[i] = (std::abs(dphi) > 3.14159265358979323846 / 2.0) ? 1.0 : 0.0;
+                nst->prevSym = cur;
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<DBPSKState *>(st->native.get())) {
+                    nst->prevPhase = 0.0;
+                    nst->prevSym = {1.0, 0.0};
+                }
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 3. comm.QPSKModulator & comm.QPSKDemodulator
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.QPSKModulator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["PhaseOffset"] = Value::scalar(3.14159265358979323846 / 4.0, mr);
+            st->props["BitInput"] = Value::logicalScalar(false, mr);
+            st->props["SymbolMapping"] = Value::fromString("Gray", mr);
+            if (!args.empty() && args[0].isNumeric()) {
+                st->props["PhaseOffset"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.QPSKModulator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const auto &st = (*self.objectStateConst());
+            double phi0 = st.props.count("PhaseOffset") ? st.props.at("PhaseOffset").toScalar() : (3.14159265358979323846 / 4.0);
+            bool bitIn = st.props.count("BitInput") && st.props.at("BitInput").toScalar() != 0.0;
+            bool gray = !st.props.count("SymbolMapping") || st.props.at("SymbolMapping").toString() != "Binary";
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const size_t nSym = bitIn ? (N / 2) : N;
+            Value y = Value::matrix(nSym, 1, ValueType::COMPLEX, mr);
+            Complex *yd = y.complexDataMut();
+            constexpr double kPi2 = 3.14159265358979323846 / 2.0;
+            static const int grayToPhase[4] = {0, 1, 3, 2};
+            for (size_t i = 0; i < nSym; ++i) {
+                int sym = 0;
+                if (bitIn) {
+                    int b0 = (x.elemAsDouble(2 * i) != 0.0) ? 1 : 0;
+                    int b1 = (x.elemAsDouble(2 * i + 1) != 0.0) ? 1 : 0;
+                    sym = (b0 << 1) | b1;
+                } else {
+                    sym = static_cast<int>(x.elemAsDouble(i)) & 3;
+                }
+                int phIdx = gray ? grayToPhase[sym & 3] : (sym & 3);
+                double ang = phi0 + phIdx * kPi2;
+                yd[i] = Complex(std::cos(ang), std::sin(ang));
+            }
+            outs[0] = std::move(y);
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.QPSKDemodulator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["PhaseOffset"] = Value::scalar(3.14159265358979323846 / 4.0, mr);
+            st->props["BitOutput"] = Value::logicalScalar(false, mr);
+            st->props["SymbolMapping"] = Value::fromString("Gray", mr);
+            if (!args.empty() && args[0].isNumeric()) {
+                st->props["PhaseOffset"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.QPSKDemodulator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const auto &st = (*self.objectStateConst());
+            double phi0 = st.props.count("PhaseOffset") ? st.props.at("PhaseOffset").toScalar() : (3.14159265358979323846 / 4.0);
+            bool bitOut = st.props.count("BitOutput") && st.props.at("BitOutput").toScalar() != 0.0;
+            bool gray = !st.props.count("SymbolMapping") || st.props.at("SymbolMapping").toString() != "Binary";
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            constexpr double kPi = 3.14159265358979323846;
+            constexpr double kTwoPi = 2.0 * kPi;
+            constexpr double kPi2 = kPi / 2.0;
+            static const int phaseToGray[4] = {0, 1, 3, 2};
+            Value y = Value::matrix(bitOut ? (2 * N) : N, 1, ValueType::DOUBLE, mr);
+            double *yd = y.doubleDataMut();
+            for (size_t i = 0; i < N; ++i) {
+                double re = isCplx ? xc[i].real() : x.elemAsDouble(i);
+                double im = isCplx ? xc[i].imag() : 0.0;
+                double ang = std::atan2(im, re) - phi0;
+                ang = std::fmod(ang, kTwoPi);
+                if (ang < 0.0) ang += kTwoPi;
+                int phIdx = static_cast<int>(std::floor((ang + kPi / 4.0) / kPi2)) & 3;
+                int sym = gray ? phaseToGray[phIdx] : phIdx;
+                if (bitOut) {
+                    yd[2 * i] = (sym >> 1) & 1;
+                    yd[2 * i + 1] = sym & 1;
+                } else {
+                    yd[i] = static_cast<double>(sym);
+                }
+            }
+            outs[0] = std::move(y);
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 4. comm.RaisedCosineTransmitFilter & comm.RaisedCosineReceiveFilter
+    struct RCFilterState : NativePayload {
+        std::vector<std::complex<double>> z;
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<RCFilterState>();
+        }
+    };
+    auto designRCFilter = [](const ObjectState &st, bool isTx) -> std::vector<double> {
+        std::string shape = st.props.count("Shape") ? st.props.at("Shape").toString() : "Square root";
+        double beta = st.props.count("RolloffFactor") ? st.props.at("RolloffFactor").toScalar() : 0.2;
+        size_t span = st.props.count("FilterSpanInSymbols")
+            ? static_cast<size_t>(std::max(1.0, st.props.at("FilterSpanInSymbols").toScalar())) : 10;
+        const char *spsProp = isTx ? "OutputSamplesPerSymbol" : "InputSamplesPerSymbol";
+        size_t sps = st.props.count(spsProp)
+            ? static_cast<size_t>(std::max(1.0, st.props.at(spsProp).toScalar())) : 8;
+        double gain = st.props.count("Gain") ? st.props.at("Gain").toScalar() : 1.0;
+
+        const size_t len = span * sps + 1;
+        const double half = 0.5 * static_cast<double>(span * sps);
+        const double Ts = static_cast<double>(sps);
+        constexpr double kPi = 3.14159265358979323846;
+        std::vector<double> h(len, 0.0);
+        bool isSqrt = (shape.find("Square") != std::string::npos || shape.find("square") != std::string::npos);
+        for (size_t i = 0; i < len; ++i) {
+            double t = (static_cast<double>(i) - half) / Ts;
+            if (std::abs(t) < 1e-12) {
+                h[i] = isSqrt ? ((1.0 - beta) + 4.0 * beta / kPi) : 1.0;
+            } else if (isSqrt) {
+                if (beta > 0.0 && std::abs(std::abs(4.0 * beta * t) - 1.0) < 1e-9) {
+                    h[i] = (beta / std::sqrt(2.0)) *
+                           ((1.0 + 2.0 / kPi) * std::sin(kPi / (4.0 * beta)) +
+                            (1.0 - 2.0 / kPi) * std::cos(kPi / (4.0 * beta)));
+                } else {
+                    double num = std::sin(kPi * t * (1.0 - beta)) +
+                                 4.0 * beta * t * std::cos(kPi * t * (1.0 + beta));
+                    double den = kPi * t * (1.0 - (4.0 * beta * t) * (4.0 * beta * t));
+                    h[i] = num / den;
+                }
+            } else {
+                if (beta > 0.0 && std::abs(std::abs(2.0 * beta * t) - 1.0) < 1e-9) {
+                    h[i] = (kPi / 4.0) * (std::sin(kPi * t) / (kPi * t));
+                } else {
+                    double sinc = std::sin(kPi * t) / (kPi * t);
+                    double cosPart = std::cos(kPi * beta * t) / (1.0 - (2.0 * beta * t) * (2.0 * beta * t));
+                    h[i] = sinc * cosPart;
+                }
+            }
+        }
+        double energy = 0.0;
+        for (double v : h) energy += v * v;
+        double scale = (energy > 0.0) ? (gain / std::sqrt(energy)) : gain;
+        for (double &v : h) v *= scale;
+        return h;
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.RaisedCosineTransmitFilter");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<RCFilterState>();
+            st->props["Shape"] = Value::fromString("Square root", mr);
+            st->props["RolloffFactor"] = Value::scalar(0.2, mr);
+            st->props["FilterSpanInSymbols"] = Value::scalar(10.0, mr);
+            st->props["OutputSamplesPerSymbol"] = Value::scalar(8.0, mr);
+            st->props["Gain"] = Value::scalar(1.0, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("comm.RaisedCosineTransmitFilter", std::move(st), true, mr);
+        };
+        bc.methods["coeffs"] = [designRCFilter](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto b = designRCFilter((*self.objectStateConst()), true);
+            Value bv = Value::matrix(1, b.size(), ValueType::DOUBLE, mr);
+            std::copy(b.begin(), b.end(), bv.doubleDataMut());
+            Value s = Value::structure(mr);
+            s.field("Numerator") = std::move(bv);
+            outs[0] = std::move(s);
+        };
+        bc.methods["step"] = [designRCFilter](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<RCFilterState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<RCFilterState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            auto b = designRCFilter(*st, true);
+            const size_t nb = b.size();
+            if (nst->z.size() != nb - 1)
+                nst->z.assign(nb > 1 ? nb - 1 : 0, {0.0, 0.0});
+            size_t sps = st->props.count("OutputSamplesPerSymbol")
+                ? static_cast<size_t>(std::max(1.0, st->props.at("OutputSamplesPerSymbol").toScalar())) : 8;
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const size_t outLen = N * sps;
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            Value y = Value::matrix(outLen, 1, isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            Complex *yc = isCplx ? y.complexDataMut() : nullptr;
+            double *yd = isCplx ? nullptr : y.doubleDataMut();
+            for (size_t i = 0; i < N; ++i) {
+                std::complex<double> xi = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                for (size_t k = 0; k < sps; ++k) {
+                    std::complex<double> u = (k == 0) ? xi : std::complex<double>(0.0, 0.0);
+                    std::complex<double> out = b[0] * u + (nst->z.empty() ? std::complex<double>(0.0, 0.0) : nst->z[0]);
+                    for (size_t j = 0; j + 1 < nst->z.size(); ++j)
+                        nst->z[j] = b[j + 1] * u + nst->z[j + 1];
+                    if (!nst->z.empty())
+                        nst->z.back() = b.back() * u;
+                    size_t idx = i * sps + k;
+                    if (isCplx) {
+                        yc[idx] = out;
+                    } else {
+                        yd[idx] = out.real();
+                    }
+                }
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<RCFilterState *>(st->native.get()))
+                    nst->z.clear();
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.RaisedCosineReceiveFilter");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<RCFilterState>();
+            st->props["Shape"] = Value::fromString("Square root", mr);
+            st->props["RolloffFactor"] = Value::scalar(0.2, mr);
+            st->props["FilterSpanInSymbols"] = Value::scalar(10.0, mr);
+            st->props["InputSamplesPerSymbol"] = Value::scalar(8.0, mr);
+            st->props["DecimationFactor"] = Value::scalar(8.0, mr);
+            st->props["DecimationOffset"] = Value::scalar(0.0, mr);
+            st->props["Gain"] = Value::scalar(1.0, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("comm.RaisedCosineReceiveFilter", std::move(st), true, mr);
+        };
+        bc.methods["coeffs"] = [designRCFilter](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto b = designRCFilter((*self.objectStateConst()), false);
+            Value bv = Value::matrix(1, b.size(), ValueType::DOUBLE, mr);
+            std::copy(b.begin(), b.end(), bv.doubleDataMut());
+            Value s = Value::structure(mr);
+            s.field("Numerator") = std::move(bv);
+            outs[0] = std::move(s);
+        };
+        bc.methods["step"] = [designRCFilter](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<RCFilterState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<RCFilterState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            auto b = designRCFilter(*st, false);
+            const size_t nb = b.size();
+            if (nst->z.size() != nb - 1)
+                nst->z.assign(nb > 1 ? nb - 1 : 0, {0.0, 0.0});
+            size_t dec = st->props.count("DecimationFactor")
+                ? static_cast<size_t>(std::max(1.0, st->props.at("DecimationFactor").toScalar())) : 8;
+            size_t decOff = st->props.count("DecimationOffset")
+                ? static_cast<size_t>(std::max(0.0, st->props.at("DecimationOffset").toScalar())) : 0;
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            std::vector<std::complex<double>> decOut;
+            decOut.reserve((N + dec - 1) / dec);
+            for (size_t i = 0; i < N; ++i) {
+                std::complex<double> u = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                std::complex<double> out = b[0] * u + (nst->z.empty() ? std::complex<double>(0.0, 0.0) : nst->z[0]);
+                for (size_t j = 0; j + 1 < nst->z.size(); ++j)
+                    nst->z[j] = b[j + 1] * u + nst->z[j + 1];
+                if (!nst->z.empty())
+                    nst->z.back() = b.back() * u;
+                if ((i % dec) == decOff)
+                    decOut.push_back(out);
+            }
+            Value y = Value::matrix(decOut.size(), 1, isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            if (isCplx) {
+                Complex *yc = y.complexDataMut();
+                for (size_t i = 0; i < decOut.size(); ++i) yc[i] = decOut[i];
+            } else {
+                double *yd = y.doubleDataMut();
+                for (size_t i = 0; i < decOut.size(); ++i) yd[i] = decOut[i].real();
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<RCFilterState *>(st->native.get()))
+                    nst->z.clear();
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 5. comm.AWGNChannel
+    struct AWGNState : NativePayload {
+        ops::RngContext rng;
+        bool initialized = false;
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<AWGNState>();
+        }
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.AWGNChannel");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<AWGNState>();
+            st->props["NoiseMethod"] = Value::fromString("Signal to noise ratio (Eb/No)", mr);
+            st->props["SNR"] = Value::scalar(10.0, mr);
+            st->props["EbNo"] = Value::scalar(10.0, mr);
+            st->props["SignalPower"] = Value::scalar(1.0, mr);
+            st->props["RandomStream"] = Value::fromString("Global stream", mr);
+            st->props["Seed"] = Value::scalar(67.0, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("comm.AWGNChannel", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<AWGNState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<AWGNState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            bool ownStream = st->props.count("RandomStream") &&
+                st->props.at("RandomStream").toString().find("mt19937ar") != std::string::npos;
+            if (ownStream && !nst->initialized) {
+                uint64_t seed = st->props.count("Seed")
+                    ? static_cast<uint64_t>(std::max(0.0, st->props.at("Seed").toScalar())) : 67ull;
+                nst->rng.seed(seed);
+                nst->initialized = true;
+            }
+            ops::RngContext &rng = ownStream ? nst->rng : ctx.engine->rng();
+            double snrDb = st->props.count("SNR") ? st->props.at("SNR").toScalar() : 10.0;
+            double sigPwr = st->props.count("SignalPower") ? st->props.at("SignalPower").toScalar() : 1.0;
+            double noisePwr = sigPwr * std::pow(10.0, -snrDb / 10.0);
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(),
+                                    isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            if (isCplx) {
+                const Complex *xc = x.complexData();
+                Complex *yc = y.complexDataMut();
+                double sigma = std::sqrt(noisePwr / 2.0);
+                for (size_t i = 0; i < N; ++i) {
+                    double nRe = sigma * rng.nextNormal();
+                    double nIm = sigma * rng.nextNormal();
+                    yc[i] = Complex(xc[i].real() + nRe, xc[i].imag() + nIm);
+                }
+            } else {
+                double *yd = y.doubleDataMut();
+                double sigma = std::sqrt(noisePwr);
+                for (size_t i = 0; i < N; ++i) {
+                    yd[i] = x.elemAsDouble(i) + sigma * rng.nextNormal();
+                }
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<AWGNState *>(st->native.get()))
+                    nst->initialized = false;
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 6. comm.SymbolSynchronizer
+    struct SymSyncState : NativePayload {
+        double loopFilterState = 0.0;
+        bool strobe = false;
+        std::vector<bool> strobeHistory;
+        double mu = 0.0;
+        double ncoCounter = 0.0;
+        std::complex<double> interpState[3] = {{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
+        std::vector<std::complex<double>> tedBuffer;
+        bool initialized = false;
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<SymSyncState>();
+        }
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.SymbolSynchronizer");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<SymSyncState>();
+            st->props["TimingErrorDetector"] = Value::fromString("Zero-Crossing (decision-directed)", mr);
+            st->props["SamplesPerSymbol"] = Value::scalar(2.0, mr);
+            st->props["DampingFactor"] = Value::scalar(1.0, mr);
+            st->props["NormalizedLoopBandwidth"] = Value::scalar(0.01, mr);
+            st->props["DetectorGain"] = Value::scalar(2.7, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("comm.SymbolSynchronizer", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<SymSyncState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<SymSyncState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            size_t sps = st->props.count("SamplesPerSymbol")
+                ? static_cast<size_t>(std::max(2.0, st->props.at("SamplesPerSymbol").toScalar())) : 2;
+            double zeta = st->props.count("DampingFactor") ? st->props.at("DampingFactor").toScalar() : 1.0;
+            double BnTs = st->props.count("NormalizedLoopBandwidth") ? st->props.at("NormalizedLoopBandwidth").toScalar() : 0.01;
+            double Kp = st->props.count("DetectorGain") ? st->props.at("DetectorGain").toScalar() : 2.7;
+            std::string tedName = st->props.count("TimingErrorDetector")
+                ? st->props.at("TimingErrorDetector").toString() : "Zero-Crossing (decision-directed)";
+
+            if (!nst->initialized || nst->strobeHistory.size() != sps) {
+                nst->loopFilterState = 0.0;
+                nst->strobe = false;
+                nst->strobeHistory.assign(sps, false);
+                nst->mu = 0.0;
+                nst->ncoCounter = 0.0;
+                nst->interpState[0] = nst->interpState[1] = nst->interpState[2] = {0.0, 0.0};
+                nst->tedBuffer.assign(sps, {0.0, 0.0});
+                nst->initialized = true;
+            }
+
+            double theta = BnTs / static_cast<double>(sps) / (zeta + 0.25 / zeta);
+            double d = -(1.0 + 2.0 * zeta * theta + theta * theta) * Kp;
+            double K1 = (4.0 * zeta * theta) / d;
+            double K2 = (4.0 * theta * theta) / d;
+
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const size_t maxOut = (N * 11 + (10 * sps - 1)) / (10 * sps);
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            std::vector<std::complex<double>> syms;
+            syms.reserve(maxOut);
+            std::vector<double> timErr(N, 0.0);
+
+            auto sgn = [](double v) -> double { return (v > 0.0) ? 1.0 : ((v < 0.0) ? -1.0 : 0.0); };
+
+            for (size_t i = 0; i < N; ++i) {
+                if (syms.size() == maxOut && nst->strobe)
+                    break;
+                timErr[i] = nst->mu;
+                std::complex<double> xi = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                std::complex<double> x0 = xi;
+                std::complex<double> x1 = nst->interpState[0];
+                std::complex<double> x2 = nst->interpState[1];
+                std::complex<double> x3 = nst->interpState[2];
+                std::complex<double> c0 = x2;
+                std::complex<double> c1 = -0.5 * x0 + 1.5 * x1 - 0.5 * x2 - 0.5 * x3;
+                std::complex<double> c2 = 0.5 * x0 - 0.5 * x1 - 0.5 * x2 + 0.5 * x3;
+                std::complex<double> intOut = c0 + c1 * nst->mu + c2 * (nst->mu * nst->mu);
+                nst->interpState[0] = x0;
+                nst->interpState[1] = x1;
+                nst->interpState[2] = x2;
+
+                if (nst->strobe)
+                    syms.push_back(intOut);
+
+                double e = 0.0;
+                bool tailAllZero = true;
+                for (size_t k = 1; k < sps; ++k) {
+                    if (nst->strobeHistory[k]) { tailAllZero = false; break; }
+                }
+                if (tedName.find("Gardner") != std::string::npos) {
+                    if (nst->strobe && tailAllZero) {
+                        std::complex<double> t1 = nst->tedBuffer[(sps / 2) - (sps % 2)];
+                        std::complex<double> t2 = nst->tedBuffer[sps / 2];
+                        std::complex<double> mid = 0.5 * (t1 + t2);
+                        e = mid.real() * (nst->tedBuffer[0].real() - intOut.real()) +
+                            mid.imag() * (nst->tedBuffer[0].imag() - intOut.imag());
+                    }
+                } else if (tedName.find("Mueller") != std::string::npos) {
+                    if (nst->strobe && tailAllZero) {
+                        e = sgn(nst->tedBuffer[0].real()) * intOut.real() - sgn(intOut.real()) * nst->tedBuffer[0].real() +
+                            sgn(nst->tedBuffer[0].imag()) * intOut.imag() - sgn(intOut.imag()) * nst->tedBuffer[0].imag();
+                    }
+                } else {
+                    if (nst->strobe && tailAllZero) {
+                        std::complex<double> t1 = nst->tedBuffer[(sps / 2) - (sps % 2)];
+                        std::complex<double> t2 = nst->tedBuffer[sps / 2];
+                        std::complex<double> mid = 0.5 * (t1 + t2);
+                        e = mid.real() * (sgn(nst->tedBuffer[0].real()) - sgn(intOut.real())) +
+                            mid.imag() * (sgn(nst->tedBuffer[0].imag()) - sgn(intOut.imag()));
+                    }
+                }
+
+                int strobeSum = nst->strobe ? 1 : 0;
+                for (size_t k = 1; k < sps; ++k)
+                    if (nst->strobeHistory[k]) ++strobeSum;
+                if (strobeSum == 1) {
+                    for (size_t k = 0; k + 1 < sps; ++k)
+                        nst->tedBuffer[k] = nst->tedBuffer[k + 1];
+                    nst->tedBuffer[sps - 1] = intOut;
+                } else if (strobeSum > 1) {
+                    for (size_t k = 0; k + 2 < sps; ++k)
+                        nst->tedBuffer[k] = nst->tedBuffer[k + 2];
+                    if (sps >= 2) nst->tedBuffer[sps - 2] = {0.0, 0.0};
+                    nst->tedBuffer[sps - 1] = intOut;
+                }
+
+                double loopFiltOut = e * K2 + nst->loopFilterState;
+                double v = e * K1 + loopFiltOut;
+                nst->loopFilterState = loopFiltOut;
+
+                double W = v + 1.0 / static_cast<double>(sps);
+                for (size_t k = 0; k + 1 < sps; ++k)
+                    nst->strobeHistory[k] = nst->strobeHistory[k + 1];
+                nst->strobeHistory[sps - 1] = nst->strobe;
+                nst->strobe = (nst->ncoCounter < W);
+                if (nst->strobe)
+                    nst->mu = nst->ncoCounter / W;
+                double diff = nst->ncoCounter - W;
+                nst->ncoCounter = diff - std::floor(diff);
+            }
+
+            Value y = Value::matrix(syms.size(), 1, isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            if (isCplx) {
+                Complex *yc = y.complexDataMut();
+                for (size_t i = 0; i < syms.size(); ++i) yc[i] = syms[i];
+            } else {
+                double *yd = y.doubleDataMut();
+                for (size_t i = 0; i < syms.size(); ++i) yd[i] = syms[i].real();
+            }
+            outs[0] = std::move(y);
+            if (outs.size() >= 2) {
+                Value te = Value::matrix(N, 1, ValueType::DOUBLE, mr);
+                std::copy(timErr.begin(), timErr.end(), te.doubleDataMut());
+                outs[1] = std::move(te);
+            }
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<SymSyncState *>(st->native.get()))
+                    nst->initialized = false;
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 7. comm.CRCGenerator & comm.CRCDetector
+    auto parseCRCPoly = [](const Value &v) -> std::vector<int> {
+        if (v.isNumeric() || v.isLogical()) {
+            std::vector<int> p(v.numel());
+            for (size_t i = 0; i < v.numel(); ++i)
+                p[i] = (v.elemAsDouble(i) != 0.0) ? 1 : 0;
+            return p;
+        }
+        std::string s = v.toString();
+        std::vector<int> degs;
+        size_t i = 0;
+        while (i < s.size()) {
+            if (s[i] == 'z' || s[i] == 'Z' || s[i] == 'D' || s[i] == 'X' || s[i] == 'x') {
+                ++i;
+                while (i < s.size() && s[i] == ' ') ++i;
+                if (i < s.size() && s[i] == '^') {
+                    ++i;
+                    while (i < s.size() && s[i] == ' ') ++i;
+                    int d = 0;
+                    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+                        d = d * 10 + (s[i] - '0');
+                        ++i;
+                    }
+                    degs.push_back(d);
+                } else {
+                    degs.push_back(1);
+                }
+            } else if (s[i] == '1') {
+                degs.push_back(0);
+                ++i;
+            } else {
+                ++i;
+            }
+        }
+        if (degs.empty()) return {1, 0, 0, 1};
+        int maxDeg = *std::max_element(degs.begin(), degs.end());
+        std::vector<int> poly(maxDeg + 1, 0);
+        for (int d : degs)
+            poly[maxDeg - d] = 1;
+        return poly;
+    };
+    auto computeCRCBits = [](const std::vector<int> &bits, const std::vector<int> &poly) -> std::vector<int> {
+        const size_t deg = poly.size() > 1 ? poly.size() - 1 : 0;
+        std::vector<int> reg(bits.begin(), bits.end());
+        reg.insert(reg.end(), deg, 0);
+        for (size_t i = 0; i < bits.size(); ++i) {
+            if (reg[i]) {
+                for (size_t j = 0; j <= deg; ++j)
+                    reg[i + j] ^= poly[j];
+            }
+        }
+        return std::vector<int>(reg.end() - deg, reg.end());
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.CRCGenerator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["Polynomial"] = Value::fromString("z^16 + z^12 + z^5 + 1", mr);
+            if (!args.empty() && (args.size() % 2 == 1)) {
+                st->props["Polynomial"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.CRCGenerator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [parseCRCPoly, computeCRCBits](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const auto &st = (*self.objectStateConst());
+            auto poly = parseCRCPoly(st.props.at("Polynomial"));
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            std::vector<int> bits(N);
+            for (size_t i = 0; i < N; ++i)
+                bits[i] = (x.elemAsDouble(i) != 0.0) ? 1 : 0;
+            auto crc = computeCRCBits(bits, poly);
+            const size_t total = N + crc.size();
+            if (x.isLogical()) {
+                Value y = Value::matrix(total, 1, ValueType::LOGICAL, mr);
+                uint8_t *yd = y.logicalDataMut();
+                for (size_t i = 0; i < N; ++i) yd[i] = static_cast<uint8_t>(bits[i]);
+                for (size_t i = 0; i < crc.size(); ++i) yd[N + i] = static_cast<uint8_t>(crc[i]);
+                outs[0] = std::move(y);
+            } else {
+                Value y = Value::matrix(total, 1, ValueType::DOUBLE, mr);
+                double *yd = y.doubleDataMut();
+                for (size_t i = 0; i < N; ++i) yd[i] = static_cast<double>(bits[i]);
+                for (size_t i = 0; i < crc.size(); ++i) yd[N + i] = static_cast<double>(crc[i]);
+                outs[0] = std::move(y);
+            }
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "comm.CRCDetector");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["Polynomial"] = Value::fromString("z^16 + z^12 + z^5 + 1", mr);
+            if (!args.empty() && (args.size() % 2 == 1)) {
+                st->props["Polynomial"] = args[0];
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("comm.CRCDetector", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [parseCRCPoly, computeCRCBits](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const auto &st = (*self.objectStateConst());
+            auto poly = parseCRCPoly(st.props.at("Polynomial"));
+            const size_t deg = poly.size() > 1 ? poly.size() - 1 : 0;
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const size_t msgLen = (N > deg) ? (N - deg) : 0;
+            std::vector<int> msgBits(msgLen);
+            for (size_t i = 0; i < msgLen; ++i)
+                msgBits[i] = (x.elemAsDouble(i) != 0.0) ? 1 : 0;
+            auto crc = computeCRCBits(msgBits, poly);
+            bool hasErr = false;
+            for (size_t i = 0; i < deg && (msgLen + i) < N; ++i) {
+                int rxBit = (x.elemAsDouble(msgLen + i) != 0.0) ? 1 : 0;
+                if (rxBit != crc[i]) { hasErr = true; break; }
+            }
+            if (x.isLogical()) {
+                Value y = Value::matrix(msgLen, 1, ValueType::LOGICAL, mr);
+                uint8_t *yd = y.logicalDataMut();
+                for (size_t i = 0; i < msgLen; ++i) yd[i] = static_cast<uint8_t>(msgBits[i]);
+                outs[0] = std::move(y);
+            } else {
+                Value y = Value::matrix(msgLen, 1, ValueType::DOUBLE, mr);
+                double *yd = y.doubleDataMut();
+                for (size_t i = 0; i < msgLen; ++i) yd[i] = static_cast<double>(msgBits[i]);
+                outs[0] = std::move(y);
+            }
+            if (outs.size() >= 2)
+                outs[1] = Value::logicalScalar(hasErr, mr);
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 8. comm.OFDMModulator, comm.OFDMDemodulator, comm.ConstellationDiagram, dsp.ArrayPlot
+    for (const char *clsName : {"comm.OFDMModulator", "comm.OFDMDemodulator", "comm.ConstellationDiagram", "dsp.ArrayPlot"}) {
+        BuiltinClass bc;
+        wireSysObjBase(bc, clsName);
+        std::string cn(clsName);
+        bc.construct = [applySysObjNV, cn](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            Value pos = Value::matrix(1, 4, ValueType::DOUBLE, mr);
+            pos.doubleDataMut()[0] = 100.0; pos.doubleDataMut()[1] = 100.0;
+            pos.doubleDataMut()[2] = 560.0; pos.doubleDataMut()[3] = 420.0;
+            st->props["Position"] = std::move(pos);
+            if (!args.empty() && args[0].isObject()) {
+                for (const auto &kv : (*args[0].objectStateConst()).props)
+                    st->props[kv.first] = kv.second;
+                applySysObjNV(*st, args, 1);
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object(cn, std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            if (!outs.empty())
+                outs[0] = (!args.empty()) ? args[0] : Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 9. dsp.IIRFilter
+    struct IIRFilterState : NativePayload {
+        std::vector<std::complex<double>> z;
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<IIRFilterState>();
+        }
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "dsp.IIRFilter");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<IIRFilterState>();
+            st->props["Structure"] = Value::fromString("Direct form II transposed", mr);
+            Value num = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            num.doubleDataMut()[0] = 1.0; num.doubleDataMut()[1] = 0.0;
+            Value den = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            den.doubleDataMut()[0] = 1.0; den.doubleDataMut()[1] = -1.0;
+            st->props["Numerator"] = std::move(num);
+            st->props["Denominator"] = std::move(den);
+            applySysObjNV(*st, args, 0);
+            return Value::object("dsp.IIRFilter", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<IIRFilterState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<IIRFilterState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            const Value &bVal = st->props.at("Numerator");
+            const Value &aVal = st->props.at("Denominator");
+            const size_t nb = bVal.numel();
+            const size_t na = aVal.numel();
+            const size_t n = std::max(nb, na);
+            std::vector<double> b(n, 0.0), a(n, 0.0);
+            double a0 = (na > 0 && aVal.elemAsDouble(0) != 0.0) ? aVal.elemAsDouble(0) : 1.0;
+            for (size_t i = 0; i < nb; ++i) b[i] = bVal.elemAsDouble(i) / a0;
+            for (size_t i = 0; i < na; ++i) a[i] = aVal.elemAsDouble(i) / a0;
+            if (nst->z.size() != (n > 1 ? n - 1 : 0))
+                nst->z.assign(n > 1 ? n - 1 : 0, {0.0, 0.0});
+            const Value &x = args[0];
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(),
+                                    isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            Complex *yc = isCplx ? y.complexDataMut() : nullptr;
+            double *yd = isCplx ? nullptr : y.doubleDataMut();
+            for (size_t i = 0; i < N; ++i) {
+                std::complex<double> u = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                std::complex<double> out = b[0] * u + (nst->z.empty() ? std::complex<double>(0.0, 0.0) : nst->z[0]);
+                for (size_t j = 0; j + 1 < nst->z.size(); ++j)
+                    nst->z[j] = b[j + 1] * u - a[j + 1] * out + nst->z[j + 1];
+                if (!nst->z.empty())
+                    nst->z.back() = b[n - 1] * u - a[n - 1] * out;
+                if (isCplx) {
+                    yc[i] = out;
+                } else {
+                    yd[i] = out.real();
+                }
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<IIRFilterState *>(st->native.get()))
+                    nst->z.clear();
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 10. dsp.FIRInterpolator
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "dsp.FIRInterpolator");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->props["InterpolationFactor"] = Value::scalar(2.0, mr);
+            if (!args.empty() && args[0].isNumeric()) {
+                st->props["InterpolationFactor"] = args[0];
+                if (args.size() >= 2 && args[1].isNumeric()) {
+                    st->props["Numerator"] = args[1];
+                    applySysObjNV(*st, args, 2);
+                } else {
+                    applySysObjNV(*st, args, 1);
+                }
+            } else {
+                applySysObjNV(*st, args, 0);
+            }
+            return Value::object("dsp.FIRInterpolator", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            outs[0] = (!args.empty()) ? args[0] : Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
+
+    // 11. dsp.VariableFractionalDelay
+    struct VFDState : NativePayload {
+        std::vector<std::complex<double>> hist;
+        std::shared_ptr<NativePayload> clone() const override {
+            return std::make_shared<VFDState>();
+        }
+    };
+    {
+        BuiltinClass bc;
+        wireSysObjBase(bc, "dsp.VariableFractionalDelay");
+        bc.construct = [applySysObjNV](Span<const Value> args, CallContext &ctx) -> Value {
+            auto *mr = ctx.engine->resource();
+            auto st = std::make_shared<ObjectState>(mr);
+            st->native = std::make_shared<VFDState>();
+            st->props["MaximumDelay"] = Value::scalar(100.0, mr);
+            applySysObjNV(*st, args, 0);
+            return Value::object("dsp.VariableFractionalDelay", std::move(st), true, mr);
+        };
+        bc.methods["step"] = [](Value &self, Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            auto *st = self.objectStateMut();
+            auto *nst = static_cast<VFDState *>(st->native.get());
+            if (!nst) {
+                auto sp = std::make_shared<VFDState>();
+                nst = sp.get();
+                st->native = std::move(sp);
+            }
+            double maxD = st->props.count("MaximumDelay")
+                ? std::max(1.0, st->props.at("MaximumDelay").toScalar()) : 100.0;
+            size_t maxHist = static_cast<size_t>(maxD) + 4;
+            if (nst->hist.size() < maxHist)
+                nst->hist.resize(maxHist, {0.0, 0.0});
+            const Value &x = args[0];
+            const Value &dVal = args[1];
+            const size_t N = x.numel();
+            const bool isCplx = x.isComplex();
+            const Complex *xc = isCplx ? x.complexData() : nullptr;
+            Value y = Value::matrix(x.dims().rows(), x.dims().cols(),
+                                    isCplx ? ValueType::COMPLEX : ValueType::DOUBLE, mr);
+            Complex *yc = isCplx ? y.complexDataMut() : nullptr;
+            double *yd = isCplx ? nullptr : y.doubleDataMut();
+            for (size_t i = 0; i < N; ++i) {
+                std::complex<double> xi = isCplx
+                    ? xc[i]
+                    : std::complex<double>(x.elemAsDouble(i), 0.0);
+                for (size_t k = maxHist - 1; k > 0; --k)
+                    nst->hist[k] = nst->hist[k - 1];
+                nst->hist[0] = xi;
+
+                double d = (dVal.numel() == 1) ? dVal.toScalar() : dVal.elemAsDouble(i);
+                if (d < 0.0) d = 0.0;
+                if (d > maxD) d = maxD;
+                size_t dInt = static_cast<size_t>(std::floor(d));
+                double frac = d - static_cast<double>(dInt);
+                std::complex<double> s0 = (dInt < maxHist) ? nst->hist[dInt] : std::complex<double>(0.0, 0.0);
+                std::complex<double> s1 = (dInt + 1 < maxHist) ? nst->hist[dInt + 1] : std::complex<double>(0.0, 0.0);
+                std::complex<double> out = (1.0 - frac) * s0 + frac * s1;
+                if (isCplx) {
+                    yc[i] = out;
+                } else {
+                    yd[i] = out.real();
+                }
+            }
+            outs[0] = std::move(y);
+        };
+        bc.methods["release"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            if (auto *st = self.objectStateMut()) {
+                if (auto *nst = static_cast<VFDState *>(st->native.get()))
+                    nst->hist.clear();
+            }
+            if (!outs.empty()) outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        };
+        bc.methods["reset"] = bc.methods["release"];
+        bc.subsref = bc.methods["step"];
+        engine.registerClass(std::move(bc));
+    }
 }
 
 } // namespace numkit::runtime

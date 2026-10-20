@@ -196,7 +196,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     const double s = span / p10;
                     const double step = (s <= 1.5) ? 0.2 * p10
                                       : (s <= 3.0) ? 0.5 * p10
-                                      : (s <= 7.0) ? 1.0 * p10
+                                      : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                    : 2.0 * p10;
                     lo = std::floor(dmin / step + 1e-12) * step;
                     hi = std::ceil(dmax / step - 1e-12) * step;

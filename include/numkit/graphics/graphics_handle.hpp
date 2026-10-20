@@ -24,12 +24,15 @@ namespace numkit {
 struct GraphicsHandlePayload : public NativePayload
 {
     int handleId = 0;
+    int numericValue = 0;
     std::shared_ptr<NativePayload> clone() const override
     {
         auto p = std::make_shared<GraphicsHandlePayload>();
         p->handleId = handleId;
+        p->numericValue = numericValue;
         return p;
     }
+    double asDouble() const override { return static_cast<double>(numericValue != 0 ? numericValue : handleId); }
 };
 
 // Registry id of a graphics-handle Value, or -1 when `v` is not one.
@@ -50,11 +53,13 @@ inline int graphicsHandleIdOf(const Value &v)
 // Handle object Value wrapping registry id `id` with MATLAB class name
 // `className` (that string is what class()/isa() report).
 inline Value makeGraphicsHandleValue(const std::string &className, int id,
-                                     std::pmr::memory_resource *mr = nullptr)
+                                     std::pmr::memory_resource *mr = nullptr,
+                                     int numericVal = 0)
 {
     auto st = std::make_shared<ObjectState>(mr);
     auto payload = std::make_shared<GraphicsHandlePayload>();
     payload->handleId = id;
+    payload->numericValue = numericVal;
     st->native = payload;
     return Value::object(className, std::move(st), /*isHandle=*/true, mr);
 }

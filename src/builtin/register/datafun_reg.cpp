@@ -74,6 +74,7 @@ void reallog_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void realpow_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void realsqrt_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void rng_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void register_randstream(Engine &);
 void setdiff_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void setxor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void splitapply_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -325,6 +326,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("randi",    &::numkit::builtin::detail::randi_reg);
     engine.registerFunction("randperm", &::numkit::builtin::detail::randperm_reg);
     engine.registerFunction("rng",      &::numkit::builtin::detail::rng_reg);
+    register_randstream(engine);
 
     engine.registerFunction("max",      &::numkit::builtin::detail::max_reg);
     engine.registerFunction("min",      &::numkit::builtin::detail::min_reg);

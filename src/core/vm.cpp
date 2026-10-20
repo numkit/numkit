@@ -1500,9 +1500,13 @@ enter_frame:
                     Value &dst = R[I.a];
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
+                    auto isGfxCls = [](const std::string &c) {
+                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    };
                     const bool sameArr =
                         dst.isObject()
-                        && dst.objectClassName() == R[I.c].objectClassName();
+                        && (dst.objectClassName() == R[I.c].objectClassName()
+                            || (isGfxCls(dst.objectClassName()) && isGfxCls(R[I.c].objectClassName())));
                     if (newable || sameArr) {
                         // Linear slice: scalar / range / vector / logical / `:`.
                         std::vector<size_t> pos =
@@ -1636,9 +1640,13 @@ enter_frame:
                     Value &dst = R[I.a];
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
+                    auto isGfxCls = [](const std::string &c) {
+                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    };
                     const bool sameArr =
                         dst.isObject()
-                        && dst.objectClassName() == val.objectClassName();
+                        && (dst.objectClassName() == val.objectClassName()
+                            || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
                     if (newable || sameArr) {
                         std::vector<std::vector<size_t>> perDim = {
                             resolveStoreSubscript(ri, dst.isObject() ? dst.dims().rows() : 0),
@@ -1751,9 +1759,13 @@ enter_frame:
                     const Value &val = R[I.e];
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
+                    auto isGfxCls = [](const std::string &c) {
+                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    };
                     const bool sameArr =
                         dst.isObject()
-                        && dst.objectClassName() == val.objectClassName();
+                        && (dst.objectClassName() == val.objectClassName()
+                            || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
                     if (newable || sameArr) {
                         std::vector<std::vector<size_t>> perDim(ndims);
                         for (uint8_t i = 0; i < ndims; ++i) {
@@ -4729,6 +4741,18 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
     // Generic fallback via externalFuncs_
     const char *fname = builtinIdName(bid);
     if (fname) {
+        if (na >= 1 && R[argBase].isObject()) {
+            const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassName());
+            if (cls && cls->methods.count(fname)) {
+                Value self = R[argBase];
+                Span<const Value> rest((na > 1) ? &R[argBase + 1] : nullptr, na - 1);
+                Value out[1];
+                CallContext ctx{&engine_, currentCallEnv()};
+                cls->methods.at(fname)(self, rest, 1, Span<Value>(out, 1), ctx);
+                R[I.a] = std::move(out[0]);
+                return;
+            }
+        }
         const ExternalFunc *fnPtr = engine_.findExternal(
             fname, currentCallEnv());
         if (fnPtr) {
@@ -4917,6 +4941,23 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         numCaptures = R[fhReg].numel() - 1;
     } else if (R[fhReg].isFuncHandle()) {
         funcHandleVal = R[fhReg];
+    } else if (R[fhReg].isObject()) {
+        const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassName());
+        if (cls && cls->subsref) {
+            std::vector<Value> argsBuf(na);
+            for (size_t i = 0; i < na; ++i)
+                argsBuf[i] = R[argBase + i];
+            std::vector<Value> outBuf(nout);
+            CallContext ctx{&engine_, currentCallEnv()};
+            cls->subsref(R[fhReg], Span<const Value>(argsBuf.data(), na), nout,
+                         Span<Value>(outBuf.data(), nout), ctx);
+            for (size_t i = 0; i < nout; ++i)
+                R[outBase + i] = std::move(outBuf[i]);
+            return false;
+        }
+        throw std::runtime_error(
+            "VM: multi-output call '[...] = f(...)' of a value that is not a "
+            "function handle");
     } else {
         throw std::runtime_error(
             "VM: multi-output call '[...] = f(...)' of a value that is not a "

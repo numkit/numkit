@@ -190,6 +190,14 @@ inline std::string formatDateTimeElem(double serialDay, const std::string &fmt, 
             std::snprintf(y2, sizeof(y2), "%02lld", static_cast<long long>(c.year % 100));
             res += y2;
             i += 2;
+        } else if (f.compare(i, 3, "QQQ") == 0) {
+            int q = static_cast<int>((c.month - 1) / 3 + 1);
+            res += "Q" + std::to_string(q);
+            i += 3;
+        } else if (f.compare(i, 2, "QQ") == 0) {
+            int q = static_cast<int>((c.month - 1) / 3 + 1);
+            res += "Q" + std::to_string(q);
+            i += 2;
         } else if (f.compare(i, 3, "MMM") == 0) {
             res += mmm;
             i += 3;
@@ -265,9 +273,21 @@ inline double parseDateTimeString(const std::string &raw, std::pmr::memory_resou
         }
     }
     // Delegate to existing datenum parser (handles dd-MMM-yyyy, MM/dd/yyyy, etc.)
-    Value sv = Value::fromString(s, mr);
-    Value dn = numkit::builtin::datenum(Span<const Value>(&sv, 1), mr);
-    return dn.toScalar();
+    {
+        std::istringstream iss(s);
+        int a = 0, b = 0, c = 0;
+        char c1 = 0, c2 = 0;
+        if ((iss >> a >> c1 >> b >> c2 >> c) && (c1 == '/' || c1 == '-') && c1 == c2 && c >= 1000 && a >= 1 && a <= 12 && b >= 1 && b <= 31) {
+            return composeSerialDay(c, a, b, 0, 0, 0.0);
+        }
+    }
+    try {
+        Value sv = Value::fromString(s, mr);
+        Value dn = numkit::builtin::datenum(Span<const Value>(&sv, 1), mr);
+        return dn.toScalar();
+    } catch (...) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
 }
 
 // ── Payloads ────────────────────────────────────────────────────────────────
@@ -1073,6 +1093,43 @@ void register_timefun(Engine &engine) {
         dur.ops["uplus"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs,
                               CallContext &) { outs[0] = self; };
 
+        dur.methods["abs"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs,
+                                CallContext &ctx) {
+            const size_t n = self.objectCount();
+            std::vector<double> secs(n);
+            std::string fmt = durElem(self, 0) ? durElem(self, 0)->format : "hh:mm:ss";
+            for (size_t i = 0; i < n; ++i)
+                secs[i] = std::abs(durElem(self, i) ? durElem(self, i)->seconds : 0.0);
+            outs[0] = makeDurationArray(self.dims(), secs, fmt, ctx.engine->resource());
+        };
+        auto addDurMinMaxMethod = [&](const char *mname, bool isMax) {
+            dur.methods[mname] = [isMax](Value &self, Span<const Value>, size_t nargout,
+                                         Span<Value> outs, CallContext &ctx) {
+                auto *mr = ctx.engine->resource();
+                const size_t n = self.objectCount();
+                if (n == 0) {
+                    outs[0] = self;
+                    return;
+                }
+                size_t bestIdx = 0;
+                double bestVal = durElem(self, 0) ? durElem(self, 0)->seconds : 0.0;
+                for (size_t i = 1; i < n; ++i) {
+                    double v = durElem(self, i) ? durElem(self, i)->seconds : 0.0;
+                    if (std::isnan(v)) continue;
+                    if (std::isnan(bestVal) || (isMax ? (v > bestVal) : (v < bestVal))) {
+                        bestVal = v;
+                        bestIdx = i;
+                    }
+                }
+                std::string fmt = durElem(self, 0) ? durElem(self, 0)->format : "hh:mm:ss";
+                outs[0] = makeDurationArray(Dims(1, 1), {bestVal}, fmt, mr);
+                if (nargout >= 2)
+                    outs[1] = Value::scalar(static_cast<double>(bestIdx + 1), mr);
+            };
+        };
+        addDurMinMaxMethod("min", false);
+        addDurMinMaxMethod("max", true);
+
         auto durAddSub = [](double sign) -> ObjectMethod {
             return [sign](Value &, Span<const Value> args, size_t, Span<Value> outs,
                           CallContext &ctx) {
@@ -1839,7 +1896,28 @@ void register_timefun(Engine &engine) {
                     dst[c * n + r] = rows[r][c];
             outs[0] = std::move(cm);
         };
-        dt.methods["datestr"] = dt.methods["char"];
+        dt.methods["datestr"] = [hasNonZeroTime](Value &self, Span<const Value> args, size_t nargout,
+                                                 Span<Value> outs, CallContext &ctx) {
+            std::vector<Value> modArgs(args.begin(), args.end());
+            if (!modArgs.empty() && (modArgs[0].isChar() || modArgs[0].isString())) {
+                std::string f = modArgs[0].toString();
+                for (size_t i = 0; i + 1 < f.size(); ++i) {
+                    if (f[i] == 'm' && f[i + 1] == 'm' && (i == 0 || f[i - 1] != ':')) {
+                        f[i] = 'M';
+                        f[i + 1] = 'M';
+                        ++i;
+                    } else if (f.compare(i, 3, "mmm") == 0) {
+                        f[i] = 'M'; f[i + 1] = 'M'; f[i + 2] = 'M';
+                        i += 2;
+                    }
+                }
+                modArgs[0] = Value::fromString(f, ctx.engine->resource());
+            }
+            const auto *cls = ctx.engine->findClass("datetime");
+            if (cls && cls->methods.count("char"))
+                cls->methods.at("char")(self, Span<const Value>(modArgs.data(), modArgs.size()),
+                                        nargout, outs, ctx);
+        };
 
         dt.methods["string"] = [hasNonZeroTime](Value &self, Span<const Value> args, size_t,
                                                 Span<Value> outs, CallContext &ctx) {
@@ -1963,6 +2041,12 @@ void register_timefun(Engine &engine) {
                 }
                 if (unit == "year" || unit == "years") {
                     sds[i] = isEnd ? composeSerialDay(c.year, 12, 31) : composeSerialDay(c.year, 1, 1);
+                } else if (unit == "quarter" || unit == "quarters") {
+                    int q = (c.month - 1) / 3 + 1;
+                    int mStart = (q - 1) * 3 + 1;
+                    int mEnd = q * 3;
+                    sds[i] = isEnd ? composeSerialDay(c.year, mEnd, daysInMonth(c.year, mEnd))
+                                   : composeSerialDay(c.year, mStart, 1);
                 } else if (unit == "month" || unit == "months") {
                     sds[i] = isEnd ? composeSerialDay(c.year, c.month, daysInMonth(c.year, c.month))
                                    : composeSerialDay(c.year, c.month, 1);
@@ -2040,6 +2124,208 @@ void register_timefun(Engine &engine) {
         };
         addMinMaxMethod("min", false);
         addMinMaxMethod("max", true);
+
+        dt.methods["flipud"] = [](Value &self, Span<const Value>, size_t,
+                                  Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const size_t R = self.dims().rows(), C = self.dims().cols();
+            std::vector<double> sds(R * C);
+            for (size_t c = 0; c < C; ++c)
+                for (size_t r = 0; r < R; ++r)
+                    sds[c * R + r] = dtElem(self, c * R + (R - 1 - r))->serialDay;
+            const auto *p0 = dtElem(self, 0);
+            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+        };
+        dt.methods["fliplr"] = [](Value &self, Span<const Value>, size_t,
+                                  Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const size_t R = self.dims().rows(), C = self.dims().cols();
+            std::vector<double> sds(R * C);
+            for (size_t c = 0; c < C; ++c)
+                for (size_t r = 0; r < R; ++r)
+                    sds[c * R + r] = dtElem(self, (C - 1 - c) * R + r)->serialDay;
+            const auto *p0 = dtElem(self, 0);
+            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+        };
+        dt.methods["flip"] = [](Value &self, Span<const Value>, size_t,
+                                Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const size_t R = self.dims().rows(), C = self.dims().cols();
+            std::vector<double> sds(R * C);
+            if (R > 1) {
+                for (size_t c = 0; c < C; ++c)
+                    for (size_t r = 0; r < R; ++r)
+                        sds[c * R + r] = dtElem(self, c * R + (R - 1 - r))->serialDay;
+            } else {
+                for (size_t c = 0; c < C; ++c)
+                    for (size_t r = 0; r < R; ++r)
+                        sds[c * R + r] = dtElem(self, (C - 1 - c) * R + r)->serialDay;
+            }
+            const auto *p0 = dtElem(self, 0);
+            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+        };
+
+        dt.methods["unique"] = [](Value &self, Span<const Value> args, size_t nargout,
+                                  Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            const size_t n = self.objectCount();
+            bool stable = false;
+            for (const auto &a : args) {
+                if (a.isChar() || a.isString()) {
+                    std::string s = a.toString();
+                    for (auto &ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    if (s == "stable") stable = true;
+                }
+            }
+            constexpr double kTol = 1e-9 / kSecondsPerDay;
+            std::vector<double> uniqSds;
+            std::vector<size_t> ia;
+            std::vector<size_t> ic(n, 0);
+            if (stable) {
+                for (size_t i = 0; i < n; ++i) {
+                    double sd = dtElem(self, i)->serialDay;
+                    size_t found = uniqSds.size();
+                    for (size_t u = 0; u < uniqSds.size(); ++u) {
+                        if (std::abs(uniqSds[u] - sd) <= kTol) { found = u; break; }
+                    }
+                    if (found == uniqSds.size()) {
+                        uniqSds.push_back(sd);
+                        ia.push_back(i + 1);
+                    }
+                    ic[i] = found + 1;
+                }
+            } else {
+                std::vector<size_t> order(n);
+                for (size_t i = 0; i < n; ++i) order[i] = i;
+                std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+                    double sa = dtElem(self, a)->serialDay;
+                    double sb = dtElem(self, b)->serialDay;
+                    if (std::isnan(sa)) return false;
+                    if (std::isnan(sb)) return true;
+                    return sa < sb - kTol;
+                });
+                for (size_t k = 0; k < n; ++k) {
+                    size_t idx = order[k];
+                    double sd = dtElem(self, idx)->serialDay;
+                    if (uniqSds.empty() || std::isnan(sd) || std::isnan(uniqSds.back())
+                        || std::abs(sd - uniqSds.back()) > kTol) {
+                        uniqSds.push_back(sd);
+                        ia.push_back(idx + 1);
+                    }
+                    ic[idx] = uniqSds.size();
+                }
+            }
+            const auto *p0 = dtElem(self, 0);
+            Dims outDims = (self.dims().rows() == 1 && self.dims().cols() > 1)
+                               ? Dims(1, uniqSds.size())
+                               : Dims(uniqSds.size(), 1);
+            outs[0] = makeDatetimeArray(outDims, uniqSds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            if (nargout >= 2) {
+                Value iaVal = Value::matrix(ia.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < ia.size(); ++i)
+                    iaVal.doubleDataMut()[i] = static_cast<double>(ia[i]);
+                outs[1] = std::move(iaVal);
+            }
+            if (nargout >= 3) {
+                Value icVal = Value::matrix(n, 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < n; ++i)
+                    icVal.doubleDataMut()[i] = static_cast<double>(ic[i]);
+                outs[2] = std::move(icVal);
+            }
+        };
+
+        dt.methods["intersect"] = [](Value &self, Span<const Value> args, size_t nargout,
+                                     Span<Value> outs, CallContext &ctx) {
+            if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
+                throw std::runtime_error("nk:intersect:InvalidInput: Expected two datetime inputs.");
+            auto *mr = ctx.engine->resource();
+            const Value &other = args[0];
+            bool stable = false;
+            for (size_t k = 1; k < args.size(); ++k) {
+                if (args[k].isChar() || args[k].isString()) {
+                    std::string s = args[k].toString();
+                    for (auto &ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    if (s == "stable") stable = true;
+                }
+            }
+            constexpr double kTol = 1e-9 / kSecondsPerDay;
+            const size_t nA = self.objectCount();
+            const size_t nB = other.objectCount();
+            struct Item { double sd; size_t ia; size_t ib; };
+            std::vector<Item> items;
+            for (size_t i = 0; i < nA; ++i) {
+                double sa = dtElem(self, i)->serialDay;
+                if (std::isnan(sa)) continue;
+                bool dup = false;
+                for (const auto &it : items) {
+                    if (std::abs(it.sd - sa) <= kTol) { dup = true; break; }
+                }
+                if (dup) continue;
+                for (size_t j = 0; j < nB; ++j) {
+                    double sb = dtElem(other, j)->serialDay;
+                    if (!std::isnan(sb) && std::abs(sa - sb) <= kTol) {
+                        items.push_back({sa, i + 1, j + 1});
+                        break;
+                    }
+                }
+            }
+            if (!stable) {
+                std::sort(items.begin(), items.end(), [&](const Item &a, const Item &b) {
+                    return a.sd < b.sd - kTol;
+                });
+            }
+            std::vector<double> sds(items.size());
+            for (size_t i = 0; i < items.size(); ++i) sds[i] = items[i].sd;
+            const auto *p0 = dtElem(self, 0);
+            Dims outDims = (self.dims().rows() == 1 && self.dims().cols() > 1
+                            && other.dims().rows() == 1 && other.dims().cols() > 1)
+                               ? Dims(1, sds.size())
+                               : Dims(sds.size(), 1);
+            outs[0] = makeDatetimeArray(outDims, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            if (nargout >= 2) {
+                Value iaVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < items.size(); ++i)
+                    iaVal.doubleDataMut()[i] = static_cast<double>(items[i].ia);
+                outs[1] = std::move(iaVal);
+            }
+            if (nargout >= 3) {
+                Value ibVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < items.size(); ++i)
+                    ibVal.doubleDataMut()[i] = static_cast<double>(items[i].ib);
+                outs[2] = std::move(ibVal);
+            }
+        };
+
+        dt.methods["ismember"] = [](Value &self, Span<const Value> args, size_t nargout,
+                                    Span<Value> outs, CallContext &ctx) {
+            if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
+                throw std::runtime_error("nk:ismember:InvalidInput: Expected two datetime inputs.");
+            auto *mr = ctx.engine->resource();
+            const Value &other = args[0];
+            constexpr double kTol = 1e-9 / kSecondsPerDay;
+            const size_t nA = self.objectCount();
+            const size_t nB = other.objectCount();
+            Value lia = makeArrayFromDims(self.dims(), ValueType::LOGICAL, mr);
+            Value locb = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < nA; ++i) {
+                double sa = dtElem(self, i)->serialDay;
+                size_t found = 0;
+                if (!std::isnan(sa)) {
+                    for (size_t j = 0; j < nB; ++j) {
+                        double sb = dtElem(other, j)->serialDay;
+                        if (!std::isnan(sb) && std::abs(sa - sb) <= kTol) {
+                            found = j + 1;
+                            break;
+                        }
+                    }
+                }
+                lia.logicalDataMut()[i] = found > 0 ? 1 : 0;
+                locb.doubleDataMut()[i] = static_cast<double>(found);
+            }
+            outs[0] = std::move(lia);
+            if (nargout >= 2)
+                outs[1] = std::move(locb);
+        };
 
         // Operators on datetime
         dt.ops["plus"] = [](Value &, Span<const Value> args, size_t, Span<Value> outs,
