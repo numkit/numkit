@@ -3292,10 +3292,35 @@ int Compiler::tryCompileFused(const ASTNode *node)
     // pressure (keep headroom below the 255-register limit).
     if (inFusionFallback_ || !engine_.fusionEnabled() || nextReg_ >= 200)
         return -1;
+    auto isKnownVarOrConst = [&](const ASTNode *op) -> bool {
+        while (op && (op->type == NodeType::UNARY_OP || op->type == NodeType::FIELD_ACCESS)
+               && !op->children.empty()) {
+            op = op->children[0].get();
+        }
+        if (!op || op->type != NodeType::IDENTIFIER)
+            return true;
+        const std::string &name = op->strValue;
+        if (varRegisters_.count(name) > 0 || engine_.isReservedName(name))
+            return true;
+        if (isTopLevel_ && engine_.getVariable(name) != nullptr)
+            return true;
+        return false;
+    };
     const auto &rules = engine_.fusionRules();
     for (size_t ri = 0; ri < rules.size(); ++ri) {
         auto operands = rules[ri].match(node);
-        if (operands) return compileFused(node, ri, *operands);
+        if (!operands)
+            continue;
+        bool allPure = true;
+        for (const ASTNode *op : *operands) {
+            if (!isKnownVarOrConst(op)) {
+                allPure = false;
+                break;
+            }
+        }
+        if (!allPure)
+            return -1;
+        return compileFused(node, ri, *operands);
     }
     return -1;
 }

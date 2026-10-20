@@ -426,7 +426,7 @@ end
 
 function r = numkit_adaptint(fn, a, b, tol, depth, xk, wk, wg)
   [K, G] = numkit_gk15(fn, a, b, xk, wk, wg);
-  if abs(K - G) < tol || depth >= 20
+  if abs(K - G) < 0.01*tol || depth >= 20
     r = K;
     return;
   end

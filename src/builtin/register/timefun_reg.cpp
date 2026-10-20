@@ -670,10 +670,26 @@ void register_timefun(Engine &engine) {
         });
 
     engine.registerFunction("pause",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &) {
+        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 0, 1, "pause");
+            static bool pauseEnabled = true;
+            if (!args.empty() && (args[0].isChar() || args[0].isString())) {
+                const std::string prev = pauseEnabled ? "on" : "off";
+                std::string mode = args[0].toString();
+                for (char &c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (mode == "off") pauseEnabled = false;
+                else if (mode == "on") pauseEnabled = true;
+                if (nargout > 0 || mode == "query") {
+                    outs[0] = Value::fromString(prev, ctx.engine->resource());
+                } else {
+                    outs[0] = Value();
+                }
+                return;
+            }
             double s = args.empty() ? 0.0 : args[0].toScalar();
-            numkit::builtin::pause(s);
+            if (pauseEnabled && s > 0.0) {
+                numkit::builtin::pause(s);
+            }
             outs[0] = Value();
         });
 

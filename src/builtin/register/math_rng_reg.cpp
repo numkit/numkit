@@ -86,11 +86,23 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     if (t != ValueType::DOUBLE && t != ValueType::SINGLE)
         throw Error("rand: type must be 'double' or 'single'",
                     0, 0, "rand", "", "numkit:rand:badType");
-    if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())
-        && dimArgs[0].toString() == "seed") {
-        outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandSeed()),
-                                ctx.engine->resource());
-        return;
+    if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
+        const std::string flag = dimArgs[0].toString();
+        if (flag == "seed") {
+            outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandSeed()),
+                                    ctx.engine->resource());
+            return;
+        }
+        if (flag == "state") {
+            auto st = Value::matrix(35, 1, ValueType::DOUBLE, ctx.engine->resource());
+            double *d = st.doubleDataMut();
+            for (size_t i = 0; i < 32; ++i) d[i] = rngRef.v5SwbZ()[i];
+            d[32] = static_cast<double>(rngRef.v5SwbIdx());
+            d[33] = rngRef.v5SwbBorrow();
+            d[34] = static_cast<double>(rngRef.v5SwbJ()) * 2.2204460492503131e-16;
+            outs[0] = std::move(st);
+            return;
+        }
     }
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && dimArgs[1].isScalar() && !dimArgs[1].isChar()) {
@@ -101,7 +113,13 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             outs[0] = Value();
             return;
         }
-        if (flag == "state" || flag == "twister") {
+        if (flag == "state") {
+            rngRef.setLegacyV5Rand(
+                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+            outs[0] = Value();
+            return;
+        }
+        if (flag == "twister") {
             rngRef.setLegacyTwisterRand(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();

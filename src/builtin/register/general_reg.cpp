@@ -109,9 +109,10 @@ void register_general(Engine &engine) {
                                         res = qualified.empty() ? "built-in (" + baseName + ")" : qualified;
                                     } else {
                                         bool found = false;
+                                        const bool hasNonMExt = (qname.find('.') != std::string::npos && qname == baseName);
+                                        const std::string candName = hasNonMExt ? qname : (baseName + ".m");
                                         try {
-                                            std::string cur = baseName + ".m";
-                                            auto rp = ctx.engine->resolvePath(cur);
+                                            auto rp = ctx.engine->resolvePath(candName);
                                             if (rp.fs && rp.fs->exists(rp.path)) {
                                                 res = rp.path;
                                                 found = true;
@@ -121,11 +122,11 @@ void register_general(Engine &engine) {
                                             for (const auto &dir : ctx.engine->path()) {
                                                 std::string p = dir;
                                                 if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
-                                                p += baseName + ".m";
+                                                p += candName;
                                                 try {
                                                     auto rp = ctx.engine->resolvePath(p);
                                                     if (rp.fs && rp.fs->exists(rp.path)) {
-                                                        res = p;
+                                                        res = rp.path;
                                                         found = true;
                                                         break;
                                                     }
@@ -241,8 +242,22 @@ void register_general(Engine &engine) {
     engine.registerFunction("cd",
                             [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 // No args: behave like pwd (return / print current dir).
-                                if (args.empty()) {
+                                auto getActualCwd = [&]() -> std::string {
                                     std::string c = ctx.engine->cwd();
+                                    if (c.empty()) {
+                                        try {
+                                            auto rp0 = ctx.engine->resolvePath(".");
+                                            if (rp0.fs) c = rp0.fs->cwd();
+                                        } catch (...) {}
+                                        if (c.empty()) {
+                                            if (auto *fs = ctx.engine->findVirtualFS("native"))
+                                                c = fs->cwd();
+                                        }
+                                    }
+                                    return c;
+                                };
+                                if (args.empty()) {
+                                    std::string c = getActualCwd();
                                     if (nargout == 0) {
                                         ctx.engine->outputText(c + "\n");
                                         outs[0] = Value();
@@ -260,7 +275,7 @@ void register_general(Engine &engine) {
                                 auto st = rp.fs->stat(rp.path);
                                 if (!st || st->kind != FileStat::Kind::Directory)
                                     throw std::runtime_error("cd: not a directory: " + target);
-                                std::string prev = ctx.engine->cwd();
+                                std::string prev = getActualCwd();
                                 ctx.engine->setCwd(rp.path);
                                 // MATLAB: with output, return the PREVIOUS cwd.
                                 if (nargout > 0)

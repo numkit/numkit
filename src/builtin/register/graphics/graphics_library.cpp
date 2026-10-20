@@ -45,6 +45,14 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+extern "C" {
+__declspec(dllimport) void *__stdcall GetDC(void *hWnd);
+__declspec(dllimport) int __stdcall ReleaseDC(void *hWnd, void *hDC);
+__declspec(dllimport) int __stdcall GetDeviceCaps(void *hdc, int index);
+}
+#endif
+
 namespace numkit {
 
 // export_reg.cpp â€” saveas/exportgraphics/print (portion 32).
@@ -1590,7 +1598,29 @@ void registerHandleAccessors(Engine &engine)
                         outs[0] = std::move(v);
                         return;
                     }
-                    if (lprop == "position" || lprop == "outerposition" || lprop == "screensize") {
+                    if (lprop == "screensize") {
+                        Value v = Value::matrix(1, 4, ValueType::DOUBLE, engine.resource());
+                        v.doubleDataMut()[0] = 1.0; v.doubleDataMut()[1] = 1.0;
+                        double w = 1920.0, h = 1080.0;
+#ifdef _WIN32
+                        if (void *hdc = GetDC(nullptr)) {
+                            const int physW = GetDeviceCaps(hdc, 118); // DESKTOPHORZRES
+                            const int physH = GetDeviceCaps(hdc, 117); // DESKTOPVERTRES
+                            const int logW  = GetDeviceCaps(hdc, 8);   // HORZRES
+                            ReleaseDC(nullptr, hdc);
+                            if (physW > 0 && physH > 0 && logW > 0) {
+                                const double scale = std::round((static_cast<double>(physW) / static_cast<double>(logW)) * 4.0) / 4.0;
+                                w = (scale > 0.0) ? (static_cast<double>(physW) / scale) : static_cast<double>(logW);
+                                h = (scale > 0.0) ? (static_cast<double>(physH) / scale) : static_cast<double>(physH);
+                            }
+                        }
+#endif
+                        v.doubleDataMut()[2] = w;
+                        v.doubleDataMut()[3] = h;
+                        outs[0] = std::move(v);
+                        return;
+                    }
+                    if (lprop == "position" || lprop == "outerposition") {
                         Value v = Value::matrix(1, 4, ValueType::DOUBLE, engine.resource());
                         v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
                         v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
@@ -2315,7 +2345,42 @@ void GraphicsLibrary::install(Engine &engine)
     engine.registerFunction("", "shg", noopGfx);
     engine.registerFunction("", "datetick", noopGfx);
     engine.registerFunction("", "rectangle", noopGfx);
-    engine.registerFunction("", "uicontrol", noopGfx);
+    engine.registerFunction("", "uicontrol",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            auto &fm = ctx.engine->figureManager();
+            const int id = fm.createHandleAt(
+                fm.currentFigureId(), FigureManager::HandleRecord::kNoAxes,
+                "text", kTextClass);
+            outs[0] = makeGraphicsHandleValue(kTextClass, id, ctx.engine->resource());
+        });
+    engine.registerFunction("", "VideoWriter",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            Value s = Value::structure(mr);
+            std::string fn = (!args.empty() && (args[0].isChar() || args[0].isString()))
+                                 ? args[0].toString() : "output.avi";
+            s.setFieldAll("Filename", Value::fromString(fn, mr));
+            s.setFieldAll("FrameRate", Value::scalar(30.0, mr));
+            s.setFieldAll("Quality", Value::scalar(75.0, mr));
+            outs[0] = std::move(s);
+        });
+    engine.registerFunction("", "open",
+        [](Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            if (nargout >= 1) outs[0] = Value::structure(ctx.engine->resource());
+            else outs[0] = Value();
+        });
+    engine.registerFunction("", "writeVideo",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+            outs[0] = Value();
+        });
+    auto graphStub = [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        auto *mr = ctx.engine->resource();
+        Value s = Value::structure(mr);
+        if (!args.empty()) s.setFieldAll("Adj", args[0]);
+        outs[0] = std::move(s);
+    };
+    engine.registerFunction("", "digraph", graphStub);
+    engine.registerFunction("", "graph", graphStub);
     engine.registerFunction("", "plotmatrix", noopGfx);
     engine.registerFunction("", "makedatatip", noopGfx);
     engine.registerFunction("", "soundsc", noopGfx);

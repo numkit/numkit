@@ -1268,21 +1268,30 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     // Grows (any rank) with default-constructed gap fill. v1: each
     // subscript selects a single element.
     if (rhs.isObject()) {
-        const bool newable = !var->isObject() && (var->isUnset() || var->isEmpty());
         auto isGfxCls = [](const std::string &c) {
             return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
         };
+        if (!var->isObject() && var->isNumeric() && isGfxCls(rhs.objectClassName())) {
+            *var = Value();
+        }
+        const bool newable = !var->isObject() && (var->isUnset() || var->isEmpty());
         const bool sameArr =
             var->isObject() && (var->objectClassName() == rhs.objectClassName()
                                 || (isGfxCls(var->objectClassName()) && isGfxCls(rhs.objectClassName())));
         if (newable || sameArr) {
-            // Resolve each subscript to its full index list (scalar, range,
-            // vector, logical, `:` or `end` — resolveIndex handles all and is
-            // grow-friendly), then slice-store rhs (broadcast or matched).
             std::vector<std::vector<size_t>> perDim(nargs);
-            for (size_t d = 0; d < nargs; ++d)
-                perDim[d] = resolveIndex(lhs->children[d + 1].get(), *var,
-                                         static_cast<int>(d), static_cast<int>(nargs), env);
+            for (size_t d = 0; d < nargs; ++d) {
+                const ASTNode *sub = lhs->children[d + 1].get();
+                if ((var->isUnset() || var->isEmpty())
+                    && sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
+                    const size_t n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(static_cast<int>(d));
+                    perDim[d].resize(n);
+                    for (size_t k = 0; k < n; ++k) perDim[d][k] = k;
+                } else {
+                    perDim[d] = resolveIndex(sub, *var,
+                                             static_cast<int>(d), static_cast<int>(nargs), env);
+                }
+            }
             engine_.objectStoreSlice(*var, perDim, rhs, env);
             return;
         }
@@ -1316,6 +1325,17 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     }
 
     if (nargs == 1) {
+        if (rhs.isStruct() && (var->isUnset() || var->isEmpty() || var->isStruct())) {
+            auto indices = resolveIndex(lhs->children[1].get(), *var, 0, 1, env);
+            if (var->isUnset() || var->isEmpty())
+                *var = Value::structArray(0, 0, engine_.mr_);
+            for (size_t idx : indices) {
+                var->growStructArrayTo(idx, engine_.mr_);
+                for (const auto &name : rhs.fieldNamesInOrder())
+                    var->setField(idx, name, rhs.field(name));
+            }
+            return;
+        }
         // ── scalar fast path: B(i) = scalar ──
         if (rhs.isScalar()) {
             size_t scalarIdx;
@@ -2115,9 +2135,23 @@ std::vector<Value> TreeWalker::execSuperCall(const ASTNode *superRef, const ASTN
 
 bool TreeWalker::tryFusion(const ASTNode *node, Environment *env, Value &out)
 {
+    auto isKnownVarOrConst = [&](const ASTNode *op) -> bool {
+        while (op && (op->type == NodeType::UNARY_OP || op->type == NodeType::FIELD_ACCESS)
+               && !op->children.empty()) {
+            op = op->children[0].get();
+        }
+        if (!op || op->type != NodeType::IDENTIFIER)
+            return true;
+        const std::string &name = op->strValue;
+        return (env && env->get(name) != nullptr) || engine_.isReservedName(name);
+    };
     for (const FusionRule &rule : engine_.fusionRules()) {
         auto operands = rule.match(node);
         if (!operands) continue;
+        for (const ASTNode *opNode : *operands) {
+            if (!isKnownVarOrConst(opNode))
+                return false;
+        }
         // Matched this idiom's shape. Evaluate its (side-effect-free) operands
         // and try the kernel; if it declines, fall back (the normal path may
         // safely re-evaluate the pure operands). A node maps to one idiom, so

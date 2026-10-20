@@ -1498,11 +1498,14 @@ enter_frame:
                 // fresh object array) or an object array of the same class.
                 if (R[I.c].isObject()) {
                     Value &dst = R[I.a];
-                    const bool newable =
-                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     auto isGfxCls = [](const std::string &c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
                     };
+                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassName())) {
+                        dst = Value();
+                    }
+                    const bool newable =
+                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     const bool sameArr =
                         dst.isObject()
                         && (dst.objectClassName() == R[I.c].objectClassName()
@@ -1638,19 +1641,26 @@ enter_frame:
                 // when the target is empty/unset or a same-class object array.
                 if (val.isObject()) {
                     Value &dst = R[I.a];
-                    const bool newable =
-                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     auto isGfxCls = [](const std::string &c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
                     };
+                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassName())) {
+                        dst = Value();
+                    }
+                    const bool newable =
+                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     const bool sameArr =
                         dst.isObject()
                         && (dst.objectClassName() == val.objectClassName()
                             || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
                     if (newable || sameArr) {
+                        const size_t rDim = (dst.isObject() && dst.objectCount() > 0)
+                                                ? dst.dims().rows() : val.dims().rows();
+                        const size_t cDim = (dst.isObject() && dst.objectCount() > 0)
+                                                ? dst.dims().cols() : val.numel();
                         std::vector<std::vector<size_t>> perDim = {
-                            resolveStoreSubscript(ri, dst.isObject() ? dst.dims().rows() : 0),
-                            resolveStoreSubscript(ci, dst.isObject() ? dst.dims().cols() : 0)};
+                            resolveStoreSubscript(ri, rDim),
+                            resolveStoreSubscript(ci, cDim)};
                         engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
                         break;
                     }
@@ -3339,6 +3349,7 @@ enter_frame:
 
             // ── Return ───────────────────────────────────────────
             case OpCode::RET:
+                returnCount_ = 0;
                 popCallFrame(R[I.a]);
                 goto enter_frame;
             case OpCode::RET_MULTI: {
@@ -3370,6 +3381,7 @@ enter_frame:
             }
             case OpCode::RET_EMPTY:
             case OpCode::HALT:
+                returnCount_ = 0;
                 popCallFrame(Value());
                 goto enter_frame;
             case OpCode::NOP:
@@ -4360,6 +4372,9 @@ void VM::popCallFrame(Value retVal)
             }
         } else {
             caller.R[frame.destReg] = std::move(retVal);
+            for (uint8_t i = 0; i < returnCount_; ++i)
+                returnBuf_[i] = Value();
+            returnCount_ = 0;
         }
     } else {
         R_ = nullptr;

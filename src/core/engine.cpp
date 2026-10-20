@@ -3660,6 +3660,10 @@ Engine::ResolvedPath Engine::resolvePath(const std::string &userPath) const
         if ((!rp.fs || !rp.fs->exists(rp.path)) &&
             !userPath.empty() &&
             userPath.find_first_of("/\\:") == std::string::npos) {
+            if (rp.fs && rp.fs->exists(userPath)) {
+                rp.path = userPath;
+                return rp;
+            }
             for (const auto &dir : mPath_) {
                 if (dir.empty()) continue;
                 std::string candPath = dir;
@@ -3669,6 +3673,10 @@ Engine::ResolvedPath Engine::resolvePath(const std::string &userPath) const
                 ResolvedPath cand = fsCtx_.resolvePath(candPath);
                 if (cand.fs && cand.fs->exists(cand.path))
                     return cand;
+                if (rp.fs && rp.fs->exists(candPath)) {
+                    rp.path = candPath;
+                    return rp;
+                }
             }
         }
         return rp;

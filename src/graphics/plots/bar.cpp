@@ -938,12 +938,12 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // separated by null markers in the wire JSON; the renderer breaks
     // sub-paths on null and closes each.
     auto patchImpl = [](Span<const Value> args, size_t nargout,
-                        Span<Value> outs, GraphicsContext &gc) {
+                        Span<Value> outs, GraphicsContext &gc, bool isFill) {
         (void)nargout;
-        if (args.size() < 2) { outs[0] = Value(); return; }
         auto &fm = gc.fm;
-        if (args[0].isChar() || args[0].isString()) {
-            fm.prepareForPlot();
+        if (args.size() < 2 || args[0].isChar() || args[0].isString()) {
+            if (isFill) fm.prepareForPlot();
+            else fm.current().modified = true;
             DatasetInfo ds;
             ds.type = "polygon";
             ds.xJson = "[0,1]";
@@ -1011,7 +1011,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
         }
 
-        fm.prepareForPlot();
+        if (isFill) fm.prepareForPlot();
+        else fm.current().modified = true;
         DatasetInfo ds;
         ds.type = "polygon";
         ds.xJson = xs.str();
@@ -1023,8 +1024,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         fm.emitModified();
         outs[0] = Value();
     };
-    reg("bar", "patch", patchImpl);
-    reg("bar", "fill",  patchImpl);
+    reg("bar", "patch", [patchImpl](Span<const Value> args, size_t nargout,
+                                    Span<Value> outs, GraphicsContext &gc) {
+        patchImpl(args, nargout, outs, gc, false);
+    });
+    reg("bar", "fill",  [patchImpl](Span<const Value> args, size_t nargout,
+                                    Span<Value> outs, GraphicsContext &gc) {
+        patchImpl(args, nargout, outs, gc, true);
+    });
     // pie(X) â€” circular slices proportional to X. Each wedge is its
     // own polygon dataset so it picks up a distinct palette colour.
     // Calling forms (subset of MATLAB's):
