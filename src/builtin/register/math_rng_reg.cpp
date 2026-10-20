@@ -66,15 +66,9 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     if (t != ValueType::DOUBLE && t != ValueType::SINGLE)
         throw Error("rand: type must be 'double' or 'single'",
                     0, 0, "rand", "", "numkit:rand:badType");
-    // Legacy state syntax (pre-`rng` MATLAB): rand('seed', n) /
-    // rand('state', n) / rand('twister', n). Seeds the engine stream with
-    // n. Sequence VALUES differ from MATLAB's legacy generators (nk
-    // has one MT19937 stream, `rng(n)` semantics) — but the call must
-    // control the stream, not error (bugs/closed/stats/randn-legacy-seed-syntax.md).
-    // Legacy QUERY: rand('seed') / randn('seed') -> the last seed (double).
     if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && dimArgs[0].toString() == "seed") {
-        outs[0] = Value::scalar(static_cast<double>(ctx.engine->rng().legacySeed()),
+        outs[0] = Value::scalar(static_cast<double>(ctx.engine->rng().legacyRandSeed()),
                                 ctx.engine->resource());
         return;
     }
@@ -82,18 +76,13 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         && dimArgs[1].isScalar() && !dimArgs[1].isChar()) {
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed") {
-            // True MATLAB v4 generator — bit-identical (Park-Miller +
-            // polar; bugs/closed/stats/randn-legacy-seed-syntax.md).
-            ctx.engine->rng().setLegacyV4(
+            ctx.engine->rng().setLegacyV4Rand(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
         if (flag == "state" || flag == "twister") {
-            // v5-MT / init_by-array seeding not yet replicated: seed the
-            // modern stream (documented divergence, todo
-            // partial_fix_followups) — the call must control, not error.
-            ctx.engine->rng().seed(
+            ctx.engine->rng().setLegacyTwisterRand(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
@@ -125,29 +114,46 @@ void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     if (t != ValueType::DOUBLE && t != ValueType::SINGLE)
         throw Error("randn: type must be 'double' or 'single'",
                     0, 0, "randn", "", "numkit:randn:badType");
-    // Legacy state syntax — same as rand (see the comment above).
-    // Legacy QUERY: rand('seed') / randn('seed') -> the last seed (double).
-    if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())
-        && dimArgs[0].toString() == "seed") {
-        outs[0] = Value::scalar(static_cast<double>(ctx.engine->rng().legacySeed()),
-                                ctx.engine->resource());
-        return;
-    }
-    if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
-        && dimArgs[1].isScalar() && !dimArgs[1].isChar()) {
+    if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed") {
-            // True MATLAB v4 generator — bit-identical (Park-Miller +
-            // polar; bugs/closed/stats/randn-legacy-seed-syntax.md).
-            ctx.engine->rng().setLegacyV4(
+            outs[0] = Value::scalar(static_cast<double>(ctx.engine->rng().legacyRandnSeed()),
+                                    ctx.engine->resource());
+            return;
+        }
+        if (flag == "state") {
+            auto st = Value::matrix(2, 1, ValueType::DOUBLE, ctx.engine->resource());
+            st.doubleDataMut()[0] = static_cast<double>(ctx.engine->rng().v5RandnIcng());
+            st.doubleDataMut()[1] = static_cast<double>(ctx.engine->rng().v5RandnJsr());
+            outs[0] = std::move(st);
+            return;
+        }
+    }
+    if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
+        && !dimArgs[1].isChar()) {
+        const std::string flag = dimArgs[0].toString();
+        if (flag == "seed" && dimArgs[1].isScalar()) {
+            ctx.engine->rng().setLegacyV4Randn(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
-        if (flag == "state" || flag == "twister") {
-            // v5-MT / init_by-array seeding not yet replicated: seed the
-            // modern stream (documented divergence, todo
-            // partial_fix_followups) — the call must control, not error.
+        if (flag == "state") {
+            if (dimArgs[1].isScalar()) {
+                ctx.engine->rng().setLegacyV5Randn(
+                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                outs[0] = Value();
+                return;
+            }
+            if (dimArgs[1].numel() == 2) {
+                ctx.engine->rng().setLegacyV5RandnState(
+                    static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(0)),
+                    static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(1)));
+                outs[0] = Value();
+                return;
+            }
+        }
+        if (flag == "twister" && dimArgs[1].isScalar()) {
             ctx.engine->rng().seed(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();
@@ -281,14 +287,6 @@ void randperm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     }
 }
 
-// rng MATLAB forms:
-//   rng()              return current state struct (read-only snapshot)
-//   rng(seed)          seed with integer
-//   rng('default')     rng(0)
-//   rng('shuffle')     seed from random_device
-//   rng(state_struct)  restore previously-snapshotted state
-// nargout > 0 : return the current state BEFORE seeding/restoring.
-// (Matches MATLAB: `prev = rng(123)` snapshots the old state and seeds.)
 void rng_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
              CallContext &ctx)
 {
@@ -301,8 +299,6 @@ void rng_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
         prev = ctx.engine->rng().state(mr);
 
     if (args.empty()) {
-        // rng() with no return value is a no-op; with a return it
-        // gives the snapshot.
         if (nargout > 0) outs[0] = std::move(prev);
         return;
     }
@@ -322,7 +318,19 @@ void rng_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
         if (sd < 0.0)
             throw Error("rng: seed must be a non-negative integer",
                          0, 0, "rng", "", "numkit:rng:badSeed");
-        ctx.engine->rng().seed(static_cast<uint64_t>(sd));
+        const auto seedVal = static_cast<uint64_t>(sd);
+        if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
+            const auto genName = args[1].toString();
+            if (genName == "v4") {
+                ctx.engine->rng().setLegacyV4(seedVal);
+            } else if (genName == "v5normal") {
+                ctx.engine->rng().setLegacyV5Randn(seedVal);
+            } else {
+                ctx.engine->rng().seed(seedVal);
+            }
+        } else {
+            ctx.engine->rng().seed(seedVal);
+        }
     } else {
         throw Error("rng: argument must be a non-negative integer, "
                      "a struct from rng(), 'default', or 'shuffle'",

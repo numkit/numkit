@@ -1054,7 +1054,7 @@ enter_frame:
                     else
                         fs.rawData = fs.range.rawData();
                 }
-                if (fs.count == 0) {
+                if (fs.count == 0) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
                     continue;
                 }
@@ -1071,7 +1071,7 @@ enter_frame:
                     return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
                 };
                 if (R[I.b].isEmpty() || R[I.c].isEmpty()
-                    || (I.e != 0xFF && R[I.e].isEmpty())) {
+                    || (I.e != 0xFF && R[I.e].isEmpty())) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
                     continue;
                 }
@@ -1080,7 +1080,7 @@ enter_frame:
                 const double step  = (I.e == 0xFF) ? 1.0
                                                    : colonScalar(R[I.e]);
                 const size_t count = Value::colonCount(start, step, stop);
-                if (count == 0) {
+                if (count == 0) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
                     continue;
                 }

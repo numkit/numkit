@@ -3116,6 +3116,8 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
     auto rangeVal = execNode(node->children[0].get(), env);
 
     // Empty range — body never executes (MATLAB behavior)
+    if (rangeVal.isEmpty()) { env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE)); return Value(); }
+    if (false)
     if (rangeVal.isEmpty())
         return Value();
 
