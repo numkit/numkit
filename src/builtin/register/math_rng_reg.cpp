@@ -252,11 +252,15 @@ void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             dbl_out = randi(ctx.engine->rng(), imin, imax, r, c, p, mr);
         } else {
             // ND form: allocate matrixND and fill via the same uniform-int pass.
+            if (imin > imax)
+                throw Error("randi: low bound must be <= high bound",
+                            0, 0, "randi", "", "numkit:randi:badRange");
             auto m = Value::matrixND(dims.data(), static_cast<int>(dims.size()),
                                       ValueType::DOUBLE, mr);
-            std::uniform_int_distribution<int64_t> dist(imin, imax);
+            const double span = static_cast<double>(imax - imin + 1);
+            auto &rngRef = ctx.engine->rng();
             for (size_t i = 0; i < m.numel(); ++i)
-                m.doubleDataMut()[i] = static_cast<double>(dist(ctx.engine->rng()));
+                m.doubleDataMut()[i] = static_cast<double>(imin) + std::floor(rngRef.nextUniform() * span);
             dbl_out = std::move(m);
         }
     }

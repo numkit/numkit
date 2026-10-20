@@ -649,10 +649,33 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 std::string sLower;
                 sLower.reserve(s.size());
                 for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
-                if (sLower == "location" && i + 1 < args.size() && args[i + 1].isChar()) {
+                if (sLower == "location" && i + 1 < args.size() && (args[i + 1].isChar() || args[i + 1].isString())) {
                     sawLocation = true;
                     newLoc = normLocation(args[i + 1].toString());
                     ++i;  // skip the value
+                    continue;
+                }
+                static const std::array<const char *, 23> kLegendProps{
+                    "orientation", "numcolumns", "numcolumnsmode",
+                    "fontsize", "fontname", "fontweight", "fontangle", "fontunits",
+                    "interpreter", "box", "color", "edgecolor", "textcolor",
+                    "linewidth", "autoupdate", "position", "units", "visible",
+                    "string", "title", "itemhitfcn", "tag", "userdata",
+                };
+                bool isLegendProp = false;
+                for (const char *p : kLegendProps) {
+                    if (sLower == p) {
+                        isLegendProp = true;
+                        break;
+                    }
+                }
+                if (isLegendProp && i + 1 < args.size()) {
+                    if (sLower == "box" && (args[i + 1].isChar() || args[i + 1].isString())) {
+                        std::string bv = args[i + 1].toString();
+                        for (char &c : bv) c = (char)std::tolower((unsigned char)c);
+                        ax.legendBoxOn = (bv != "off");
+                    }
+                    ++i;  // skip property value
                     continue;
                 }
                 // MATLAB 'show'/'hide'/'off' as the first arg: visibility

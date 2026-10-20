@@ -3831,7 +3831,7 @@ void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
                                  const Value &val)
 {
     if (!env) return;
-    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+    for (size_t fi = frames_.size(); fi-- > 0;) {
         auto &f = frames_[fi];
         Environment *fEnv = f.env ? f.env.get()
                                   : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
@@ -3874,9 +3874,9 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
 {
     std::unordered_map<std::string, Value> out;
     if (!frameEnv) return out;
-    // Find the frame that owns this env.
+    // Find the innermost frame that owns this env.
     const CallFrame *match = nullptr;
-    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+    for (size_t fi = frames_.size(); fi-- > 0;) {
         const auto &f = frames_[fi];
         Environment *fEnv = f.env ? f.env.get()
                                   : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())

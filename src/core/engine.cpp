@@ -3445,19 +3445,14 @@ Value Engine::eval(const std::string &code, Environment *scope,
         return treeWalker_->execute(ast.get(), scope);
     }
 
-    // VM path: route inner top-level's ctx.env via inheritedScope_,
-    // sync registers to scope after exec.
-    Environment *prevInherited = vm_->inheritedScope_;
-    vm_->inheritedScope_ = scope;
-    bool prevClearAll = clearAllCalled_;
-    clearAllCalled_ = false;
-    vm_->clearLastVarMap();
-
     // Pre-populate inner top-level's dynVars with caller's variables
     // (registers + existing overlay + env-resident vars) so
     // ASSERT_DEF fallback resolves bare identifiers that live in the
     // caller's scope. Map lives on this C++ stack frame — must
     // outlive vm_->execute(chunk).
+    // NOTE: snapshot BEFORE updating inheritedScope_ so frames_[0] (the
+    // outer script frame) is not mistaken for `scope` when `scope` belongs
+    // to a user-function frame.
     auto callerSnapshot = vm_->snapshotFrameVars(scope);
     // Also include vars set in scope.env directly (e.g. by assignin
     // when the name wasn't in the caller's static varMap). Env values
@@ -3469,6 +3464,14 @@ Value Engine::eval(const std::string &code, Environment *scope,
     });
     vm_->setNextFrameDynVars(callerSnapshot.empty() ? nullptr : &callerSnapshot);
 
+    // VM path: route inner top-level's ctx.env via inheritedScope_,
+    // sync registers to scope after exec.
+    Environment *prevInherited = vm_->inheritedScope_;
+    vm_->inheritedScope_ = scope;
+    bool prevClearAll = clearAllCalled_;
+    clearAllCalled_ = false;
+    vm_->clearLastVarMap();
+
     auto chunk = compiler_->compile(ast.get(), src);
     vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
                           &compiler_->scriptLocalCompiledFuncs());
@@ -3476,15 +3479,15 @@ Value Engine::eval(const std::string &code, Environment *scope,
     Value result;
     try {
         result = vm_->execute(chunk);
+        vm_->inheritedScope_ = prevInherited;
         syncVMToScope(scope);
     } catch (...) {
-        syncVMToScope(scope);
         vm_->inheritedScope_ = prevInherited;
+        syncVMToScope(scope);
         clearAllCalled_ = prevClearAll;
         throw;
     }
 
-    vm_->inheritedScope_ = prevInherited;
     clearAllCalled_ = prevClearAll;
     return result;
 }
