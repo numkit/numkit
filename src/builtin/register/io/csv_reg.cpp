@@ -25,5 +25,13 @@ void csvwrite_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     csvwrite(ctx.engine->fsContext(), args);
 }
 
+void dlmwrite_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+{
+    (void)nargout;
+    (void)outs;
+    argcheck::checkNargin(args.size(), 2, 10, "dlmwrite");
+    csvwrite(ctx.engine->fsContext(), Span<const Value>(args.data(), 2));
+}
+
 
 } // namespace numkit::io::detail

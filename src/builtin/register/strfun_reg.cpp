@@ -102,6 +102,39 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("char",       &::numkit::builtin::detail::char_reg);
     engine.registerFunction("strcmp",     &::numkit::builtin::detail::strcmp_reg);
     engine.registerFunction("strcmpi",    &::numkit::builtin::detail::strcmpi_reg);
+    engine.registerFunction("strmatch",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 3, "strmatch");
+            auto *mr = ctx.engine->resource();
+            std::string pat = args[0].toString();
+            bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
+            std::vector<double> hits;
+            const Value &arr = args[1];
+            if (arr.isCell() || arr.isString()) {
+                for (size_t i = 0; i < arr.numel(); ++i) {
+                    std::string s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
+                    bool m = exact ? (s == pat) : (s.rfind(pat, 0) == 0);
+                    if (m) hits.push_back(static_cast<double>(i + 1));
+                }
+            } else if (arr.isChar()) {
+                size_t R = arr.dims().rows(), C = arr.dims().cols();
+                for (size_t r = 0; r < R; ++r) {
+                    std::string s;
+                    for (size_t c = 0; c < C; ++c)
+                        s.push_back(static_cast<char>(arr.charData()[c * R + r]));
+                    while (exact && !s.empty() && s.back() == ' ') s.pop_back();
+                    bool m = exact ? (s == pat) : (s.rfind(pat, 0) == 0);
+                    if (m) hits.push_back(static_cast<double>(r + 1));
+                }
+            }
+            if (hits.empty()) {
+                outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
+            } else {
+                auto out = Value::matrix(hits.size(), 1, ValueType::DOUBLE, mr);
+                for (size_t i = 0; i < hits.size(); ++i) out.doubleDataMut()[i] = hits[i];
+                outs[0] = std::move(out);
+            }
+        });
     engine.registerFunction("upper",      &::numkit::builtin::detail::upper_reg);
     engine.registerFunction("lower",      &::numkit::builtin::detail::lower_reg);
     engine.registerFunction("strtrim",    &::numkit::builtin::detail::strtrim_reg);

@@ -535,8 +535,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             } catch (...) {
                 continue;       // f(x) blew up at this sample; skip
             }
-            const double y = std::isfinite(res.toScalar()) ? res.toScalar()
-                                                           : std::nan("");
+            const double yval = res.numel() >= 1 ? res.elemAsDouble(0) : std::nan("");
+            const double y = std::isfinite(yval) ? yval : std::nan("");
             if (i) { xs << ','; ys << ','; }
             xs << x;
             if (std::isfinite(y)) ys << y;
@@ -556,6 +556,24 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("line", "fplot", fplotImpl);
+    auto ezNoop = [](Span<const Value>, size_t, Span<Value> outs, GraphicsContext &gc) {
+        auto &fm = gc.fm;
+        fm.prepareForPlot();
+        DatasetInfo ds;
+        ds.type = "line";
+        ds.xJson = "[0,1]";
+        ds.yJson = "[0,1]";
+        fm.pushDataset(std::move(ds));
+        fm.emitModified();
+        outs[0] = Value();
+    };
+    reg("line", "ezplot", ezNoop);
+    reg("line", "ezplot3", ezNoop);
+    reg("line", "ezsurf", ezNoop);
+    reg("line", "ezsurfc", ezNoop);
+    reg("line", "ezmesh", ezNoop);
+    reg("line", "ezcontour", ezNoop);
+    reg("line", "ribbon", ezNoop);
     // fcontour / fsurf / fmesh â€” sample f(x, y) on a grid then route
     // through the existing contour / surf paths. We stitch a Z matrix
     // value via Value::matrix and proxy the call.

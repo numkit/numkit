@@ -328,6 +328,10 @@ bool Parser::isCommandStyleCall() const
         return false;
 
     const Token &next = peekToken(1);
+    if (next.type == TokenType::STAR && next.line == current().line
+        && (current().value == "clear" || current().value == "clearvars"
+            || current().value == "who" || current().value == "whos"))
+        return true;
 
     // Command args may START with a glued '-' or '/': `which -all sin`,
     // `cd /path`, `web -broswer http://…` (the fieldtest corpus idiom).
@@ -1003,6 +1007,27 @@ ASTNodePtr Parser::parseClassDef()
                 auto [pln, pcl] = loc();
                 auto prop = makeNode(NodeType::CLASSDEF_PROPERTY, pln, pcl);
                 prop->strValue = consume(TokenType::IDENTIFIER, "property name").value;
+                if (current().line == pln && match(TokenType::LPAREN)) {
+                    int depth = 1;
+                    while (!isAtEnd() && depth > 0) {
+                        if (check(TokenType::LPAREN)) ++depth;
+                        else if (check(TokenType::RPAREN)) --depth;
+                        advance();
+                    }
+                }
+                if (current().line == pln && check(TokenType::IDENTIFIER)) {
+                    advance();
+                    while (current().line == pln && match(TokenType::DOT) && check(TokenType::IDENTIFIER))
+                        advance();
+                }
+                if (current().line == pln && match(TokenType::LBRACE)) {
+                    int depth = 1;
+                    while (!isAtEnd() && depth > 0) {
+                        if (check(TokenType::LBRACE)) ++depth;
+                        else if (check(TokenType::RBRACE)) --depth;
+                        advance();
+                    }
+                }
                 if (match(TokenType::ASSIGN))
                     prop->children.push_back(parseExpression());
                 prop->classAttrs = blockAttrs;

@@ -281,15 +281,27 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
     int kind = precOpt->first;
     size_t bsize = precOpt->second;
 
+    size_t skip = 0;
     bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
-        if (!args[3].isChar() && !args[3].isString())
+        if (args[3].isChar() || args[3].isString()) {
+            be = numkit::ops::parseEndian(args[3].toString(), "fread");
+        } else if (args[3].isScalar() || args[3].isEmpty()) {
+            if (args[3].isScalar())
+                skip = static_cast<size_t>(std::max(0.0, args[3].toScalar()));
+        } else {
             throw Error("fread: machine format must be a char array");
-        be = numkit::ops::parseEndian(args[3].toString(), "fread");
+        }
+    }
+    if (args.size() >= 5) {
+        if (!args[4].isChar() && !args[4].isString())
+            throw Error("fread: machine format must be a char array");
+        be = numkit::ops::parseEndian(args[4].toString(), "fread");
     }
 
     size_t available = f->buffer.size() - f->cursor;
-    size_t maxElems = available / bsize;
+    size_t stride = bsize + skip;
+    size_t maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
     size_t n = std::min(sz.limit, maxElems);
     if (sz.limit != SIZE_MAX && n < sz.limit)
         f->lastError = "End of file reached.";
@@ -299,7 +311,7 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
     for (size_t i = 0; i < n; ++i) {
         // Local copy lets us byte-swap safely without mutating f->buffer.
         char tmp[8];
-        std::memcpy(tmp, f->buffer.data() + f->cursor + i * bsize, bsize);
+        std::memcpy(tmp, f->buffer.data() + f->cursor + i * stride, bsize);
         if (be && bsize > 1) numkit::ops::byteSwap(tmp, bsize);
 
         double v = 0.0;
@@ -323,7 +335,10 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         }
         values[i] = v;
     }
-    f->cursor += n * bsize;
+    if (n > 0) {
+        size_t adv = (n - 1) * stride + bsize;
+        f->cursor = std::min(f->buffer.size(), f->cursor + adv);
+    }
     outs[0] = numkit::ops::shapeFreadOutput(values.data(), values.size(), sz, mr);
     if (nargout > 1)
         outs[1] = Value::scalar(static_cast<double>(n), mr);

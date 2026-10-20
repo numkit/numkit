@@ -830,11 +830,14 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return v;
         }
     }
-    if (name != "XData" && name != "YData" && name != "ZData")
+    std::string mappedName = name;
+    if (mappedName == "XEndPoints") mappedName = "XData";
+    if (mappedName == "YEndPoints") mappedName = "YData";
+    if (mappedName != "XData" && mappedName != "YData" && mappedName != "ZData")
         return Value();
     if (!ds)
         return Value();
-    if (name == "ZData") {
+    if (mappedName == "ZData") {
         if (ds->zJson.empty())
             return Value::matrix(1, 0, ValueType::DOUBLE, mr);
         if (ds->zJson.size() >= 2 && ds->zJson[0] == '[' && ds->zJson[1] == '[')
@@ -847,13 +850,13 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             v.doubleDataMut()[i] = zvals[i];
         return v;
     }
-    const std::vector<double> &raw = (name == "XData") ? ds->xRaw : ds->yRaw;
+    const std::vector<double> &raw = (mappedName == "XData") ? ds->xRaw : ds->yRaw;
     std::vector<double> vals;
     if (!raw.empty()) {
         vals = raw;
     } else {
         vals = figdetail::parseFlatDoubles(
-            (name == "XData") ? ds->xJson : ds->yJson);
+            (mappedName == "XData") ? ds->xJson : ds->yJson);
     }
     if (vals.empty())
         return Value();
@@ -1010,6 +1013,8 @@ std::string canonicalPropName(const std::string &raw)
         {"marker", "Marker"}, {"markersize", "MarkerSize"},
         {"color", "Color"}, {"visible", "Visible"}, {"displayname", "DisplayName"},
         {"xdata", "XData"}, {"ydata", "YData"}, {"zdata", "ZData"},
+        {"xendpoints", "XEndPoints"}, {"yendpoints", "YEndPoints"},
+        {"facecolor", "FaceColor"}, {"edgecolor", "EdgeColor"},
         {"sizedata", "SizeData"}, {"barwidth", "BarWidth"}, {"basevalue", "BaseValue"},
         {"binedges", "BinEdges"}, {"values", "Values"}, {"bincounts", "BinCounts"},
         {"numbins", "NumBins"}, {"binwidth", "BinWidth"}, {"binlimits", "BinLimits"},
@@ -2303,6 +2308,28 @@ void GraphicsLibrary::install(Engine &engine)
         if (entry.core)
             engine.registerFunction("", entry.name, ext);  // bare core name
     }
+
+    auto noopGfx = [](Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        if (nargout >= 1) outs[0] = Value::scalar(1.0, ctx.engine->resource());
+    };
+    engine.registerFunction("", "shg", noopGfx);
+    engine.registerFunction("", "datetick", noopGfx);
+    engine.registerFunction("", "rectangle", noopGfx);
+    engine.registerFunction("", "uicontrol", noopGfx);
+    engine.registerFunction("", "plotmatrix", noopGfx);
+    engine.registerFunction("", "makedatatip", noopGfx);
+    engine.registerFunction("", "soundsc", noopGfx);
+    engine.registerFunction("", "zplane", noopGfx);
+    engine.registerFunction("", "listfonts",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->resource();
+            Value c = Value::cell(4, 1, mr);
+            c.cellAt(0) = Value::fromString("Helvetica", mr);
+            c.cellAt(1) = Value::fromString("Arial", mr);
+            c.cellAt(2) = Value::fromString("Times New Roman", mr);
+            c.cellAt(3) = Value::fromString("Courier New", mr);
+            outs[0] = c;
+        });
 }
 
 } // namespace numkit

@@ -366,6 +366,8 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("accumarray", &::numkit::builtin::detail::accumarray_reg);
     engine.registerFunction("deg2rad",    &::numkit::builtin::detail::deg2rad_reg);
     engine.registerFunction("rad2deg",    &::numkit::builtin::detail::rad2deg_reg);
+    engine.registerFunction("degtorad",   &::numkit::builtin::detail::deg2rad_reg);
+    engine.registerFunction("radtodeg",   &::numkit::builtin::detail::rad2deg_reg);
     engine.registerFunction("wrapToPi",   &::numkit::builtin::detail::wrapToPi_reg);
     engine.registerFunction("wrapTo2Pi",  &::numkit::builtin::detail::wrapTo2Pi_reg);
     engine.registerFunction("wrapTo180",  &::numkit::builtin::detail::wrapTo180_reg);

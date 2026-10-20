@@ -119,6 +119,27 @@ void register_lang(Engine &engine) {
             outs[0] = ::numkit::builtin::iskeyword(args, ctx.engine->resource());
         });
 
+    engine.registerFunction("nargchk",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 3, 4, "nargchk");
+            auto *mr = ctx.engine->resource();
+            double lo = args[0].toScalar(), hi = args[1].toScalar(), n = args[2].toScalar();
+            if (n < lo) outs[0] = Value::fromString("Not enough input arguments.", mr);
+            else if (n > hi) outs[0] = Value::fromString("Too many input arguments.", mr);
+            else outs[0] = Value::logicalScalar(false, mr);
+        });
+
+    engine.registerFunction("memoize",
+        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &) {
+            argcheck::checkNargin(args.size(), 1, 1, "memoize");
+            outs[0] = args[0];
+        });
+
+    engine.registerFunction("savepath",
+        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+            outs[0] = Value::scalar(0.0, ctx.engine->resource());
+        });
+
     engine.registerFunction("isvarname",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isvarname");

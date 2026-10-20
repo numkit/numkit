@@ -128,7 +128,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                         return;
                                     }
 
-                                    if (first == "all" || first == "classes") {
+                                    if (first == "*") {
+                                        env->clearAll();
+                                        if (!insideFunc) {
+                                            ctx.engine->reinstallConstants();
+                                            ctx.engine->markClearAll();
+                                        }
+                                    } else if (first == "all" || first == "classes") {
                                         if (insideFunc) {
                                             env->clearAll();
                                             } else {

@@ -98,8 +98,16 @@ void save(Engine &engine, Environment &env, Span<const Value> args)
         varnames.push_back(s);
     }
 
-    if (mode == Mode::Auto)
-        mode = endsWithIgnoreCase(filename, ".mat") ? Mode::Mat : Mode::Ascii;
+    if (mode == Mode::Auto) {
+        if (endsWithIgnoreCase(filename, ".mat")) {
+            mode = Mode::Mat;
+        } else if (filename.find('.') == std::string::npos) {
+            filename += ".mat";
+            mode = Mode::Mat;
+        } else {
+            mode = Mode::Ascii;
+        }
+    }
 
     std::vector<std::string> names(varnames.begin(), varnames.end());
     if (mode == Mode::Mat) {

@@ -68,9 +68,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 }
             }
 
-            const size_t Yr = yArg->dims().rows();
-            const size_t Yc = yArg->dims().cols();
+            size_t Yr = yArg->dims().rows();
+            size_t Yc = yArg->dims().cols();
             const bool matrix = (Yr > 1 && Yc > 1);
+            bool transposeY = (matrix && xArg && xArg->numel() == Yc && Yr != Yc);
+            if (transposeY) std::swap(Yr, Yc);
             // Vector path (back-compat): single dataset.
             if (!matrix) {
                 DatasetInfo ds;
@@ -103,7 +105,15 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 for (size_t r = 0; r < Yr; ++r) xb[r] = (double)(r + 1);
             }
             std::vector<double> Ybuf(yArg->numel());
-            for (size_t i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yArg->elemAsDouble(i);
+            if (transposeY) {
+                size_t origR = yArg->dims().rows();
+                size_t origC = yArg->dims().cols();
+                for (size_t r = 0; r < origR; ++r)
+                    for (size_t c = 0; c < origC; ++c)
+                        Ybuf[r * origC + c] = yArg->elemAsDouble(c * origR + r);
+            } else {
+                for (size_t i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yArg->elemAsDouble(i);
+            }
             const double *Yp = Ybuf.data();
             if (mode == "stacked") {
                 // Cumulative sums; emit column Yc-1 first so lower
