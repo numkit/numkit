@@ -294,14 +294,46 @@ void delaunay_reg(Span<const Value> args, size_t /*nargout*/,
 //   vq = griddata(x, y, v, xq, yq, 'linear')   — only mode for v1
 //
 // 'nearest', 'natural', 'cubic', 'v4' modes are BACKLOG.
-void griddata_reg(Span<const Value> args, size_t /*nargout*/,
+void griddata_reg(Span<const Value> args, size_t nargout,
                   Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 5, "griddata");
-    // NOTE: a trailing method arg (args[5], e.g. 'nearest') is currently
-    // ignored — only 'linear' is implemented (v1 gap, see header).
-    outs[0] = griddata(args[0], args[1], args[2], args[3], args[4],
-                       ctx.engine->resource());
+    argcheck::checkNargin(args.size(), 5, 7, "griddata");
+    auto *mr = ctx.engine->resource();
+    std::string method = "linear";
+    if (args.size() >= 6 && (args[5].isChar() || args[5].isString()))
+        method = args[5].toString();
+
+    const Value &xqIn = args[3];
+    const Value &yqIn = args[4];
+    Value xqExpanded, yqExpanded;
+    const bool bothVectors = xqIn.dims().isVector() && yqIn.dims().isVector();
+    const bool diffOrient  = (xqIn.dims().rows() == 1) != (yqIn.dims().rows() == 1);
+    if (bothVectors && (xqIn.numel() != yqIn.numel() || (diffOrient && xqIn.numel() > 1) || nargout >= 3)) {
+        const std::size_t rows = yqIn.numel();
+        const std::size_t cols = xqIn.numel();
+        xqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
+        yqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
+        double *xd = xqExpanded.doubleDataMut();
+        double *yd = yqExpanded.doubleDataMut();
+        for (std::size_t c = 0; c < cols; ++c) {
+            const double xv = xqIn.elemAsDouble(c);
+            for (std::size_t r = 0; r < rows; ++r) {
+                xd[c * rows + r] = xv;
+                yd[c * rows + r] = yqIn.elemAsDouble(r);
+            }
+        }
+    }
+    const Value &xq = xqExpanded.isUnset() ? xqIn : xqExpanded;
+    const Value &yq = yqExpanded.isUnset() ? yqIn : yqExpanded;
+
+    Value vq = griddata(args[0], args[1], args[2], xq, yq, method, mr);
+    if (nargout >= 3 && outs.size() >= 3) {
+        outs[0] = xq;
+        outs[1] = yq;
+        outs[2] = std::move(vq);
+    } else {
+        outs[0] = std::move(vq);
+    }
 }
 
 } // namespace detail

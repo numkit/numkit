@@ -231,11 +231,40 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "subplot",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             (void)nargout;
+            auto &fm = gc.fm;
+            if (args.size() == 1 && !args[0].isEmpty()) {
+                if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
+                    if (auto *rec = fm.findHandle(hid)) {
+                        if (rec->figureId > 0) fm.setFigure(rec->figureId);
+                        if (rec->axesIndex >= 0 &&
+                            static_cast<size_t>(rec->axesIndex) < fm.current().axes.size()) {
+                            fm.current().currentAxes = rec->axesIndex;
+                        }
+                    }
+                    outs[0] = Value();
+                    return;
+                }
+                int mnp = 0;
+                if (args[0].isChar() || args[0].isString()) {
+                    try { mnp = std::stoi(args[0].toString()); } catch (...) {}
+                } else {
+                    mnp = static_cast<int>(args[0].elemAsDouble(0));
+                }
+                if (mnp >= 111 && mnp <= 999) {
+                    int m = mnp / 100;
+                    int n = (mnp / 10) % 10;
+                    int p = mnp % 10;
+                    if (m >= 1 && n >= 1 && p >= 1 && p <= m * n) {
+                        fm.setSubplot(m, n, p);
+                    }
+                }
+                outs[0] = Value();
+                return;
+            }
             if (args.size() < 3 || args[0].isEmpty() || args[1].isEmpty() || args[2].isEmpty()) {
                 outs[0] = Value();
                 return;
             }
-            auto &fm = gc.fm;
             int m = static_cast<int>(args[0].elemAsDouble(0));
             int n = static_cast<int>(args[1].elemAsDouble(0));
             int p = static_cast<int>(args[2].elemAsDouble(0));
@@ -806,7 +835,18 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     reg("layout", "colormap",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
-            if (args.empty()) { outs[0] = Value(); return; }
+            if (args.empty()) {
+                auto cm = Value::matrix(64, 3, ValueType::DOUBLE, gc.mr);
+                double *p = cm.doubleDataMut();
+                for (size_t i = 0; i < 64; ++i) {
+                    const double v = static_cast<double>(i) / 63.0;
+                    p[i] = v;
+                    p[64 + i] = v;
+                    p[128 + i] = v;
+                }
+                outs[0] = std::move(cm);
+                return;
+            }
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (args[0].isChar()) {
@@ -1433,6 +1473,16 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     reg("layout", "set", noop);
     reg("layout", "get", noop_ret1);
+    reg("layout", "camzoom", noop);
+    reg("layout", "camorbit", noop);
+    reg("layout", "campan", noop);
+    reg("layout", "camroll", noop);
+    reg("layout", "camdolly", noop);
+    reg("layout", "camva", noop);
+    reg("layout", "camtarget", noop);
+    reg("layout", "campos", noop);
+    reg("layout", "camup", noop);
+    reg("layout", "camproj", noop);
 }
 
 // â”€â”€ Reactive-session checkpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

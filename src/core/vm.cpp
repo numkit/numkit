@@ -1198,7 +1198,7 @@ enter_frame:
             case OpCode::HORZCAT_APPEND: {
                 Value &dst = R[I.a];
                 const Value &val = R[I.b];
-                if (val.isScalar() && !val.isComplex()
+                if ((val.isDoubleScalar() || (val.isHeapDouble() && val.numel() == 1))
                     && dst.heapRefCount() == 1
                     && (dst.isEmpty()
                         || (dst.isHeapDouble() && dst.dims().rows() == 1))) {
@@ -1206,8 +1206,9 @@ enter_frame:
                     break;
                 }
                 Value elems[2] = { dst, val };
-                if (dst.isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(dst.objectClassName());
+                if (dst.isObject() || val.isObject()) {
+                    const Value &obj = dst.isObject() ? dst : val;
+                    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
                     if (cls && cls->ops.count("horzcat")) {
                         Value self = dst;
                         Value out[1];
@@ -1253,7 +1254,7 @@ enter_frame:
                 // two-element vertcat otherwise.
                 Value &dst = R[I.a];
                 const Value &val = R[I.b];
-                if (val.isScalar() && !val.isComplex()
+                if ((val.isDoubleScalar() || (val.isHeapDouble() && val.numel() == 1))
                     && dst.heapRefCount() == 1
                     && (dst.isEmpty()
                         || (dst.isHeapDouble() && dst.dims().cols() == 1))) {
@@ -1261,8 +1262,9 @@ enter_frame:
                     break;
                 }
                 Value elems[2] = { dst, val };
-                if (dst.isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(dst.objectClassName());
+                if (dst.isObject() || val.isObject()) {
+                    const Value &obj = dst.isObject() ? dst : val;
+                    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
                     if (cls && cls->ops.count("vertcat")) {
                         Value self = dst;
                         Value out[1];
@@ -1931,6 +1933,19 @@ enter_frame:
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
+                if (R[I.b].isStructArray()) {
+                    size_t n = R[I.b].numel();
+                    Value csl = Value::csl(n, engine_.mr_);
+                    for (size_t i = 0; i < n; ++i) {
+                        const auto &m = R[I.b].structArrayElem(i);
+                        auto it = m.find(fname);
+                        if (it == m.end())
+                            throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                        csl.cslAt(i) = it->second;
+                    }
+                    R[I.a] = std::move(csl);
+                    break;
+                }
                 if (!R[I.b].hasField(fname))
                     throw std::runtime_error("Reference to non-existent field '" + fname + "'");
                 R[I.a] = R[I.b].field(fname);
@@ -2090,6 +2105,19 @@ enter_frame:
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
+                if (R[I.b].isStructArray()) {
+                    size_t n = R[I.b].numel();
+                    Value csl = Value::csl(n, engine_.mr_);
+                    for (size_t i = 0; i < n; ++i) {
+                        const auto &m = R[I.b].structArrayElem(i);
+                        auto it = m.find(fname);
+                        if (it == m.end())
+                            throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                        csl.cslAt(i) = it->second;
+                    }
+                    R[I.a] = std::move(csl);
+                    break;
+                }
                 if (!R[I.b].hasField(fname))
                     throw std::runtime_error("Reference to non-existent field '" + fname + "'");
                 R[I.a] = R[I.b].field(fname);
@@ -3205,8 +3233,9 @@ enter_frame:
             case OpCode::RET_MULTI: {
                 // a=base, b=count — store return values in returnBuf_
                 uint8_t base = I.a, count = I.b;
-                returnCount_ = count;
-                for (uint8_t i = 0; i < count && i < kMaxReturns; ++i)
+                uint8_t capped = static_cast<uint8_t>(std::min<size_t>(count, kMaxReturns));
+                returnCount_ = capped;
+                for (uint8_t i = 0; i < capped; ++i)
                     returnBuf_[i] = R[base + i];
                 popCallFrame(R[base]); // first value as primary return
                 goto enter_frame;

@@ -1338,8 +1338,30 @@ void meshgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
 void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 2, "ndgrid");
+    argcheck::checkNargin(args.size(), 1, "ndgrid");
     std::pmr::memory_resource *mr = ctx.engine->resource();
+    if (args.size() == 1) {
+        if (nargout <= 1) {
+            size_t d[2] = {args[0].numel(), 1};
+            outs[0] = reshape(args[0], Span<const size_t>(d, 2), mr);
+            return;
+        }
+        if (nargout == 2) {
+            auto [X, Y] = ndgrid(args[0], args[0], mr);
+            outs[0] = std::move(X);
+            outs[1] = std::move(Y);
+            return;
+        }
+        if (nargout == 3) {
+            auto [X, Y, Z] = ndgrid(args[0], args[0], args[0], mr);
+            outs[0] = std::move(X);
+            outs[1] = std::move(Y);
+            outs[2] = std::move(Z);
+            return;
+        }
+        throw Error("ndgrid: 4+ outputs are not yet supported",
+                     0, 0, "ndgrid", "", "numkit:ndgrid:tooManyOutputs");
+    }
     if (args.size() == 2) {
         auto [X, Y] = ndgrid(args[0], args[1], mr);
         outs[0] = std::move(X);

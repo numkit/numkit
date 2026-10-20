@@ -91,6 +91,25 @@ Engine::~Engine()
     // Flush any files the user left open — best-effort, swallow any
     // backend errors because we're already tearing down.
     closeAllFiles();
+    vm_.reset();
+    compiler_.reset();
+    treeWalker_.reset();
+    debugController_.reset();
+    debugObserver_.reset();
+    workspaceEnv_.reset();
+    constantsEnv_.reset();
+    globalsEnv_.reset();
+    userConstants_.clear();
+    scriptLocalUserFuncs_.clear();
+    savedScriptLocalUserFuncs_.clear();
+    userFuncs_.clear();
+    classDefAst_.clear();
+    classDefs_.clear();
+    classes_.clear();
+    callbackBuiltins_.clear();
+    fusionRules_.clear();
+    binaryOps_.clear();
+    unaryOps_.clear();
     externalFuncs_.clear();
     shortNameIndex_.clear();
     pluginLoader_.reset();
@@ -2175,12 +2194,21 @@ void Engine::addPath(const std::string &dir)
     }
     if (dir.empty() || dir == "-begin" || dir == "-end" || dir == "-frozen")
         return;
+    std::string effectiveDir = dir;
+    try {
+        ResolvedPath rp = fsCtx_.resolvePath(dir);
+        if (rp.fs && rp.fs->exists(rp.path)) {
+            effectiveDir = (rp.fs->name() != "native")
+                ? (rp.fs->name() + ":" + rp.path)
+                : rp.path;
+        }
+    } catch (...) {}
     // De-dup: ignore if already present.
     for (const auto &p : mPath_) {
-        if (p == dir) return;
+        if (p == effectiveDir || p == dir) return;
     }
     mFileMissCache_.clear();
-    mPath_.push_back(dir);
+    mPath_.push_back(effectiveDir);
 }
 
 void Engine::rmPath(const std::string &dir)
@@ -2198,7 +2226,18 @@ void Engine::rmPath(const std::string &dir)
         }
         return;
     }
-    auto it = std::find(mPath_.begin(), mPath_.end(), dir);
+    std::string effectiveDir = dir;
+    try {
+        ResolvedPath rp = fsCtx_.resolvePath(dir);
+        if (rp.fs) {
+            effectiveDir = (rp.fs->name() != "native")
+                ? (rp.fs->name() + ":" + rp.path)
+                : rp.path;
+        }
+    } catch (...) {}
+    auto it = std::find_if(mPath_.begin(), mPath_.end(), [&](const std::string &p) {
+        return p == dir || p == effectiveDir;
+    });
     if (it != mPath_.end()) {
         mFileMissCache_.clear();
         mPath_.erase(it);
@@ -2499,9 +2538,14 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
             }
         }
 
+        const std::string cachePath = (rp.fs->name() != "native")
+            ? (rp.fs->name() + ":" + rp.path)
+            : rp.path;
+
         // Cache hit? Validate via mtime; re-parse if stale.
         auto cit = mFileCache_.find(name);
-        if (cit != mFileCache_.end() && cit->second.fullPath == userPath) {
+        if (cit != mFileCache_.end()
+            && (cit->second.fullPath == cachePath || cit->second.fullPath == userPath)) {
             auto st = rp.fs->stat(rp.path);
             int64_t curMtime = st ? st->mtime : 0;
             if (curMtime != 0 && curMtime == cit->second.mtime) {
@@ -2613,7 +2657,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     outs[0] = ctx.engine->constructChecked(c, args, ctx);
                 });
                 MFileCacheEntry ce;
-                ce.fullPath = userPath;
+                ce.fullPath = cachePath;
                 if (auto st = rp.fs->stat(rp.path))
                     ce.mtime = st->mtime;
                 ce.sourceCode = std::make_shared<const std::string>(std::move(content));
@@ -2633,10 +2677,14 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     if (!args.empty() || nargout > 0)
                         throw Error("Attempt to execute SCRIPT " + scriptName + " as a function.",
                                     0, 0, scriptName, "", "numkit:script:CalledAsFunction");
+                    auto keepSrc = srcPtr;
+                    const std::string keepFs = fsName;
+                    const std::string keepDir = sDir;
+                    const std::string keepPath = sPath;
                     Environment *scope = ctx.env ? ctx.env : &ctx.engine->workspaceEnv();
-                    ctx.engine->pushScriptOrigin(fsName, sDir, sPath);
+                    ctx.engine->pushScriptOrigin(keepFs, keepDir, keepPath);
                     try {
-                        ctx.engine->eval(*srcPtr, scope);
+                        ctx.engine->eval(*keepSrc, scope);
                     } catch (...) {
                         ctx.engine->popScriptOrigin();
                         throw;
@@ -2650,7 +2698,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     }
                 });
                 MFileCacheEntry ce;
-                ce.fullPath = userPath;
+                ce.fullPath = cachePath;
                 if (auto st = rp.fs->stat(rp.path))
                     ce.mtime = st->mtime;
                 ce.sourceCode = std::move(srcPtr);
@@ -2713,7 +2761,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
 
         // Cache stat metadata for mtime-based invalidation.
         MFileCacheEntry e;
-        e.fullPath = userPath;
+        e.fullPath = cachePath;
         if (auto st = rp.fs->stat(rp.path))
             e.mtime = st->mtime;
         e.sourceCode = std::make_shared<const std::string>(std::move(content));
@@ -3162,15 +3210,15 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
 }
 Value Engine::eval(const std::string &code, bool suppressTopLevelDisplay)
 {
+    auto src = std::make_shared<const std::string>(code);
     refreshStaleMFiles();
     if (backend_ == Backend::VM && vm_)
         vm_->flushWorkspaceFrame();
 
-    Lexer lexer(code);
+    Lexer lexer(*src);
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
     auto ast = parser.parse();
-    auto src = std::make_shared<const std::string>(code);
     if (suppressTopLevelDisplay)
         markTopLevelSuppressed(ast.get());
 

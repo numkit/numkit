@@ -69,7 +69,15 @@ void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 
     std::string path = args[0].toString();
     std::string mode = (args.size() >= 2 && args[1].isChar()) ? args[1].toString() : "r";
+    bool be = false;
+    if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
+        be = numkit::ops::parseEndian(args[2].toString(), "fopen");
+    }
     int fid = fs.openFile(path, mode);
+    if (fid >= 0 && be) {
+        if (auto *f = fs.findFile(fid))
+            f->mode += ";be";
+    }
     outs[0] = Value::scalar(static_cast<double>(fid), mr);
     // [fid, errmsg] = fopen(...) â€” errmsg is '' on success.
     if (nargout > 1)
@@ -273,9 +281,9 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
     int kind = precOpt->first;
     size_t bsize = precOpt->second;
 
-    bool be = false;
+    bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
-        if (!args[3].isChar())
+        if (!args[3].isChar() && !args[3].isString())
             throw Error("fread: machine format must be a char array");
         be = numkit::ops::parseEndian(args[3].toString(), "fread");
     }
@@ -342,9 +350,9 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     int kind = precOpt->first;
     size_t bsize = precOpt->second;
 
-    bool be = false;
+    bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
-        if (!args[3].isChar())
+        if (!args[3].isChar() && !args[3].isString())
             throw Error("fwrite: machine format must be a char array");
         be = numkit::ops::parseEndian(args[3].toString(), "fwrite");
     }

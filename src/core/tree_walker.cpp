@@ -252,6 +252,18 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             return objectPropGet(obj, fname, env);
         if (!obj.isStruct())
             throw std::runtime_error("Dot indexing requires a struct");
+        if (obj.isStructArray()) {
+            size_t n = obj.numel();
+            Value csl = Value::csl(n, engine_.mr_);
+            for (size_t i = 0; i < n; ++i) {
+                const auto &m = obj.structArrayElem(i);
+                auto it = m.find(fname);
+                if (it == m.end())
+                    throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                csl.cslAt(i) = it->second;
+            }
+            return csl;
+        }
         if (!obj.hasField(fname))
             throw std::runtime_error("Reference to non-existent field '" + fname + "'");
         return obj.field(fname);
@@ -1712,8 +1724,11 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
         }
     }
 
-    if (node->type != NodeType::CALL)
+    if (node->type != NodeType::CALL) {
+        if (nout <= 1)
+            return {execNode(node, env)};
         throw std::runtime_error("Expected function call in multi-assignment");
+    }
 
     // Superclass-qualified multi-output call `[a,b] = method@Base(obj,...)`.
     if (node->children[0]->type == NodeType::SUPERCLASS_REF)
@@ -2697,6 +2712,18 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
     if (!obj.isStruct())
         throw std::runtime_error("Dot indexing requires a struct, got "
                                  + std::string(mtypeName(obj.type())));
+    if (obj.isStructArray()) {
+        size_t n = obj.numel();
+        Value csl = Value::csl(n, engine_.mr_);
+        for (size_t i = 0; i < n; ++i) {
+            const auto &m = obj.structArrayElem(i);
+            auto it = m.find(node->strValue);
+            if (it == m.end())
+                throw std::runtime_error("Reference to non-existent field '" + node->strValue + "'");
+            csl.cslAt(i) = it->second;
+        }
+        return csl;
+    }
     if (!obj.hasField(node->strValue))
         throw std::runtime_error("Reference to non-existent field '" + node->strValue + "'");
     return obj.field(node->strValue);

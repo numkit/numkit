@@ -502,7 +502,29 @@ void getfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
     if (args.size() < 2)
         throw Error("getfield requires (S, name)",
                      0, 0, "getfield", "", "numkit:getfield:nargin");
-    outs[0] = getfield(args[0], args[1], ctx.engine->resource());
+    Value cur = args[0];
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (args[i].isCell()) {
+            size_t idx = args[i].numel() > 0
+                             ? Value::checkedScalarIndex(args[i].cellAt(0).toScalar())
+                             : 0;
+            if (cur.isStructArray()) {
+                if (idx >= cur.numel())
+                    throw Error("Index exceeds array bounds.", 0, 0, "getfield", "",
+                                "numkit:getfield:indexOutOfBounds");
+                Value single = Value::structure(ctx.engine->resource());
+                const auto &m = cur.structArrayElem(idx);
+                for (const auto &fn : cur.fieldNamesInOrder()) {
+                    auto it = m.find(fn);
+                    single.field(fn) = (it != m.end()) ? it->second : Value();
+                }
+                cur = std::move(single);
+            }
+        } else {
+            cur = getfield(cur, args[i], ctx.engine->resource());
+        }
+    }
+    outs[0] = std::move(cur);
 }
 
 void setfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)

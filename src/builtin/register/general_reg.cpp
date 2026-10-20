@@ -404,18 +404,60 @@ void register_general(Engine &engine) {
                             [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 std::string target = args.empty() ? std::string(".")
                                                                    : args[0].toString();
-                                auto rp = ctx.engine->resolvePath(target);
-                                if (!rp.fs)
-                                    throw std::runtime_error("dir: cannot resolve '" + target + "'");
+                                auto globMatch = [](const std::string &pat, const std::string &str) -> bool {
+                                    size_t p = 0, s = 0, starIdx = std::string::npos, matchIdx = 0;
+                                    while (s < str.size()) {
+                                        if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
+                                            ++p; ++s;
+                                        } else if (p < pat.size() && pat[p] == '*') {
+                                            starIdx = p++;
+                                            matchIdx = s;
+                                        } else if (starIdx != std::string::npos) {
+                                            p = starIdx + 1;
+                                            s = ++matchIdx;
+                                        } else {
+                                            return false;
+                                        }
+                                    }
+                                    while (p < pat.size() && pat[p] == '*') ++p;
+                                    return p == pat.size();
+                                };
+
                                 std::vector<DirEntry> entries;
-                                auto st = rp.fs->stat(rp.path);
-                                if (st && st->kind == FileStat::Kind::File) {
-                                    DirEntry e;
-                                    e.name = rp.path;
-                                    e.isDirectory = false;
-                                    entries.push_back(e);
+                                Engine::ResolvedPath rp;
+                                const bool hasWild = target.find('*') != std::string::npos
+                                                  || target.find('?') != std::string::npos;
+                                if (hasWild) {
+                                    size_t sep = target.find_last_of("/\\");
+                                    std::string dirPart = (sep == std::string::npos) ? std::string(".")
+                                                        : (sep == 0 ? std::string("/") : target.substr(0, sep));
+                                    std::string patPart = (sep == std::string::npos) ? target : target.substr(sep + 1);
+                                    rp = ctx.engine->resolvePath(dirPart);
+                                    if (!rp.fs)
+                                        throw std::runtime_error("dir: cannot resolve '" + target + "'");
+                                    auto all = rp.fs->listDir(rp.path);
+                                    for (auto &e : all) {
+                                        if ((e.name == "." || e.name == "..") && (patPart.empty() || patPart[0] != '.'))
+                                            continue;
+                                        if (globMatch(patPart, e.name))
+                                            entries.push_back(std::move(e));
+                                    }
+                                    std::sort(entries.begin(), entries.end(),
+                                              [](const DirEntry &a, const DirEntry &b) { return a.name < b.name; });
                                 } else {
-                                    entries = rp.fs->listDir(rp.path);
+                                    rp = ctx.engine->resolvePath(target);
+                                    if (!rp.fs)
+                                        throw std::runtime_error("dir: cannot resolve '" + target + "'");
+                                    auto st = rp.fs->stat(rp.path);
+                                    if (st && st->kind == FileStat::Kind::File) {
+                                        DirEntry e;
+                                        size_t sep = rp.path.find_last_of("/\\");
+                                        e.name = (sep == std::string::npos) ? rp.path : rp.path.substr(sep + 1);
+                                        e.isDirectory = false;
+                                        entries.push_back(e);
+                                    } else {
+                                        entries = rp.fs->listDir(rp.path);
+                                    }
                                 }
 
                                 if (nargout == 0) {

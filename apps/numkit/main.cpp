@@ -97,7 +97,19 @@ void reportError(const Engine::EvalResult &r, const std::string &prefix)
 int runEval(const std::string &code)
 {
     StandardEngine engine;
+    {
+        std::error_code ec;
+        std::filesystem::path cwd = std::filesystem::current_path(ec);
+        if (!ec) {
+            auto cU8 = cwd.u8string();
+            engine.pushScriptOrigin(
+                "native",
+                std::string(reinterpret_cast<const char *>(cU8.data()), cU8.size()),
+                "");
+        }
+    }
     auto r = engine.evalSafe(code);
+    engine.popScriptOrigin();
     if (!r.ok) {
         reportError(r, "Error: ");
         return 1;
@@ -108,7 +120,18 @@ int runEval(const std::string &code)
 int runScript(const std::string &path)
 {
     StandardEngine engine;
-    std::ifstream f(path, std::ios::binary);
+    std::filesystem::path fsPath;
+    try {
+        std::error_code ec;
+        auto p = std::filesystem::u8path(path);
+        if (std::filesystem::exists(p, ec))
+            fsPath = p;
+        else
+            fsPath = std::filesystem::path(path);
+    } catch (...) {
+        fsPath = std::filesystem::path(path);
+    }
+    std::ifstream f(fsPath, std::ios::binary);
     if (!f) {
         std::cerr << "numkit: cannot open '" << path << "'\n";
         return 1;
@@ -119,9 +142,15 @@ int runScript(const std::string &path)
 
     {
         std::error_code ec;
-        std::filesystem::path abs = std::filesystem::absolute(path, ec);
-        if (!ec)
-            engine.pushScriptOrigin("native", abs.parent_path().string(), abs.string());
+        std::filesystem::path abs = std::filesystem::absolute(fsPath, ec);
+        if (!ec) {
+            auto pU8 = abs.parent_path().u8string();
+            auto aU8 = abs.u8string();
+            engine.pushScriptOrigin(
+                "native",
+                std::string(reinterpret_cast<const char *>(pU8.data()), pU8.size()),
+                std::string(reinterpret_cast<const char *>(aU8.data()), aU8.size()));
+        }
     }
 
     auto r = engine.evalSafe(src);

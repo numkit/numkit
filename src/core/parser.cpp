@@ -626,9 +626,11 @@ ASTNodePtr Parser::tryMultiAssign()
     if (!parseElem())
         return nullptr;
 
-    // Остальные элементы через запятую
-    while (check(TokenType::COMMA)) {
-        advance();
+    // Остальные элементы через запятую или пробел ([a, b] = ... и [a b] = ...)
+    while (!check(TokenType::RBRACKET) && !isAtEnd()) {
+        match(TokenType::COMMA);
+        if (check(TokenType::RBRACKET))
+            break;
         if (!parseElem())
             return nullptr;
     }
@@ -645,6 +647,11 @@ ASTNodePtr Parser::tryMultiAssign()
     advance();
 
     auto rhs = parseExpression();
+    if (names.size() > 1 && rhs && rhs->type == NodeType::IDENTIFIER) {
+        auto callNode = makeNode(NodeType::CALL, rhs->line, rhs->col);
+        callNode->children.push_back(std::move(rhs));
+        rhs = std::move(callNode);
+    }
     auto node = makeNode(NodeType::MULTI_ASSIGN, startLine, startCol);
     node->returnNames = std::move(names);
     // Прикрепляем полноценные lvalue-цели только когда есть хотя бы одна
@@ -719,9 +726,19 @@ ASTNodePtr Parser::parseFor()
     auto node = makeNode(NodeType::FOR_STMT, ln, cl);
     consume(TokenType::KW_FOR, "for");
 
+    const bool paren = check(TokenType::LPAREN);
+    if (paren)
+        advance();
     node->strValue = consume(TokenType::IDENTIFIER, "loop variable").value;
     consume(TokenType::ASSIGN, "=");
     node->children.push_back(parseExpression());
+    if (paren) {
+        if (check(TokenType::COMMA)) {
+            advance();
+            (void)parseExpression();
+        }
+        consume(TokenType::RPAREN, ")");
+    }
     skipTerminators();
 
     node->children.push_back(parseBlock({TokenType::KW_END}));
@@ -859,9 +876,12 @@ ASTNodePtr Parser::parseFunctionDef()
     if (hasOutput) {
         if (check(TokenType::LBRACKET)) {
             advance();
-            node->returnNames.push_back(consume(TokenType::IDENTIFIER, "return var").value);
-            while (match(TokenType::COMMA))
+            while (!check(TokenType::RBRACKET) && !isAtEnd()) {
+                match(TokenType::COMMA);
+                if (check(TokenType::RBRACKET))
+                    break;
                 node->returnNames.push_back(consume(TokenType::IDENTIFIER, "return var").value);
+            }
             consume(TokenType::RBRACKET, "]");
         } else {
             node->returnNames.push_back(consume(TokenType::IDENTIFIER, "return var").value);

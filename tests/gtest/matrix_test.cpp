@@ -1765,9 +1765,19 @@ TEST_P(GridKronTest, NdgridFourArgsThrows)
                  std::exception);
 }
 
-TEST_P(GridKronTest, NdgridSingleArgThrows)
+TEST_P(GridKronTest, NdgridSingleArgAndZeroArgs)
 {
-    EXPECT_THROW(eval("X = ndgrid(1:5);"), std::exception);
+    eval("X = ndgrid(1:5); [A, B] = ndgrid(1:3);");
+    auto *X = getVarPtr("X");
+    EXPECT_EQ(rows(*X), 5u);
+    EXPECT_EQ(cols(*X), 1u);
+    auto *A = getVarPtr("A");
+    auto *B = getVarPtr("B");
+    EXPECT_EQ(rows(*A), 3u);
+    EXPECT_EQ(cols(*A), 3u);
+    EXPECT_EQ(rows(*B), 3u);
+    EXPECT_EQ(cols(*B), 3u);
+    EXPECT_THROW(eval("X = ndgrid();"), std::exception);
 }
 
 // ── kron / cross / dot ─────────────────────────────────────────

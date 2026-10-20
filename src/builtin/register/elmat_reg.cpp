@@ -135,6 +135,7 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("eye",        &::numkit::builtin::detail::eye_reg);
     engine.registerFunction("false",      &::numkit::builtin::detail::false_reg);
     engine.registerFunction("flip",       &::numkit::builtin::detail::flip_reg);
+    engine.registerFunction("flipdim",    &::numkit::builtin::detail::flip_reg);
     engine.registerFunction("fliplr",     &::numkit::builtin::detail::fliplr_reg);
     engine.registerFunction("flipud",     &::numkit::builtin::detail::flipud_reg);
     engine.registerFunction("hadamard",   &::numkit::builtin::detail::hadamard_reg);

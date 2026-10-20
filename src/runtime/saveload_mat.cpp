@@ -156,11 +156,35 @@ public:
     const std::uint8_t *data;
     std::size_t len;
     std::size_t pos = 0;
+    bool bigEndian = false;
 
-    MatReader(const std::uint8_t *d, std::size_t l) : data(d), len(l), pos(0) {}
+    MatReader(const std::uint8_t *d, std::size_t l, bool be = false)
+        : data(d), len(l), pos(0), bigEndian(be) {}
 
     bool eof() const { return pos >= len; }
     std::size_t remaining() const { return (pos <= len) ? (len - pos) : 0; }
+
+    std::uint16_t peekU16At(const std::uint8_t *p) const {
+        if (bigEndian) {
+            return (static_cast<std::uint16_t>(p[0]) << 8) |
+                   static_cast<std::uint16_t>(p[1]);
+        }
+        return static_cast<std::uint16_t>(p[0]) |
+               (static_cast<std::uint16_t>(p[1]) << 8);
+    }
+
+    std::uint32_t peekU32At(const std::uint8_t *p) const {
+        if (bigEndian) {
+            return (static_cast<std::uint32_t>(p[0]) << 24) |
+                   (static_cast<std::uint32_t>(p[1]) << 16) |
+                   (static_cast<std::uint32_t>(p[2]) << 8) |
+                   static_cast<std::uint32_t>(p[3]);
+        }
+        return static_cast<std::uint32_t>(p[0]) |
+               (static_cast<std::uint32_t>(p[1]) << 8) |
+               (static_cast<std::uint32_t>(p[2]) << 16) |
+               (static_cast<std::uint32_t>(p[3]) << 24);
+    }
 
     std::uint8_t readU8() {
         if (pos + 1 > len) throw Error("load: truncated MAT file");
@@ -169,18 +193,14 @@ public:
 
     std::uint16_t readU16() {
         if (pos + 2 > len) throw Error("load: truncated MAT file");
-        std::uint16_t v = static_cast<std::uint16_t>(data[pos]) |
-                          (static_cast<std::uint16_t>(data[pos + 1]) << 8);
+        std::uint16_t v = peekU16At(data + pos);
         pos += 2;
         return v;
     }
 
     std::uint32_t readU32() {
         if (pos + 4 > len) throw Error("load: truncated MAT file");
-        std::uint32_t v = static_cast<std::uint32_t>(data[pos]) |
-                          (static_cast<std::uint32_t>(data[pos + 1]) << 8) |
-                          (static_cast<std::uint32_t>(data[pos + 2]) << 16) |
-                          (static_cast<std::uint32_t>(data[pos + 3]) << 24);
+        std::uint32_t v = peekU32At(data + pos);
         pos += 4;
         return v;
     }
@@ -194,10 +214,7 @@ public:
 
     Tag readTag() {
         if (pos + 8 > len) throw Error("load: truncated MAT tag");
-        std::uint32_t tag0 = static_cast<std::uint32_t>(data[pos]) |
-                             (static_cast<std::uint32_t>(data[pos + 1]) << 8) |
-                             (static_cast<std::uint32_t>(data[pos + 2]) << 16) |
-                             (static_cast<std::uint32_t>(data[pos + 3]) << 24);
+        std::uint32_t tag0 = peekU32At(data + pos);
         
         Tag t;
         if ((tag0 >> 16) != 0) {
@@ -210,12 +227,20 @@ public:
         } else {
             // Standard format
             t.type = tag0;
-            t.byteCount = static_cast<std::uint32_t>(data[pos + 4]) |
-                          (static_cast<std::uint32_t>(data[pos + 5]) << 8) |
-                          (static_cast<std::uint32_t>(data[pos + 6]) << 16) |
-                          (static_cast<std::uint32_t>(data[pos + 7]) << 24);
+            t.byteCount = peekU32At(data + pos + 4);
             t.payload = data + pos + 8;
             std::size_t padded = (t.byteCount + 7) & ~7;
+            if (t.type == miCOMPRESSED) {
+                std::size_t unpaddedEnd = pos + 8 + t.byteCount;
+                if (unpaddedEnd == len) {
+                    padded = t.byteCount;
+                } else if (unpaddedEnd + 8 <= len) {
+                    std::uint32_t nextType = peekU32At(data + unpaddedEnd);
+                    if (nextType == miCOMPRESSED || nextType == miMATRIX) {
+                        padded = t.byteCount;
+                    }
+                }
+            }
             if (pos + 8 + padded > len) {
                 if (pos + 8 + t.byteCount > len)
                     throw Error("load: corrupted MAT element length");
@@ -320,9 +345,9 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
         }
         inner.writeTag(miINT8, nameTable.data(), static_cast<std::uint32_t>(nameTable.size()));
 
-        // Field values: for each field, for each element in struct / object array
-        for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
-            for (std::size_t ei = 0; ei < numElems; ++ei) {
+        // Field values: MAT5 stores all fields of element 0, then element 1, etc.
+        for (std::size_t ei = 0; ei < numElems; ++ei) {
+            for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
                 Value fval;
                 if (v.type() == ValueType::OBJECT) {
                     const auto *st = v.objectStateAt(ei);
@@ -401,13 +426,14 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         throw Error("load: expected miMATRIX element in MAT5 file");
     }
 
-    MatReader ir(matrixTag.payload, matrixTag.byteCount);
+    MatReader ir(matrixTag.payload, matrixTag.byteCount, mr.bigEndian);
 
     // 1. Array Flags
     auto flagsTag = ir.readTag();
     if (flagsTag.byteCount < 4) throw Error("load: malformed array flags");
-    std::uint8_t arrayClass = flagsTag.payload[0];
-    std::uint8_t flags = flagsTag.payload[1];
+    std::uint32_t flagsWord = ir.peekU32At(flagsTag.payload);
+    std::uint8_t arrayClass = static_cast<std::uint8_t>(flagsWord & 0xFF);
+    std::uint8_t flags = static_cast<std::uint8_t>((flagsWord >> 8) & 0xFF);
     bool isLogical = (flags & MAT5_FLAG_LOGICAL) != 0;
     bool isComplex = (flags & MAT5_FLAG_COMPLEX) != 0;
 
@@ -416,9 +442,10 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
     int nd = static_cast<int>(dimsTag.byteCount / sizeof(std::int32_t));
     if (nd < 2) nd = 2;
     std::vector<size_t> d(nd, 1);
-    const auto *dp = reinterpret_cast<const std::int32_t*>(dimsTag.payload);
     for (int i = 0; i < nd; ++i) {
-        d[i] = (i < static_cast<int>(dimsTag.byteCount / 4)) ? static_cast<size_t>(dp[i]) : 1;
+        d[i] = (i < static_cast<int>(dimsTag.byteCount / 4))
+                   ? static_cast<size_t>(static_cast<std::int32_t>(ir.peekU32At(dimsTag.payload + i * 4)))
+                   : 1;
     }
     Dims shape(d.data(), nd);
     std::size_t numElems = shape.numel();
@@ -452,7 +479,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         auto fnamelenTag = ir.readTag();
         std::uint32_t fnLen = 32;
         if (fnamelenTag.byteCount >= 4) {
-            fnLen = *reinterpret_cast<const std::uint32_t*>(fnamelenTag.payload);
+            fnLen = ir.peekU32At(fnamelenTag.payload);
         }
         if (fnLen == 0) fnLen = 32;
 
@@ -467,8 +494,8 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         }
 
         std::vector<std::vector<Value>> fieldVals(fnames.size(), std::vector<Value>(numElems));
-        for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
-            for (std::size_t ei = 0; ei < numElems; ++ei) {
+        for (std::size_t ei = 0; ei < numElems; ++ei) {
+            for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
                 auto [childName, childVal] = decodeMat5Matrix(ir, mem);
                 fieldVals[fi][ei] = std::move(childVal);
             }
@@ -511,10 +538,9 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         result = createMatrix(shape, ValueType::CHAR, mem);
         char *out = result.charDataMut();
         if (dataTag.type == miUINT16) {
-            const auto *u16 = reinterpret_cast<const std::uint16_t*>(dataTag.payload);
             std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount / 2));
             for (std::size_t i = 0; i < charCount; ++i) {
-                out[i] = static_cast<char>(u16[i] & 0xFF);
+                out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
             }
         } else if (dataTag.type == miUTF8 || dataTag.type == miUINT8 || dataTag.type == miINT8) {
             std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount));
@@ -547,19 +573,59 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 
         auto realTag = ir.readTag();
 
-        auto readTagElemAsDouble = [](const MatReader::Tag &tag, std::size_t idx) -> double {
+        auto readTagElemAsDouble = [&ir](const MatReader::Tag &tag, std::size_t idx) -> double {
             if (!tag.payload) return 0.0;
+            auto readVal = [&ir](const std::uint8_t *p, std::size_t sz, void *dst) {
+                if (ir.bigEndian) {
+                    auto *d = static_cast<std::uint8_t *>(dst);
+                    for (std::size_t k = 0; k < sz; ++k) d[k] = p[sz - 1 - k];
+                } else {
+                    std::memcpy(dst, p, sz);
+                }
+            };
             switch (tag.type) {
-                case miDOUBLE: return reinterpret_cast<const double*>(tag.payload)[idx];
-                case miSINGLE: return static_cast<double>(reinterpret_cast<const float*>(tag.payload)[idx]);
+                case miDOUBLE: {
+                    double v = 0.0;
+                    readVal(tag.payload + idx * 8, 8, &v);
+                    return v;
+                }
+                case miSINGLE: {
+                    float v = 0.0f;
+                    readVal(tag.payload + idx * 4, 4, &v);
+                    return static_cast<double>(v);
+                }
                 case miINT8:   return static_cast<double>(reinterpret_cast<const std::int8_t*>(tag.payload)[idx]);
                 case miUINT8:  return static_cast<double>(reinterpret_cast<const std::uint8_t*>(tag.payload)[idx]);
-                case miINT16:  return static_cast<double>(reinterpret_cast<const std::int16_t*>(tag.payload)[idx]);
-                case miUINT16: return static_cast<double>(reinterpret_cast<const std::uint16_t*>(tag.payload)[idx]);
-                case miINT32:  return static_cast<double>(reinterpret_cast<const std::int32_t*>(tag.payload)[idx]);
-                case miUINT32: return static_cast<double>(reinterpret_cast<const std::uint32_t*>(tag.payload)[idx]);
-                case miINT64:  return static_cast<double>(reinterpret_cast<const std::int64_t*>(tag.payload)[idx]);
-                case miUINT64: return static_cast<double>(reinterpret_cast<const std::uint64_t*>(tag.payload)[idx]);
+                case miINT16: {
+                    std::int16_t v = 0;
+                    readVal(tag.payload + idx * 2, 2, &v);
+                    return static_cast<double>(v);
+                }
+                case miUINT16: {
+                    std::uint16_t v = 0;
+                    readVal(tag.payload + idx * 2, 2, &v);
+                    return static_cast<double>(v);
+                }
+                case miINT32: {
+                    std::int32_t v = 0;
+                    readVal(tag.payload + idx * 4, 4, &v);
+                    return static_cast<double>(v);
+                }
+                case miUINT32: {
+                    std::uint32_t v = 0;
+                    readVal(tag.payload + idx * 4, 4, &v);
+                    return static_cast<double>(v);
+                }
+                case miINT64: {
+                    std::int64_t v = 0;
+                    readVal(tag.payload + idx * 8, 8, &v);
+                    return static_cast<double>(v);
+                }
+                case miUINT64: {
+                    std::uint64_t v = 0;
+                    readVal(tag.payload + idx * 8, 8, &v);
+                    return static_cast<double>(v);
+                }
                 default:       return 0.0;
             }
         };
@@ -576,6 +642,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             result = createMatrix(shape, vt, mem);
             if (numElems > 0 && realTag.payload) {
                 const bool exactMatch =
+                    !ir.bigEndian && (
                     (vt == ValueType::DOUBLE && realTag.type == miDOUBLE) ||
                     (vt == ValueType::SINGLE && realTag.type == miSINGLE) ||
                     (vt == ValueType::INT8   && realTag.type == miINT8)   ||
@@ -586,7 +653,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
                     (vt == ValueType::UINT32 && realTag.type == miUINT32) ||
                     (vt == ValueType::INT64  && realTag.type == miINT64)  ||
                     (vt == ValueType::UINT64 && realTag.type == miUINT64) ||
-                    (vt == ValueType::LOGICAL && (realTag.type == miUINT8 || realTag.type == miINT8));
+                    (vt == ValueType::LOGICAL && (realTag.type == miUINT8 || realTag.type == miINT8)));
                 if (exactMatch && realTag.byteCount >= result.rawBytes()) {
                     std::memcpy(result.rawDataMut(), realTag.payload, result.rawBytes());
                 } else {
@@ -886,7 +953,8 @@ void loadMat(Engine &engine, Environment &env,
     if (bytes.size() >= 128 && ((bytes[126] == 'I' && bytes[127] == 'M') ||
                                (bytes[126] == 'M' && bytes[127] == 'I'))) {
         // MAT5
-        MatReader mrReader(reinterpret_cast<const std::uint8_t*>(bytes.data() + 128), bytes.size() - 128);
+        const bool isBigEndian = (bytes[126] == 'M' && bytes[127] == 'I');
+        MatReader mrReader(reinterpret_cast<const std::uint8_t*>(bytes.data() + 128), bytes.size() - 128, isBigEndian);
 
         Value asStruct;
         if (nargout > 0) asStruct = Value::structure(mr);
@@ -900,7 +968,7 @@ void loadMat(Engine &engine, Environment &env,
                 // Decompress zlib stream
                 std::vector<std::uint8_t> uncompressed = ops::zlibDecompress(
                     tag.payload, tag.byteCount);
-                MatReader decompReader(uncompressed.data(), uncompressed.size());
+                MatReader decompReader(uncompressed.data(), uncompressed.size(), isBigEndian);
                 while (!decompReader.eof()) {
                     if (decompReader.remaining() < 8) break;
                     auto [name, v] = decodeMat5Matrix(decompReader, mr);
@@ -911,7 +979,7 @@ void loadMat(Engine &engine, Environment &env,
                     }
                 }
             } else if (tag.type == miMATRIX) {
-                MatReader subReader(tag.payload - 8, tag.totalAdvance);
+                MatReader subReader(tag.payload - 8, tag.totalAdvance, isBigEndian);
                 auto [name, v] = decodeMat5Matrix(subReader, mr);
                 if (!name.empty()) {
                     if (nargout > 0) asStruct.setField(0, name, v);

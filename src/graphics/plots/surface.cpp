@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” surface.cpp
+// nk/graphics â€” surface.cpp
 //
 // graphics.surface.* builders (surf / mesh / slice / isosurface / coneplot / streamtube / waterfall / lighting), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -174,6 +174,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     {
         using namespace std::placeholders;
         reg("surface", "surf", std::bind(surfImpl, "surf", _1, _2, _3, _4));
+        reg("surface", "surface", std::bind(surfImpl, "surf", _1, _2, _3, _4));
         reg("surface", "mesh", std::bind(surfImpl, "mesh", _1, _2, _3, _4));
     }
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1468,6 +1469,15 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 if (s == "left" || s == "right" || s == "headlight") pos = s;
             }
             fm.currentAxes().camlightPos = pos;
+            fm.current().modified = true;
+            fm.emitModified();
+            outs[0] = Value();
+        });
+    reg("surface", "light",
+        [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+            auto &fm = gc.fm;
+            if (fm.currentAxes().camlightPos.empty())
+                fm.currentAxes().camlightPos = "headlight";
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();

@@ -201,6 +201,76 @@ void register_specfun(Engine &engine) {
                 outs[0] = std::move(out);
             }
         });
+    engine.registerFunction("lambertw",
+        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 1, 2, "lambertw");
+            auto *mr = ctx.engine->resource();
+            int branch = 0;
+            const Value &x = (args.size() == 2) ? args[1] : args[0];
+            if (args.size() == 2)
+                branch = static_cast<int>(args[0].toScalar());
+            auto evalLambertW = [](int k, double z) -> double {
+                if (std::isnan(z)) return z;
+                const double negInvE = -1.0 / std::exp(1.0);
+                if (k == 0) {
+                    if (z == 0.0) return 0.0;
+                    if (std::isinf(z) && z > 0.0) return z;
+                    if (z < negInvE) return std::numeric_limits<double>::quiet_NaN();
+                    if (std::abs(z - negInvE) <= 1e-15) return -1.0;
+                    double w;
+                    if (z < -0.3) {
+                        double p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
+                        w = -1.0 + p - p * p / 3.0;
+                    } else if (z < 1.0) {
+                        w = z * (1.0 - z + 1.5 * z * z) / (1.0 + 0.5 * z * z);
+                    } else {
+                        double lz = std::log(z);
+                        w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
+                    }
+                    for (int it = 0; it < 50; ++it) {
+                        double ew = std::exp(w);
+                        double wew = w * ew;
+                        double f = wew - z;
+                        if (std::abs(f) <= 1e-15 * (std::abs(z) + 1.0)) break;
+                        double wp1 = w + 1.0;
+                        double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+                        if (denom == 0.0) break;
+                        double dw = f / denom;
+                        w -= dw;
+                        if (std::abs(dw) <= 1e-15 * std::abs(w)) break;
+                    }
+                    return w;
+                } else if (k == -1) {
+                    if (z < negInvE || z >= 0.0) return std::numeric_limits<double>::quiet_NaN();
+                    if (std::abs(z - negInvE) <= 1e-15) return -1.0;
+                    double w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
+                                          : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
+                    for (int it = 0; it < 50; ++it) {
+                        double ew = std::exp(w);
+                        double f = w * ew - z;
+                        if (std::abs(f) <= 1e-15 * (std::abs(z) + 1.0)) break;
+                        double wp1 = w + 1.0;
+                        double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+                        if (denom == 0.0) break;
+                        double dw = f / denom;
+                        w -= dw;
+                        if (std::abs(dw) <= 1e-15 * std::abs(w)) break;
+                    }
+                    return w;
+                }
+                return std::numeric_limits<double>::quiet_NaN();
+            };
+            const size_t n = x.numel();
+            if (n == 1) {
+                outs[0] = Value::scalar(evalLambertW(branch, x.elemAsDouble(0)), mr);
+                return;
+            }
+            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+            double *dst = out.doubleDataMut();
+            for (size_t i = 0; i < n; ++i)
+                dst[i] = evalLambertW(branch, x.elemAsDouble(i));
+            outs[0] = std::move(out);
+        });
     auto noopFn = [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &/*ctx*/) {
         outs[0] = Value();
     };

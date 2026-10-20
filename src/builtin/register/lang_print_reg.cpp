@@ -34,6 +34,19 @@ void disp_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
     ctx.engine->outputText(dispFormat(args[0]));
 }
 
+void display_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 2, "display");
+    std::string name = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                           ? args[1].toString()
+                           : "ans";
+    if (args[0].isObject()) {
+        ctx.engine->displayObject(name, args[0]);
+        return;
+    }
+    ctx.engine->outputText(args[0].formatDisplay(name));
+}
+
 void fprintf_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                  CallContext &ctx)
 {

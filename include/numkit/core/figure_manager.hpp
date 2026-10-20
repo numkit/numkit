@@ -393,6 +393,8 @@ struct AxesState
 
     // Position in subplot grid (1-based), 0 = not a subplot
     int subplotIndex = 0;
+    int subplotRows = 0;
+    int subplotCols = 0;
 };
 
 struct FigureState
@@ -770,7 +772,9 @@ public:
 
         // Find the axes for this subplot position
         for (int i = 0; i < static_cast<int>(fig.axes.size()); ++i) {
-            if (fig.axes[i].subplotIndex == p) {
+            if (fig.axes[i].subplotIndex == p
+                && (fig.axes[i].subplotRows == 0
+                    || (fig.axes[i].subplotRows == m && fig.axes[i].subplotCols == n))) {
                 fig.currentAxes = i;
                 return;
             }
@@ -786,6 +790,8 @@ public:
                                   /*axes records*/ true, /*figure rec*/ false);
                 fig.axes[i] = AxesState{};
                 fig.axes[i].subplotIndex = p;
+                fig.axes[i].subplotRows = m;
+                fig.axes[i].subplotCols = n;
                 fig.currentAxes = i;
                 fig.modified = true;
                 return;
@@ -794,6 +800,8 @@ public:
         // Create new axes for position p
         AxesState ax;
         ax.subplotIndex = p;
+        ax.subplotRows = m;
+        ax.subplotCols = n;
         fig.axes.push_back(ax);
         fig.currentAxes = static_cast<int>(fig.axes.size()) - 1;
     }
@@ -832,7 +840,7 @@ public:
                 fig.modified = true;
                 return;
             }
-            // The previous charts die with the fresh axes â€” their handles
+            // The previous charts die with the fresh axes — their handles
             // go stale (MATLAB: hold off + plot invalidates old Lines).
             // The axes itself (and the figure) survive the content reset.
             invalidateHandles(fig.id, fig.currentAxes,
@@ -840,13 +848,17 @@ public:
             // The datasets this axes held are about to be wiped, so the
             // chart-call handle base restarts at 0 (see beginChartCall).
             chartCallBase_ = 0;
-            // Preserve fields that "survive a fresh plot" â€” subplot position
+            // Preserve fields that "survive a fresh plot" — subplot position
             // and colorScale (the latter so `colorscale('log'); imagesc(M)`
             // bakes log into the new dataset's quantization).
             int savedSubplot = ax.subplotIndex;
+            int savedSubplotRows = ax.subplotRows;
+            int savedSubplotCols = ax.subplotCols;
             std::string savedColorScale = ax.colorScale;
             ax = AxesState{};
             ax.subplotIndex = savedSubplot;
+            ax.subplotRows = savedSubplotRows;
+            ax.subplotCols = savedSubplotCols;
             ax.colorScale = savedColorScale;
         }
         fig.modified = true;

@@ -824,6 +824,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             ds.type = "histogram";
             ds.xJson = vecToJson(centers);
             ds.yJson = vecToJson(counts);
+            ds.zJson = vecToJson(edges);
+            ds.uJson = vecToJson(v);
+            ds.vJson = (X.dims().rows() > 1 && X.dims().cols() == 1) ? "col" : "row";
             ds.style = style.str();
             fm.pushDataset(std::move(ds));
             fm.emitModified();

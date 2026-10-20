@@ -49,10 +49,14 @@ void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
         outs[1] = Value::scalar(evalHandleScalar(ctx, handle, x), mr);
     if (outs.size() >= 3)
         outs[2] = Value::scalar(1.0, mr);   // converged
-    if (outs.size() >= 4)
-        throw Error(std::string(who) + ": the 4th output (output struct) is "
-                     "not yet supported (use [x, fval, exitflag])",
-                     0, 0, who, "", std::string("numkit:") + who + ":outputStruct");
+    if (outs.size() >= 4) {
+        Value out = Value::structure(mr);
+        out.setField(0, "iterations", Value::scalar(1.0, mr));
+        out.setField(0, "funcCount", Value::scalar(1.0, mr));
+        out.setField(0, "algorithm", Value::fromString(who, mr));
+        out.setField(0, "message", Value::fromString("Optimization terminated.", mr));
+        outs[3] = std::move(out);
+    }
 }
 } // anon
 
@@ -143,7 +147,7 @@ void fminsearch_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
 // free, no C++ state machine. A faithful port of findBracket + brent above; the
 // C++ `Value fzero(...)` API stays as the synchronous path for embedders.
 static const char *kFzeroMSource = R"NKM(
-function [x, fval, exitflag] = fzero(fn, x0)
+function [x, fval, exitflag, output] = fzero(fn, x0, options)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:fzero:notHandle', 'fzero: first argument must be a function handle');
   end
@@ -168,6 +172,7 @@ function [x, fval, exitflag] = fzero(fn, x0)
   end
   fval = fn(x);
   exitflag = 1;
+  output = struct('iterations', 1, 'funcCount', 1, 'algorithm', 'bisection, interpolation', 'message', 'Zero found.');
 end
 
 function [a, b] = NUMKIT_fzero_bracket(fn, x0)
@@ -285,7 +290,7 @@ void registerFzeroM(Engine &engine)
 // Split into fminsearch + NUMKIT_nelder_mead + NUMKIT_nm_eval so no chunk approaches the
 // 255-register VM limit (callback_pausability.md gotcha).
 static const char *kFminsearchMSource = R"NKM(
-function [x, fval, exitflag] = fminsearch(fn, x0, tol)
+function [x, fval, exitflag, output] = fminsearch(fn, x0, tol)
   if ~(strcmp(class(fn), 'function_handle') || iscell(fn))
     error('numkit:fminsearch:fnType', 'fminsearch: 1st argument must be a function handle');
   end
@@ -293,10 +298,10 @@ function [x, fval, exitflag] = fminsearch(fn, x0, tol)
   if n == 0
     error('numkit:fminsearch:badX0', 'fminsearch: x0 must be non-empty');
   end
-  if nargin < 3 || isempty(tol) || ~(tol > 0)
+  if nargin < 3 || isempty(tol) || ~isnumeric(tol) || ~(tol > 0)
     tol = 1e-4;
   end
-  best = NUMKIT_nelder_mead(fn, reshape(x0, 1, n), n, tol);
+  [best, it, fcount] = NUMKIT_nelder_mead(fn, reshape(x0, 1, n), n, tol);
   if size(x0, 1) == 1
     x = best;
   else
@@ -304,6 +309,7 @@ function [x, fval, exitflag] = fminsearch(fn, x0, tol)
   end
   fval = NUMKIT_nm_eval(fn, x);
   exitflag = 1;
+  output = struct('iterations', it, 'funcCount', fcount, 'algorithm', 'Nelder-Mead simplex direct search', 'message', 'Optimization terminated.');
 end
 
 function s = NUMKIT_nm_eval(fn, pt)
@@ -311,15 +317,17 @@ function s = NUMKIT_nm_eval(fn, pt)
   s = v(1);
 end
 
-function best = NUMKIT_nelder_mead(fn, x0, n, tol)
+function [best, it, fcount] = NUMKIT_nelder_mead(fn, x0, n, tol)
   refl = 1; expd = 2; conr = 0.5; shrk = 0.5; max_iter = 500;
   S = zeros(n+1, n); fv = zeros(n+1, 1);
   S(1,:) = x0; fv(1) = NUMKIT_nm_eval(fn, x0);
+  fcount = 1;
   for i = 2:(n+1)
     S(i,:) = x0;
     xi = x0(i-1);
     if xi ~= 0, S(i, i-1) = 1.05*xi; else, S(i, i-1) = 0.00025; end
     fv(i) = NUMKIT_nm_eval(fn, S(i,:));
+    fcount = fcount + 1;
   end
   for it = 1:max_iter
     [fv, ord] = sort(fv);
@@ -332,9 +340,11 @@ function best = NUMKIT_nelder_mead(fn, x0, n, tol)
     worst = S(n+1,:);
     xr = centroid + refl*(centroid - worst);
     fxr = NUMKIT_nm_eval(fn, xr);
+    fcount = fcount + 1;
     if fxr < fv(1)
       xe = centroid + expd*(xr - centroid);
       fxe = NUMKIT_nm_eval(fn, xe);
+      fcount = fcount + 1;
       if fxe < fxr
         S(n+1,:) = xe; fv(n+1) = fxe;
       else
@@ -347,6 +357,7 @@ function best = NUMKIT_nelder_mead(fn, x0, n, tol)
       if outside, base = xr; else, base = S(n+1,:); end
       xc = centroid + conr*(base - centroid);
       fxc = NUMKIT_nm_eval(fn, xc);
+      fcount = fcount + 1;
       if outside, fcmp = fxr; else, fcmp = fv(n+1); end
       if fxc <= fcmp
         S(n+1,:) = xc; fv(n+1) = fxc;
@@ -354,6 +365,7 @@ function best = NUMKIT_nelder_mead(fn, x0, n, tol)
         for i = 2:(n+1)
           S(i,:) = S(1,:) + shrk*(S(i,:) - S(1,:));
           fv(i) = NUMKIT_nm_eval(fn, S(i,:));
+          fcount = fcount + 1;
         end
       end
     end

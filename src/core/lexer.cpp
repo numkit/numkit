@@ -45,7 +45,22 @@ void Lexer::error(const std::string &msg, int line, int col)
 
 Lexer::Lexer(const std::string &source)
     : src_(source)
-{}
+{
+    if (src_.find('\r') != std::string::npos) {
+        std::string norm;
+        norm.reserve(src_.size());
+        for (size_t i = 0; i < src_.size(); ++i) {
+            if (src_[i] == '\r') {
+                norm.push_back('\n');
+                if (i + 1 < src_.size() && src_[i + 1] == '\n')
+                    ++i;
+            } else {
+                norm.push_back(src_[i]);
+            }
+        }
+        src_ = std::move(norm);
+    }
+}
 
 char Lexer::peek() const
 {
@@ -622,6 +637,7 @@ void Lexer::readIdentifier()
         {"else", TokenType::KW_ELSE},
         {"end", TokenType::KW_END},
         {"for", TokenType::KW_FOR},
+        {"parfor", TokenType::KW_FOR},
         {"while", TokenType::KW_WHILE},
         {"break", TokenType::KW_BREAK},
         {"continue", TokenType::KW_CONTINUE},

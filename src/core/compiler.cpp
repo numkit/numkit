@@ -590,7 +590,9 @@ uint8_t Compiler::compileNode(const ASTNode *node)
     // CELL_GET producer is flipped (brick 5b). Splice contexts call compileNodeExpand
     // directly and skip this. See dev-docs/memory/csl_first_class.md.
     uint8_t reg = compileNodeExpand(node);
-    if (node && node->type == NodeType::CELL_INDEX)
+    if (node && (node->type == NodeType::CELL_INDEX
+                 || node->type == NodeType::FIELD_ACCESS
+                 || node->type == NodeType::DYNAMIC_FIELD_ACCESS))
         emitAB(OpCode::COLLAPSE, reg, reg);
     return reg;
 }
@@ -2754,7 +2756,12 @@ uint8_t Compiler::compileCellLiteral(const ASTNode *node)
         // fixed-count path below. See dev-docs/memory/csl_first_class.md.
         bool hasBraceIndex = false;
         for (auto &elem : row->children)
-            if (elem->type == NodeType::CELL_INDEX) { hasBraceIndex = true; break; }
+            if (elem->type == NodeType::CELL_INDEX
+                || elem->type == NodeType::FIELD_ACCESS
+                || elem->type == NodeType::DYNAMIC_FIELD_ACCESS) {
+                hasBraceIndex = true;
+                break;
+            }
         if (hasBraceIndex) {
             uint8_t acc = tempReg();
             emitABC(OpCode::CELL_LITERAL, acc, 0, 0);  // seed an empty 1x0 cell

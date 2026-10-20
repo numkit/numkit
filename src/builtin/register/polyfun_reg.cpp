@@ -10,6 +10,7 @@
 namespace numkit::builtin {
 void registerIntegralM(Engine &engine);
 void registerInlineImpulseM(Engine &engine);
+void registerInterpolantClasses(Engine &engine);
 }
 
 namespace numkit::builtin::detail {
@@ -54,6 +55,7 @@ void register_polyfun(Engine &engine) {
     engine.registerFunction("__gk15_nodes", &::numkit::builtin::detail::gk15_nodes_reg);
     ::numkit::builtin::registerIntegralM(engine);
     ::numkit::builtin::registerInlineImpulseM(engine);
+    ::numkit::builtin::registerInterpolantClasses(engine);
     engine.registerFunction("integral2", &::numkit::builtin::detail::integral2_reg);
     engine.registerFunction("integral3", &::numkit::builtin::detail::integral3_reg);
     engine.registerFunction("quadgk",    &::numkit::builtin::detail::quadgk_reg);

@@ -10,6 +10,7 @@
 // Each registered adapter in iofun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
 void disp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void display_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void fprintf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void fscanf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
 void sprintf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
@@ -22,6 +23,7 @@ namespace numkit::builtin::detail {
 void register_iofun(Engine &engine) {
     engine.registerFunction("sprintf",    &::numkit::builtin::detail::sprintf_reg);
     engine.registerFunction("disp",       &::numkit::builtin::detail::disp_reg);
+    engine.registerFunction("display",    &::numkit::builtin::detail::display_reg);
     engine.registerFunction("fprintf",    &::numkit::builtin::detail::fprintf_reg);
     engine.registerFunction("fscanf",     &::numkit::builtin::detail::fscanf_reg);
     engine.registerFunction("sscanf",     &::numkit::builtin::detail::sscanf_reg);

@@ -130,6 +130,8 @@ handleTypes()
         {"patch",       {"polygon", "matlab.graphics.primitive.Patch"}},
         {"fill",        {"polygon", "matlab.graphics.primitive.Patch"}},
         {"surf",        {"surface", "matlab.graphics.chart.surface.Surface"}},
+        {"surface",     {"surface", "matlab.graphics.primitive.Surface"}},
+        {"pcolor",      {"surface", "matlab.graphics.primitive.Surface"}},
         {"mesh",        {"surface", "matlab.graphics.chart.surface.Surface"}},
         {"waterfall",   {"surface", "matlab.graphics.chart.surface.Waterfall"}},
         {"contour",     {"contour", "matlab.graphics.chart.contour.Contour"}},
@@ -723,9 +725,45 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     const std::string &name, std::pmr::memory_resource *mr)
 {
+    DatasetInfo *ds = fm.datasetOf(*rec);
+    if (rec->type == "histogram" && ds) {
+        if (name == "BinEdges") {
+            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            auto v = Value::matrix(1, ev.size(), ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < ev.size(); ++i) v.doubleDataMut()[i] = ev[i];
+            return v;
+        }
+        if (name == "Values" || name == "BinCounts") {
+            auto cv = figdetail::parseFlatDoubles(ds->yJson);
+            auto v = Value::matrix(1, cv.size(), ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < cv.size(); ++i) v.doubleDataMut()[i] = cv[i];
+            return v;
+        }
+        if (name == "NumBins") {
+            auto cv = figdetail::parseFlatDoubles(ds->yJson);
+            return Value::scalar(static_cast<double>(cv.size()), mr);
+        }
+        if (name == "BinWidth") {
+            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            return Value::scalar(ev.size() >= 2 ? ev[1] - ev[0] : 1.0, mr);
+        }
+        if (name == "BinLimits") {
+            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            auto v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = ev.empty() ? 0.0 : ev.front();
+            v.doubleDataMut()[1] = ev.empty() ? 1.0 : ev.back();
+            return v;
+        }
+        if (name == "Data") {
+            auto dv = figdetail::parseFlatDoubles(ds->uJson);
+            bool col = (ds->vJson == "col");
+            auto v = Value::matrix(col ? dv.size() : 1, col ? 1 : dv.size(), ValueType::DOUBLE, mr);
+            for (size_t i = 0; i < dv.size(); ++i) v.doubleDataMut()[i] = dv[i];
+            return v;
+        }
+    }
     if (name != "XData" && name != "YData" && name != "ZData")
         return Value();
-    DatasetInfo *ds = fm.datasetOf(*rec);
     if (!ds)
         return Value();
     if (name == "ZData") {
@@ -996,9 +1034,51 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return makeHandleArray(kAxesClass, ids, mr);
         }
         auto it = rec->props.find(name);
-        return it != rec->props.end()
-                   ? decodeProp(it->second, mr)
-                   : (strict ? Value() : Value::fromString("", mr));
+        if (it != rec->props.end())
+            return decodeProp(it->second, mr);
+        std::string lowName = name;
+        for (char &ch : lowName)
+            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+        for (const auto &[k, v] : rec->props) {
+            std::string lk = k;
+            for (char &ch : lk)
+                if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+            if (lk == lowName)
+                return decodeProp(v, mr);
+        }
+        if (lowName == "papersize") {
+            auto v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = 20.999998;
+            v.doubleDataMut()[1] = 29.699999;
+            return v;
+        }
+        if (lowName == "paperposition") {
+            auto v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = 0.6345;
+            v.doubleDataMut()[1] = 6.3452;
+            v.doubleDataMut()[2] = 20.3046;
+            v.doubleDataMut()[3] = 15.2284;
+            return v;
+        }
+        if (lowName == "position" || lowName == "outerposition") {
+            auto v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = 100.0;
+            v.doubleDataMut()[1] = 100.0;
+            v.doubleDataMut()[2] = 560.0;
+            v.doubleDataMut()[3] = 420.0;
+            return v;
+        }
+        if (lowName == "units")
+            return str("pixels");
+        if (lowName == "paperunits")
+            return str("centimeters");
+        if (lowName == "papertype")
+            return str("A4");
+        if (lowName == "color")
+            return rgb(1.0, 1.0, 1.0);
+        if (lowName == "visible")
+            return str("on");
+        return strict ? Value() : Value::fromString("", mr);
     }
     if (rec->type == "axes") {
         if (name == "Parent")
@@ -1120,7 +1200,11 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                    const std::string &name, const Value &val)
 {
-    rec->props[name] = encodeProp(val);
+    if (name == "XData" || name == "YData") {
+        rec->props.erase(name);
+    } else if (!(val.isNumeric() && val.numel() > 1024 && name != "ZData")) {
+        rec->props[name] = encodeProp(val);
+    }
     if (rec->type == "text") {
         if (name == "String") {
             std::string *f = textFieldOf(fm, *rec);

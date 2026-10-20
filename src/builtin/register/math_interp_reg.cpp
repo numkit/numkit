@@ -438,4 +438,186 @@ void unmkpp_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
 
 } // namespace detail
 
+static const char *kGriddedInterpolantClassSource = R"NUMKIT_M(
+classdef griddedInterpolant
+    properties
+        GridVectors
+        Values
+        Method
+        ExtrapolationMethod
+    end
+    methods
+        function obj = griddedInterpolant(varargin)
+            obj.Method = 'linear';
+            obj.ExtrapolationMethod = '';
+            nNum = 0;
+            for k = 1:nargin
+                if ischar(varargin{k}) || isstring(varargin{k})
+                    break;
+                end
+                nNum = k;
+            end
+            if nargin >= nNum + 1 && (ischar(varargin{nNum + 1}) || isstring(varargin{nNum + 1}))
+                obj.Method = char(varargin{nNum + 1});
+            end
+            if nargin >= nNum + 2 && (ischar(varargin{nNum + 2}) || isstring(varargin{nNum + 2}))
+                obj.ExtrapolationMethod = char(varargin{nNum + 2});
+            else
+                obj.ExtrapolationMethod = obj.Method;
+            end
+            if nNum == 1
+                V = varargin{1};
+                obj.Values = V;
+                if isvector(V)
+                    obj.GridVectors = {1:numel(V)};
+                else
+                    obj.GridVectors = {1:size(V,1), 1:size(V,2)};
+                end
+            elseif nNum == 2
+                if iscell(varargin{1})
+                    obj.GridVectors = varargin{1};
+                    obj.Values = varargin{2};
+                else
+                    x = varargin{1};
+                    obj.GridVectors = {x(:)'};
+                    obj.Values = varargin{2};
+                end
+            elseif nNum >= 3
+                X = varargin{1};
+                Y = varargin{2};
+                obj.Values = varargin{3};
+                if size(X, 1) > 1 && size(X, 2) > 1
+                    xg = X(:, 1)';
+                else
+                    xg = X(:)';
+                end
+                if size(Y, 1) > 1 && size(Y, 2) > 1
+                    yg = Y(1, :);
+                else
+                    yg = Y(:)';
+                end
+                obj.GridVectors = {xg, yg};
+            end
+        end
+        function vq = subsref(obj, s)
+            if strcmp(s(1).type, '()')
+                q = s(1).subs;
+                if numel(q) == 1 && iscell(q{1})
+                    q = q{1};
+                end
+                useExtrap = ~strcmpi(obj.ExtrapolationMethod, 'none');
+                if numel(obj.GridVectors) == 1
+                    xq = q{1};
+                    if useExtrap
+                        vq = interp1(obj.GridVectors{1}, obj.Values, xq, obj.Method, 'extrap');
+                    else
+                        vq = interp1(obj.GridVectors{1}, obj.Values, xq, obj.Method);
+                    end
+                else
+                    xg = obj.GridVectors{1};
+                    yg = obj.GridVectors{2};
+                    V = obj.Values;
+                    xq = q{1};
+                    yq = q{2};
+                    ny = numel(yg);
+                    nq = numel(xq);
+                    T = zeros(nq, ny);
+                    xqf = xq(:);
+                    yqf = yq(:);
+                    for j = 1:ny
+                        if useExtrap
+                            col = interp1(xg, V(:, j), xqf, obj.Method, 'extrap');
+                        else
+                            col = interp1(xg, V(:, j), xqf, obj.Method);
+                        end
+                        T(:, j) = col(:);
+                    end
+                    vqf = zeros(nq, 1);
+                    for k = 1:nq
+                        if useExtrap
+                            vqf(k) = interp1(yg, T(k, :), yqf(k), obj.Method, 'extrap');
+                        else
+                            vqf(k) = interp1(yg, T(k, :), yqf(k), obj.Method);
+                        end
+                    end
+                    vq = reshape(vqf, size(xq));
+                end
+                if numel(s) > 1
+                    vq = builtin('subsref', vq, s(2:end));
+                end
+            else
+                vq = builtin('subsref', obj, s);
+            end
+        end
+    end
+end
+)NUMKIT_M";
+
+static const char *kScatteredInterpolantClassSource = R"NUMKIT_M(
+classdef scatteredInterpolant
+    properties
+        Points
+        Values
+        Method
+        ExtrapolationMethod
+    end
+    methods
+        function obj = scatteredInterpolant(varargin)
+            obj.Method = 'linear';
+            obj.ExtrapolationMethod = 'linear';
+            nNum = 0;
+            for k = 1:nargin
+                if ischar(varargin{k}) || isstring(varargin{k})
+                    break;
+                end
+                nNum = k;
+            end
+            if nargin >= nNum + 1 && (ischar(varargin{nNum + 1}) || isstring(varargin{nNum + 1}))
+                obj.Method = char(varargin{nNum + 1});
+            end
+            if nargin >= nNum + 2 && (ischar(varargin{nNum + 2}) || isstring(varargin{nNum + 2}))
+                obj.ExtrapolationMethod = char(varargin{nNum + 2});
+            end
+            if nNum == 2
+                obj.Points = varargin{1};
+                obj.Values = varargin{2}(:);
+            elseif nNum >= 3
+                x = varargin{1}(:);
+                y = varargin{2}(:);
+                obj.Points = [x, y];
+                obj.Values = varargin{3}(:);
+            end
+        end
+        function vq = subsref(obj, s)
+            if strcmp(s(1).type, '()')
+                q = s(1).subs;
+                if numel(q) == 1 && iscell(q{1})
+                    xq = q{1}{1};
+                    yq = q{1}{2};
+                elseif numel(q) == 1
+                    P = q{1};
+                    xq = P(:, 1);
+                    yq = P(:, 2);
+                else
+                    xq = q{1};
+                    yq = q{2};
+                end
+                vq = griddata(obj.Points(:, 1), obj.Points(:, 2), obj.Values, xq, yq, obj.Method);
+                if numel(s) > 1
+                    vq = builtin('subsref', vq, s(2:end));
+                end
+            else
+                vq = builtin('subsref', obj, s);
+            end
+        end
+    end
+end
+)NUMKIT_M";
+
+void registerInterpolantClasses(Engine &engine)
+{
+    engine.registerBuiltinClassSource(kGriddedInterpolantClassSource);
+    engine.registerBuiltinClassSource(kScatteredInterpolantClassSource);
+}
+
 } // namespace numkit::builtin
