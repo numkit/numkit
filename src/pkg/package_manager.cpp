@@ -47,6 +47,40 @@ std::string getSharedLibExtension()
 #endif
 }
 
+std::string cmakeToolchainFlags(const std::string &buildDir)
+{
+    std::error_code ec;
+    if (fs::exists(fs::path(buildDir) / "CMakeCache.txt", ec)) {
+        return " -DNUMKIT_BUILD_TESTS=OFF";
+    }
+
+    auto compilers = sys::findAllCxxCompilers();
+    bool hasNativeCompiler = false;
+    for (const auto &c : compilers) {
+        if (c.name != "zig c++") {
+            hasNativeCompiler = true;
+            break;
+        }
+    }
+
+    bool forceZig = (sys::envGet("NUMKIT_USE_ZIG") == "1");
+    if (!hasNativeCompiler || forceZig) {
+        auto zig = sys::findZig();
+        auto ninja = sys::findNinja();
+        if (zig.found && ninja.found) {
+            return " -G Ninja"
+                   " -DCMAKE_MAKE_PROGRAM=\"" + ninja.path + "\""
+                   " -DCMAKE_CXX_COMPILER=\"" + zig.path + "\""
+                   " -DCMAKE_CXX_COMPILER_ARG1=c++"
+                   " -DCMAKE_C_COMPILER=\"" + zig.path + "\""
+                   " -DCMAKE_C_COMPILER_ARG1=cc"
+                   " -DNUMKIT_BUILD_TESTS=OFF";
+        }
+    }
+
+    return " -DNUMKIT_BUILD_TESTS=OFF";
+}
+
 } // namespace
 
 PackageManager::PackageManager(const std::string &modulesDir)
@@ -66,9 +100,14 @@ PackageManager::PackageManager(const std::string &modulesDir)
     }
 
     std::string home = getUserHomeDir();
-    cacheDir_ = (fs::path(home) / ".numkit" / "cache").string();
-
     std::error_code ec;
+    fs::path sharedSrc = fs::path(home) / ".numkit" / "src";
+    if (fs::exists(sharedSrc / "value" / "CMakeLists.txt", ec)) {
+        cacheDir_ = sharedSrc.string();
+    } else {
+        cacheDir_ = (fs::path(home) / ".numkit" / "cache").string();
+    }
+
     fs::create_directories(modulesDir_, ec);
     fs::create_directories(cacheDir_, ec);
 }
@@ -249,7 +288,8 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
 
     // Configure CMake build
     std::string buildDir = (fs::path(sourceDir) / "build").string();
-    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + sourceDir + "\" -DCMAKE_BUILD_TYPE=Release";
+    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + sourceDir
+                       + "\" -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
     if (verbose) {
         std::cout << "Configuring CMake project...\n";
     }
@@ -260,7 +300,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose)
     }
 
     // Build project
-    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release";
+    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release --parallel";
     if (verbose) {
         std::cout << "Building shared module...\n";
     }
@@ -372,14 +412,15 @@ int PackageManager::build(const std::string &dir, bool verbose)
         std::cout << "Building module in " << dir << "...\n";
     }
 
-    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + dir + "\" -DCMAKE_BUILD_TYPE=Release";
+    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + dir
+                       + "\" -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
     auto cfgRes = sys::runProcess(cfgCmd);
     if (!cfgRes.ok()) {
         std::cerr << "CMake configuration failed:\n" << cfgRes.output << "\n";
         return 1;
     }
 
-    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release";
+    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release --parallel";
     auto buildRes = sys::runProcess(buildCmd);
     if (!buildRes.ok()) {
         std::cerr << "CMake build failed:\n" << buildRes.output << "\n";
