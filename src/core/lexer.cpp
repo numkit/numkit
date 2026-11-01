@@ -46,6 +46,12 @@ void Lexer::error(const std::string &msg, int line, int col)
 Lexer::Lexer(const std::string &source)
     : src_(source)
 {
+    if (src_.size() >= 3
+        && static_cast<unsigned char>(src_[0]) == 0xEF
+        && static_cast<unsigned char>(src_[1]) == 0xBB
+        && static_cast<unsigned char>(src_[2]) == 0xBF) {
+        src_.erase(0, 3);
+    }
     if (src_.find('\r') != std::string::npos) {
         std::string norm;
         norm.reserve(src_.size());

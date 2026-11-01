@@ -212,7 +212,7 @@ void writeManifestWithMetadata(const fs::path &srcManifest, const fs::path &dest
         if (firstBrace != std::string::npos) {
             std::ostringstream meta;
             meta << "{\n"
-                 << "  \"version\": \"" << versionStr << "\",\n"
+                 << "  \"resolved_version\": \"" << versionStr << "\",\n"
                  << "  \"ref\": \"" << refStr << "\",\n"
                  << "  \"commit\": \"" << commitSha << "\",\n"
                  << "  \"git_url\": \"" << gitUrl << "\",";
@@ -228,7 +228,7 @@ void writeManifestWithMetadata(const fs::path &srcManifest, const fs::path &dest
         mf << "{\n"
            << "  \"name\": \"" << pkgName << "\",\n"
            << "  \"library\": \"" << libFilename << "\",\n"
-           << "  \"version\": \"" << versionStr << "\",\n"
+           << "  \"resolved_version\": \"" << versionStr << "\",\n"
            << "  \"ref\": \"" << refStr << "\",\n"
            << "  \"commit\": \"" << commitSha << "\",\n"
            << "  \"git_url\": \"" << gitUrl << "\"\n"
@@ -717,7 +717,10 @@ std::vector<InstalledPackage> PackageManager::scanInstalled(const Engine *engine
                     std::ostringstream ss;
                     ss << in.rdbuf();
                     std::string json = ss.str();
-                    p.version = extractJsonStringField(json, "version");
+                    p.version = extractJsonStringField(json, "resolved_version");
+                    if (p.version.empty()) {
+                        p.version = extractJsonStringField(json, "version");
+                    }
                     p.ref     = extractJsonStringField(json, "ref");
                     p.commit  = extractJsonStringField(json, "commit");
                     p.gitUrl  = extractJsonStringField(json, "git_url");
@@ -768,10 +771,10 @@ int PackageManager::avail(std::ostream &out, const Engine *engine) const
     auto installed = scanInstalled(engine);
     out << "Official NumKit Toolboxes:\n";
     out << "  " << std::left << std::setw(18) << "PACKAGE"
-        << std::setw(22) << "STATUS"
+        << std::setw(26) << "STATUS"
         << "DESCRIPTION" << "\n";
     out << "  " << std::string(16, '-') << "  "
-        << std::string(20, '-') << "  "
+        << std::string(24, '-') << "  "
         << std::string(52, '-') << "\n";
 
     for (const auto &info : officialCatalog()) {
@@ -786,7 +789,7 @@ int PackageManager::avail(std::ostream &out, const Engine *engine) const
             }
         }
         out << "  " << std::left << std::setw(18) << ("numkit-" + info.name)
-            << std::setw(22) << status
+            << std::setw(26) << status
             << info.description << "\n";
     }
     out << "\nInstall a toolbox with:  numkit pkg install <name>\n"
