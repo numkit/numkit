@@ -7,7 +7,7 @@
 // The bare-name resolver reaches every registration unqualified;
 // the compat.* alias layer is retired (see AGENTS.md).
 //   y = svd(A);
-// working without code changes â€” the same shape toolboxes/{stats,signal}
+// working without code changes — the same shape toolboxes/{stats,signal}
 // adopted when they moved out of toolboxes/builtin.
 //
 // Functions land here per migration group as they move out of

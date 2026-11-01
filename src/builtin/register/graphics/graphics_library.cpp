@@ -1,14 +1,14 @@
 // src/graphics/src/library.cpp
 //
-// Engine-coupled installer for the graphics plotting service â€” the SOLE
+// Engine-coupled installer for the graphics plotting service — the SOLE
 // graphics TU that includes <nk/core>. It is registration glue only: it
 // asks plots.cpp (core-free) for the table of GraphicsFn plotting bodies, then
-// wraps each in a CallContextâ†’GraphicsContext adapter and registers it under
+// wraps each in a CallContext→GraphicsContext adapter and registers it under
 //   graphics.<sub>.<name>   +   compat.<name>   (+ bare core name when core=true)
 //
 // The adapter is the one place graphics' two runtime escape hatches are bound
 // to the live Engine: callBuiltin (forward to another registered plot builtin
-// by name â€” surfcâ†’surf, fcontourâ†’contour, geoplotâ†’plot, â€¦) and callHandle
+// by name — surfc→surf, fcontour→contour, geoplot→plot, …) and callHandle
 // (evaluate a user @(x) function handle for fplot/fsurf sampling). Everything
 // else a plotting body needs flows through the figure session (FigureManager)
 // and a scratch arena, both core-free.
@@ -17,13 +17,13 @@
 // the lone Engine-coupled file (here it also hosts the generic adapter, since
 // graphics has one uniform adapter rather than per-function _reg bridges).
 //
-// â”€â”€ Graphics handles (bugs/closed/graphics/plot-family-no-return-value.md) â”€â”€
+// ── Graphics handles (bugs/closed/graphics/plot-family-no-return-value.md) ──
 // This TU is also the handle ACCESSOR layer:
-//   â€¢ the adapter post-hook binds handle objects for chart builtins
+//   • the adapter post-hook binds handle objects for chart builtins
 //     (h = plot(...)) and for figure/gca/gcf/axes;
-//   â€¢ handle-aware set/get/isgraphics/ishandle/isvalid are registered here
-//     (delete lives in general_reg.cpp â€” one core name, type-dispatched);
-//   â€¢ one BuiltinClass per MATLAB class name routes dot-syntax
+//   • handle-aware set/get/isgraphics/ishandle/isvalid are registered here
+//     (delete lives in general_reg.cpp — one core name, type-dispatched);
+//   • one BuiltinClass per MATLAB class name routes dot-syntax
 //     (h.LineWidth, h.LineWidth = 2) through the FigureManager registry.
 
 #include <numkit/graphics/library.hpp>
@@ -55,7 +55,7 @@ __declspec(dllimport) int __stdcall GetDeviceCaps(void *hdc, int index);
 
 namespace numkit {
 
-// export_reg.cpp â€” saveas/exportgraphics/print (portion 32).
+// export_reg.cpp — saveas/exportgraphics/print (portion 32).
 void registerFigureExport(Engine &engine);
 
 namespace {
@@ -66,7 +66,7 @@ constexpr const char *kTextClass   = "matlab.graphics.primitive.Text";
 constexpr const char *kLegendClass = "matlab.graphics.illustration.Legend";
 constexpr const char *kRootClass   = "matlab.ui.Root";
 
-// Builtin name â†’ Text slot for the title/label family (adapter wrap).
+// Builtin name → Text slot for the title/label family (adapter wrap).
 const std::string &textSlotOf(const std::string &fnName)
 {
     static const std::map<std::string, std::string> m = {
@@ -78,7 +78,7 @@ const std::string &textSlotOf(const std::string &fnName)
     return it == m.end() ? kEmpty : it->second;
 }
 
-// Axes PROPERTY name â†’ Text slot (get(gca,'Title') family â€” capitalized).
+// Axes PROPERTY name → Text slot (get(gca,'Title') family — capitalized).
 const std::string &textSlotOfProp(const std::string &prop)
 {
     static const std::map<std::string, std::string> m = {
@@ -90,7 +90,7 @@ const std::string &textSlotOfProp(const std::string &prop)
     return it == m.end() ? kEmpty : it->second;
 }
 
-// Which AxesState field a Text slot reads/writes ("sgtitle" â†’ the
+// Which AxesState field a Text slot reads/writes ("sgtitle" → the
 // FigureState instead). ylabel under yyaxis-right routes to ylabel2.
 std::string *textFieldOf(FigureManager &fm, FigureManager::HandleRecord &rec)
 {
@@ -113,7 +113,7 @@ std::string *textFieldOf(FigureManager &fm, FigureManager::HandleRecord &rec)
     return nullptr;
 }
 
-// Builtin name â†’ (type, MATLAB class name)
+// Builtin name → (type, MATLAB class name)
 const std::unordered_map<std::string, std::pair<std::string, std::string>> &
 handleTypes()
 {
@@ -158,8 +158,8 @@ handleTypes()
     return m;
 }
 
-// â”€â”€ Property encoding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// rec->props maps name â†’ string form (figure layer is Value-free).
+// ── Property encoding ────────────────────────────────────────────────
+// rec->props maps name → string form (figure layer is Value-free).
 // Numerics use %.17g so decodeProp's stod round-trips bit-exactly
 // (std::to_string's 6 digits would silently truncate user values).
 std::string formatPropDouble(double d)
@@ -244,7 +244,7 @@ Value decodeProp(const std::string &s, std::pmr::memory_resource *mr)
     return Value::fromString(s, mr);
 }
 
-// â”€â”€ Chart property defaults (MATLAB R2025b documented values) â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Chart property defaults (MATLAB R2025b documented values) ────────
 // Introspection reports MATLAB's defaults even where the nk renderer
 // draws its own palette (get before set); once the user sets a property,
 // both get() and the render use the user value.
@@ -274,10 +274,10 @@ Value chartDefaultProp(const std::string &type, const std::string &name,
         return num(0.0);
     if (name == "BarWidth" && type == "bar") return num(0.8);
     if (name == "Children")   return Value::matrix(0, 0, ValueType::DOUBLE, mr);
-    return Value();   // unknown â†’ caller decides (empty â‡’ error/blank)
+    return Value();   // unknown → caller decides (empty ⇒ error/blank)
 }
 
-// â”€â”€ Style-string rebuild (render-effect for LineStyle/Marker/Color) â”€â”€
+// ── Style-string rebuild (render-effect for LineStyle/Marker/Color) ──
 // ds.style speaks two dialects (renderer parseLineSpec): the compact
 // MATLAB linespec ("r--o") and the kv extras ("color=#hex;lineStyle=--").
 // A property set rewrites the string into the kv form, preserving the
@@ -303,7 +303,7 @@ StyleParts parseStyle(const std::string &s)
         }
         return p;
     }
-    // Compact dialect â€” mirrors the renderer's STYLE_COLOR map so a
+    // Compact dialect — mirrors the renderer's STYLE_COLOR map so a
     // rebuilt style keeps the same visual colour the plot was drawn with.
     static const std::map<char, const char *> kCharColor = {
         {'r', "#f07070"}, {'g', "#6ee7a0"}, {'b', "#60d0f0"},
@@ -344,7 +344,7 @@ std::string rgbToHex(const Value &v)
     return buf;
 }
 
-// â”€â”€ Render-effect: apply one property to the backing DatasetInfo â”€â”€â”€â”€â”€
+// ── Render-effect: apply one property to the backing DatasetInfo ─────
 void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     const std::string &name, const Value &val)
 {
@@ -372,7 +372,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         append("color", p.colorHex);
         append("lineStyle", p.lineStyle);
         append("marker", p.marker);
-        ds->style = out;   // empty â‡’ renderer defaults (palette line, no marker)
+        ds->style = out;   // empty ⇒ renderer defaults (palette line, no marker)
     } else if (name == "Visible") {
         ds->visible = !(val.isChar() || val.isString()) || val.toString() != "off";
     } else if (name == "DisplayName") {
@@ -410,7 +410,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         fm.markFigureModified(rec->figureId);
 }
 
-// Auto tick positions for get(gca,'XTick') in 'auto' mode â€” the SAME
+// Auto tick positions for get(gca,'XTick') in 'auto' mode — the SAME
 // niceTicks the renderer uses, over the explicit xlim if set, else the
 // data range (portion 34; MATLAB returns the drawn ticks).
 std::vector<double> axesAutoTicks(FigureManager &fm,
@@ -482,8 +482,8 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
 }
 
 // MATLAB R2025b (probe-verified): setting the AXES font RESETS even an
-// explicitly-set label-Text font â€” the texts fall back to the axes
-// values (FontSize Ã—1.1). Drop their stored font props.
+// explicitly-set label-Text font — the texts fall back to the axes
+// values (FontSize ×1.1). Drop their stored font props.
 void resetAxesTextFonts(FigureManager &fm, FigureManager::HandleRecord *rec)
 {
     for (auto &[id, r] : fm.handles())
@@ -495,7 +495,7 @@ void resetAxesTextFonts(FigureManager &fm, FigureManager::HandleRecord *rec)
         }
 }
 
-// tick vector Value â† json "[a,b,c]"
+// tick vector Value ← json "[a,b,c]"
 Value decodeTickVec(const std::string &json, std::pmr::memory_resource *mr)
 {
     auto v = figdetail::parseFlatDoubles(json);
@@ -507,7 +507,7 @@ Value decodeTickVec(const std::string &json, std::pmr::memory_resource *mr)
     return out;
 }
 
-// ["a","b"] json â†’ 1Ã—N cell of char.
+// ["a","b"] json → 1×N cell of char.
 Value decodeTickLabels(const std::string &json, std::pmr::memory_resource *mr)
 {
     std::vector<std::string> labels;
@@ -530,7 +530,7 @@ Value decodeTickLabels(const std::string &json, std::pmr::memory_resource *mr)
     return c;
 }
 
-// cell/string-array/char â†’ ["a","b"] json.
+// cell/string-array/char → ["a","b"] json.
 std::string encodeTickLabels(const Value &v)
 {
     std::string out = "[";
@@ -542,7 +542,7 @@ std::string encodeTickLabels(const Value &v)
     return out + "]";
 }
 
-// â”€â”€ Axes / figure property mapping (render-effect) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Axes / figure property mapping (render-effect) ───────────────────
 bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                    const std::string &name, const Value &val)
 {
@@ -568,7 +568,7 @@ bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     else if (name == "YLabel") ax->ylabel = val.toString();
     else if (name == "ZLabel") ax->zlabel = val.toString();
     else if (name == "Title")  ax->title  = val.toString();
-    // â”€â”€ Portion 34 (MATLAB R2025b probe-verified semantics) â”€â”€
+    // ── Portion 34 (MATLAB R2025b probe-verified semantics) ──
     else if (name == "FontSize" && val.isNumeric() && v.size() == 1) {
         ax->fontSize = v[0];
         resetAxesTextFonts(fm, rec);   // label Texts follow the axes font
@@ -715,7 +715,7 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     if (name == "YLabel") return str(ax->ylabel.c_str());
     if (name == "ZLabel") return str(ax->zlabel.c_str());
     if (name == "Title")  return str(ax->title.c_str());
-    // â”€â”€ Portion 34 live reads (MATLAB R2025b probe-verified) â”€â”€
+    // ── Portion 34 live reads (MATLAB R2025b probe-verified) ──
     if (name == "FontSize")   return num(ax->fontSize);
     if (name == "FontWeight") return str(ax->fontWeight.c_str());
     if (name == "FontName")   return str(ax->fontName.c_str());
@@ -874,7 +874,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     return v;
 }
 
-// â”€â”€ Handle record lookup helpers (create-or-reuse) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Handle record lookup helpers (create-or-reuse) ───────────────────
 int handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
 {
     for (auto &[id, r] : fm.handles())
@@ -909,7 +909,7 @@ Value makeFigureHandleFor(FigureManager &fm, int figureId,
 {
     if (auto *rec = findRecordBy(fm, "figure", figureId, 0))
         return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), mr, figureId);
-    // createHandle stamps the CURRENT figure â€” switch, create, switch back.
+    // createHandle stamps the CURRENT figure — switch, create, switch back.
     const int saved = fm.currentFigureId();
     if (saved != figureId)
         fm.setFigure(figureId);
@@ -959,7 +959,7 @@ Value makeLegendHandleFor(FigureManager &fm, int figureId, size_t axesIndex,
     return makeGraphicsHandleValue(kLegendClass, id, mr);
 }
 
-// Root (groot) â€” ONE global record (figureId 0 never matches a real
+// Root (groot) — ONE global record (figureId 0 never matches a real
 // figure, so figure sweeps leave it alone).
 Value makeRootHandle(FigureManager &fm, std::pmr::memory_resource *mr)
 {
@@ -992,7 +992,7 @@ Value makeHandleArray(const std::string &className,
                               /*isHandle=*/true, mr);
 }
 
-// â”€â”€ Unified record property access â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Unified record property access ───────────────────────────────────
 // ONE body shared by get(h,'Prop') / set(h,'Prop',v) AND the dot-syntax
 // h.Prop / h.Prop = v (BuiltinClass propGet/propSet). Live state fields
 // (Text.String, Legend.Location/Box/Visible, chart XData) read from the
@@ -1090,7 +1090,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (it != rec->props.end())
             return decodeProp(it->second, mr);
         // MATLAB R2025b (probe-verified): label Texts inherit the AXES
-        // font â€” FontSize at 1.1Ã— â€” unless the axes font was set (which
+        // font — FontSize at 1.1× — unless the axes font was set (which
         // RESETS any explicit Text font, see resetAxesTextFonts).
         AxesState *ax = rec->slot == "sgtitle" ? nullptr
                                                : fm.axesOf(*rec);
@@ -1118,7 +1118,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Type") return str("legend");
         if (name == "Parent")
             return makeAxesHandleFor(fm, rec->figureId, rec->axesIndex, mr);
-        // Live render state first â€” a stored prop would shadow later
+        // Live render state first — a stored prop would shadow later
         // command-form changes (`legend show` after set(hL,'Visible','off')).
         if (name == "Location")
             return str(ax && !ax->legendLocation.empty()
@@ -1229,7 +1229,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return v;
     }
     // An EXPLICIT linespec from the plot call (plot(x,y,'r--o')) is
-    // user intent and reads back MATLAB-exact â€” unlike the soft series
+    // user intent and reads back MATLAB-exact — unlike the soft series
     // palette the renderer draws. Colors map to MATLAB's table
     // ('r'==[1 0 0]), kv hex to /255.
     if (name == "Color" || name == "LineStyle" || name == "Marker") {
@@ -1338,7 +1338,7 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 fm.markFigureModified(rec->figureId);
             }
         }
-        return true;   // FontSize/Color/â€¦ store-only (renderer gap filed)
+        return true;   // FontSize/Color/… store-only (renderer gap filed)
     }
     if (rec->type == "legend") {
         AxesState *ax = fm.axesOf(*rec);
@@ -1374,7 +1374,7 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 
 // ============================================================
 // Handle-aware accessor registration (set/get/isgraphics/ishandle/
-// isvalid â€” delete lives in general_reg.cpp, type-dispatched)
+// isvalid — delete lives in general_reg.cpp, type-dispatched)
 // ============================================================
 namespace {
 

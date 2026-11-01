@@ -1,22 +1,22 @@
 /// @file figure_render.hpp
 /// @ingroup group_graphics
 ///
-/// Engine-side figure renderer â€” the software path behind
+/// Engine-side figure renderer — the software path behind
 /// saveas/exportgraphics/print (portion 32). Produces a pixel-space
 /// DISPLAY LIST from a FigureState, plus two backends:
-///   â€¢ renderFigureSvg  â€” vector SVG (text as <text>)
-///   â€¢ renderFigureRgb  â€” rasterised RGB buffer (built-in 5Ã—7 bitmap
+///   • renderFigureSvg  — vector SVG (text as <text>)
+///   • renderFigureRgb  — rasterised RGB buffer (built-in 5×7 bitmap
 ///     font, Bresenham lines, scanline polygon fill)
 ///
 /// Deliberately STL-only and Value-free (same contract as the rest of
 /// the figure layer); the bundle's export_reg.cpp turns the RGB buffer
 /// into PNG bytes via the image toolbox and writes through the fs.
 ///
-/// Scope (portion 32): vector chart types â€” line, stairs, stem, scatter,
-/// bar, barh, area, errorbar â€” on linear/log axes with grid, limits,
+/// Scope (portion 32): vector chart types — line, stairs, stem, scatter,
+/// bar, barh, area, errorbar — on linear/log axes with grid, limits,
 /// tick formats, dir reverse, subplot tiling, legend, sgtitle.
 /// NOT yet rendered: 3-D surfaces/contours, imagesc/heatmap (colormap
-/// port), polar, text overlays, yyaxis right-scale, annotations â€”
+/// port), polar, text overlays, yyaxis right-scale, annotations —
 /// tracked in bugs/opened/graphics/handle-surface-gaps.md sibling
 /// export-gaps file.
 #pragma once
@@ -37,7 +37,7 @@
 namespace numkit {
 namespace figrender {
 
-// â”€â”€ Colour helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Colour helpers ───────────────────────────────────────────────────
 struct Rgb {
     std::uint8_t r = 0, g = 0, b = 0;
     Rgb() = default;
@@ -61,7 +61,7 @@ struct Rgb {
     }
 };
 
-// Series palette â€” the SAME hexes the IDE renderer's KIND_PALETTE uses,
+// Series palette — the SAME hexes the IDE renderer's KIND_PALETTE uses,
 // so saveas output matches the on-screen figure.
 inline const std::vector<Rgb> &palette()
 {
@@ -73,7 +73,7 @@ inline const std::vector<Rgb> &palette()
     return p;
 }
 
-// MATLAB single-char linespec colours â€” mirrors the JS STYLE_COLOR map.
+// MATLAB single-char linespec colours — mirrors the JS STYLE_COLOR map.
 inline bool charSpecColor(char c, Rgb &out)
 {
     switch (c) {
@@ -94,7 +94,7 @@ struct StyleParts {
     Rgb color{0x7f, 0xd9, 0x9a};
     bool hasColor = false;   // explicit colour (char or kv)
     std::string lineStyle;   // "-", "--", ":", "-.", "" (unset), "none"
-    std::string marker;      // "", "o", "+", "*", ".", "x", "s", "d", â€¦
+    std::string marker;      // "", "o", "+", "*", ".", "x", "s", "d", …
     // histogram extras (portion 39; engine histogram() packs them):
     Rgb faceColor{0x00, 0x72, 0xbd};   // MATLAB FaceColor 'auto'
     bool hasFaceColor = false;
@@ -117,13 +117,13 @@ struct TextExtras {
     int halign = 0;          // 0 left, 1 center, 2 right
 };
 
-// One MATLAB colour spec â†’ Rgb. Accepts the linespec short letters,
+// One MATLAB colour spec → Rgb. Accepts the linespec short letters,
 // long colour names, #rrggbb, and "r,g,b" / "r g b" float triplets
 // (0..1, MATLAB convention). Returns false when unrecognised.
 inline bool textColorSpec(const std::string &v, Rgb &out)
 {
     // MATLAB-exact named colours (short letters are the SAME values:
-    // 'r' == 'red' == (1,0,0)) â€” NOT the soft series palette, which is
+    // 'r' == 'red' == (1,0,0)) — NOT the soft series palette, which is
     // a deliberate nk aesthetic for LINES only.
     static const std::pair<const char *, Rgb> kNames[] = {
         {"red", {255, 0, 0}},       {"green", {0, 128, 0}},
@@ -280,13 +280,13 @@ inline StyleParts parseStyle(const std::string &s)
     return p;
 }
 
-// â”€â”€ Colormap tables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Colormap tables ──────────────────────────────────────────────────
 // Ground truth: MATLAB R2025b feval(<name>, 256) dumped as hex RGB
 // (2026-09-11 probe; first parula entry 3e26a8 = (62,38,168) verified
 // against exported-PNG pixels). MATLAB maps a scaled CData value v to
 // entry round(t*(N-1)) + 1 (1-based) with t = (v-clo)/(chi-clo)
 // clamped to [0,1]; NaN renders as entry 1 (the first color).
-// viridis: MATLAB R2025b has no viridis() (exist()==0) â€” this table is
+// viridis: MATLAB R2025b has no viridis() (exist()==0) — this table is
 // the matplotlib-approximate stops from the IDE colormaps.js, linearly
 // sampled to 256, so engine export and IDE render identically.
 struct NamedPaletteHex { const char *name; const char *hex; };
@@ -334,8 +334,8 @@ inline const std::uint8_t *namedPalette(const std::string &name, int &n)
 
 // Custom palette from colormap(M) JSON "[[r,g,b],...]" (values [0,1]).
 // figdetail::parseFlatDoubles stops at the first ']' (flat arrays), so
-// brackets are stripped first and the numbers re-wrapped â€” "[[0,0,0],
-// [1,0,0]]" â†’ "[0,0,0,1,0,0]" â€” then grouped into RGB triplets.
+// brackets are stripped first and the numbers re-wrapped — "[[0,0,0],
+// [1,0,0]]" → "[0,0,0,1,0,0]" — then grouped into RGB triplets.
 inline std::vector<Rgb> parseCustomPalette(const std::string &json)
 {
     std::string flat = "[";
@@ -353,7 +353,7 @@ inline std::vector<Rgb> parseCustomPalette(const std::string &json)
     return out;
 }
 
-// â”€â”€ Display list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Display list ─────────────────────────────────────────────────────
 struct Cmd {
     enum Kind { LINE, POLY, TEXT, MARK, IMAGE } kind;
     std::vector<double> xs, ys;   // LINE/POLY pixel points; MARK single;
@@ -371,11 +371,11 @@ struct Cmd {
     std::string fontFamily;       // TEXT: font name (SVG honours it;
                                   // the raster backend is monospace)
 
-    // â”€â”€ IMAGE (imagesc / image / imshow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── IMAGE (imagesc / image / imshow) ─────────────────────────────
     // Indexed form: img holds cell indices 0..254 with 255 = NaN
-    // sentinel, COLUMN-major (idx = col*imgH + row) â€” the layout
+    // sentinel, COLUMN-major (idx = col*imgH + row) — the layout
     // DatasetInfo::zQuantized already uses. rgbDirect form (imshow
-    // truecolor): img holds row-major RGBA QUADS (r,g,b,a â€” alpha is
+    // truecolor): img holds row-major RGBA QUADS (r,g,b,a — alpha is
     // synthesized 255 for plain RGB input, see image.cpp). qLo/qHi is
     // the baked quantization range; a cell's reconstructed value is
     // qLo + idx/254*(qHi-qLo). climLo/climHi is the display window
@@ -394,7 +394,7 @@ struct Cmd {
 // SVG backends so both produce identical pixels. The buffer size is the
 // rounded on-screen rect (at least 1x1); each output pixel samples the
 // containing cell via its centre (MATLAB-style nearest cell). Row/col 0
-// sit at the screen end where the DATA rect's iy0/ix0 edge landed â€” the
+// sit at the screen end where the DATA rect's iy0/ix0 edge landed — the
 // axes transform has already baked in yDir/xDir.
 inline std::vector<std::uint8_t> imageCmdRgb(const Cmd &c)
 {
@@ -464,9 +464,9 @@ inline std::vector<std::uint8_t> imageCmdRgb(const Cmd &c)
     return buf;
 }
 
-// Nested 2-D JSON rows "[[a,b],[c,d]]" â†’ row-major doubles + dims.
-// Null entries (NaN cells) â†’ NaN. Depth-tracked: only INNER brackets
-// (depth 2) delimit rows â€” the outer pair is the wrapper (counting it
+// Nested 2-D JSON rows "[[a,b],[c,d]]" → row-major doubles + dims.
+// Null entries (NaN cells) → NaN. Depth-tracked: only INNER brackets
+// (depth 2) delimit rows — the outer pair is the wrapper (counting it
 // as a row over-read the value vector).
 inline void parseNestedDoubles(const std::string &j, std::vector<double> &out,
                                size_t &rows, size_t &cols)
@@ -514,10 +514,10 @@ inline void parseNestedDoubles(const std::string &j, std::vector<double> &out,
         out.clear();
 }
 
-// â”€â”€ Ticks (ported from ide/src/components/plot/plotTicks.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Ticks (ported from ide/src/components/plot/plotTicks.js) ─────────
 // MATLAB-exact auto ticks (probe-verified R2025b, portion 34): target
-// 10 intervals, ladder breakpoints 1/2/5 â€” [0,10]â†’step 1 (11 ticks),
-// [0,3]â†’step 0.5 (7), [0,7]â†’step 1 (8).
+// 10 intervals, ladder breakpoints 1/2/5 — [0,10]→step 1 (11 ticks),
+// [0,3]→step 0.5 (7), [0,7]→step 1 (8).
 inline std::vector<double> niceTicks(double mn, double mx, int target = 10)
 {
     std::vector<double> major;
@@ -551,7 +551,7 @@ inline std::vector<double> logTicks(double mn, double mx)
 }
 
 // Default tick label: %g-style with trailing-zero trim + exponent
-// compaction ("1e+06" â†’ "1e6").
+// compaction ("1e+06" → "1e6").
 inline std::string tickLabel(double v)
 {
     if (v == 0)
@@ -585,12 +585,12 @@ inline std::string tickLabel(double v)
     return s;
 }
 
-// â”€â”€ Per-axes data range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Per-axes data range ──────────────────────────────────────────────
 struct AxisRange {
     double lo = 0, hi = 1;
     bool log = false;
     bool valid() const { return hi > lo; }
-    double map(double v, double p0, double p1) const   // data â†’ pixel
+    double map(double v, double p0, double p1) const   // data → pixel
     {
         double t;
         if (log) {
@@ -619,7 +619,7 @@ inline std::vector<double> parseVec(const std::string &json)
     return figdetail::parseFlatDoubles(json);
 }
 
-// ["a","b",â€¦] tick-label json â†’ strings.
+// ["a","b",…] tick-label json → strings.
 inline std::vector<std::string> parseTickLabelVec(const std::string &json)
 {
     std::vector<std::string> labels;
@@ -637,7 +637,7 @@ inline std::vector<std::string> parseTickLabelVec(const std::string &json)
     return labels;
 }
 
-// â”€â”€ Display-list builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Display-list builder ─────────────────────────────────────────────
 struct Rect { double x0, y0, x1, y1; };   // pixel, y DOWN
 
 inline void addLine(std::vector<Cmd> &out, std::vector<double> xs,
@@ -712,7 +712,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     const Rgb kTextCol(0x28, 0x28, 0x30);
 
     // Margin: room for tick labels + axis labels. axis off (`axis off`,
-    // imshow) drops the decorations â€” a slim inset only, the image gets
+    // imshow) drops the decorations — a slim inset only, the image gets
     // the canvas (probe: imshow fills the saved figure).
     double ml = 64, mr = 14, mt = 20, mb = 48;
     if (!ax.title.empty())
@@ -920,12 +920,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     // Image data rect (probe-verified MATLAB R2025b, portion 35). The
     // wire xJson/yJson are "[1,C]"/"[1,R]" ranges by default, a
     // per-column/row CENTER vector when numel==cells, or EDGE vectors
-    // when numel==cells+1. Image edges: centers get Â±spacing/2 (the
-    // default [1,C] reduces to Â±0.5); edge vectors are used as-is. When
+    // when numel==cells+1. Image edges: centers get ±spacing/2 (the
+    // default [1,C] reduces to ±0.5); edge vectors are used as-is. When
     // the axes limits are auto, MATLAB pads the image extent by
-    // span/(2*(cells-1)) where span = x(end)-x(1) of the GIVEN vector â€”
-    // e.g. default 3x4 image â†’ XLim [0.5 4.5]; centers [10..40] â†’
-    // [5 45]; edges [10..50] â†’ [3.333 56.667].
+    // span/(2*(cells-1)) where span = x(end)-x(1) of the GIVEN vector —
+    // e.g. default 3x4 image → XLim [0.5 4.5]; centers [10..40] →
+    // [5 45]; edges [10..50] → [3.333 56.667].
     auto imageEdges = [](const std::vector<double> &v, size_t cells,
                          double &e0, double &e1, double &pad) {
         if (v.size() < 2 || cells == 0) {
@@ -1095,7 +1095,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     auto Y = [&](double v) { return YR.map(v, py0, py1); };
     auto Y2 = [&](double v) { return YR2.map(v, py0, py1); };
 
-    // â”€â”€ Grid (under the data) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Grid (under the data) ───────────────────────────────────────
     if (ax.gridMajor && ax.gridUserTouched) {
         auto gx = XR.log ? logTicks(xlo, xhi) : niceTicks(xlo, xhi);
         auto gy = YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi);
@@ -1105,7 +1105,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             addLine(out, {plot.x0, plot.x1}, {Y(v), Y(v)}, kGridCol, 1, false);
     }
 
-    // â”€â”€ Images (under series â€” MATLAB draws lines over the image) â”€â”€â”€
+    // ── Images (under series — MATLAB draws lines over the image) ───
     for (size_t i = 0; i < ax.datasets.size(); ++i) {
         const DatasetInfo &ds = ax.datasets[i];
         if (!ds.visible || (ds.type != "imagesc" && ds.type != "image-rgb"))
@@ -1150,12 +1150,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         out.push_back(std::move(c));
     }
 
-    // â”€â”€ 3-D content (portion 40; MATLAB probes R2025b): surf = flat â”€â”€
+    // ── 3-D content (portion 40; MATLAB probes R2025b): surf = flat ──
     // per-quad faces coloured by the FIRST corner's Z through the
     // colormap (FaceColor 'flat', CData=Z), edges (0.129)x3; mesh /
     // waterfall = segments coloured by Z (EdgeColor 'flat'); view from
     // ax.viewJson, default (-37.5, 30); orthographic az/el projection;
-    // painter's sort (far quads first). clim auto = [min Z, max Z] â€”
+    // painter's sort (far quads first). clim auto = [min Z, max Z] —
     // same rule as imagesc. The 3-D box replaces the 2-D frame.
     {
         bool has3d = false;
@@ -1348,7 +1348,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             // surf quads, painter's sort (far first).
             for (const auto &g : grids) {
                 if (g.r < 2 || g.c < 2)
-                    continue;   // single cell â€” no quads (mesh lines only)
+                    continue;   // single cell — no quads (mesh lines only)
                 struct Q {
                     double px[4], py[4], depth;
                     Rgb col;
@@ -1459,7 +1459,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         }
     }
 
-    // â”€â”€ Series â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Series ──────────────────────────────────────────────────────
     size_t seriesIdx = 0;
     for (size_t i = 0; i < ax.datasets.size(); ++i) {
         const DatasetInfo &ds = ax.datasets[i];
@@ -1746,7 +1746,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         addText(out, ax.title, (plot.x0 + plot.x1) / 2 - 3.2 * ax.title.size(),
                 plot.y0 - 18, labelFS + 2, kTextCol, false, fBold, fam);
 
-    // â”€â”€ Colorbar (portion 38; probe-verified R2025b: limits = CLim, â”€â”€
+    // ── Colorbar (portion 38; probe-verified R2025b: limits = CLim, ──
     // vertical ticks = the 10-interval ladder (12 for [1 12]), a
     // horizontal strip uses the 5-interval ladder, FontSize 9, strip
     // low end at bottom/left).
@@ -1852,7 +1852,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         }
     }
 
-    // â”€â”€ Legend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Legend ──────────────────────────────────────────────────────
     if (!ax.legendLabels.empty() && !ax.legendHidden) {
         double rowH = 16, pad2 = 6;
         double lw2 = 22, tw = 0;
@@ -1887,7 +1887,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     }
 }
 
-// Full figure â†’ display list. Subplot grid tiling; single axes uses the
+// Full figure → display list. Subplot grid tiling; single axes uses the
 // whole canvas.
 inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
                                             int H)
@@ -1925,7 +1925,7 @@ inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
         }
         renderAxes(fig, *ordered[i], box, out);
     }
-    // â”€â”€ Figure-level annotations (portion 41): normalized [0,1] figure
+    // ── Figure-level annotations (portion 41): normalized [0,1] figure
     // units mapped straight onto the canvas. MATLAB defaults: Color
     // (0.1294)^3, HeadSize 10 (chevron ~12% of length), textarrow text
     // at the TAIL.
@@ -1993,9 +1993,9 @@ inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
     return out;
 }
 
-// â”€â”€ SVG backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Embeds an on-screen RGB buffer (top-down, wÃ—hÃ—3) as an image payload
-// for SVG (a data: URL). The figure layer stays free of codec code â€”
+// ── SVG backend ─────────────────────────────────────────────────────
+// Embeds an on-screen RGB buffer (top-down, w×h×3) as an image payload
+// for SVG (a data: URL). The figure layer stays free of codec code —
 // the bundle export glue supplies a PNG+base64 implementation; without
 // one, SVG export skips IMAGE cmds (raster export always renders them).
 using SvgImageEmbedder =
@@ -2027,7 +2027,7 @@ inline std::string renderFigureSvg(const FigureState &fig, int W, int H,
     for (const Cmd &c : cmds) {
         if (c.kind == Cmd::IMAGE) {
             if (!embed)
-                continue;   // no codec available â€” skip (PNG path renders)
+                continue;   // no codec available — skip (PNG path renders)
             std::vector<std::uint8_t> buf = imageCmdRgb(c);
             int pw = std::max(1, (int)std::lround(std::max(c.xs[0], c.xs[1])
                                                   - std::min(c.xs[0], c.xs[1])));
@@ -2078,14 +2078,14 @@ inline std::string renderFigureSvg(const FigureState &fig, int W, int H,
                                         + std::to_string(c.y + r)
                                     : "")
                    + "\" stroke=\"" + c.color.hex() + "\" stroke-width=\"1.2\" fill=\"none\"/>\n";
-            } else {   // o . * ^ v < > p h â†’ circle
+            } else {   // o . * ^ v < > p h → circle
                 s += "<circle cx=\"" + std::to_string(c.x) + "\" cy=\""
                    + std::to_string(c.y) + "\" r=\"" + std::to_string(r)
                    + "\" fill=\"none\" stroke=\"" + c.color.hex()
                    + "\" stroke-width=\"1.4\"/>\n";
             }
         } else {
-            // LINE / POLY â†’ <polyline>/<polygon>
+            // LINE / POLY → <polyline>/<polygon>
             std::string pts;
             for (size_t i = 0; i < c.xs.size(); ++i) {
                 if (i)
@@ -2251,8 +2251,8 @@ inline std::string renderFigurePdf(const FigureState &fig, int W, int H)
     return pdf;
 }
 
-// â”€â”€ RGB raster backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Classic public-domain 5Ã—7 bitmap font (column-encoded, LSB = top row),
+// ── RGB raster backend ───────────────────────────────────────────────
+// Classic public-domain 5×7 bitmap font (column-encoded, LSB = top row),
 // ASCII 0x20..0x7E.
 inline const std::uint8_t *font5x7(char c)
 {
@@ -2392,7 +2392,7 @@ public:
                     px((int)x + d, (int)y - d, c);
                 }
             }
-        } else {   // o . * ^ v < > p h â†’ outline circle (+ rays for *)
+        } else {   // o . * ^ v < > p h → outline circle (+ rays for *)
             for (int a = 0; a < 360; a += 2) {
                 double rad = a * 3.14159265358979 / 180.0;
                 px((int)std::lround(x + r * std::cos(rad)),
@@ -2408,7 +2408,7 @@ public:
         }
     }
 
-    // Monospace text, scale = fontSize / 7 (glyph 5Ã—7 + 1 col spacing).
+    // Monospace text, scale = fontSize / 7 (glyph 5×7 + 1 col spacing).
     // rot90 renders the run bottom-to-top (ylabel).
     void text(double x, double y, const std::string &s, double fontSize, Rgb c,
               bool rot90)
@@ -2429,7 +2429,7 @@ public:
             }
         } else {
             // Glyph columns run UPWARD from (x,y); within a glyph rows
-            // go leftâ†’right after rotation.
+            // go left→right after rotation.
             double cy = y;
             for (auto it = s.rbegin(); it != s.rend(); ++it) {
                 const std::uint8_t *g = font5x7(*it);
@@ -2445,7 +2445,7 @@ public:
         }
     }
 
-    // Blit a top-down RGB buffer (pwÃ—phÃ—3) at pixel (x0,y0). Used by the
+    // Blit a top-down RGB buffer (pw×ph×3) at pixel (x0,y0). Used by the
     // IMAGE cmd; the buffer is already at on-screen resolution.
     void image(int x0, int y0, const std::vector<std::uint8_t> &buf, int pw,
                int ph)
@@ -2476,7 +2476,7 @@ private:
     std::vector<std::uint8_t> px_;
 };
 
-// Render to a top-down RGB buffer (HÃ—WÃ—3 bytes).
+// Render to a top-down RGB buffer (H×W×3 bytes).
 inline std::vector<std::uint8_t> renderFigureRgb(const FigureState &fig,
                                                  int W, int H)
 {

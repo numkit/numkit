@@ -1,4 +1,4 @@
-﻿// toolboxes/ode/src/library.cpp
+// toolboxes/ode/src/library.cpp
 //
 // Registers all ODE-toolbox functions under ode.<name> and the flat
 // compat.<name> alias.
@@ -18,7 +18,7 @@ void odeget_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
 } // namespace numkit::ode::detail
 
 namespace numkit::ode {
-// Defined in ode45.cpp / ode23.cpp â€” install the `.m` solver wrappers (pausable
+// Defined in ode45.cpp / ode23.cpp — install the `.m` solver wrappers (pausable
 // RHS; the C++ `Value ode45/ode23(...)` APIs remain the synchronous embedder
 // path).
 void registerOde45M(Engine &engine);
@@ -31,13 +31,13 @@ void OdeLibrary::install(Engine &engine)
 {
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
         engine.registerFunction(std::string("ode.") + sub, name, fn);
-        // compat.* registration removed â€” bare-name resolver replaces it
+        // compat.* registration removed — bare-name resolver replaces it
     };
 
     // ode45 is an embedded `.m` wrapper (vm_callbacks_plan.md): the RHS f(t,y)
     // is called from bytecode and is pausable under the debugger. Registered as
     // a top-level user function (shadows externals on both backends), so no
-    // ode.solvers/compat external alias is needed â€” the C++ `Value ode45(...)`
+    // ode.solvers/compat external alias is needed — the C++ `Value ode45(...)`
     // API (ode45_reg) is retained as the synchronous embedder path.
     ode::registerOde45M(engine);
     ode::registerOde23M(engine);   // embedded `.m` wrapper (pausable RHS)

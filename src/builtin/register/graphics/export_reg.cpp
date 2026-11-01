@@ -1,6 +1,6 @@
 // src/bundle/src/register/graphics/export_reg.cpp
 //
-// saveas / exportgraphics / print â€” engine-side figure export (portion
+// saveas / exportgraphics / print — engine-side figure export (portion
 // 32). The renderer itself is core-free (figure/figure_render.hpp: a
 // pixel-space display list + SVG and RGB backends); this reg glue owns
 // the MATLAB argument forms, turns the RGB buffer into encoded image
@@ -8,7 +8,7 @@
 //
 // Supported output: .svg (vector) + everything imwriteToBytes encodes
 // (.png/.jpg/.bmp/.tga/.pnm/.tif). Unsupported documented MATLAB
-// formats (.pdf/.eps/.fig/.emf) throw a clear "not supported" â€” filed
+// formats (.pdf/.eps/.fig/.emf) throw a clear "not supported" — filed
 // in bugs/opened/graphics/figure-export-gaps.md, never silent.
 
 #include <numkit/core/engine.hpp>
@@ -41,7 +41,7 @@ std::string lowerExtOf(const std::string &path)
 
 // PNG + base64 data-URL embedder for SVG <image> elements. The buffer
 // arrives top-down row-major from figrender::imageCmdRgb; it goes to
-// imwriteToBytes as a column-major uint8 HÃ—WÃ—3 Value (the transpose is
+// imwriteToBytes as a column-major uint8 H×W×3 Value (the transpose is
 // the same column-major contract the raster export path uses).
 const char kBase64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -113,7 +113,7 @@ struct ExportArgs {
     const FigureState *fig = nullptr;
     std::string path;
     std::string ext;        // from filename or explicit format
-    int dpi = 150;          // MATLAB png default; scales the 840Ã—630 base
+    int dpi = 150;          // MATLAB png default; scales the 840×630 base
 };
 
 // Shared argument walk for all three entry points: a handle/number
@@ -143,12 +143,12 @@ ExportArgs parseExportArgs(Engine &engine, Span<const Value> args,
         for (char &c : sl)
             c = (char)std::tolower((unsigned char)c);
         if (!s.empty() && s[0] == '-') {
-            // print-style flags: -dpng / -dsvg / -r150 / -ochrâ€¦
+            // print-style flags: -dpng / -dsvg / -r150 / -ochr…
             if (sl.size() > 2 && sl[1] == 'd')
                 out.ext = sl.substr(2);
             else if (sl.size() > 2 && sl[1] == 'r')
                 out.dpi = std::max(30, std::atoi(sl.c_str() + 2));
-            // other print options (-painters, -opengl, -bestfit, â€¦)
+            // other print options (-painters, -opengl, -bestfit, …)
             // accepted and ignored
             continue;
         }
@@ -188,7 +188,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 {
     if (!ea.fig)
         throw std::runtime_error(std::string(who) + ": no figure to export");
-    // Base canvas 840Ã—630 (MATLAB's 560Ã—420 pt @150dpi â‰ˆ 825Ã—619);
+    // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
     const int W = std::max(64, (int)(840.0 * ea.dpi / 150.0));
     const int H = std::max(64, (int)(630.0 * ea.dpi / 150.0));
@@ -218,10 +218,10 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
     if (ea.ext == "fig" || ea.ext == "emf" || ea.ext == "hdf") {
         throw std::runtime_error(std::string(who) + ": format '."
             + ea.ext + "' is not supported yet (supported: .png .svg .jpg "
-              ".bmp .tga .pnm .tif) â€” bugs/opened/graphics/"
+              ".bmp .tga .pnm .tif) — bugs/opened/graphics/"
               "figure-export-gaps.md");
     }
-    // Raster formats â†’ RGB buffer â†’ image toolbox encoder.
+    // Raster formats → RGB buffer → image toolbox encoder.
     std::vector<std::uint8_t> rgb =
         figrender::renderFigureRgb(*ea.fig, W, H);
     const size_t Hp = (size_t)H, Wp = (size_t)W;
@@ -229,7 +229,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
                               engine.resource());
     std::uint8_t *d = A.uint8DataMut();
     // Value is COLUMN-MAJOR (MATLAB layout): d[r + c*H + ch*H*W]. The
-    // raster buffer is row-major top-down RGB â€” transpose into place
+    // raster buffer is row-major top-down RGB — transpose into place
     // (filling it linearly scrambles the image into crisscrossing
     // diagonal noise).
     for (size_t r = 0; r < Hp; ++r)
@@ -273,7 +273,7 @@ void registerFigureExport(Engine &engine)
         };
         engine.registerFunction("", "exportgraphics", std::move(fn));
     }
-    // print(fig, filename, '-dpng' [, '-r###' â€¦]) and the command form
+    // print(fig, filename, '-dpng' [, '-r###' …]) and the command form
     // `print -dpng file.png` (glue args arrive the same way).
     {
         ExternalFunc fn = [&engine](Span<const Value> args, size_t,

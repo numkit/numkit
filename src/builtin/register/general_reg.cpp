@@ -6,7 +6,7 @@
 #include <numkit/value/scratch.hpp>
 #include <numkit/core/vm.hpp>
 #include <numkit/runtime/runtime.hpp>
-#include <numkit/core/graphics_handle.hpp>
+#include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
 #include <iomanip>

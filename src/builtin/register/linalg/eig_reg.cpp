@@ -5,10 +5,10 @@
 // engine-free compute in eig.cpp. The auto-dispatch helpers
 // (eigValuesAuto / eigVDAuto, choosing the symmetric Jacobi vs general
 // char-poly path via the now-public isSymmetricApprox) and leftEigenvectors
-// (the [V,D,W] form) live here too â€” they are register-only glue.
+// (the [V,D,W] form) live here too — they are register-only glue.
 // library.cpp forward-declares + registers the *_reg fns by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/eig.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
@@ -74,7 +74,7 @@ bool isHermitianApprox(const Value &A, double tol)
 // general (char-poly + roots) path automatically.
 Value eigValuesAuto(const Value &M, std::pmr::memory_resource *mr)
 {
-    // Complex input never routes through the double-only symmetric path â€”
+    // Complex input never routes through the double-only symmetric path —
     // isSymmetricApprox reads doubleData() and would reject it outright
     // (bugs/opened/linalg/eig-complex-input-rejected.md). The general
     // path's complex-Schur pipeline handles it.
@@ -108,8 +108,8 @@ std::tuple<Value, Value> eigVDAuto(const Value &M, std::pmr::memory_resource *mr
 
 } // namespace
 
-// Left eigenvectors W (the [V,D,W]=eig form): W'Â·A = DÂ·W', i.e. the columns of
-// W are the right eigenvectors of Aáµ€. We eig(Máµ€), reorder its columns to match
+// Left eigenvectors W (the [V,D,W]=eig form): W'·A = D·W', i.e. the columns of
+// W are the right eigenvectors of Aᵀ. We eig(Mᵀ), reorder its columns to match
 // the eigenvalue order of D, and normalize each to unit 2-norm (MATLAB). For
 // symmetric M this reduces to W == V. Only real-eigenvalue M is supported (the
 // general eig path itself throws on complex eigenvalues).
@@ -117,12 +117,12 @@ static Value leftEigenvectors(const Value &M, const Value &D,
                               std::pmr::memory_resource *mr)
 {
     const std::size_t n = static_cast<std::size_t>(M.dims().dim(0));
-    // Máµ€.
+    // Mᵀ.
     Value Mt = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *mt = Mt.doubleDataMut();
     for (std::size_t j = 0; j < n; ++j)
         for (std::size_t i = 0; i < n; ++i)
-            mt[i + j * n] = M.elemAsDouble(j + i * n);   // Máµ€(i,j) = M(j,i)
+            mt[i + j * n] = M.elemAsDouble(j + i * n);   // Mᵀ(i,j) = M(j,i)
 
     auto [VL, DL] = eigVDAuto(Mt, mr);
 
@@ -135,7 +135,7 @@ static Value leftEigenvectors(const Value &M, const Value &D,
     double *wd = W.doubleDataMut();
     std::vector<bool> used(n, false);
     for (std::size_t k = 0; k < n; ++k) {
-        // Match D's k-th eigenvalue to the nearest unused eigenvalue of Máµ€.
+        // Match D's k-th eigenvalue to the nearest unused eigenvalue of Mᵀ.
         std::size_t best = n;
         double bestErr = std::numeric_limits<double>::infinity();
         for (std::size_t j = 0; j < n; ++j) {

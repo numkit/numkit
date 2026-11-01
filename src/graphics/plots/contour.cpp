@@ -1,4 +1,4 @@
-// nk/graphics â€” contour.cpp
+// nk/graphics — contour.cpp
 //
 // graphics.contour.* builders (contour / contourf), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -34,12 +34,12 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
     };
 
-    // â”€â”€ Contour â€” marching squares over Z(R, C) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Contour — marching squares over Z(R, C) ────────────────────────
     // contour(Z) / contour(Z, n) / contour(Z, levels)
     // contour(X, Y, Z[, n|levels])
-    // We don't reuse the imagesc heatmap path â€” contour produces 1-D
+    // We don't reuse the imagesc heatmap path — contour produces 1-D
     // line layers instead of a 2-D raster. Each level becomes its own
-    // DatasetInfo with type='line' and an inline color (HSLâ†’RGB ramp
+    // DatasetInfo with type='line' and an inline color (HSL→RGB ramp
     // through the z-extent), with NaN separators between segments so
     // the existing line renderer can draw them as one path.
     auto contourImpl = [](Span<const Value> args, size_t nargout,
@@ -120,7 +120,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             return a + (L - va) / (vb - va) * (b - a);
         };
 
-        // HSL â†’ RGB ramp helper: blue (240Â°) at zmn â†’ red (0Â°) at zmx.
+        // HSL → RGB ramp helper: blue (240°) at zmn → red (0°) at zmx.
         const auto colorForLevel = [&](double L) {
             const double t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
@@ -211,8 +211,8 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         }
     };
     reg("contour", "contour", contourImpl);
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // contourf â€” filled bands between consecutive levels.
+    // ────────────────────────────────────────────────────────────────
+    // contourf — filled bands between consecutive levels.
     // Strategy: for each level L from highest to lowest, draw the
     // closed polygon "Z >= L" with a colour from the colormap at that
     // level. Because levels are drawn in descending order each layer
@@ -222,9 +222,9 @@ void buildContourPlots(std::vector<PlotEntry> &table)
     // corner-points (TL, TR, BR, BL), we compute a 4-bit bitmask of
     // "corner is inside (z >= L)" and look up the polygon vertices
     // from a 16-entry table. Saddle codes (5, 10) are split into two
-    // disjoint triangles â€” visually equivalent to MATLAB's
+    // disjoint triangles — visually equivalent to MATLAB's
     // disambiguation in our usage (the renderer fills the union).
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     auto contourfImpl = [](Span<const Value> args, size_t nargout,
                            Span<Value> outs, GraphicsContext &gc) {
         auto setOutputs = [&]() {
@@ -297,7 +297,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
                     levels.push_back(zmn + step * i);
             }
         }
-        // Bottom band â€” covers the entire data extent. Drawn first
+        // Bottom band — covers the entire data extent. Drawn first
         // (lightest colour) so descending layers sit on top.
         std::sort(levels.begin(), levels.end());
 
@@ -306,7 +306,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             return a + (L - va) / (vb - va) * (b - a);
         };
 
-        // HSLâ†’RGB ramp same as contour (blueâ†’red across [zmn, zmx]).
+        // HSL→RGB ramp same as contour (blue→red across [zmn, zmx]).
         const auto colorForLevel = [&](double L) {
             const double t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
@@ -329,7 +329,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             return std::string(buf);
         };
 
-        // Bottom layer â€” full extent â€” coloured at the lowest band so
+        // Bottom layer — full extent — coloured at the lowest band so
         // any cell whose minimum corner is below the smallest level
         // gets a colour. Drawn first (lowest stack position).
         {
@@ -410,7 +410,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
                         case 11: emitRing({ TL, TR, Re_, B, BL }); break;
                         case 13: emitRing({ TL, T, Re_, BR, BL }); break;
                         case 14: emitRing({ TR, BR, BL, Le, T }); break;
-                        // Saddles â€” draw as two disjoint triangles.
+                        // Saddles — draw as two disjoint triangles.
                         case 5:  emitRing({ TL, T, Le });
                                  emitRing({ BR, B, Re_ }); break;
                         case 10: emitRing({ TR, Re_, T });

@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/caching_memory_resource.hpp>
-#include <numkit/core/value_stats.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
@@ -3504,95 +3503,6 @@ std::vector<std::string> Engine::workspaceVarNames() const
     auto names = workspaceEnv_->localNames();
     std::sort(names.begin(), names.end());
     return names;
-}
-
-static std::string jsonEscape(const std::string &s)
-{
-    std::string out;
-    out.reserve(s.size() + 4);
-    for (char c : s) {
-        if (c == '"')
-            out += "\\\"";
-        else if (c == '\\')
-            out += "\\\\";
-        else if (c == '\n')
-            out += "\\n";
-        else if (c == '\t')
-            out += "\\t";
-        else
-            out += c;
-    }
-    return out;
-}
-
-std::string Engine::workspaceJSON() const
-{
-    auto names = workspaceVarNames();
-    std::ostringstream os;
-    os << "{";
-    bool first = true;
-    for (auto &name : names) {
-        auto *val = workspaceEnv_->get(name);
-        if (!val)
-            continue;
-        if (!first)
-            os << ",";
-        first = false;
-        os << "\"" << jsonEscape(name) << "\":{";
-        os << "\"type\":\"" << mtypeName(val->type()) << "\"";
-        auto &d = val->dims();
-        os << ",\"size\":\"" << d.rows() << "x" << d.cols();
-        if (d.is3D())
-            os << "x" << d.pages();
-        os << "\"";
-        os << ",\"bytes\":" << val->deepBytes();
-        os << ",\"preview\":";
-        if (val->type() == ValueType::DOUBLE && val->isScalar()) {
-            double v = val->toScalar();
-            if (std::isnan(v))
-                os << "\"NaN\"";
-            else if (std::isinf(v))
-                os << (v > 0 ? "\"Inf\"" : "\"-Inf\"");
-            else
-                os << v;
-        } else if (val->type() == ValueType::COMPLEX && val->isScalar()) {
-            auto c = val->toComplex();
-            os << "\"" << c.real();
-            if (c.imag() >= 0)
-                os << "+";
-            os << c.imag() << "i\"";
-        } else if (val->type() == ValueType::CHAR) {
-            os << "\"" << jsonEscape(val->toString()) << "\"";
-        } else if (val->type() == ValueType::LOGICAL && val->isScalar()) {
-            os << (val->toBool() ? "true" : "false");
-        } else if ((val->type() == ValueType::DOUBLE) && val->numel() <= 10) {
-            os << "[";
-            for (size_t i = 0; i < val->numel(); ++i) {
-                if (i)
-                    os << ",";
-                os << val->doubleData()[i];
-            }
-            os << "]";
-        } else {
-            os << "null";
-        }
-        // Optional display stats (min/max/mean/median/mode/var/std) for the
-        // unified Variable / struct viewer's column chooser. Full-precision
-        // so the JS side renders exact values; omitted for non-numeric.
-        ValueStats st;
-        if (computeValueStats(*val, st)) {
-            std::ostringstream so;
-            so.precision(17);
-            so << ",\"stats\":{\"min\":" << st.min << ",\"max\":" << st.max
-               << ",\"mean\":" << st.mean << ",\"median\":" << st.median
-               << ",\"mode\":" << st.mode << ",\"var\":" << st.var
-               << ",\"std\":" << st.std << "}";
-            os << so.str();
-        }
-        os << "}";
-    }
-    os << "}";
-    return os.str();
 }
 
 // ============================================================

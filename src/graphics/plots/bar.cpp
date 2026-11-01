@@ -1,4 +1,4 @@
-// nk/graphics â€” bar.cpp
+// nk/graphics — bar.cpp
 //
 // graphics.bar.* builders (bar / barh / scatter / hist / histogram / pie / boxplot / patch / heatmap / bubblechart / swarmchart), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -97,7 +97,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 "#7fd99a", "#5fb3d4", "#e9b870", "#9b8cf2",
                 "#e26a6a", "#d4a5e6", "#f2a37e", "#6fcfbf",
             };
-            // Build base X vector â€” explicit when given, else 1..Yr.
+            // Build base X vector — explicit when given, else 1..Yr.
             std::vector<double> xb(Yr);
             if (xArg) {
                 for (size_t r = 0; r < Yr; ++r) xb[r] = xArg->elemAsDouble(r);
@@ -157,7 +157,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 // don't overlap. The IDE renderer renders each dataset
                 // with the same default width, so sub-pixel
                 // positioning is the visible separator. With Yc bars
-                // per group, offsets span Â±0.4 around the base.
+                // per group, offsets span ±0.4 around the base.
                 const double groupHalf = 0.4;
                 const double slot = (Yc > 1) ? (2 * groupHalf) / (Yc - 1) : 0.0;
                 for (size_t cc = 0; cc < Yc; ++cc) {
@@ -183,10 +183,10 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Statistical chart wrappers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────── Statistical chart wrappers ───────────────────────────
     // These all reduce to 1-2 existing dataset types (scatter / line /
     // bar / stairs) so the renderer doesn't need any new code.
-    // cdfplot(x) / ecdf(x) â€” empirical cumulative distribution. Sorts
+    // cdfplot(x) / ecdf(x) — empirical cumulative distribution. Sorts
     // x ascending and renders a right-continuous step function from
     // 0 to 1. NaN inputs are dropped.
     auto cdfImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -225,14 +225,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     };
     reg("bar", "cdfplot", cdfImpl);
     // `ecdf` is already provided by toolboxes/stats as a computational
-    // routine that returns (F, x) â€” registering a graphics version
+    // routine that returns (F, x) — registering a graphics version
     // here would duplicate the compat.<ecdf> alias and brick WASM
     // init. Users plot the empirical CDF via `cdfplot(x)`.
-    // qqplot(x) â€” quantile-quantile plot vs the standard normal. The
+    // qqplot(x) — quantile-quantile plot vs the standard normal. The
     // observed sample quantile at rank i = (i - 0.5) / N is plotted
-    // against the theoretical normal quantile Î¦â»Â¹((i - 0.5) / N).
+    // against the theoretical normal quantile Φ⁻¹((i - 0.5) / N).
     // Reference line passes through the 25th and 75th sample quantiles
-    // â€” a robust IQR-based fit that beats a naive Î¼ Â± Ïƒ line on
+    // — a robust IQR-based fit that beats a naive μ ± σ line on
     // skewed data. Two datasets: scatter (points) + line (reference).
     reg("bar", "qqplot",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -247,7 +247,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::sort(xs.begin(), xs.end());
             const size_t N = xs.size();
 
-            // Probit (inverse normal CDF) â€” Abramowitz & Stegun 26.2.23
+            // Probit (inverse normal CDF) — Abramowitz & Stegun 26.2.23
             // rational approx, good to ~4.5e-4 absolute error. Mirrors
             // the upper tail; the lower tail is its negative.
             const auto probit = [](double p) {
@@ -305,7 +305,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // pareto(Y) â€” bars in descending Y order + a cumulative-percent
+    // pareto(Y) — bars in descending Y order + a cumulative-percent
     // line on the same axes. Useful for "80/20" / quality-control
     // visualisations. We emit two datasets:
     //   1. type=bar, X = 1..N (rank), Y sorted descending
@@ -353,7 +353,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // histfit(x[, nbins]) â€” histogram of x with a Gaussian fit overlay.
+    // histfit(x[, nbins]) — histogram of x with a Gaussian fit overlay.
     // Default 10 bins. The fit uses sample mean/std; PDF is scaled by
     // (N * binWidth) so the curve is visually comparable to the bar
     // counts.
@@ -434,7 +434,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // gscatter(x, y, g) â€” scatter coloured by group label. Each unique
+    // gscatter(x, y, g) — scatter coloured by group label. Each unique
     // value of g becomes its own scatter dataset (so it picks up a
     // distinct color from the renderer's palette).
     reg("bar", "gscatter",
@@ -449,7 +449,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
 
             // Group indices: distinct values in G, preserving first-seen
             // order. G can be numeric or char (treat both via toScalar
-            // when numeric; char-array support deferred â€” most users
+            // when numeric; char-array support deferred — most users
             // pass numeric labels).
             std::vector<double> groupKeys;
             std::vector<int> groupIdx(N);
@@ -501,7 +501,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // spy(M) â€” sparsity pattern. Renders a marker at every (col, row)
+    // spy(M) — sparsity pattern. Renders a marker at every (col, row)
     // where M is non-zero (and finite). Mirrors MATLAB convention of
     // axis ij so the matrix sits like the printed form (row 1 at top).
     reg("bar", "spy",
@@ -539,9 +539,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // barh â€” horizontal bar chart, mirror of bar(). MATLAB convention:
-    //   barh(y)    â€” y is vector of bar lengths, vertical positions = 1:N
-    //   barh(x, y) â€” x is vertical positions (categories), y = lengths
+    // barh — horizontal bar chart, mirror of bar(). MATLAB convention:
+    //   barh(y)    — y is vector of bar lengths, vertical positions = 1:N
+    //   barh(x, y) — x is vertical positions (categories), y = lengths
     // We store xJson = positions (rendered along the Y axis) and
     // yJson = lengths (along X axis); the 'barh' mode in the renderer
     // swaps the axis roles compared to 'bar'.
@@ -579,7 +579,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             ds.type = "scatter";
             ds.xJson = vecToJson(args[0]);
             ds.yJson = vecToJson(args[1]);
-            // scatter(x, y, ..., 'filled') â†’ filled markers; MATLAB's default is
+            // scatter(x, y, ..., 'filled') → filled markers; MATLAB's default is
             // open (the renderer draws an outline unless the style says filled).
             for (size_t k = 2; k < args.size(); ++k) {
                 if (args[k].isChar()) {
@@ -666,20 +666,20 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                     outs[1] = std::move(centers);
             }
         });
-    // histogram(X [, nbins | edges] [, Name-Value]) â€” MATLAB R2025b
+    // histogram(X [, nbins | edges] [, Name-Value]) — MATLAB R2025b
     // semantics (probe-verified 2026-09-12):
-    //   â€¢ auto binning: all-integer data â†’ width-1 bins at xÂ±0.5;
-    //     otherwise Scott width 3.5Â·std(X)Â·n^(-1/3), floored to one
-    //     significant digit, edges at floor(min/w)Â·w .. ceil(max/w)Â·w
-    //     (probes: rand(1,100) â†’ w 0.2, 5 bins; randn(1,1000) â†’ w 0.3,
-    //     23 bins, edges âˆ’3.3..3.6; 1:50 â†’ 50 integer bins).
-    //   â€¢ defaults: FaceColor 'auto' = (0,0.447,0.741), EdgeColor
-    //     (0.851)Ã—3 light gray, LineWidth 0.5, Normalization 'count',
+    //   • auto binning: all-integer data → width-1 bins at x±0.5;
+    //     otherwise Scott width 3.5·std(X)·n^(-1/3), floored to one
+    //     significant digit, edges at floor(min/w)·w .. ceil(max/w)·w
+    //     (probes: rand(1,100) → w 0.2, 5 bins; randn(1,1000) → w 0.3,
+    //     23 bins, edges −3.3..3.6; 1:50 → 50 integer bins).
+    //   • defaults: FaceColor 'auto' = (0,0.447,0.741), EdgeColor
+    //     (0.851)×3 light gray, LineWidth 0.5, Normalization 'count',
     //     bars TOUCH (full bin width).
     // Name-Value handled: BinWidth, BinLimits, FaceColor (hex kv only),
     // EdgeColor. Deferred (filed): BinMethod strings, other
     // Normalization modes, histogram(C)/cat bins, histogram of
-    // datetime â€” see handle-surface-gaps.
+    // datetime — see handle-surface-gaps.
     reg("bar", "histogram",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             if (args.empty()) { outs[0] = Value(); return; }
@@ -743,7 +743,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                             if (c == sc.first)
                                 *kv = sc.second;
                     } else if (cv.isNumeric() && cv.numel() >= 3) {
-                        // Explicit triplet â€” the deterministic path the
+                        // Explicit triplet — the deterministic path the
                         // parity spec pins (MATLAB's 'auto' colour is
                         // THEME-dependent: dark theme renders
                         // (0.49,0.73,0.92) on a forced-white figure).
@@ -778,7 +778,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                     w = 1;
                 } else {
                     double scott = 3.5 * sd * std::pow((double)n, -1.0 / 3.0);
-                    // floor to one significant digit (probe: 0.35â†’0.3)
+                    // floor to one significant digit (probe: 0.35→0.3)
                     double p = std::pow(10.0, std::floor(std::log10(scott > 0 ? scott : 1)));
                     w = std::floor((scott > 0 ? scott : 1) / p) * p;
                     if (!(w > 0)) w = 1;
@@ -820,7 +820,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::ostringstream style;
             style << "binWidth=" << (edges.size() > 1 ? edges[1] - edges[0] : 1);
             // MATLAB default FaceAlpha 0.6: bars composite with the
-            // background â€” the export pre-blends toward white.
+            // background — the export pre-blends toward white.
             {
                 char ab[24];
                 std::snprintf(ab, sizeof ab, ";faceAlpha=%.4g", faceAlpha);
@@ -842,14 +842,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // histogram2(X, Y) â€” 2-D histogram. Bins (X, Y) into an nxÃ—ny grid
+    // histogram2(X, Y) — 2-D histogram. Bins (X, Y) into an nx×ny grid
     // and renders the count matrix as an imagesc-style heatmap. Param
     // forms supported (positional, like MATLAB's classic call):
-    //   histogram2(X, Y)              â€” 10Ã—10 bins over data extent
-    //   histogram2(X, Y, n)           â€” nÃ—n
-    //   histogram2(X, Y, [nx ny])     â€” explicit grid
-    //   histogram2(X, Y, nx, ny)      â€” explicit grid (separate args)
-    // Name-Value form (NumBins, BinEdges, â€¦) is on the BACKLOG.
+    //   histogram2(X, Y)              — 10×10 bins over data extent
+    //   histogram2(X, Y, n)           — n×n
+    //   histogram2(X, Y, [nx ny])     — explicit grid
+    //   histogram2(X, Y, nx, ny)      — explicit grid (separate args)
+    // Name-Value form (NumBins, BinEdges, …) is on the BACKLOG.
     reg("bar", "histogram2",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             auto *mr = gc.mr;
@@ -921,18 +921,18 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // adapter routes through the existing heatmap renderer with
             // its full quantization + LUT path.
             std::vector<Value> proxied = { centers_x, centers_y, counts };
-            // Delegate to heatmapImpl. axisIj=false â€” histogram2 stays on
+            // Delegate to heatmapImpl. axisIj=false — histogram2 stays on
             // axis xy by default (Y up), unlike imagesc which auto-flips.
             heatmapImpl("imagesc", false,
                         Span<const Value>(proxied.data(), proxied.size()),
                         nargout, outs, gc);
         });
-    // â”€â”€ patch / fill â€” generic filled polygon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── patch / fill — generic filled polygon ────────────────────────
     // Calling forms:
-    //   patch(X, Y)             â€” single polygon, default fill
-    //   patch(X, Y, C)          â€” C is a colour spec ('r', '#ff8800',
+    //   patch(X, Y)             — single polygon, default fill
+    //   patch(X, Y, C)          — C is a colour spec ('r', '#ff8800',
     //                              [r g b] triplet 0..1)
-    //   patch(X, Y, C, 'EdgeColor', '...')   â€” N-V pairs (subset)
+    //   patch(X, Y, C, 'EdgeColor', '...')   — N-V pairs (subset)
     // X and Y may be column-vectors (one polygon) or matrices (one
     // polygon per column). For matrix inputs we serialise polygons
     // separated by null markers in the wire JSON; the renderer breaks
@@ -1032,11 +1032,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                                     Span<Value> outs, GraphicsContext &gc) {
         patchImpl(args, nargout, outs, gc, true);
     });
-    // pie(X) â€” circular slices proportional to X. Each wedge is its
+    // pie(X) — circular slices proportional to X. Each wedge is its
     // own polygon dataset so it picks up a distinct palette colour.
     // Calling forms (subset of MATLAB's):
-    //   pie(X)             â€” slice for every X(i) > 0
-    //   pie(X, explode)    â€” explode(i) â‰  0 displaces that wedge
+    //   pie(X)             — slice for every X(i) > 0
+    //   pie(X, explode)    — explode(i) ≠ 0 displaces that wedge
     //                        radially by ~10% of the unit radius
     auto pieImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs,
                       GraphicsContext &gc, bool tilt3d) {
@@ -1074,15 +1074,15 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         for (size_t i = 0; i < N; ++i) {
             const double v = X.elemAsDouble(i);
             if (!std::isfinite(v) || v <= 0) continue;
-            const double dÎ¸ = v / total * TAU;
-            const double Î¸0 = angle;
-            const double Î¸1 = angle + dÎ¸;
-            angle = Î¸1;
+            const double dθ = v / total * TAU;
+            const double θ0 = angle;
+            const double θ1 = angle + dθ;
+            angle = θ1;
 
             // Explode: shift centre along the wedge bisector.
             double cx = 0, cy = 0;
             if (expl && expl->numel() > i && expl->elemAsDouble(i) != 0) {
-                const double mid = (Î¸0 + Î¸1) / 2;
+                const double mid = (θ0 + θ1) / 2;
                 const double off = 0.1;
                 cx = off * std::cos(mid);
                 cy = off * std::sin(mid) * tiltY;
@@ -1092,7 +1092,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             xs << '['; ys << '[';
             xs << cx; ys << cy;
             for (int s = 0; s <= arcSamples; ++s) {
-                const double t = Î¸0 + (Î¸1 - Î¸0) * s / arcSamples;
+                const double t = θ0 + (θ1 - θ0) * s / arcSamples;
                 xs << ',' << (cx + std::cos(t));
                 ys << ',' << (cy + std::sin(t) * tiltY);
             }
@@ -1106,7 +1106,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             sty << "color=" << kPalette[i % 10] << ";fillOpacity=0.85";
             ds.style = sty.str();
             // Auto-label "p%" so the legend (if user calls legend())
-            // shows percentages. MATLAB uses cell labels â€” we ship the
+            // shows percentages. MATLAB uses cell labels — we ship the
             // numeric form by default.
             char buf[16];
             std::snprintf(buf, sizeof buf, "%.0f%%", v / total * 100.0);
@@ -1122,14 +1122,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     reg("bar", "pie3", [pieImpl](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
         pieImpl(a, n, o, gc, true);
     });
-    // boxplot(X) / boxchart(X) â€” Tukey box-and-whisker plot.
-    // X as vector â†’ one box at x=1.
-    // X as matrix â†’ one box per column at x = 1..C.
+    // boxplot(X) / boxchart(X) — Tukey box-and-whisker plot.
+    // X as vector → one box at x=1.
+    // X as matrix → one box per column at x = 1..C.
     // Per box we emit:
-    //   â€¢ polygon for the IQR rectangle (Q1..Q3)
-    //   â€¢ line for the median (horizontal across the box)
-    //   â€¢ line dataset for the two whisker stems + the two caps
-    //   â€¢ scatter dataset for outliers (beyond Â±1.5Â·IQR)
+    //   • polygon for the IQR rectangle (Q1..Q3)
+    //   • line for the median (horizontal across the box)
+    //   • line dataset for the two whisker stems + the two caps
+    //   • scatter dataset for outliers (beyond ±1.5·IQR)
     auto boxImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.empty() || args[0].numel() == 0) {
@@ -1139,7 +1139,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         const auto &M = args[0];
         const size_t R = std::max<size_t>(1, M.dims().rows());
         const size_t C = std::max<size_t>(1, M.dims().cols());
-        // Treat 1Ã—N or NÃ—1 as a single column; matrix â†’ C columns.
+        // Treat 1×N or N×1 as a single column; matrix → C columns.
         const bool single = (R == 1 || C == 1);
         const size_t nBoxes = single ? 1 : C;
         const size_t nPerBox = single ? M.numel() : R;
@@ -1213,7 +1213,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             //    separators between segments.
             std::ostringstream wx, wy;
             wx << '['; wy << '[';
-            // Lower stem: (cx, whLo) â†’ (cx, q1)
+            // Lower stem: (cx, whLo) → (cx, q1)
             wx << cx << ',' << cx;
             wy << whLo << ',' << q1;
             // Lower cap
@@ -1233,7 +1233,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             dsW.style = "color=#1f77b4";
             fm.pushDataset(std::move(dsW));
 
-            // 4. Outliers â€” scatter at (cx, v) for v outside fences.
+            // 4. Outliers — scatter at (cx, v) for v outside fences.
             std::ostringstream ox, oy;
             ox << '['; oy << '[';
             bool first = true;
@@ -1260,10 +1260,10 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     };
     reg("bar", "boxplot",  boxImpl);
     reg("bar", "boxchart", boxImpl);
-    // violinplot(X) â€” Gaussian-KDE shape + slim box + median dot.
-    // Layout mirrors boxplot: vector â†’ one violin at x=1, matrix
-    // â†’ one violin per column at x = 1..C. KDE bandwidth uses
-    // Silverman's rule (1.06 Â· Ïƒ Â· N^(-1/5)).
+    // violinplot(X) — Gaussian-KDE shape + slim box + median dot.
+    // Layout mirrors boxplot: vector → one violin at x=1, matrix
+    // → one violin per column at x = 1..C. KDE bandwidth uses
+    // Silverman's rule (1.06 · σ · N^(-1/5)).
     reg("bar", "violinplot",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -1380,7 +1380,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // bar3(Z) â€” 3-D bars. Emits raw 3-D coords so the WebGL renderer
+    // bar3(Z) — 3-D bars. Emits raw 3-D coords so the WebGL renderer
     // can build cuboids with real depth + lighting; no more cabinet
     // pre-projection. Wire format: type='bar3' with the Z-matrix as
     // nested rows (same shape as surf), plus implicit (x, y) coords =
@@ -1426,7 +1426,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // fill3(X, Y, Z[, C]) â€” emits raw 3-D vertex arrays. Each column
+    // fill3(X, Y, Z[, C]) — emits raw 3-D vertex arrays. Each column
     // of (X, Y, Z) is one polygon (one polygon for vector inputs).
     // The WebGL renderer builds a triangle fan per polygon under
     // perspective.
@@ -1487,15 +1487,15 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         });
     reg("bar", "geobubble",
         [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
-            // bubblechart routing â€” scatter accepts sizes as its 3rd arg.
+            // bubblechart routing — scatter accepts sizes as its 3rd arg.
             geoForward("scatter", a, o, gc);
         });
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // bubblechart / bubblechart3 / swarmchart â€” variants of scatter
+    // ────────────────────────────────────────────────────────────────
+    // bubblechart / bubblechart3 / swarmchart — variants of scatter
     // / scatter3 that emphasise size-modulated markers. We delegate
     // to the underlying scatter family; the size vector flows through
     // unchanged and the renderer applies it as marker radius.
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     reg("bar", "bubblechart",
         [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             delegateTo("scatter", a, o, gc);
@@ -1504,7 +1504,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             delegateTo("scatter3", a, o, gc);
         });
-    // swarmchart(x, y[, sizes[, color]]) â€” scatter with X-axis jitter
+    // swarmchart(x, y[, sizes[, color]]) — scatter with X-axis jitter
     // applied per unique categorical X. For each cluster of points
     // sharing the same X coordinate, points are spread along X within
     // a small interval; the spread amount scales with the cluster's
@@ -1528,7 +1528,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 buckets[key].push_back(i);
             }
             // Per bucket, spread points uniformly in [-half, +half] of
-            // the slot width. Slot = 0.35 Ã— the smallest gap between
+            // the slot width. Slot = 0.35 × the smallest gap between
             // distinct X values, capped at 0.4 absolute.
             double minGap = 1.0;
             if (buckets.size() > 1) {
@@ -1564,15 +1564,15 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             delegateTo("scatter3", a, o, gc);
         });
-    // heatmap(C) â€” table-style heatmap. Same data layout as imagesc:
+    // heatmap(C) — table-style heatmap. Same data layout as imagesc:
     // 2-D matrix of values mapped through a colormap. Optional row/
     // column label strings ('RowNames' / 'ColumnNames') are accepted
-    // but currently flow through as labels only â€” full table-style
+    // but currently flow through as labels only — full table-style
     // heatmap with cell-text overlays + row/col headers is BACKLOG.
     // Forms supported (subset):
     //   heatmap(C)
     //   heatmap(C, 'Colormap', name)
-    // Helper â€” emit a text-annotation dataset at (x, y) with label.
+    // Helper — emit a text-annotation dataset at (x, y) with label.
     // Picks a colour that contrasts with the cell value (white on
     // dark bins, black on light bins) via a brightness threshold.
     auto pushCellText = [](FigureManager &fm, double x, double y,
@@ -1591,7 +1591,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     reg("bar", "heatmap",
         [pushCellText](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             // Drop trailing N-V pairs that the imagesc adapter doesn't
-            // know about â€” keep only the first numeric argument as the
+            // know about — keep only the first numeric argument as the
             // data matrix. 'Colormap' is honoured via a colormap() call
             // right after; 'CellLabelColor' / 'CellLabelFormat' etc.
             // are accepted as no-ops. Cell-label text is enabled by
@@ -1632,14 +1632,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             if (!cmap.empty()) {
                 gc.fm.currentAxes().colormapName = cmap;
             }
-            // Cell-text overlay â€” one <text> per cell with the
+            // Cell-text overlay — one <text> per cell with the
             // formatted value. Skipped for very large matrices to
             // avoid clutter.
             if (cellLabel && !proxied.empty()) {
                 const auto &C = proxied[0];
                 const size_t R = C.dims().rows();
                 const size_t W = C.dims().cols();
-                if (R * W <= 400) {   // â‰¤ 20Ã—20 grid â€” show labels
+                if (R * W <= 400) {   // ≤ 20×20 grid — show labels
                     double cmn = std::numeric_limits<double>::infinity();
                     double cmx = -std::numeric_limits<double>::infinity();
                     for (size_t i = 0; i < R * W; ++i) {
@@ -1655,7 +1655,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                             const double v = C.elemAsDouble(cc * R + r);
                             const double t_ = (cmx == cmn) ? 0.5
                                 : (v - cmn) / (cmx - cmn);
-                            // Dark background â†” low t (blue/cyan side
+                            // Dark background ↔ low t (blue/cyan side
                             // of parula). Threshold 0.4 picks readable
                             // colour against parula's gradient.
                             const bool dark = (t_ < 0.4);
@@ -1672,7 +1672,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             gc.fm.current().modified = true;
             gc.fm.emitModified();
         });
-    // confusionchart(C [, classNames]) â€” confusion matrix heatmap
+    // confusionchart(C [, classNames]) — confusion matrix heatmap
     // with cell-value labels. Same as heatmap(C) but adds explicit
     // axis labels and (when classNames given) categorical tick
     // labels on both axes.

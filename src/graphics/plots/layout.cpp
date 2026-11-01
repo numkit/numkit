@@ -1,4 +1,4 @@
-// nk/graphics â€” layout.cpp
+// nk/graphics — layout.cpp
 //
 // graphics.layout.* builders (figure / subplot / axes / labels / limits / legend / ticks / colormap), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -47,7 +47,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.empty() || args[0].isChar() || args[0].isString()) {
                 id = fm.newFigure();
             } else if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
-                // figure(f) with a Figure handle â€” make its figure current.
+                // figure(f) with a Figure handle — make its figure current.
                 auto *rec = fm.findHandle(hid);
                 if (!rec || rec->type != "figure")
                     throw std::runtime_error(
@@ -61,7 +61,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.current().modified = true;
             fm.emitModified();
             // The bundle adapter wraps this id into a matlab.ui.Figure
-            // handle object (kHandleReturning wrap). Always emit the id â€”
+            // handle object (kHandleReturning wrap). Always emit the id —
             // MATLAB binds a bare `figure` statement's Figure into `ans`.
             outs[0] = Value::scalar(static_cast<double>(id), mr);
         });
@@ -115,7 +115,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &fig = fm.current();
-            // Everything drawn in this figure dies â€” stale handles must
+            // Everything drawn in this figure dies — stale handles must
             // read as deleted (MATLAB semantics over a cleared figure).
             // The Figure itself survives clf; the super title is figure
             // CONTENT, so it dies too (MATLAB clf clears sgtitle).
@@ -277,7 +277,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.setSubplot(m, n, p);
             outs[0] = Value();
         });
-    // tiledlayout(m, n[, ...]) â€” modern alternative to subplot. We
+    // tiledlayout(m, n[, ...]) — modern alternative to subplot. We
     // store the grid shape on the FigureState so subsequent nexttile
     // calls can step through cells. Trailing N-V pairs ('Padding',
     // 'TileSpacing', 'TileIndexing') are accepted but currently no-op
@@ -295,7 +295,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.setSubplot(m, n, 1);
             outs[0] = Value();
         });
-    // nexttile([span]) â€” bumps the active subplot cell index by 1
+    // nexttile([span]) — bumps the active subplot cell index by 1
     // (or by `span` if given a numeric arg). When the figure has no
     // tiledlayout grid yet, the call is a no-op.
     reg("layout", "nexttile",
@@ -365,20 +365,20 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             outs[0] = Value();
         });
-    // text(x, y, str, ...) â€” annotation overlay. Each call appends ONE
+    // text(x, y, str, ...) — annotation overlay. Each call appends ONE
     // text dataset (single-point) to the current axes. For arrays, the
     // user iterates via for-loop in script. Trailing name-value pairs
-    // (Color, FontSize) parsed minimally â€” extra pairs are ignored.
+    // (Color, FontSize) parsed minimally — extra pairs are ignored.
     // The IDE renders text overlays after the image / line layers so
     // labels stay on top of imagesc / scatter.
-    // annotation(type, x, y [, Name-Value]) â€” figure-level overlays in
+    // annotation(type, x, y [, Name-Value]) — figure-level overlays in
     // NORMALIZED FIGURE coordinates [0,1] (MATLAB convention; probes
     // R2025b: Color (0.1294)^3, HeadSize 10, LineWidth 0.5; textarrow
     // text sits at the TAIL). Accepted types: line / arrow / textarrow /
     // ellipse / rectangle / textbox. NV: String, Color (name / short /
     // 1x3 triplet), FaceColor, FontSize. Attached to the CURRENT
     // figure; clf clears them (same lifecycle as superTitle). No
-    // handle object yet â€” deferred with the annotation IDE rendering
+    // handle object yet — deferred with the annotation IDE rendering
     // (figure-export-gaps / handle-surface-gaps).
     reg("layout", "annotation",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -401,7 +401,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 && args[1].numel() >= 4
                 && !(args.size() >= 3 && args[2].isNumeric())) {
                 // Position form (ellipse / rectangle / textbox):
-                // annotation(type, [x y w h]) â€” one vector.
+                // annotation(type, [x y w h]) — one vector.
                 an.x1 = args[1].elemAsDouble(0);
                 an.y1 = args[1].elemAsDouble(1);
                 an.x2 = an.x1 + args[1].elemAsDouble(2);
@@ -481,7 +481,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             const Value &yv = args[1];
             if (!xv.numel() || !yv.numel()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
-            // text() does NOT call prepareForPlot â€” it's an annotation,
+            // text() does NOT call prepareForPlot — it's an annotation,
             // it should append to whatever's already there even without
             // explicit `hold on`.
             DatasetInfo ds;
@@ -559,10 +559,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // MATLAB semantics:
-            //   grid          â†’ toggle MAJOR (minor untouched)
-            //   grid on       â†’ major on
-            //   grid off      â†’ both off
-            //   grid minor    â†’ toggle MINOR (major untouched)
+            //   grid          → toggle MAJOR (minor untouched)
+            //   grid on       → major on
+            //   grid off      → both off
+            //   grid minor    → toggle MINOR (major untouched)
             // Major and minor are independent booleans; the script can
             // hold "minor only" (rare but valid in MATLAB).
             size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
@@ -580,7 +580,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // Normalise a Location string ("NorthWest" â†’ "northwest"). MATLAB
+    // Normalise a Location string ("NorthWest" → "northwest"). MATLAB
     // accepts mixed case; we always lowercase. Empty / unrecognised
     // strings clear the field so the renderer falls back to its default.
     auto normLocation = [](const std::string &raw) -> std::string {
@@ -613,7 +613,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // not yet honoured but parsed-and-skipped so they don't
             // pollute legendLabels.
             // Pure-visibility args ('boxoff'/'boxon'/'show'/'on'/
-            // 'hide'/'off') must NOT clear existing labels â€” they toggle
+            // 'hide'/'off') must NOT clear existing labels — they toggle
             // frame/visibility only (MATLAB semantics). Detect up front
             // before zapping legendLabels.
             bool visibilityOnly = !args.empty();
@@ -630,12 +630,12 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             if (!visibilityOnly) ax.legendLabels.clear();
             // Don't reset legendLocation if the user calls bare `legend(...)`
-            // again â€” but DO accept an explicit override.
+            // again — but DO accept an explicit override.
             bool sawLocation = false;
             std::string newLoc;
             for (size_t i = 0; i < args.size(); ++i) {
-                // Cell of labels â€” the canonical multi-legend form
-                // legend({'sine','cosine'}, 'Location', ...) â€” decompose
+                // Cell of labels — the canonical multi-legend form
+                // legend({'sine','cosine'}, 'Location', ...) — decompose
                 // into individual labels
                 // (bugs/closed/graphics/legend-cell-and-name-value.md).
                 if (args[i].isCell()) {
@@ -695,10 +695,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 if (i == 0 && (sLower == "show" || sLower == "on")) {
                     ax.legendHidden = false;
-                    // No labels passed â€” keep whatever was set previously.
+                    // No labels passed — keep whatever was set previously.
                     continue;
                 }
-                // 'boxoff' / 'boxon' â€” toggle the legend frame.
+                // 'boxoff' / 'boxon' — toggle the legend frame.
                 if (sLower == "boxoff") {
                     ax.legendBoxOn = false;
                     continue;
@@ -812,7 +812,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             out.doubleDataMut()[3] = yl.elemAsDouble(1);
             outs[0] = std::move(out);
         });
-    // xdir / ydir â€” direct setters. MATLAB also accepts
+    // xdir / ydir — direct setters. MATLAB also accepts
     // set(gca, 'XDir', 'reverse'); we ship the direct form here,
     // and `set` is on the BACKLOG.
     reg("layout", "xdir",
@@ -841,7 +841,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             outs[0] = Value();
         });
-    // â”€â”€ Color limits & colormap â€” graphics.layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Color limits & colormap — graphics.layout ─────────────────────
     reg("layout", "caxis",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
@@ -884,7 +884,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 ax.colormapName = name;
                 ax.customColormapJson.clear();
             } else {
-                // Numeric MÃ—3 matrix â†’ encode as JSON array of triplets
+                // Numeric M×3 matrix → encode as JSON array of triplets
                 // and clear the named colormap.
                 const auto &M = args[0];
                 const std::size_t R = M.dims().rows();
@@ -911,9 +911,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = (nargout >= 1 && !args.empty() && args[0].isNumeric()) ? args[0] : Value();
         });
-    // colorscale('log' | 'linear') â€” must be called BEFORE imagesc(M).
+    // colorscale('log' | 'linear') — must be called BEFORE imagesc(M).
     // Sets the axes' colorScale state, which survives prepareForPlot so
-    // the next imagesc bakes log10 into its quantization (one-shot â€”
+    // the next imagesc bakes log10 into its quantization (one-shot —
     // toggling after imagesc does nothing because the data is already
     // quantized).
     reg("layout", "colorscale",
@@ -930,9 +930,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             outs[0] = Value();
         });
-    // xscale / yscale('log' | 'linear') â€” set the axis scale of the current
+    // xscale / yscale('log' | 'linear') — set the axis scale of the current
     // axes. Mirrors `set(gca, 'XScale', 'log')` from MATLAB. Unlike colorscale
-    // these do NOT survive prepareForPlot â€” they're meant to be set AFTER
+    // these do NOT survive prepareForPlot — they're meant to be set AFTER
     // the plot, like in MATLAB. The IDE-side renderer (Heatmap, Interactive-
     // Plot) reads figure.xscale / figure.yscale to drive log-axis display.
     auto regAxisScale = [&](const char *fnName, std::string AxesState::*field) {
@@ -960,7 +960,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     };
     regAxisScale("xscale", &AxesState::xscale);
     regAxisScale("yscale", &AxesState::yscale);
-    // yyaxis(side) â€” switch the active Y-side. MATLAB: yyaxis left|right.
+    // yyaxis(side) — switch the active Y-side. MATLAB: yyaxis left|right.
     // First call enables the dual-axis state and stays enabled for the
     // life of the current axes; toggling only changes which side new
     // plots / ylim / ylabel / yscale calls write to.
@@ -986,9 +986,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     auto noop_ret1 = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
         outs[0] = Value::scalar(1.0, gc.mr);
     };
-    // linkaxes â€” connect all subplot cells in the current figure for
+    // linkaxes — connect all subplot cells in the current figure for
     // synchronised pan/zoom. MATLAB:
-    //   linkaxes(h)            â€” link on x and y (alias for 'xy')
+    //   linkaxes(h)            — link on x and y (alias for 'xy')
     //   linkaxes(h, 'x'|'y'|'xy'|'off')
     // nk doesn't model graphics handles, so we ignore the first
     // argument and link every subplot cell in the current figure
@@ -1018,7 +1018,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // rotate3d / pan3d / zoom3d (on|off) â€” toggle the OrbitControls
+    // rotate3d / pan3d / zoom3d (on|off) — toggle the OrbitControls
     // axis-of-interaction for the 3-D renderer. MATLAB also accepts
     // these as no-arg toggles but the e2e parity tests pass strings.
     auto interactionToggle = [](std::string AxesState::*field,
@@ -1047,7 +1047,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [interactionToggle](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             interactionToggle(&AxesState::zoom3dMode, a, o, gc);
         });
-    // xticks / yticks / zticks â€” set custom tick positions. Accept a
+    // xticks / yticks / zticks — set custom tick positions. Accept a
     // numeric vector OR the string "auto" to clear. With no args,
     // the v1 returns an empty value (true MATLAB returns the
     // auto-generated tick set; needs renderer-side query plumbing).
@@ -1092,7 +1092,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "xticks", ticksReg(&AxesState::xTicksJson, &AxesState::xTicksAuto));
     reg("layout", "yticks", ticksReg(&AxesState::yTicksJson, &AxesState::yTicksAuto));
     reg("layout", "zticks", ticksReg(&AxesState::zTicksJson, &AxesState::zTicksAuto));
-    // xticklabels / yticklabels / zticklabels â€” set custom tick label
+    // xticklabels / yticklabels / zticklabels — set custom tick label
     // strings. Accept a cell of strings, a string array, or a single
     // multiline string. v1: cell-of-chars (most common) supported via
     // per-element toString; "auto" clears.
@@ -1140,7 +1140,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "xticklabels", tickLabelsReg(&AxesState::xTickLabelsJson));
     reg("layout", "yticklabels", tickLabelsReg(&AxesState::yTickLabelsJson));
     reg("layout", "zticklabels", tickLabelsReg(&AxesState::zTickLabelsJson));
-    // xtickformat / ytickformat / ztickformat â€” set a sprintf-style
+    // xtickformat / ytickformat / ztickformat — set a sprintf-style
     // format string ("%.2f", "%.0e", etc.). 'auto' clears.
     auto tickFormatReg = [](std::string AxesState::*field) {
         return [field](Span<const Value> args, size_t nargout,
@@ -1168,7 +1168,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "xtickformat", tickFormatReg(&AxesState::xTickFormat));
     reg("layout", "ytickformat", tickFormatReg(&AxesState::yTickFormat));
     reg("layout", "ztickformat", tickFormatReg(&AxesState::zTickFormat));
-    // xtickangle / ytickangle â€” rotation of tick labels in degrees.
+    // xtickangle / ytickangle — rotation of tick labels in degrees.
     auto tickAngleReg = [](double AxesState::*field) {
         return [field](Span<const Value> args, size_t nargout,
                        Span<Value> outs, GraphicsContext &gc) {
@@ -1183,10 +1183,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     };
     reg("layout", "xtickangle", tickAngleReg(&AxesState::xTickAngle));
     reg("layout", "ytickangle", tickAngleReg(&AxesState::yTickAngle));
-    // daspect([dx dy dz]) / pbaspect([px py pz]) â€” data + plot box
+    // daspect([dx dy dz]) / pbaspect([px py pz]) — data + plot box
     // aspect ratios. v1 maps the canonical [1 1 1] case to
     // axisMode='equal' (equivalent visual). Other ratios accepted but
-    // currently no-op â€” full anisotropic stretching is BACKLOG.
+    // currently no-op — full anisotropic stretching is BACKLOG.
     auto aspectImpl = [](Span<const Value> args, size_t nargout,
                          Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
@@ -1218,7 +1218,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     };
     reg("layout", "daspect",  aspectImpl);
     reg("layout", "pbaspect", aspectImpl);
-    // box(on|off|toggle) â€” show/hide the axis frame rectangle (the
+    // box(on|off|toggle) — show/hide the axis frame rectangle (the
     // full closed box vs. just left + bottom edges).
     reg("layout", "box",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -1237,7 +1237,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // gca / gcf / axes â€” ensure the target exists; the bundle adapter
+    // gca / gcf / axes — ensure the target exists; the bundle adapter
     // wraps the result into an axes/figure handle object
     // (matlab.graphics.axis.Axes / matlab.ui.Figure).
     reg("layout", "axes",
@@ -1258,7 +1258,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             gc.fm.current();       // create-on-demand, like MATLAB
             outs[0] = Value();
         });
-    // cla([reset]) â€” clear the current axes' datasets. With 'reset'
+    // cla([reset]) — clear the current axes' datasets. With 'reset'
     // also clears the per-axis config (title, xlabel, etc.). MATLAB's
     // 'reset' is opt-in; default cla preserves axes properties.
     reg("layout", "cla",
@@ -1292,21 +1292,21 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // linkprop / linkdata â€” handle-based property linking. We don't
+    // linkprop / linkdata — handle-based property linking. We don't
     // model graphics handles, so these accept any args and return an
     // opaque scalar handle so user scripts that store the return value
     // (h = linkprop(...);) don't break. Real synchronised state is
     // BACKLOG.
     reg("layout", "linkprop", noop_ret1);
     reg("layout", "linkdata", noop_ret1);
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // animatedline â€” incremental line plot. MATLAB:
-    //   h = animatedline;          â€” empty line on the current axes
-    //   h = animatedline(x0, y0);  â€” initial points
+    // ────────────────────────────────────────────────────────────────
+    // animatedline — incremental line plot. MATLAB:
+    //   h = animatedline;          — empty line on the current axes
+    //   h = animatedline(x0, y0);  — initial points
     //   addpoints(h, x, y);
     //   clearpoints(h);
     //   [x, y] = getpoints(h);
-    //   drawnow;                   â€” flush
+    //   drawnow;                   — flush
     // nk doesn't model graphics handles, so animatedline-cluster
     // calls target the most recent animated dataset on the current
     // axes (axes::animatedDatasetIdx). animatedline returns an
@@ -1315,7 +1315,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // Wire: the dataset uses ds.type='line' with isAnimated=true and
     // animatedX/animatedY holding the raw points. xJson/yJson are
     // rebuilt on every push.
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     auto rebuildAnimatedJson = [](DatasetInfo &ds) {
         std::ostringstream xs, ys;
         xs << '[';
@@ -1374,7 +1374,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            // Skip args[0] (handle) â€” addpoints(h, x, y).
+            // Skip args[0] (handle) — addpoints(h, x, y).
             if (args.size() < 3) { outs[0] = Value(); return; }
             const auto &xa = args[1];
             const auto &ya = args[2];
@@ -1436,7 +1436,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = std::move(xv);
             if (nargout >= 2) outs[1] = std::move(yv);
         });
-    // drawnow â€” flush figure state. Engine emits figure JSON on
+    // drawnow — flush figure state. Engine emits figure JSON on
     // every modification; drawnow just bumps modified + emits to be
     // safe (idempotent if already up-to-date).
     reg("layout", "drawnow",
@@ -1447,7 +1447,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // zlabel(text) â€” 3-D Z-axis label.
+    // zlabel(text) — 3-D Z-axis label.
     reg("layout", "zlabel",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -1459,12 +1459,12 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // zlim([z0, z1]) â€” 3-D Z-axis limits.
+    // zlim([z0, z1]) — 3-D Z-axis limits.
     reg("layout", "zlim",
         [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             queryOrSetLim(gc.fm, gc.fm.currentAxes().zlimJson, args, nargout, outs, 'z');
         });
-    // view(az, el) â€” set the 3-D camera azimuth/elevation in degrees.
+    // view(az, el) — set the 3-D camera azimuth/elevation in degrees.
     // Both args required for the (az, el) form; 2-element vector also
     // accepted (view([az, el])). The renderer reads cfg.view on mount
     // of Composite3DPlot. Stash on AxesState so it survives prepareForPlot.
@@ -1475,7 +1475,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             double az = 0, el = 0;
             bool ok = false;
-            // view(2) / view(3) â€” preset top-down / default 3-D views.
+            // view(2) / view(3) — preset top-down / default 3-D views.
             size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size()) { outs[0] = Value(); return; }
             if (args.size() - idx == 1 && args[idx].numel() == 1 && !args[idx].isChar()) {
@@ -1514,10 +1514,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "camproj", noop);
 }
 
-// â”€â”€ Reactive-session checkpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Reactive-session checkpoints ─────────────────────────────────────
 // See figure_manager.hpp for the contract. Truncation only ever
 // removes the TAIL of datasets, so surviving chart-handle records
-// keep valid indices â€” records pointing into the removed tail are
+// keep valid indices — records pointing into the removed tail are
 // tombstoned without reindexing.
 
 FigureManager::FigureCheckpoint FigureManager::checkpointFigures() const
@@ -1585,7 +1585,7 @@ void FigureManager::restoreFigures(const FigureCheckpoint &cp)
                 }
             } else {
                 // Axes created after the checkpoint within a surviving
-                // figure: their producing statements re-run â€” clean slate.
+                // figure: their producing statements re-run — clean slate.
                 if (!ax.datasets.empty()) {
                     ax.datasets.clear();
                     fig.modified = true;

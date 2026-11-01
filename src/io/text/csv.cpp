@@ -1,7 +1,7 @@
-﻿// toolboxes/io/src/text/csv.cpp
+// toolboxes/io/src/text/csv.cpp
 //
 // CSV text I/O (csvread / csvwrite). The PARSE / SERIALIZE cores are Engine-free
-// (csvreadFromString / csvwriteToString â€” pure textâ†”Value, usable from the C++
+// (csvreadFromString / csvwriteToString — pure text↔Value, usable from the C++
 // library API with no Engine, mirroring image::imreadFromBytes). The MATLAB-facing
 // entries (csvread/csvwrite + the detail reg adapters) add VFS path resolution +
 // read/write via the Engine.
@@ -21,9 +21,9 @@
 
 namespace numkit::io {
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 // Private CSV helpers
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 
 namespace {
 
@@ -77,9 +77,9 @@ ScratchVec<double> parseCsvLine(std::pmr::memory_resource *mr, const std::string
 
 } // namespace
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Engine-free PARSE / SERIALIZE cores (pure text â†” Value â€” no Engine/VFS)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
+// Engine-free PARSE / SERIALIZE cores (pure text ↔ Value — no Engine/VFS)
+// ════════════════════════════════════════════════════════════════════════
 
 Value csvreadFromString(const std::string &content, size_t skipRows, size_t skipCols,
                         bool haveRange, size_t lastRow, size_t lastCol,
@@ -87,7 +87,7 @@ Value csvreadFromString(const std::string &content, size_t skipRows, size_t skip
 {
     const size_t r1 = skipRows, c1 = skipCols, r2 = lastRow, c2 = lastCol;
     ScratchArena scratch(mr);
-    // Outer + inner ScratchVec â€” uses-allocator construction propagates
+    // Outer + inner ScratchVec — uses-allocator construction propagates
     // the arena into each inner row that we move-construct from
     // `parseCsvLine`'s sliced result below.
     ScratchVec<ScratchVec<double>> rows(&scratch);
@@ -96,7 +96,7 @@ Value csvreadFromString(const std::string &content, size_t skipRows, size_t skip
     while (pos <= content.size()) {
         size_t nl = content.find('\n', pos);
         size_t end = (nl == std::string::npos) ? content.size() : nl;
-        // Stop cleanly on a trailing newline with nothing after it â€”
+        // Stop cleanly on a trailing newline with nothing after it —
         // otherwise we'd produce one bogus empty row.
         if (end == pos && nl == std::string::npos)
             break;
@@ -197,16 +197,16 @@ std::string csvwriteToString(const Value &M, size_t offR, size_t offC)
     return os.str();
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// csvread / csvwrite â€” MATLAB-facing entries: VFS path resolution + read/write
+// ════════════════════════════════════════════════════════════════════════
+// csvread / csvwrite — MATLAB-facing entries: VFS path resolution + read/write
 //
-//   csvread(filename)                         â†’ full numeric CSV â†’ matrix
-//   csvread(filename, R1, C1)                 â†’ skip first R1 rows / C1 cols
-//   csvread(filename, R1, C1, [R1 C1 R2 C2])  â†’ read a rectangular range
-//   csvwrite(filename, M[, R, C])             â†’ write M as CSV (with offsets)
+//   csvread(filename)                         → full numeric CSV → matrix
+//   csvread(filename, R1, C1)                 → skip first R1 rows / C1 cols
+//   csvread(filename, R1, C1, [R1 C1 R2 C2])  → read a rectangular range
+//   csvwrite(filename, M[, R, C])             → write M as CSV (with offsets)
 //
 // Missing cells are read as 0. Filenames with no extension get ".csv".
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 
 Value csvread(FsContext &fs, Span<const Value> args, std::pmr::memory_resource *mr)
 {

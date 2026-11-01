@@ -1,4 +1,4 @@
-// fzero_reg.cpp â€” Engine adapters + embedded-.m registration relocated from
+// fzero_reg.cpp — Engine adapters + embedded-.m registration relocated from
 // the optim toolbox in Phase D. Toolbox keeps the Engine-free FnHandle
 // kernels (fzero/fminbnd/fminsearch); this core-coupled glue lives in bundle.
 #include <numkit/optim/local/fzero.hpp>
@@ -11,7 +11,7 @@
 
 namespace numkit::optim {
 
-// â”€â”€ Engine adapter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Engine adapter ───────────────────────────────────────────────────
 //
 // Each adapter validates that the user passed a function handle, then
 // wraps the (Engine, handle) pair into a stack-resident lambda that
@@ -29,7 +29,7 @@ void requireFuncHandle(const Value &fn, const char *who)
                      0, 0, who, "", std::string("numkit:") + who + ":fnType");
 }
 
-// Evaluate the objective at a point (scalar or vector Value) â†’ scalar.
+// Evaluate the objective at a point (scalar or vector Value) → scalar.
 double evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
 {
     Value a[1] = { pt };
@@ -39,7 +39,7 @@ double evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
 
 // Emit the optional fval / exitflag outputs (and reject the not-yet-
 // supported `output` struct). `x` is the result point, `who` the fn name.
-// Reaching here means the solver converged (it throws otherwise) â†’ the
+// Reaching here means the solver converged (it throws otherwise) → the
 // MATLAB exit flag is 1.
 void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
                       Span<Value> outs, const char *who)
@@ -141,9 +141,9 @@ void fminsearch_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
 
 } // namespace detail
 
-// â”€â”€ fzero as an embedded `.m` wrapper (vm_callbacks_plan.md) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── fzero as an embedded `.m` wrapper (vm_callbacks_plan.md) ──────────────────
 // The registered, user-facing fzero is implemented in `.m` so the objective `f`
-// is called from bytecode (CALL_INDIRECT) â€” pausable under the debugger for
+// is called from bytecode (CALL_INDIRECT) — pausable under the debugger for
 // free, no C++ state machine. A faithful port of findBracket + brent above; the
 // C++ `Value fzero(...)` API stays as the synchronous path for embedders.
 static const char *kFzeroMSource = R"NKM(
@@ -292,13 +292,13 @@ void registerFzeroM(Engine &engine)
     engine.registerBuiltinMSource(kFzeroMSource);
 }
 
-// â”€â”€ fminsearch as an embedded `.m` wrapper (vm_callbacks_plan.md) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── fminsearch as an embedded `.m` wrapper (vm_callbacks_plan.md) ─────────────
 // The objective is always user code, so fminsearch takes the `.m` path: the
 // Nelder-Mead simplex search is the natural `.m` algorithm and every objective
-// evaluation `fn(x)` runs as bytecode â†’ pausable under the debugger. A faithful
+// evaluation `fn(x)` runs as bytecode → pausable under the debugger. A faithful
 // transcription of the C++ `nelderMead` above (same reflection/expansion/
 // contraction/shrink constants, same dual TolFun+TolX convergence, same simplex
-// seeding, kMaxIter=500). The point is always passed to `fn` as a 1Ã—n row, like
+// seeding, kMaxIter=500). The point is always passed to `fn` as a 1×n row, like
 // the C++ `evalVecToScalar`. The C++ `Value fminsearch(...)` API is retained.
 // Split into fminsearch + NUMKIT_nelder_mead + NUMKIT_nm_eval so no chunk approaches the
 // 255-register VM limit (callback_pausability.md gotcha).

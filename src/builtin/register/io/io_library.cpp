@@ -1,11 +1,11 @@
-﻿// toolboxes/io/src/library.cpp
+// toolboxes/io/src/library.cpp
 //
 // Registration hub for the Data Import and Export library.
-// Namespace layout (namespace_design.md Â§5, Â§9.4):
-//   file_io/   â†’ io.file_io.<fn>   (fopen, fclose, fread, fwrite, ...)
-//   text/      â†’ io.text.<fn>      (csvread, csvwrite, ...)
-//   paths/     â†’ io.paths.<fn>     (filesep, fullfile, fileparts, ...)
-// (save / load moved to runtime â€” they are workspace runtime,
+// Namespace layout (namespace_design.md §5, §9.4):
+//   file_io/   → io.file_io.<fn>   (fopen, fclose, fread, fwrite, ...)
+//   text/      → io.text.<fn>      (csvread, csvwrite, ...)
+//   paths/     → io.paths.<fn>     (filesep, fullfile, fileparts, ...)
+// (save / load moved to runtime — they are workspace runtime,
 //  not data import/export, and register bare via registerWorkspaceRuntime.)
 // Each function is also aliased into `compat.<fn>` so MATLAB-style
 // scripts call them flat via the bare-name resolver.
@@ -34,7 +34,7 @@ void frewind_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
 void fread_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
 void fwrite_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
 
-// text/extras.cpp (C1 â€” modern text helpers)
+// text/extras.cpp (C1 — modern text helpers)
 void fileread_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
 void readlines_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
 void writelines_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
@@ -42,7 +42,7 @@ void readmatrix_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
 void writematrix_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
 void type_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
 
-// paths/paths.cpp (C2 â€” file-name construction)
+// paths/paths.cpp (C2 — file-name construction)
 void filesep_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
 void fullfile_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
 void fileparts_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
@@ -55,11 +55,11 @@ namespace numkit {
 
 void IoLibrary::install(Engine &engine)
 {
-    // io is a MATLAB-mirror library â€” every function dual-registered
+    // io is a MATLAB-mirror library — every function dual-registered
     // (io.<sub>.<name> + compat.<name>).
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
         engine.registerFunction(std::string("io.") + sub, name, fn);
-        // compat.* registration removed â€” bare-name resolver replaces it
+        // compat.* registration removed — bare-name resolver replaces it
     };
 
     reg("file_io", "fopen",   &io::detail::fopen_reg);

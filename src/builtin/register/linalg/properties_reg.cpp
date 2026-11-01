@@ -7,7 +7,7 @@
 // (hence the eig.hpp include). library.cpp forward-declares + registers
 // these by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/properties.hpp>
 #include <numkit/linalg/eig.hpp>     // eig_symmetric / eig_general_VD (condeig [V,D])
@@ -105,7 +105,7 @@ void condeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         return;
     }
     // [V, D[, s]] form: hand off to eig for the first two, compute s
-    // separately (no shared work yet â€” refactor candidate when this
+    // separately (no shared work yet — refactor candidate when this
     // becomes a hot path).
     const Value &A = args[0];
     // Eig dispatch matches the eig_reg path.

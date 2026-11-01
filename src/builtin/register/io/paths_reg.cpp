@@ -61,7 +61,7 @@ void tempname_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     outs[0] = tempname(ctx.engine->fsContext(), ctx.engine->resource());
 }
 
-// â”€â”€ genpath: recursive path string from a directory tree â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── genpath: recursive path string from a directory tree ────────────
 // MATLAB: recursive DFS; skips @class folders, +package folders,
 // `private`, and hidden dot-directories (.git etc.). Returns
 // "root;root/sub1;root/sub1/sub2;..." as a semicolon-joined string.
@@ -82,7 +82,7 @@ void genpathCollect(Engine &eng, const std::string &dir, std::string &out)
             genpathCollect(eng, dir + "/" + e.name, out);
         }
     } catch (...) {
-        // Path not listable â€” just include the root.
+        // Path not listable — just include the root.
     }
 }
 } // namespace

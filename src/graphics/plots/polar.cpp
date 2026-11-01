@@ -1,4 +1,4 @@
-// nk/graphics â€” polar.cpp
+// nk/graphics — polar.cpp
 //
 // graphics.polar.* builders (polarplot / polarscatter / polarhistogram / rlim / theta* / r*), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -34,14 +34,14 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
     };
 
-    // compass(U, V) â€” vector arrows from the origin on a POLAR
+    // compass(U, V) — vector arrows from the origin on a POLAR
     // coordinate system. Each (U_i, V_i) becomes an arrow with
     // tail at origin and head at (theta_i, rho_i) where
     // theta = atan2(V, U) and rho = hypot(U, V). MATLAB-equivalent.
-    //   compass(Z)        â€” Z complex; (U, V) = (real(Z), imag(Z))
-    //   compass(U, V)     â€” explicit pair
-    //   compass(..., spec) â€” optional LineSpec string
-    // Wire format: type="compass" dataset on a polar axes â€” the
+    //   compass(Z)        — Z complex; (U, V) = (real(Z), imag(Z))
+    //   compass(U, V)     — explicit pair
+    //   compass(..., spec) — optional LineSpec string
+    // Wire format: type="compass" dataset on a polar axes — the
     // renderer (PolarPlot.jsx) treats xJson as theta, yJson as rho.
     reg("polar", "compass",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -89,7 +89,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€ Polar â€” graphics.polar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Polar — graphics.polar ───────────────────────────────────────
     auto polarPlotFn = [](Span<const Value> args, size_t nargout,
                           Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
@@ -125,7 +125,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         }});
-    // polarscatter(theta, rho) â€” markers at each (Î¸, Ï) on the polar
+    // polarscatter(theta, rho) — markers at each (θ, ρ) on the polar
     // axes. Same wire format as polarplot but type='scatter' so the
     // PolarPlot renderer draws circles instead of polylines.
     reg("polar", "polarscatter",
@@ -150,9 +150,9 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     // Shared helper for the two angular-histogram builtins. Bins
-    // theta values into `nbins` sectors of width 2Ï€/nbins over
-    // [0, 2Ï€), wraps negative/out-of-range inputs, and emits the
-    // bin centres + counts as two JSON arrays â€” `tx` (theta) and
+    // theta values into `nbins` sectors of width 2π/nbins over
+    // [0, 2π), wraps negative/out-of-range inputs, and emits the
+    // bin centres + counts as two JSON arrays — `tx` (theta) and
     // `ty` (count). Used by polarhistogram (type="bar") and the
     // legacy rose (type="rose"); the only difference is the
     // dataset `type` tag and the default bin count.
@@ -183,8 +183,8 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         txOut = tx.str();
         tyOut = ty.str();
     };
-    // polarhistogram(theta[, nbins]) â€” bins Î¸ values into nbins angular
-    // sectors over [0, 2Ï€) and emits a polar bar dataset where each
+    // polarhistogram(theta[, nbins]) — bins θ values into nbins angular
+    // sectors over [0, 2π) and emits a polar bar dataset where each
     // bin centre carries its count. PolarPlot renders the bars as
     // wedges from the origin.
     reg("polar", "polarhistogram",
@@ -194,7 +194,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
             int nbins = (args.size() >= 2 && args[1].numel() == 1)
                         ? std::max(1, (int)args[1].toScalar())
-                        : 36;   // 10Â° bins by default
+                        : 36;   // 10° bins by default
             std::string tx, ty;
             computeAngularHistogram(args[0], nbins, tx, ty);
             auto &fm = gc.fm;
@@ -208,16 +208,16 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // polarbubblechart(theta, rho, [sz], [c]) â€” scatter on polar
+    // polarbubblechart(theta, rho, [sz], [c]) — scatter on polar
     // axes with per-point marker size + optional per-point colour.
     //   sz : scalar (broadcast) | vector (per-point), points^2
-    //   c  : one of â€”
-    //          â€¢ RGB row [r g b]   (single colour for all points)
-    //          â€¢ RGB matrix N-by-3 (per-point RGB triplets)
-    //          â€¢ vector length N   (colormap data â€” index into
+    //   c  : one of —
+    //          • RGB row [r g b]   (single colour for all points)
+    //          • RGB matrix N-by-3 (per-point RGB triplets)
+    //          • vector length N   (colormap data — index into
     //            the active colormap; renderer maps to RGB)
     // Wire format: type="bubble", size column in sizeJson, colour
-    // (if any) in colorJson. NEITHER lands in zJson â€” that's
+    // (if any) in colorJson. NEITHER lands in zJson — that's
     // reserved for actual z-coordinates / matrices (imagesc etc.).
     reg("polar", "polarbubblechart",
         [](Span<const Value> args, size_t nargout,
@@ -241,9 +241,9 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                 const size_t R = c.dims().rows();
                 const size_t C = c.dims().cols();
                 if (R > 0 && C == 3) {
-                    // RGB matrix â€” emit as [[r,g,b], [r,g,b], ...].
+                    // RGB matrix — emit as [[r,g,b], [r,g,b], ...].
                     // MATLAB stores column-major, so row i of an
-                    // RÃ—3 matrix is at linear indices i, i+R, i+2R.
+                    // R×3 matrix is at linear indices i, i+R, i+2R.
                     std::ostringstream cs;
                     cs << '[';
                     for (size_t i = 0; i < R; ++i) {
@@ -256,7 +256,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                     cs << ']';
                     ds.colorJson = cs.str();
                 } else {
-                    // Scalar / vector â†’ colormap index data.
+                    // Scalar / vector → colormap index data.
                     ds.colorJson = vecToJson(c);
                 }
             }
@@ -266,7 +266,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // rose(theta[, nbins]) â€” angular histogram, the classic MATLAB
+    // rose(theta[, nbins]) — angular histogram, the classic MATLAB
     // function (deprecated in favour of polarhistogram but kept for
     // legacy code). Same bin counting as polarhistogram (shared
     // helper); tagged type="rose" so a future renderer can give it
@@ -293,7 +293,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€ Polar-specific settings â€” graphics.polar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Polar-specific settings — graphics.polar ─────────────────────
     reg("polar", "rlim",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
@@ -347,10 +347,10 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             }
             outs[0] = Value();
         });
-    // thetaticks(degrees) â€” set theta tick positions on the polar
+    // thetaticks(degrees) — set theta tick positions on the polar
     // axes. Argument is a vector of DEGREES (MATLAB convention).
     // Without args (or empty arg) the user clears custom ticks and
-    // the renderer falls back to its default 30Â°-spaced grid.
+    // the renderer falls back to its default 30°-spaced grid.
     reg("polar", "thetaticks",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
@@ -360,7 +360,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // rticks(values) â€” set radial tick positions in r-axis units.
+    // rticks(values) — set radial tick positions in r-axis units.
     // Empty arg = clear (auto). Default rticks are picked by
     // niceStep in the renderer.
     reg("polar", "rticks",
@@ -395,13 +395,13 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                 escape(el.isChar() ? el.toString() : std::string{});
             }
         } else if (v.isChar()) {
-            // Single label â€” wrap in 1-element array.
+            // Single label — wrap in 1-element array.
             escape(v.toString());
         }
         os << ']';
         return os.str();
     };
-    // thetaticklabels(labels) â€” set label text for theta ticks.
+    // thetaticklabels(labels) — set label text for theta ticks.
     // `labels` is a cell array of char vectors (or a single char
     // for one tick). Renderer falls back to numeric degrees when
     // the labels array length doesn't match the tick count.

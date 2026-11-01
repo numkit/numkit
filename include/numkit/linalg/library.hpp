@@ -1,14 +1,14 @@
-﻿/// @file library.hpp
+/// @file library.hpp
 /// @ingroup group_matfun
 // toolboxes/linalg/include/nk/linalg/library.hpp
 //
-// Linear Algebra Toolbox â€” user-facing linalg functions (lu, qr, chol,
-// svd, eig, det, inv, pinv, norm, expm, â€¦). Mirrors MATLAB's Linear
+// Linear Algebra Toolbox — user-facing linalg functions (lu, qr, chol,
+// svd, eig, det, inv, pinv, norm, expm, …). Mirrors MATLAB's Linear
 // Algebra documentation tree.
 //
 // Layering note:
 //   toolboxes/builtin retains the operator-side implementations of the
-//   matrix operators *, \, /, ^, ', .'  â€” those live in
+//   matrix operators *, \, /, ^, ', .'  — those live in
 //   toolboxes/builtin/src/language/operators/ because they are compiled
 //   directly from the parser/VM (`mldivide` is the runtime backing
 //   of  `\` ). Both they and this toolbox call the shared linear-solve
@@ -24,7 +24,7 @@ namespace numkit {
 
 /// @addtogroup group_matfun
 /// @{
- class Engine; }  // fwd-decl â€” keep this public header core-free
+ class Engine; }  // fwd-decl — keep this public header core-free
 
 namespace numkit {
 
@@ -33,7 +33,7 @@ class LinalgLibrary
 public:
     /// Register every linalg function under the `linalg.<sub>.<name>`
     /// namespace and alias each into `compat.<name>` (so scripts using
-    /// `import compat.*` see them flat â€” preserves the legacy surface
+    /// `import compat.*` see them flat — preserves the legacy surface
     /// they had while living in toolboxes/builtin).
     static void install(Engine &engine);
 };

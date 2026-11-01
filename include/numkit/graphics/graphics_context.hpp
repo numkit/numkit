@@ -1,22 +1,22 @@
-﻿/// @file graphics_context.hpp
+/// @file graphics_context.hpp
 /// @ingroup group_graphics
 #pragma once
 // nk/graphics/graphics_context.hpp
 //
 // The core-free execution context handed to every graphics plotting body.
 //
-// Graphics is a plotting *service* (figure / plot / surf / imshow / â€¦): each
-// function's job is a side effect â€” build a wire-JSON dataset and push it onto
+// Graphics is a plotting *service* (figure / plot / surf / imshow / …): each
+// function's job is a side effect — build a wire-JSON dataset and push it onto
 // the active figure's axes via the FigureManager, then emit a "modified"
 // notification. None of that needs the Engine; it needs (1) the figure session
 // state, (2) a scratch allocator, and (3) two escape hatches that DO reach back
 // into the runtime: forwarding to another registered plot builtin by name
-// (surfc â†’ surf, fcontour â†’ contour, geoplot â†’ plot, â€¦) and evaluating a user
+// (surfc → surf, fcontour → contour, geoplot → plot, …) and evaluating a user
 // function-handle (fplot/fsurf sampling f(x)).
 //
 // `GraphicsContext` bundles exactly those four things. The two runtime escape
 // hatches are std::function callbacks bound by the bundle-side adapter (see
-// library.cpp) to the live Engine â€” so the plotting bodies (plots.cpp) stay
+// library.cpp) to the live Engine — so the plotting bodies (plots.cpp) stay
 // core-free and the only Engine-coupled glue is the one generic adapter.
 //
 // This mirrors the FsContext decoupling: stateful/runtime surfaces are pulled
@@ -45,7 +45,7 @@ struct GraphicsContext {
     FigureManager &fm;                  // active figure / axes session state
     std::pmr::memory_resource *mr;      // scratch allocator for Value building
 
-    // Forward to another *registered* plot builtin by name (e.g. surfc â†’ surf).
+    // Forward to another *registered* plot builtin by name (e.g. surfc → surf).
     // Resolves the builtin at call time, invokes it with (args, nargout, outs),
     // and returns true; returns false if no such builtin is registered (callers
     // treat that as a no-op and return an empty value). Bound by the adapter to
@@ -56,7 +56,7 @@ struct GraphicsContext {
                        Span<Value> outs)>
         callBuiltin;
 
-    // Evaluate a user function-handle Value (the @(x)â€¦ callbacks fed to
+    // Evaluate a user function-handle Value (the @(x)… callbacks fed to
     // fplot / fcontour / fsurf / fplot3). Bound by the adapter to
     // Engine::callFunctionHandle; works on both the TreeWalker and VM backends.
     std::function<Value(const Value &handle, Span<const Value> args)> callHandle;
@@ -71,7 +71,7 @@ using GraphicsFn = std::function<void(Span<const Value> args,
 
 // One registration record. `sub` is the graphics sub-namespace (layout / line /
 // bar / surface / polar / contour / image); `core` requests the extra bare-name
-// registration into core (figure / close / hold etc., namespace_design.md Â§7).
+// registration into core (figure / close / hold etc., namespace_design.md §7).
 struct PlotEntry {
     const char *sub;
     const char *name;
@@ -81,7 +81,7 @@ struct PlotEntry {
 
 // Builds the full table of graphics plotting bodies (core-free; defined in
 // plots.cpp). The bundle-side installer (library.cpp GraphicsLibrary::install)
-// wraps each entry's GraphicsFn in a CallContextâ†’GraphicsContext adapter and
+// wraps each entry's GraphicsFn in a CallContext→GraphicsContext adapter and
 // registers it under graphics.<sub>.<name> (+ the bare core name when set;
 // non-core names resolve bare through the bare-name resolver).
 void buildPlotTable(std::vector<PlotEntry> &table);

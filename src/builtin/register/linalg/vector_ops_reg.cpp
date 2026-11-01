@@ -4,7 +4,7 @@
 // dot / kron that delegate to the engine-free compute in vector_ops.cpp.
 // library.cpp forward-declares + registers these by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/vector_ops.hpp>
 

@@ -1,6 +1,6 @@
-﻿// toolboxes/io/src/text/type.cpp
+// toolboxes/io/src/text/type.cpp
 //
-// type(filename) â€” read a file via the VFS and stream it to a caller-provided
+// type(filename) — read a file via the VFS and stream it to a caller-provided
 // output sink. Core-free: the Engine coupling (its output sink) is injected by
 // the caller, so this compute TU includes no <nk/core/...>. The bundle
 // `type_reg` adapter binds the sink to `engine.outputText`. The VFS read goes
@@ -12,7 +12,7 @@
 
 namespace numkit::io {
 
-// â”€â”€ type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── type ──────────────────────────────────────────────────────────────
 void type(FsContext &fs,
           const std::function<void(const std::string &)> &out,
           const std::string &filename)

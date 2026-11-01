@@ -1,4 +1,4 @@
-﻿// nk/graphics â€” image.cpp
+// nk/graphics — image.cpp
 //
 // graphics.image.* builders (imagesc / pcolor / imshow), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -43,23 +43,23 @@ void buildImagePlots(std::vector<PlotEntry> &table)
     // imagesc auto-applies MATLAB axis ij (yDir='reverse', matrix-row-1
     // at top). pcolor stays on axis xy. histogram2 (delegates separately)
     // also stays on axis xy. The axis-ij flag is the second positional
-    // arg of heatmapImpl now â€” it's set AFTER prepareForPlot inside.
+    // arg of heatmapImpl now — it's set AFTER prepareForPlot inside.
     reg("image", "imagesc", std::bind(heatmapImpl, "imagesc", true,  _1, _2, _3, _4));
     reg("image", "pcolor",  std::bind(heatmapImpl, "pcolor",  false, _1, _2, _3, _4));
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // imshow â€” display image. MATLAB:
-    //   imshow(I)            â€” grayscale, range = type-default
-    //                          (uint8 â†’ [0,255], double/single â†’ [0,1],
-    //                           logical â†’ [0,1])
-    //   imshow(I, [lo hi])   â€” grayscale with explicit display range
-    //   imshow(I, [])        â€” grayscale auto-range (== imagesc behaviour)
-    //   imshow(RGB)          â€” truecolor, RGB is MÃ—NÃ—3 (uint8 or double).
-    //                          double in [0,1] â†’ cast *255 to uint8.
+    // ────────────────────────────────────────────────────────────────
+    // imshow — display image. MATLAB:
+    //   imshow(I)            — grayscale, range = type-default
+    //                          (uint8 → [0,255], double/single → [0,1],
+    //                           logical → [0,1])
+    //   imshow(I, [lo hi])   — grayscale with explicit display range
+    //   imshow(I, [])        — grayscale auto-range (== imagesc behaviour)
+    //   imshow(RGB)          — truecolor, RGB is M×N×3 (uint8 or double).
+    //                          double in [0,1] → cast *255 to uint8.
     // Compared to imagesc, imshow:
-    //   â€¢ defaults colormap to "gray" (grayscale only; RGB ignores cmap)
-    //   â€¢ forces axisMode='image' (1:1 pixels, equal aspect)
-    //   â€¢ forces axisVisible=false (no ticks / labels / box)
-    //   â€¢ forces yDir='reverse' (matrix-row=1 at top)
+    //   • defaults colormap to "gray" (grayscale only; RGB ignores cmap)
+    //   • forces axisMode='image' (1:1 pixels, equal aspect)
+    //   • forces axisVisible=false (no ticks / labels / box)
+    //   • forces yDir='reverse' (matrix-row=1 at top)
     // Existing user-set values for colormap/axisMode survive.
     // Deferred: filename input,
     // 'XData','YData','InitialMagnification','Border','Reduce',
@@ -73,7 +73,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
 
         if (args.empty()) { outs[0] = Value(); return; }
 
-        // imshow('path/to/img.png') â€” decode the file by calling the registered
+        // imshow('path/to/img.png') — decode the file by calling the registered
         // `imread` builtin THROUGH A HANDLE resolved by name at call time. This
         // keeps graphics free of any image-toolbox C++ dependency (no include,
         // no numkit::image:: symbol); imread is installed by the image toolbox
@@ -103,11 +103,11 @@ void buildImagePlots(std::vector<PlotEntry> &table)
 
         const ValueType vt = I.type();
 
-        // â”€â”€ Argument parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Argument parsing ────────────────────────────────────────
         // Supported forms:
         //   imshow(I)
-        //   imshow(I, [lo hi])              â€” explicit display range
-        //   imshow(I, [])                    â€” auto-range (data extent)
+        //   imshow(I, [lo hi])              — explicit display range
+        //   imshow(I, [])                    — auto-range (data extent)
         //   imshow(I, 'DisplayRange', [lo hi])
         //   imshow(I, 'XData', xv, 'YData', yv, ...)
         //   imshow(I, [lo hi], 'XData', xv, ...)
@@ -172,7 +172,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             ds.originalRows = R;
             ds.originalCols = C;
             // Cast to uint8. uint8/uint16 etc. as-is (clamped); float
-            // / logical â†’ multiply by 255 then clamp.
+            // / logical → multiply by 255 then clamp.
             const double scale = (vt == ValueType::DOUBLE
                                   || vt == ValueType::SINGLE
                                   || vt == ValueType::LOGICAL) ? 255.0 : 1.0;
@@ -198,7 +198,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
                     if (!hasAlpha) ds.rgbBytes[outIdx + 3] = 255;
                 }
             }
-            // Inline JSON preview â€” same 2M-pixel cap as imagesc; mean-pool
+            // Inline JSON preview — same 2M-pixel cap as imagesc; mean-pool
             // each channel independently when over the cap. Wire shape:
             // [[[r,g,b,a],...],...]  (always 4-tuple, alpha=255 for RGB).
             constexpr size_t MAX_INLINE_PIXELS = 2'000'000;
@@ -266,7 +266,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             // 'DisplayRange') or auto-ranged via `imshow(I, [])`.
             double cmin = 0.0, cmax = 1.0;
             if (vt == ValueType::UINT8) { cmin = 0; cmax = 255; }
-            // logical / double / single â†’ already [0, 1].
+            // logical / double / single → already [0, 1].
             bool autoRange = false;
             if (rangeArg) {
                 if (rangeArg->numel() == 0) {
@@ -367,7 +367,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
 
         // Common imshow axes config. axisMode='image' iff not already set
         // (tests want 'image' on default, but a user-set 'square' or
-        // 'tight' should win). axisVisible and yDir are unconditional â€”
+        // 'tight' should win). axisVisible and yDir are unconditional —
         // imshow's defining trait is "no axes, image orientation".
         if (ax.axisMode.empty()) ax.axisMode = "image";
         ax.axisVisible = false;

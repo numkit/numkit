@@ -1,4 +1,4 @@
-﻿// toolboxes/io/src/text/extras.cpp
+// toolboxes/io/src/text/extras.cpp
 //
 // fileread / readlines / writelines / readmatrix / writematrix / type.
 
@@ -90,11 +90,11 @@ std::vector<std::string> splitLines(const std::string &content)
 
 bool tryParseDouble(const std::string &tok, double &out)
 {
-    if (tok.empty()) { out = 0.0; return true; }   // empty cell â†’ 0
+    if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
     try {
         size_t pos = 0;
         out = std::stod(tok, &pos);
-        // Trailing junk â†’ not a clean number.
+        // Trailing junk → not a clean number.
         while (pos < tok.size() && std::isspace(static_cast<unsigned char>(tok[pos]))) ++pos;
         return pos == tok.size();
     } catch (...) {
@@ -129,13 +129,13 @@ std::string trimWs(const std::string &s)
 
 } // namespace
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Engine-free PARSE / SERIALIZE cores (pure text â†” Value â€” no Engine/VFS)
+// ════════════════════════════════════════════════════════════════════════
+// Engine-free PARSE / SERIALIZE cores (pure text ↔ Value — no Engine/VFS)
 //
 // Mirrors csvreadFromString / csvwriteToString: a C++ embedder can turn a
 // delimited text blob into a numeric matrix (and back) with no Engine. The
 // MATLAB-facing readmatrix / writematrix add VFS read/write on top.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 
 Value readmatrixFromString(const std::string &content, std::pmr::memory_resource *mr)
 {
@@ -166,7 +166,7 @@ Value readmatrixFromString(const std::string &content, std::pmr::memory_resource
         row.reserve(toks.size());
         for (auto &t : toks) {
             double v = 0.0;
-            tryParseDouble(trimWs(t), v);     // unparseable â†’ 0 (MATLAB compat)
+            tryParseDouble(trimWs(t), v);     // unparseable → 0 (MATLAB compat)
             row.push_back(v);
         }
         if (row.size() > maxCols) maxCols = row.size();
@@ -213,15 +213,15 @@ std::string writematrixToString(const Value &m)
     return os.str();
 }
 
-// â”€â”€ fileread â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── fileread ──────────────────────────────────────────────────────────
 Value fileread(FsContext &fs, const std::string &filename,
                std::pmr::memory_resource *mr)
 {
     return charRow(mr, slurpFile(fs, filename, "fileread"));
 }
 
-// â”€â”€ readlines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Returns a STRING array (column vector), NÃ—1.
+// ── readlines ─────────────────────────────────────────────────────────
+// Returns a STRING array (column vector), N×1.
 Value readlines(FsContext &fs, const std::string &filename,
                 std::pmr::memory_resource *mr)
 {
@@ -232,7 +232,7 @@ Value readlines(FsContext &fs, const std::string &filename,
     return out;
 }
 
-// â”€â”€ writelines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── writelines ────────────────────────────────────────────────────────
 void writelines(FsContext &fs, const Value &lines, const std::string &filename)
 {
     std::ostringstream os;
@@ -246,7 +246,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
     };
 
     if (lines.isString() && lines.numel() != 1) {
-        // String ARRAY â†’ one line per element (MATLAB writelines contract).
+        // String ARRAY → one line per element (MATLAB writelines contract).
         // Must precede the scalar branch: Value::toString() on a string array
         // returns only element [0], so the old (isChar||isString) catch-all
         // silently wrote just the first line. See bugs/io/writelines.md.
@@ -254,7 +254,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
         for (size_t i = 0; i < n; ++i)
             append(lines.stringElem(i));
     } else if (lines.isChar() || lines.isString()) {
-        // Single char row / scalar string â†’ one line.
+        // Single char row / scalar string → one line.
         append(lines.toString());
     } else if (lines.isCell()) {
         const size_t n = lines.numel();
@@ -272,14 +272,14 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
     spitFile(fs, filename, os.str(), "writelines");
 }
 
-// â”€â”€ readmatrix â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── readmatrix ────────────────────────────────────────────────────────
 Value readmatrix(FsContext &fs, const std::string &filename,
                  std::pmr::memory_resource *mr)
 {
     return readmatrixFromString(slurpFile(fs, filename, "readmatrix"), mr);
 }
 
-// â”€â”€ writematrix â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── writematrix ───────────────────────────────────────────────────────
 void writematrix(FsContext &fs, const Value &m, const std::string &filename)
 {
     spitFile(fs, filename, writematrixToString(m), "writematrix");

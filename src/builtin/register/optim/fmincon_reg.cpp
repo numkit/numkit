@@ -1,21 +1,21 @@
-// fmincon_reg.cpp â€” fmincon (nonlinear constrained minimization) as an
+// fmincon_reg.cpp — fmincon (nonlinear constrained minimization) as an
 // embedded `.m`, mirroring the other optim solvers (pausable objective).
 //
-// min f(x) s.t. AÂ·x â‰¤ b, AeqÂ·x = beq, lb â‰¤ x â‰¤ ub, c(x) â‰¤ 0, ceq(x) = 0.
+// min f(x) s.t. A·x ≤ b, Aeq·x = beq, lb ≤ x ≤ ub, c(x) ≤ 0, ceq(x) = 0.
 //
 // Sequential Quadratic Programming (SQP) reusing the shipped `quadprog` as
-// the QP subproblem solver. At each iterate x: FD gradient g = âˆ‡f, a BFGS
+// the QP subproblem solver. At each iterate x: FD gradient g = ∇f, a BFGS
 // Hessian estimate B of the objective, the nonlinear constraints + FD
 // Jacobians (linearised), and the step d from
-//   min 0.5 dáµ€B d + gáµ€d  s.t.  [A; Jc]Â·d â‰¤ [bâˆ’Ax; âˆ’c],
-//                               [Aeq; Jceq]Â·d = [beqâˆ’Aeq x; âˆ’ceq],
-//                               lbâˆ’x â‰¤ d â‰¤ ubâˆ’x,
+//   min 0.5 dᵀB d + gᵀd  s.t.  [A; Jc]·d ≤ [b−Ax; −c],
+//                               [Aeq; Jceq]·d = [beq−Aeq x; −ceq],
+//                               lb−x ≤ d ≤ ub−x,
 // then an L1-merit backtracking line search (penalising the nonlinear
 // constraint violation; the linear/bound constraints stay feasible via the
 // QP). BFGS update; repeat until the step vanishes. Parity with MATLAB
 // fmincon is on the SOLUTION (the local minimiser).
 //
-// nonlcon returns `[c, ceq]` â€” a multi-output function-handle call, enabled
+// nonlcon returns `[c, ceq]` — a multi-output function-handle call, enabled
 // by the anonymous-multi-output / varargout support (the objective and
 // nonlcon both run as bytecode, pausable).
 

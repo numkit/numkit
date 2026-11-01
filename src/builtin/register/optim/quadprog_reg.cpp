@@ -1,15 +1,15 @@
-// quadprog_reg.cpp â€” quadprog (quadratic program) as an embedded `.m`.
+// quadprog_reg.cpp — quadprog (quadratic program) as an embedded `.m`.
 //
-// min 0.5Â·xáµ€Hx + fáµ€x  s.t.  AÂ·x â‰¤ b,  AeqÂ·x = beq,  lb â‰¤ x â‰¤ ub.
+// min 0.5·xᵀHx + fᵀx  s.t.  A·x ≤ b,  Aeq·x = beq,  lb ≤ x ≤ ub.
 //
 // Primal active-set method for a strictly-convex QP (H positive definite),
 // so it needs no Phase-1: each iteration solves the equality-constrained
 // QP over the current working set via the KKT saddle-point system
-//   [H Báµ€; B 0]Â·[x; Î»] = [âˆ’f; c]   (B = [Aeq; active inequalities]),
+//   [H Bᵀ; B 0]·[x; λ] = [−f; c]   (B = [Aeq; active inequalities]),
 // then adds the most-violated inactive inequality or drops the active one
 // with the most-negative multiplier until the KKT conditions hold. The QP
 // optimum is unique for PD H, so this matches MATLAB quadprog's solution.
-// No FnHandle here (H, f and the constraint matrices are data) â€” but the
+// No FnHandle here (H, f and the constraint matrices are data) — but the
 // `.m` form keeps it on the same self-contained, debuggable footing as the
 // other optim solvers.
 
@@ -53,10 +53,10 @@ function [x, mu] = NUMKIT_qp_kkt(H, f, Amat, cvec, n)
   end
   At = transpose(Amat);
   % Primal-dual KKT regularisation (the OSQP trick): a tiny -delta*I on
-  % the multiplier block makes the saddle system quasi-definite â€”
+  % the multiplier block makes the saddle system quasi-definite —
   % nonsingular even when the active rows are linearly dependent (which
   % a strict mldivide rejects; pinv instead returns min-norm garbage that
-  % violates the constraints â€” tried). delta is far below H's scale.
+  % violates the constraints — tried). delta is far below H's scale.
   % (bugs/opened/optim/linprog-rank-deficient-error.md)
   delta = 1e-12;
   Z = -delta * eye(k);
@@ -116,7 +116,7 @@ function x = NUMKIT_qp_admm(H, f, C, d, Be, ce, n)
   feas = max([C * xp - d; abs(Be * xp - ce)]);
   % Accept the polish on FEASIBILITY alone: the ADMM iterate is only
   % residual-tolerance feasible, so its objective can sit *below* the
-  % true optimum â€” comparing objectives would reject the exact vertex
+  % true optimum — comparing objectives would reject the exact vertex
   % (observed as a 2e-9 objVal drift on the LP-book repro).
   if isempty(feas) || max(feas) < 1e-7
     x = xp;

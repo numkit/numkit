@@ -1,10 +1,10 @@
-﻿// nk/graphics â€” plots/shared.cpp
+// nk/graphics — plots/shared.cpp
 //
 // Plot bodies shared across more than one family, as numkit::detail free
 // functions so the line / bar / image builders can each call them:
-//   heatmapImpl  â€” imagesc / pcolor (image) + histogram2 (bar)
-//   geoForward   â€” geoplot (line) + geoscatter / geobubble (bar)
-//   delegateTo   â€” comet* (line) + bubblechart / swarmchart / ... (bar)
+//   heatmapImpl  — imagesc / pcolor (image) + histogram2 (bar)
+//   geoForward   — geoplot (line) + geoscatter / geobubble (bar)
+//   delegateTo   — comet* (line) + bubblechart / swarmchart / ... (bar)
 // Carved out of buildPlotTable; bodies verbatim (pure helpers via header).
 
 #include "plot_internal.hpp"
@@ -43,7 +43,7 @@ void heatmapImpl(
         }
         auto &fm = gc.fm;
         fm.prepareForPlot();
-        // axis-ij must be set AFTER prepareForPlot â€” that call wipes
+        // axis-ij must be set AFTER prepareForPlot — that call wipes
         // the axes state. Setting it here ensures the JSON emit at
         // the end of this function sees the right yDir.
         if (axisIj) {
@@ -89,9 +89,9 @@ void heatmapImpl(
         ds.originalCols = cols;
 
         // colorScale axes-state was set by `colorscale('log')` *before*
-        // this imagesc â€” bake log10 into the quantization. Non-positive
+        // this imagesc — bake log10 into the quantization. Non-positive
         // and non-finite values become NaN (rendered transparent), not
-        // clamped to a fake "very negative dB" â€” clamping would skew
+        // clamped to a fake "very negative dB" — clamping would skew
         // cmin and waste the colour range on phantom data.
         const bool logColor = (fm.currentAxes().colorScale == "log");
         ds.colorScaleBaked = logColor;
@@ -120,7 +120,7 @@ void heatmapImpl(
                 if (v > cmax) cmax = v;
             }
         }
-        // climJson if set has shape "[a,b]" â€” parse it for the user
+        // climJson if set has shape "[a,b]" — parse it for the user
         // override. clim is in original-domain values; in log mode we
         // need to take log10 of both limits for the quantization range.
         if (!fm.currentAxes().climJson.empty()) {
@@ -138,7 +138,7 @@ void heatmapImpl(
                             cmin = std::log10(a);
                             cmax = std::log10(b);
                         }
-                        // else: keep scanned (log) values â€” user set bad clim for log
+                        // else: keep scanned (log) values — user set bad clim for log
                     } else {
                         cmin = a;
                         cmax = b;
@@ -172,7 +172,7 @@ void heatmapImpl(
         }
 
         // Inline-JSON preview: emit uint8 indices (1-3 chars per cell)
-        // rather than doubles. Same â‰¤2M-cells cap as before â€” large
+        // rather than doubles. Same ≤2M-cells cap as before — large
         // matrices get mean-pooled in index space (idx 255 NaN-skipped).
         constexpr size_t MAX_INLINE_CELLS = 2'000'000;
         const size_t totalCells = rows * cols;
@@ -253,12 +253,12 @@ void heatmapImpl(
 void geoForward(const char *target, Span<const Value> args,
                      Span<Value> outs, GraphicsContext &gc) {
     if (args.size() < 2) { outs[0] = Value(); return; }
-    // Build a new arg list with (lon, lat, ...) â€” i.e. swap the
+    // Build a new arg list with (lon, lat, ...) — i.e. swap the
     // first two so target's X = lon, Y = lat.
     std::vector<Value> proxied;
     proxied.reserve(args.size());
-    proxied.push_back(args[1]);   // lon â†’ X
-    proxied.push_back(args[0]);   // lat â†’ Y
+    proxied.push_back(args[1]);   // lon → X
+    proxied.push_back(args[0]);   // lat → Y
     for (size_t i = 2; i < args.size(); ++i) proxied.push_back(args[i]);
     std::array<Value, 4> outBuf;
     if (!gc.callBuiltin(target, Span<const Value>(proxied.data(), proxied.size()), 0,

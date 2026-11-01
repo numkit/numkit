@@ -5,7 +5,7 @@
 // assembles the 1-/2-/3-output MATLAB forms. library.cpp forward-declares
 // + registers this by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/balance.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>

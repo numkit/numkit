@@ -1,4 +1,4 @@
-﻿// toolboxes/io/include/nk/io/file_io/fileio.hpp
+// toolboxes/io/include/nk/io/file_io/fileio.hpp
 #pragma once
 
 #include <numkit/value/span.hpp>
@@ -11,17 +11,17 @@
 namespace numkit::io {
 
 /// @file
-/// @brief File I/O builtins â€” thin C++ API over the FsContext file-handle table
+/// @brief File I/O builtins — thin C++ API over the FsContext file-handle table
 /// (fopen/findFile).
 ///
 /// Each function takes the FsContext (VFS + fid table; moved out of Engine)
 /// and the argument span; results are written into
 /// `outs`. `nargout` is forwarded because several of these populate
 /// optional second returns (`[fid, errmsg]` from `fopen`,
-/// `[msg, code]` from `ferror`, â€¦).
+/// `[msg, code]` from `ferror`, …).
 ///
 /// The inherently variadic call surface makes a `Span`-based
-/// signature the natural C++ API â€” typed wrappers would just re-parse
+/// signature the natural C++ API — typed wrappers would just re-parse
 /// the same args.
 
 /// @brief Open a file (`[fid, errmsg] = fopen(filename, permission, machineformat)`).
@@ -121,7 +121,7 @@ void fseek(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @see fseek
 void frewind(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
 
-// â”€â”€ Binary I/O â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Binary I/O ───────────────────────────────────────────────────────
 
 /// @brief Read raw binary data
 /// (`A = fread(fid, size, precision, machineformat)`).

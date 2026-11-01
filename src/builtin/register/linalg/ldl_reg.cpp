@@ -4,7 +4,7 @@
 // lower/upper/matrix/vector options and delegates to the engine-free ldl
 // compute in ldl.cpp. library.cpp forward-declares + registers this by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/ldl.hpp>
 

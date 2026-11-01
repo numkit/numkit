@@ -1,15 +1,15 @@
 // include/nk/graphics/graphics_handle.hpp
 //
-// Graphics-handle object payload â€” the Value-side half of the handle
+// Graphics-handle object payload — the Value-side half of the handle
 // registry (bugs/closed/graphics/plot-family-no-return-value.md).
 //
-// Layering: the registry (id â†’ HandleRecord) lives in FigureManager
+// Layering: the registry (id → HandleRecord) lives in FigureManager
 // (figure layer, no Engine). This header carries the NativePayload that
 // a handle Value holds: just the registry id. It depends only on the
 // value layer, so three consumers can share it without layering knots:
-//   â€¢ the graphics plot bodies (core-free, e.g. close(figureHandle)),
-//   â€¢ the bundle install hub (graphics_library.cpp â€” accessor layer),
-//   â€¢ the builtin layer (general_reg.cpp â€” unified delete dispatch).
+//   • the graphics plot bodies (core-free, e.g. close(figureHandle)),
+//   • the bundle install hub (graphics_library.cpp — accessor layer),
+//   • the builtin layer (general_reg.cpp — unified delete dispatch).
 #pragma once
 
 #include <numkit/value/object.hpp>
@@ -37,8 +37,8 @@ struct GraphicsHandlePayload : public NativePayload
 
 // Registry id of a graphics-handle Value, or -1 when `v` is not one.
 // Payload-based (not class-name-based): class(h) reports the MATLAB
-// class (matlab.graphics.chart.primitive.Line, â€¦), so the class name is
-// NOT a discriminator â€” the payload is.
+// class (matlab.graphics.chart.primitive.Line, …), so the class name is
+// NOT a discriminator — the payload is.
 inline int graphicsHandleIdOf(const Value &v)
 {
     if (!v.isObject())

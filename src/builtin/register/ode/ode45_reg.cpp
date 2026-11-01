@@ -1,4 +1,4 @@
-// bundle/src/register/ode/ode45_reg.cpp â€” Engine adapter + embedded-.m registration relocated from the
+// bundle/src/register/ode/ode45_reg.cpp — Engine adapter + embedded-.m registration relocated from the
 // ode toolbox in Phase D (solver 3-way split): the toolbox keeps the
 // Engine-free FnHandle kernel; this core-coupled glue lives in bundle.
 #include <numkit/ode/solvers.hpp>
@@ -34,14 +34,14 @@ void ode45_reg(Span<const Value> args, size_t nargout,
 
 } // namespace detail
 
-// â”€â”€ ode45 as an embedded `.m` wrapper (vm_callbacks_plan.md) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ode45 as an embedded `.m` wrapper (vm_callbacks_plan.md) ──────────────────
 // The registered ode45 is implemented in `.m`: the RHS `f(t,y)` is evaluated
 // from bytecode (pausable), and the Dormand-Prince 5(4) step loop + adaptive
 // control + Shampine dense output are the natural `.m` algorithm. A faithful,
-// vectorised transcription of the C++ above â€” the stage/dense linear algebra is
+// vectorised transcription of the C++ above — the stage/dense linear algebra is
 // vector ops (`y + h*(a21*k1)`, `sum((er./sc).^2)`), so it still runs on the
 // SIMD-backed kernels and is bit-identical to the retained `Value ode45(...)`
-// API. (nk doesn't bind varargin with no extra args â†’ fixed `opts` param.)
+// API. (nk doesn't bind varargin with no extra args → fixed `opts` param.)
 static const char *kOde45MSource = R"NKM(
 function [t, y] = ode45(fn, tspan, y0, opts, varargin)
   if ischar(fn) || isstring(fn), fn = str2func(fn); end

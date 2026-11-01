@@ -1,8 +1,8 @@
-﻿#pragma once
-// nk/graphics â€” plots/plot_internal.hpp
+#pragma once
+// nk/graphics — plots/plot_internal.hpp
 //
 // Private (src-only) header shared by the per-family plot-table builders carved
-// out of plots.cpp. NOT installed â€” only the graphics .cpp TUs include it.
+// out of plots.cpp. NOT installed — only the graphics .cpp TUs include it.
 //
 // It declares (1) the pure JSON/parse helpers (numkit::detail) that many plot
 // bodies share, and (2) the per-family build*Plots(table) entry points that
@@ -26,7 +26,7 @@ namespace detail {
 // uses magnitude; NaN -> null; +/-Inf -> +/-1e308.
 std::string vecToJson(const Value &v);
 
-// "[1,2,...,n]" â€” the 1-based implicit-X axis for a plot given only Y.
+// "[1,2,...,n]" — the 1-based implicit-X axis for a plot given only Y.
 std::string makeIndexJson(std::size_t n);
 
 // A char Value as its raw string (title / label text).
@@ -62,6 +62,6 @@ void buildLayoutPlots(std::vector<PlotEntry> &table);
 void buildImagePlots(std::vector<PlotEntry> &table);
 void buildLinePlots(std::vector<PlotEntry> &table);
 void buildBarPlots(std::vector<PlotEntry> &table);
-// BUILDER-DECLS â€” the family split appends new declarations directly above here.
+// BUILDER-DECLS — the family split appends new declarations directly above here.
 
 }  // namespace numkit

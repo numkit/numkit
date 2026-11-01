@@ -1,4 +1,4 @@
-﻿/// @file library.hpp
+/// @file library.hpp
 /// @ingroup group_optim
 #pragma once
 
@@ -6,7 +6,7 @@ namespace numkit {
 
 /// @addtogroup group_optim
 /// @{
- class Engine; }  // fwd-decl â€” keep this public header core-free
+ class Engine; }  // fwd-decl — keep this public header core-free
 
 namespace numkit {
 

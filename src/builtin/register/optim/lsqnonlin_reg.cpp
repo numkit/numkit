@@ -1,15 +1,15 @@
-// lsqnonlin_reg.cpp â€” lsqnonlin / lsqcurvefit (nonlinear least squares) as
+// lsqnonlin_reg.cpp — lsqnonlin / lsqcurvefit (nonlinear least squares) as
 // embedded `.m` wrappers, mirroring the fzero / fminsearch / fsolve pattern
 // (vm_callbacks_plan.md): the residual F(p) is always user code, so the
-// solver is written in `.m` and every F(p) evaluation runs as bytecode â†’
+// solver is written in `.m` and every F(p) evaluation runs as bytecode →
 // pausable under the debugger, no C++ state machine.
 //
-// lsqnonlin(fun, p0) minimises â€–F(p)â€–Â² via Levenberg-Marquardt with a
-// forward-difference Jacobian â€” the same Gauss-Newton/LM core as fsolve,
+// lsqnonlin(fun, p0) minimises ‖F(p)‖² via Levenberg-Marquardt with a
+// forward-difference Jacobian — the same Gauss-Newton/LM core as fsolve,
 // but it terminates at the least-squares minimiser (the step shrinking)
 // rather than requiring F=0, so it handles over-determined residuals.
 // lsqcurvefit(fun, p0, xdata, ydata) = lsqnonlin(@(p) fun(p,xdata)-ydata, p0).
-// Bound constraints (lb/ub) are deferred â€” rejected with a clear error.
+// Bound constraints (lb/ub) are deferred — rejected with a clear error.
 
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>

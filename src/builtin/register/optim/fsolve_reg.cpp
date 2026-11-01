@@ -1,12 +1,12 @@
-// fsolve_reg.cpp â€” fsolve (nonlinear system solver) as an embedded `.m`
+// fsolve_reg.cpp — fsolve (nonlinear system solver) as an embedded `.m`
 // wrapper, mirroring the fzero / fminsearch pattern (vm_callbacks_plan.md):
 // the objective F(x) is always user code, so the solver is written in `.m`
-// and every F(x) evaluation runs as bytecode â†’ pausable under the debugger
+// and every F(x) evaluation runs as bytecode → pausable under the debugger
 // for free, no C++ state machine.
 //
 // Algorithm: Levenberg-Marquardt on F(x)=0 with a forward-difference
-// Jacobian. (J'J + lambdaÂ·diag(J'J))Â·dx = -J'F, adapting lambda until the
-// residual norm decreases â€” robust on singular / ill-conditioned Jacobians.
+// Jacobian. (J'J + lambda·diag(J'J))·dx = -J'F, adapting lambda until the
+// residual norm decreases — robust on singular / ill-conditioned Jacobians.
 // Parity with MATLAB fsolve is on the SOLUTION (the root), not the iterate
 // trajectory: for a problem with a unique root near x0 any convergent
 // solver lands on the same point.

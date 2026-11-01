@@ -1,4 +1,4 @@
-﻿// toolboxes/io/include/nk/io/text/extras.hpp
+// toolboxes/io/include/nk/io/text/extras.hpp
 //
 // Modern text-file helpers.
 
@@ -16,7 +16,7 @@ namespace numkit::io {
 
 using ::numkit::FsContext;
 
-/// @brief Read a file's entire content through the FsContext VFS â€” shared by
+/// @brief Read a file's entire content through the FsContext VFS — shared by
 /// fileread / readlines / readmatrix and by `type`. Engine-free.
 /// @throws Error  on a read failure (`fnName` names the calling builtin).
 std::string slurpFile(FsContext &fs, const std::string &filename,
@@ -27,27 +27,27 @@ std::string slurpFile(FsContext &fs, const std::string &filename,
 ///
 /// File routes go through the VFS via `FsContext` so callers see consistent
 /// path resolution (script origin, `NUMKIT_FS`, native fallback). Every helper
-/// here is Engine-free â€” `type` takes an output-sink callback for emission.
+/// here is Engine-free — `type` takes an output-sink callback for emission.
 
-/// @brief Parse delimited text into a numeric DOUBLE matrix â€” **Engine-free**.
+/// @brief Parse delimited text into a numeric DOUBLE matrix — **Engine-free**.
 ///
-/// Pure textâ†’Value (no Engine, no VFS), mirroring `csvreadFromString` /
+/// Pure text→Value (no Engine, no VFS), mirroring `csvreadFromString` /
 /// `image::imreadFromBytes`. Comma / semicolon / tab delimited; a leading
 /// all-non-numeric header row is skipped automatically; unparseable cells
 /// read as 0. The MATLAB-facing `readmatrix` adds VFS read on top of this.
 ///
 /// @param content  Delimited text.
-/// @param mr       Memory resource (nullptr â†’ process default).
+/// @param mr       Memory resource (nullptr → process default).
 /// @return         DOUBLE matrix.
 Value readmatrixFromString(const std::string &content,
                            std::pmr::memory_resource *mr = nullptr);
 
-/// @brief Serialize a numeric matrix to CSV text â€” **Engine-free**.
+/// @brief Serialize a numeric matrix to CSV text — **Engine-free**.
 ///
 /// Comma-delimited; integer-valued doubles printed without decimals. Pure
-/// Valueâ†’text (no Engine); `writematrix` adds VFS write on top.
+/// Value→text (no Engine); `writematrix` adds VFS write on top.
 ///
-/// @param m  Numeric (non-complex, â‰¤2-D) matrix.
+/// @param m  Numeric (non-complex, ≤2-D) matrix.
 /// @return   CSV text, one row per line, trailing newline.
 /// @throws Error  Complex or 3-D input.
 std::string writematrixToString(const Value &m);
@@ -56,8 +56,8 @@ std::string writematrixToString(const Value &m);
 ///
 /// @param fs        Filesystem session (VFS registry + resolver).
 /// @param filename  Path to file.
-/// @param mr        Memory resource (nullptr â†’ process default).
-/// @return          `1 Ã— N` CHAR row containing the file contents.
+/// @param mr        Memory resource (nullptr → process default).
+/// @return          `1 × N` CHAR row containing the file contents.
 /// @throws Error    File not found / read error.
 /// @see readlines, readmatrix
 Value fileread(FsContext &fs, const std::string &filename,
@@ -69,7 +69,7 @@ Value fileread(FsContext &fs, const std::string &filename,
 ///
 /// @param fs        Filesystem session (VFS registry + resolver).
 /// @param filename  Path to file.
-/// @param mr        Memory resource (nullptr â†’ process default).
+/// @param mr        Memory resource (nullptr → process default).
 /// @return          STRING column array.
 /// @see fileread, writelines
 Value readlines(FsContext &fs, const std::string &filename,
@@ -94,7 +94,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename);
 ///
 /// @param fs        Filesystem session (VFS registry + resolver).
 /// @param filename  Path to file.
-/// @param mr        Memory resource (nullptr â†’ process default).
+/// @param mr        Memory resource (nullptr → process default).
 /// @return          Numeric matrix (DOUBLE).
 /// @throws Error    File not found / parse failure.
 /// @see writematrix, fileread
@@ -117,11 +117,11 @@ void writematrix(FsContext &fs, const Value &m, const std::string &filename);
 ///
 /// Reads the file via the VFS (`slurpFile`) and writes it to `out`, appending a
 /// trailing newline when the content lacks one. Core-free: the Engine coupling
-/// (its output sink) is injected by the caller â€” the bundle `type_reg` adapter
+/// (its output sink) is injected by the caller — the bundle `type_reg` adapter
 /// binds `out` to `engine.outputText`. No return value.
 ///
 /// @param fs        Filesystem context (VFS read).
-/// @param out       Output sink â€” invoked with each chunk of text to emit.
+/// @param out       Output sink — invoked with each chunk of text to emit.
 /// @param filename  Path to file.
 /// @throws Error    File not found (from slurpFile).
 void type(FsContext &fs,

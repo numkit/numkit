@@ -1,4 +1,4 @@
-// nk/graphics â€” line.cpp
+// nk/graphics — line.cpp
 //
 // graphics.line.* builders (plot / plot3 / stem / stairs / area / errorbar / semilog* / fplot / comet / geoplot / xline), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -43,13 +43,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             auto &fm = gc.fm;
             fm.prepareForPlot();
-            // MATLAB multi-series grammar: (X, Y [, LineSpec] [, N/Vâ€¦])*,
+            // MATLAB multi-series grammar: (X, Y [, LineSpec] [, N/V…])*,
             // then plot(Y) / plot(Y, LineSpec) single-vector forms. Each
-            // pair is its own dataset â†’ its own Line handle
-            // (plot(x,y,x2,y2) returns a 1Ã—2 Line array).
+            // pair is its own dataset → its own Line handle
+            // (plot(x,y,x2,y2) returns a 1×2 Line array).
             // Discriminator: a char arg that is entirely linespec alphabet
             // ("-:.o+*xsd^v<>phrgbcymwk") is a LineSpec; any other char
-            // starts an N/V pair ('LineWidth', 2, â€¦).
+            // starts an N/V pair ('LineWidth', 2, …).
             auto isSpec = [](const Value &v) {
                 if (!v.isChar()) return false;
                 static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
@@ -139,9 +139,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // plot3(x, y, z) / scatter3(x, y, z) â€” 3-D series. The renderer
+    // plot3(x, y, z) / scatter3(x, y, z) — 3-D series. The renderer
     // does a cabinet-projection to 2-D (z extends into upper-right at
-    // 30Â°, scaled 0.5). Real 3-D camera is B3 territory; this gets
+    // 30°, scaled 0.5). Real 3-D camera is B3 territory; this gets
     // the data on screen so users can write the script and inspect
     // values today. Both reuse the line / scatter render modes after
     // adapter projection.
@@ -157,7 +157,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         fm.prepareForPlot();
         // MATLAB multi-series grammar (triples): (X, Y, Z [, LineSpec]
-        // [, N/Vâ€¦])* â€” same spec/N/V discriminator as plot().
+        // [, N/V…])* — same spec/N/V discriminator as plot().
         auto isSpec = [](const Value &v) {
             if (!v.isChar()) return false;
             static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
@@ -180,7 +180,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             ds.xJson = vecToJson(args[i]);
             ds.yJson = vecToJson(args[i + 1]);
             ds.zJson = vecToJson(args[i + 2]);   // 1-D vector here, distinct
-                                                  // from imagesc's 2-D zJson â€”
+                                                  // from imagesc's 2-D zJson —
                                                   // adapter disambiguates by
                                                   // `type`.
             i += 3;
@@ -209,11 +209,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         reg("line", "plot3",    std::bind(plot3Impl, "plot3",    _1, _2, _3, _4));
         reg("line", "scatter3", std::bind(plot3Impl, "scatter3", _1, _2, _3, _4));
     }
-    // stem3(x, y, z) â€” vertical 3D stems from the z=0 plane up to
+    // stem3(x, y, z) — vertical 3D stems from the z=0 plane up to
     // each (x, y, z) point + marker at the tip. Shares the cabinet
     // projection with plot3/scatter3. Emits two datasets:
     //   1. type='plot3' line with NaN-separated 2-point segments
-    //      (one segment per stem, going (x,y,0) â†’ (x,y,z))
+    //      (one segment per stem, going (x,y,0) → (x,y,z))
     //   2. type='scatter3' markers at the tips.
     reg("line", "stem3",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -270,7 +270,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // quiver(x, y, u, v) â€” vector field as N arrows starting at
+    // quiver(x, y, u, v) — vector field as N arrows starting at
     // (x[i], y[i]) and pointing in direction (u[i], v[i]). MATLAB
     // accepts matrices; for first cut we expect flat vectors with
     // matching length. quiver(x, y, u, v, scale) optionally scales
@@ -299,7 +299,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // feather(U, V) â€” arrows on the x-axis. Each arrow starts at
+    // feather(U, V) — arrows on the x-axis. Each arrow starts at
     // (i, 0) and points to (i + U_i, V_i). Same scale=1 contract as
     // compass.
     reg("line", "feather",
@@ -332,10 +332,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // area â€” filled curve. MATLAB convention:
-    //   area(y)            â€” x = 1:N, fill from y to baseline 0
-    //   area(x, y)         â€” fill from y to baseline 0
-    //   area(x, y, base)   â€” fill from y to `base`
+    // area — filled curve. MATLAB convention:
+    //   area(y)            — x = 1:N, fill from y to baseline 0
+    //   area(x, y)         — fill from y to baseline 0
+    //   area(x, y, base)   — fill from y to `base`
     // Stored as `type = "area"`; the optional baseline lives in
     // ds.lineWidth's slot is wrong, use a dedicated field. Reusing
     // `markerSize` is also wrong. We pack base into ds.style as
@@ -359,9 +359,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
 
             // Identify the Y data Value and its layout. MATLAB
             // distinguishes vector vs matrix:
-            //   area(Y)         â€” Y vector â†’ 1 series; Y matrix â†’ cols stacked
-            //   area(x, Y)      â€” same with explicit x
-            //   area(x, Y, base)â€” optional baseline scalar
+            //   area(Y)         — Y vector → 1 series; Y matrix → cols stacked
+            //   area(x, Y)      — same with explicit x
+            //   area(x, Y, base)— optional baseline scalar
             const Value *xData = nullptr;
             const Value *yData = nullptr;
             double baseline = 0.0;
@@ -382,7 +382,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const size_t Yc = yData->dims().cols();
             // Stacked path: matrix Y with rows>1 AND cols>1.
             const bool stacked = (Yr > 1 && Yc > 1);
-            // Palette colours for stacked series â€” sampled from a
+            // Palette colours for stacked series — sampled from a
             // distinct ramp so users don't see all-blue.
             static const char *kStackPalette[8] = {
                 "#7fd99a", "#5fb3d4", "#e9b870", "#9b8cf2",
@@ -390,7 +390,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             };
 
             if (!stacked) {
-                // Single-series path â€” backwards-compatible with the
+                // Single-series path — backwards-compatible with the
                 // previous wire format.
                 DatasetInfo ds;
                 ds.type = "area";
@@ -414,12 +414,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 return;
             }
 
-            // â”€â”€ Stacked path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Stacked path ──────────────────────────────────────
             // For each row r, compute cumulative sums S[r][c] =
             // sum_{c'=0..c} Y[r][c']. Emit one dataset per column of
             // Y, each with y = S[r][c]; render order is REVERSE so
             // the topmost band (largest cumulative) is drawn first
-            // and gets overdrawn from below â€” yielding visible bands
+            // and gets overdrawn from below — yielding visible bands
             // for c = Yc-1, Yc-2, ..., 0.
             std::vector<std::vector<double>> S(Yr, std::vector<double>(Yc, 0.0));
             std::vector<double> Ybuf(yData->numel());
@@ -432,7 +432,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     S[r][c] = acc;
                 }
             }
-            // X vector â€” explicit when given, else 1..Yr.
+            // X vector — explicit when given, else 1..Yr.
             std::ostringstream xs;
             xs << '[';
             if (xData) {
@@ -471,9 +471,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // quiver3(x, y, z, u, v, w[, scale]) â€” 3-D vector field. Each (x,
+    // quiver3(x, y, z, u, v, w[, scale]) — 3-D vector field. Each (x,
     // y, z, u, v, w) row becomes one arrow from (x, y, z) to
-    // (x + sÂ·u, y + sÂ·v, z + sÂ·w). Default scale = 1.
+    // (x + s·u, y + s·v, z + s·w). Default scale = 1.
     reg("line", "quiver3",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -487,7 +487,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             ds.zJson = vecToJson(args[2]);
             ds.uJson = vecToJson(args[3]);
             ds.vJson = vecToJson(args[4]);
-            // w as a separate JSON field â€” adapter knows about uJson +
+            // w as a separate JSON field — adapter knows about uJson +
             // vJson (2-D quiver) so we tuck w into style as scale-style
             // extras for now: encode as `w=[...]`. Cleaner would be a
             // dedicated wJson field on DatasetInfo; deferred.
@@ -501,7 +501,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€ Function-based plots (fplot / fcontour / fsurf / fmesh) â”€â”€â”€â”€â”€
+    // ── Function-based plots (fplot / fcontour / fsurf / fmesh) ─────
     // Eval the user's function-handle on a sampled grid in C++ and
     // route the resulting matrices through the existing 2-D / 3-D
     // pipelines. Engine::callFunctionHandle works on both backends
@@ -574,7 +574,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     reg("line", "ezmesh", ezNoop);
     reg("line", "ezcontour", ezNoop);
     reg("line", "ribbon", ezNoop);
-    // fcontour / fsurf / fmesh â€” sample f(x, y) on a grid then route
+    // fcontour / fsurf / fmesh — sample f(x, y) on a grid then route
     // through the existing contour / surf paths. We stitch a Z matrix
     // value via Value::matrix and proxy the call.
     auto sampleGrid = [](const Value &fh, double xa, double xb,
@@ -671,7 +671,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     };
     reg("line", "fsurf", fSurfMeshImpl);
     reg("line", "fmesh", fSurfMeshImpl);
-    // fplot3(funx, funy, funz [, [tmin tmax]]) â€” parametric 3-D curve.
+    // fplot3(funx, funy, funz [, [tmin tmax]]) — parametric 3-D curve.
     // Mirror of fplot but with 3 function handles evaluated against a
     // shared parameter t; emits a `plot3` dataset (xJson + yJson + zJson).
     reg("line", "fplot3",
@@ -709,7 +709,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                         Span<const Value>(argv.data(), 1)).toScalar();
                     z = gc.callHandle(fz,
                         Span<const Value>(argv.data(), 1)).toScalar();
-                } catch (...) { /* point becomes NaN â€” JSON null */ }
+                } catch (...) { /* point becomes NaN — JSON null */ }
                 if (i) { xs << ','; ys << ','; zs << ','; }
                 if (std::isfinite(x)) xs << x; else xs << "null";
                 if (std::isfinite(y)) ys << y; else ys << "null";
@@ -729,9 +729,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€ Streamlines â€” RK4 integration over a 2-D vector field â”€â”€â”€â”€â”€â”€â”€â”€
-    //   streamline(X, Y, U, V, sx, sy)    â€” explicit seed points
-    //   streamslice(X, Y, U, V)           â€” auto 5Ã—5 seed grid
+    // ── Streamlines — RK4 integration over a 2-D vector field ────────
+    //   streamline(X, Y, U, V, sx, sy)    — explicit seed points
+    //   streamslice(X, Y, U, V)           — auto 5×5 seed grid
     // Uniform grid is assumed (linspace-style X / Y). Bilinear interp
     // for (U, V) at integration points; integration stops when the
     // particle leaves the grid, hits a NaN cell, or stalls (|F| < eps).
@@ -809,7 +809,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         // Build the seed list.
         std::vector<std::pair<double, double>> seeds;
         if (autoSlice) {
-            // 5Ã—5 evenly spaced inside the grid (1 cell margin so the
+            // 5×5 evenly spaced inside the grid (1 cell margin so the
             // first integration step has data on every side).
             const int nS = 5;
             for (int j = 0; j < nS; ++j) {
@@ -828,7 +828,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 seeds.emplace_back(SX.elemAsDouble(k), SY.elemAsDouble(k));
         }
 
-        // RK4 trace from a single seed in `dir` âˆˆ {+1, -1}. Appends
+        // RK4 trace from a single seed in `dir` ∈ {+1, -1}. Appends
         // points to xs/ys (with a leading null when we already have
         // points from a prior trace).
         const double h = std::min(dxAvg, dyAvg) * 0.4;
@@ -880,11 +880,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             traceFrom(sx0, sy0, -1, bwdX, bwdY, bwdN);
             if (fwdN == 0 && bwdN == 0) continue;
             if (count > 0) { xs << ",null,"; ys << ",null,"; }
-            // Backward trace runs sx0â†’edge â€” emit reversed so the line
+            // Backward trace runs sx0→edge — emit reversed so the line
             // flows naturally seedToEdge twice. We just dump bwd points
             // as captured (in time-order from seed); a break separates
             // it from the forward half. Renderer doesn't care about
-            // direction â€” it just connects consecutive non-NaN points.
+            // direction — it just connects consecutive non-NaN points.
             if (bwdN > 0) {
                 xs << bwdX.str(); ys << bwdY.str();
                 count += bwdN;
@@ -950,10 +950,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // errorbar(y, e)                â€” x = 1:N, symmetric e
-    // errorbar(x, y, e)             â€” symmetric e
-    // errorbar(x, y, neg, pos)      â€” asymmetric error bounds
-    // errorbar(x, y, e, 'spec')     â€” symmetric, with line spec
+    // errorbar(y, e)                — x = 1:N, symmetric e
+    // errorbar(x, y, e)             — symmetric e
+    // errorbar(x, y, neg, pos)      — asymmetric error bounds
+    // errorbar(x, y, e, 'spec')     — symmetric, with line spec
     // errorbar(x, y, neg, pos, 'spec')
     // The dataset's xJson/yJson hold the centre points; eJson (sym) or
     // eNegJson + ePosJson (asym) hold the magnitudes. The renderer
@@ -970,12 +970,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             DatasetInfo ds;
             ds.type = "errorbar";
 
-            // Find the first char arg (line spec) â€” everything before is data.
+            // Find the first char arg (line spec) — everything before is data.
             size_t nData = args.size();
             for (size_t i = 0; i < args.size(); ++i) {
                 if (args[i].isChar()) { nData = i; break; }
             }
-            // Optional N/V pairs after the (optional) spec â€” same parser as
+            // Optional N/V pairs after the (optional) spec — same parser as
             // plot() handles 'LineWidth', 'MarkerSize', 'DisplayName'.
             size_t nvStart = nData;
             if (nData < args.size() && args[nData].isChar()) {
@@ -984,21 +984,21 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
 
             switch (nData) {
-                case 1:  // errorbar(y) â€” degenerate but legal-ish; no error
+                case 1:  // errorbar(y) — degenerate but legal-ish; no error
                     ds.xJson = makeIndexJson(args[0].numel());
                     ds.yJson = vecToJson(args[0]);
                     break;
-                case 2:  // errorbar(y, e) â€” x = 1:N, symmetric e
+                case 2:  // errorbar(y, e) — x = 1:N, symmetric e
                     ds.xJson = makeIndexJson(args[0].numel());
                     ds.yJson = vecToJson(args[0]);
                     ds.eJson = vecToJson(args[1]);
                     break;
-                case 3:  // errorbar(x, y, e) â€” symmetric e
+                case 3:  // errorbar(x, y, e) — symmetric e
                     ds.xJson = vecToJson(args[0]);
                     ds.yJson = vecToJson(args[1]);
                     ds.eJson = vecToJson(args[2]);
                     break;
-                case 4:  // errorbar(x, y, neg, pos) â€” asymmetric
+                case 4:  // errorbar(x, y, neg, pos) — asymmetric
                 default:
                     ds.xJson    = vecToJson(args[0]);
                     ds.yJson    = vecToJson(args[1]);
@@ -1012,7 +1012,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€ Log-scale plot types â€” graphics.line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Log-scale plot types — graphics.line ────────────────────────
     auto registerLogPlot = [&reg](
                                 const char *name, const std::string &xscale,
                                 const std::string &yscale) {
@@ -1080,8 +1080,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     registerLogPlot("semilogx", "log", "linear");
     registerLogPlot("semilogy", "linear", "log");
     registerLogPlot("loglog", "log", "log");
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // geoplot / geoscatter / geobubble â€” geographic plots without a
+    // ────────────────────────────────────────────────────────────────
+    // geoplot / geoscatter / geobubble — geographic plots without a
     // basemap. The basemap-tile path (Web Mercator + WMS fetch) is
     // BACKLOG; for v1 these route through plot/scatter with
     // (X = lon, Y = lat) so user scripts that target geographic
@@ -1090,13 +1090,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     //   geoplot(lat, lon)
     //   geoplot(lat, lon, lineSpec)
     //   geoscatter(lat, lon[, sizes[, color]])
-    //   geobubble(lat, lon, sizes)   â€” sizes drive marker radius
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    //   geobubble(lat, lon, sizes)   — sizes drive marker radius
+    // ────────────────────────────────────────────────────────────────
     reg("line", "geoplot",
         [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
             geoForward("plot", a, o, gc);
         });
-    // comet(x, y) / comet3(x, y, z) â€” animated trail. Routes to plot
+    // comet(x, y) / comet3(x, y, z) — animated trail. Routes to plot
     // with a `cometAnim=1` hint in the style string; the IDE's
     // CompositePlot picks up the flag and animates the polyline
     // progressively via requestAnimationFrame (the final-state
@@ -1128,20 +1128,20 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 fm.emitModified();
             }
         });
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // triplot(TRI, X, Y [, LineSpec, ...]) â€” plot a triangulation.
-    // TRI is MÃ—3 (column-major) with 1-based vertex indices into X/Y.
+    // ────────────────────────────────────────────────────────────────
+    // triplot(TRI, X, Y [, LineSpec, ...]) — plot a triangulation.
+    // TRI is M×3 (column-major) with 1-based vertex indices into X/Y.
     // Emits ONE `line` dataset with null-separated triangle loops:
-    //   a â†’ b â†’ c â†’ a â†’ null â†’ a' â†’ b' â†’ c' â†’ a' â†’ null â€¦
+    //   a → b → c → a → null → a' → b' → c' → a' → null …
     // so the entire triangulation is a single series in the figure
     // (one legend entry, one colour) instead of M independent series.
-    // This matches MATLAB's triplot semantics â€” the canonical way to
+    // This matches MATLAB's triplot semantics — the canonical way to
     // visualise `delaunay(x, y)` output without exploding the series
     // count.
     // Optional 4th positional arg = LineSpec ("b-", "k--", etc). After
     // that, standard plot N-V pairs (LineWidth / MarkerSize) flow
     // through parsePlotArgs.
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     reg("line", "triplot",
         [](Span<const Value> args, size_t /*nargout*/,
                         Span<Value> outs, GraphicsContext &gc) {
@@ -1158,7 +1158,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
 
-            // Walk TRI column-major: row i, column k â†’ T[k*M + i] (1-based).
+            // Walk TRI column-major: row i, column k → T[k*M + i] (1-based).
             std::vector<double> Tbuf(TRI.numel());
             for (std::size_t i = 0; i < Tbuf.size(); ++i) Tbuf[i] = TRI.elemAsDouble(i);
             const double *T = Tbuf.data();
@@ -1193,14 +1193,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // voronoi(x, y) â€” Voronoi diagram via Delaunay dual.
+    // ────────────────────────────────────────────────────────────────
+    // voronoi(x, y) — Voronoi diagram via Delaunay dual.
     // Algorithm:
     //   1. Compute brute-force Delaunay triangulation of the cloud
     //      (same logic as delaunay_reg in toolboxes/builtin).
     //   2. For each triangle, compute its circumcenter.
     //   3. For each pair of triangles sharing an edge, draw a line
-    //      segment connecting their circumcenters â€” that's a Voronoi
+    //      segment connecting their circumcenters — that's a Voronoi
     //      cell boundary edge.
     //   4. Emit as a single `line` dataset with null separators
     //      between segments, plus scatter markers at the input
@@ -1208,7 +1208,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // Cells touching the convex hull don't have a finite second
     // endpoint (the cell is unbounded); v1 just omits those edges.
     // Properly-extended infinite rays are BACKLOG.
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     reg("line", "voronoi",
         [](Span<const Value> args, size_t nargout,
                      Span<Value> outs, GraphicsContext &gc) {
@@ -1268,7 +1268,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 ccs[t].x = (ax2_ay2*(by-cy) + bx2_by2*(cy-ay) + cx2_cy2*(ay-by)) / d;
                 ccs[t].y = (ax2_ay2*(cx-bx) + bx2_by2*(ax-cx) + cx2_cy2*(bx-ax)) / d;
             }
-            // Compute the input-points extent up-front â€” we need it
+            // Compute the input-points extent up-front — we need it
             // both for clipping unbounded ray endpoints and (later) for
             // setting xlim/ylim on the axes.
             double xMin = X[0], xMax = X[0], yMin = Y[0], yMax = Y[0];
@@ -1287,7 +1287,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const double clipYLo = yMin - yPad, clipYHi = yMax + yPad;
 
             // Build edge-to-triangles map. Each Delaunay edge is shared
-            // by exactly 1 triangle (= convex-hull edge â†’ unbounded
+            // by exactly 1 triangle (= convex-hull edge → unbounded
             // Voronoi cell, draw a ray) or 2 triangles (= interior
             // edge, draw the finite segment between their CCs).
             std::map<std::pair<size_t, size_t>, std::vector<size_t>> edge2tri;
@@ -1318,12 +1318,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 const size_t u = kv.first.first, v = kv.first.second;
                 const auto &neighbors = kv.second;
                 if (neighbors.size() == 2) {
-                    // Interior edge â€” bounded segment between two CCs.
+                    // Interior edge — bounded segment between two CCs.
                     const auto &A = ccs[neighbors[0]];
                     const auto &B = ccs[neighbors[1]];
                     emit(A.x, A.y, B.x, B.y);
                 } else if (neighbors.size() == 1) {
-                    // Hull edge â€” unbounded ray from the CC, perpendicular
+                    // Hull edge — unbounded ray from the CC, perpendicular
                     // to the edge, going AWAY from the third triangle vertex.
                     const size_t t = neighbors[0];
                     const auto &T = tris[t];
@@ -1338,7 +1338,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     const double tx = X[third] - midX;
                     const double ty = Y[third] - midY;
                     if (nx * tx + ny * ty > 0) { nx = -nx; ny = -ny; }
-                    // Extend the ray FAR â€” clipSeg will trim to the bbox.
+                    // Extend the ray FAR — clipSeg will trim to the bbox.
                     const double far = (clipXHi - clipXLo) + (clipYHi - clipYLo);
                     const double nlen = std::sqrt(nx * nx + ny * ny);
                     if (nlen < 1e-15) continue;
@@ -1368,7 +1368,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 fm.currentAxes().holdOn = wasHold;
             }
             // Clamp axis to the data extent (computed above as
-            // clipX/Y Lo/Hi). Same range we used for ray clipping â€”
+            // clipX/Y Lo/Hi). Same range we used for ray clipping —
             // both come from the input-points bbox plus 10% margin.
             std::ostringstream xlim, ylim;
             xlim << '[' << clipXLo << ',' << clipXHi << ']';
@@ -1381,7 +1381,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // parallelplot â€” parallel-coordinates plot. v1 routes each row of
+    // parallelplot — parallel-coordinates plot. v1 routes each row of
     // the input matrix as one line plot across N axis indices; the
     // dedicated multi-axis "parallel" rendering is BACKLOG.
     reg("line", "parallelplot",
@@ -1412,18 +1412,18 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.currentAxes().holdOn = wasHold;
             outs[0] = Value();
         });
-    // scatter3 â€” real impl registered earlier via plot3Impl shared body.
-    // pcolor â€” real implementation registered earlier in install()
+    // scatter3 — real impl registered earlier via plot3Impl shared body.
+    // pcolor — real implementation registered earlier in install()
     // (graphics.image.pcolor + compat.pcolor). The duplicate noop
     // here used to register `compat.pcolor` a second time, which the
     // engine's registerFunction rejects, throwing during install and
     // dropping the renderer into fallback mode.
-    // xline(x [, lineSpec]) / yline(y [, lineSpec]) â€” reference lines
+    // xline(x [, lineSpec]) / yline(y [, lineSpec]) — reference lines
     // extending across the visible viewport. Each call emits a
     // dataset with type='xline' / 'yline'; the adapter routes to a
     // viewport-spanning line layer that the renderer redraws on
     // every pan / zoom (range scan ignores these so the auto-range
-    // doesn't blow up to Â±âˆž).
+    // doesn't blow up to ±∞).
     auto refLineImpl = [](const char *type) {
         return [type](Span<const Value> args, size_t nargout,
                       Span<Value> outs, GraphicsContext &gc) {

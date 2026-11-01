@@ -13,10 +13,19 @@ It features a dual-engine architecture (TreeWalker AST interpreter + Bytecode St
 
 NumKit is organized as a modular ecosystem:
 
-- **[numkit/numkit](https://github.com/numkit/numkit)**: The core headless runtime, parser, Bytecode VM, built-in language library, and interactive REPL.
+- **[numkit/numkit](https://github.com/numkit/numkit)**: Core runtime, parser, TreeWalker + Bytecode VM, built-in language library, package manager, and interactive REPL.
 - **[numkit/value](https://github.com/numkit/value)**: Foundational value representation (`Value`), memory resources, and plugin C-ABI.
-- **[numkit/ops](https://github.com/numkit/ops)**: Low-level numerical kernels (Highway SIMD, BLAS 1/2/3, FFT, convolutions, filters, random number generators).
-- **[numkit/signal](https://github.com/numkit/signal)**: Digital Signal Processing toolbox (FFT, filtering, multirate, spectral analysis).
+- **[numkit/sys](https://github.com/numkit/sys)**: Virtual filesystem (`FsContext`), OS process execution, environment, and toolchain discovery.
+- **[numkit/ops](https://github.com/numkit/ops)**: Low-level numerical kernels (Highway SIMD, BLAS 1/2/3, LAPACK decompositions, FFT, ODE/optimization solvers, random number generators).
+- **[numkit/codegen](https://github.com/numkit/codegen)**: Ahead-of-time (AOT) C++17 transpiler, static type-inference engine, and runtime C-ABI bridge.
+- **Domain Toolboxes**:
+  - **[numkit/signal](https://github.com/numkit/signal)**: Digital Signal Processing (filtering, spectral analysis, multirate, windows).
+  - **[numkit/control](https://github.com/numkit/control)**: Control Systems (`tf`, `ss`, `zpk`, LQR/Kalman, frequency/time response).
+  - **[numkit/stats](https://github.com/numkit/stats)**: Statistics & Machine Learning (distributions, hypothesis tests, regression, clustering).
+  - **[numkit/wavelet](https://github.com/numkit/wavelet)**: Wavelet transforms (DWT, MODWT, CWT, wavelet packets, denoising).
+  - **[numkit/audio](https://github.com/numkit/audio)**: Audio processing (MFCC, pitch/spectral descriptors, perceptual weighting).
+  - **[numkit/comm](https://github.com/numkit/comm)**: Communications (modulation, channel coding, Galois fields, channels).
+  - **[numkit/image](https://github.com/numkit/image)**: Image processing (filtering, morphology, geometry, color spaces, segmentation).
 - **[numkit/registry](https://github.com/numkit/registry)**: Central index and registry for packages and toolboxes.
 
 ---

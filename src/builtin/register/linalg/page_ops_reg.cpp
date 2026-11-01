@@ -5,7 +5,7 @@
 // pagemrdivide / pagelsqminnorm that delegate to the engine-free compute in
 // page_ops.cpp. library.cpp forward-declares + registers these by name.
 //
-// Phase 2b compute/register split â€” see project_layering_refactor memory.
+// Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <numkit/linalg/page_ops.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>

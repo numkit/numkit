@@ -1,4 +1,4 @@
-﻿/// @file help.hpp
+/// @file help.hpp
 /// @ingroup group_lang
 #pragma once
 
@@ -34,7 +34,7 @@ inline void registerHelpLibrary(Engine &engine)
     HelpLibrary::install(engine);
 }
 
-// â”€â”€ C++ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── C++ Public API ──────────────────────────────────────────────────────────
 
 /// @brief Formats help text or catalog index for given function or topic name (`help query`).
 /// @param query Function, category, or empty string to display root catalog index.

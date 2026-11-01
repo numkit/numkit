@@ -24,11 +24,11 @@ namespace numkit {
 /// @{
 
 
-// â”€â”€ Flat JSON number-array helpers (line-series downsampling) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Flat JSON number-array helpers (line-series downsampling) ────────────
 namespace figdetail {
 
 // Count top-level elements in a flat JSON number array "[a,b,c]" cheaply
-// (commas + 1) â€” gates the expensive parse on series size.
+// (commas + 1) — gates the expensive parse on series size.
 inline std::size_t countFlatElements(const std::string &j) {
     std::size_t commas = 0;
     bool any = false;
@@ -39,7 +39,7 @@ inline std::size_t countFlatElements(const std::string &j) {
     return any ? commas + 1 : 0;
 }
 
-// Parse a flat JSON number array â†’ doubles. "null" â†’ NaN; bare/quoted
+// Parse a flat JSON number array → doubles. "null" → NaN; bare/quoted
 // Inf/NaN handled by strtod. The figure xJson is engine-built (well-formed).
 inline std::vector<double> parseFlatDoubles(const std::string &j) {
     std::vector<double> out;
@@ -65,7 +65,7 @@ inline std::vector<double> parseFlatDoubles(const std::string &j) {
     return out;
 }
 
-// Serialize doubles â†’ flat JSON array. NaN â†’ null, Â±Inf â†’ "Inf"/"-Inf".
+// Serialize doubles → flat JSON array. NaN → null, ±Inf → "Inf"/"-Inf".
 inline std::string serializeFlatDoubles(const std::vector<double> &v) {
     std::ostringstream os;
     os << "[";
@@ -89,24 +89,24 @@ struct DatasetInfo
     std::string yJson;
     std::string zJson;     // 2D matrix for imagesc, e.g. [[1,2],[3,4]]
     // Per-point auxiliary columns. Decoupled from xJson/yJson/zJson
-    // because they carry semantically different data â€” overloading
+    // because they carry semantically different data — overloading
     // zJson for marker sizes (as the original Phase 2e polar work
     // did) leaks coordinate semantics into a sizing channel and
     // breaks any future 3-D polar use case.
-    //   sizeJson   â€” polarbubblechart / scatter point areas
+    //   sizeJson   — polarbubblechart / scatter point areas
     //                (points^2, MATLAB convention).
-    //   colorJson  â€” per-point colour. May be a single RGB row
+    //   colorJson  — per-point colour. May be a single RGB row
     //                "[[r,g,b]]" or N rows "[[r,g,b],...]". Renderer
     //                falls back to the dataset's `style.color` when
     //                empty.
     std::string sizeJson;
     std::string colorJson;
-    std::string type;      // "line", "bar", "scatter", "stem", "stairs", "imagesc", "errorbar", â€¦
+    std::string type;      // "line", "bar", "scatter", "stem", "stairs", "imagesc", "errorbar", …
     std::string label;     // for legend
     std::string style;     // MATLAB style hint, e.g. "r--o", "b:", "g-."
     double lineWidth = 0;  // 0 = default
     double markerSize = 0; // 0 = default
-    // set(h,'Visible','off') â€” emitted as "visible":false only when off
+    // set(h,'Visible','off') — emitted as "visible":false only when off
     // (absence = visible, so the wire format stays back-compatible).
     bool visible = true;
 
@@ -116,25 +116,25 @@ struct DatasetInfo
     // secondary Y mapping. Emitted in JSON only when non-empty.
     std::string yside;
 
-    // â”€â”€ Errorbar â€” symmetric (eJson) or asymmetric (eNegJson + ePosJson) â”€â”€
-    // For symmetric: errorbar(x, y, e) â†’ eJson is non-empty, eNeg/ePos empty.
-    // For asymmetric: errorbar(x, y, neg, pos) â†’ eNegJson + ePosJson non-empty.
+    // ── Errorbar — symmetric (eJson) or asymmetric (eNegJson + ePosJson) ──
+    // For symmetric: errorbar(x, y, e) → eJson is non-empty, eNeg/ePos empty.
+    // For asymmetric: errorbar(x, y, neg, pos) → eNegJson + ePosJson non-empty.
     // The renderer derives bar bounds as y - eNeg .. y + ePos (with eJson
     // doubled-up when symmetric). Empty for non-errorbar datasets.
     std::string eJson;
     std::string eNegJson;
     std::string ePosJson;
 
-    // â”€â”€ Quiver â€” vector field (per-point u/v components) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // quiver(x, y, u, v) â†’ N arrows starting at (x, y) pointing
+    // ── Quiver — vector field (per-point u/v components) ────────────────
+    // quiver(x, y, u, v) → N arrows starting at (x, y) pointing
     // in direction (u, v). Empty for non-quiver datasets.
     std::string uJson;
     std::string vJson;
 
-    // â”€â”€ Imagesc storage (uint8 quantized) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Imagesc storage (uint8 quantized) ──────────────────────────────
     // Display path is fundamentally indexed: each pixel is a colormap
-    // index 0..255. Storing the full-precision float is overkill â€” for a
-    // 16kÃ—42k spectrogram the float32 backing store would be 2.7 GB and
+    // index 0..255. Storing the full-precision float is overkill — for a
+    // 16k×42k spectrogram the float32 backing store would be 2.7 GB and
     // wouldn't fit in the WASM heap. Quantizing once at imagesc-time
     // brings storage down to ~890 MB (with the LOD pyramid) for the same
     // shape and enables fast LUT-based rendering.
@@ -145,9 +145,9 @@ struct DatasetInfo
     // Layout: column-major (MATLAB convention), idx = c * rows + r.
     //
     // colorScaleBaked is true when log10 was applied before quantization
-    // â€” toggling color scale post-imagesc requires re-emitting the figure.
+    // — toggling color scale post-imagesc requires re-emitting the figure.
     // Hover values reconstruct via cminOrig + (idx/254) * range; the
-    // 256-level resolution gives â‰¤0.4% step on a typical [cmin..cmax].
+    // 256-level resolution gives ≤0.4% step on a typical [cmin..cmax].
     std::vector<uint8_t> zQuantized;
     double cminOrig = 0.0;
     double cmaxOrig = 1.0;
@@ -160,7 +160,7 @@ struct DatasetInfo
     size_t originalRows = 0;
     size_t originalCols = 0;
 
-    // â”€â”€ Phase 2 large line-series downsampling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 2 large line-series downsampling ──────────────────────────
     // For a huge line/stairs series (> kSeriesPreviewThreshold points) the
     // full x/y are parsed out of xJson/yJson into xRaw/yRaw, xJson/yJson are
     // replaced by a small M4 preview, and seriesDownsampled is set, so the
@@ -171,28 +171,28 @@ struct DatasetInfo
     bool   seriesDownsampled = false;
     size_t seriesN = 0;
     double sxLo = 0, sxHi = 0, syLo = 0, syHi = 0;   // x/y data ranges
-    // Lazy LOD pyramid (coarser levels only â€” xRaw/yRaw is the finest level)
+    // Lazy LOD pyramid (coarser levels only — xRaw/yRaw is the finest level)
     // built on the first getSeriesDisplayTile so every viewport tile is
     // O(width), not O(visible), even when fully zoomed out.
     mutable std::vector<DecimatedSeries> seriesPyramid;
 
-    // â”€â”€ Lazy LOD pyramid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // L0 is zQuantized itself (originalRows Ã— originalCols, column-major).
-    // Level kâ‰¥1 is lodLevels[k-1] with shape lodDims[k-1], built by 2Ã—2
+    // ── Lazy LOD pyramid ───────────────────────────────────────────────
+    // L0 is zQuantized itself (originalRows × originalCols, column-major).
+    // Level k≥1 is lodLevels[k-1] with shape lodDims[k-1], built by 2×2
     // mean-pooling the previous level (NaN sentinel propagates: only finite
     // children contribute to a parent block, all-NaN block stays 255).
     //
     // Built lazily on getFigureDisplayTile when the resampler picks a
-    // level higher than what's already cached. Bounded by ~10 levels â€”
-    // beyond that the matrix is < 64Ã—64 and further pooling is pointless.
+    // level higher than what's already cached. Bounded by ~10 levels —
+    // beyond that the matrix is < 64×64 and further pooling is pointless.
     //
-    // Memory cost: 4/3Ã— original (geometric series). For 16kÃ—42k uint8 =
-    // 670 MB â†’ pyramid total ~890 MB.
+    // Memory cost: 4/3× original (geometric series). For 16k×42k uint8 =
+    // 670 MB → pyramid total ~890 MB.
     mutable std::vector<std::vector<uint8_t>> lodLevels;
     mutable std::vector<std::pair<size_t, size_t>> lodDims;
 
-    // â”€â”€ Per-vertex colours for fill3 / polygon3d datasets.
-    // Layout: parallel to xJson/yJson/zJson â€” for each finite (x, y, z)
+    // ── Per-vertex colours for fill3 / polygon3d datasets.
+    // Layout: parallel to xJson/yJson/zJson — for each finite (x, y, z)
     // sample there are three uint8 RGB bytes, in the SAME order. The
     // null separators between polygons / triangles do NOT consume
     // colour entries (the renderer skips them when walking xRaw/yRaw).
@@ -200,7 +200,7 @@ struct DatasetInfo
     // `style` material.
     std::string vertexColorsJson;
 
-    // â”€â”€ animatedline storage. When type=="line" and the dataset was
+    // ── animatedline storage. When type=="line" and the dataset was
     // created via animatedline / addpoints, these vectors hold the
     // raw point data; xJson/yJson are rebuilt from them on every
     // emit. Empty for non-animated datasets.
@@ -208,10 +208,10 @@ struct DatasetInfo
     std::vector<double> animatedY;
     bool isAnimated = false;
 
-    // â”€â”€ Image-RGB (truecolor, set by imshow with MÃ—NÃ—3 input) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Source bytes are ALWAYS uint8 0..255 â€” imshow casts doubleâ†’u8 with
+    // ── Image-RGB (truecolor, set by imshow with M×N×3 input) ──────────
+    // Source bytes are ALWAYS uint8 0..255 — imshow casts double→u8 with
     // *255 and clamps before reaching here. Layout is row-major RGBA
-    // QUADS (r0,g0,b0,a0, r1,g1,b1,a1, ...) â€” alpha is synthesized 255
+    // QUADS (r0,g0,b0,a0, r1,g1,b1,a1, ...) — alpha is synthesized 255
     // for plain RGB input. originalRows/originalCols give the
     // pixel dims (same field as imagesc reuses).
     //
@@ -222,7 +222,7 @@ struct DatasetInfo
     std::string rgbJson;
 };
 
-/** Per-axes state â€” one subplot panel has one AxesState */
+/** Per-axes state — one subplot panel has one AxesState */
 struct AxesState
 {
     std::vector<DatasetInfo> datasets;
@@ -236,7 +236,7 @@ struct AxesState
     std::string thetalimJson;
     std::string climJson;     // color limits for imagesc, e.g. "[0,1]"
     std::string colormapName; // "parula","jet","hot","cool","gray","viridis","turbo","hsv"
-    // Custom palette via `colormap(M)` with M an NÃ—3 RGB matrix. JSON
+    // Custom palette via `colormap(M)` with M an N×3 RGB matrix. JSON
     // array string "[[r,g,b],[r,g,b],...]" with values in [0, 1]. When
     // non-empty, overrides colormapName.
     std::string customColormapJson;
@@ -244,12 +244,12 @@ struct AxesState
     bool holdOn = false;
     // Major / minor grid as two independent booleans, matching MATLAB
     // semantics:
-    //   grid          â†’ toggles `gridMajor` (minor untouched)
-    //   grid on       â†’ gridMajor = true
-    //   grid off      â†’ both = false
-    //   grid minor    â†’ toggles `gridMinor` (major untouched)
+    //   grid          → toggles `gridMajor` (minor untouched)
+    //   grid on       → gridMajor = true
+    //   grid off      → both = false
+    //   grid minor    → toggles `gridMinor` (major untouched)
     // gridUserTouched lets the adapter tell "user said off" apart from
-    // "script never called grid()" â€” important because the JS side
+    // "script never called grid()" — important because the JS side
     // wants different defaults for 2-D (off) and 3-D (on).
     bool gridMajor = false;
     bool gridMinor = false;
@@ -260,10 +260,10 @@ struct AxesState
     // the *outside variants. We normalise to lowercase. Empty = renderer
     // picks a default. Outside positions have a `outside` suffix.
     std::string legendLocation;
-    // legendBoxOn â€” `legend boxoff` toggles the legend frame off.
+    // legendBoxOn — `legend boxoff` toggles the legend frame off.
     // Default true (MATLAB default). JSON emits only when off.
     bool legendBoxOn = true;
-    // legendHidden â€” `legend off` / `legend('hide')` / Visible='off' on
+    // legendHidden — `legend off` / `legend('hide')` / Visible='off' on
     // the Legend handle: labels and location are PRESERVED (MATLAB
     // semantics), the render is suppressed. JSON emits only when true.
     bool legendHidden = false;
@@ -273,7 +273,7 @@ struct AxesState
 
     std::string xscale = "linear";
     std::string yscale = "linear";
-    std::string colorScale = "linear";  // 'linear' | 'log' â€” survives prepareForPlot
+    std::string colorScale = "linear";  // 'linear' | 'log' — survives prepareForPlot
     std::string axisMode;
     // Custom tick positions / labels. Empty = renderer auto-generates
     // (`niceTicks`). Non-empty values override the auto-generated set
@@ -295,10 +295,10 @@ struct AxesState
     std::string yTickLabelsJson;
     std::string zTickLabelsJson;
 
-    // â”€â”€ Axes font / frame (portion 34; MATLAB R2025b probe-verified) â”€â”€
+    // ── Axes font / frame (portion 34; MATLAB R2025b probe-verified) ──
     // FontSize/Weight/Name apply to tick labels AND propagate to the
-    // label Text objects (title/xlabel/â€¦ default to 1.1Ã— the axes font;
-    // setting the axes font RESETS even an explicitly-set Text font â€”
+    // label Text objects (title/xlabel/… default to 1.1× the axes font;
+    // setting the axes font RESETS even an explicitly-set Text font —
     // MATLAB behaviour, not a default-tracking inheritance).
     double fontSize = 10.0;
     std::string fontWeight = "normal";   // normal | bold
@@ -314,14 +314,14 @@ struct AxesState
     // Tick-label rotation in degrees. 0 = horizontal (default).
     double xTickAngle = 0.0;
     double yTickAngle = 0.0;
-    // axisVisible â€” MATLAB `axis off` / `axis on` controls whether the
+    // axisVisible — MATLAB `axis off` / `axis on` controls whether the
     // axes lines / ticks / labels render. true = drawn (default), false
     // = hidden. imshow ships axis off implicitly (image-only viewport).
     // axisMode and axisVisible are independent: `axis image off` is
     // axisMode='image' + axisVisible=false. JSON emit only when false
     // so untouched figures keep the existing wire format.
     bool axisVisible = true;
-    // boxOn â€” MATLAB `box on/off` controls the axis FRAME rectangle.
+    // boxOn — MATLAB `box on/off` controls the axis FRAME rectangle.
     // true (default) draws the full box; false draws only the X / Y
     // axis lines (left + bottom edges of the panel).
     bool boxOn = true;
@@ -336,9 +336,9 @@ struct AxesState
     std::string xDir = "normal";
     std::string yDir = "normal";
 
-    // â”€â”€ yyaxis (dual Y) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── yyaxis (dual Y) ────────────────────────────────────────────
     // MATLAB:
-    //   yyaxis left|right  â€” switches the active Y-side; subsequent
+    //   yyaxis left|right  — switches the active Y-side; subsequent
     //   plot/scatter/etc. write to that side, and ylim/ylabel/yscale
     //   target the active side too.
     // We model it as a "shadow" set of fields on the right side of the
@@ -351,7 +351,7 @@ struct AxesState
     std::string yscale2 = "linear";
 
     // 3-D camera view set by view(az, el); empty = renderer default
-    // (-37.5Â°, 30Â°). Wire format: "[az,el]" with degrees.
+    // (-37.5°, 30°). Wire format: "[az,el]" with degrees.
     std::string viewJson;
 
     // Z-axis label / limits (3-D figures). Empty = auto-derived from
@@ -378,7 +378,7 @@ struct AxesState
 
     std::string thetaDir = "counterclockwise";
     std::string thetaZeroLocation = "right";
-    // Custom polar tick positions + labels â€” MATLAB thetaticks(),
+    // Custom polar tick positions + labels — MATLAB thetaticks(),
     // rticks(), thetaticklabels(), rticklabels(). Empty JSON arrays
     // = renderer falls back to its auto-generated nice ticks.
     //   thetaticks: array of DEGREES (e.g. [0 45 90 135 180])
@@ -412,7 +412,7 @@ struct FigureState
 
     // linkaxes mode for the figure's subplot cells. Empty / "off" = no
     // link. "x" / "y" / "xy" = pan/zoom propagates across all cells on
-    // those axes. We model this at the figure level â€” handles aren't
+    // those axes. We model this at the figure level — handles aren't
     // a thing in nk's graphics layer yet, so calling linkaxes(...)
     // unconditionally links every subplot cell in the current figure.
     std::string linkMode;
@@ -422,7 +422,7 @@ struct FigureState
     // Title.String. Empty = no super-title (no header strip drawn).
     std::string superTitle;
 
-    // â”€â”€ annotation() overlays (portion 41). Coordinates are NORMALIZED
+    // ── annotation() overlays (portion 41). Coordinates are NORMALIZED
     // FIGURE units [0,1] (MATLAB convention), independent of axes.
     // 'line'/'arrow'/'textarrow': x1,y1=tail x2,y2=head;
     // 'ellipse'/'rectangle'/'textbox': x1,y1=lower-left, x2,y2=width,
@@ -469,10 +469,10 @@ class FigureManager
 public:
     using OutputFunc = std::function<void(const std::string &)>;
 
-    // â”€â”€ Graphics handle registry (bugs/closed/graphics/plot-family-no-
-    // return-value.md) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Graphics handle registry (bugs/closed/graphics/plot-family-no-
+    // return-value.md) ────────────────────────────────────────────────
     // Chart builtins create a handle record for each dataset they push;
-    // gca/gcf/figure create records for axes/figures; title/xlabel/â€¦
+    // gca/gcf/figure create records for axes/figures; title/xlabel/…
     // create slot-bound Text records; legend a per-axes Legend record;
     // groot one global Root record. The returned handle object references
     // it by id. set/get/delete/isgraphics consult this registry.
@@ -480,11 +480,11 @@ public:
     // accessor layer).
     struct HandleRecord
     {
-        std::string type;       // "line", "stem", â€¦ | "axes" | "figure"
+        std::string type;       // "line", "stem", … | "axes" | "figure"
                                 // | "text" | "legend" | "root"
         std::string className;  // "matlab.graphics.chart.primitive.Line"
         int figureId = 0;
-        // kNoAxes marks figure-scoped records (sgtitle Text) â€” scoped
+        // kNoAxes marks figure-scoped records (sgtitle Text) — scoped
         // axes sweeps (prepareForPlot) leave them alone; full-figure
         // sweeps (clf/close) invalidate them.
         static constexpr size_t kNoAxes = static_cast<size_t>(-1);
@@ -496,7 +496,7 @@ public:
         // Text records: which label slot this Text writes to
         // ("title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel").
         std::string slot;
-        // Property name â†’ JSON-encoded value. The figure layer stays
+        // Property name → JSON-encoded value. The figure layer stays
         // core-free (no Value); the adapter (which has Value access)
         // encodes/decodes.
         std::map<std::string, std::string> props;
@@ -599,7 +599,7 @@ public:
     }
 
     // Live dataset behind a chart record (nullptr when the axes or the
-    // dataset slot is gone â€” e.g. after prepareForPlot/closing).
+    // dataset slot is gone — e.g. after prepareForPlot/closing).
     DatasetInfo *datasetOf(const HandleRecord &rec)
     {
         if (!rec.isChart())
@@ -635,11 +635,11 @@ public:
     }
 
     // Invalidate handle records whose backing state died wholesale.
-    //   close(fig)          â†’ the whole tree: charts + axes + the figure
+    //   close(fig)          → the whole tree: charts + axes + the figure
     //                          record itself        (axesIdx=-1, T, T)
-    //   clf                 â†’ charts + axes records, figure survives
+    //   clf                 → charts + axes records, figure survives
     //                                               (axesIdx=-1, T, F)
-    //   prepareForPlot      â†’ ONLY the charts of one axes â€” the axes
+    //   prepareForPlot      → ONLY the charts of one axes — the axes
     //                          record survives the content reset
     //                                               (axesIdx=k,  F, F)
     // Stale handles then read as deleted, exactly like MATLAB handles
@@ -688,7 +688,7 @@ public:
      * route through this helper instead of `currentAxes().datasets.push_back`
      * directly so dual-Y routing stays consistent (no plot family forgotten).
      */
-    // Large line-series â†’ downsampled-preview thresholds. Below the
+    // Large line-series → downsampled-preview thresholds. Below the
     // threshold the full array is shipped and the JS-side viewport
     // decimation (Phase 1) keeps full zoom detail; at/above it the engine
     // ships a small preview + retains raw x/y for getSeriesDisplayTile.
@@ -705,7 +705,7 @@ public:
     }
 
     // For a huge line/stairs series with ascending x, retain raw x/y for
-    // viewport tiles and replace the inline JSON with a small M4 preview â€”
+    // viewport tiles and replace the inline JSON with a small M4 preview —
     // the frontend then receives O(previewCols) points, not O(N). Mirrors
     // imagesc's downsampled-preview path. No-op for small or non-monotonic
     // series (they keep their full inline JSON + the JS-side decimation).
@@ -718,7 +718,7 @@ public:
         auto yr = figdetail::parseFlatDoubles(ds.yJson);
         const std::size_t n = xr.size();
         if (n != yr.size() || n <= kSeriesPreviewThreshold) return;
-        // Decimation buckets by x â€” valid only for ascending x. Bail on a
+        // Decimation buckets by x — valid only for ascending x. Bail on a
         // non-monotonic series (rare for huge data; keeps the full JSON).
         for (std::size_t i = 1; i < n; ++i) if (xr[i] < xr[i - 1]) return;
         double xlo = xr.front(), xhi = xr.back();
@@ -763,7 +763,7 @@ public:
 
     int currentFigureId() const { return currentFigure_; }
 
-    /** subplot(m,n,p) â€” set grid and switch to axes at position p */
+    /** subplot(m,n,p) — set grid and switch to axes at position p */
     void setSubplot(int m, int n, int p)
     {
         auto &fig = current();
@@ -864,11 +864,11 @@ public:
         fig.modified = true;
     }
 
-    // â”€â”€ Chart-call handle base â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Chart-call handle base ─────────────────────────────────────
     // The adapter (graphics_library.cpp) snapshots the current axes'
     // dataset count before running a chart builtin's body; prepareForPlot
     // resets it to 0 when it wipes the axes. The post-hook then binds
-    // handles for datasets [base, after) â€” exactly the ones THIS call
+    // handles for datasets [base, after) — exactly the ones THIS call
     // pushed, whether or not a wipe intervened.
     void beginChartCall() { chartCallBase_ = currentAxes().datasets.size(); }
     size_t chartCallBase() const { return chartCallBase_; }
@@ -956,7 +956,7 @@ public:
                         os << ",\"markerSize\":" << ds.markerSize;
                     if (!ds.visible)
                         os << ",\"visible\":false";
-                    // Per-point size / colour columns â€” used by
+                    // Per-point size / colour columns — used by
                     // polarbubblechart and (future) bubblechart on
                     // cartesian axes. Emitted as `size` / `pointColor`
                     // to avoid colliding with the dataset-level
@@ -1189,10 +1189,10 @@ public:
 
     const std::map<int, FigureState> &figures() const { return figures_; }
 
-    // â”€â”€ Reactive-session checkpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Reactive-session checkpoints ─────────────────────────────
     // Rollback point for incremental re-runs (ReactiveSession). A
     // re-run `plot` under a persisted `hold on` would APPEND lines
-    // (each tick accumulating curves) â€” restoring the checkpoint
+    // (each tick accumulating curves) — restoring the checkpoint
     // taken before the dirty set truncates datasets back to the
     // pre-tick count and re-applies the hold flag, so the replayed
     // graphics statements reproduce the full-re-run figure state.
@@ -1201,7 +1201,7 @@ public:
         size_t datasetCount = 0;
     };
     struct FigureCheckpoint {
-        // figure id â†’ per-axes snapshot (sized to the axes vector at
+        // figure id → per-axes snapshot (sized to the axes vector at
         // capture time; figures absent here are treated as "created
         // after the checkpoint" on restore).
         std::vector<std::pair<int, std::vector<AxesCheckpoint>>> figures;
@@ -1210,26 +1210,26 @@ public:
     void restoreFigures(const FigureCheckpoint &cp);
 
     /**
-     * Display-grid tile resampler. Fills a displayH Ã— displayW row-major
+     * Display-grid tile resampler. Fills a displayH × displayW row-major
      * uint8 buffer with mean-pooled samples from the dataset's zQuantized,
      * applying optional log10 inverse on either axis so the buffer can be
      * blitted directly to the panel's pixel grid.
      *
      *   srcR0, srcC0, srcH, srcW : visible source-rect in source-cell coords
      *                              (fractional allowed for log inverse)
-     *   xLog, yLog               : log10 axis transforms â€” when set, the
+     *   xLog, yLog               : log10 axis transforms — when set, the
      *                              source-cell at display-pixel u (or v) is
      *                              srcC0 * (srcC1/srcC0)^(u/displayW), etc.
      *                              Requires srcC0 > 0 (yLog: srcR0 > 0).
-     *   out                      : caller-allocated, size â‰¥ displayH*displayW
+     *   out                      : caller-allocated, size ≥ displayH*displayW
      *
      * Per display pixel:
      *  - compute its source-cell centre via linear or log map
-     *  - mean-pool over a small âŒˆsrcStepâŒ‰Ã—âŒˆcStepâŒ‰ block centred there
+     *  - mean-pool over a small ⌈srcStep⌉×⌈cStep⌉ block centred there
      *  - skip NaN sentinels (idx 255), write 255 if the block is all-NaN
      *
-     * Cost: O(displayH * displayW * âŒˆrStepâŒ‰ * âŒˆcStepâŒ‰) â€” for a 800Ã—600 panel
-     * showing the full 10000Â² extent that's ~30M ops, ~30ms in WASM. The
+     * Cost: O(displayH * displayW * ⌈rStep⌉ * ⌈cStep⌉) — for a 800×600 panel
+     * showing the full 10000² extent that's ~30M ops, ~30ms in WASM. The
      * upcoming Stage D LOD pyramid drops this to ~3 ms by reading from a
      * pre-pooled level rather than the L0 source.
      *
@@ -1238,7 +1238,7 @@ public:
      */
     // Decimate a downsampled line series' raw x/y over the viewport [x0,x1]
     // to `width` columns. algo: 0=M4 (default), 1=LTTB, 2=none. Empty when
-    // the dataset isn't a downsampled series or indices are out of range â€”
+    // the dataset isn't a downsampled series or indices are out of range —
     // the frontend refines zoom detail without ever shipping the full array.
     DecimatedSeries getSeriesDisplayTile(int figId, int axIdx, int dsIdx,
                                          double x0, double x1, int width, int algo) const
@@ -1297,10 +1297,10 @@ public:
         if (yLog && srcR0 <= 0) return false;
         if (xLog && srcC0 <= 0) return false;
 
-        // â”€â”€ LOD pyramid: pick the smallest level whose cells are â‰¤1 per
-        // display-pixel. At level k each cell covers 2^k Ã— 2^k of L0, so
+        // ── LOD pyramid: pick the smallest level whose cells are ≤1 per
+        // display-pixel. At level k each cell covers 2^k × 2^k of L0, so
         // the optimal level is floor(log2(min(rStep, cStep))) clamped to
-        // [0, 10]. Building higher levels lazily â€” first zoom-out builds
+        // [0, 10]. Building higher levels lazily — first zoom-out builds
         // up the tree once, subsequent zooms reuse cached levels.
         const double rStep0 = (srcR1 - srcR0) / displayH;
         const double cStep0 = (srcC1 - srcC0) / displayW;
@@ -1325,7 +1325,7 @@ public:
             lvlRows = ds.lodDims[level - 1].first;
             lvlCols = ds.lodDims[level - 1].second;
         } else {
-            // ensureLOD couldn't build (e.g. dataset too small) â€” fall back to L0.
+            // ensureLOD couldn't build (e.g. dataset too small) — fall back to L0.
             lvlData = ds.zQuantized.data();
             lvlRows = fullRows;
             lvlCols = fullCols;
@@ -1378,10 +1378,10 @@ public:
 
     /**
      * Build the LOD pyramid up to `targetLevel` if it isn't already cached.
-     * Each level halves dims via 2Ã—2 mean-pooling of the parent (NaN-skip).
-     * Idempotent â€” repeated calls with smaller targetLevel are no-ops.
+     * Each level halves dims via 2×2 mean-pooling of the parent (NaN-skip).
+     * Idempotent — repeated calls with smaller targetLevel are no-ops.
      *
-     * Stops early if a level would shrink below 32Ã—32 (further pooling is
+     * Stops early if a level would shrink below 32×32 (further pooling is
      * useless detail-wise) or if memory allocation throws.
      */
     void ensureLOD(const DatasetInfo &ds, int targetLevel) const
@@ -1429,9 +1429,9 @@ public:
 
     /**
      * Source-grid tile fetcher (kept for Stage A/B compat tests). Reads a
-     * sub-rectangle rows [r0, r0+h) Ã— cols [c0, c0+w) from zQuantized,
-     * mean-pools by `lodÃ—lod`, writes row-major uint8 indices to `out`.
-     * Stage C uses getFigureDisplayTile instead â€” that one resamples to
+     * sub-rectangle rows [r0, r0+h) × cols [c0, c0+w) from zQuantized,
+     * mean-pools by `lod×lod`, writes row-major uint8 indices to `out`.
+     * Stage C uses getFigureDisplayTile instead — that one resamples to
      * display-pixel grid in one pass.
      */
     bool getFigureTile(int figId, int axIdx, int dsIdx,
@@ -1477,7 +1477,7 @@ public:
 
         out.resize(oH * oW);
 
-        // Mean-pool indices over LÃ—L blocks. Index 255 = NaN, skipped.
+        // Mean-pool indices over L×L blocks. Index 255 = NaN, skipped.
         // Row-major output (suits canvas blit). zQuantized is column-major.
         for (size_t orow = 0; orow < oH; ++orow) {
             const size_t rA = static_cast<size_t>(r0) + orow * L;

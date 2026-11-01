@@ -1,4 +1,4 @@
-// bundle/src/register/ode/ode23_reg.cpp â€” Engine adapter + embedded-.m registration relocated from the
+// bundle/src/register/ode/ode23_reg.cpp — Engine adapter + embedded-.m registration relocated from the
 // ode toolbox in Phase D (solver 3-way split): the toolbox keeps the
 // Engine-free FnHandle kernel; this core-coupled glue lives in bundle.
 #include <numkit/ode/solvers.hpp>
@@ -32,7 +32,7 @@ void ode23_reg(Span<const Value> args, size_t nargout,
 
 } // namespace detail
 
-// â”€â”€ ode23 as an embedded `.m` wrapper (vm_callbacks_plan.md) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ode23 as an embedded `.m` wrapper (vm_callbacks_plan.md) ──────────────────
 // Same pattern as ode45: the RHS `f(t,y)` runs as bytecode (pausable); the
 // Bogacki-Shampine 3(2) step + adaptive control + cubic-Hermite dense output
 // are the natural `.m` algorithm, vectorised so the stage arithmetic still hits

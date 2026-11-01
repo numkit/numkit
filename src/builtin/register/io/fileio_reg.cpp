@@ -2,7 +2,7 @@
 //
 // Engine adapters for the io.file_io builtins. The compute (fopen/fclose/
 // fgetl/fgets/feof/ferror/ftell/fseek/frewind/fread/fwrite) is Engine-free in
-// toolboxes/io/src/file_io/fileio.cpp â€” it takes FsContext& (the file-handle
+// toolboxes/io/src/file_io/fileio.cpp — it takes FsContext& (the file-handle
 // table, moved out of Engine in B1c) + a memory_resource. These CallContext
 // adapters bridge the registration ABI, supplying engine.fsContext() +
 // engine.resource(). IoLibrary::install (toolboxes/io/src/library.cpp)

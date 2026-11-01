@@ -22,9 +22,9 @@
 namespace numkit::io {
 using namespace ::numkit::ops;
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 // Shared small helper
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 
 namespace {
 
@@ -41,16 +41,16 @@ FsContext::OpenFile *requireReadFid(FsContext &fs, Span<const Value> args, const
 
 } // namespace
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 // Public API
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ════════════════════════════════════════════════════════════════════════
 
 void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("fopen: filename must be a char array");
 
-    // `fopen('all')` â€” only as the sole argument â€” returns a row vector
+    // `fopen('all')` — only as the sole argument — returns a row vector
     // of every user-opened fid. With a mode arg, 'all' becomes a literal
     // filename instead.
     if (args.size() == 1 && args[0].toString() == "all") {
@@ -79,7 +79,7 @@ void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
             f->mode += ";be";
     }
     outs[0] = Value::scalar(static_cast<double>(fid), mr);
-    // [fid, errmsg] = fopen(...) â€” errmsg is '' on success.
+    // [fid, errmsg] = fopen(...) — errmsg is '' on success.
     if (nargout > 1)
         outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError() : std::string(), mr);
 }
@@ -114,7 +114,7 @@ void fgetl(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
     size_t start = f->cursor;
     size_t nl = f->buffer.find('\n', start);
     size_t end = (nl == std::string::npos) ? f->buffer.size() : nl;
-    // Strip trailing \r so CRLF files don't leak the carriage return â€”
+    // Strip trailing \r so CRLF files don't leak the carriage return —
     // MATLAB does the same.
     size_t trimEnd = end;
     if (trimEnd > start && f->buffer[trimEnd - 1] == '\r')
@@ -254,7 +254,7 @@ void frewind(FsContext &fs, Span<const Value> args, size_t, Span<Value>, std::pm
     f->cursor = 0;
 }
 
-// â”€â”€ Binary I/O â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Binary I/O ──────────────────────────────────────────────────────────
 
 void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr)
 {
@@ -378,7 +378,7 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
                     0, 0, "fwrite", "", "numkit:fwrite:unsupportedClass");
     size_t numel = A.numel();
 
-    // Accept any numeric element type â€” `Value::elemAsDouble` handles
+    // Accept any numeric element type — `Value::elemAsDouble` handles
     // DOUBLE/SINGLE/LOGICAL/CHAR/INT*/UINT* uniformly. The on-disk
     // precision is governed by `precStr`, not by the input dtype, so
     // MATLAB-style `fwrite(fid, uint8([...]), 'uint8')` works.
@@ -409,7 +409,7 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
         dst += bsize;
     }
 
-    // Same cursor-based write contract as fprintf â€” appendOnly snaps to
+    // Same cursor-based write contract as fprintf — appendOnly snaps to
     // the end regardless of any prior seek.
     size_t writePos = f->appendOnly ? f->buffer.size() : f->cursor;
     if (writePos + bytes.size() > f->buffer.size())

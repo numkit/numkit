@@ -1,4 +1,4 @@
-// nk/graphics â€” surface.cpp
+// nk/graphics — surface.cpp
 //
 // graphics.surface.* builders (surf / mesh / slice / isosurface / coneplot / streamtube / waterfall / lighting), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
@@ -34,7 +34,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
     };
 
-    // â”€â”€ Surf / mesh â€” wireframe quad mesh under cabinet projection â”€â”€
+    // ── Surf / mesh — wireframe quad mesh under cabinet projection ──
     // surf(Z) / surf(X, Y, Z); mesh(...) shares the same body. Real
     // face shading + lighting is deferred; for now we emit the wire
     // skeleton (rows + cols) as plot3-style line segments and let the
@@ -115,7 +115,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             return;
         }
 
-        // mesh â€” wireframe: emit two big plot3 polylines (horizontal
+        // mesh — wireframe: emit two big plot3 polylines (horizontal
         // sweep + vertical sweep) so the existing 3-D line renderer
         // draws the lattice.
         std::ostringstream xH, yH, zH;
@@ -177,20 +177,20 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         reg("surface", "surface", std::bind(surfImpl, "surf", _1, _2, _3, _4));
         reg("surface", "mesh", std::bind(surfImpl, "mesh", _1, _2, _3, _4));
     }
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // slice â€” axis-aligned cross sections of a 3-D scalar volume.
+    // ────────────────────────────────────────────────────────────────
+    // slice — axis-aligned cross sections of a 3-D scalar volume.
     // Forms supported:
-    //   slice(V, sx, sy, sz)           â€” V is MÃ—NÃ—P
-    //   slice(X, Y, Z, V, sx, sy, sz)  â€” explicit grid coords
+    //   slice(V, sx, sy, sz)           — V is M×N×P
+    //   slice(X, Y, Z, V, sx, sy, sz)  — explicit grid coords
     // sx / sy / sz are vectors (or empty) of slice coordinates along
     // each axis. Each entry produces one 2-D plane of quads at that
     // axis position, picking volume values via nearest-neighbour
     // sampling (linear interpolation along the slice axis is a
     // follow-up). Each plane is emitted as a single polygon3d
     // dataset; colour is the volume's mean value mapped through the
-    // contour HSL ramp â€” per-cell colormap on the WebGL side is in
+    // contour HSL ramp — per-cell colormap on the WebGL side is in
     // BACKLOG (needs vertexColors plumbing in buildPolygon3D).
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     auto sliceImpl = [](Span<const Value> args, size_t nargout,
                         Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
@@ -287,7 +287,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             return V->elemAsDouble(k * M * N + j * M + i);
         };
 
-        // Helper â€” emit a 4-vertex CCW quad-loop, terminated by null.
+        // Helper — emit a 4-vertex CCW quad-loop, terminated by null.
         // Also pushes one RGB triplet per vertex into the parallel
         // vertexColors stream so the renderer can colour each quad
         // by the local volume value.
@@ -362,7 +362,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             }
             xs << ']'; ys << ']'; zs << ']'; cs << ']';
             DatasetInfo ds;
-            // Reuse the existing fill3 wire shape â€” adapter routes
+            // Reuse the existing fill3 wire shape — adapter routes
             // type='fill3' to polygon3d mode in the 3-D renderer.
             ds.type = "fill3";
             ds.xJson = xs.str();
@@ -383,7 +383,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             }
             return best;
         };
-        // Mean-value-per-slice â€” just average finite voxels in the
+        // Mean-value-per-slice — just average finite voxels in the
         // selected plane.
         const auto sliceMean = [&](char axis, size_t idx) {
             double sum = 0; size_t n = 0;
@@ -427,7 +427,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 pushSlice('z', idx, sliceMean('z', idx));
             }
         }
-        // No slices specified â€” degenerate: pick mid-plane on each axis.
+        // No slices specified — degenerate: pick mid-plane on each axis.
         if ((!sx || sx->numel() == 0) && (!sy || sy->numel() == 0)
          && (!sz || sz->numel() == 0)) {
             pushSlice('x', N / 2, vmid);
@@ -438,12 +438,12 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("surface", "slice", sliceImpl);
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // isosurface(V, isovalue) â€” marching cubes.
+    // ────────────────────────────────────────────────────────────────
+    // isosurface(V, isovalue) — marching cubes.
     // Forms supported:
     //   isosurface(V, iso)
     //   isosurface(X, Y, Z, V, iso)
-    // The volume V is MÃ—NÃ—P (rows = Y, cols = X, pages = Z). For each
+    // The volume V is M×N×P (rows = Y, cols = X, pages = Z). For each
     // cube cell we compute an 8-bit code from "corner < iso", look up
     // the edge bitmask + triangle list from the standard Bourke
     // marching-cubes tables, and interpolate edge crossings linearly.
@@ -452,7 +452,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // triangles so the existing 3-D polygon3d renderer fans them
     // correctly. Per-vertex normals + per-vertex colour from V are a
     // BACKLOG item.
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     // Standard Paul-Bourke marching-cubes tables (public domain, see
     // http://paulbourke.net/geometry/polygonise/). edgeTable[cubeIndex]
     // is a 12-bit mask of edges crossed by the surface; triTable[i][k]
@@ -790,7 +790,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         }
 
         // Cube corner offsets matching Bourke's convention. Corner k
-        // â†” (di, dj, dk) where di stripe X axis, dj stripe Y axis, dk
+        // ↔ (di, dj, dk) where di stripe X axis, dj stripe Y axis, dk
         // stripe Z axis (depth).
         static const int kCornerDX[8] = {0, 1, 1, 0, 0, 1, 1, 0};
         static const int kCornerDY[8] = {0, 0, 1, 1, 0, 0, 1, 1};
@@ -804,8 +804,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         bool first = true;
 
         // Convert data-axis order to MATLAB convention: axis-0 stripes
-        // X (j â†’ cols), axis-1 stripes Y (i â†’ rows), axis-2 stripes Z
-        // (k â†’ pages).
+        // X (j → cols), axis-1 stripes Y (i → rows), axis-2 stripes Z
+        // (k → pages).
         for (size_t k = 0; k + 1 < P; ++k) {
             for (size_t j = 0; j + 1 < N; ++j) {
                 for (size_t i = 0; i + 1 < M; ++i) {
@@ -851,8 +851,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                     // a triangle is 3 vertices. We keep `first=false`
                     // after writing ",null" so the next triangle's
                     // first vertex picks up its leading comma in the
-                    // "if(!first)" branch â€” yielding the correct
-                    // "v,v,v,null,v,v,v,null,â€¦" sequence.
+                    // "if(!first)" branch — yielding the correct
+                    // "v,v,v,null,v,v,v,null,…" sequence.
                     const int *tri = kMcTriTable[code];
                     for (int t = 0; tri[t] != -1; t += 3) {
                         for (int v = 0; v < 3; ++v) {
@@ -900,22 +900,22 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("surface", "isosurface", isosurfaceImpl);
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // coneplot â€” cone-headed arrows over a 3-D vector field.
+    // ────────────────────────────────────────────────────────────────
+    // coneplot — cone-headed arrows over a 3-D vector field.
     // Forms supported:
     //   coneplot(U, V, W)
-    //     â€” cones at integer grid (1..N, 1..M, 1..P) aligned with
+    //     — cones at integer grid (1..N, 1..M, 1..P) aligned with
     //       (U(i,j,k), V(i,j,k), W(i,j,k)).
     //   coneplot(X, Y, Z, U, V, W)
-    //     â€” same but with explicit grid coords.
+    //     — same but with explicit grid coords.
     //   coneplot(X, Y, Z, U, V, W, Cx, Cy, Cz [, S])
-    //     â€” cones at user-specified positions with U/V/W taken as the
+    //     — cones at user-specified positions with U/V/W taken as the
     //       value AT those positions (nearest-neighbour for the v1).
     //       S is a scalar magnitude factor.
-    // Each cone is a 6-sided pyramid (apex + 6-vertex base ring) â†’
+    // Each cone is a 6-sided pyramid (apex + 6-vertex base ring) →
     // 6 side triangles + 4 cap triangles = 10 triangles per cone,
     // emitted into a single fill3 dataset (null-separated triangles).
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     auto coneplotImpl = [](Span<const Value> args, size_t nargout,
                            Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
@@ -953,7 +953,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // unique x-values live at stride M (along columns), z-values at
         // stride M*N (along pages). Y already varies along i so the
         // first M elements are exactly y(1..M). The pre-fix code read
-        // `X[i]` which gave x(1) for every i â€” all cones collapsed into
+        // `X[i]` which gave x(1) for every i — all cones collapsed into
         // a single x/z slice and the field rendered as a flat row.
         std::vector<double> Xs(N), Ys(M), Zs(P);
         if (X && Y && Z && X->numel() >= M * N * P
@@ -974,7 +974,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         }
 
         // Build the cone-position list. Without Cx/Cy/Cz we place a
-        // cone at every grid point (M*N*P cones â€” fine for small
+        // cone at every grid point (M*N*P cones — fine for small
         // demos; the BACKLOG carries skipping).
         struct ConeAt { double x, y, z, u, v, w; };
         std::vector<ConeAt> cones;
@@ -1024,7 +1024,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         if (cones.empty()) { outs[0] = Value(); return; }
 
         // Auto-scale: largest vector magnitude in the field divided
-        // by 0.4 Ã— the smallest grid spacing â†’ cones don't overlap.
+        // by 0.4 × the smallest grid spacing → cones don't overlap.
         double maxMag = 0;
         for (const auto &c : cones) {
             const double m = std::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
@@ -1050,14 +1050,14 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             // Axis = normalized (u, v, w). Apex at base + axis * len.
             const double ax = c.u / mag, ay = c.v / mag, az = c.w / mag;
             const double scale = coneLen * (mag / maxMag);
-            // Build orthonormal basis (e1, e2) âŠ¥ axis.
+            // Build orthonormal basis (e1, e2) ⊥ axis.
             double e1x, e1y, e1z;
             if (std::abs(ax) < 0.9) { e1x = 0; e1y = -az; e1z = ay; }
             else                    { e1x = -az; e1y = 0; e1z = ax; }
             // Normalize e1.
             const double e1n = std::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
             if (e1n > 0) { e1x /= e1n; e1y /= e1n; e1z /= e1n; }
-            // e2 = axis Ã— e1
+            // e2 = axis × e1
             const double e2x = ay * e1z - az * e1y;
             const double e2y = az * e1x - ax * e1z;
             const double e2z = ax * e1y - ay * e1x;
@@ -1076,7 +1076,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 ry[n] = by + coneRad * (e1y * cs + e2y * sn);
                 rz[n] = bz + coneRad * (e1z * cs + e2z * sn);
             }
-            // Helper â€” emit one triangle (3 verts) followed by null.
+            // Helper — emit one triangle (3 verts) followed by null.
             const auto tri = [&](double X1, double Y1, double Z1,
                                  double X2, double Y2, double Z2,
                                  double X3, double Y3, double Z3) {
@@ -1114,17 +1114,17 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("surface", "coneplot", coneplotImpl);
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // streamtube â€” tubes wrapped around streamlines through a 3-D
+    // ────────────────────────────────────────────────────────────────
+    // streamtube — tubes wrapped around streamlines through a 3-D
     // vector field. Forms supported:
     //   streamtube(X, Y, Z, U, V, W, sx, sy, sz)
-    //   streamtube(U, V, W, sx, sy, sz)         â€” implicit grid
+    //   streamtube(U, V, W, sx, sy, sz)         — implicit grid
     // Per seed point, integrate the field with fixed-step Euler (RK1)
     // forward. Tube generated with an N-vertex ring around each
     // streamline sample; radii proportional to local |V| with a hard
     // cap of the grid spacing. Output: one fill3 dataset per
     // streamline, triangle list (quads split into two triangles).
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ────────────────────────────────────────────────────────────────
     auto streamtubeImpl = [](Span<const Value> args, size_t nargout,
                              Span<Value> outs, GraphicsContext &gc) {
         (void)nargout;
@@ -1234,7 +1234,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             if (path.size() < 2) continue;
 
             // Per-segment Frenet-ish frame: tangent = path[i+1] - path[i],
-            // normalised; pick a stable e1 âŠ¥ tangent, e2 = tangent Ã— e1.
+            // normalised; pick a stable e1 ⊥ tangent, e2 = tangent × e1.
             std::ostringstream xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
             bool first = true;
@@ -1254,7 +1254,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 }
                 const double tn = std::sqrt(tan[0] * tan[0] + tan[1] * tan[1] + tan[2] * tan[2]);
                 if (tn > 0) { tan[0] /= tn; tan[1] /= tn; tan[2] /= tn; }
-                // Project prevE1 onto plane âŠ¥ tan and renormalise.
+                // Project prevE1 onto plane ⊥ tan and renormalise.
                 const double dot = tan[0] * prevE1[0] + tan[1] * prevE1[1] + tan[2] * prevE1[2];
                 std::array<double, 3> e1 = {
                     prevE1[0] - dot * tan[0],
@@ -1263,7 +1263,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 };
                 double e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
                 if (e1n < 1e-9) {
-                    // prev was nearly parallel â€” pick a new e1.
+                    // prev was nearly parallel — pick a new e1.
                     if (std::abs(tan[0]) < 0.9) e1 = {0, -tan[2], tan[1]};
                     else                        e1 = {-tan[2], 0, tan[0]};
                     e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
@@ -1321,7 +1321,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("surface", "streamtube", streamtubeImpl);
-    // contour3(Z[, n|levels]) â€” contour lines on the surface defined
+    // contour3(Z[, n|levels]) — contour lines on the surface defined
     // by Z. Same algorithm as 2-D contour but each segment carries the
     // Z value of the level so it can be drawn at the surface height.
     // Wire format: type='contour3' with X, Y vectors, Z-matrix, plus
@@ -1389,7 +1389,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // surfc(Z) / meshc(Z) â€” surf/mesh + contour3 in a single figure.
+    // surfc(Z) / meshc(Z) — surf/mesh + contour3 in a single figure.
     // Implemented as wrappers that invoke compat.surf (or compat.mesh)
     // followed by compat.contour3. hold on between calls so both
     // datasets land on the same axes.
@@ -1411,7 +1411,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     reg("surface", "meshc", [surfMeshContour](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
         surfMeshContour("mesh", a, n, o, gc);
     });
-    // waterfall(Z) â€” row-by-row 3-D ribbons. Emits the same Z-matrix
+    // waterfall(Z) — row-by-row 3-D ribbons. Emits the same Z-matrix
     // wire format as surf/bar3; the WebGL renderer builds per-row
     // ribbons (row Z values down to baseline z=0).
     reg("surface", "waterfall",
@@ -1455,7 +1455,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // camlight(['left'|'right'|'headlight']) â€” adds a directional
+    // camlight(['left'|'right'|'headlight']) — adds a directional
     // light positioned relative to the camera. Default: headlight
     // (light from camera).
     reg("surface", "camlight",
@@ -1482,7 +1482,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // lighting('flat'|'gouraud'|'phong'|'none') â€” material shading
+    // lighting('flat'|'gouraud'|'phong'|'none') — material shading
     // model. Default 'gouraud' (smooth Lambert), 'flat' uses per-face
     // normals, 'phong' adds specular highlights, 'none' removes
     // shading entirely.
@@ -1502,7 +1502,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // material('shiny'|'metal'|'dull') â€” preset specular response
+    // material('shiny'|'metal'|'dull') — preset specular response
     // (only meaningful with lighting='phong').
     reg("surface", "material",
         [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
@@ -1519,7 +1519,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    // surfl(Z[, X, Y]) â€” surf + auto camlight + lighting gouraud.
+    // surfl(Z[, X, Y]) — surf + auto camlight + lighting gouraud.
     // Implemented as a thin wrapper that calls compat.surf followed by
     // setting camlightPos = 'headlight' and lightingMode = 'gouraud'
     // on the resulting axes.

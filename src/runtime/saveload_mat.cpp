@@ -790,8 +790,8 @@ void saveMat4(const std::string &osPath,
             mw.writeBytes(v.rawData(), v.rawBytes());
         }
     }
-    // Binary channel: MAT bytes contain values â‰¥ 0x80 that the text
-    // writeFile path would UTF-8-mangle crossing the JSâ†”WASM boundary.
+    // Binary channel: MAT bytes contain values ≥ 0x80 that the text
+    // writeFile path would UTF-8-mangle crossing the JS↔WASM boundary.
     fs.writeFileBytes(osPath, std::string(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
 }
 
@@ -915,7 +915,7 @@ void saveMat(Engine &engine, Environment &env,
 
     // Level 5 Header (128 bytes). The "MATLAB 5.0 MAT-file" prefix is
     // part of the MAT Level-5 format specification (readers identify the
-    // file by it) â€” file-format interop, not shipped diagnostics.
+    // file by it) — file-format interop, not shipped diagnostics.
     MatWriter mw;
     std::string hdrText = "MATLAB 5.0 MAT-file, Platform: NumKit Autonomous Engine, Created by NumKit";
     hdrText.resize(116, ' ');
@@ -942,7 +942,7 @@ void saveMat(Engine &engine, Environment &env,
         }
     }
 
-    // Binary channel â€” see the writeFileBytes note in saveMat4 above.
+    // Binary channel — see the writeFileBytes note in saveMat4 above.
     resolved.fs->writeFileBytes(resolved.path, std::string(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
 }
 

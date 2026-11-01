@@ -1,4 +1,4 @@
-﻿// toolboxes/io/src/paths/paths.cpp
+// toolboxes/io/src/paths/paths.cpp
 //
 // filesep / fullfile / fileparts / tempdir / tempname.
 
@@ -100,7 +100,7 @@ fileparts(const std::string &path, std::pmr::memory_resource *mr)
                     : path.substr(0, lastSep);
         base = path.substr(lastSep + 1);
     }
-    // Find last '.' in base â€” but ignore a leading dot ('.bashrc').
+    // Find last '.' in base — but ignore a leading dot ('.bashrc').
     std::string name = base, ext;
     if (!base.empty()) {
         size_t dot = base.find_last_of('.');
@@ -117,7 +117,7 @@ fileparts(const std::string &path, std::pmr::memory_resource *mr)
 Value tempdir(FsContext &fs, std::pmr::memory_resource *mr)
 {
     // Prefer the resolved-FS temp area when available (lets hosts hook
-    // a virtual temp area â€” IDE / WASM use this). Fall back to host OS.
+    // a virtual temp area — IDE / WASM use this). Fall back to host OS.
     std::string td;
     FsContext::ResolvedPath resolved{};
     try {

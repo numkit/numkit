@@ -1,4 +1,4 @@
-﻿#include <numkit/core/help/help_catalog.hpp>
+#include <numkit/core/help/help_catalog.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -143,7 +143,7 @@ std::vector<std::string> HelpCatalog::getAllFunctions() const {
 
 void HelpCatalog::initCategories() {
     categories_ = {
-        // â”€â”€ 1. elmat: Elementary matrices and matrix manipulation â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 1. elmat: Elementary matrices and matrix manipulation ────────
         {
             "elmat",
             "Elementary matrices and matrix manipulation.",
@@ -226,7 +226,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 2. elfun: Elementary math functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 2. elfun: Elementary math functions ──────────────────────────
         {
             "elfun",
             "Elementary math functions.",
@@ -303,7 +303,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 3. ops: Operators and elementary operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 3. ops: Operators and elementary operations ──────────────────
         {
             "ops",
             "Operators and elementary operations.",
@@ -360,7 +360,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 4. matfun: Matrix functions - numerical linear algebra â”€â”€â”€â”€â”€â”€â”€
+        // ── 4. matfun: Matrix functions - numerical linear algebra ───────
         {
             "matfun",
             "Matrix functions - numerical linear algebra.",
@@ -421,7 +421,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 5. datafun: Data analysis and Fourier transforms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 5. datafun: Data analysis and Fourier transforms ─────────────
         {
             "datafun",
             "Data analysis, summary statistics and Fourier transforms.",
@@ -469,7 +469,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 6. specfun: Special mathematical functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 6. specfun: Special mathematical functions ───────────────────
         {
             "specfun",
             "Special mathematical functions.",
@@ -518,7 +518,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 7. polyfun: Polynomials and interpolation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 7. polyfun: Polynomials and interpolation ────────────────────
         {
             "polyfun",
             "Polynomials, interpolation and numerical integration.",
@@ -553,7 +553,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 8. strfun: Character and string manipulation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 8. strfun: Character and string manipulation ─────────────────
         {
             "strfun",
             "Character and string manipulation.",
@@ -593,7 +593,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 9. datatypes: Data types and structures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 9. datatypes: Data types and structures ──────────────────────
         {
             "datatypes",
             "Data types, structures, cells and object introspection.",
@@ -638,7 +638,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 10. timefun: Time and dates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 10. timefun: Time and dates ──────────────────────────────────
         {
             "timefun",
             "Time, dates and profiling.",
@@ -661,7 +661,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 11. lang: Language syntax, diagnostics and session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 11. lang: Language syntax, diagnostics and session ───────────
         {
             "lang",
             "Language syntax, diagnostics and session.",
@@ -707,7 +707,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 12. iofun: File input and output â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 12. iofun: File input and output ─────────────────────────────
         {
             "iofun",
             "File input and output, workspace persistence.",
@@ -742,7 +742,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 13. signal: Signal Processing Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 13. signal: Signal Processing Toolbox ────────────────────────
         {
             "signal",
             "Signal Processing Toolbox.",
@@ -779,7 +779,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 14. stats: Statistics and Machine Learning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 14. stats: Statistics and Machine Learning ───────────────────
         {
             "stats",
             "Statistics and Machine Learning Toolbox.",
@@ -822,7 +822,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 15. image: Image Processing Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 15. image: Image Processing Toolbox ──────────────────────────
         {
             "image",
             "Image Processing Toolbox.",
@@ -851,7 +851,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 16. control: Control System Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 16. control: Control System Toolbox ──────────────────────────
         {
             "control",
             "Control System Toolbox.",
@@ -881,7 +881,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 17. optim: Optimization Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 17. optim: Optimization Toolbox ──────────────────────────────
         {
             "optim",
             "Optimization Toolbox.",
@@ -900,7 +900,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 18. wavelet: Wavelet Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 18. wavelet: Wavelet Toolbox ─────────────────────────────────
         {
             "wavelet",
             "Wavelet Toolbox.",
@@ -934,7 +934,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 19. comm: Communications Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 19. comm: Communications Toolbox ─────────────────────────────
         {
             "comm",
             "Communications Toolbox.",
@@ -964,7 +964,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 20. audio: Audio Toolbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 20. audio: Audio Toolbox ─────────────────────────────────────
         {
             "audio",
             "Audio Toolbox.",
@@ -991,7 +991,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 21. ode: Ordinary Differential Equations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 21. ode: Ordinary Differential Equations ─────────────────────
         {
             "ode",
             "Ordinary Differential Equation (ODE) Solvers.",
@@ -1011,7 +1011,7 @@ void HelpCatalog::initCategories() {
             }
         },
 
-        // â”€â”€ 22. graphics: Plotting and visualization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 22. graphics: Plotting and visualization ─────────────────────
         {
             "graphics",
             "2-D and 3-D plotting and visualization.",

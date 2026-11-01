@@ -69,11 +69,8 @@ file(GLOB_RECURSE NUMKIT_SOURCES
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"
     "src/pkg/*.cpp"
-    "src/ode/*.cpp"
-    "src/optim/*.cpp"
     "src/io/*.cpp"
     "src/graphics/*.cpp"
-    "src/scriptgraph/*.cpp"
 )
 
 if(NOT NUMKIT_WITH_SIMD)
@@ -96,11 +93,8 @@ target_include_directories(numkit
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin/register/support
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ode
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/optim
         ${CMAKE_CURRENT_SOURCE_DIR}/src/io
         ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/scriptgraph
 )
 
 target_link_libraries(numkit
@@ -149,6 +143,7 @@ if(NUMKIT_BUILD_TESTS)
         tests/gtest/ops_test.cpp
         tests/gtest/numeric_test.cpp
         tests/gtest/package_manager_test.cpp
+        tests/gtest/reactive_session_test.cpp
         tests/gtest/known_bugs_test.cpp
     )
 

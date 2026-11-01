@@ -1,21 +1,21 @@
-// linprog_reg.cpp â€” linprog (linear program) as an embedded `.m`.
+// linprog_reg.cpp — linprog (linear program) as an embedded `.m`.
 //
-// min fáµ€x  s.t.  AÂ·x â‰¤ b,  AeqÂ·x = beq,  lb â‰¤ x â‰¤ ub.
+// min fᵀx  s.t.  A·x ≤ b,  Aeq·x = beq,  lb ≤ x ≤ ub.
 //
 // Solved by a **proximal (Tikhonov) regularization** that reuses the
-// strictly-convex quadprog active-set: minimise fáµ€x + (Îµ/2)Â·â€–xâ€–Â² for a tiny
-// Îµ. At an LP optimum that is a *vertex*, exactly n constraints are active
-// and fully determine x via a linear solve â€” independent of the ÎµÂ·I term â€”
+// strictly-convex quadprog active-set: minimise fᵀx + (ε/2)·‖x‖² for a tiny
+// ε. At an LP optimum that is a *vertex*, exactly n constraints are active
+// and fully determine x via a linear solve — independent of the ε·I term —
 // so the regularized QP returns the **exact** vertex (verified across
-// Îµ = 1e-6 â€¦ 1e-10). The Îµ term only selects which active set is optimal,
-// and for small Îµ the fáµ€x term dominates â†’ the LP-optimal vertex.
+// ε = 1e-6 … 1e-10). The ε term only selects which active set is optimal,
+// and for small ε the fᵀx term dominates → the LP-optimal vertex.
 //
 // Scope / caveats (documented in bugs/optim/linprog.md):
 //   * Exact for bounded, feasible LPs with a **unique** optimum.
 //   * On a **degenerate** optimum (an optimal face, not a single vertex) the
-//     regularization returns the minimum-â€–xâ€– optimal point â€” MATLAB returns
+//     regularization returns the minimum-‖x‖ optimal point — MATLAB returns
 //     a basic vertex, which may differ (the objective value still matches).
-//   * Unboundedness is only flagged heuristically (â€–xâ€– blows up); a full
+//   * Unboundedness is only flagged heuristically (‖x‖ blows up); a full
 //     2-phase simplex would be the exact follow-up.
 
 #include <numkit/core/engine.hpp>

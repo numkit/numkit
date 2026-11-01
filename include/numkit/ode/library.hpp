@@ -1,4 +1,4 @@
-﻿/// @file library.hpp
+/// @file library.hpp
 /// @ingroup group_ode
 // toolboxes/ode/include/nk/ode/library.hpp
 //
@@ -11,7 +11,7 @@ namespace numkit {
 
 /// @addtogroup group_ode
 /// @{
- class Engine; }  // fwd-decl â€” keep this public header core-free
+ class Engine; }  // fwd-decl — keep this public header core-free
 
 namespace numkit {
 

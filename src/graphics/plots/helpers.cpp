@@ -1,4 +1,4 @@
-// nk/graphics â€” plots/helpers.cpp
+// nk/graphics — plots/helpers.cpp
 //
 // Definitions of the pure JSON/parse helpers declared in plot_internal.hpp.
 // Core-free, no figure side effects: data -> JSON string and option parsing,
@@ -23,8 +23,8 @@ std::string vecToJson(const Value &v)
             os << std::abs(v.complexData()[i]);
         }
     } else {
-        // MATLAB's plot family accepts any numeric input â€” logical,
-        // integer classes, single â€” converted to double at the boundary
+        // MATLAB's plot family accepts any numeric input — logical,
+        // integer classes, single — converted to double at the boundary
         // (plot(t, t >= 0) is the canonical textbook form). Fast path for
         // plain double storage; elemAsDouble performs the same conversion
         // for the other numeric types.

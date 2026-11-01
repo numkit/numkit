@@ -1,4 +1,4 @@
-﻿// bundle/src/register/ode/options_reg.cpp â€” Engine adapter + embedded-.m registration relocated from the
+// bundle/src/register/ode/options_reg.cpp — Engine adapter + embedded-.m registration relocated from the
 // ode toolbox in Phase D (solver 3-way split): the toolbox keeps the
 // Engine-free FnHandle kernel; this core-coupled glue lives in bundle.
 #include <numkit/ode/solvers.hpp>
@@ -11,7 +11,7 @@
 
 namespace numkit::ode {
 
-// â”€â”€ Engine adapters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Engine adapters ─────────────────────────────────────────────────
 
 namespace detail {
 

@@ -1,4 +1,4 @@
-﻿// toolboxes/io/include/nk/io/paths/paths.hpp
+// toolboxes/io/include/nk/io/paths/paths.hpp
 //
 // File-name construction utilities.
 
@@ -29,8 +29,8 @@ using ::numkit::FsContext;
 /// Returns the single-character separator: `"\\"` on Windows, `"/"`
 /// elsewhere.
 ///
-/// @param mr  Memory resource (nullptr â†’ process default).
-/// @return    `1 Ã— 1` CHAR.
+/// @param mr  Memory resource (nullptr → process default).
+/// @return    `1 × 1` CHAR.
 /// @see fullfile
 Value filesep(std::pmr::memory_resource *mr = nullptr);
 
@@ -41,7 +41,7 @@ Value filesep(std::pmr::memory_resource *mr = nullptr);
 /// appended literally with a separator, matching the platform convention.
 ///
 /// @param parts  Path segments to join.
-/// @param mr     Memory resource (nullptr â†’ process default).
+/// @param mr     Memory resource (nullptr → process default).
 /// @return       CHAR path.
 /// @see filesep, fileparts
 Value fullfile(Span<const std::string> parts,
@@ -53,7 +53,7 @@ Value fullfile(Span<const std::string> parts,
 /// `ext` includes the leading dot. `folder` has no trailing separator.
 ///
 /// @param path  Input path string.
-/// @param mr    Memory resource (nullptr â†’ process default).
+/// @param mr    Memory resource (nullptr → process default).
 /// @return      `(folder, name, ext)` triple of CHAR values.
 /// @see fullfile
 std::tuple<Value, Value, Value>
@@ -65,7 +65,7 @@ fileparts(const std::string &path,
 /// Includes a trailing separator. Routes through the engine VFS.
 ///
 /// @param fs      Filesystem session (VFS registry + resolver).
-/// @param mr      Memory resource (nullptr â†’ process default).
+/// @param mr      Memory resource (nullptr → process default).
 /// @return        CHAR path.
 /// @see tempname
 Value tempdir(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
@@ -77,7 +77,7 @@ Value tempdir(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
 /// consecutive calls don't collide.
 ///
 /// @param fs      Filesystem session (VFS registry + resolver).
-/// @param mr      Memory resource (nullptr â†’ process default).
+/// @param mr      Memory resource (nullptr → process default).
 /// @return        CHAR path.
 /// @see tempdir
 Value tempname(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
