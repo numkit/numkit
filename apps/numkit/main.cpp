@@ -214,12 +214,13 @@ int runRepl()
 void printUsage(const char *prog)
 {
     std::cout << "Usage: " << prog << " [options] [script.m]\n"
-              << "       " << prog << " build <script.m> [-o <out.exe>] [--run]\n"
+              << "       " << prog << " build <script.m> [-o <out.exe>] [--ops-kernels] [--run]\n"
               << "       " << prog << " codegen <script.m> [options]\n"
               << "       " << prog << " pkg <command> [arguments]\n\n"
               << "Options:\n"
               << "  -e, --eval <code>    evaluate inline MATLAB code and exit\n"
               << "  --aot                AOT-compile and run script.m via numkit-codegen\n"
+              << "  --ops-kernels        use Highway SIMD numkit::ops kernels during AOT compilation\n"
               << "  --isolated           strict namespace mode (modules require qualified calls or import)\n"
               << "  --compat             MATLAB compatibility mode (default: global bare module calls)\n"
               << "  --cwd=<path>         set working directory\n"
@@ -409,6 +410,7 @@ int main(int argc, char **argv)
     std::string target;
     std::string evalCode;
     bool aotRun = false;
+    bool opsKernels = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -420,6 +422,8 @@ int main(int argc, char **argv)
             return 0;
         } else if (arg == "--aot") {
             aotRun = true;
+        } else if (arg == "--ops-kernels") {
+            opsKernels = true;
         } else if (arg == "--isolated") {
             numkit::envSet("NUMKIT_MODE", "isolated");
         } else if (arg == "--compat") {
@@ -446,8 +450,12 @@ int main(int argc, char **argv)
     if (target.empty())
         return runRepl();
 
-    if (aotRun)
-        return runCodegenSubcommand(argv[0], {"--run", target});
+    if (aotRun) {
+        std::vector<std::string> cgArgs = {"--run"};
+        if (opsKernels) cgArgs.push_back("--ops-kernels");
+        cgArgs.push_back(target);
+        return runCodegenSubcommand(argv[0], cgArgs);
+    }
 
     return runScript(target);
 }
