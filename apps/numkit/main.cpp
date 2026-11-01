@@ -279,7 +279,7 @@ std::string quoteShellArg(const std::string &s)
 int runCodegenSubcommand(const char *argv0, const std::vector<std::string> &args)
 {
     const std::string cgBin = findCodegenBinary(argv0);
-    std::string cmd = quoteShellArg(cgBin);
+    std::string cmd = "\"" + cgBin + "\"";
     for (const auto &a : args) {
         cmd += " " + quoteShellArg(a);
     }
