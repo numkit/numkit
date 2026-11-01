@@ -3005,4 +3005,52 @@ TEST_P(DisplayTest, SingleComplexStorageAndOperations)
     EXPECT_EQ(eval("class(zd)").toString(), "double");
 }
 
+TEST_P(DisplayTest, CoreAndLinalgStubClosures)
+{
+    // 1. 4-D ndgrid and 4-D interpn
+    eval("[X1, X2, X3, X4] = ndgrid(1:2, 1:2, 1:2, 1:2); "
+         "V = X1 + 2*X2 + 3*X3 + 4*X4; "
+         "vq = interpn(X1, X2, X3, X4, V, 1.5, 1.5, 1.5, 1.5);");
+    EXPECT_NEAR(evalScalar("vq"), 1.5 + 3.0 + 4.5 + 6.0, 1e-12);
+
+    // 2. num2cell / cell2mat on 4-D arrays & struct2cell on struct arrays
+    eval("C4 = num2cell(V); V4 = cell2mat(C4); "
+         "sArr = struct('a', {10, 20}, 'b', {30, 40}); "
+         "sCell = struct2cell(sArr);");
+    EXPECT_NEAR(evalScalar("max(abs(V4(:) - V(:)))"), 0.0, 1e-12);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(sCell)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sCell{1}"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sCell{2}"), 30.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sCell{3}"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("sCell{4}"), 40.0);
+
+    // 3. setxor / union / intersect / setdiff 'rows' index outputs
+    eval("A = [1 2; 3 4; 5 6]; B = [3 4; 7 8]; "
+         "[cx, iax, ibx] = setxor(A, B, 'rows'); "
+         "[cu, iau, ibu] = union(A, B, 'rows'); "
+         "[ci, iai, ibi] = intersect(A, B, 'rows'); "
+         "[cd, iad] = setdiff(A, B, 'rows');");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(iax)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ibx)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("iai(1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ibi(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(iad)"), 2.0);
+
+    // 4. qrinsert and qrdelete 'row' mode
+    eval("M = [1 2 3; 4 5 6; 7 8 10; 2 1 4]; "
+         "[Q, R] = qr(M); rNew = [9 8 7]; "
+         "[Q1, R1] = qrinsert(Q, R, 2, rNew, 'row'); "
+         "M1 = [M(1,:); rNew; M(2:end,:)]; "
+         "[Q2, R2] = qrdelete(Q1, R1, 2, 'row');");
+    EXPECT_NEAR(evalScalar("norm(Q1 * R1 - M1, 'fro')"), 0.0, 1e-10);
+    EXPECT_NEAR(evalScalar("norm(Q2 * R2 - M, 'fro')"), 0.0, 1e-10);
+
+    // 5. Complex matrix 2-norm and Paley Hadamard (12 and 20)
+    eval("Z = [1+2i, 3-1i; 4i, 2+2i]; nZ = norm(Z, 2); sZ = svd(Z); "
+         "H12 = hadamard(12); H20 = hadamard(20);");
+    EXPECT_NEAR(evalScalar("abs(nZ - sZ(1))"), 0.0, 1e-12);
+    EXPECT_NEAR(evalScalar("norm(H12 * H12' - 12 * eye(12), 'fro')"), 0.0, 1e-12);
+    EXPECT_NEAR(evalScalar("norm(H20 * H20' - 20 * eye(20), 'fro')"), 0.0, 1e-12);
+}
+
 INSTANTIATE_DUAL(DisplayTest);

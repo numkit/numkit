@@ -661,7 +661,8 @@ bool wantsRows(Span<const Value> args, size_t start)
 // as an element; the result is the sorted set of unique rows (NaN-containing
 // rows are distinct and sort last, matching unique('rows')). 2-D DOUBLE only.
 Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
-                const char *fn, std::pmr::memory_resource *mr)
+                const char *fn, size_t nargout, Span<Value> outs,
+                std::pmr::memory_resource *mr)
 {
     validateUniqueRowsInput(A, fn);
     validateUniqueRowsInput(B, fn);
@@ -672,11 +673,20 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
                     "number of columns", 0, 0, fn, "",
                     std::string("numkit:") + fn + ":rowsCols");
     const size_t cols = (ar > 0) ? ac : bc;
+    auto makeColVec = [&](const std::vector<double> &v) {
+        Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
+        if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
+        return col;
+    };
 
     // union(A,B,'rows') == unique rows of the vertical concatenation [A; B].
     if (kind == SetOpKind::Union) {
         const size_t nr = ar + br;
-        if (nr == 0) return emptyRowsResult(cols, mr);
+        if (nr == 0) {
+            if (nargout >= 2) outs[1] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+            if (nargout >= 3) outs[2] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+            return emptyRowsResult(cols, mr);
+        }
         auto combined = Value::matrix(nr, cols, ValueType::DOUBLE, mr);
         double *cd = combined.doubleDataMut();
         const double *ad = (ar > 0) ? A.doubleData() : nullptr;
@@ -685,27 +695,41 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
             for (size_t r = 0; r < ar; ++r)      cd[c * nr + r]      = ad[c * ar + r];
             for (size_t r = 0; r < br; ++r)      cd[c * nr + ar + r] = bd[c * br + r];
         }
-        return uniqueRows(combined, mr);
+        if (nargout <= 1) return uniqueRows(combined, mr);
+        auto [uRows, iaAll, icAll] = uniqueRowsWithIndices(combined, /*stable=*/false, /*last=*/false, mr);
+        (void)icAll;
+        std::vector<double> iaVec, ibVec;
+        for (size_t i = 0; i < iaAll.numel(); ++i) {
+            const size_t idx1 = static_cast<size_t>(iaAll.elemAsDouble(i));
+            if (idx1 <= ar) iaVec.push_back(static_cast<double>(idx1));
+            else            ibVec.push_back(static_cast<double>(idx1 - ar));
+        }
+        if (nargout >= 2) outs[1] = makeColVec(iaVec);
+        if (nargout >= 3) outs[2] = makeColVec(ibVec);
+        return uRows;
     }
 
     // intersect / setdiff: unique rows of A that ARE / ARE NOT present in B.
     const bool wantInB = (kind == SetOpKind::Intersect);
-    if (ar == 0) return emptyRowsResult(cols, mr);
+    if (ar == 0) {
+        if (nargout >= 2) outs[1] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+        if (nargout >= 3 && wantInB) outs[2] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+        return emptyRowsResult(cols, mr);
+    }
     const double *ad = A.doubleData();
     const double *bd = (br > 0) ? B.doubleData() : nullptr;
 
     ScratchArena scratch(mr);
-    std::pmr::unordered_map<RowKey, char, RowKeyHash, RowKeyEq> bset(&scratch);
+    std::pmr::unordered_map<RowKey, size_t, RowKeyHash, RowKeyEq> bset(&scratch);
     for (size_t r = 0; r < br; ++r)
         if (!rowHasNan(bd, bc, br, r))
-            bset.try_emplace(extractRow(bd, bc, br, r, &scratch), char{1});
+            bset.try_emplace(extractRow(bd, bc, br, r, &scratch), r + 1);
 
     std::pmr::unordered_map<RowKey, char, RowKeyHash, RowKeyEq> seen(&scratch);
     auto nonNan = ScratchVec<size_t>(&scratch);
     auto nanIdx = ScratchVec<size_t>(&scratch);
     for (size_t r = 0; r < ar; ++r) {
         if (rowHasNan(ad, ac, ar, r)) {
-            // NaN row: never equal to anything, so never "in B".
             if (!wantInB) nanIdx.push_back(r);  // setdiff keeps; intersect drops
             continue;
         }
@@ -716,17 +740,28 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
     std::sort(nonNan.begin(), nonNan.end(),
               [ad, ac, ar](size_t a, size_t b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
     nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
+    if (nargout >= 2) {
+        std::vector<double> iaVec(nonNan.size());
+        for (size_t i = 0; i < nonNan.size(); ++i)
+            iaVec[i] = static_cast<double>(nonNan[i] + 1);
+        outs[1] = makeColVec(iaVec);
+    }
+    if (wantInB && nargout >= 3) {
+        std::vector<double> ibVec(nonNan.size());
+        for (size_t i = 0; i < nonNan.size(); ++i) {
+            RowKey key = extractRow(ad, ac, ar, nonNan[i], &scratch);
+            ibVec[i] = static_cast<double>(bset[key]);
+        }
+        outs[2] = makeColVec(ibVec);
+    }
     if (nonNan.empty()) return emptyRowsResult(cols, mr);
     return numkit::ops::collectRowsByIndex(A, nonNan.data(), nonNan.size(), mr);
 }
 
-// Row-wise setxor (MATLAB setxor(A,B,'rows')): the symmetric difference of the
-// row sets — unique rows present in exactly one of A or B, sorted. Computed on
-// the vertical concatenation [A;B] so a single collectRowsByIndex selects the
-// kept rows. A NaN-containing row is never equal to anything (NaN != NaN), so
-// every NaN row counts as "only in its side" and is kept (appended last).
-// 2-D DOUBLE only. vs MATLAB R2025b.
+// Row-wise setxor: the symmetric difference of the row sets — unique rows
+// present in exactly one of A or B, sorted.
 Value setxorRows(const Value &A, const Value &B, const char *fn,
+                 size_t nargout, Span<Value> outs,
                  std::pmr::memory_resource *mr)
 {
     validateUniqueRowsInput(A, fn);
@@ -739,7 +774,16 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
                     std::string("numkit:") + fn + ":rowsCols");
     const size_t cols = (ar > 0) ? ac : bc;
     const size_t nr = ar + br;
-    if (nr == 0) return emptyRowsResult(cols, mr);
+    auto makeColVec = [&](const std::vector<double> &v) {
+        Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
+        if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
+        return col;
+    };
+    if (nr == 0) {
+        if (nargout >= 2) outs[1] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+        if (nargout >= 3) outs[2] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
+        return emptyRowsResult(cols, mr);
+    }
 
     auto combined = Value::matrix(nr, cols, ValueType::DOUBLE, mr);
     double *cd = combined.doubleDataMut();
@@ -767,7 +811,6 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
         const bool fromA = (ci < ar);
         if (rowHasNan(cdp, cols, nr, ci)) { nanIdx.push_back(ci); continue; }
         RowKey key = extractRow(cdp, cols, nr, ci, &scratch);
-        // keep iff present only in this row's own side
         const auto &other = fromA ? bset : aset;
         if (other.count(key) > 0) continue;
         if (seen.try_emplace(std::move(key), char{1}).second) nonNan.push_back(ci);
@@ -775,6 +818,15 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
     std::sort(nonNan.begin(), nonNan.end(),
               [cdp, cols, nr](size_t a, size_t b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
     nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
+    if (nargout >= 2) {
+        std::vector<double> iaVec, ibVec;
+        for (size_t ci : nonNan) {
+            if (ci < ar) iaVec.push_back(static_cast<double>(ci + 1));
+            else         ibVec.push_back(static_cast<double>(ci - ar + 1));
+        }
+        outs[1] = makeColVec(iaVec);
+        if (nargout >= 3) outs[2] = makeColVec(ibVec);
+    }
     if (nonNan.empty()) return emptyRowsResult(cols, mr);
     return numkit::ops::collectRowsByIndex(combined, nonNan.data(), nonNan.size(), mr);
 }
@@ -785,19 +837,12 @@ void union_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
     argcheck::checkNargin(args.size(), 1, 4, "union");
     argcheck::checkNargin(args.size(), 2, 4, "union");
     auto *mr = ctx.engine->resource();
-    // char/logical/integer operands: promote to double, compute, then narrow
-    // the VALUES output back to the shared class (ia/ib stay double). The
-    // narrow runs AFTER emitSetopIndices, which needs the double values.
     const ValueType setNarrow = setopNarrowClass(args[0], args[1]);
     Value A = setopPromote(args[0], mr), B = setopPromote(args[1], mr);
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
                               outs[0] = narrowUniqueClass(outs[0], setNarrow, mr); };
     if (wantsRows(args, 2)) {
-        if (nargout >= 2)
-            throw Error("union: 'rows' index outputs (ia, ib) are not yet "
-                        "supported in this revision", 0, 0, "union", "",
-                        "numkit:union:rowsIdx");
-        outs[0] = setOpRows(A, B, SetOpKind::Union, "union", mr);
+        outs[0] = setOpRows(A, B, SetOpKind::Union, "union", nargout, outs, mr);
         narrowOut();
         return;
     }
@@ -818,11 +863,7 @@ void intersect_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
                               outs[0] = narrowUniqueClass(outs[0], setNarrow, mr); };
     if (wantsRows(args, 2)) {
-        if (nargout >= 2)
-            throw Error("intersect: 'rows' index outputs (ia, ib) are not yet "
-                        "supported in this revision", 0, 0, "intersect", "",
-                        "numkit:intersect:rowsIdx");
-        outs[0] = setOpRows(A, B, SetOpKind::Intersect, "intersect", mr);
+        outs[0] = setOpRows(A, B, SetOpKind::Intersect, "intersect", nargout, outs, mr);
         narrowOut();
         return;
     }
@@ -843,11 +884,7 @@ void setdiff_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
                               outs[0] = narrowUniqueClass(outs[0], setNarrow, mr); };
     if (wantsRows(args, 2)) {
-        if (nargout >= 2)
-            throw Error("setdiff: 'rows' index output (ia) is not yet "
-                        "supported in this revision", 0, 0, "setdiff", "",
-                        "numkit:setdiff:rowsIdx");
-        outs[0] = setOpRows(A, B, SetOpKind::Setdiff, "setdiff", mr);
+        outs[0] = setOpRows(A, B, SetOpKind::Setdiff, "setdiff", nargout, outs, mr);
         narrowOut();
         return;
     }
@@ -916,13 +953,13 @@ void setxor_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     argcheck::checkNargin(args.size(), 2, 4, "setxor");
     auto *mr = ctx.engine->resource();
     if (wantsRows(args, 2)) {
-        if (nargout >= 2)
-            throw Error("setxor: 'rows' index outputs (ia, ib) are not yet supported",
-                         0, 0, "setxor", "", "numkit:setxor:rowsIdx");
-        outs[0] = setxorRows(args[0], args[1], "setxor", mr);
+        outs[0] = setxorRows(args[0], args[1], "setxor", nargout, outs, mr);
         return;
     }
     outs[0] = setxor(args[0], args[1], mr);
+    if (nargout >= 2)
+        emitSetopIndices(SetOpKind::Union, args[0], args[1], outs[0], nargout, outs,
+                         mr, "setxor");
 }
 
 void allunique_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,

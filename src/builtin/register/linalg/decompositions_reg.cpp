@@ -348,19 +348,24 @@ void qrupdate_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 4, 5, "qrinsert");
+    bool isRow = false;
     if (args.size() == 5) {
-        if (!(args[4].isChar() || args[4].isString())
-            || args[4].toString() != "col")
-            throw Error("qrinsert: row form not supported in v1 -- pass 'col' or omit",
-                        0, 0, "qrinsert", "", "numkit:qrinsert:rowDeferred");
+        if (!(args[4].isChar() || args[4].isString()))
+            throw Error("qrinsert: orient must be 'col' or 'row'",
+                        0, 0, "qrinsert", "", "numkit:qrinsert:badOrient");
+        std::string orient = args[4].toString();
+        if (orient == "row") isRow = true;
+        else if (orient != "col")
+            throw Error("qrinsert: orient must be 'col' or 'row'",
+                        0, 0, "qrinsert", "", "numkit:qrinsert:badOrient");
     }
     const double kd = args[2].toScalar();
     if (kd < 1.0 || kd != std::floor(kd))
         throw Error("qrinsert: k must be a positive integer",
                     0, 0, "qrinsert", "", "numkit:qrinsert:badK");
-    auto [Q1, R1] = qrinsert(args[0], args[1],
-                             static_cast<std::size_t>(kd), args[3],
-                             ctx.engine->resource());
+    auto [Q1, R1] = isRow
+        ? qrinsert_row(args[0], args[1], static_cast<std::size_t>(kd), args[3], ctx.engine->resource())
+        : qrinsert(args[0], args[1], static_cast<std::size_t>(kd), args[3], ctx.engine->resource());
     outs[0] = std::move(Q1);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
 }
@@ -368,19 +373,24 @@ void qrinsert_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 void qrdelete_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 4, "qrdelete");
+    bool isRow = false;
     if (args.size() == 4) {
-        if (!(args[3].isChar() || args[3].isString())
-            || args[3].toString() != "col")
-            throw Error("qrdelete: row form not supported in v1 -- pass 'col' or omit",
-                        0, 0, "qrdelete", "", "numkit:qrdelete:rowDeferred");
+        if (!(args[3].isChar() || args[3].isString()))
+            throw Error("qrdelete: orient must be 'col' or 'row'",
+                        0, 0, "qrdelete", "", "numkit:qrdelete:badOrient");
+        std::string orient = args[3].toString();
+        if (orient == "row") isRow = true;
+        else if (orient != "col")
+            throw Error("qrdelete: orient must be 'col' or 'row'",
+                        0, 0, "qrdelete", "", "numkit:qrdelete:badOrient");
     }
     const double kd = args[2].toScalar();
     if (kd < 1.0 || kd != std::floor(kd))
         throw Error("qrdelete: k must be a positive integer",
                     0, 0, "qrdelete", "", "numkit:qrdelete:badK");
-    auto [Q1, R1] = qrdelete(args[0], args[1],
-                             static_cast<std::size_t>(kd),
-                             ctx.engine->resource());
+    auto [Q1, R1] = isRow
+        ? qrdelete_row(args[0], args[1], static_cast<std::size_t>(kd), ctx.engine->resource())
+        : qrdelete(args[0], args[1], static_cast<std::size_t>(kd), ctx.engine->resource());
     outs[0] = std::move(Q1);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
 }

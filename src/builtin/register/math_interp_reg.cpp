@@ -387,19 +387,143 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         }
     }
 
-    const auto &V0 = args[0];
-    const int ndV = V0.dims().is3D() ? 3
-                  : (V0.dims().ndim() <= 2 ? 2 : V0.dims().ndim());
-    if (ndV == 2) {
+    size_t L = 0;
+    while (L < args.size() && isData(args[L])) ++L;
+
+    int maxNd = 2;
+    for (size_t i = 0; i < L; ++i) {
+        const int nd = args[i].dims().is3D() ? 3
+                     : (args[i].dims().ndim() <= 2 ? 2 : args[i].dims().ndim());
+        if (nd > maxNd) maxNd = nd;
+    }
+
+    if (maxNd == 2 && (L == 3 || L == 5)) {
         interp2_reg(args, nargout, outs, ctx);
         return;
     }
-    if (ndV == 3) {
+    if (maxNd == 3 && (L == 4 || L == 7)) {
         interp3_reg(args, nargout, outs, ctx);
         return;
     }
-    throw Error("interpn: 4+-D inputs are not yet supported",
-                 0, 0, "interpn", "", "numkit:interpn:rank");
+
+    const int N = (maxNd >= 4) ? maxNd
+                : (L >= 5 && (L % 2 == 1) ? static_cast<int>((L - 1) / 2)
+                                          : static_cast<int>(L - 1));
+    if (N < 4 || (L != static_cast<size_t>(N + 1) && L != static_cast<size_t>(2 * N + 1))) {
+        throw Error("interpn: invalid number of arguments for N-D interpolation",
+                     0, 0, "interpn", "", "numkit:interpn:nargin");
+    }
+
+    const bool hasGrids = (L == static_cast<size_t>(2 * N + 1));
+    const Value &V = hasGrids ? args[static_cast<size_t>(N)] : args[0];
+    const size_t qStart = hasGrids ? static_cast<size_t>(N + 1) : 1;
+
+    std::string method = "linear";
+    if (L < args.size() && (args[L].isChar() || args[L].isString())) {
+        method = args[L].toString();
+        for (auto &c : method) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const bool isNearest = (method == "nearest");
+    if (!isNearest && method != "linear") {
+        throw Error("interpn: unsupported method '" + method + "' for 4+-D inputs",
+                     0, 0, "interpn", "", "numkit:interpn:badMethod");
+    }
+
+    std::vector<size_t> vShape(static_cast<size_t>(N));
+    std::vector<size_t> vStrides(static_cast<size_t>(N), 1);
+    size_t strideAcc = 1;
+    for (int d = 0; d < N; ++d) {
+        const size_t sd = (d < V.dims().ndim()) ? static_cast<size_t>(V.dims().dim(d)) : 1;
+        if (sd < 2)
+            throw Error("interpn: each dimension of V must have length >= 2",
+                         0, 0, "interpn", "", "numkit:interpn:smallDim");
+        vShape[static_cast<size_t>(d)] = sd;
+        vStrides[static_cast<size_t>(d)] = strideAcc;
+        strideAcc *= sd;
+    }
+
+    // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
+    std::vector<std::vector<double>> grids(static_cast<size_t>(N));
+    for (int d = 0; d < N; ++d) {
+        const size_t sd = vShape[static_cast<size_t>(d)];
+        grids[static_cast<size_t>(d)].resize(sd);
+        if (!hasGrids) {
+            for (size_t k = 0; k < sd; ++k)
+                grids[static_cast<size_t>(d)][k] = static_cast<double>(k + 1);
+        } else {
+            const Value &Gd = args[static_cast<size_t>(d)];
+            if (Gd.numel() == sd) {
+                for (size_t k = 0; k < sd; ++k)
+                    grids[static_cast<size_t>(d)][k] = Gd.elemAsDouble(k);
+            } else {
+                // Full ndgrid tensor: step along axis d using vStrides[d].
+                const size_t st = vStrides[static_cast<size_t>(d)];
+                for (size_t k = 0; k < sd; ++k)
+                    grids[static_cast<size_t>(d)][k] = Gd.elemAsDouble(k * st);
+            }
+        }
+    }
+
+    const Value &Xq0 = args[qStart];
+    const size_t nQuery = Xq0.numel();
+    std::vector<size_t> outShape(static_cast<size_t>(Xq0.dims().ndim()));
+    for (int k = 0; k < Xq0.dims().ndim(); ++k)
+        outShape[static_cast<size_t>(k)] = static_cast<size_t>(Xq0.dims().dim(k));
+    Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
+                                ctx.engine->resource());
+    double *od = out.doubleDataMut();
+
+    std::vector<size_t> idx0(static_cast<size_t>(N));
+    std::vector<double> frac(static_cast<size_t>(N));
+    const size_t nCorners = static_cast<size_t>(1) << N;
+
+    for (size_t q = 0; q < nQuery; ++q) {
+        bool outOfBounds = false;
+        for (int d = 0; d < N; ++d) {
+            const Value &Xqd = args[qStart + static_cast<size_t>(d)];
+            const double xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
+            const auto &g = grids[static_cast<size_t>(d)];
+            if (std::isnan(xq) || xq < g.front() || xq > g.back()) {
+                outOfBounds = true;
+                break;
+            }
+            auto it = std::upper_bound(g.begin(), g.end(), xq);
+            size_t i0 = (it == g.begin()) ? 0 : static_cast<size_t>(std::distance(g.begin(), it) - 1);
+            if (i0 >= g.size() - 1) i0 = g.size() - 2;
+            const double denom = g[i0 + 1] - g[i0];
+            idx0[static_cast<size_t>(d)] = i0;
+            frac[static_cast<size_t>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
+        }
+        if (outOfBounds) {
+            od[q] = std::numeric_limits<double>::quiet_NaN();
+            continue;
+        }
+        if (isNearest) {
+            size_t lin = 0;
+            for (int d = 0; d < N; ++d) {
+                const size_t pick = idx0[static_cast<size_t>(d)]
+                                  + (frac[static_cast<size_t>(d)] >= 0.5 ? 1 : 0);
+                lin += pick * vStrides[static_cast<size_t>(d)];
+            }
+            od[q] = V.elemAsDouble(lin);
+        } else {
+            double acc = 0.0;
+            for (size_t mask = 0; mask < nCorners; ++mask) {
+                double w = 1.0;
+                size_t lin = 0;
+                for (int d = 0; d < N; ++d) {
+                    const bool hi = ((mask >> d) & 1u) != 0;
+                    const double fd = frac[static_cast<size_t>(d)];
+                    w *= hi ? fd : (1.0 - fd);
+                    lin += (idx0[static_cast<size_t>(d)] + (hi ? 1 : 0))
+                         * vStrides[static_cast<size_t>(d)];
+                }
+                acc += w * V.elemAsDouble(lin);
+            }
+            od[q] = acc;
+        }
+    }
+    outs[0] = std::move(out);
 }
 
 // polyfit_reg / polyval_reg → math/elementary/polynomials.cpp

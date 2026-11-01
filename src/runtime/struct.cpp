@@ -340,14 +340,28 @@ Value struct2cell(const Value &s, std::pmr::memory_resource *mr)
     if (!s.isStruct())
         throw Error("struct2cell requires a struct", 0, 0, "struct2cell", "",
                      "numkit:struct2cell:notStruct");
-    if (s.isStructArray())
-        throw Error("struct2cell: struct-array inputs not yet supported",
-                     0, 0, "struct2cell", "", "numkit:struct2cell:array");
-    const auto &fields = s.structFields();
-    auto c = Value::cell(fields.size(), 1, mr);
-    size_t i = 0;
-    for (const auto &[k, v] : fields)
-        c.cellAt(i++) = v;
+    const auto names = s.fieldNamesInOrder();
+    const size_t F = names.size();
+    if (!s.isStructArray()) {
+        auto c = Value::cell(F, 1, mr);
+        const auto &fields = s.structFields();
+        for (size_t f = 0; f < F; ++f) {
+            auto it = fields.find(names[f]);
+            c.cellAt(f) = (it != fields.end()) ? it->second : Value::Empty;
+        }
+        return c;
+    }
+    const size_t M = s.dims().rows();
+    const size_t N = s.dims().cols();
+    auto c = (N == 1) ? Value::cell(F, M, mr) : Value::cell3D(F, M, N, mr);
+    const size_t numel = s.numel();
+    for (size_t k = 0; k < numel; ++k) {
+        const auto &elemMap = s.structArrayElem(k);
+        for (size_t f = 0; f < F; ++f) {
+            auto it = elemMap.find(names[f]);
+            c.cellAt(f + k * F) = (it != elemMap.end()) ? it->second : Value::Empty;
+        }
+    }
     return c;
 }
 

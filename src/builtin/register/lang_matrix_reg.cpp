@@ -1379,8 +1379,27 @@ void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
             outs[2] = std::move(Z);
             return;
         }
-        throw Error("ndgrid: 4+ outputs are not yet supported",
-                     0, 0, "ndgrid", "", "numkit:ndgrid:tooManyOutputs");
+        const size_t D = nargout;
+        const size_t n0 = args[0].numel();
+        std::vector<size_t> shape(D, n0);
+        std::vector<size_t> strides(D, 1);
+        size_t total = (D == 0) ? 0 : 1;
+        for (size_t k = 0; k < D; ++k) {
+            strides[k] = total;
+            total *= shape[k];
+        }
+        const size_t outCount = std::min(D, outs.size());
+        for (size_t m = 0; m < outCount; ++m) {
+            Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
+            double *gd = G.doubleDataMut();
+            const size_t stride_m = strides[m];
+            for (size_t lin = 0; lin < total; ++lin) {
+                const size_t coord = (lin / stride_m) % n0;
+                gd[lin] = args[0].elemAsDouble(coord);
+            }
+            outs[m] = std::move(G);
+        }
+        return;
     }
     if (args.size() == 2) {
         auto [X, Y] = ndgrid(args[0], args[1], mr);
@@ -1395,8 +1414,28 @@ void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
         if (nargout > 2) outs[2] = std::move(Z);
         return;
     }
-    throw Error("ndgrid: 4+ inputs are not yet supported",
-                 0, 0, "ndgrid", "", "numkit:ndgrid:tooManyInputs");
+    const size_t D = args.size();
+    std::vector<size_t> shape(D);
+    std::vector<size_t> strides(D, 1);
+    size_t total = 1;
+    for (size_t k = 0; k < D; ++k) {
+        shape[k] = args[k].numel();
+        strides[k] = total;
+        total *= shape[k];
+    }
+    const size_t wantOut = std::max<size_t>(1, nargout);
+    const size_t outCount = std::min({wantOut, D, outs.size()});
+    for (size_t m = 0; m < outCount; ++m) {
+        Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
+        double *gd = G.doubleDataMut();
+        const size_t stride_m = strides[m];
+        const size_t len_m = shape[m];
+        for (size_t lin = 0; lin < total; ++lin) {
+            const size_t coord = (lin / stride_m) % len_m;
+            gd[lin] = args[m].elemAsDouble(coord);
+        }
+        outs[m] = std::move(G);
+    }
 }
 
 // NOTE: kron_reg migrated to toolboxes/linalg/src/vector_ops.cpp.
