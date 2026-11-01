@@ -16,11 +16,13 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/build_info.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -212,20 +214,79 @@ int runRepl()
 void printUsage(const char *prog)
 {
     std::cout << "Usage: " << prog << " [options] [script.m]\n"
+              << "       " << prog << " build <script.m> [-o <out.exe>] [--run]\n"
+              << "       " << prog << " codegen <script.m> [options]\n"
               << "       " << prog << " pkg <command> [arguments]\n\n"
               << "Options:\n"
               << "  -e, --eval <code>    evaluate inline MATLAB code and exit\n"
+              << "  --aot                AOT-compile and run script.m via numkit-codegen\n"
               << "  --isolated           strict namespace mode (modules require qualified calls or import)\n"
               << "  --compat             MATLAB compatibility mode (default: global bare module calls)\n"
               << "  --cwd=<path>         set working directory\n"
               << "  -v, --version        print version and build timestamp\n"
               << "  -h, --help           show this help message\n\n"
+              << "AOT Compilation & Transpilation:\n"
+              << "  build <file.m>       compile a .m script/function into a native executable\n"
+              << "  codegen <file.m>     transpile .m to C++ (or run/build via numkit-codegen)\n\n"
               << "Package Management:\n"
               << "  pkg install <target> install a package (e.g. numkit-signal, owner/repo, URL)\n"
               << "  pkg list             list installed packages and their status\n"
               << "  pkg build [dir]      build a module in the specified directory\n"
               << "  pkg remove <name>    remove an installed package\n\n"
               << "If no script or --eval is provided, starts an interactive REPL.\n";
+}
+
+std::string findCodegenBinary(const char *argv0)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+#ifdef _WIN32
+    const char *binName = "numkit-codegen.exe";
+#else
+    const char *binName = "numkit-codegen";
+#endif
+    if (argv0 && argv0[0] != '\0') {
+        fs::path selfDir = fs::absolute(fs::path(argv0), ec).parent_path();
+        if (!ec && !selfDir.empty()) {
+            fs::path sibling = selfDir / binName;
+            if (fs::exists(sibling, ec)) return sibling.string();
+        }
+    }
+#ifdef _WIN32
+    std::string home = numkit::envGet("USERPROFILE");
+#else
+    std::string home = numkit::envGet("HOME");
+#endif
+    if (!home.empty()) {
+        fs::path p = fs::path(home) / ".numkit" / "bin" / binName;
+        if (fs::exists(p, ec)) return p.string();
+    }
+    return binName;
+}
+
+std::string quoteShellArg(const std::string &s)
+{
+    if (s.find_first_of(" \t\"") == std::string::npos) return s;
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"') out += "\\\"";
+        else out += c;
+    }
+    out += "\"";
+    return out;
+}
+
+int runCodegenSubcommand(const char *argv0, const std::vector<std::string> &args)
+{
+    const std::string cgBin = findCodegenBinary(argv0);
+    std::string cmd = quoteShellArg(cgBin);
+    for (const auto &a : args) {
+        cmd += " " + quoteShellArg(a);
+    }
+#ifdef _WIN32
+    cmd = "\"" + cmd + "\"";
+#endif
+    return std::system(cmd.c_str());
 }
 
 void printPkgUsage(const char *prog)
@@ -293,9 +354,20 @@ int main(int argc, char **argv)
     if (argc >= 2 && std::string(argv[1]) == "pkg") {
         return runPkgCommand(argc, argv);
     }
+    if (argc >= 2 && std::string(argv[1]) == "codegen") {
+        std::vector<std::string> args;
+        for (int i = 2; i < argc; ++i) args.emplace_back(argv[i]);
+        return runCodegenSubcommand(argv[0], args);
+    }
+    if (argc >= 2 && std::string(argv[1]) == "build") {
+        std::vector<std::string> args = {"--build"};
+        for (int i = 2; i < argc; ++i) args.emplace_back(argv[i]);
+        return runCodegenSubcommand(argv[0], args);
+    }
 
     std::string target;
     std::string evalCode;
+    bool aotRun = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -305,6 +377,8 @@ int main(int argc, char **argv)
         } else if (arg == "-v" || arg == "--version") {
             printVersion();
             return 0;
+        } else if (arg == "--aot") {
+            aotRun = true;
         } else if (arg == "--isolated") {
             numkit::envSet("NUMKIT_MODE", "isolated");
         } else if (arg == "--compat") {
@@ -330,6 +404,9 @@ int main(int argc, char **argv)
 
     if (target.empty())
         return runRepl();
+
+    if (aotRun)
+        return runCodegenSubcommand(argv[0], {"--run", target});
 
     return runScript(target);
 }
