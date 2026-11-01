@@ -103,27 +103,62 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             outs[0] = std::move(st);
             return;
         }
+        if (flag == "twister") {
+            std::uint32_t mt[ops::MatlabMT19937::STATE_SIZE];
+            int idx = 0;
+            rngRef.engine().getState(mt, idx);
+            auto st = Value::matrix(625, 1, ValueType::UINT32, ctx.engine->resource());
+            std::uint32_t *d = st.uint32DataMut();
+            for (size_t i = 0; i < 624; ++i) d[i] = mt[i];
+            d[624] = static_cast<std::uint32_t>(idx);
+            outs[0] = std::move(st);
+            return;
+        }
     }
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
-        && dimArgs[1].isScalar() && !dimArgs[1].isChar()) {
+        && !dimArgs[1].isChar()) {
         const std::string flag = dimArgs[0].toString();
-        if (flag == "seed") {
+        if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Rand(
                 static_cast<std::uint64_t>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
         if (flag == "state") {
-            rngRef.setLegacyV5Rand(
-                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
-            outs[0] = Value();
-            return;
+            if (dimArgs[1].isScalar()) {
+                rngRef.setLegacyV5Rand(
+                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                outs[0] = Value();
+                return;
+            }
+            if (dimArgs[1].numel() == 35) {
+                double z[32];
+                for (size_t i = 0; i < 32; ++i) z[i] = dimArgs[1].elemAsDouble(i);
+                const std::size_t idx = static_cast<std::size_t>(dimArgs[1].elemAsDouble(32));
+                const double borrow = dimArgs[1].elemAsDouble(33);
+                const std::uint32_t j = static_cast<std::uint32_t>(
+                    std::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
+                rngRef.setLegacyV5RandState(z, idx, borrow, j);
+                outs[0] = Value();
+                return;
+            }
         }
         if (flag == "twister") {
-            rngRef.setLegacyTwisterRand(
-                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
-            outs[0] = Value();
-            return;
+            if (dimArgs[1].isScalar()) {
+                rngRef.setLegacyTwisterRand(
+                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                outs[0] = Value();
+                return;
+            }
+            if (dimArgs[1].numel() == 625) {
+                std::uint32_t mt[ops::MatlabMT19937::STATE_SIZE];
+                for (size_t i = 0; i < 624; ++i)
+                    mt[i] = static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(i));
+                const int idx = static_cast<int>(dimArgs[1].elemAsDouble(624));
+                rngRef.setLegacyTwisterRandState(mt, idx);
+                outs[0] = Value();
+                return;
+            }
         }
     }
     ScratchArena scratch(mr);

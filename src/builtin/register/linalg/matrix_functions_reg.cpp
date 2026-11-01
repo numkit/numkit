@@ -65,8 +65,7 @@ void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     Value handle = fnArg;
     if (fnArg.isChar() || fnArg.isString()) {
         handle = Value::funcHandle(knownName, mr);
-    } else if (!fnArg.isFuncHandle()
-               && !(fnArg.isCell() && fnArg.numel() >= 1 && fnArg.cellAt(0).isFuncHandle())) {
+    } else if (!fnArg.isFuncHandle()) {
         throw Error("funm: second argument must be a function handle or function name",
                     0, 0, "funm", "", "numkit:funm:badFun");
     }

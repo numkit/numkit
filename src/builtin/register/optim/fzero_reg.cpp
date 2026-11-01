@@ -20,11 +20,10 @@ namespace numkit::optim {
 namespace detail {
 
 namespace {
-// Validate args[0] is a callable handle (handle or cell-of-handle).
+// Validate args[0] is a callable function handle.
 void requireFuncHandle(const Value &fn, const char *who)
 {
-    if (!fn.isFuncHandle()
-        && !(fn.isCell() && fn.numel() >= 1 && fn.cellAt(0).isFuncHandle()))
+    if (!fn.isFuncHandle())
         throw Error(std::string(who) + ": 1st argument must be a function handle",
                      0, 0, who, "", std::string("numkit:") + who + ":fnType");
 }

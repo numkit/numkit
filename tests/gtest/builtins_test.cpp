@@ -1588,6 +1588,22 @@ TEST_P(BuiltinTest, Func2Str)
     EXPECT_DOUBLE_EQ(getVar("is_fh_pi"), 1.0);
     EXPECT_DOUBLE_EQ(getVar("is_cell_pi"), 0.0);
     EXPECT_TRUE(getVarPtr("fh_pi")->isFuncHandle());
+
+    // Plain cell arrays starting with a function handle are NOT closures and
+    // must be rejected by func2str / fzero / integral.
+    EXPECT_THROW(eval("func2str({@sin, 123});"), std::exception);
+    EXPECT_THROW(eval("fzero({@sin, 123}, 3);"), std::exception);
+}
+
+TEST_P(BuiltinTest, LegacyRngStateAndTwisterRoundTrip)
+{
+    eval("rand('state', 42); s_v5 = rand('state'); r1 = rand(1, 5); rand('state', s_v5); r2 = rand(1, 5); d_v5 = max(abs(r1 - r2));");
+    EXPECT_DOUBLE_EQ(getVar("d_v5"), 0.0);
+    EXPECT_EQ(getVarPtr("s_v5")->numel(), 35u);
+
+    eval("rand('twister', 12345); s_tw = rand('twister'); t1 = rand(1, 5); rand('twister', s_tw); t2 = rand(1, 5); d_tw = max(abs(t1 - t2));");
+    EXPECT_DOUBLE_EQ(getVar("d_tw"), 0.0);
+    EXPECT_EQ(getVarPtr("s_tw")->numel(), 625u);
 }
 
 // ── shiftdim — Pack 12 ────────────────────────────────────────

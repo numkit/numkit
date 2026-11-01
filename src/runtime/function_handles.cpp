@@ -70,17 +70,7 @@ void registerFunctionHandles(Engine &engine)
                                Span<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("func2str requires 1 argument");
-                                // A VM closure that captures variables is packed
-                                // as a cell {handle, captures...} (the same
-                                // convention Engine::callFunctionHandleMulti uses
-                                // to make it callable). Unwrap to the bare handle
-                                // so func2str works on captured anon functions too
-                                // (e.g. @(x) x + a). On TreeWalker / for capture-
-                                // free anons the handle is plain — this is a no-op.
                                 const Value *h = &args[0];
-                                if (h->isCell() && h->numel() >= 1 &&
-                                    h->cellAt(0).isFuncHandle())
-                                    h = &h->cellAt(0);
                                 if (!h->isFuncHandle())
                                     throw std::runtime_error(
                                         "func2str: argument must be a function handle");

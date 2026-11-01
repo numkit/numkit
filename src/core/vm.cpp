@@ -3295,28 +3295,18 @@ enter_frame:
                 }
                 // Multi-output flattened handle call: resolve + push a
                 // MULTI frame over the flattened args (captures appended).
-                Value fh;
-                size_t ncaps = 0;
-                bool legacyCellClosure = false;
-                if (R[fhReg].isFuncHandle()) {
-                    fh = R[fhReg];
-                    ncaps = fh.funcHandleCaptureCount();
-                } else if (R[fhReg].isCell() && R[fhReg].numel() >= 1
-                           && R[fhReg].cellAt(0).isFuncHandle()) {
-                    fh = R[fhReg].cellAt(0);
-                    ncaps = R[fhReg].numel() - 1;
-                    legacyCellClosure = true;
-                } else {
+                if (!R[fhReg].isFuncHandle()) {
                     throw std::runtime_error(
                         "VM: multi-output call of a value that is not a "
                         "function handle");
                 }
+                const Value &fh = R[fhReg];
+                const size_t ncaps = fh.funcHandleCaptureCount();
                 const std::string &fName = fh.funcHandleName();
                 std::vector<Value> cargs(nflat + ncaps);
                 for (size_t i = 0; i < nflat; ++i) cargs[i] = ABf[i];
                 for (size_t i = 0; i < ncaps; ++i)
-                    cargs[nflat + i] = legacyCellClosure ? R[fhReg].cellAt(1 + i)
-                                                         : fh.funcHandleCapture(i);
+                    cargs[nflat + i] = fh.funcHandleCapture(i);
                 const size_t ctot = cargs.size();
                 if (const BytecodeChunk *fc = findCompiledFunc(fName)) {
                     frame.ip = ip + 1;
@@ -4408,25 +4398,18 @@ bool VM::pushCallbackFrame(const Value &handle, Span<const Value> args, size_t n
     // Unwrap a closure cell {handle, captures…}: captures append to the args,
     // matching the [user_params…, captures…] chunk parameter layout (same as
     // callFunctionHandleMulti).
-    const Value *bare = &handle;
+    if (!handle.isFuncHandle())
+        return false;
     std::vector<Value> withCaptures;
-    if (handle.isFuncHandle() && handle.funcHandleCaptureCount() > 0) {
+    if (handle.funcHandleCaptureCount() > 0) {
         const size_t ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
         withCaptures.assign(args.begin(), args.end());
         for (size_t i = 0; i < ncaps; ++i)
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = Span<const Value>(withCaptures.data(), withCaptures.size());
-    } else if (handle.isCell() && handle.numel() >= 1 && handle.cellAt(0).isFuncHandle()) {
-        bare = &handle.cellAt(0);
-        withCaptures.assign(args.begin(), args.end());
-        for (size_t i = 1; i < handle.numel(); ++i)
-            withCaptures.push_back(handle.cellAt(i));
-        args = Span<const Value>(withCaptures.data(), withCaptures.size());
     }
-    if (!bare->isFuncHandle())
-        return false;
-    const UserFunction *uf = engine_.lookupUserFunctionLocal(bare->funcHandleName());
+    const UserFunction *uf = engine_.lookupUserFunctionLocal(handle.funcHandleName());
     if (!uf)
         return false; // not user code — caller must use the synchronous path
     const BytecodeChunk *cc = engine_.ensureClassMethodChunk(*uf);
@@ -4856,16 +4839,10 @@ bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *
     // Resolve function handle (plain or closure)
     Value funcHandleVal;
     size_t numCaptures = 0;
-    bool legacyCellClosure = false;
 
     if (target.isFuncHandle()) {
         funcHandleVal = target;
         numCaptures = target.funcHandleCaptureCount();
-    } else if (target.isCell() && target.numel() >= 1
-               && target.cellAt(0).isFuncHandle()) {
-        funcHandleVal = target.cellAt(0);
-        numCaptures = target.numel() - 1;
-        legacyCellClosure = true;
     } else if (target.isObject()) {
         // OBJECT: obj(i…) dispatches to the class subsref overload.
         // (A known variable `obj(i)` compiles to CALL_INDIRECT, so the
@@ -4926,8 +4903,7 @@ bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *
     for (size_t i = 0; i < na; ++i)
         argsBuf[i] = AB[i];
     for (size_t i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = legacyCellClosure ? target.cellAt(1 + i)
-                                            : funcHandleVal.funcHandleCapture(i);
+        argsBuf[na + i] = funcHandleVal.funcHandleCapture(i);
     const size_t totalArgs = totalArgsN;
 
     // Try compiled user function
@@ -4975,15 +4951,9 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     // Resolve the function handle (plain or closure) + its captures.
     Value funcHandleVal;
     size_t numCaptures = 0;
-    bool legacyCellClosure = false;
     if (R[fhReg].isFuncHandle()) {
         funcHandleVal = R[fhReg];
         numCaptures = funcHandleVal.funcHandleCaptureCount();
-    } else if (R[fhReg].isCell() && R[fhReg].numel() >= 1
-               && R[fhReg].cellAt(0).isFuncHandle()) {
-        funcHandleVal = R[fhReg].cellAt(0);
-        numCaptures = R[fhReg].numel() - 1;
-        legacyCellClosure = true;
     } else if (R[fhReg].isObject()) {
         const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassName());
         if (cls && cls->subsref) {
@@ -5015,8 +4985,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     for (size_t i = 0; i < na; ++i)
         argsBuf[i] = R[argBase + i];
     for (size_t i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = legacyCellClosure ? R[fhReg].cellAt(1 + i)
-                                            : funcHandleVal.funcHandleCapture(i);
+        argsBuf[na + i] = funcHandleVal.funcHandleCapture(i);
     const size_t totalArgs = totalArgsN;
 
     // Compiled user / anonymous function → multi-return frame push (the body

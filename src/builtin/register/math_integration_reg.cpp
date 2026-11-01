@@ -203,8 +203,7 @@ void gk15_nodes_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> 
 
 static bool isCallableHandleArg(const Value &v)
 {
-    return v.isFuncHandle()
-        || (v.isCell() && v.numel() >= 1 && v.cellAt(0).isFuncHandle());
+    return v.isFuncHandle();
 }
 
 void integral_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)

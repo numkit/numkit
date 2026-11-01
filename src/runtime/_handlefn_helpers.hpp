@@ -60,7 +60,7 @@ inline std::string lowerName(const std::string &s)
 {
     std::string r = s;
     std::transform(r.begin(), r.end(), r.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return r;
 }
 
@@ -70,13 +70,10 @@ inline std::string lowerName(const std::string &s)
 // cell that VM produces for anonymous functions.
 inline bool tryParseBuiltinHandle(const Value &h, BuiltinFn &out, const char *fn)
 {
-    const Value *bare = &h;
-    if (h.isCell() && h.numel() >= 1 && h.cellAt(0).isFuncHandle())
-        bare = &h.cellAt(0);
-    if (!bare->isFuncHandle())
+    if (!h.isFuncHandle())
         throw Error(std::string(fn) + ": fn argument must be a function handle",
                      0, 0, fn, "", std::string("numkit:") + fn + ":fnType");
-    const std::string s = lowerName(bare->funcHandleName());
+    const std::string s = lowerName(h.funcHandleName());
     if (s == "numel")     { out = BuiltinFn::Numel;     return true; }
     if (s == "length")    { out = BuiltinFn::Length;    return true; }
     if (s == "ndims")     { out = BuiltinFn::Ndims;     return true; }

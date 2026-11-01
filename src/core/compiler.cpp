@@ -1257,10 +1257,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
     if (!calleeIsVar && isTopLevel_ && !engine_.isReservedName(funcName)) {
         Value *existing = engine_.getVariable(funcName);
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
-            const bool isCallable =
-                existing->isFuncHandle()
-                || (existing->isCell() && existing->numel() >= 1
-                    && existing->cellAt(0).isFuncHandle());
+            const bool isCallable = existing->isFuncHandle();
             if (isCallable
                 || (!engine_.isKnownLeafName(funcName) && !engine_.hasFunction(funcName)))
                 calleeIsVar = true;
@@ -3655,11 +3652,9 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             existing = engine_.getVariable(name);
         }
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
-            // Variable exists — check if it's a callable (funcHandle or closure cell)
-            // Callable variables take priority over same-name external functions
-            bool isCallable = existing->isFuncHandle()
-                              || (existing->isCell() && existing->numel() >= 1
-                                  && existing->cellAt(0).isFuncHandle());
+            // Variable exists — check if it's a callable function handle.
+            // Callable variables take priority over same-name external functions.
+            bool isCallable = existing->isFuncHandle();
             if (isCallable || (!engine_.isKnownLeafName(name) && !engine_.hasFunction(name))) {
                 isKnownVar = true;
             }

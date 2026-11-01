@@ -135,7 +135,7 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                          0, 0, "unique", "", "numkit:unique:badArg");
         std::string s = a.toString();
         std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "rows") useRows = true;
         else if (s == "stable") stable = true;
         else if (s == "sorted") stable = false;
@@ -285,7 +285,7 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
 
     auto lower = [](std::string s) {
         std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return s;
     };
     auto requireNumBins = [](double v) {

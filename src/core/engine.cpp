@@ -228,12 +228,9 @@ CallbackBuiltin *Engine::callbackBuiltin(const std::string &name) const
 
 bool Engine::isUserCodeHandle(const Value &handle) const
 {
-    const Value *bare = &handle;
-    if (handle.isCell() && handle.numel() >= 1 && handle.cellAt(0).isFuncHandle())
-        bare = &handle.cellAt(0);
-    if (!bare->isFuncHandle())
+    if (!handle.isFuncHandle())
         return false;
-    return lookupUserFunctionLocal(bare->funcHandleName()) != nullptr;
+    return lookupUserFunctionLocal(handle.funcHandleName()) != nullptr;
 }
 
 std::string Engine::formatObjectDisplay(const std::string &name, const Value &obj) const
@@ -2847,28 +2844,19 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
 {
     // Closure form: VM packages `@(x) x + capture` as a FUNC_HANDLE
     // carrying captured values to append to the user-supplied args.
-    const Value *bareHandle = &handle;
+    if (!handle.isFuncHandle())
+        throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
     std::vector<Value> withCaptures;
-    if (handle.isFuncHandle() && handle.funcHandleCaptureCount() > 0) {
+    if (handle.funcHandleCaptureCount() > 0) {
         const std::size_t ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
         for (const auto &a : args) withCaptures.push_back(a);
         for (std::size_t i = 0; i < ncaps; ++i)
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = Span<const Value>(withCaptures.data(), withCaptures.size());
-    } else if (handle.isCell() && handle.numel() >= 1
-               && handle.cellAt(0).isFuncHandle()) {
-        bareHandle = &handle.cellAt(0);
-        withCaptures.reserve(args.size() + handle.numel() - 1);
-        for (const auto &a : args) withCaptures.push_back(a);
-        for (std::size_t i = 1; i < handle.numel(); ++i)
-            withCaptures.push_back(handle.cellAt(i));
-        args = Span<const Value>(withCaptures.data(), withCaptures.size());
     }
-    if (!bareHandle->isFuncHandle())
-        throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
     Environment *e = env ? env : workspaceEnv_.get();
-    const std::string name = bareHandle->funcHandleName();
+    const std::string name = handle.funcHandleName();
 
     // 1) Built-in (registered external) — works regardless of backend.
     {
@@ -2905,7 +2893,7 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
     // parameter layout. Pass the BARE handle (not the closure cell) so
     // TW resolves the funcHandleName correctly.
     if (treeWalker_)
-        return treeWalker_->callHandleMultiPublic(*bareHandle, args, e, nout);
+        return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
 
     throw std::runtime_error("callFunctionHandle: undefined function in handle '@"
                              + name + "'");

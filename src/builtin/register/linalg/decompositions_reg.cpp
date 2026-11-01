@@ -203,7 +203,7 @@ bool wantsEcon(Span<const Value> args, const char *fn)
     if (o.type() == ValueType::CHAR) {
         std::string s = o.toString();
         std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "econ") return true;
         throw Error(std::string(fn) + ": unknown option '" + s + "'",
                     0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
@@ -227,7 +227,7 @@ void lu_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
                         0, 0, "lu", "", "numkit:lu:badArg");
         std::string s = args[1].toString();
         std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "vector") vectorP = true;
         else if (s == "matrix") vectorP = false;
         else throw Error("lu: unknown option '" + s + "'",
@@ -257,7 +257,7 @@ void qr_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContex
         if (o.type() == ValueType::CHAR || o.isString()) {
             std::string s = o.toString();
             std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (s == "econ")        econ = true;
             else if (s == "vector") vectorP = true;
             else if (s == "matrix") vectorP = false;

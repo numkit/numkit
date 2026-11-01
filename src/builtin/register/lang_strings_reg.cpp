@@ -200,7 +200,7 @@ void strsplit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     for (size_t k = optStart; k + 1 < args.size(); k += 2) {
         std::string name = args[k].toString();
         std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char ch) { return std::tolower(ch); });
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (name == "collapsedelimiters")
             collapse = !args[k + 1].isEmpty() && args[k + 1].toScalar() != 0.0;
         // DelimiterType='RegularExpression' is not supported (literal only).
@@ -323,7 +323,7 @@ void mat2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
         if (a.type() == ValueType::CHAR || a.isString()) {
             std::string s = a.toString();
             std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char ch) { return std::tolower(ch); });
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
             if (s == "class") withClass = true;
         } else if (!a.isEmpty()) {
             prec = argcheck::expectedInteger(

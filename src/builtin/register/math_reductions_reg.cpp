@@ -108,7 +108,7 @@ OutTypeMode parseOutTypeMode(const Value &arg, const char *fn)
 {
     std::string s = arg.toString();
     std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (s == "default") return OutTypeMode::Default;
     if (s == "double")  return OutTypeMode::Double;
     if (s == "native")  return OutTypeMode::Native;
@@ -476,7 +476,7 @@ inline std::string lowercaseStr(const Value &v)
 {
     std::string s = v.toString();
     std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
