@@ -3974,6 +3974,11 @@ void Compiler::collectFreeVars(const ASTNode *node,
         // Skip __result__ (synthetic return var)
         if (name == "__result__")
             return;
+        // Skip unshadowed built-in reserved constants (pi, eps, inf, nan, ...):
+        // the anonymous function chunk resolves them directly from constantsEnv_.
+        if (engine_.isReservedName(name) && !chunk_.assignedVars.count(name)
+            && (!isTopLevel_ || !engine_.workspaceEnv().get(name)))
+            return;
         // Check if exists in outer scope
         if (varRegisters_.count(name)) {
             freeVars.push_back(name);
@@ -4159,7 +4164,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
         elemRegs.push_back(outerReg);
     }
 
-    // Pack into consecutive registers for CELL_LITERAL
+    // Pack into consecutive registers for CLOSURE_MAKE (FUNC_HANDLE with captures)
     uint8_t base = nextReg_;
     for (size_t i = 0; i < totalSlots; ++i) {
         uint8_t slot = tempReg();
@@ -4168,7 +4173,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
     }
 
     uint8_t dst = tempReg();
-    emitABC(OpCode::CELL_LITERAL, dst, base, static_cast<uint8_t>(totalSlots));
+    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint8_t>(totalSlots));
     return dst;
 }
 

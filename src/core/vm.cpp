@@ -2223,7 +2223,15 @@ enter_frame:
                 break;
             }
 
-            // ── Cell operations ──────────────────────────────────
+            // ── Cell & closure operations ─────────────────────────
+            case OpCode::CLOSURE_MAKE: {
+                uint8_t base = I.b, count = I.c;
+                Value fh = R[base];
+                if (count > 1)
+                    fh.setFuncHandleCaptures(&R[base + 1], count - 1);
+                R[I.a] = std::move(fh);
+                break;
+            }
             case OpCode::CELL_LITERAL: {
                 uint8_t base = I.b, count = I.c;
                 auto cell = Value::cell(count == 0 ? 0 : 1, count);
@@ -3289,12 +3297,15 @@ enter_frame:
                 // MULTI frame over the flattened args (captures appended).
                 Value fh;
                 size_t ncaps = 0;
-                if (R[fhReg].isCell() && R[fhReg].numel() >= 1
-                    && R[fhReg].cellAt(0).isFuncHandle()) {
+                bool legacyCellClosure = false;
+                if (R[fhReg].isFuncHandle()) {
+                    fh = R[fhReg];
+                    ncaps = fh.funcHandleCaptureCount();
+                } else if (R[fhReg].isCell() && R[fhReg].numel() >= 1
+                           && R[fhReg].cellAt(0).isFuncHandle()) {
                     fh = R[fhReg].cellAt(0);
                     ncaps = R[fhReg].numel() - 1;
-                } else if (R[fhReg].isFuncHandle()) {
-                    fh = R[fhReg];
+                    legacyCellClosure = true;
                 } else {
                     throw std::runtime_error(
                         "VM: multi-output call of a value that is not a "
@@ -3304,7 +3315,8 @@ enter_frame:
                 std::vector<Value> cargs(nflat + ncaps);
                 for (size_t i = 0; i < nflat; ++i) cargs[i] = ABf[i];
                 for (size_t i = 0; i < ncaps; ++i)
-                    cargs[nflat + i] = R[fhReg].cellAt(1 + i);
+                    cargs[nflat + i] = legacyCellClosure ? R[fhReg].cellAt(1 + i)
+                                                         : fh.funcHandleCapture(i);
                 const size_t ctot = cargs.size();
                 if (const BytecodeChunk *fc = findCompiledFunc(fName)) {
                     frame.ip = ip + 1;
@@ -3907,6 +3919,8 @@ static std::string describeInstruction(const Instruction &instr,
         return "in matrix construction";
     case OpCode::CELL_LITERAL:
         return "in cell construction";
+    case OpCode::CLOSURE_MAKE:
+        return "in anonymous function creation";
 
     // Indexing
     case OpCode::INDEX_GET:
@@ -4396,7 +4410,14 @@ bool VM::pushCallbackFrame(const Value &handle, Span<const Value> args, size_t n
     // callFunctionHandleMulti).
     const Value *bare = &handle;
     std::vector<Value> withCaptures;
-    if (handle.isCell() && handle.numel() >= 1 && handle.cellAt(0).isFuncHandle()) {
+    if (handle.isFuncHandle() && handle.funcHandleCaptureCount() > 0) {
+        const size_t ncaps = handle.funcHandleCaptureCount();
+        withCaptures.reserve(args.size() + ncaps);
+        withCaptures.assign(args.begin(), args.end());
+        for (size_t i = 0; i < ncaps; ++i)
+            withCaptures.push_back(handle.funcHandleCapture(i));
+        args = Span<const Value>(withCaptures.data(), withCaptures.size());
+    } else if (handle.isCell() && handle.numel() >= 1 && handle.cellAt(0).isFuncHandle()) {
         bare = &handle.cellAt(0);
         withCaptures.assign(args.begin(), args.end());
         for (size_t i = 1; i < handle.numel(); ++i)
@@ -4832,16 +4853,19 @@ void VM::callTwOnlyMulti(Value *R, const UserFunction &uf,
 bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *AB, size_t na,
                               Value *R, CallFrame &frame, const Instruction *ip)
 {
-    // Resolve function handle (plain or closure cell)
+    // Resolve function handle (plain or closure)
     Value funcHandleVal;
     size_t numCaptures = 0;
+    bool legacyCellClosure = false;
 
-    if (target.isCell() && target.numel() >= 1
-        && target.cellAt(0).isFuncHandle()) {
+    if (target.isFuncHandle()) {
+        funcHandleVal = target;
+        numCaptures = target.funcHandleCaptureCount();
+    } else if (target.isCell() && target.numel() >= 1
+               && target.cellAt(0).isFuncHandle()) {
         funcHandleVal = target.cellAt(0);
         numCaptures = target.numel() - 1;
-    } else if (target.isFuncHandle()) {
-        funcHandleVal = target;
+        legacyCellClosure = true;
     } else if (target.isObject()) {
         // OBJECT: obj(i…) dispatches to the class subsref overload.
         // (A known variable `obj(i)` compiles to CALL_INDIRECT, so the
@@ -4902,7 +4926,8 @@ bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *
     for (size_t i = 0; i < na; ++i)
         argsBuf[i] = AB[i];
     for (size_t i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = target.cellAt(1 + i);
+        argsBuf[na + i] = legacyCellClosure ? target.cellAt(1 + i)
+                                            : funcHandleVal.funcHandleCapture(i);
     const size_t totalArgs = totalArgsN;
 
     // Try compiled user function
@@ -4947,15 +4972,18 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     uint8_t na = static_cast<uint8_t>(I.d);
     uint8_t nout = I.e;
 
-    // Resolve the function handle (plain or closure cell) + its captures.
+    // Resolve the function handle (plain or closure) + its captures.
     Value funcHandleVal;
     size_t numCaptures = 0;
-    if (R[fhReg].isCell() && R[fhReg].numel() >= 1
-        && R[fhReg].cellAt(0).isFuncHandle()) {
+    bool legacyCellClosure = false;
+    if (R[fhReg].isFuncHandle()) {
+        funcHandleVal = R[fhReg];
+        numCaptures = funcHandleVal.funcHandleCaptureCount();
+    } else if (R[fhReg].isCell() && R[fhReg].numel() >= 1
+               && R[fhReg].cellAt(0).isFuncHandle()) {
         funcHandleVal = R[fhReg].cellAt(0);
         numCaptures = R[fhReg].numel() - 1;
-    } else if (R[fhReg].isFuncHandle()) {
-        funcHandleVal = R[fhReg];
+        legacyCellClosure = true;
     } else if (R[fhReg].isObject()) {
         const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassName());
         if (cls && cls->subsref) {
@@ -4987,7 +5015,8 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     for (size_t i = 0; i < na; ++i)
         argsBuf[i] = R[argBase + i];
     for (size_t i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = R[fhReg].cellAt(1 + i);
+        argsBuf[na + i] = legacyCellClosure ? R[fhReg].cellAt(1 + i)
+                                            : funcHandleVal.funcHandleCapture(i);
     const size_t totalArgs = totalArgsN;
 
     // Compiled user / anonymous function → multi-return frame push (the body

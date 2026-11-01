@@ -208,7 +208,8 @@ void register_specfun(Engine &engine) {
             int branch = 0;
             const Value &x = (args.size() == 2) ? args[1] : args[0];
             if (args.size() == 2)
-                branch = static_cast<int>(args[0].toScalar());
+                branch = argcheck::expectedInteger(
+                    argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
             auto evalLambertW = [](int k, double z) -> double {
                 if (std::isnan(z)) return z;
                 const double negInvE = -1.0 / std::exp(1.0);

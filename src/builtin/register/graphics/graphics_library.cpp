@@ -908,7 +908,7 @@ Value makeFigureHandleFor(FigureManager &fm, int figureId,
                           std::pmr::memory_resource *mr)
 {
     if (auto *rec = findRecordBy(fm, "figure", figureId, 0))
-        return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), mr, figureId);
+        return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), figureId, mr);
     // createHandle stamps the CURRENT figure — switch, create, switch back.
     const int saved = fm.currentFigureId();
     if (saved != figureId)
@@ -916,7 +916,7 @@ Value makeFigureHandleFor(FigureManager &fm, int figureId,
     const int id = fm.createHandle("figure", kFigureClass);
     if (saved != figureId)
         fm.setFigure(saved);
-    return makeGraphicsHandleValue(kFigureClass, id, mr, figureId);
+    return makeGraphicsHandleValue(kFigureClass, id, figureId, mr);
 }
 
 Value makeFigureHandle(FigureManager &fm, std::pmr::memory_resource *mr)

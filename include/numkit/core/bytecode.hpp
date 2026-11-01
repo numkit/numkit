@@ -232,7 +232,7 @@ enum class OpCode : uint8_t {
     // ── Scope ────────────────────────────────────────────────
     GLOBAL_DECL,     // [reserved] compiler writes to chunk.globalNames instead
     PERSISTENT_DECL, // [reserved] compiler writes to chunk.globalNames instead
-    CLOSURE_MAKE,    // [reserved] compiler uses cell-packing {funcHandle, captures} instead
+    CLOSURE_MAKE,    // dst, base, count       R[dst] = R[base] (FUNC_HANDLE) with captures R[base+1..base+count-1]
     CLEAR_VAR,       // reg                    R[reg] = empty (clear variable)
     CLEAR_DYN,       // nameReg                lookup name in varMap, clear register
     EXIST_VAR,       // dst, nameReg, filterReg  check name in varMap/functions → 0/1/5

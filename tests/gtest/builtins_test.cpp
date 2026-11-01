@@ -821,7 +821,13 @@ TEST_P(BuiltinTest, FminsearchFvalExitflag)
 TEST_P(BuiltinTest, FzeroOutputStructDeferredThrows)
 {
     eval("function [a,b,c,d] = fz4(f, x0)\n  [a,b,c,d] = fzero(f, x0);\nend");
-    EXPECT_THROW(eval("[x,fv,ef,op] = fz4(@(x) x.^2 - 4, [0 10]);"), std::exception);
+    eval("[x,fv,ef,op] = fz4(@(x) x.^2 - 4, [0 10]);");
+    EXPECT_NEAR(getVar("x"), 2.0, 1e-9);
+    EXPECT_NEAR(getVar("fv"), 0.0, 1e-9);
+    EXPECT_DOUBLE_EQ(getVar("ef"), 1.0);
+    auto *op = getVarPtr("op");
+    ASSERT_NE(op, nullptr);
+    EXPECT_TRUE(op->isStruct());
 }
 
 TEST_P(BuiltinTest, OptimsetGet)
@@ -1565,11 +1571,23 @@ TEST_P(BuiltinTest, Func2Str)
     // str2func(func2str(h)) round-trips for anonymous handles.
     eval("e = func2str(str2func('@(x) x.^2 - 3'));");
     EXPECT_EQ(getVarPtr("e")->toString(), "@(x)x.^2-3");
-    // Captures a variable: the VM packs this as a closure cell {handle, capture}
-    // — func2str unwraps it (TreeWalker returns a plain handle). The source keeps
-    // the captured NAME, matching MATLAB.
-    eval("aa = 5; g = func2str(@(x) x + aa);");
+    // Captures a variable: both TreeWalker and VM emit a first-class
+    // ValueType::FUNC_HANDLE with embedded captures (OpCode::CLOSURE_MAKE).
+    eval("aa = 5; fh = @(x) x + aa; g = func2str(fh); c1 = class(fh); is_fh = isa(fh, 'function_handle'); is_cell = iscell(fh); y = fh(3);");
     EXPECT_EQ(getVarPtr("g")->toString(), "@(x)x+aa");
+    EXPECT_EQ(getVarPtr("c1")->toString(), "function_handle");
+    EXPECT_DOUBLE_EQ(getVar("is_fh"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("is_cell"), 0.0);
+    EXPECT_DOUBLE_EQ(getVar("y"), 8.0);
+    EXPECT_TRUE(getVarPtr("fh")->isFuncHandle());
+
+    // Referencing built-in constant `pi` inside an anonymous handle does not
+    // turn it into a cell either, and remains a first-class function_handle.
+    eval("fh_pi = @(x) sin(2*pi*x); c_pi = class(fh_pi); is_fh_pi = isa(fh_pi, 'function_handle'); is_cell_pi = iscell(fh_pi);");
+    EXPECT_EQ(getVarPtr("c_pi")->toString(), "function_handle");
+    EXPECT_DOUBLE_EQ(getVar("is_fh_pi"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("is_cell_pi"), 0.0);
+    EXPECT_TRUE(getVarPtr("fh_pi")->isFuncHandle());
 }
 
 // ── shiftdim — Pack 12 ────────────────────────────────────────

@@ -2845,13 +2845,19 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
                                                     size_t nout,
                                                     Environment *env)
 {
-    // Closure form: VM packages `@(x) x + capture` as a cell whose
-    // first element is the bare funcHandle and the rest are captured
-    // values to append to the user-supplied args.
+    // Closure form: VM packages `@(x) x + capture` as a FUNC_HANDLE
+    // carrying captured values to append to the user-supplied args.
     const Value *bareHandle = &handle;
     std::vector<Value> withCaptures;
-    if (handle.isCell() && handle.numel() >= 1
-        && handle.cellAt(0).isFuncHandle()) {
+    if (handle.isFuncHandle() && handle.funcHandleCaptureCount() > 0) {
+        const std::size_t ncaps = handle.funcHandleCaptureCount();
+        withCaptures.reserve(args.size() + ncaps);
+        for (const auto &a : args) withCaptures.push_back(a);
+        for (std::size_t i = 0; i < ncaps; ++i)
+            withCaptures.push_back(handle.funcHandleCapture(i));
+        args = Span<const Value>(withCaptures.data(), withCaptures.size());
+    } else if (handle.isCell() && handle.numel() >= 1
+               && handle.cellAt(0).isFuncHandle()) {
         bareHandle = &handle.cellAt(0);
         withCaptures.reserve(args.size() + handle.numel() - 1);
         for (const auto &a : args) withCaptures.push_back(a);
