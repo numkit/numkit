@@ -229,10 +229,12 @@ void printUsage(const char *prog)
               << "  build <file.m>       compile a .m script/function into a native executable\n"
               << "  codegen <file.m>     transpile .m to C++ (or run/build via numkit-codegen)\n\n"
               << "Package Management:\n"
-              << "  pkg install <target> install a package (e.g. numkit-signal, owner/repo, URL)\n"
-              << "  pkg list             list installed packages and their status\n"
+              << "  pkg install <pkg...> install one or more packages (or --all, --head)\n"
+              << "  pkg update [pkg...]  update installed packages to latest release/commit\n"
+              << "  pkg avail            list official NumKit toolboxes and installation status\n"
+              << "  pkg list             list installed packages and their versions\n"
               << "  pkg build [dir]      build a module in the specified directory\n"
-              << "  pkg remove <name>    remove an installed package\n\n"
+              << "  pkg remove <pkg...>  remove one or more installed packages\n\n"
               << "If no script or --eval is provided, starts an interactive REPL.\n";
 }
 
@@ -293,15 +295,21 @@ void printPkgUsage(const char *prog)
 {
     std::cout << "Usage: " << prog << " pkg <command> [arguments]\n\n"
               << "Commands:\n"
-              << "  install <target>   install a package (e.g. numkit-signal, user/repo, URL, or local path)\n"
-              << "  list               list installed packages and their status\n"
+              << "  install <pkg...> [--all] [--head]\n"
+              << "                     install one or more packages (e.g. signal, signal@v1.0.0, user/repo, --all)\n"
+              << "  update [pkg...] [--head]\n"
+              << "                     update installed packages (all installed if none specified)\n"
+              << "  avail              list all official NumKit toolboxes and their installation status\n"
+              << "  list               list installed packages, versions, and library paths\n"
               << "  build [dir]        build a module from source in the specified directory (default: .)\n"
-              << "  remove <name>      remove an installed package\n"
+              << "  remove <pkg...>    remove one or more installed packages\n"
               << "  help               show this help message\n\n"
               << "Examples:\n"
-              << "  " << prog << " pkg install numkit-signal\n"
-              << "  " << prog << " pkg install username/custom-toolbox\n"
-              << "  " << prog << " pkg list\n";
+              << "  " << prog << " pkg avail\n"
+              << "  " << prog << " pkg install signal wavelet\n"
+              << "  " << prog << " pkg install --all\n"
+              << "  " << prog << " pkg install signal@v1.0.0\n"
+              << "  " << prog << " pkg update\n";
 }
 
 int runPkgCommand(int argc, char **argv)
@@ -314,23 +322,56 @@ int runPkgCommand(int argc, char **argv)
     numkit::pkg::PackageManager pm;
 
     if (subcmd == "install") {
-        if (argc < 4) {
-            std::cerr << "Error: 'pkg install' requires a package target.\n"
-                      << "Example: " << argv[0] << " pkg install numkit-signal\n";
+        bool installAll = false;
+        bool forceHead = false;
+        std::vector<std::string> targets;
+        for (int i = 3; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--all" || arg == "-a") {
+                installAll = true;
+            } else if (arg == "--head") {
+                forceHead = true;
+            } else {
+                targets.push_back(std::move(arg));
+            }
+        }
+        if (targets.empty() && !installAll) {
+            std::cerr << "Error: 'pkg install' requires at least one package target or '--all'.\n"
+                      << "Example: " << argv[0] << " pkg install signal\n";
             return 1;
         }
-        return pm.install(argv[3]);
-    } else if (subcmd == "list") {
+        return pm.installMany(targets, installAll, /*verbose=*/true, forceHead);
+    } else if (subcmd == "update" || subcmd == "upgrade") {
+        bool forceHead = false;
+        std::vector<std::string> names;
+        for (int i = 3; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--all" || arg == "-a") {
+                continue;
+            } else if (arg == "--head") {
+                forceHead = true;
+            } else {
+                names.push_back(std::move(arg));
+            }
+        }
+        return pm.update(names, /*verbose=*/true, forceHead);
+    } else if (subcmd == "avail" || subcmd == "available" || subcmd == "catalog" || subcmd == "search") {
+        return pm.avail(std::cout);
+    } else if (subcmd == "list" || subcmd == "status") {
         return pm.list(std::cout);
     } else if (subcmd == "build") {
         std::string dir = (argc >= 4) ? argv[3] : ".";
         return pm.build(dir);
     } else if (subcmd == "remove" || subcmd == "uninstall") {
         if (argc < 4) {
-            std::cerr << "Error: 'pkg remove' requires a package name.\n";
+            std::cerr << "Error: 'pkg remove' requires at least one package name.\n";
             return 1;
         }
-        return pm.remove(argv[3]);
+        int failures = 0;
+        for (int i = 3; i < argc; ++i) {
+            if (pm.remove(argv[i]) != 0) ++failures;
+        }
+        return failures == 0 ? 0 : 1;
     } else if (subcmd == "-h" || subcmd == "--help" || subcmd == "help") {
         printPkgUsage(argv[0]);
         return 0;
