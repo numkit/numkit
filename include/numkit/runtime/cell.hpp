@@ -1,6 +1,6 @@
 /// @file cell.hpp
 /// @ingroup group_datatypes
-// toolboxes/builtin/include/nk/builtin/language/cells/cell.hpp
+// toolboxes/builtin/include/numkit/builtin/language/cells/cell.hpp
 #pragma once
 
 #include <memory_resource>

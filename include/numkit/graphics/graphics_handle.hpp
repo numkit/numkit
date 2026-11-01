@@ -1,4 +1,4 @@
-// include/nk/graphics/graphics_handle.hpp
+// include/numkit/graphics/graphics_handle.hpp
 //
 // Graphics-handle object payload — the Value-side half of the handle
 // registry (bugs/closed/graphics/plot-family-no-return-value.md).

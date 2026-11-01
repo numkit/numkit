@@ -370,7 +370,7 @@ public:
         bool ok = true;
         bool debugStop = false;
         std::string errorMessage;
-        std::string errorId;      // nk:<fn>:<tag> when the thrower set one
+        std::string errorId;      // numkit:<fn>:<tag> when the thrower set one
         int errorLine = 0;
         int errorCol = 0;
         std::string errorFunc;

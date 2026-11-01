@@ -1,4 +1,4 @@
-// runtime/include/nk/runtime/function_file.hpp
+// runtime/include/numkit/runtime/function_file.hpp
 //
 // MATLAB `run`/file-execution semantics for FUNCTION files
 // (bugs/opened/lang/run-invokes-nullary-function-file.md): a file whose

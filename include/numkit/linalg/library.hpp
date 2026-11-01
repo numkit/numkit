@@ -1,6 +1,6 @@
 /// @file library.hpp
 /// @ingroup group_matfun
-// toolboxes/linalg/include/nk/linalg/library.hpp
+// toolboxes/linalg/include/numkit/linalg/library.hpp
 //
 // Linear Algebra Toolbox — user-facing linalg functions (lu, qr, chol,
 // svd, eig, det, inv, pinv, norm, expm, …). Mirrors MATLAB's Linear

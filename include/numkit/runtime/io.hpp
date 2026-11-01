@@ -1,6 +1,6 @@
 /// @file io.hpp
 /// @ingroup group_iofun
-// src/runtime/include/nk/runtime/io.hpp
+// src/runtime/include/numkit/runtime/io.hpp
 //
 // Language-runtime I/O functions coupled to the Engine execution context
 // (outputText sink, fid table, OpenFile).

@@ -1,4 +1,4 @@
-// src/bundle/include/nk/bundle/builtin_library.hpp
+// src/bundle/include/numkit/bundle/builtin_library.hpp
 //
 // Registration hub for the Standard Builtin Library on an Engine instance.
 #pragma once

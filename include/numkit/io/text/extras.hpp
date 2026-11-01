@@ -1,4 +1,4 @@
-// toolboxes/io/include/nk/io/text/extras.hpp
+// toolboxes/io/include/numkit/io/text/extras.hpp
 //
 // Modern text-file helpers.
 

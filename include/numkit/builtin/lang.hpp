@@ -1,4 +1,4 @@
-// src/builtin/include/nk/builtin/lang.hpp
+// src/builtin/include/numkit/builtin/lang.hpp
 //
 // Pure C++ Language keywords, variable name validation, environment, and evaluation.
 #pragma once

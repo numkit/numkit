@@ -1,4 +1,4 @@
-// src/core/include/nk/core/plugin_loader.hpp
+// src/core/include/numkit/core/plugin_loader.hpp
 //
 // PluginLoader: dynamic loading and resolution for NumKit modules (.dll / .so).
 #pragma once

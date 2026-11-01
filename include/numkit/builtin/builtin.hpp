@@ -1,4 +1,4 @@
-// src/builtin/include/nk/builtin/builtin.hpp
+// src/builtin/include/numkit/builtin/builtin.hpp
 //
 // Master umbrella header for NumKit Standard Builtin Library (numkit::builtin).
 // Pure, engine-free C++ mathematical, array manipulation, and data analysis APIs.

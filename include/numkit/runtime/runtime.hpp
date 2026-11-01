@@ -1,4 +1,4 @@
-// src/runtime/include/nk/runtime/runtime.hpp
+// src/runtime/include/numkit/runtime/runtime.hpp
 //
 // Language-runtime layer (L2, engine-coupled). Scripting runtime execution,
 // workspace commands, cells, structures, containers, diagnostics, I/O, and callbacks.

@@ -520,7 +520,7 @@ inline Dims broadcastDims(const Value &a, const Value &b, const char *fnName)
         return a.dims();
     if (na == nb)
         return a.dims();
-    throw std::runtime_error(std::string("nk:") + fnName
+    throw std::runtime_error(std::string("numkit:") + fnName
                              + ":DimMismatch: Arrays have incompatible sizes for this operation.");
 }
 
@@ -560,7 +560,7 @@ inline void mutateDatetimeComponent(Value &self, int comp, const Value &val)
     const size_t n = self.objectCount();
     const size_t nv = val.numel();
     if (nv != 1 && nv != n)
-        throw std::runtime_error("nk:datetime:SizeMismatch: Assigned value must be a scalar or match the datetime array size.");
+        throw std::runtime_error("numkit:datetime:SizeMismatch: Assigned value must be a scalar or match the datetime array size.");
     for (size_t i = 0; i < n; ++i) {
         auto *p = dtElemMut(self, i);
         if (!p)
@@ -608,7 +608,7 @@ inline Value constructDurationFromUnit(Span<const Value> args, double scaleSecon
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(std::string("nk:") + fnName
+        throw std::runtime_error(std::string("numkit:") + fnName
                                  + ":InvalidInput: Expected a numeric or duration input.");
     const size_t n = x.numel();
     std::vector<double> secs(n);
@@ -639,14 +639,14 @@ inline Value constructCalDurFromUnit(Span<const Value> args, int64_t monthMult, 
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(std::string("nk:") + fnName
+        throw std::runtime_error(std::string("numkit:") + fnName
                                  + ":InvalidInput: Expected a numeric integer array.");
     const size_t n = x.numel();
     std::vector<CalDurElemPayload> items(n);
     for (size_t i = 0; i < n; ++i) {
         double v = x.elemAsDouble(i);
         if (!std::isfinite(v) || std::floor(v) != v)
-            throw std::runtime_error(std::string("nk:") + fnName
+            throw std::runtime_error(std::string("numkit:") + fnName
                                      + ":MustBeInteger: Calendar duration quantities must be finite integers.");
         int64_t iv = static_cast<int64_t>(v);
         items[i] = CalDurElemPayload(iv * monthMult, iv * dayMult, 0.0);
@@ -1015,7 +1015,7 @@ void register_timefun(Engine &engine) {
                 }
                 return makeDurationArray(d, secs, fmt, mr);
             }
-            throw std::runtime_error("nk:duration:InvalidArgs: Expected duration(H, MI, S) or duration([H MI S]).");
+            throw std::runtime_error("numkit:duration:InvalidArgs: Expected duration(H, MI, S) or duration([H MI S]).");
         };
 
         dur.propGet = [](const Value &self, const std::string &name, Value &out,
@@ -1169,7 +1169,7 @@ void register_timefun(Engine &engine) {
                 }
                 if (!lhs.isObject() || lhs.objectClassName() != "duration"
                     || !rhs.isObject() || rhs.objectClassName() != "duration")
-                    throw std::runtime_error("nk:duration:TypeMismatch: Both operands must be durations.");
+                    throw std::runtime_error("numkit:duration:TypeMismatch: Both operands must be durations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const size_t n = d.numel();
                 std::vector<double> secs(n);
@@ -1340,7 +1340,7 @@ void register_timefun(Engine &engine) {
                 }
                 return makeCalDurArray(d, items, mr);
             }
-            throw std::runtime_error("nk:calendarDuration:InvalidArgs: Expected calendarDuration(Y, M, D) or calendarDuration(Y, M, D, H, MI, S).");
+            throw std::runtime_error("numkit:calendarDuration:InvalidArgs: Expected calendarDuration(Y, M, D) or calendarDuration(Y, M, D, H, MI, S).");
         };
 
         cal.methods["calyears"] = [](Value &self, Span<const Value>, size_t, Span<Value> outs,
@@ -1421,7 +1421,7 @@ void register_timefun(Engine &engine) {
                 }
                 if (!lhs.isObject() || lhs.objectClassName() != "calendarDuration"
                     || !rhs.isObject() || rhs.objectClassName() != "calendarDuration")
-                    throw std::runtime_error("nk:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
+                    throw std::runtime_error("numkit:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const size_t n = d.numel();
                 std::vector<CalDurElemPayload> items(n);
@@ -1559,7 +1559,7 @@ void register_timefun(Engine &engine) {
             // datetime(x, 'ConvertFrom', type)
             if (!convFrom.empty()) {
                 if (nPos != 1 || (!args[0].isNumeric() && !args[0].isLogical()))
-                    throw std::runtime_error("nk:datetime:InvalidConvertFrom: Expected a single numeric input with 'ConvertFrom'.");
+                    throw std::runtime_error("numkit:datetime:InvalidConvertFrom: Expected a single numeric input with 'ConvertFrom'.");
                 const Value &x = args[0];
                 const size_t n = x.numel();
                 std::vector<double> sds(n);
@@ -1584,7 +1584,7 @@ void register_timefun(Engine &engine) {
                         int64_t d = iv % 100;
                         sds[i] = composeSerialDay(static_cast<double>(y), static_cast<double>(m), static_cast<double>(d));
                     } else {
-                        throw std::runtime_error("nk:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '" + convFrom + "'.");
+                        throw std::runtime_error("numkit:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '" + convFrom + "'.");
                     }
                 }
                 return makeDatetimeArray(x.dims(), sds, fmt, tz, mr);
@@ -1651,7 +1651,7 @@ void register_timefun(Engine &engine) {
                             return makeDatetimeArray(args[0].dims(), sds, fmt, tz, mr);
                         }
                     }
-                    throw std::runtime_error("nk:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
+                    throw std::runtime_error("numkit:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
                 }
                 std::vector<double> sds(R);
                 for (size_t r = 0; r < R; ++r) {
@@ -1671,12 +1671,12 @@ void register_timefun(Engine &engine) {
                 Dims outDims(1, 1);
                 for (size_t k = 0; k < nPos; ++k) {
                     if (!args[k].isNumeric() && !args[k].isLogical())
-                        throw std::runtime_error("nk:datetime:NonNumericComponent: Date/time components must be numeric.");
+                        throw std::runtime_error("numkit:datetime:NonNumericComponent: Date/time components must be numeric.");
                     if (args[k].numel() != 1) {
                         if (outDims.numel() == 1)
                             outDims = args[k].dims();
                         else if (args[k].dims() != outDims && args[k].numel() != outDims.numel())
-                            throw std::runtime_error("nk:datetime:ComponentSizeMismatch: Date/time component arrays must be the same size or scalar.");
+                            throw std::runtime_error("numkit:datetime:ComponentSizeMismatch: Date/time component arrays must be the same size or scalar.");
                     }
                 }
                 const size_t n = outDims.numel();
@@ -1697,7 +1697,7 @@ void register_timefun(Engine &engine) {
                 return makeDatetimeArray(outDims, sds, fmt, tz, mr);
             }
 
-            throw std::runtime_error("nk:datetime:InvalidSyntax: Unsupported arguments to datetime constructor.");
+            throw std::runtime_error("numkit:datetime:InvalidSyntax: Unsupported arguments to datetime constructor.");
         };
 
         dt.propGet = [](const Value &self, const std::string &name, Value &out,
@@ -2015,7 +2015,7 @@ void register_timefun(Engine &engine) {
         dt.methods["between"] = [](Value &self, Span<const Value> args, size_t,
                                    Span<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
-                throw std::runtime_error("nk:between:InvalidInput: Expected two datetime inputs.");
+                throw std::runtime_error("numkit:between:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->resource();
             const Value &rhs = args[0];
             Dims d = broadcastDims(self, rhs, "between");
@@ -2039,7 +2039,7 @@ void register_timefun(Engine &engine) {
         dt.methods["dateshift"] = [](Value &self, Span<const Value> args, size_t,
                                      Span<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
-                throw std::runtime_error("nk:dateshift:NotEnoughInputs: Expected dateshift(t, 'start'|'end', unit).");
+                throw std::runtime_error("numkit:dateshift:NotEnoughInputs: Expected dateshift(t, 'start'|'end', unit).");
             auto *mr = ctx.engine->resource();
             std::string rule = args[0].toString();
             std::string unit = args[1].toString();
@@ -2253,7 +2253,7 @@ void register_timefun(Engine &engine) {
         dt.methods["intersect"] = [](Value &self, Span<const Value> args, size_t nargout,
                                      Span<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
-                throw std::runtime_error("nk:intersect:InvalidInput: Expected two datetime inputs.");
+                throw std::runtime_error("numkit:intersect:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->resource();
             const Value &other = args[0];
             bool stable = false;
@@ -2315,7 +2315,7 @@ void register_timefun(Engine &engine) {
         dt.methods["ismember"] = [](Value &self, Span<const Value> args, size_t nargout,
                                     Span<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
-                throw std::runtime_error("nk:ismember:InvalidInput: Expected two datetime inputs.");
+                throw std::runtime_error("numkit:ismember:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->resource();
             const Value &other = args[0];
             constexpr double kTol = 1e-9 / kSecondsPerDay;
@@ -2375,7 +2375,7 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd + dy;
                 }
             } else {
-                throw std::runtime_error("nk:datetime:InvalidPlusOperand: Cannot add value of type '"
+                throw std::runtime_error("numkit:datetime:InvalidPlusOperand: Cannot add value of type '"
                                          + std::string(mtypeName(other.type())) + "' to a datetime.");
             }
             outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
@@ -2387,7 +2387,7 @@ void register_timefun(Engine &engine) {
             const Value &lhs = args[0];
             const Value &rhs = args[1];
             if (!lhs.isObject() || lhs.objectClassName() != "datetime")
-                throw std::runtime_error("nk:datetime:InvalidMinus: Cannot subtract a datetime from a non-datetime.");
+                throw std::runtime_error("numkit:datetime:InvalidMinus: Cannot subtract a datetime from a non-datetime.");
 
             // datetime - datetime -> duration
             if (rhs.isObject() && rhs.objectClassName() == "datetime") {
@@ -2427,7 +2427,7 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd - dy;
                 }
             } else {
-                throw std::runtime_error("nk:datetime:InvalidMinusOperand: Cannot subtract value of type '"
+                throw std::runtime_error("numkit:datetime:InvalidMinusOperand: Cannot subtract value of type '"
                                          + std::string(mtypeName(rhs.type())) + "' from a datetime.");
             }
             outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
@@ -2492,7 +2492,7 @@ void register_timefun(Engine &engine) {
             const Value &stopVal = (args.size() == 3) ? args[2] : args[1];
             if (!startVal.isObject() || startVal.objectClassName() != "datetime"
                 || !stopVal.isObject() || stopVal.objectClassName() != "datetime")
-                throw std::runtime_error("nk:datetime:InvalidColonEndpoints: Colon endpoints must be datetimes.");
+                throw std::runtime_error("numkit:datetime:InvalidColonEndpoints: Colon endpoints must be datetimes.");
             double startSd = dtElem(startVal, 0)->serialDay;
             double stopSd = dtElem(stopVal, 0)->serialDay;
             const auto *p0 = dtElem(startVal, 0);
@@ -2506,7 +2506,7 @@ void register_timefun(Engine &engine) {
                                     + static_cast<double>(cp->days)
                                     + cp->seconds / kSecondsPerDay;
                 if (approxStep == 0.0)
-                    throw std::runtime_error("nk:datetime:ZeroColonStep: Colon step cannot be zero.");
+                    throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (int64_t k = 0; k < 100000; ++k) {
                     double cur = addCalendarMonths(startSd, cp->months * k, cp->days * k, cp->seconds * static_cast<double>(k));
                     if ((approxStep > 0.0 && cur > stopSd + kTol)
@@ -2522,10 +2522,10 @@ void register_timefun(Engine &engine) {
                     else if (args[1].isNumeric())
                         stepDays = args[1].toScalar();
                     else
-                        throw std::runtime_error("nk:datetime:InvalidColonStep: Unsupported colon step type.");
+                        throw std::runtime_error("numkit:datetime:InvalidColonStep: Unsupported colon step type.");
                 }
                 if (stepDays == 0.0)
-                    throw std::runtime_error("nk:datetime:ZeroColonStep: Colon step cannot be zero.");
+                    throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (int64_t k = 0; k < 100000; ++k) {
                     double cur = startSd + static_cast<double>(k) * stepDays;
                     if ((stepDays > 0.0 && cur > stopSd + kTol)

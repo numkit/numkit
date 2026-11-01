@@ -1,4 +1,4 @@
-// core/include/nk/core/fusion_rule.hpp
+// core/include/numkit/core/fusion_rule.hpp
 //
 // Element-wise fusion rule registry — the GENERIC, domain-free half of VM
 // element-wise fusion. The engine owns a list of FusionRule; the standard

@@ -1,6 +1,6 @@
 /// @file library.hpp
 /// @ingroup group_ode
-// toolboxes/ode/include/nk/ode/library.hpp
+// toolboxes/ode/include/numkit/ode/library.hpp
 //
 // Ordinary Differential Equations Toolbox. Mirrors MATLAB's `ode*` and
 // `odeset` / `odeget` API surface for initial-value problems.

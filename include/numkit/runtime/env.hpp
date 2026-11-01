@@ -1,4 +1,4 @@
-// src/runtime/include/nk/runtime/language/commands/env.hpp
+// src/runtime/include/numkit/runtime/language/commands/env.hpp
 #pragma once
 
 #include <memory_resource>

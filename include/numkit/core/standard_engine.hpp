@@ -1,4 +1,4 @@
-// bundle/include/nk/bundle/standard_engine.hpp
+// bundle/include/numkit/bundle/standard_engine.hpp
 //
 // StandardEngine — an Engine with the standard library already installed, as a
 // stack-constructible convenience:

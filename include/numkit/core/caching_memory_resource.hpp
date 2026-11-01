@@ -1,4 +1,4 @@
-// core/include/nk/core/caching_memory_resource.hpp
+// core/include/numkit/core/caching_memory_resource.hpp
 //
 // A memory_resource that recycles freed *large* blocks instead of returning
 // them to the OS. Blocks of an identical (size, alignment) are pooled on a

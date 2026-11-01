@@ -1,6 +1,6 @@
 /// @file diagnostics.hpp
 /// @ingroup group_lang
-// toolboxes/builtin/include/nk/builtin/programming/errors/diagnostics.hpp
+// toolboxes/builtin/include/numkit/builtin/programming/errors/diagnostics.hpp
 #pragma once
 
 #include <memory_resource>

@@ -1,6 +1,6 @@
 /// @file struct.hpp
 /// @ingroup group_datatypes
-// toolboxes/builtin/include/nk/builtin/language/structures/struct.hpp
+// toolboxes/builtin/include/numkit/builtin/language/structures/struct.hpp
 #pragma once
 
 #include <memory_resource>
