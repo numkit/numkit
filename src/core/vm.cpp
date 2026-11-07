@@ -1496,7 +1496,11 @@ enter_frame:
                 // Builtin object-array indexed store: arr(i) = obj. Fires
                 // when RHS is an object and the target is empty/unset (→ a
                 // fresh object array) or an object array of the same class.
-                if (R[I.c].isObject()) {
+                const bool canPromote1D = R[I.a].isObject() && !R[I.c].isObject()
+                                          && (R[I.c].isNumeric() || R[I.c].isLogical())
+                                          && R[I.a].objectStateConst() && R[I.a].objectStateConst()->native
+                                          && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
+                if (R[I.c].isObject() || canPromote1D) {
                     Value &dst = R[I.a];
                     auto isGfxCls = [](const std::string &c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
@@ -1506,10 +1510,10 @@ enter_frame:
                     }
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    const bool sameArr =
-                        dst.isObject()
-                        && (dst.objectClassName() == R[I.c].objectClassName()
-                            || (isGfxCls(dst.objectClassName()) && isGfxCls(R[I.c].objectClassName())));
+                    const bool sameArr = canPromote1D ||
+                        (dst.isObject()
+                         && (dst.objectClassName() == R[I.c].objectClassName()
+                             || (isGfxCls(dst.objectClassName()) && isGfxCls(R[I.c].objectClassName()))));
                     if (newable || sameArr) {
                         // Linear slice: scalar / range / vector / logical / `:`.
                         std::vector<size_t> pos =
@@ -1639,7 +1643,11 @@ enter_frame:
 
                 // OBJECT: arr(i,j) = obj — builtin 2-D element store + grow,
                 // when the target is empty/unset or a same-class object array.
-                if (val.isObject()) {
+                const bool canPromote2D = R[I.a].isObject() && !val.isObject()
+                                          && (val.isNumeric() || val.isLogical())
+                                          && R[I.a].objectStateConst() && R[I.a].objectStateConst()->native
+                                          && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
+                if (val.isObject() || canPromote2D) {
                     Value &dst = R[I.a];
                     auto isGfxCls = [](const std::string &c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
@@ -1649,10 +1657,10 @@ enter_frame:
                     }
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    const bool sameArr =
-                        dst.isObject()
-                        && (dst.objectClassName() == val.objectClassName()
-                            || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
+                    const bool sameArr = canPromote2D ||
+                        (dst.isObject()
+                         && (dst.objectClassName() == val.objectClassName()
+                             || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName()))));
                     if (newable || sameArr) {
                         const size_t rDim = (dst.isObject() && dst.objectCount() > 0)
                                                 ? dst.dims().rows() : val.dims().rows();
@@ -4008,8 +4016,8 @@ void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
 {
     if (n < 0) n = 0;
     int target = static_cast<int>(frames_.size()) - 1 - n;
-    if (target < 1)
-        return;  // top-level / out-of-range — env-side write done by Engine
+    if (target < 0)
+        return;  // out-of-range — env-side write done by Engine
     auto &frame = frames_[target];
     // varMap is vector<pair<name, regIdx>> (small), linear scan.
     for (const auto &entry : frame.chunk->varMap) {

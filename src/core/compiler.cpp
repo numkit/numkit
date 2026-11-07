@@ -285,6 +285,28 @@ void Compiler::collectAssignedNames(const ASTNode *node, std::vector<std::string
     }
     if (node->type == NodeType::FOR_STMT && !node->strValue.empty())
         out.push_back(node->strValue);
+    if (node->type == NodeType::COMMAND_CALL && node->strValue == "syms") {
+        static const std::unordered_set<std::string> kSymsFlags = {
+            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        };
+        for (const auto &ch : node->children) {
+            if (!ch->strValue.empty() && !kSymsFlags.count(ch->strValue))
+                out.push_back(ch->strValue);
+        }
+    }
+    if (node->type == NodeType::CALL && !node->children.empty()
+        && node->children[0]->type == NodeType::IDENTIFIER
+        && node->children[0]->strValue == "syms") {
+        static const std::unordered_set<std::string> kSymsFlags = {
+            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        };
+        for (size_t i = 1; i < node->children.size(); ++i) {
+            const auto *ch = node->children[i].get();
+            if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty()
+                && !kSymsFlags.count(ch->strValue))
+                out.push_back(ch->strValue);
+        }
+    }
 
     for (auto &child : node->children)
         collectAssignedNames(child.get(), out);
@@ -3540,6 +3562,23 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     const std::string &name = funcNode->strValue;
     size_t nargs = node->children.size() - 1;
 
+    if (name == "syms") {
+        static const std::unordered_set<std::string> kSymsFlags = {
+            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        };
+        for (size_t i = 1; i <= nargs; ++i) {
+            auto *argNode = node->children[i].get();
+            if (argNode->type == NodeType::STRING_LITERAL) {
+                const std::string &tok = argNode->strValue;
+                if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
+                    uint8_t reg = varRegWrite(tok);
+                    if (!mayClear_)
+                        definedRegs_.set(reg);
+                }
+            }
+        }
+    }
+
     // ── Workspace introspection builtins → opcodes inside functions ──
     if (!isTopLevel_) {
         // exist(expr) or exist(expr, filter) → EXIST_VAR dst, nameReg, filterReg
@@ -3926,6 +3965,20 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
     }
 
     // ── Generic command call ──
+    if (name == "syms") {
+        static const std::unordered_set<std::string> kSymsFlags = {
+            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        };
+        for (size_t i = 0; i < nargs; ++i) {
+            const std::string &tok = node->children[i]->strValue;
+            if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
+                uint8_t reg = varRegWrite(tok);
+                if (!mayClear_)
+                    definedRegs_.set(reg);
+            }
+        }
+    }
+
     // Compile arguments: each child is a STRING_LITERAL
     uint8_t argBase = nextReg_;
     for (size_t i = 0; i < nargs; ++i) {

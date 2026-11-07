@@ -1267,7 +1267,11 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     // fresh object array) or an existing object array of the same class.
     // Grows (any rank) with default-constructed gap fill. v1: each
     // subscript selects a single element.
-    if (rhs.isObject()) {
+    const bool canPromoteRhs = var->isObject() && !rhs.isObject()
+                               && (rhs.isNumeric() || rhs.isLogical())
+                               && var->objectStateConst() && var->objectStateConst()->native
+                               && var->objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
+    if (rhs.isObject() || canPromoteRhs) {
         auto isGfxCls = [](const std::string &c) {
             return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
         };
@@ -1275,9 +1279,9 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             *var = Value();
         }
         const bool newable = !var->isObject() && (var->isUnset() || var->isEmpty());
-        const bool sameArr =
-            var->isObject() && (var->objectClassName() == rhs.objectClassName()
-                                || (isGfxCls(var->objectClassName()) && isGfxCls(rhs.objectClassName())));
+        const bool sameArr = canPromoteRhs ||
+            (var->isObject() && (var->objectClassName() == rhs.objectClassName()
+                                 || (isGfxCls(var->objectClassName()) && isGfxCls(rhs.objectClassName()))));
         if (newable || sameArr) {
             std::vector<std::vector<size_t>> perDim(nargs);
             for (size_t d = 0; d < nargs; ++d) {

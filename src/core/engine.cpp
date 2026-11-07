@@ -539,16 +539,26 @@ bool Engine::tryObjectSubsref(Value &self, Span<const Value> args, std::size_t n
 void Engine::objectStoreSlice(Value &dst, const std::vector<std::vector<size_t>> &perDim,
                               const Value &val, Environment *env)
 {
-    const BuiltinClass *cls = findClass(val.objectClassName());
+    const std::string &clsName = dst.isObject() ? dst.objectClassName() : val.objectClassName();
+    const BuiltinClass *cls = findClass(clsName);
+    Value coercedVal = val;
+    if (dst.isObject() && !val.isObject() && cls && cls->construct) {
+        const ObjectState *st = dst.objectStateConst();
+        if (st && st->native && st->native->fromScalarDouble(0.0) != nullptr) {
+            CallContext ctx{this, env};
+            Value argBuf[1] = {val};
+            coercedVal = cls->construct(Span<const Value>(argBuf, 1), ctx);
+        }
+    }
     Value fill; // default element for grown gaps (class no-arg constructor)
     if (cls && cls->construct) {
         CallContext ctx{this, env};
         fill = cls->construct(Span<const Value>(nullptr, 0), ctx);
     }
     if (perDim.size() == 1)
-        dst.objectAssignLinear(perDim[0], val, fill, resource());
+        dst.objectAssignLinear(perDim[0], coercedVal, fill, resource());
     else
-        dst.objectAssignND(perDim, val, fill, resource());
+        dst.objectAssignND(perDim, coercedVal, fill, resource());
 }
 
 // ── classdef → BuiltinClass adapter ──────────────────────────

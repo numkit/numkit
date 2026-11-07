@@ -169,6 +169,63 @@ public:
         return engine_.findExternal(name, env);
     }
 
+    ObjectMethod wrapMethod(ObjectMethod m) {
+        if (!m) return {};
+        auto self = shared_from_this();
+        return [self, fn = std::move(m)](Value &obj, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+            CallContext pluginCtx = ctx;
+            pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
+            fn(obj, args, nargout, outs, pluginCtx);
+        };
+    }
+
+    void registerClass(BuiltinClass cls) override {
+        auto self = shared_from_this();
+        if (cls.construct) {
+            auto origCtor = std::move(cls.construct);
+            cls.construct = [self, fn = std::move(origCtor)](Span<const Value> args, CallContext &ctx) -> Value {
+                CallContext pluginCtx = ctx;
+                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
+                return fn(args, pluginCtx);
+            };
+        }
+        if (cls.propGet) {
+            auto origGet = std::move(cls.propGet);
+            cls.propGet = [self, fn = std::move(origGet)](const Value &obj, const std::string &name, Value &out, CallContext &ctx) -> bool {
+                CallContext pluginCtx = ctx;
+                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
+                return fn(obj, name, out, pluginCtx);
+            };
+        }
+        if (cls.propSet) {
+            auto origSet = std::move(cls.propSet);
+            cls.propSet = [self, fn = std::move(origSet)](Value &obj, const std::string &name, const Value &val, CallContext &ctx) -> bool {
+                CallContext pluginCtx = ctx;
+                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
+                return fn(obj, name, val, pluginCtx);
+            };
+        }
+        cls.subsref = wrapMethod(std::move(cls.subsref));
+        cls.subsasgn = wrapMethod(std::move(cls.subsasgn));
+        for (auto &kv : cls.methods) {
+            kv.second = wrapMethod(std::move(kv.second));
+        }
+        for (auto &kv : cls.ops) {
+            kv.second = wrapMethod(std::move(kv.second));
+        }
+        try {
+            engine_.registerClass(std::move(cls));
+        } catch (const std::exception &) {}
+    }
+
+    const BuiltinClass *findClass(const std::string &name) const override {
+        return engine_.findClass(name);
+    }
+
+    void assignToCaller(int n, const std::string &name, Value val) override {
+        engine_.assignToCaller(n, name, std::move(val));
+    }
+
 private:
     Engine &engine_;
     std::string prefixNs_;
