@@ -102,6 +102,9 @@ struct ResolvedSubscript {
 // view is valid until the SplatArgs (and the R registers it may point
 // into) go out of scope; pushCallFrame copies its args, so a
 // subsequent `goto enter_frame` out of the case block is safe.
+class SplatArgs;
+static SplatArgs splatCallArgs(const Value *, uint8_t, uint8_t);
+
 class SplatArgs
 {
 public:
