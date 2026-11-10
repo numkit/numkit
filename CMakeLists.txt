@@ -111,6 +111,33 @@ if(NUMKIT_WITH_SIMD)
     target_link_libraries(numkit PRIVATE hwy hwy_contrib)
 endif()
 
+# ── Shared C-ABI Library: numkit_c ───────────────────────────────────────
+add_library(numkit_c SHARED
+    src/c_api/c_api.cpp
+)
+add_library(numkit::c ALIAS numkit_c)
+target_compile_definitions(numkit_c PRIVATE NUMKIT_C_BUILD=1)
+target_include_directories(numkit_c
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(numkit_c
+    PUBLIC  numkit_value_c
+    PRIVATE numkit ${CMAKE_DL_LIBS}
+)
+if(APPLE)
+    set_target_properties(numkit_c PROPERTIES
+        BUILD_RPATH "@loader_path;@loader_path/.."
+        INSTALL_RPATH "@loader_path"
+    )
+elseif(UNIX)
+    set_target_properties(numkit_c PROPERTIES
+        BUILD_RPATH "$ORIGIN;$ORIGIN/.."
+        INSTALL_RPATH "$ORIGIN"
+    )
+endif()
+
 # ── Executable: numkit CLI / REPL ────────────────────────────────────────
 if(NUMKIT_BUILD_CLI)
     add_executable(numkit_cli apps/numkit/main.cpp)
@@ -125,14 +152,16 @@ endif()
 if(NUMKIT_BUILD_TESTS)
     enable_testing()
 
-    FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.14.0
-    )
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
+    if(NOT TARGET GTest::gtest)
+        FetchContent_Declare(
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG v1.14.0
+        )
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    endif()
 
     set(NUMKIT_TEST_SOURCES
         tests/gtest/main.cpp
@@ -159,4 +188,13 @@ if(NUMKIT_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(numkit_gtest)
+
+    add_executable(numkit_engine_c_test
+        tests/c_api/engine_c_api.cpp
+    )
+    target_link_libraries(numkit_engine_c_test PRIVATE
+        numkit_c
+        GTest::gtest_main
+    )
+    add_test(NAME numkit_engine_c_test COMMAND numkit_engine_c_test)
 endif()
