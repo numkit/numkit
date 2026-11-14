@@ -339,12 +339,15 @@ bool Parser::isCommandStyleCall() const
     // `N/2`) by requiring whitespace between the command head and the
     // operator AND the operand being glued to the operator.
     if (next.type == TokenType::MINUS || next.type == TokenType::SLASH) {
-        const int headEnd = current().col + static_cast<int>(current().value.size());
+        const int headEnd = current().endCol > 0 ? current().endCol
+                                                 : current().col + static_cast<int>(current().value.size());
         const Token &operand = peekToken(2);
+        const int nextEnd = next.endCol > 0 ? next.endCol
+                                            : next.col + static_cast<int>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
-            && operand.col == next.col + static_cast<int>(next.value.size())
+            && operand.col == nextEnd
             && (operand.type == TokenType::IDENTIFIER
                 || operand.type == TokenType::NUMBER
                 || operand.type == TokenType::STRING
@@ -354,12 +357,15 @@ bool Parser::isCommandStyleCall() const
     // Relative path in command form: e.g. `load ../sampleEEGdata` or `load ./foo`
     if (next.type == TokenType::DOT || next.type == TokenType::DOT_SLASH
         || next.type == TokenType::DOT_BACKSLASH) {
-        const int headEnd = current().col + static_cast<int>(current().value.size());
+        const int headEnd = current().endCol > 0 ? current().endCol
+                                                 : current().col + static_cast<int>(current().value.size());
         const Token &operand = peekToken(2);
+        const int nextEnd = next.endCol > 0 ? next.endCol
+                                            : next.col + static_cast<int>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
-            && operand.col == next.col + static_cast<int>(next.value.size())
+            && operand.col == nextEnd
             && (operand.type == TokenType::DOT
                 || operand.type == TokenType::DOT_SLASH
                 || operand.type == TokenType::DOT_BACKSLASH
@@ -461,6 +467,8 @@ ASTNodePtr Parser::parseCommandStyleCall()
     int prevEnd = -1; // col just past the source text of the previous token
 
     auto tokenEndCol = [](const Token &t) {
+        if (t.endCol > 0)
+            return t.endCol - 1;
         // Quoted strings store the UNQUOTED value but span the quotes in
         // the source (opening quote at t.col, closing after the value).
         if (t.type == TokenType::STRING || t.type == TokenType::DQSTRING)
@@ -1296,7 +1304,7 @@ ASTNodePtr Parser::parseUnary()
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
         n->strValue = "-";
-        n->children.push_back(parsePower());
+        n->children.push_back(parseUnary());
         return n;
     }
     if (check(TokenType::TILDE)) {
@@ -1304,7 +1312,7 @@ ASTNodePtr Parser::parseUnary()
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
         n->strValue = "~";
-        n->children.push_back(parsePower());
+        n->children.push_back(parseUnary());
         return n;
     }
     if (check(TokenType::PLUS)) {
@@ -1312,7 +1320,7 @@ ASTNodePtr Parser::parseUnary()
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
         n->strValue = "+";
-        n->children.push_back(parsePower());
+        n->children.push_back(parseUnary());
         return n;
     }
     return parsePower();

@@ -46,25 +46,24 @@ void registerWorkspaceRuntime(Engine &engine)
     engine.registerFunction("clear",
                             [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
+                                ctx.engine->syncFrameToEnv(env);
                                 bool insideFunc = ctx.engine->isInsideFunctionCall();
 
                                 if (args.empty()) {
-                                    // MATLAB: bare 'clear' clears workspace variables only,
+                                    // Bare 'clear' clears workspace variables only,
                                     // NOT user functions or figures.
                                     env->clearAll();
                                     if (!insideFunc) {
                                         ctx.engine->reinstallConstants();
                                         ctx.engine->markClearAll();
                                     }
+                                    ctx.engine->syncEnvRemovalsToFrame(env);
                                 } else {
-                                    std::string first = args[0].isChar() ? args[0].toString() : "";
+                                    std::string first = (args[0].isChar() || args[0].isString())
+                                                            ? args[0].toString()
+                                                            : "";
 
                                     if (first == "-regexp") {
-                                        // clear -regexp pat1 pat2 ... — drop every workspace
-                                        // variable whose name matches at least one pattern.
-                                        // MATLAB uses regexp-style partial match (so `^foo`
-                                        // matches "foo1"), not whole-string regex_match.
-                                        // std::regex is slow but the workspace is tiny.
                                         std::vector<std::regex> pats;
                                         for (size_t i = 1; i < args.size(); ++i) {
                                             if (!args[i].isChar() && !args[i].isString()) continue;
@@ -75,14 +74,12 @@ void registerWorkspaceRuntime(Engine &engine)
                                                     + args[i].toString() + "'");
                                             }
                                         }
-                                        // Inside a function `env` is the local frame; the
-                                        // user's intent for `clear -regexp` is the SAME
-                                        // workspace they'd see via plain `clear x`. Apply
-                                        // to both env and (when distinct) the engine's base
-                                        // workspace so VM-mode top-level evals work too.
                                         auto applyTo = [&](Environment *e) {
                                             if (!e) return;
-                                            for (const auto &n : e->localNames()) {
+                                            std::vector<std::string> candidates = e->localNames();
+                                            for (const auto &g : e->globalNames()) candidates.push_back(g);
+                                            for (const auto &p : e->persistentNames()) candidates.push_back(p);
+                                            for (const auto &n : candidates) {
                                                 for (const auto &re : pats) {
                                                     if (std::regex_search(n, re)) {
                                                         e->remove(n);
@@ -92,23 +89,25 @@ void registerWorkspaceRuntime(Engine &engine)
                                             }
                                         };
                                         applyTo(env);
-                                        if (env != &ctx.engine->workspaceEnv())
+                                        ctx.engine->syncEnvRemovalsToFrame(env);
+                                        if (!insideFunc && env != &ctx.engine->workspaceEnv()) {
                                             applyTo(&ctx.engine->workspaceEnv());
+                                            ctx.engine->syncEnvRemovalsToFrame(&ctx.engine->workspaceEnv());
+                                        }
                                         outs[0] = Value();
                                         return;
                                     }
                                     if (first == "global") {
                                         auto *gs = ctx.env->globalsEnv();
                                         if (args.size() == 1) {
-                                            // clear global — clear all globals
                                             if (gs)
                                                 gs->clearAll();
                                             env->clearAll();
-                                            ctx.engine->markClearAll();
+                                            if (!insideFunc)
+                                                ctx.engine->markClearAll();
                                         } else {
-                                            // clear global x y — clear specific globals
                                             for (size_t i = 1; i < args.size(); ++i) {
-                                                if (args[i].isChar()) {
+                                                if (args[i].isChar() || args[i].isString()) {
                                                     std::string gname = args[i].toString();
                                                     if (gs)
                                                         gs->remove(gname);
@@ -116,13 +115,11 @@ void registerWorkspaceRuntime(Engine &engine)
                                                 }
                                             }
                                         }
+                                        ctx.engine->syncEnvRemovalsToFrame(env);
                                         outs[0] = Value();
                                         return;
                                     }
                                     if (first == "import") {
-                                        // Drop every active import in the current scope.
-                                        // Subsequent unqualified lookups fall back to core +
-                                        // parent-scope imports (if any).
                                         env->clearImports();
                                         outs[0] = Value();
                                         return;
@@ -134,39 +131,38 @@ void registerWorkspaceRuntime(Engine &engine)
                                             ctx.engine->reinstallConstants();
                                             ctx.engine->markClearAll();
                                         }
+                                        ctx.engine->syncEnvRemovalsToFrame(env);
                                     } else if (first == "all" || first == "classes") {
                                         if (insideFunc) {
                                             env->clearAll();
-                                            } else {
+                                            ctx.engine->syncEnvRemovalsToFrame(env);
+                                        } else {
                                             env->clearAll();
+                                            ctx.engine->clearAllPersistent();
                                             ctx.engine->clearUserFunctions();
                                             ctx.engine->clearClassDefs();
-                                            // MATLAB reloads cleared functions and
-                                            // classes from disk on the next call;
-                                            // the engine-startup registrations have
-                                            // no disk backing, so re-register them
-                                            // (reinstallConstants is the same idea
-                                            // for constants).
                                             ctx.engine->reinstallBuiltinSources();
                                             ctx.engine->figureManager().closeAll();
                                             ctx.engine->reinstallConstants();
                                             ctx.engine->markClearAll();
+                                            ctx.engine->syncEnvRemovalsToFrame(env);
                                         }
                                     } else if (first == "functions") {
                                         if (!insideFunc) {
+                                            ctx.engine->clearAllPersistent();
                                             ctx.engine->clearUserFunctions();
                                             ctx.engine->reinstallBuiltinSources();
                                         }
                                     } else {
-                                        // `clear x`, `clear pi`, etc.
-                                        // Un-shadow a built-in by removing the
-                                        // workspace slot — the next read then
-                                        // falls back to constantsEnv_. No
-                                        // special filtering: MATLAB allows it.
                                         for (auto &a : args) {
-                                            if (a.isChar())
-                                                env->remove(a.toString());
+                                            if (a.isChar() || a.isString()) {
+                                                std::string vname = a.toString();
+                                                env->remove(vname);
+                                                if (!insideFunc)
+                                                    ctx.engine->clearPersistentForFunc(vname);
+                                            }
                                         }
+                                        ctx.engine->syncEnvRemovalsToFrame(env);
                                     }
                                 }
                                 outs[0] = Value();
@@ -262,7 +258,7 @@ void registerWorkspaceRuntime(Engine &engine)
             if (name.empty())
                 throw std::runtime_error("assignin: name must be non-empty");
             if (where == "base") {
-                ctx.engine->workspaceEnv().set(name, args[2]);
+                ctx.engine->assignInBase(name, args[2]);
             } else if (where == "caller") {
                 // 'caller' is invalid when assignin is called directly
                 // from the base workspace — there's no enclosing
@@ -304,11 +300,8 @@ void registerWorkspaceRuntime(Engine &engine)
     engine.registerFunction("who",
                             [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
+                                ctx.engine->syncFrameToEnv(env);
 
-                                // -file <fname>: in our ASCII save format the file
-                                // contains a single matrix; load() would assign it to
-                                // a workspace variable named after the file stem.
-                                // Mirror that contract here.
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("who -file requires a filename");
@@ -328,36 +321,34 @@ void registerWorkspaceRuntime(Engine &engine)
                                     return;
                                 }
 
-                                ScratchArena scratch(ctx.engine->resource());
-                                ScratchVec<std::string> names(&scratch);
-                                // Pseudo-vars set by callUserFunction (nargin /
-                                // nargout) shouldn't appear in `who` output —
-                                // matches MATLAB.
+                                std::set<std::string> uniqNames;
                                 auto isPseudo = [](const std::string &n) {
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
-                                    // localNames() excludes parent-env constants
-                                    // (pi, eps, …) — they show up here only if
-                                    // shadowed in the workspace, as in MATLAB.
-                                    auto src = env->localNames();
-                                    for (auto &n : src)
-                                        if (!isPseudo(n)) names.push_back(n);
-                                    // Globals declared in this workspace live in
-                                    // globalsEnv_, not local storage — MATLAB
-                                    // lists them too. Disjoint from localNames.
+                                    for (auto &n : env->localNames())
+                                        if (!isPseudo(n)) uniqNames.insert(n);
                                     for (const auto &g : env->globalNames())
-                                        if (!isPseudo(g) && env->get(g)) names.push_back(g);
+                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g);
+                                    for (const auto &p : env->persistentNames())
+                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p);
                                 } else {
                                     for (auto &a : args) {
-                                        if (a.isChar()) {
+                                        if (a.isChar() || a.isString()) {
                                             std::string varName = a.toString();
-                                            if (env->getLocal(varName) && !isPseudo(varName))
-                                                names.push_back(varName);
+                                            if (!isPseudo(varName)
+                                                && (env->getLocal(varName)
+                                                    || (env->isGlobal(varName) && env->get(varName))
+                                                    || (env->isPersistent(varName) && env->get(varName)))) {
+                                                uniqNames.insert(varName);
+                                            }
                                         }
                                     }
                                 }
-                                std::sort(names.begin(), names.end());
+                                ScratchArena scratch(ctx.engine->resource());
+                                ScratchVec<std::string> names(&scratch);
+                                for (const auto &n : uniqNames)
+                                    names.push_back(n);
 
                                 if (nargout > 0) {
                                     auto *mr = ctx.engine->resource();
@@ -383,10 +374,8 @@ void registerWorkspaceRuntime(Engine &engine)
     engine.registerFunction("whos",
                             [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
+                                ctx.engine->syncFrameToEnv(env);
 
-                                // -file <fname>: ASCII save format holds a single matrix
-                                // assigned to the file's stem. Surface that as a one-row
-                                // listing with a usable bytes/size estimate from stat().
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("whos -file requires a filename");
@@ -410,30 +399,34 @@ void registerWorkspaceRuntime(Engine &engine)
                                     return;
                                 }
 
-                                ScratchArena scratch(ctx.engine->resource());
-                                ScratchVec<std::string> names(&scratch);
+                                std::set<std::string> uniqNames;
                                 auto isPseudo = [](const std::string &n) {
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
-                                    auto src = env->localNames();
-                                    for (auto &n : src)
-                                        if (!isPseudo(n)) names.push_back(n);
-                                    // Globals declared in this workspace (value
-                                    // in globalsEnv_, not local storage) — list
-                                    // them too, matching MATLAB.
+                                    for (auto &n : env->localNames())
+                                        if (!isPseudo(n)) uniqNames.insert(n);
                                     for (const auto &g : env->globalNames())
-                                        if (!isPseudo(g) && env->get(g)) names.push_back(g);
+                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g);
+                                    for (const auto &p : env->persistentNames())
+                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p);
                                 } else {
                                     for (auto &a : args) {
-                                        if (a.isChar()) {
+                                        if (a.isChar() || a.isString()) {
                                             std::string varName = a.toString();
-                                            if (env->getLocal(varName) && !isPseudo(varName))
-                                                names.push_back(varName);
+                                            if (!isPseudo(varName)
+                                                && (env->getLocal(varName)
+                                                    || (env->isGlobal(varName) && env->get(varName))
+                                                    || (env->isPersistent(varName) && env->get(varName)))) {
+                                                uniqNames.insert(varName);
+                                            }
                                         }
                                     }
                                 }
-                                std::sort(names.begin(), names.end());
+                                ScratchArena scratch(ctx.engine->resource());
+                                ScratchVec<std::string> names(&scratch);
+                                for (const auto &n : uniqNames)
+                                    names.push_back(n);
 
                                 if (nargout > 0) {
                                     auto *mr = ctx.engine->resource();
@@ -464,7 +457,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         sa.setField(idx, "sparse", Value::logicalScalar(false, mr));
                                         sa.setField(idx, "complex", Value::logicalScalar(val->isComplex() || val->isSingleComplex(), mr));
                                         sa.setField(idx, "nesting", std::move(nest));
-                                        sa.setField(idx, "persistent", Value::logicalScalar(false, mr));
+                                        sa.setField(idx, "persistent", Value::logicalScalar(env->isPersistent(n), mr));
                                     }
                                     outs[0] = std::move(sa);
                                     return;
@@ -489,6 +482,8 @@ void registerWorkspaceRuntime(Engine &engine)
                                         std::string attrStr;
                                         if (env->isGlobal(n))
                                             attrStr = "global";
+                                        else if (env->isPersistent(n))
+                                            attrStr = "persistent";
 
                                         os << "  " << n;
                                         for (size_t i = n.size(); i < 10; ++i)
@@ -516,19 +511,17 @@ void registerWorkspaceRuntime(Engine &engine)
                                     throw std::runtime_error("exist requires a name argument");
                                 std::string varName = args[0].toString();
                                 auto *env = ctx.env;
+                                ctx.engine->syncFrameToEnv(env);
 
-                                // Optional second argument: type filter
                                 std::string typeFilter;
-                                if (args.size() >= 2 && args[1].isChar())
+                                if (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
                                     typeFilter = args[1].toString();
 
                                 if (typeFilter == "class") {
-                                    // No user-defined classdef yet (no class system in
-                                    // numkit::Engine). Returning 0 matches MATLAB's
-                                    // behaviour for unknown class names — scripts that
-                                    // probe for a class get a benign "no" rather than
-                                    // a fatal "unsupported".
-                                    outs[0] = Value::scalar(0.0, ctx.engine->resource());
+                                    if (!ctx.engine->findClass(varName))
+                                        (void)ctx.engine->lookupUserFunction(varName, env);
+                                    double c = ctx.engine->findClass(varName) ? 8.0 : 0.0;
+                                    outs[0] = Value::scalar(c, ctx.engine->resource());
                                     return;
                                 }
 
@@ -548,16 +541,18 @@ void registerWorkspaceRuntime(Engine &engine)
                                 };
 
                                 double code = 0;
-                                // Check local scope only for variables (don't leak to parent)
                                 bool isVar = (env->getLocal(varName) != nullptr);
                                 if (!isVar && env->isGlobal(varName)) {
                                     auto *gs = env->globalsEnv();
                                     isVar = (gs && gs->get(varName) != nullptr);
                                 }
+                                if (!isVar && env->isPersistent(varName)) {
+                                    isVar = (env->get(varName) != nullptr);
+                                }
+                                bool isCls = (ctx.engine->findClass(varName) != nullptr);
                                 bool isFunc = ctx.engine->hasFunction(varName);
                                 bool isToolboxFunc = !isFunc && (ctx.engine->findExternal(varName, env) != nullptr);
 
-                                // Walk path list to check for `<name>.m` (m-file resolver)
                                 auto findMFile = [&]() -> bool {
                                     for (const auto &dir : ctx.engine->path()) {
                                         std::string p = dir;
@@ -570,6 +565,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
                                 if (typeFilter.empty()) {
                                     if (isVar)              code = 1;
+                                    else if (isCls)         code = 8;
                                     else if (isFunc)        code = 5;
                                     else if (isToolboxFunc) code = 2;
                                     else if (vfsExists(varName)) code = 2;       // file
@@ -579,7 +575,6 @@ void registerWorkspaceRuntime(Engine &engine)
                                 } else if (typeFilter == "builtin") {
                                     if (ctx.engine->hasExternalFunction(varName)) code = 5;
                                 } else if (typeFilter == "file") {
-                                    // Direct path — file, toolbox function, or m-file in search path
                                     if (isToolboxFunc)                            code = 2;
                                     else if (vfsExists(varName))                  code = 2;
                                     else if (findMFile())                         code = 2;
@@ -591,18 +586,22 @@ void registerWorkspaceRuntime(Engine &engine)
                             });
 
     // clearvars — clear named workspace variables. With no args, clears
-    // all. With "-except name1 name2 ...", clears everything except the
-    // listed names. Doesn't unload functions, never affects globals
-    // (matches MATLAB's `clearvars` vs. `clear` distinction).
+    // all local/persistent variables without unloading functions or touching globals.
     engine.registerFunction("clearvars",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             auto *env = ctx.env;
+            ctx.engine->syncFrameToEnv(env);
             if (args.empty()) {
-                env->clearAll();
+                for (const auto &n : env->localNames())
+                    env->remove(n);
+                std::vector<std::string> pnames(env->persistentNames().begin(),
+                                                env->persistentNames().end());
+                for (const auto &n : pnames)
+                    env->remove(n);
+                ctx.engine->syncEnvRemovalsToFrame(env);
                 outs[0] = Value();
                 return;
             }
-            // Parse "-except".
             bool exceptMode = false;
             std::vector<std::string> names;
             for (size_t i = 0; i < args.size(); ++i) {
@@ -616,9 +615,15 @@ void registerWorkspaceRuntime(Engine &engine)
                 for (const auto &n : env->localNames()) {
                     if (!keep.count(n)) env->remove(n);
                 }
+                std::vector<std::string> pnames(env->persistentNames().begin(),
+                                                env->persistentNames().end());
+                for (const auto &n : pnames) {
+                    if (!keep.count(n)) env->remove(n);
+                }
             } else {
                 for (const auto &n : names) env->remove(n);
             }
+            ctx.engine->syncEnvRemovalsToFrame(env);
             outs[0] = Value();
         });
 

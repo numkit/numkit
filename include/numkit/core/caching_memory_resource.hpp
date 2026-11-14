@@ -86,7 +86,7 @@ private:
         if (bytes >= minCache_) {
             try {
                 std::lock_guard<std::mutex> lk(mu_);
-                if (cachedBytes_ + bytes <= maxCached_) {
+                if (bytes <= maxCached_ && cachedBytes_ <= maxCached_ - bytes) {
                     free_[Key{bytes, align}].push_back(p);
                     cachedBytes_ += bytes;
                     return;

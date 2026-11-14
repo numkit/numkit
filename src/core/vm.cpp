@@ -306,6 +306,148 @@ static std::vector<size_t> resolveStoreSubscript(const Value &s, size_t curDim)
     return Value::resolveIndicesUnchecked(s);
 }
 
+// Visibility rule for `who`/`whos` over a chunk's register file: hide
+// reserved names unless the chunk has actually assigned them.
+static bool whoVisible(const Engine &engine, const std::string &name,
+                       const BytecodeChunk &chunk)
+{
+    if (!engine.isReservedName(name))
+        return true;
+    return chunk.assignedVars.count(name) > 0;
+}
+
+static Value readChunkVar(const BytecodeChunk &chunk, const Value *R, uint32_t nregs,
+                          const std::string &name, uint16_t reg)
+{
+    auto uv = chunk.upvalueBoxRegs.find(name);
+    if (uv != chunk.upvalueBoxRegs.end() && uv->second < nregs) {
+        if (const UpvaluePayload *box = asUpvalueBox(R[uv->second]))
+            return box->read();
+    }
+    return (reg < nregs) ? R[reg] : Value();
+}
+
+static void writeChunkVar(const BytecodeChunk &chunk, Value *R, uint32_t nregs,
+                          const std::string &name, uint16_t reg, const Value &val)
+{
+    if (reg < nregs)
+        R[reg] = val;
+    auto uv = chunk.upvalueBoxRegs.find(name);
+    if (uv != chunk.upvalueBoxRegs.end() && uv->second < nregs) {
+        if (UpvaluePayload *box = asUpvalueBox(R[uv->second]))
+            box->write(val);
+    }
+}
+
+static void exportChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                             const BytecodeChunk &chunk, const Value *R,
+                                             uint32_t nregs, bool isTopLevel)
+{
+    for (const auto &gname : chunk.globalNames) {
+        for (const auto &[vname, reg] : chunk.varMap) {
+            if (vname == gname && reg < nregs) {
+                Value gv = readChunkVar(chunk, R, nregs, vname, reg);
+                if (isTopLevel) {
+                    if (!gv.isUnset() && !gv.isDeleted())
+                        globalsEnv.set(gname, std::move(gv));
+                } else {
+                    if (gv.isDeleted())
+                        globalsEnv.remove(gname);
+                    else if (!gv.isUnset())
+                        globalsEnv.set(gname, std::move(gv));
+                }
+                break;
+            }
+        }
+    }
+    if (!isTopLevel && !chunk.persistentNames.empty()) {
+        auto &bucket = engine.persistentBucket(chunk.name);
+        for (const auto &pname : chunk.persistentNames) {
+            for (const auto &[vname, reg] : chunk.varMap) {
+                if (vname == pname && reg < nregs) {
+                    Value pv = readChunkVar(chunk, R, nregs, vname, reg);
+                    if (pv.isDeleted())
+                        bucket.erase(pname);
+                    else if (!pv.isUnset())
+                        bucket[pname] = std::move(pv);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static void importChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                             const BytecodeChunk &chunk, Value *R,
+                                             uint32_t nregs, bool isTopLevel, bool seedMissing)
+{
+    for (const auto &gname : chunk.globalNames) {
+        for (const auto &[vname, reg] : chunk.varMap) {
+            if (vname == gname && reg < nregs) {
+                Value *gval = globalsEnv.get(gname);
+                if (gval && !gval->isUnset() && !gval->isDeleted()) {
+                    writeChunkVar(chunk, R, nregs, vname, reg, *gval);
+                } else if (seedMissing) {
+                    writeChunkVar(chunk, R, nregs, vname, reg, Value::Empty);
+                }
+                break;
+            }
+        }
+    }
+    if (!isTopLevel && !chunk.persistentNames.empty()) {
+        auto &bucket = engine.persistentBucket(chunk.name);
+        for (const auto &pname : chunk.persistentNames) {
+            for (const auto &[vname, reg] : chunk.varMap) {
+                if (vname == pname && reg < nregs) {
+                    auto it = bucket.find(pname);
+                    if (it != bucket.end() && !it->second.isUnset() && !it->second.isDeleted()) {
+                        writeChunkVar(chunk, R, nregs, vname, reg, it->second);
+                    } else if (seedMissing) {
+                        bucket[pname] = Value::Empty;
+                        writeChunkVar(chunk, R, nregs, vname, reg, Value::Empty);
+                    } else if (it == bucket.end()) {
+                        writeChunkVar(chunk, R, nregs, vname, reg, Value::Empty);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+int VM::callDepth() const
+{
+    int d = 0;
+    for (const auto &f : frames_) {
+        if (!f.isScriptFrame)
+            ++d;
+    }
+    for (const PausedState *ps : activePausedStates_) {
+        if (!ps) continue;
+        for (const auto &f : ps->frames) {
+            if (!f.isScriptFrame)
+                ++d;
+        }
+    }
+    return d;
+}
+
+bool VM::hasActiveFrameNamed(const std::string &funcName) const
+{
+    for (const auto &f : frames_) {
+        if (f.chunk && f.chunk->name == funcName)
+            return true;
+    }
+    for (const PausedState *ps : activePausedStates_) {
+        if (!ps) continue;
+        for (const auto &f : ps->frames) {
+            if (f.chunk && f.chunk->name == funcName)
+                return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================
 // Public API
 // ============================================================
@@ -451,21 +593,13 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, Span<const Valu
 
 // ── Paused state save/restore (for debug eval) ────────────
 
-static thread_local std::vector<VM::PausedState *> s_activePausedStates;
-
 std::unique_ptr<VM::PausedState> VM::savePausedState()
 {
-    for (const auto &f : frames_) {
+    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+        const auto &f = frames_[fi];
         if (!f.chunk) continue;
-        for (const auto &gname : f.chunk->globalNames) {
-            for (const auto &[vname, reg] : f.chunk->varMap) {
-                if (vname == gname && reg < f.nregs) {
-                    if (!f.R[reg].isUnset() && !f.R[reg].isDeleted())
-                        engine_.globalsEnv_->set(gname, f.R[reg]);
-                    break;
-                }
-            }
-        }
+        exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, f.R, f.nregs,
+                                         f.isScriptFrame);
     }
     auto s = std::make_unique<PausedState>();
     // Move (not copy) — CallFrame holds a unique_ptr<Environment>. The
@@ -485,15 +619,16 @@ std::unique_ptr<VM::PausedState> VM::savePausedState()
     s->regSnapshot.assign(regStack_.begin(), regStack_.begin() + regStackTop_);
     s->wasReentrantEval = inReentrantEval_;
     inReentrantEval_ = true;
-    s_activePausedStates.push_back(s.get());
+    activePausedStates_.push_back(s.get());
     return s;
 }
 
 void VM::restorePausedState(std::unique_ptr<PausedState> s)
 {
     if (!s) return;
-    if (!s_activePausedStates.empty() && s_activePausedStates.back() == s.get())
-        s_activePausedStates.pop_back();
+    auto psIt = std::find(activePausedStates_.rbegin(), activePausedStates_.rend(), s.get());
+    if (psIt != activePausedStates_.rend())
+        activePausedStates_.erase(std::next(psIt).base());
     // The frames being replaced belong to an inner, abandoned run — drop
     // their origin pushes before the outer's frames (whose pushes are still
     // on the stack) become current again.
@@ -515,18 +650,12 @@ void VM::restorePausedState(std::unique_ptr<PausedState> s)
     std::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
     // Fix R pointers in frames (they pointed into regStack_)
     R_ = regStack_.data();
-    for (auto &f : frames_) {
+    for (size_t fi = 0; fi < frames_.size(); ++fi) {
+        auto &f = frames_[fi];
         f.R = &regStack_[f.regBase];
         if (f.chunk) {
-            for (const auto &gname : f.chunk->globalNames) {
-                for (const auto &[vname, reg] : f.chunk->varMap) {
-                    if (vname == gname && reg < f.nregs) {
-                        if (Value *gval = engine_.globalsEnv_->get(gname))
-                            f.R[reg] = *gval;
-                        break;
-                    }
-                }
-            }
+            importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, f.R, f.nregs,
+                                             f.isScriptFrame, /*seedMissing=*/false);
         }
     }
     // Fix ForState data pointers (they point into ForState::range).
@@ -589,6 +718,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, siz
     cf.nregs = nregs;
     cf.forStackBase = 0;
     cf.tryStackBase = 0;
+    cf.isScriptFrame = true;
     cf.originDepth = engine_.scriptOriginDepth();
     // Scoped-eval read-side: caller's variable snapshot was attached
     // via setNextFrameDynVars before this startExecution call. Plug it
@@ -659,9 +789,6 @@ enter_frame:
 
     {
         CallFrame &frame = frames_.back();
-    if (frames_.size() >= 2) {
-        auto &pf = frames_[frames_.size() - 2];
-    }
         const Instruction *ip = frame.ip;
         const BytecodeChunk &chunk = *frame.chunk;
         const Instruction *end = chunk.code.data() + chunk.code.size();
@@ -2421,6 +2548,53 @@ enter_frame:
                 R[I.a] = std::move(fh);
                 break;
             }
+            case OpCode::UPVAL_NEW: {
+                Value initVal = (I.b != kInvalidReg) ? R[I.b] : Value();
+                Value boxVal = makeUpvalueBox(std::move(initVal), engine_.mr_);
+                if (!chunk.globalNames.empty() || !chunk.persistentNames.empty()) {
+                    if (UpvaluePayload *box = asUpvalueBox(boxVal)) {
+                        for (const auto &gname : chunk.globalNames) {
+                            auto uv = chunk.upvalueBoxRegs.find(gname);
+                            if (uv != chunk.upvalueBoxRegs.end() && uv->second == I.a) {
+                                box->globalEnv = engine_.globalsEnv_;
+                                box->backingName = gname;
+                                if (!box->value.isUnset() && !box->value.isDeleted())
+                                    engine_.globalsEnv_->set(gname, box->value);
+                                break;
+                            }
+                        }
+                        if (!box->globalEnv) {
+                            for (const auto &pname : chunk.persistentNames) {
+                                auto uv = chunk.upvalueBoxRegs.find(pname);
+                                if (uv != chunk.upvalueBoxRegs.end() && uv->second == I.a) {
+                                    box->persistentBucket = engine_.persistentBucketPtr(chunk.name);
+                                    box->backingName = pname;
+                                    if (!box->value.isUnset() && !box->value.isDeleted())
+                                        (*box->persistentBucket)[pname] = box->value;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                R[I.a] = std::move(boxVal);
+                break;
+            }
+            case OpCode::UPVAL_LOAD: {
+                UpvaluePayload *box = asUpvalueBox(R[I.b]);
+                Value v = box ? box->read() : Value();
+                if (I.c == 0 && (v.isUnset() || v.isDeleted())) {
+                    throw std::runtime_error(
+                        "Undefined function or variable '" + chunk.strings[I.d] + "'");
+                }
+                R[I.a] = std::move(v);
+                break;
+            }
+            case OpCode::UPVAL_STORE: {
+                if (UpvaluePayload *box = asUpvalueBox(R[I.a]))
+                    box->write(R[I.b]);
+                break;
+            }
             case OpCode::CELL_LITERAL: {
                 uint16_t base = I.b, count = I.c;
                 auto cell = Value::cell(count == 0 ? 0 : 1, count);
@@ -2737,6 +2911,51 @@ enter_frame:
                 uint16_t nargout_val = I.e; // 0=statement, 1=expression
                 int32_t funcIdx = I.d;
 
+                // Dynamically injected local variable (via eval/load/assignin)
+                // shadows functions and builtins.
+                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                    const std::string &candName = chunk.strings[funcIdx];
+                    bool clearedInChunk = false;
+                    if (chunk.assignedVars.count(candName)) {
+                        for (const auto &[vn, reg] : chunk.varMap) {
+                            if (vn == candName && reg < chunk.numRegisters) {
+                                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                                if (rv.isDeleted())
+                                    clearedInChunk = true;
+                                break;
+                            }
+                        }
+                    }
+                    const Value *dynLocal = nullptr;
+                    if (!clearedInChunk) {
+                        if (frame.dynVars) {
+                            auto it = frame.dynVars->find(candName);
+                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                                dynLocal = &it->second;
+                        }
+                        if (!dynLocal) {
+                            if (frame.isScriptFrame) {
+                                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                                dynLocal = scopeEnv.getLocal(candName);
+                            } else if (frame.env) {
+                                dynLocal = frame.env->getLocal(candName);
+                            }
+                            if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
+                                dynLocal = nullptr;
+                        }
+                    }
+                    if (dynLocal) {
+                        Value target = *dynLocal;
+                        if (na == 0 && !target.isFuncHandle()) {
+                            R[I.a] = std::move(target);
+                        } else {
+                            if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
+                                goto enter_frame;
+                        }
+                        break;
+                    }
+                }
+
                 // Try resolved cache first
                 const BytecodeChunk *targetChunk = nullptr;
                 if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
@@ -2900,58 +3119,67 @@ enter_frame:
                         R[I.a] = std::move(ob[0]);
                         break;
                     }
-                    auto findParentVar = [&](const std::string &varName) -> const Value * {
+                    auto findParentVar = [&](const std::string &varName) -> std::optional<Value> {
                         if (chunk.parentFuncName.empty())
-                            return nullptr;
+                            return std::nullopt;
                         for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                 continue;
                             for (const auto &[vname, reg] : pf.chunk->varMap) {
                                 if (vname == varName && reg < pf.nregs) {
-                                    if (!pf.R[reg].isUnset() && !pf.R[reg].isDeleted())
-                                        return &pf.R[reg];
+                                    Value v = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
+                                    if (!v.isUnset() && !v.isDeleted())
+                                        return v;
                                     break;
                                 }
                             }
                         }
-                        for (int psi = static_cast<int>(s_activePausedStates.size()) - 1; psi >= 0; --psi) {
-                            const VM::PausedState *ps = s_activePausedStates[psi];
+                        for (int psi = static_cast<int>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
+                            const VM::PausedState *ps = activePausedStates_[psi];
                             if (!ps) continue;
                             for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                 const CallFrame &pf = ps->frames[fi];
                                 if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                     continue;
+                                if (pf.regBase + pf.nregs > ps->regSnapshot.size())
+                                    continue;
+                                const Value *psR = &ps->regSnapshot[pf.regBase];
                                 for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                    if (vname == varName && reg < pf.nregs
-                                        && pf.regBase + reg < ps->regSnapshot.size()) {
-                                        const Value &v = ps->regSnapshot[pf.regBase + reg];
+                                    if (vname == varName && reg < pf.nregs) {
+                                        Value v = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
                                         if (!v.isUnset() && !v.isDeleted())
-                                            return &v;
+                                            return v;
                                         break;
                                     }
                                 }
                             }
                         }
-                        return nullptr;
+                        return std::nullopt;
                     };
                     size_t dot = funcName.find('.');
                     if (dot != std::string::npos) {
                         std::string root = funcName.substr(0, dot);
-                        const Value *rootVal = nullptr;
+                        std::optional<Value> rootOpt;
                         if (frame.dynVars) {
                             auto it = frame.dynVars->find(root);
-                            if (it != frame.dynVars->end() && !it->second.isDeleted())
-                                rootVal = &it->second;
+                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                                rootOpt = it->second;
                         }
-                        if (!rootVal)
-                            rootVal = findParentVar(root);
-                        if (!rootVal && currentCallEnv())
-                            rootVal = currentCallEnv()->get(root);
-                        if (!rootVal)
-                            rootVal = engine_.workspaceEnv().get(root);
-                        if (rootVal && !rootVal->isUnset() && !rootVal->isDeleted()) {
-                            Value cur = *rootVal;
+                        if (!rootOpt)
+                            rootOpt = findParentVar(root);
+                        if (!rootOpt && currentCallEnv()) {
+                            if (const Value *ev = currentCallEnv()->get(root);
+                                ev && !ev->isUnset() && !ev->isDeleted())
+                                rootOpt = *ev;
+                        }
+                        if (!rootOpt) {
+                            if (const Value *wv = engine_.workspaceEnv().get(root);
+                                wv && !wv->isUnset() && !wv->isDeleted())
+                                rootOpt = *wv;
+                        }
+                        if (rootOpt) {
+                            Value cur = std::move(*rootOpt);
                             size_t pos = dot + 1;
                             while (pos < funcName.size()) {
                                 size_t nextDot = funcName.find('.', pos);
@@ -2978,20 +3206,26 @@ enter_frame:
                         }
                     }
                     if (dot == std::string::npos && na > 0) {
-                        const Value *varVal = nullptr;
+                        std::optional<Value> varOpt;
                         if (frame.dynVars) {
                             auto it = frame.dynVars->find(funcName);
-                            if (it != frame.dynVars->end() && !it->second.isDeleted())
-                                varVal = &it->second;
+                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                                varOpt = it->second;
                         }
-                        if (!varVal)
-                            varVal = findParentVar(funcName);
-                        if (!varVal && currentCallEnv())
-                            varVal = currentCallEnv()->get(funcName);
-                        if (!varVal)
-                            varVal = engine_.workspaceEnv().get(funcName);
-                        if (varVal && !varVal->isUnset() && !varVal->isDeleted()) {
-                            Value target = *varVal;
+                        if (!varOpt)
+                            varOpt = findParentVar(funcName);
+                        if (!varOpt && currentCallEnv()) {
+                            if (const Value *ev = currentCallEnv()->get(funcName);
+                                ev && !ev->isUnset() && !ev->isDeleted())
+                                varOpt = *ev;
+                        }
+                        if (!varOpt) {
+                            if (const Value *wv = engine_.workspaceEnv().get(funcName);
+                                wv && !wv->isUnset() && !wv->isDeleted())
+                                varOpt = *wv;
+                        }
+                        if (varOpt) {
+                            Value target = std::move(*varOpt);
                             if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
                                 goto enter_frame;
                             break;
@@ -3016,6 +3250,36 @@ enter_frame:
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
+
+                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                    const std::string &candName = chunk.strings[funcIdx];
+                    const Value *dynLocal = nullptr;
+                    if (frame.dynVars) {
+                        auto it = frame.dynVars->find(candName);
+                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                            dynLocal = &it->second;
+                    }
+                    if (!dynLocal) {
+                        if (frame.isScriptFrame) {
+                            Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                            dynLocal = scopeEnv.getLocal(candName);
+                        } else if (frame.env) {
+                            dynLocal = frame.env->getLocal(candName);
+                        }
+                        if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
+                            dynLocal = nullptr;
+                    }
+                    if (dynLocal) {
+                        Value target = *dynLocal;
+                        if (NF == 0 && !target.isFuncHandle()) {
+                            R[I.a] = std::move(target);
+                        } else {
+                            if (execCallIndirectSpan(target, I.a, AB, NF, R, frame, ip))
+                                goto enter_frame;
+                        }
+                        break;
+                    }
+                }
 
                 const BytecodeChunk *targetChunk = nullptr;
                 if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
@@ -3141,6 +3405,50 @@ enter_frame:
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
+
+                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                    const Value *dynLocal = nullptr;
+                    if (frame.dynVars) {
+                        auto it = frame.dynVars->find(funcName);
+                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                            dynLocal = &it->second;
+                    }
+                    if (!dynLocal) {
+                        if (frame.isScriptFrame) {
+                            Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                            dynLocal = scopeEnv.getLocal(funcName);
+                        } else if (frame.env) {
+                            dynLocal = frame.env->getLocal(funcName);
+                        }
+                        if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
+                            dynLocal = nullptr;
+                    }
+                    if (dynLocal && dynLocal->isFuncHandle()) {
+                        const Value fh = *dynLocal;
+                        const size_t ncaps = fh.funcHandleCaptureCount();
+                        const std::string &hName = fh.funcHandleName();
+                        std::vector<Value> cargs(NF + ncaps);
+                        for (size_t i = 0; i < NF; ++i) cargs[i] = AB[i];
+                        for (size_t i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
+                        if (const BytecodeChunk *fc = findCompiledFunc(hName)) {
+                            frame.ip = ip + 1;
+                            returnBuf_.clear();
+                            pushCallFrame(*fc, cargs.data(), cargs.size(), 0, nout, true, outBase, nout);
+                            goto enter_frame;
+                        }
+                        if (const ExternalFunc *fp = engine_.findExternal(hName, currentCallEnv())) {
+                            std::vector<Value> ob(nout);
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*fp)(Span<const Value>(cargs.data(), NF), nout, Span<Value>(ob.data(), nout), ctx);
+                            for (uint16_t i = 0; i < nout; ++i)
+                                if (ob[i].isUnset())
+                                    throw std::runtime_error("Too many output arguments.");
+                            for (uint16_t i = 0; i < nout; ++i)
+                                R[outBase + i] = std::move(ob[i]);
+                            break;
+                        }
+                    }
+                }
 
                 // Try compiled user function first.
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
@@ -3630,22 +3938,14 @@ enter_frame:
                     // still be null mid-body), so `!frame.env` was the
                     // wrong predicate and leaked base variables into
                     // functions (ScopeIsolationTest regression).
-                    if (&frame == &frames_.front()) {
-                        const Value *wv = engine_.workspaceEnv().get(
-                            chunk.strings[I.d]);
+                    if (frame.isScriptFrame) {
+                        Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                        const Value *wv = scopeEnv.get(chunk.strings[I.d]);
                         if (wv && !wv->isUnset() && !wv->isDeleted()) {
                             R[I.a] = *wv;
                             break;
                         }
                     } else if (frame.env) {
-                        // Function frame: consult the frame's OWN locals
-                        // only (getLocal — no parent-chain walk, so no
-                        // base-variable leak into function scope).
-                        // assignin('caller', ...) lands here via
-                        // Engine::assignToCaller's env-side write when
-                        // the register write was clobbered by an
-                        // intervening call
-                        // (bugs/closed/core/assignin-caller-write-through).
                         const Value *lv = frame.env->getLocal(
                             chunk.strings[I.d]);
                         if (lv && !lv->isUnset() && !lv->isDeleted()) {
@@ -3662,8 +3962,9 @@ enter_frame:
                                 continue;
                             for (const auto &[vname, reg] : pf.chunk->varMap) {
                                 if (vname == nn && reg < pf.nregs) {
-                                    if (!pf.R[reg].isUnset() && !pf.R[reg].isDeleted()) {
-                                        R[I.a] = pf.R[reg];
+                                    Value pv = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
+                                    if (!pv.isUnset() && !pv.isDeleted()) {
+                                        R[I.a] = std::move(pv);
                                         foundInParent = true;
                                     }
                                     break;
@@ -3673,19 +3974,21 @@ enter_frame:
                                 break;
                         }
                         if (!foundInParent) {
-                            for (int psi = static_cast<int>(s_activePausedStates.size()) - 1; psi >= 0 && !foundInParent; --psi) {
-                                const VM::PausedState *ps = s_activePausedStates[psi];
+                            for (int psi = static_cast<int>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
+                                const VM::PausedState *ps = activePausedStates_[psi];
                                 if (!ps) continue;
                                 for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                     const CallFrame &pf = ps->frames[fi];
                                     if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                         continue;
+                                    if (pf.regBase + pf.nregs > ps->regSnapshot.size())
+                                        continue;
+                                    const Value *psR = &ps->regSnapshot[pf.regBase];
                                     for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                        if (vname == nn && reg < pf.nregs
-                                            && pf.regBase + reg < ps->regSnapshot.size()) {
-                                            const Value &v = ps->regSnapshot[pf.regBase + reg];
-                                            if (!v.isUnset() && !v.isDeleted()) {
-                                                R[I.a] = v;
+                                        if (vname == nn && reg < pf.nregs) {
+                                            Value pv = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
+                                            if (!pv.isUnset() && !pv.isDeleted()) {
+                                                R[I.a] = std::move(pv);
                                                 foundInParent = true;
                                             }
                                             break;
@@ -3728,33 +4031,36 @@ enter_frame:
                 break;
 
             case OpCode::CLEAR_DYN: {
+                auto clearOneVar = [&](const std::string &varName) {
+                    for (auto &[vn, reg] : chunk.varMap) {
+                        if (vn == varName && reg < chunk.numRegisters) {
+                            writeChunkVar(chunk, R, chunk.numRegisters, vn, reg, Value::deleted());
+                            break;
+                        }
+                    }
+                    if (frame.dynVars)
+                        frame.dynVars->erase(varName);
+                    if (frame.env)
+                        frame.env->remove(varName);
+                };
                 if (R[I.a].isCsl()) {
                     const size_t n = R[I.a].cslCount();
                     if (n == 0 && I.b <= 1) {
                         for (auto &[vn, reg] : chunk.varMap) {
                             if (reg < chunk.numRegisters && engine_.isReservedName(vn) == 0)
-                                R[reg] = Value::deleted();
+                                writeChunkVar(chunk, R, chunk.numRegisters, vn, reg, Value::deleted());
                         }
+                        if (frame.dynVars)
+                            frame.dynVars->clear();
+                        if (frame.env)
+                            frame.env->clearAll(/*keepImports=*/true);
                     } else {
-                        for (size_t k = 0; k < n; ++k) {
-                            std::string varName = R[I.a].cslAt(k).toString();
-                            for (auto &[vn, reg] : chunk.varMap) {
-                                if (vn == varName && reg < chunk.numRegisters) {
-                                    R[reg] = Value::deleted();
-                                    break;
-                                }
-                            }
-                        }
+                        for (size_t k = 0; k < n; ++k)
+                            clearOneVar(R[I.a].cslAt(k).toString());
                     }
                     break;
                 }
-                std::string varName = R[I.a].toString();
-                for (auto &[vn, reg] : chunk.varMap) {
-                    if (vn == varName && reg < chunk.numRegisters) {
-                        R[reg] = Value::deleted();
-                        break;
-                    }
-                }
+                clearOneVar(R[I.a].toString());
                 break;
             }
 
@@ -3767,14 +4073,30 @@ enter_frame:
 
                 double code = 0;
 
-                // The var/builtin filters (and the var/function probes of
-                // the no-filter form) are local fast checks. Everything
-                // with a FILESYSTEM answer ('file', 'dir', 'class', and
-                // the file/m-file fallback of the no-filter form) belongs
-                // to the registered exist() external — the old stub
-                // returned 0 with a warning, so exist(absolutePath,
-                // 'file') silently mis-reported inside functions
-                // (bugs/closed/runtime/exist-file-function-scope.md).
+                auto hasLocalVar = [&]() -> bool {
+                    for (auto &[vn, reg] : chunk.varMap) {
+                        if (vn == varName && reg < chunk.numRegisters) {
+                            Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                            if (!rv.isUnset() && !rv.isDeleted())
+                                return true;
+                            if (rv.isDeleted())
+                                return false;
+                            break;
+                        }
+                    }
+                    if (frame.dynVars) {
+                        auto it = frame.dynVars->find(varName);
+                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                            return true;
+                    }
+                    if (frame.env) {
+                        if (const Value *lv = frame.env->getLocal(varName);
+                            lv && !lv->isUnset() && !lv->isDeleted())
+                            return true;
+                    }
+                    return false;
+                };
+
                 auto delegateToExternal = [&]() -> bool {
                     const ExternalFunc *fn =
                         engine_.findExternal("exist", currentCallEnv());
@@ -3792,33 +4114,26 @@ enter_frame:
                 };
 
                 if (filter.empty()) {
-                    // No filter: check variables first, then functions
-                    for (auto &[vn, reg] : chunk.varMap) {
-                        if (vn == varName && reg < chunk.numRegisters) {
-                            if (!R[reg].isUnset() && !R[reg].isDeleted())
-                                code = 1;
-                            break;
-                        }
-                    }
-                    if (code == 0 && engine_.hasFunction(varName))
+                    if (hasLocalVar())
+                        code = 1;
+                    else if (engine_.findClass(varName) != nullptr)
+                        code = 8;
+                    else if (engine_.hasFunction(varName))
                         code = 5;
-                    // …then files / m-files (MATLAB returns 2 for those).
                     if (code == 0)
                         delegateToExternal();
                 } else if (filter == "var") {
-                    // Only check local variables
-                    for (auto &[vn, reg] : chunk.varMap) {
-                        if (vn == varName && reg < chunk.numRegisters) {
-                            if (!R[reg].isUnset() && !R[reg].isDeleted())
-                                code = 1;
-                            break;
-                        }
-                    }
+                    if (hasLocalVar())
+                        code = 1;
                 } else if (filter == "builtin") {
                     if (engine_.hasExternalFunction(varName))
                         code = 5;
-                } else if (filter == "file" || filter == "dir"
-                           || filter == "class") {
+                } else if (filter == "class") {
+                    if (engine_.findClass(varName) != nullptr)
+                        code = 8;
+                    else
+                        delegateToExternal();
+                } else if (filter == "file" || filter == "dir") {
                     delegateToExternal();
                 }
 
@@ -3934,17 +4249,19 @@ static void rebuildLocalVarMap(std::vector<std::pair<std::string, Value>> &out,
 {
     out.clear();
     const auto &assigned = chunk.assignedVars;
-    if (chunk.globalNames.empty()) {
+    if (chunk.globalNames.empty() && chunk.persistentNames.empty()) {
         for (auto &[name, reg] : chunk.varMap)
             if (reg < nregs && assigned.count(name))
-                out.push_back({name, R[reg]});
+                out.push_back({name, readChunkVar(chunk, R, nregs, name, reg)});
         return;
     }
-    std::unordered_set<std::string_view> globals(chunk.globalNames.begin(),
-                                                 chunk.globalNames.end());
+    std::unordered_set<std::string_view> excluded(chunk.globalNames.begin(),
+                                                  chunk.globalNames.end());
+    for (const auto &pn : chunk.persistentNames)
+        excluded.insert(pn);
     for (auto &[name, reg] : chunk.varMap)
-        if (reg < nregs && assigned.count(name) && !globals.count(name))
-            out.push_back({name, R[reg]});
+        if (reg < nregs && assigned.count(name) && !excluded.count(name))
+            out.push_back({name, readChunkVar(chunk, R, nregs, name, reg)});
 }
 
 void VM::exportTopLevelVariables()
@@ -3953,22 +4270,12 @@ void VM::exportTopLevelVariables()
         return;
 
     CallFrame &topFrame = frames_[0];
-    rebuildLocalVarMap(lastVarMap_, *topFrame.chunk, topFrame.R, topFrame.nregs);
-
-    // Export top-level globals: write the value to globalsEnv_ only. No
-    // local-storage mirror into workspaceEnv_ — that dual-storage is what
-    // diverged who/whos between the engines. Base-workspace membership
-    // (workspaceEnv_->globals_) is recorded by Engine::runOneChunk's
-    // updateTopLevelGlobals; who/whos enumerate it.
-    for (auto &gname : topFrame.chunk->globalNames) {
-        for (auto &[vname, reg] : topFrame.chunk->varMap) {
-            if (vname == gname && reg < topFrame.nregs) {
-                if (!topFrame.R[reg].isUnset() && !topFrame.R[reg].isDeleted())
-                    engine_.globalsEnv_->set(gname, topFrame.R[reg]);
-                break;
-            }
-        }
-    }
+    if (!topFrame.chunk)
+        return;
+    if (topFrame.isScriptFrame)
+        rebuildLocalVarMap(lastVarMap_, *topFrame.chunk, topFrame.R, topFrame.nregs);
+    exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *topFrame.chunk, topFrame.R,
+                                     topFrame.nregs, topFrame.isScriptFrame);
 }
 
 // ============================================================
@@ -3986,6 +4293,10 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
     // Unwind call frames to the handler's frame (exception may propagate across calls)
     while (frames_.size() > th.frameIndex + 1) {
         CallFrame &f = frames_.back();
+        if (f.chunk) {
+            exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, f.R, f.nregs,
+                                             f.isScriptFrame);
+        }
         // Drop the unwound frames' provenance pushes: the lowest unwound
         // frame's originDepth is the cut point — entries below it belong to
         // surviving frames or non-VM scopes (the run() builtin).
@@ -4013,6 +4324,10 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
     // Set up catch context in the handler's frame
     CallFrame &frame = frames_.back();
     R_ = frame.R;
+    if (frame.chunk) {
+        importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *frame.chunk, frame.R,
+                                         frame.nregs, frame.isScriptFrame, /*seedMissing=*/false);
+    }
 
     Value err = Value::structure();
     err.field("message") = Value::fromString(msg, engine_.mr_);
@@ -4170,63 +4485,143 @@ DebugController *VM::debugCtl()
 
 Environment *VM::currentCallEnv()
 {
-    // Frame 0 == top-level script: builtins see workspaceEnv directly,
-    // matching script-level eval(). Frame >= 1 == user function call:
-    // give it a private env so e.g. `import a.*` inside the function
-    // doesn't leak after return. Lazy — only allocated on first builtin
-    // that asks (most frames never need it).
-    //
-    // If `inheritedScope_` is set (re-entrant eval invoked with an
-    // explicit scope by Engine::eval(src, scope)), the inner top-level
-    // routes ctx.env there instead of the global workspace. Function
-    // frames keep their own private env regardless.
-    if (frames_.size() <= 1)
+    if (frames_.empty() || frames_.back().isScriptFrame)
         return inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv();
     auto &frame = frames_.back();
     if (!frame.env) {
         frame.env = std::make_unique<Environment>(
-            &engine_.workspaceEnv(),
+            &engine_.constantsEnv(),
             engine_.globalsEnv_.get());
     }
     return frame.env.get();
 }
 
-Environment *VM::callerEnvAtDepth(int n)
+Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
 {
-    // Frame index 0 is the top-level script frame; user-function frames
-    // start at 1. The "caller" of the running builtin (n=0) is the last
-    // user-function frame (frames_.back()) when we're inside one, or
-    // the top-level script frame otherwise.
-    //
-    // n=0 → frames_.back() if it's a user-function frame, else workspace.
-    // n=1 → one frame up. Etc. Walking off the top → workspaceEnv.
-    if (n < 0) n = 0;
-    int target = static_cast<int>(frames_.size()) - 1 - n;
-    if (target < 1)
-        return &engine_.workspaceEnv();
-    auto &frame = frames_[target];
-    if (!frame.env) {
-        frame.env = std::make_unique<Environment>(
-            &engine_.workspaceEnv(),
+    if (f.isScriptFrame)
+        return f.env ? f.env.get() : (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv());
+    if (!f.env) {
+        f.env = std::make_unique<Environment>(
+            &engine_.constantsEnv(),
             engine_.globalsEnv_.get());
     }
-    return frame.env.get();
+    if (f.chunk && frameRegs) {
+        if (!f.chunk->persistentNames.empty()) {
+            f.env->bindPersistentBucket(engine_.persistentBucketPtr(f.chunk->name));
+            for (const auto &pname : f.chunk->persistentNames)
+                f.env->declarePersistent(pname);
+        }
+        for (const auto &gname : f.chunk->globalNames)
+            f.env->declareGlobal(gname);
+
+        exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, frameRegs,
+                                         f.nregs, /*isTopLevel=*/false);
+
+        std::unordered_set<std::string_view> gset(f.chunk->globalNames.begin(),
+                                                  f.chunk->globalNames.end());
+        std::unordered_set<std::string_view> pset(f.chunk->persistentNames.begin(),
+                                                  f.chunk->persistentNames.end());
+        for (const auto &[vn, reg] : f.chunk->varMap) {
+            if (gset.count(vn) || pset.count(vn))
+                continue;
+            if (!whoVisible(engine_, vn, *f.chunk) && vn != "nargin" && vn != "nargout")
+                continue;
+            Value v = readChunkVar(*f.chunk, frameRegs, f.nregs, vn, reg);
+            if (!v.isUnset() && !v.isDeleted())
+                f.env->setLocal(vn, v);
+            else if (v.isDeleted())
+                f.env->remove(vn);
+        }
+    }
+    if (f.dynVars) {
+        for (const auto &[dn, dv] : *f.dynVars) {
+            if (!dv.isUnset() && !dv.isDeleted())
+                f.env->setLocal(dn, dv);
+        }
+    }
+    return f.env.get();
+}
+
+Environment *VM::callerEnvAtDepth(int n)
+{
+    if (n < 0) n = 0;
+    int seen = 0;
+    for (size_t fi = frames_.size(); fi-- > 0;) {
+        auto &f = frames_[fi];
+        if (f.isScriptFrame)
+            continue;
+        if (seen == n)
+            return materializeFrameEnv(f, f.R);
+        ++seen;
+    }
+    for (size_t psi = activePausedStates_.size(); psi-- > 0;) {
+        PausedState *ps = activePausedStates_[psi];
+        if (!ps) continue;
+        for (size_t fi = ps->frames.size(); fi-- > 0;) {
+            auto &f = ps->frames[fi];
+            if (f.isScriptFrame)
+                continue;
+            if (seen == n) {
+                const Value *psR = (f.regBase + f.nregs <= ps->regSnapshot.size())
+                                       ? &ps->regSnapshot[f.regBase]
+                                       : nullptr;
+                return materializeFrameEnv(f, psR);
+            }
+            ++seen;
+        }
+    }
+    return &engine_.workspaceEnv();
 }
 
 void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
 {
     if (n < 0) n = 0;
-    int target = static_cast<int>(frames_.size()) - 1 - n;
-    if (target < 0)
-        return;  // out-of-range — env-side write done by Engine
-    auto &frame = frames_[target];
-    // varMap is vector<pair<name, regIdx>> (small), linear scan.
-    for (const auto &entry : frame.chunk->varMap) {
-        if (entry.first == name && entry.second < frame.nregs) {
-            frame.R[entry.second] = val;
+    int seen = 0;
+    for (size_t fi = frames_.size(); fi-- > 0;) {
+        auto &f = frames_[fi];
+        if (f.isScriptFrame)
+            continue;
+        if (seen == n) {
+            if (f.chunk) {
+                for (const auto &entry : f.chunk->varMap) {
+                    if (entry.first == name && entry.second < f.nregs) {
+                        writeChunkVar(*f.chunk, f.R, f.nregs, entry.first, entry.second, val);
+                        break;
+                    }
+                }
+            }
+            if (f.env)
+                writeToFrameMatchingEnv(f.env.get(), name, val);
             return;
         }
+        ++seen;
     }
+    for (size_t psi = activePausedStates_.size(); psi-- > 0;) {
+        PausedState *ps = activePausedStates_[psi];
+        if (!ps) continue;
+        for (size_t fi = ps->frames.size(); fi-- > 0;) {
+            auto &f = ps->frames[fi];
+            if (f.isScriptFrame)
+                continue;
+            if (seen == n) {
+                if (f.chunk && f.regBase + f.nregs <= ps->regSnapshot.size()) {
+                    Value *psR = &ps->regSnapshot[f.regBase];
+                    for (const auto &entry : f.chunk->varMap) {
+                        if (entry.first == name && entry.second < f.nregs) {
+                            writeChunkVar(*f.chunk, psR, f.nregs, entry.first, entry.second, val);
+                            break;
+                        }
+                    }
+                }
+                if (f.env)
+                    writeToFrameMatchingEnv(f.env.get(), name, val);
+                return;
+            }
+            ++seen;
+        }
+    }
+    // Walked off user-function frames (e.g. n == 0 in a top-level script): write to base frame(s)
+    writeToFrameMatchingEnv(&engine_.workspaceEnv(), name, val);
 }
 
 void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
@@ -4236,39 +4631,153 @@ void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
     for (size_t fi = frames_.size(); fi-- > 0;) {
         auto &f = frames_[fi];
         Environment *fEnv = f.env ? f.env.get()
-                                  : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                                             : nullptr);
+                                  : (f.isScriptFrame
+                                         ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                                         : nullptr);
         if (fEnv != env) continue;
-        for (const auto &entry : f.chunk->varMap) {
-            if (entry.first == name && entry.second < f.nregs) {
-                f.R[entry.second] = val;
-                break;
+        if (f.chunk) {
+            for (const auto &entry : f.chunk->varMap) {
+                if (entry.first == name && entry.second < f.nregs) {
+                    writeChunkVar(*f.chunk, f.R, f.nregs, entry.first, entry.second, val);
+                    break;
+                }
             }
+        }
+        if (f.dynVars)
+            (*f.dynVars)[name] = val;
+    }
+    for (size_t psi = activePausedStates_.size(); psi-- > 0;) {
+        PausedState *ps = activePausedStates_[psi];
+        if (!ps) continue;
+        for (size_t fi = ps->frames.size(); fi-- > 0;) {
+            auto &f = ps->frames[fi];
+            Environment *fEnv = f.env ? f.env.get()
+                                      : (f.isScriptFrame ? &engine_.workspaceEnv() : nullptr);
+            if (fEnv != env) continue;
+            if (f.chunk && f.regBase + f.nregs <= ps->regSnapshot.size()) {
+                Value *psR = &ps->regSnapshot[f.regBase];
+                for (const auto &entry : f.chunk->varMap) {
+                    if (entry.first == name && entry.second < f.nregs) {
+                        writeChunkVar(*f.chunk, psR, f.nregs, entry.first, entry.second, val);
+                        break;
+                    }
+                }
+            }
+            if (f.dynVars)
+                (*f.dynVars)[name] = val;
+        }
+    }
+}
+
+void VM::syncFrameToEnv(Environment *env)
+{
+    if (!env) return;
+    if (env == &engine_.workspaceEnv()) {
+        flushWorkspaceFrame();
+        return;
+    }
+    for (size_t fi = frames_.size(); fi-- > 0;) {
+        auto &f = frames_[fi];
+        if (!f.isScriptFrame && f.env.get() == env) {
+            materializeFrameEnv(f, f.R);
+            return;
+        }
+    }
+    for (size_t psi = activePausedStates_.size(); psi-- > 0;) {
+        PausedState *ps = activePausedStates_[psi];
+        if (!ps) continue;
+        for (size_t fi = ps->frames.size(); fi-- > 0;) {
+            auto &f = ps->frames[fi];
+            if (!f.isScriptFrame && f.env.get() == env) {
+                const Value *psR = (f.regBase + f.nregs <= ps->regSnapshot.size())
+                                       ? &ps->regSnapshot[f.regBase]
+                                       : nullptr;
+                materializeFrameEnv(f, psR);
+                return;
+            }
+        }
+    }
+}
+
+void VM::syncEnvRemovalsToFrame(Environment *env)
+{
+    if (!env) return;
+    auto syncOne = [&](CallFrame &f, Value *regs) {
+        if (!f.chunk || !regs) return;
+        for (const auto &[vn, reg] : f.chunk->varMap) {
+            if (reg >= f.nregs) continue;
+            if (engine_.isReservedName(vn) && !f.chunk->assignedVars.count(vn))
+                continue;
+            if (vn == "nargin" || vn == "nargout")
+                continue;
+            const bool stillPresent = (env->getLocal(vn) != nullptr)
+                                      || (env->isGlobal(vn) && env->get(vn) != nullptr)
+                                      || env->isPersistent(vn);
+            if (!stillPresent) {
+                Value cur = readChunkVar(*f.chunk, regs, f.nregs, vn, reg);
+                if (!cur.isUnset() && !cur.isDeleted())
+                    writeChunkVar(*f.chunk, regs, f.nregs, vn, reg, Value::deleted());
+            }
+        }
+        if (f.dynVars) {
+            for (auto it = f.dynVars->begin(); it != f.dynVars->end();) {
+                if (env->getLocal(it->first) == nullptr && !env->isGlobal(it->first)
+                    && !env->isPersistent(it->first))
+                    it = f.dynVars->erase(it);
+                else
+                    ++it;
+            }
+        }
+    };
+    for (size_t fi = frames_.size(); fi-- > 0;) {
+        auto &f = frames_[fi];
+        Environment *fEnv = f.env ? f.env.get()
+                                  : (f.isScriptFrame
+                                         ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                                         : nullptr);
+        if (fEnv == env)
+            syncOne(f, f.R);
+    }
+    for (size_t psi = activePausedStates_.size(); psi-- > 0;) {
+        PausedState *ps = activePausedStates_[psi];
+        if (!ps) continue;
+        for (size_t fi = ps->frames.size(); fi-- > 0;) {
+            auto &f = ps->frames[fi];
+            Environment *fEnv = f.env ? f.env.get()
+                                      : (f.isScriptFrame ? &engine_.workspaceEnv() : nullptr);
+            if (fEnv == env && f.regBase + f.nregs <= ps->regSnapshot.size())
+                syncOne(f, &ps->regSnapshot[f.regBase]);
         }
     }
 }
 
 void VM::flushWorkspaceFrame()
 {
-    if (frames_.empty()) return;
-    const auto &f = frames_[0];
-    if (!f.chunk || f.env) return;
-    Environment &ws = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-    for (const auto &entry : f.chunk->varMap) {
-        if (entry.second < f.nregs) {
-            const Value &v = f.R[entry.second];
-            if (!v.isUnset() && !v.isDeleted())
-                ws.set(entry.first, v);
-        }
-    }
-    for (const auto &gname : f.chunk->globalNames) {
-        for (const auto &[vname, reg] : f.chunk->varMap) {
-            if (vname == gname && reg < f.nregs) {
-                if (!f.R[reg].isUnset() && !f.R[reg].isDeleted())
-                    engine_.globalsEnv_->set(gname, f.R[reg]);
-                break;
+    auto flushOne = [&](const CallFrame &f, const Value *regs, Environment &ws) {
+        if (!f.chunk || !regs || f.env) return;
+        for (const auto &entry : f.chunk->varMap) {
+            if (entry.second < f.nregs) {
+                if (!whoVisible(engine_, entry.first, *f.chunk))
+                    continue;
+                Value v = readChunkVar(*f.chunk, regs, f.nregs, entry.first, entry.second);
+                if (!v.isUnset() && !v.isDeleted())
+                    ws.set(entry.first, std::move(v));
+                else if (v.isDeleted())
+                    ws.remove(entry.first);
             }
         }
+        exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, regs, f.nregs,
+                                         /*isTopLevel=*/true);
+    };
+    if (!frames_.empty() && frames_[0].isScriptFrame) {
+        Environment &ws = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+        flushOne(frames_[0], frames_[0].R, ws);
+    }
+    for (const PausedState *ps : activePausedStates_) {
+        if (!ps || ps->frames.empty() || !ps->frames[0].isScriptFrame) continue;
+        const auto &f0 = ps->frames[0];
+        if (f0.regBase + f0.nregs <= ps->regSnapshot.size())
+            flushOne(f0, &ps->regSnapshot[f0.regBase], engine_.workspaceEnv());
     }
 }
 
@@ -4276,25 +4785,40 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
 {
     std::unordered_map<std::string, Value> out;
     if (!frameEnv) return out;
-    // Find the innermost frame that owns this env.
     const CallFrame *match = nullptr;
+    const Value *matchRegs = nullptr;
     for (size_t fi = frames_.size(); fi-- > 0;) {
         const auto &f = frames_[fi];
         Environment *fEnv = f.env ? f.env.get()
-                                  : (fi == 0 ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                                             : nullptr);
-        if (fEnv == frameEnv) { match = &f; break; }
+                                  : (f.isScriptFrame
+                                         ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                                         : nullptr);
+        if (fEnv == frameEnv) { match = &f; matchRegs = f.R; break; }
     }
-    if (match) {
-        // Statically-allocated locals (live in registers).
-        for (const auto &entry : match->chunk->varMap) {
-            if (entry.second < match->nregs) {
-                const Value &v = match->R[entry.second];
-                if (!v.isUnset() && !v.isDeleted())
-                    out.emplace(entry.first, v);
+    if (!match) {
+        for (size_t psi = activePausedStates_.size(); psi-- > 0 && !match;) {
+            const PausedState *ps = activePausedStates_[psi];
+            if (!ps) continue;
+            for (size_t fi = ps->frames.size(); fi-- > 0;) {
+                const auto &f = ps->frames[fi];
+                Environment *fEnv = f.env ? f.env.get()
+                                          : (f.isScriptFrame ? &engine_.workspaceEnv() : nullptr);
+                if (fEnv == frameEnv && f.regBase + f.nregs <= ps->regSnapshot.size()) {
+                    match = &f;
+                    matchRegs = &ps->regSnapshot[f.regBase];
+                    break;
+                }
             }
         }
-        // Existing dynVars overlay (assignin'd / debug-injected names).
+    }
+    if (match && match->chunk && matchRegs) {
+        for (const auto &entry : match->chunk->varMap) {
+            if (entry.second < match->nregs) {
+                Value v = readChunkVar(*match->chunk, matchRegs, match->nregs, entry.first, entry.second);
+                if (!v.isUnset() && !v.isDeleted())
+                    out.emplace(entry.first, std::move(v));
+            }
+        }
         if (match->dynVars) {
             for (const auto &kv : *match->dynVars) {
                 if (!kv.second.isUnset() && !kv.second.isDeleted())
@@ -4314,31 +4838,38 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
     if (callDepth() >= maxRecursion_)
         throw std::runtime_error("VM: maximum recursion depth exceeded");
 
+    const size_t nUpvals = funcChunk.upvalueParamRegs.size();
+    const size_t userNargs = (nargs >= nUpvals) ? (nargs - nUpvals) : nargs;
+
     // varargin: the LAST declared parameter absorbs extras (1xN cell,
-    // empty 0x0 when none) — same MATLAB semantics as TreeWalker.
+    // empty 0x0 when none) — same semantics as TreeWalker.
     const bool va = !funcChunk.paramNames.empty()
                     && funcChunk.paramNames.back() == "varargin";
-    if (!va && nargs > static_cast<size_t>(funcChunk.numParams))
+    if (!va && userNargs > static_cast<size_t>(funcChunk.numParams))
         throw std::runtime_error("Too many input arguments for function '" + funcChunk.name + "'");
-    // Too-few stays lenient (toolbox shims use `if nargin < k` guards —
-    // see the TreeWalker note).
 
     uint32_t nregs = funcChunk.numRegisters;
-    size_t pc = std::min(nargs, static_cast<size_t>(funcChunk.numParams));
+    size_t pc = std::min(userNargs, static_cast<size_t>(funcChunk.numParams));
 
-    // Copy args, varargin, and ctorSeed BEFORE ensureRegStackCapacity, since
-    // `args` or `ctorSeed` may point into caller registers inside regStack_.
+    // Copy args, upvalue boxes, varargin, and ctorSeed BEFORE ensureRegStackCapacity,
+    // since `args` or `ctorSeed` may point into caller registers inside regStack_.
     std::vector<Value> argsCopy(pc);
     for (size_t i = 0; i < pc; ++i)
         argsCopy[i] = args[i];
 
+    std::vector<Value> upvalsCopy(nUpvals);
+    if (nUpvals > 0 && nargs >= nUpvals) {
+        for (size_t i = 0; i < nUpvals; ++i)
+            upvalsCopy[i] = args[userNargs + i];
+    }
+
     Value vaCell;
     if (va) {
         const size_t required = funcChunk.numParams - 1;
-        vaCell = nargs > required
-                     ? Value::cell(1, nargs - required, engine_.mr_)
+        vaCell = userNargs > required
+                     ? Value::cell(1, userNargs - required, engine_.mr_)
                      : Value::cell(0, 0, engine_.mr_);
-        for (size_t i = required; i < nargs; ++i)
+        for (size_t i = required; i < userNargs; ++i)
             vaCell.cellAt(i - required) = args[i];
     }
 
@@ -4354,6 +4885,12 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
     for (uint32_t i = 0; i < nregs; ++i)
         newR[i] = Value();
 
+    for (size_t i = 0; i < nUpvals; ++i) {
+        uint16_t uvReg = funcChunk.upvalueParamRegs[i];
+        if (uvReg < nregs)
+            newR[uvReg] = std::move(upvalsCopy[i]);
+    }
+
     for (size_t i = 0; i < pc; ++i)
         newR[i] = std::move(argsCopy[i]);
 
@@ -4368,7 +4905,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
     // Inject nargin/nargout into function scope
     for (auto &[vname, reg] : funcChunk.varMap) {
         if (vname == "nargin" && reg < nregs)
-            newR[reg] = Value::scalar(static_cast<double>(nargs), nullptr);
+            newR[reg] = Value::scalar(static_cast<double>(userNargs), nullptr);
         else if (vname == "nargout" && reg < nregs)
             newR[reg] = Value::scalar(static_cast<double>(nargout), nullptr);
     }
@@ -4382,35 +4919,18 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
             }
     }
 
-    // Sync caller's live global registers to globalsEnv before importing into callee
+    // Sync caller's live global/persistent registers before importing into callee
     if (!frames_.empty()) {
         const auto &cf0 = frames_.back();
         if (cf0.chunk) {
-            for (const auto &gname : cf0.chunk->globalNames) {
-                for (const auto &[vname, reg] : cf0.chunk->varMap) {
-                    if (vname == gname && reg < cf0.nregs) {
-                        if (!cf0.R[reg].isUnset() && !cf0.R[reg].isDeleted())
-                            engine_.globalsEnv_->set(gname, cf0.R[reg]);
-                        break;
-                    }
-                }
-            }
+            exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *cf0.chunk, cf0.R,
+                                             cf0.nregs, cf0.isScriptFrame);
         }
     }
 
-    // Import global/persistent variables from globalsEnv (seed [] if uninitialized)
-    for (auto &gname : funcChunk.globalNames) {
-        for (auto &[vname, reg] : funcChunk.varMap) {
-            if (vname == gname && reg < nregs) {
-                Value *gval = engine_.globalsEnv_->get(gname);
-                if (gval && !gval->isUnset() && !gval->isDeleted())
-                    newR[reg] = *gval;
-                else
-                    newR[reg] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
-                break;
-            }
-        }
-    }
+    // Import global and persistent variables (seed [] if uninitialized)
+    importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, funcChunk, newR, nregs,
+                                     /*isTopLevel=*/false, /*seedMissing=*/true);
 
     // Pre-compute caller's CALL-site arg names so the new frame can
     // expose them via inputname(k). caller's frame.ip was advanced past
@@ -4492,31 +5012,14 @@ void VM::popCallFrame(Value retVal)
         ctl->popFrame();
     }
 
-    bool isTopLevel = (frames_.size() == 1);
+    bool isScriptFrame = frame.isScriptFrame;
 
-    // Export globals back to globalsEnv_ (the single global value store) — no
-    // local copy in workspaceEnv_. A function-scope `global X` writes only
-    // globalsEnv_ and never touches the base workspace; mirroring it there was
-    // the leak. Base-workspace membership is recorded separately by
-    // runOneChunk's updateTopLevelGlobals, and reads of a base-undeclared
-    // global are blocked by Engine::getVariable's membership gate.
-    for (auto &gname : frame.chunk->globalNames) {
-        for (auto &[vname, reg] : frame.chunk->varMap) {
-            if (vname == gname && reg < frame.nregs) {
-                if (isTopLevel) {
-                    // Bare `global X` (unset/deleted reg) must not clobber an
-                    // existing global value.
-                    if (!frame.R[reg].isUnset() && !frame.R[reg].isDeleted())
-                        engine_.globalsEnv_->set(gname, frame.R[reg]);
-                } else {
-                    engine_.globalsEnv_->set(gname, frame.R[reg]);
-                }
-                break;
-            }
-        }
+    if (frame.chunk) {
+        exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *frame.chunk, frame.R,
+                                         frame.nregs, isScriptFrame);
     }
 
-    if (isTopLevel)
+    if (isScriptFrame && frame.chunk)
         rebuildLocalVarMap(lastVarMap_, *frame.chunk, frame.R, frame.nregs);
 
     // Cleanup: release heap objects in frame
@@ -4531,15 +5034,8 @@ void VM::popCallFrame(Value retVal)
     tryStack_.resize(std::min(tryStack_.size(), frame.tryStackBase));
 
     frames_.pop_back();
-    // Drop this frame's provenance push (and anything a throwing callee
-    // leaked above it) — truncate, not pop, so the stack stays consistent
-    // on every unwind path.
     engine_.truncateScriptOrigins(originDepth);
 
-    // State-machine callback return: feed the result into the continuation,
-    // which either pushes the next callback frame (re-attaching itself) or
-    // writes the final result to its captured destination. No caller-register
-    // write — the "caller" of a callback frame is the C++ state machine.
     if (cont) {
         R_ = frames_.empty() ? nullptr : frames_.back().R;
         cont->step(*this, &retVal, cont);
@@ -4550,15 +5046,9 @@ void VM::popCallFrame(Value retVal)
         CallFrame &caller = frames_.back();
         R_ = caller.R;
         if (caller.chunk) {
-            for (const auto &gname : caller.chunk->globalNames) {
-                for (const auto &[vname, reg] : caller.chunk->varMap) {
-                    if (vname == gname && reg < caller.nregs) {
-                        if (Value *gval = engine_.globalsEnv_->get(gname))
-                            caller.R[reg] = *gval;
-                        break;
-                    }
-                }
-            }
+            importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *caller.chunk, caller.R,
+                                             caller.nregs, caller.isScriptFrame,
+                                             /*seedMissing=*/false);
         }
 
         if (frame.isMultiReturn) {
@@ -5320,36 +5810,57 @@ void VM::execDisplay(const Instruction &I, Value *R, const BytecodeChunk &chunk)
     engine_.outputText(R[I.a].formatDisplay(name));
 }
 
-// MATLAB-parity visibility rule for `who`/`whos` over a chunk's register
-// file. Hide reserved names (built-in constants, pseudo-vars, and any
-// host-registered constants) UNLESS the chunk has actually assigned them
-// — i.e. the user shadowed them. Mirrors DebugWorkspace::names() so both
-// surfaces show the same thing.
-static bool whoVisible(const Engine &engine, const std::string &name,
-                       const BytecodeChunk &chunk)
-{
-    if (!engine.isReservedName(name))
-        return true;
-    return chunk.assignedVars.count(name) > 0;
-}
-
 void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 {
+    std::unordered_set<std::string> seen;
     std::vector<std::string> names;
+    auto addName = [&](const std::string &nm) {
+        if (seen.insert(nm).second)
+            names.push_back(nm);
+    };
+    const CallFrame *curFrame = frames_.empty() ? nullptr : &frames_.back();
     if (I.b == 0) {
         for (auto &[vn, reg] : chunk.varMap) {
-            if (reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()
-                && whoVisible(engine_, vn, chunk))
-                names.push_back(vn);
+            if (reg < chunk.numRegisters && whoVisible(engine_, vn, chunk)) {
+                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                if (!rv.isUnset() && !rv.isDeleted())
+                    addName(vn);
+            }
+        }
+        if (curFrame && curFrame->dynVars) {
+            for (const auto &[dn, dv] : *curFrame->dynVars)
+                if (!dv.isUnset() && !dv.isDeleted() && dn != "nargin" && dn != "nargout")
+                    addName(dn);
+        }
+        if (curFrame && curFrame->env) {
+            for (const auto &dn : curFrame->env->localNames())
+                if (dn != "nargin" && dn != "nargout")
+                    addName(dn);
         }
     } else {
         for (uint16_t i = 0; i < I.b; ++i) {
             std::string reqName = R[I.a + i].toString();
+            bool found = false;
             for (auto &[vn, reg] : chunk.varMap) {
-                if (vn == reqName && reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()) {
-                    names.push_back(vn);
+                if (vn == reqName && reg < chunk.numRegisters) {
+                    Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                    if (!rv.isUnset() && !rv.isDeleted()) {
+                        addName(vn);
+                        found = true;
+                    }
                     break;
                 }
+            }
+            if (!found && curFrame) {
+                if (curFrame->dynVars) {
+                    auto it = curFrame->dynVars->find(reqName);
+                    if (it != curFrame->dynVars->end() && !it->second.isUnset() && !it->second.isDeleted()) {
+                        addName(reqName);
+                        found = true;
+                    }
+                }
+                if (!found && curFrame->env && curFrame->env->getLocal(reqName))
+                    addName(reqName);
             }
         }
     }
@@ -5369,60 +5880,99 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 
 void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 {
-    std::vector<std::string> names;
+    std::unordered_map<std::string, Value> liveVals;
+    const CallFrame *curFrame = frames_.empty() ? nullptr : &frames_.back();
     if (I.b == 0) {
         for (auto &[vn, reg] : chunk.varMap) {
-            if (reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()
-                && whoVisible(engine_, vn, chunk))
-                names.push_back(vn);
+            if (reg < chunk.numRegisters && whoVisible(engine_, vn, chunk)) {
+                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                if (!rv.isUnset() && !rv.isDeleted())
+                    liveVals[vn] = std::move(rv);
+            }
+        }
+        if (curFrame && curFrame->dynVars) {
+            for (const auto &[dn, dv] : *curFrame->dynVars)
+                if (!dv.isUnset() && !dv.isDeleted() && dn != "nargin" && dn != "nargout")
+                    liveVals[dn] = dv;
+        }
+        if (curFrame && curFrame->env) {
+            for (const auto &dn : curFrame->env->localNames()) {
+                if (dn != "nargin" && dn != "nargout") {
+                    if (const Value *lv = curFrame->env->getLocal(dn);
+                        lv && !lv->isUnset() && !lv->isDeleted())
+                        liveVals[dn] = *lv;
+                }
+            }
         }
     } else {
         for (uint16_t i = 0; i < I.b; ++i) {
             std::string reqName = R[I.a + i].toString();
+            bool found = false;
             for (auto &[vn, reg] : chunk.varMap) {
-                if (vn == reqName && reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()) {
-                    names.push_back(vn);
+                if (vn == reqName && reg < chunk.numRegisters) {
+                    Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                    if (!rv.isUnset() && !rv.isDeleted()) {
+                        liveVals[vn] = std::move(rv);
+                        found = true;
+                    }
                     break;
+                }
+            }
+            if (!found && curFrame) {
+                if (curFrame->dynVars) {
+                    auto it = curFrame->dynVars->find(reqName);
+                    if (it != curFrame->dynVars->end() && !it->second.isUnset() && !it->second.isDeleted()) {
+                        liveVals[reqName] = it->second;
+                        found = true;
+                    }
+                }
+                if (!found && curFrame->env) {
+                    if (const Value *lv = curFrame->env->getLocal(reqName);
+                        lv && !lv->isUnset() && !lv->isDeleted())
+                        liveVals[reqName] = *lv;
                 }
             }
         }
     }
+    std::vector<std::string> names;
+    names.reserve(liveVals.size());
+    for (const auto &[k, _] : liveVals)
+        names.push_back(k);
     std::sort(names.begin(), names.end());
     std::unordered_set<std::string> globalSet(chunk.globalNames.begin(),
                                               chunk.globalNames.end());
+    std::unordered_set<std::string> persistentSet(chunk.persistentNames.begin(),
+                                                  chunk.persistentNames.end());
     if (!names.empty()) {
         std::ostringstream os;
         os << "  Name" << std::string(6, ' ') << "Size" << std::string(13, ' ')
            << "Bytes  Class" << std::string(5, ' ') << "Attributes\n\n";
         for (auto &n : names) {
-            for (auto &[vn2, reg2] : chunk.varMap) {
-                if (vn2 == n && reg2 < chunk.numRegisters) {
-                    auto &val = R[reg2];
-                    auto &d = val.dims();
-                    std::string sizeStr = std::to_string(d.rows()) + "x"
-                                          + std::to_string(d.cols());
-                    if (d.is3D())
-                        sizeStr += "x" + std::to_string(d.pages());
-                    std::string bytesStr = std::to_string(val.deepBytes());
-                    std::string classStr = mtypeName(val.type());
-                    std::string attrStr;
-                    if (globalSet.count(n))
-                        attrStr = "global";
-                    os << "  " << n;
-                    for (size_t i = n.size(); i < 10; ++i)
-                        os << " ";
-                    os << sizeStr;
-                    for (size_t i = sizeStr.size(); i < 17; ++i)
-                        os << " ";
-                    for (size_t i = bytesStr.size(); i < 5; ++i)
-                        os << " ";
-                    os << bytesStr << "  " << classStr;
-                    for (size_t i = classStr.size(); i < 10; ++i)
-                        os << " ";
-                    os << attrStr << "\n";
-                    break;
-                }
-            }
+            const Value &val = liveVals.at(n);
+            auto &d = val.dims();
+            std::string sizeStr = std::to_string(d.rows()) + "x"
+                                  + std::to_string(d.cols());
+            if (d.is3D())
+                sizeStr += "x" + std::to_string(d.pages());
+            std::string bytesStr = std::to_string(val.deepBytes());
+            std::string classStr = mtypeName(val.type());
+            std::string attrStr;
+            if (globalSet.count(n))
+                attrStr = "global";
+            else if (persistentSet.count(n))
+                attrStr = "persistent";
+            os << "  " << n;
+            for (size_t i = n.size(); i < 10; ++i)
+                os << " ";
+            os << sizeStr;
+            for (size_t i = sizeStr.size(); i < 17; ++i)
+                os << " ";
+            for (size_t i = bytesStr.size(); i < 5; ++i)
+                os << " ";
+            os << bytesStr << "  " << classStr;
+            for (size_t i = classStr.size(); i < 10; ++i)
+                os << " ";
+            os << attrStr << "\n";
         }
         os << "\n";
         if (engine_.outputFunc_)

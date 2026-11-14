@@ -4,7 +4,9 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
 
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -57,11 +59,16 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     scalarRegs_.reset();
     definedRegs_.reset();
     mayClear_ = false;
+    mayInjectVars_ = false;
+    upvalueRegs_.clear();
+    allScopeUpvalueBoxRegs_.clear();
+    nestedFuncInfo_.clear();
     nextReg_ = 0;
     peakReg_ = 0;
     maxVarReg_ = 0;
     currentLoc_ = {};
     isTopLevel_ = true;
+    inFunctionBody_ = false;
     inFusionFallback_ = false;
     nargoutContext_ = 1;
     activeTryDepth_ = 0;
@@ -184,7 +191,7 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
 
 namespace {
 void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
-                             std::vector<double> &loopNums)
+                             bool &mayInjectVars, std::vector<double> &loopNums)
 {
     if (!node)
         return;
@@ -192,17 +199,21 @@ void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
         return;
     if (node->type == NodeType::IDENTIFIER || node->type == NodeType::COMMAND_CALL) {
         const std::string &s = node->strValue;
-        if (s == "clear" || s == "eval" || s == "evalin")
+        if (s == "clear" || s == "clearvars" || s == "eval" || s == "evalin" || s == "run")
             mayClear = true;
+        if (s == "load" || s == "eval" || s == "evalin" || s == "run")
+            mayInjectVars = true;
     } else if (node->type == NodeType::CALL && !node->children.empty()
                && node->children[0]->type == NodeType::IDENTIFIER) {
         const std::string &s = node->children[0]->strValue;
-        if (s == "clear" || s == "eval" || s == "evalin")
+        if (s == "clear" || s == "clearvars" || s == "eval" || s == "evalin" || s == "run")
             mayClear = true;
+        if (s == "load" || s == "eval" || s == "evalin" || s == "run")
+            mayInjectVars = true;
     } else if (inLoop && node->type == NodeType::NUMBER_LITERAL && loopNums.size() < 16) {
         bool exists = false;
         for (double v : loopNums) {
-            if (v == node->numValue) {
+            if (v == node->numValue && std::signbit(v) == std::signbit(node->numValue)) {
                 exists = true;
                 break;
             }
@@ -214,22 +225,22 @@ void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
     const bool childInLoop = inLoop || node->type == NodeType::FOR_STMT
                              || node->type == NodeType::WHILE_STMT;
     for (const auto &child : node->children)
-        scanAstForLoopsAndClear(child.get(), childInLoop, mayClear, loopNums);
+        scanAstForLoopsAndClear(child.get(), childInLoop, mayClear, mayInjectVars, loopNums);
     for (const auto &t : node->lhsTargets)
-        scanAstForLoopsAndClear(t.get(), childInLoop, mayClear, loopNums);
+        scanAstForLoopsAndClear(t.get(), childInLoop, mayClear, mayInjectVars, loopNums);
     for (const auto &[cond, body] : node->branches) {
-        scanAstForLoopsAndClear(cond.get(), childInLoop, mayClear, loopNums);
-        scanAstForLoopsAndClear(body.get(), childInLoop, mayClear, loopNums);
+        scanAstForLoopsAndClear(cond.get(), childInLoop, mayClear, mayInjectVars, loopNums);
+        scanAstForLoopsAndClear(body.get(), childInLoop, mayClear, mayInjectVars, loopNums);
     }
     if (node->elseBranch)
-        scanAstForLoopsAndClear(node->elseBranch.get(), childInLoop, mayClear, loopNums);
+        scanAstForLoopsAndClear(node->elseBranch.get(), childInLoop, mayClear, mayInjectVars, loopNums);
 }
 } // namespace
 
 void Compiler::preallocatePinnedConstants(const ASTNode *body)
 {
     std::vector<double> loopNums;
-    scanAstForLoopsAndClear(body, false, mayClear_, loopNums);
+    scanAstForLoopsAndClear(body, false, mayClear_, mayInjectVars_, loopNums);
     if (mayClear_)
         definedRegs_.reset();
     for (double v : loopNums) {
@@ -402,15 +413,86 @@ uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     return r;
 }
 
+uint16_t Compiler::allocPinnedReg()
+{
+    int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
+    if (allocReg >= static_cast<int>(kInvalidReg))
+        throw std::runtime_error(
+            "Compiler: register limit exceeded (>65534 registers in chunk)");
+    uint16_t r = static_cast<uint16_t>(allocReg);
+    peakReg_ = allocReg + 1;
+    nextReg_ = allocReg + 1;
+    if (nextReg_ > maxVarReg_)
+        maxVarReg_ = nextReg_;
+    return r;
+}
+
+void Compiler::emitUpvalLoadRawIfShared(const std::string &name, uint16_t reg)
+{
+    auto it = upvalueRegs_.find(name);
+    if (it == upvalueRegs_.end())
+        return;
+    emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, it->second, 1, 0, 0));
+}
+
+void Compiler::emitUpvalStoreIfShared(const std::string &name, uint16_t reg)
+{
+    auto it = upvalueRegs_.find(name);
+    if (it == upvalueRegs_.end())
+        return;
+    emitAB(OpCode::UPVAL_STORE, it->second, reg);
+}
+
+uint16_t Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
+{
+    if (info.upvalueNames.empty()) {
+        uint16_t dst = tempReg();
+        Value fh = Value::funcHandle(info.compiledName, engine_.resource());
+        fh.setFuncHandleSource(info.displaySource);
+        int32_t constIdx = appendConstant(std::move(fh));
+        emitAD(OpCode::LOAD_CONST, dst, constIdx);
+        return dst;
+    }
+
+    size_t totalSlots = 1 + info.upvalueNames.size();
+    uint16_t fhReg = tempReg();
+    Value fh = Value::funcHandle(info.compiledName, engine_.resource());
+    fh.setFuncHandleSource(info.displaySource);
+    int32_t constIdx = appendConstant(std::move(fh));
+    emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
+
+    uint16_t base = static_cast<uint16_t>(nextReg_);
+    {
+        uint16_t slot0 = tempReg();
+        if (fhReg != slot0)
+            emitAB(OpCode::MOVE, slot0, fhReg);
+    }
+    for (const auto &uvName : info.upvalueNames) {
+        uint16_t slot = tempReg();
+        uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+        if (boxReg != slot)
+            emitAB(OpCode::MOVE, slot, boxReg);
+    }
+    uint16_t dst = tempReg();
+    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint16_t>(totalSlots));
+    return dst;
+}
+
 uint16_t Compiler::varRegRead(const std::string &name)
 {
+    // Shared lexical upvalue read (outer <-> nested function)
+    auto uvIt = upvalueRegs_.find(name);
+    if (uvIt != upvalueRegs_.end()) {
+        uint16_t reg = varRegLookup(name, /*preloadReserved=*/false);
+        int32_t nameIdx = addStringConstant(name);
+        emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, uvIt->second, 0, nameIdx, 0));
+        scalarRegs_.reset(reg);
+        return reg;
+    }
+
     // Check if variable is already known (local scope)
     auto it = varRegisters_.find(name);
     if (it != varRegisters_.end()) {
-        // Emit runtime check — variable may be unset (e.g. clear x,
-        // conditional assignment, or not yet assigned).
-        // Skip for builtin constants (pi, eps, inf, etc.) — always defined,
-        // and skip when definedRegs_ proves the variable is already defined.
         if (!engine_.isReservedName(name)) {
             if (mayClear_ || !definedRegs_.test(it->second)) {
                 int32_t nameIdx = addStringConstant(name);
@@ -422,6 +504,24 @@ uint16_t Compiler::varRegRead(const std::string &name)
         return it->second;
     }
 
+    // Zero-arg nested function call in expression context (`y = inner`)
+    auto nit = nestedFuncInfo_.find(name);
+    if (nit != nestedFuncInfo_.end()) {
+        uint16_t argBase = static_cast<uint16_t>(nextReg_);
+        for (const auto &uvName : nit->second.upvalueNames) {
+            uint16_t slot = tempReg();
+            uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+            if (boxReg != slot)
+                emitAB(OpCode::MOVE, slot, boxReg);
+        }
+        uint16_t dst = tempReg();
+        int32_t funcIdx = addStringConstant(nit->second.compiledName);
+        emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
+                                     static_cast<uint16_t>(nit->second.upvalueNames.size()),
+                                     funcIdx, nargoutContext_));
+        return dst;
+    }
+
     // Check workspaceEnv
     if (isTopLevel_ && !engine_.isReservedName(name)) {
         Value *existing = engine_.getVariable(name);
@@ -429,28 +529,19 @@ uint16_t Compiler::varRegRead(const std::string &name)
             return varRegLookup(name); // will import from workspaceEnv (including empty values)
     }
 
-    // Reserved name (built-in constant OR pseudo-var). Let varRegLookup do
-    // the pre-load from the engine so debug-eval can see nargin/ans/… that
-    // outer layers injected into workspaceEnv.
-    //
-    // Exception: `nargin`/`nargout` at top level are illegal in the
-    // reference language ("You can only call nargin/nargout from within
-    // a function."), so we don't short-circuit here — fall through to
-    // the ASSERT_DEF branch which emits the reference-exact runtime
-    // error.
     if (engine_.isReservedName(name)) {
         const bool topLevelPseudo = isTopLevel_ && (name == "nargin" || name == "nargout");
         if (!topLevelPseudo)
             return varRegLookup(name);
     }
 
-    // Check if it's a known function — emit zero-arg CALL. In MATLAB a bare
-    // function name in expression context is a call (`t1 = toc`); likewise a
-    // bare class name constructs a default instance (`x = MyClass`), which the
-    // runtime CALL handler resolves via findClass + construct.
+    // Check if it's a known function — emit zero-arg CALL unless dynamic
+    // variable injection (`load`/`eval`/`evalin`/`run`) may shadow it in frame.env,
+    // in which case ASSERT_DEF checks dynVars/frame.env first and falls back to 0-arg CALL.
     const BuiltinClass *kls = engine_.findClass(name);
-    if (engine_.hasFunction(name) || engine_.isKnownLeafName(name)
-        || (kls && kls->construct)) {
+    if (!mayInjectVars_
+        && (engine_.hasFunction(name) || engine_.isKnownLeafName(name)
+            || (kls && kls->construct))) {
         uint16_t argBase = nextReg_;
         uint16_t dst = tempReg();
         int32_t funcIdx = addStringConstant(name);
@@ -459,8 +550,6 @@ uint16_t Compiler::varRegRead(const std::string &name)
     }
 
     // Unknown variable — allocate register and emit runtime check.
-    // At runtime, ASSERT_DEF checks the register; if unset, checks dynVars
-    // (for debug eval / runtime eval); if still not found, throws error.
     uint16_t reg = varRegLookup(name);
     int32_t nameIdx = addStringConstant(name);
     emitAD(OpCode::ASSERT_DEF, reg, nameIdx);
@@ -862,7 +951,9 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
             uint16_t valReg = compileNode(rhs->children[0]->children[1].get());
             uint16_t dst = varRegLookup(lhs->strValue);
             markAssigned(lhs->strValue);
+            emitUpvalLoadRawIfShared(lhs->strValue, dst);
             emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
+            emitUpvalStoreIfShared(lhs->strValue, dst);
             scalarRegs_.reset(dst);  // result is no longer scalar
             if (!mayClear_)
                 definedRegs_.set(dst);
@@ -924,6 +1015,7 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
             scalarRegs_.reset(dst);
         if (!mayClear_)
             definedRegs_.set(dst);
+        emitUpvalStoreIfShared(lhs->strValue, dst);
 
         // Display if no semicolon
         if (!node->suppressOutput) {
@@ -952,9 +1044,11 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
         uint16_t obj = varRegWrite(objNode->strValue);
+        emitUpvalLoadRawIfShared(objNode->strValue, obj);
         uint16_t val = compileNode(node->children[1].get());
         uint16_t nameReg = compileNode(lhs->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, val);
+        emitUpvalStoreIfShared(objNode->strValue, obj);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!node->suppressOutput) {
@@ -1028,6 +1122,8 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         else scalarRegs_.reset(dst);
         if (!mayClear_ && !node->returnNames.empty() && node->returnNames[0] != "~")
             definedRegs_.set(dst);
+        if (!node->returnNames.empty() && node->returnNames[0] != "~")
+            emitUpvalStoreIfShared(node->returnNames[0], dst);
         if (!node->suppressOutput && !node->returnNames.empty()
             && node->returnNames[0] != "~") {
             int32_t nameIdx = addStringConstant(node->returnNames[0]);
@@ -1051,8 +1147,11 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         for (size_t i = 0; i < nout; ++i) {
             if (outRegs[i] != outBase + i)
                 emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<uint16_t>(i));
-            if (!mayClear_ && i < node->returnNames.size() && node->returnNames[i] != "~")
-                definedRegs_.set(outRegs[i]);
+            if (i < node->returnNames.size() && node->returnNames[i] != "~") {
+                if (!mayClear_)
+                    definedRegs_.set(outRegs[i]);
+                emitUpvalStoreIfShared(node->returnNames[i], outRegs[i]);
+            }
         }
         if (!node->suppressOutput) {
             for (size_t i = 0; i < node->returnNames.size(); ++i)
@@ -1133,7 +1232,8 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         if (rootIdent) {
             const std::string &root = rootIdent->strValue;
             rootIsVar = varRegisters_.find(root) != varRegisters_.end()
-                        || engine_.workspaceEnv().getLocal(root) != nullptr;
+                        || upvalueRegs_.find(root) != upvalueRegs_.end()
+                        || (isTopLevel_ && engine_.workspaceEnv().getLocal(root) != nullptr);
         }
         auto compileArgsBlock = [&](uint16_t &argBaseOut, bool splatCsl) {
             // splatCsl: a brace-index arg (obj.method(c{:})) stays an
@@ -1262,11 +1362,17 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             if (callNode->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
         const std::string &fname = callNode->children[0]->strValue;
         const bool calleeIsVar = varRegisters_.find(fname) != varRegisters_.end()
-                                 || engine_.workspaceEnv().getLocal(fname) != nullptr;
+                                 || upvalueRegs_.find(fname) != upvalueRegs_.end()
+                                 || (isTopLevel_ && engine_.workspaceEnv().getLocal(fname) != nullptr);
         if (anyBraceArg && !calleeIsVar) {
             std::vector<uint16_t> argRegs;
             for (size_t i = 1; i < callNode->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(callNode->children[i].get()));
+            auto nit = nestedFuncInfo_.find(fname);
+            if (nit != nestedFuncInfo_.end()) {
+                for (const auto &uvName : nit->second.upvalueNames)
+                    argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+            }
             uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
                 uint16_t slot = tempReg();
@@ -1274,7 +1380,8 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
             uint16_t outBase = reserveRegs(nout);
-            int32_t funcIdx = addStringConstant(fname);
+            int32_t funcIdx = addStringConstant(
+                nit != nestedFuncInfo_.end() ? nit->second.compiledName : fname);
             emit(Instruction::make_abcde(OpCode::CALL_FLATTEN_MULTI, outBase, argBase,
                                          static_cast<uint16_t>(argRegs.size()), funcIdx,
                                          static_cast<uint16_t>(nout)));
@@ -1283,11 +1390,6 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
                 return nout ? outBase : 0;
             return outRegs.empty() ? 0 : outRegs[0];
         }
-        // VARIABLE callee with brace args — f(c{:}) where f holds a
-        // handle or an indexable value: same expansion compile, but
-        // CALL_INDIRECT_FLATTEN so the runtime flattens the CSL and
-        // resolves the callee value
-        // (bugs/closed/lang/handle-call-csl-splat).
         if (anyBraceArg && calleeIsVar) {
             std::vector<uint16_t> flatRegs;
             for (size_t i = 1; i < callNode->children.size(); ++i)
@@ -1300,7 +1402,11 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             }
             uint16_t fhReg = varRegLookup(fname);
             int32_t nameIdx = addStringConstant(fname);
-            emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
+            auto uvIt = upvalueRegs_.find(fname);
+            if (uvIt != upvalueRegs_.end())
+                emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+            else
+                emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
             const uint16_t noutF = static_cast<uint16_t>(std::max<size_t>(nout, 1));
             uint16_t outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
@@ -1314,10 +1420,30 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         }
     }
 
+    const std::string &funcName = callNode->children[0]->strValue;
+
+    bool calleeIsVar = (varRegisters_.find(funcName) != varRegisters_.end()
+                        || upvalueRegs_.find(funcName) != upvalueRegs_.end());
+    if (!calleeIsVar && isTopLevel_ && !engine_.isReservedName(funcName)) {
+        Value *existing = engine_.getVariable(funcName);
+        if (existing && !existing->isUnset() && !existing->isDeleted()) {
+            const bool isCallable = existing->isFuncHandle();
+            if (isCallable
+                || (!engine_.isKnownLeafName(funcName) && !engine_.hasFunction(funcName)))
+                calleeIsVar = true;
+        }
+    }
+
     // Compile call arguments
     std::vector<uint16_t> argRegs;
     for (size_t i = 1; i < callNode->children.size(); ++i)
         argRegs.push_back(compileNode(callNode->children[i].get()));
+
+    auto nestedIt = (!calleeIsVar) ? nestedFuncInfo_.find(funcName) : nestedFuncInfo_.end();
+    if (nestedIt != nestedFuncInfo_.end()) {
+        for (const auto &uvName : nestedIt->second.upvalueNames)
+            argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+    }
 
     uint16_t argBase = nextReg_;
     for (size_t i = 0; i < argRegs.size(); ++i) {
@@ -1329,26 +1455,13 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     // Allocate consecutive registers for output
     uint16_t outBase = reserveRegs(nout);
 
-    const std::string &funcName = callNode->children[0]->strValue;
-
-    // If the callee names a known local / workspace variable holding a
-    // callable, this is a multi-output INDIRECT (handle) call —
-    // `[a,b] = h(x)` for a stored handle. Mirror the single-output
-    // CALL_INDIRECT gate in compileCall and emit CALL_INDIRECT_MULTI, so the
-    // VM dispatches on the handle value instead of resolving `funcName` as a
-    // function name (which would fail). Enables e.g. fmincon's nonlcon.
-    bool calleeIsVar = (varRegisters_.find(funcName) != varRegisters_.end());
-    if (!calleeIsVar && isTopLevel_ && !engine_.isReservedName(funcName)) {
-        Value *existing = engine_.getVariable(funcName);
-        if (existing && !existing->isUnset() && !existing->isDeleted()) {
-            const bool isCallable = existing->isFuncHandle();
-            if (isCallable
-                || (!engine_.isKnownLeafName(funcName) && !engine_.hasFunction(funcName)))
-                calleeIsVar = true;
-        }
-    }
     if (calleeIsVar) {
         uint16_t fhReg = varRegLookup(funcName);
+        auto uvIt = upvalueRegs_.find(funcName);
+        if (uvIt != upvalueRegs_.end()) {
+            int32_t nameIdx = addStringConstant(funcName);
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+        }
         size_t callIdx = chunk_.code.size();
         // CALL_INDIRECT_MULTI: a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_MULTI,
@@ -1362,7 +1475,8 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         return outRegs.empty() ? 0 : outRegs[0];
     }
 
-    int32_t funcIdx = addStringConstant(funcName);
+    int32_t funcIdx = addStringConstant(
+        nestedIt != nestedFuncInfo_.end() ? nestedIt->second.compiledName : funcName);
 
     // CALL_MULTI: a=outBase, d=funcIdx, b=argBase, c=nargs, e=nout
     size_t callMultiIdx = chunk_.code.size();
@@ -1678,25 +1792,17 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
             if (local && !local->isUnset() && !local->isDeleted())
                 bareUserVar = true; // empty `[]` is a defined value: `x=[]; x` shows x, not ans
         } else {
-            if (varRegisters_.count(name) > 0 && engine_.isReservedName(name) == 0)
+            if ((varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0)
+                && engine_.isReservedName(name) == 0)
                 bareUserVar = true;
         }
         if (bareUserVar)
             displayName = name;
     }
 
-    // ── Bare zero-arg function call ──────────────────────────────
-    // When the parser sees `clear` or `figure` alone on a line (followed
-    // by a terminator), it produces EXPR_STMT → IDENTIFIER.  The parser's
-    // isCommandStyleCall() only fires when there IS a following argument
-    // token.  So bare no-arg commands land here.
-    //
-    // If the identifier is NOT a known variable but IS a registered
-    // function (external or user-defined), compile it as CALL with 0 args
-    // instead of treating it as a variable read.
     if (!bareUserVar && child->type == NodeType::IDENTIFIER) {
         const std::string &name = child->strValue;
-        bool isKnownVar = varRegisters_.count(name) > 0;
+        bool isKnownVar = varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0;
 
         // Also check workspaceEnv for variables from previous eval() calls
         if (!isKnownVar && isTopLevel_ && !engine_.isReservedName(name)) {
@@ -1705,11 +1811,37 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
                 isKnownVar = true;
         }
 
-        if (!isKnownVar
+        if (!isKnownVar) {
+            auto nit = nestedFuncInfo_.find(name);
+            if (nit != nestedFuncInfo_.end()) {
+                uint16_t argBase = static_cast<uint16_t>(nextReg_);
+                for (const auto &uvName : nit->second.upvalueNames) {
+                    uint16_t slot = tempReg();
+                    uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+                    if (boxReg != slot)
+                        emitAB(OpCode::MOVE, slot, boxReg);
+                }
+                uint16_t dst = tempReg();
+                int32_t funcIdx = addStringConstant(nit->second.compiledName);
+                emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
+                                             static_cast<uint16_t>(nit->second.upvalueNames.size()),
+                                             funcIdx, 0));
+                uint16_t ansReg = varRegWrite("ans");
+                if (ansReg != dst)
+                    emitAB(OpCode::MOVE, ansReg, dst);
+                emitUpvalStoreIfShared("ans", ansReg);
+                if (!node->suppressOutput) {
+                    int32_t nameIdx = addStringConstant("ans");
+                    emitAD(OpCode::DISPLAY, ansReg, nameIdx);
+                }
+                return ansReg;
+            }
+        }
+
+        if (!isKnownVar && !mayInjectVars_
             && (engine_.isKnownLeafName(name) || engine_.hasFunction(name)
-                || engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr
-                || engine_.hasFunction(name))) {
-            // Workspace builtins inside functions → opcodes
+                || engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr)) {
+            // Workspace builtins inside functions -> opcodes
             if (!isTopLevel_) {
                 if (name == "who") {
                     emitAB(OpCode::WHO, 0, 0);
@@ -1720,21 +1852,24 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
                     return tempReg();
                 }
                 if (name == "clear") {
-                    // clear (no args) inside function — clear all locals
                     for (auto &[vname, reg] : varRegisters_) {
-                        if (engine_.isReservedName(vname) == 0)
+                        if (engine_.isReservedName(vname) == 0) {
                             emitA(OpCode::CLEAR_VAR, reg);
+                            emitUpvalStoreIfShared(vname, reg);
+                        }
                     }
-                    return tempReg();
+                    if (!mayInjectVars_)
+                        return tempReg();
                 }
                 if (name == "exist") {
                     // exist (no args) — error, but let it go to CALL
                 }
             } else if (name == "clear") {
-                // clear (no args) on top-level — clear all registers + call externalFunc
                 for (auto &[vname, reg] : varRegisters_) {
-                    if (engine_.isReservedName(vname) == 0)
+                    if (engine_.isReservedName(vname) == 0) {
                         emitA(OpCode::CLEAR_VAR, reg);
+                        emitUpvalStoreIfShared(vname, reg);
+                    }
                 }
             }
 
@@ -1744,10 +1879,11 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
             int32_t funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
 
-            // Anonymous call result → bind to `ans`.
+            // Anonymous call result -> bind to `ans`.
             uint16_t ansReg = varRegWrite("ans");
             if (ansReg != dst)
                 emitAB(OpCode::MOVE, ansReg, dst);
+            emitUpvalStoreIfShared("ans", ansReg);
             if (!node->suppressOutput) {
                 int32_t nameIdx = addStringConstant("ans");
                 emitAD(OpCode::DISPLAY, ansReg, nameIdx);
@@ -1759,8 +1895,6 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
     uint16_t reg = compileNodeExpand(child);
 
     if (bareUserVar) {
-        // Display-by-name; no ans store — reading an existing name should
-        // not reassign the anonymous-result slot.
         if (!node->suppressOutput) {
             int32_t nameIdx = addStringConstant(displayName);
             emitAD(OpCode::DISPLAY, reg, nameIdx);
@@ -1768,13 +1902,13 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
         return reg;
     }
 
-    // Non-bare expression — display each element if CSL, then bind to `ans`.
     if (!node->suppressOutput) {
         int32_t nameIdx = addStringConstant("ans");
         emitAD(OpCode::DISPLAY, reg, nameIdx);
     }
     uint16_t ansReg = varRegWrite("ans");
     emitABC(OpCode::COLLAPSE, ansReg, reg, 1);
+    emitUpvalStoreIfShared("ans", ansReg);
     return ansReg;
 }
 
@@ -1965,14 +2099,28 @@ uint16_t Compiler::compileSwitch(const ASTNode *node)
 uint16_t Compiler::compileGlobalPersistent(const ASTNode *node)
 {
     const bool isGlobal = (node->type == NodeType::GLOBAL_STMT);
+    if (!isGlobal && isTopLevel_) {
+        uint16_t msgReg = tempReg();
+        int32_t msgIdx = addStringConstant(
+            "persistent declarations are only allowed inside functions");
+        emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
+        emitA(OpCode::THROW, msgReg);
+        return msgReg;
+    }
     for (auto &name : node->paramNames) {
         varRegWrite(name); // allocate register, mark as assigned
-        chunk_.globalNames.push_back(name);
-        // Record this chunk's OWN `global X` decls (not `persistent`, and not
-        // the inherited seed pushed in compile()) so runOneChunk can register
-        // base membership + seed [] without resurrecting a cleared global.
-        if (isGlobal)
+        if (isGlobal) {
+            if (std::find(chunk_.globalNames.begin(), chunk_.globalNames.end(), name)
+                == chunk_.globalNames.end()) {
+                chunk_.globalNames.push_back(name);
+            }
             chunk_.ownGlobalDecls.push_back(name);
+        } else {
+            if (std::find(chunk_.persistentNames.begin(), chunk_.persistentNames.end(), name)
+                == chunk_.persistentNames.end()) {
+                chunk_.persistentNames.push_back(name);
+            }
+        }
     }
     return 0;
 }
@@ -2032,8 +2180,11 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
 
     // Compile catch body
     definedRegs_ = savedDefined;
-    if (!node->strValue.empty() && !mayClear_)
-        definedRegs_.set(exReg);
+    if (!node->strValue.empty()) {
+        if (!mayClear_)
+            definedRegs_.set(exReg);
+        emitUpvalStoreIfShared(node->strValue, exReg);
+    }
     if (node->children.size() > 1) {
         compileNode(node->children[1].get());
     }
@@ -2203,6 +2354,7 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     }
 
     size_t bodyStart = currentPos();
+    emitUpvalStoreIfShared(node->strValue, vReg);
 
     // Compile body
     auto savedDefined = definedRegs_;
@@ -2211,7 +2363,7 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     compileNode(node->children[1].get());
     definedRegs_ = savedDefined;
 
-    // Patch continue targets → jump to FOR_NEXT
+    // Patch continue targets -> jump to FOR_NEXT
     size_t forNextPos = currentPos();
     for (size_t pos : loopStack_.back().continuePatches) {
         patchJump(pos, forNextPos - pos);
@@ -2225,8 +2377,9 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     chunk_.code.back().d =
         static_cast<int32_t>(bodyStart) - static_cast<int32_t>(currentPos() - 1);
 
-    // Patch FOR_INIT endOffset → jump past FOR_NEXT
+    // Patch FOR_INIT endOffset -> jump past FOR_NEXT
     patchJump(forInitPos, currentPos() - forInitPos);
+    emitUpvalStoreIfShared(node->strValue, vReg);
 
     // Patch break targets → jump to here (after loop)
     for (size_t pos : loopStack_.back().breakPatches) {
@@ -2462,7 +2615,7 @@ uint16_t Compiler::compileIndexExpr(const ASTNode *node)
         argOffset = 0;
     }
 
-    uint16_t arr = varRegLookup(name);
+    uint16_t arr = varRegRead(name);
 
     if (nargs == 1) {
         IndexContextGuard guard(*this, arr, 1);
@@ -2536,6 +2689,7 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
     }
 
     uint16_t arr = varRegWrite(name);
+    emitUpvalLoadRawIfShared(name, arr);
     uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     {
@@ -2575,6 +2729,7 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
         }
     } // guard restores index context
 
+    emitUpvalStoreIfShared(name, arr);
     if (!mayClear_)
         definedRegs_.set(arr);
     if (!suppress) {
@@ -2600,8 +2755,9 @@ uint16_t Compiler::compileFieldAccess(const ASTNode *node)
         std::string qualified = tryBuildQualifiedName(node, &root);
         if (!qualified.empty() && root) {
             const std::string &rootName = root->strValue;
-            const bool isLocalVar = varRegisters_.find(rootName) != varRegisters_.end();
-            const bool isWsVar = engine_.workspaceEnv().getLocal(rootName) != nullptr;
+            const bool isLocalVar = varRegisters_.find(rootName) != varRegisters_.end()
+                                    || upvalueRegs_.find(rootName) != upvalueRegs_.end();
+            const bool isWsVar = isTopLevel_ && engine_.workspaceEnv().getLocal(rootName) != nullptr;
             if (!isLocalVar && !isWsVar) {
                 // Split into dotted segments. Normally the whole name is one
                 // qualified reference (`pkg.sub.fn`, `Class.Const`). But when
@@ -2719,6 +2875,7 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         && cur->children[0]->type == NodeType::IDENTIFIER) {
         const std::string &rootName = cur->children[0]->strValue;
         uint16_t rootReg = varRegWrite(rootName);
+        emitUpvalLoadRawIfShared(rootName, rootReg);
         uint16_t idxReg;
         {
             IndexContextGuard guard(*this, rootReg, 1);
@@ -2729,6 +2886,7 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         int32_t nameIdx = addStringConstant(fieldChain[0]);
         emit(Instruction::make_abcde(OpCode::STRUCT_ELEM_FIELD_SET,
                                      rootReg, idxReg, valReg, nameIdx, 0));
+        emitUpvalStoreIfShared(rootName, rootReg);
         if (!mayClear_)
             definedRegs_.set(rootReg);
         if (!suppress) {
@@ -2744,6 +2902,7 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
     // fieldChain is in reverse: ["b", "a"] for s.a.b
     // Root variable
     uint16_t rootReg = varRegWrite(cur->strValue);
+    emitUpvalLoadRawIfShared(cur->strValue, rootReg);
     uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     if (fieldChain.size() == 1) {
@@ -2788,6 +2947,7 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         }
     }
 
+    emitUpvalStoreIfShared(cur->strValue, rootReg);
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
@@ -2948,6 +3108,7 @@ uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
         throw std::runtime_error("Compiler: invalid cell assignment target");
 
     uint16_t cell = varRegWrite(target->strValue);
+    emitUpvalLoadRawIfShared(target->strValue, cell);
     uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     size_t nidx = lhs->children.size() - 1;
@@ -2987,6 +3148,7 @@ uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
                                      safeVal));
     }
 
+    emitUpvalStoreIfShared(target->strValue, cell);
     if (!mayClear_)
         definedRegs_.set(cell);
     if (!suppress) {
@@ -3016,6 +3178,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool s
             scalarRegs_.reset(dst);
         if (!mayClear_)
             definedRegs_.set(dst);
+        emitUpvalStoreIfShared(target->strValue, dst);
         if (!suppress) {
             int32_t nameIdx = addStringConstant(target->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
@@ -3038,8 +3201,10 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool s
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
         uint16_t obj = varRegWrite(objNode->strValue);
+        emitUpvalLoadRawIfShared(objNode->strValue, obj);
         uint16_t nameReg = compileNode(target->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, valReg);
+        emitUpvalStoreIfShared(objNode->strValue, obj);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!suppress) {
@@ -3147,6 +3312,7 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhsNode);
 
     uint16_t rootReg = varRegWrite(cur->strValue);
+    emitUpvalLoadRawIfShared(cur->strValue, rootReg);
 
     // regs[k] = container that accessor k applies to (regs[0] = root).
     std::vector<uint16_t> regs(n + 1, 0);
@@ -3261,6 +3427,7 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     for (size_t k = n - 1; k-- > 0;)
         emitSet(k, regs[k + 1]);
 
+    emitUpvalStoreIfShared(cur->strValue, rootReg);
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
@@ -3378,7 +3545,8 @@ int Compiler::tryCompileFused(const ASTNode *node)
         if (!op || op->type != NodeType::IDENTIFIER)
             return true;
         const std::string &name = op->strValue;
-        if (varRegisters_.count(name) > 0 || engine_.isReservedName(name))
+        if (varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0
+            || engine_.isReservedName(name))
             return true;
         if (isTopLevel_ && engine_.getVariable(name) != nullptr)
             return true;
@@ -3450,9 +3618,10 @@ uint16_t Compiler::compileCall(const ASTNode *node)
         std::string qualified = tryBuildQualifiedName(funcNode, &rootIdent);
         if (!qualified.empty()) {
             const std::string &root = rootIdent->strValue;
-            const bool isLocalVar = varRegisters_.find(root) != varRegisters_.end();
+            const bool isLocalVar = varRegisters_.find(root) != varRegisters_.end()
+                                    || upvalueRegs_.find(root) != upvalueRegs_.end();
             const bool isWorkspaceVar =
-                engine_.workspaceEnv().getLocal(root) != nullptr;
+                isTopLevel_ && engine_.workspaceEnv().getLocal(root) != nullptr;
             if (!isLocalVar && !isWorkspaceVar
                 // MATLAB `gca.Parent.Children(2)`: nothing registered
                 // under the dotted name, but the HEAD is a plain
@@ -3662,9 +3831,11 @@ uint16_t Compiler::compileCall(const ASTNode *node)
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
                 auto it = varRegisters_.find(argNode->strValue);
-                if (it != varRegisters_.end() && engine_.isReservedName(argNode->strValue) == 0)
+                if (it != varRegisters_.end() && engine_.isReservedName(argNode->strValue) == 0) {
                     emitA(OpCode::CLEAR_VAR, it->second);
-                if (isTopLevel_)
+                    emitUpvalStoreIfShared(argNode->strValue, it->second);
+                }
+                if (isTopLevel_ || mayInjectVars_)
                     argRegs.push_back(compileNode(argNode));
             } else {
                 const bool isBrace = (argNode->type == NodeType::CELL_INDEX);
@@ -3672,23 +3843,20 @@ uint16_t Compiler::compileCall(const ASTNode *node)
                     anyBrace = true;
                 uint16_t nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
                 emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<uint16_t>(nargs));
-                if (isTopLevel_)
+                if (isTopLevel_ || mayInjectVars_)
                     argRegs.push_back(nameReg);
             }
         }
         if (nargs == 0) {
             for (auto &[vname, reg] : varRegisters_) {
-                if (engine_.isReservedName(vname) == 0)
+                if (engine_.isReservedName(vname) == 0) {
                     emitA(OpCode::CLEAR_VAR, reg);
+                    emitUpvalStoreIfShared(vname, reg);
+                }
             }
         }
-        // On top-level, also call externalFunc for side effects.
-        // Compile every arg first, THEN allocate the contiguous arg-block
-        // and MOVE each result into place — interleaving slot allocation
-        // with arg compilation broke multi-arg cases like
-        // `clear('-regexp', '^foo')` because intermediate temps from
-        // compileNode displaced subsequent slots.
-        if (isTopLevel_) {
+        // On top-level (or when dynamic injection may exist), also call externalFunc.
+        if (isTopLevel_ || mayInjectVars_) {
             uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
                 uint16_t slot = tempReg();
@@ -3708,8 +3876,9 @@ uint16_t Compiler::compileCall(const ASTNode *node)
         return tempReg();
     }
 
-    if (!isTopLevel_) {
-        // who(expr...) / whos(expr...) → WHO/WHOS with args
+    if (!isTopLevel_ && nargoutContext_ == 0) {
+        // who(expr...) / whos(expr...) → WHO/WHOS with args (statement context only;
+        // nargout > 0 falls through to CALL so the builtin returns the cell/struct array)
         if (name == "who" || name == "whos") {
             OpCode op = (name == "who") ? OpCode::WHO : OpCode::WHOS;
             if (nargs == 0) {
@@ -3733,7 +3902,7 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // Check if it's a known variable (local or from workspaceEnv)
     // → could be array indexing OR func handle call — emit CALL_INDIRECT
     auto it = varRegisters_.find(name);
-    bool isKnownVar = (it != varRegisters_.end());
+    bool isKnownVar = (it != varRegisters_.end()) || (upvalueRegs_.find(name) != upvalueRegs_.end());
 
     // Also check workspaceEnv (or scoped eval caller vars) for variables from previous eval() calls
     if (!isKnownVar && isTopLevel_ && !engine_.isReservedName(name)) {
@@ -3761,12 +3930,12 @@ uint16_t Compiler::compileCall(const ASTNode *node)
 
     if (isKnownVar) {
         uint16_t fhReg = varRegLookup(name);
+        auto uvIt = upvalueRegs_.find(name);
+        if (uvIt != upvalueRegs_.end()) {
+            int32_t nameIdx = addStringConstant(name);
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+        }
 
-        // Brace-index args with a VARIABLE callee: compile expanded
-        // (CSL-preserving) and emit CALL_INDIRECT_FLATTEN so the runtime
-        // flattens c{:} into the arg list before resolving the handle
-        // (bugs/closed/lang/handle-call-csl-splat). Mirrors the named-
-        // callee CALL_FLATTEN gate below.
         bool varAnyBrace = false;
         for (size_t i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
@@ -3796,7 +3965,6 @@ uint16_t Compiler::compileCall(const ASTNode *node)
             guard.setDim(static_cast<uint16_t>(i - 1));
             argRegs.push_back(compileNode(node->children[i].get()));
         }
-        // guard restores here (but we can let it live until return — same scope)
 
         uint16_t argBase = static_cast<uint16_t>(nextReg_);
         for (size_t i = 0; i < argRegs.size(); ++i) {
@@ -3816,8 +3984,45 @@ uint16_t Compiler::compileCall(const ASTNode *node)
         return dst;
     }
 
-    // Fast path: 1-arg inline builtins — skip MOVE, pass arg register directly
+    // Nested function call in lexical scope: pass user args + hidden upvalue boxes
     {
+        auto nit = nestedFuncInfo_.find(name);
+        if (nit != nestedFuncInfo_.end()) {
+            bool anyBraceArg = false;
+            for (size_t i = 1; i < node->children.size(); ++i)
+                if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
+            std::vector<uint16_t> argRegs;
+            argRegs.reserve(nargs + nit->second.upvalueNames.size());
+            for (size_t i = 1; i < node->children.size(); ++i) {
+                argRegs.push_back(anyBraceArg
+                                      ? compileNodeExpand(node->children[i].get())
+                                      : compileNode(node->children[i].get()));
+            }
+            for (const auto &uvName : nit->second.upvalueNames)
+                argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+            uint16_t argBase = static_cast<uint16_t>(nextReg_);
+            for (size_t i = 0; i < argRegs.size(); ++i) {
+                uint16_t slot = tempReg();
+                if (argRegs[i] != slot)
+                    emitAB(OpCode::MOVE, slot, argRegs[i]);
+            }
+            uint16_t dst = tempReg();
+            int32_t funcIdx = addStringConstant(nit->second.compiledName);
+            size_t callIdx = chunk_.code.size();
+            emit(Instruction::make_abcde(anyBraceArg ? OpCode::CALL_FLATTEN : OpCode::CALL,
+                                         dst,
+                                         argBase,
+                                         static_cast<uint16_t>(argRegs.size()),
+                                         funcIdx,
+                                         callNargout));
+            if (!anyBraceArg)
+                recordCallArgNames(node, callIdx);
+            return dst;
+        }
+    }
+
+    // Fast path: 1-arg inline builtins — skip MOVE, pass arg register directly
+    if (!mayInjectVars_) {
         int8_t builtinId = resolveBuiltinId(name, nargs);
         if (builtinId >= 0 && nargs == 1) {
             uint16_t arg = compileNode(node->children[1].get());
@@ -3825,11 +4030,6 @@ uint16_t Compiler::compileCall(const ASTNode *node)
             emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                          dst, arg, 1,
                                          static_cast<int32_t>(builtinId), 0));
-            // Every 1-arg inline builtin (ids 0..15 in resolveBuiltinId:
-            // abs/floor/…/sign/isnan/isinf) is elementwise scalar→scalar, so a
-            // scalar argument yields a scalar result — propagate the tag.
-            // (The old bare `<= 13` magic excluded isnan/isinf at 14-15, a
-            // perf-only miss; keep this bound in sync with resolveBuiltinId.)
             constexpr int8_t kMaxUnaryInlineBuiltinId = 15;
             if (scalarRegs_.test(arg) && builtinId <= kMaxUnaryInlineBuiltinId)
                 scalarRegs_.set(dst);
@@ -3890,7 +4090,7 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     uint16_t dst = tempReg();
 
     // Try to resolve as inline scalar builtin (numeric ID)
-    int8_t builtinId = resolveBuiltinId(name, nargs);
+    int8_t builtinId = mayInjectVars_ ? -1 : resolveBuiltinId(name, nargs);
     if (builtinId >= 0) {
         emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                      dst,
@@ -3930,7 +4130,56 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
     const std::string &name = node->strValue;
     size_t nargs = node->children.size();
 
-    // ── clear x y z → CLEAR_VAR for each known variable ──
+    // Variable-headed command-syntax misparse inside functions: `x -1`, `x /2`, `x -y`
+    if (!isTopLevel_ && nargs == 1
+        && name != "clear" && name != "who" && name != "whos"
+        && name != "exist" && name != "syms"
+        && (varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0
+            || engine_.isReservedName(name) != 0)) {
+        const std::string &arg = node->children[0]->strValue;
+        if (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')) {
+            const std::string rest = arg.substr(1);
+            char *endPtr = nullptr;
+            double numVal = std::strtod(rest.c_str(), &endPtr);
+            const bool isNum = (endPtr != rest.c_str() && *endPtr == '\0');
+            auto isIdent = [](const std::string &s) {
+                if (s.empty())
+                    return false;
+                unsigned char c0 = static_cast<unsigned char>(s[0]);
+                if (!std::isalpha(c0) && c0 != '_')
+                    return false;
+                for (size_t k = 1; k < s.size(); ++k) {
+                    unsigned char ck = static_cast<unsigned char>(s[k]);
+                    if (!std::isalnum(ck) && ck != '_')
+                        return false;
+                }
+                return true;
+            };
+            if (isNum || isIdent(rest)) {
+                uint16_t lhsReg = varRegRead(name);
+                uint16_t rhsReg = 0;
+                if (isNum) {
+                    int32_t cIdx = addConstant(numVal);
+                    rhsReg = tempReg();
+                    emitAD(OpCode::LOAD_CONST, rhsReg, cIdx);
+                    scalarRegs_.set(rhsReg);
+                } else {
+                    rhsReg = varRegRead(rest);
+                }
+                uint16_t resReg = emitPlainBinary(std::string(1, arg[0]), lhsReg, rhsReg);
+                uint16_t ansReg = varRegWrite("ans");
+                if (ansReg != resReg)
+                    emitAB(OpCode::MOVE, ansReg, resReg);
+                emitUpvalStoreIfShared("ans", ansReg);
+                if (!node->suppressOutput) {
+                    int32_t nameIdx = addStringConstant("ans");
+                    emitAD(OpCode::DISPLAY, ansReg, nameIdx);
+                }
+                return ansReg;
+            }
+        }
+    }
+
     if (name == "clear") {
         // Determine what kind of clear this is
         static const std::unordered_set<std::string> kClearFlags
@@ -3944,27 +4193,29 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
 
         // Step 1: emit CLEAR_VAR opcodes for local registers
         if (isClearAll) {
-            // clear / clear all / clear classes → clear all local registers
             for (auto &[vname, reg] : varRegisters_) {
-                if (engine_.isReservedName(vname) == 0)
+                if (engine_.isReservedName(vname) == 0) {
                     emitA(OpCode::CLEAR_VAR, reg);
+                    emitUpvalStoreIfShared(vname, reg);
+                }
             }
         } else if (!isFlag) {
-            // clear x y z → clear specific variables
             for (size_t i = 0; i < nargs; ++i) {
                 const std::string &varName = node->children[i]->strValue;
                 if (engine_.isReservedName(varName) == 0) {
                     auto it = varRegisters_.find(varName);
-                    if (it != varRegisters_.end())
+                    if (it != varRegisters_.end()) {
                         emitA(OpCode::CLEAR_VAR, it->second);
+                        emitUpvalStoreIfShared(varName, it->second);
+                    }
                 }
             }
         }
         // Flags (functions, global, -regexp, import) don't clear local registers
 
         // Step 2: call externalFunc for side effects on top level,
-        // or for flags that need runtime handling (global, -regexp, etc.)
-        if (isTopLevel_ || isFlag) {
+        // or for flags / dynamic frames that need runtime handling.
+        if (isTopLevel_ || isFlag || mayInjectVars_) {
             uint16_t argBase = nextReg_;
             for (size_t i = 0; i < nargs; ++i) {
                 uint16_t slot = tempReg();
@@ -4039,17 +4290,33 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
     }
 
     // Compile arguments: each child is a STRING_LITERAL
+    auto nit = (varRegisters_.find(name) == varRegisters_.end()
+                && upvalueRegs_.find(name) == upvalueRegs_.end())
+                   ? nestedFuncInfo_.find(name)
+                   : nestedFuncInfo_.end();
     uint16_t argBase = nextReg_;
     for (size_t i = 0; i < nargs; ++i) {
         uint16_t slot = tempReg();
         int32_t strIdx = addStringConstant(node->children[i]->strValue);
         emitAD(OpCode::LOAD_STRING, slot, strIdx);
     }
+    size_t totalCallArgs = nargs;
+    if (nit != nestedFuncInfo_.end()) {
+        for (const auto &uvName : nit->second.upvalueNames) {
+            uint16_t slot = tempReg();
+            uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+            if (boxReg != slot)
+                emitAB(OpCode::MOVE, slot, boxReg);
+            ++totalCallArgs;
+        }
+    }
 
     uint16_t dst = tempReg();
-    int32_t funcIdx = addStringConstant(name);
+    int32_t funcIdx = addStringConstant(
+        nit != nestedFuncInfo_.end() ? nit->second.compiledName : name);
     emit(
-        Instruction::make_abcde(OpCode::CALL, dst, argBase, static_cast<uint16_t>(nargs), funcIdx, 0));
+        Instruction::make_abcde(OpCode::CALL, dst, argBase,
+                                static_cast<uint16_t>(totalCallArgs), funcIdx, 0));
 
     // Display result if no semicolon (rare for commands, but correct)
     if (!node->suppressOutput) {
@@ -4087,13 +4354,25 @@ void Compiler::collectFreeVars(const ASTNode *node,
             && (!isTopLevel_ || !engine_.workspaceEnv().get(name)))
             return;
         // Check if exists in outer scope
-        if (varRegisters_.count(name)) {
+        if (varRegisters_.count(name) || upvalueRegs_.count(name) || nestedFuncInfo_.count(name)) {
             freeVars.push_back(name);
         }
         return;
     }
 
     if (node->type == NodeType::ANON_FUNC) {
+        if (!node->strValue.empty() && node->children.empty()) {
+            const std::string &fn = node->strValue;
+            for (auto &p : params)
+                if (p == fn)
+                    return;
+            for (auto &f : freeVars)
+                if (f == fn)
+                    return;
+            if (nestedFuncInfo_.count(fn))
+                freeVars.push_back(fn);
+            return;
+        }
         std::vector<std::string> mergedParams = params;
         mergedParams.insert(mergedParams.end(), node->paramNames.begin(), node->paramNames.end());
         for (auto &child : node->children)
@@ -4116,6 +4395,9 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
 {
     // Case 1: @funcname — handle to existing function
     if (!node->strValue.empty() && node->children.empty()) {
+        auto nit = nestedFuncInfo_.find(node->strValue);
+        if (nit != nestedFuncInfo_.end())
+            return emitNestedFuncHandle(nit->second);
         uint16_t dst = tempReg();
         Value fh = Value::funcHandle(node->strValue, engine_.resource());
         int32_t constIdx = appendConstant(std::move(fh));
@@ -4124,10 +4406,6 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
     }
 
     // Case 2: @(params) expr — anonymous function with possible closure capture.
-    // The id comes from the ENGINE-wide counter: this chunk may be compiled
-    // as part of an attempt that later falls back to the TreeWalker, and a
-    // TreeWalker-executed @(…) literal in the same process must never re-use
-    // one of these ids (its handle would then resolve to THIS compiled body).
     int id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
     std::string anonName = "__anon_" + std::to_string(id);
 
@@ -4135,12 +4413,6 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
     auto funcNode = makeNode(NodeType::FUNCTION_DEF);
     funcNode->strValue = anonName;
     funcNode->paramNames = node->paramNames;
-    // When the body is a named-function call `@(p) g(...)`, lower it to a
-    // varargout function that forwards the call-site nargout to the body via
-    // the `__numkit_fwd_call__` helper — `varargout = __numkit_fwd_call__(nargout,
-    // 'g', args...)` — so `[a,b] = (@(x) deal(x+1,x-1))(5)` returns both
-    // values (anonymous multi-output / nargout forwarding). Non-call bodies
-    // (e.g. `@(x) x+1`) keep the single-output `__result__ = expr` fast path.
     const ASTNode *bodyExpr = node->children[0].get();
     bool forwardVarargout =
         bodyExpr->type == NodeType::CALL
@@ -4148,19 +4420,59 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
         && bodyExpr->children[0]->type == NodeType::IDENTIFIER
         && bodyExpr->children[0]->strValue != "__numkit_fwd_call__";
     if (forwardVarargout) {
-        // Only forward when the callee is a GLOBAL function name (e.g. deal),
-        // not a parameter or a captured handle variable — `@(x) f(x)` /
-        // `@(x) g(h(x))` where f/g/h are handles must NOT be lowered to a
-        // name-string call (that would resolve a function named "f", not the
-        // handle). Those keep the single-output `__result__ = expr` path.
         const std::string &callee = bodyExpr->children[0]->strValue;
         bool calleeIsVar =
-            varRegisters_.find(callee) != varRegisters_.end();
+            varRegisters_.find(callee) != varRegisters_.end()
+            || upvalueRegs_.find(callee) != upvalueRegs_.end()
+            || nestedFuncInfo_.find(callee) != nestedFuncInfo_.end();
         for (const auto &p : node->paramNames)
             if (p == callee) { calleeIsVar = true; break; }
         if (calleeIsVar)
             forwardVarargout = false;
     }
+
+    auto rewriteNestedRefs = [&](auto &self, ASTNode *cur,
+                                 const std::vector<std::string> &boundParams,
+                                 bool isCallCallee) -> void {
+        if (!cur || nestedFuncInfo_.empty())
+            return;
+        auto isBound = [&](const std::string &nm) {
+            return std::find(boundParams.begin(), boundParams.end(), nm) != boundParams.end();
+        };
+        if (cur->type == NodeType::ANON_FUNC) {
+            if (!cur->strValue.empty() && cur->children.empty()
+                && !isBound(cur->strValue) && nestedFuncInfo_.count(cur->strValue)) {
+                cur->type = NodeType::IDENTIFIER;
+                return;
+            }
+            std::vector<std::string> merged = boundParams;
+            merged.insert(merged.end(), cur->paramNames.begin(), cur->paramNames.end());
+            for (auto &ch : cur->children)
+                self(self, ch.get(), merged, false);
+            return;
+        }
+        if (cur->type == NodeType::IDENTIFIER && !isCallCallee
+            && !isBound(cur->strValue) && nestedFuncInfo_.count(cur->strValue)
+            && !varRegisters_.count(cur->strValue) && !upvalueRegs_.count(cur->strValue)) {
+            std::string fn = cur->strValue;
+            cur->type = NodeType::CALL;
+            cur->strValue.clear();
+            auto calleeNode = makeNode(NodeType::IDENTIFIER);
+            calleeNode->strValue = std::move(fn);
+            cur->children.push_back(std::move(calleeNode));
+            return;
+        }
+        for (size_t i = 0; i < cur->children.size(); ++i) {
+            const bool childIsCallee = (cur->type == NodeType::CALL && i == 0);
+            self(self, cur->children[i].get(), boundParams, childIsCallee);
+        }
+        for (auto &[a, b] : cur->branches) {
+            self(self, a.get(), boundParams, false);
+            self(self, b.get(), boundParams, false);
+        }
+        if (cur->elseBranch)
+            self(self, cur->elseBranch.get(), boundParams, false);
+    };
 
     auto bodyBlock = makeNode(NodeType::BLOCK);
     auto assignNode = makeNode(NodeType::ASSIGN);
@@ -4182,35 +4494,59 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
         auto fnameStr = makeNode(NodeType::STRING_LITERAL);
         fnameStr->strValue = bodyExpr->children[0]->strValue;
         fwdCall->children.push_back(std::move(fnameStr));
-        for (size_t i = 1; i < bodyExpr->children.size(); ++i)
-            fwdCall->children.push_back(cloneNode(bodyExpr->children[i].get()));
+        for (size_t i = 1; i < bodyExpr->children.size(); ++i) {
+            auto clonedArg = cloneNode(bodyExpr->children[i].get());
+            rewriteNestedRefs(rewriteNestedRefs, clonedArg.get(), node->paramNames, false);
+            fwdCall->children.push_back(std::move(clonedArg));
+        }
         assignNode->children.push_back(std::move(fwdCall));
     } else {
         funcNode->returnNames = {"__result__"};
         auto resultId = makeNode(NodeType::IDENTIFIER);
         resultId->strValue = "__result__";
         assignNode->children.push_back(std::move(resultId));
-        assignNode->children.push_back(cloneNode(node->children[0].get()));
+        auto clonedExpr = cloneNode(node->children[0].get());
+        rewriteNestedRefs(rewriteNestedRefs, clonedExpr.get(), node->paramNames, false);
+        assignNode->children.push_back(std::move(clonedExpr));
     }
     bodyBlock->children.push_back(std::move(assignNode));
     funcNode->children.push_back(std::move(bodyBlock));
 
     // Find free variables in body that exist in outer scope but are not params
     std::vector<std::string> capturedNames;
-    std::vector<uint16_t> capturedOuterRegs;
     collectFreeVars(node->children[0].get(), node->paramNames, capturedNames);
 
-    // Add captured vars as extra hidden parameters
+    std::vector<std::string> activeCaptures;
     for (auto &name : capturedNames) {
-        auto it = varRegisters_.find(name);
-        if (it != varRegisters_.end()) {
-            capturedOuterRegs.push_back(it->second);
+        if (varRegisters_.count(name) || upvalueRegs_.count(name) || nestedFuncInfo_.count(name)) {
+            activeCaptures.push_back(name);
             funcNode->paramNames.push_back(name);
         }
     }
 
     // Compile as separate chunk
     BytecodeChunk funcChunk = compileFunction(funcNode.get());
+
+    std::vector<uint16_t> capturedOuterRegs;
+    capturedOuterRegs.reserve(activeCaptures.size());
+    for (const auto &name : activeCaptures) {
+        auto uvIt = upvalueRegs_.find(name);
+        if (uvIt != upvalueRegs_.end()) {
+            uint16_t capReg = tempReg();
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, capReg, uvIt->second, 1, 0, 0));
+            capturedOuterRegs.push_back(capReg);
+            continue;
+        }
+        auto regIt = varRegisters_.find(name);
+        if (regIt != varRegisters_.end()) {
+            capturedOuterRegs.push_back(regIt->second);
+            continue;
+        }
+        auto nit = nestedFuncInfo_.find(name);
+        if (nit != nestedFuncInfo_.end()) {
+            capturedOuterRegs.push_back(emitNestedFuncHandle(nit->second));
+        }
+    }
     funcChunk.capturedRegisters = capturedOuterRegs;
     // Provenance is fixed at creation (reference rule). Compilation of a
     // NAMED function body carries that function's file explicitly (the
@@ -4300,7 +4636,8 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
     // `obj@Base(args)` (lhs is a local var/param) → super-constructor;
     // `method@Base(obj,…)` (lhs is a method-name identifier) → super-method.
     const bool isCtor = lhs->type == NodeType::IDENTIFIER
-                        && varRegisters_.find(lhs->strValue) != varRegisters_.end();
+                        && (varRegisters_.find(lhs->strValue) != varRegisters_.end()
+                            || upvalueRegs_.find(lhs->strValue) != upvalueRegs_.end());
 
     // Constructor: the seed object comes from lhs; args are the ctor args.
     uint16_t objReg = isCtor ? compileNode(lhs) : 0;
@@ -4343,6 +4680,7 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
                                      nargs));
         if (dst != objReg)
             emitAB(OpCode::MOVE, objReg, dst);
+        emitUpvalStoreIfShared(lhs->strValue, objReg);
         return dst;
     }
     uint16_t outBase;
@@ -4359,16 +4697,17 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
 
 uint16_t Compiler::compileFunctionDef(const ASTNode *node)
 {
+    // Nested functions inside an enclosing function body are pre-compiled
+    // into scoped "outer>inner" chunks by compileFunction's prologue and must
+    // never leak into the global / script-level function table.
+    if (inFunctionBody_)
+        return 0;
+
     // Compile function body into a separate BytecodeChunk. Which
     // bucket it lands in depends on whether we're inside a script
     // scope — script-local functions live in their own store so
     // `clear all` can't touch them (MATLAB parity).
-    const std::string enclosingFunc =
-        (!isTopLevel_ && !chunk_.name.empty() && chunk_.name != "<script>")
-            ? (chunk_.parentFuncName.empty() ? chunk_.name : chunk_.parentFuncName)
-            : std::string();
     BytecodeChunk funcChunk = compileFunction(node);
-    funcChunk.parentFuncName = enclosingFunc;
 
     UserFunction uf;
     uf.name = node->strValue;
@@ -4436,10 +4775,21 @@ Compiler::AnonOriginSentry::~AnonOriginSentry()
 void Compiler::registerFunctionAsImpl_(const std::string &qualifiedName,
                                         const ASTNode *funcDef)
 {
-    // Compile the chunk normally, then bind it under the explicit name
-    // instead of funcDef->strValue. Keeps `+pkg/foo.m` and
-    // `+other/foo.m` separate in compiledFuncs_ / engine_.userFuncs_.
-    BytecodeChunk funcChunk = compileFunction(funcDef);
+    BytecodeChunk funcChunk;
+    if (funcDef->strValue == qualifiedName) {
+        funcChunk = compileFunction(funcDef);
+    } else {
+        ASTNode fn(NodeType::FUNCTION_DEF);
+        fn.strValue = qualifiedName;
+        fn.paramNames = funcDef->paramNames;
+        fn.returnNames = funcDef->returnNames;
+        fn.line = funcDef->line;
+        fn.col = funcDef->col;
+        fn.endLine = funcDef->endLine;
+        if (!funcDef->children.empty())
+            fn.children.push_back(cloneNode(funcDef->children[0].get()));
+        funcChunk = compileFunction(&fn);
+    }
 
     UserFunction uf;
     uf.name = qualifiedName;
@@ -4461,19 +4811,32 @@ void Compiler::setChunkOrigin(const std::string &qualifiedName,
                               const std::string &fsName, const std::string &scriptDir,
                               const std::string &scriptFile)
 {
-    // Stamp provenance wherever the chunk landed — global table for the
-    // resolver's runtime registrations, script-local for the (theoretical)
-    // case of an m-file resolve during a script compile pass.
-    auto it = compiledFuncs_.find(qualifiedName);
-    if (it == compiledFuncs_.end()) {
-        it = scriptLocalCompiledFuncs_.find(qualifiedName);
-        if (it == scriptLocalCompiledFuncs_.end())
-            return;
+    auto stampMap = [&](std::unordered_map<std::string, BytecodeChunk> &tbl) {
+        const std::string prefix = qualifiedName + ">";
+        for (auto &[k, ch] : tbl) {
+            if (k == qualifiedName
+                || (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0)) {
+                ch.originKnown = true;
+                ch.originFs = fsName;
+                ch.originDir = scriptDir;
+                ch.originFile = scriptFile;
+            }
+        }
+    };
+    stampMap(compiledFuncs_);
+    stampMap(scriptLocalCompiledFuncs_);
+}
+
+void Compiler::eraseCompiledFunc(const std::string &name)
+{
+    compiledFuncs_.erase(name);
+    const std::string prefix = name + ">";
+    for (auto it = compiledFuncs_.begin(); it != compiledFuncs_.end();) {
+        if (it->first.size() > prefix.size() && it->first.compare(0, prefix.size(), prefix) == 0)
+            it = compiledFuncs_.erase(it);
+        else
+            ++it;
     }
-    it->second.originKnown = true;
-    it->second.originFs = fsName;
-    it->second.originDir = scriptDir;
-    it->second.originFile = scriptFile;
 }
 
 void Compiler::eraseCompiledFuncsForClass(const std::string &className)
@@ -4556,6 +4919,63 @@ void Compiler::promoteScriptLocalsToWorkspace()
     scriptLocalCompiledFuncs_.clear();
 }
 
+namespace {
+
+void collectScopeGlobalPersistentDecls(const ASTNode *node,
+                                       std::vector<std::string> &globals,
+                                       std::vector<std::string> &persistents)
+{
+    if (!node || node->type == NodeType::FUNCTION_DEF || node->type == NodeType::ANON_FUNC)
+        return;
+    if (node->type == NodeType::GLOBAL_STMT) {
+        for (const auto &nm : node->paramNames) {
+            if (std::find(globals.begin(), globals.end(), nm) == globals.end())
+                globals.push_back(nm);
+        }
+        return;
+    }
+    if (node->type == NodeType::PERSISTENT_STMT) {
+        for (const auto &nm : node->paramNames) {
+            if (std::find(persistents.begin(), persistents.end(), nm) == persistents.end())
+                persistents.push_back(nm);
+        }
+        return;
+    }
+    for (const auto &ch : node->children)
+        collectScopeGlobalPersistentDecls(ch.get(), globals, persistents);
+    for (const auto &[cond, body] : node->branches) {
+        collectScopeGlobalPersistentDecls(cond.get(), globals, persistents);
+        collectScopeGlobalPersistentDecls(body.get(), globals, persistents);
+    }
+    if (node->elseBranch)
+        collectScopeGlobalPersistentDecls(node->elseBranch.get(), globals, persistents);
+}
+
+void collectDirectNestedDefs(const ASTNode *node, std::vector<const ASTNode *> &out)
+{
+    if (!node || node->type == NodeType::ANON_FUNC)
+        return;
+    if (node->type == NodeType::FUNCTION_DEF) {
+        out.push_back(node);
+        return;
+    }
+    for (const auto &ch : node->children)
+        collectDirectNestedDefs(ch.get(), out);
+    for (const auto &[cond, body] : node->branches) {
+        collectDirectNestedDefs(cond.get(), out);
+        collectDirectNestedDefs(body.get(), out);
+    }
+    if (node->elseBranch)
+        collectDirectNestedDefs(node->elseBranch.get(), out);
+}
+
+bool isPseudoScopeVar(const std::string &name)
+{
+    return name == "nargin" || name == "nargout" || name == "varargin" || name == "varargout";
+}
+
+} // namespace
+
 BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
                                         std::shared_ptr<const std::string> sourceCode)
 {
@@ -4570,10 +4990,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         RegBitset savedScalarRegs;
         RegBitset savedDefinedRegs;
         bool savedMayClear;
+        bool savedMayInjectVars;
+        std::unordered_map<std::string, uint16_t> savedUpvalueRegs;
+        std::unordered_map<std::string, uint16_t> savedAllScopeUpvalBoxRegs;
+        std::unordered_map<std::string, NestedFuncInfo> savedNestedFuncInfo;
+        const EnclosingLexicalContext *savedPendingLexicalCtx;
         int savedNextReg;
         int savedPeakReg;
         int savedMaxVarReg;
         bool savedTopLevel;
+        bool savedInFunctionBody;
         bool savedInFusionFallback;
         uint16_t savedNargoutContext;
         int savedActiveTryDepth;
@@ -4592,10 +5018,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
             , savedScalarRegs(std::move(comp.scalarRegs_))
             , savedDefinedRegs(std::move(comp.definedRegs_))
             , savedMayClear(comp.mayClear_)
+            , savedMayInjectVars(comp.mayInjectVars_)
+            , savedUpvalueRegs(std::move(comp.upvalueRegs_))
+            , savedAllScopeUpvalBoxRegs(std::move(comp.allScopeUpvalueBoxRegs_))
+            , savedNestedFuncInfo(std::move(comp.nestedFuncInfo_))
+            , savedPendingLexicalCtx(comp.pendingLexicalCtx_)
             , savedNextReg(comp.nextReg_)
             , savedPeakReg(comp.peakReg_)
             , savedMaxVarReg(comp.maxVarReg_)
             , savedTopLevel(comp.isTopLevel_)
+            , savedInFunctionBody(comp.inFunctionBody_)
             , savedInFusionFallback(comp.inFusionFallback_)
             , savedNargoutContext(comp.nargoutContext_)
             , savedActiveTryDepth(comp.activeTryDepth_)
@@ -4615,10 +5047,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
             c.scalarRegs_ = std::move(savedScalarRegs);
             c.definedRegs_ = std::move(savedDefinedRegs);
             c.mayClear_ = savedMayClear;
+            c.mayInjectVars_ = savedMayInjectVars;
+            c.upvalueRegs_ = std::move(savedUpvalueRegs);
+            c.allScopeUpvalueBoxRegs_ = std::move(savedAllScopeUpvalBoxRegs);
+            c.nestedFuncInfo_ = std::move(savedNestedFuncInfo);
+            c.pendingLexicalCtx_ = savedPendingLexicalCtx;
             c.nextReg_ = savedNextReg;
             c.peakReg_ = savedPeakReg;
             c.maxVarReg_ = savedMaxVarReg;
             c.isTopLevel_ = savedTopLevel;
+            c.inFunctionBody_ = savedInFunctionBody;
             c.inFusionFallback_ = savedInFusionFallback;
             c.nargoutContext_ = savedNargoutContext;
             c.activeTryDepth_ = savedActiveTryDepth;
@@ -4629,7 +5067,11 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         }
     } stateGuard(*this);
 
+    const EnclosingLexicalContext *lexicalCtx = stateGuard.savedPendingLexicalCtx;
+    pendingLexicalCtx_ = nullptr;
+
     isTopLevel_ = false;
+    inFunctionBody_ = true;
     inFusionFallback_ = false;
     nargoutContext_ = 1;
     activeTryDepth_ = 0;
@@ -4656,13 +5098,22 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     scalarRegs_.reset();
     definedRegs_.reset();
     mayClear_ = false;
+    mayInjectVars_ = false;
+    upvalueRegs_.clear();
+    allScopeUpvalueBoxRegs_.clear();
+    nestedFuncInfo_.clear();
     nextReg_ = 0;
     peakReg_ = 0;
     maxVarReg_ = 0;
 
+    const ASTNode *bodyRoot = funcDef->children.empty() ? nullptr : funcDef->children[0].get();
+
+    // Pre-scan global and persistent declarations in this function's own body
+    // before setting up lexical upvalues and preallocating locals.
+    if (bodyRoot)
+        collectScopeGlobalPersistentDecls(bodyRoot, chunk_.globalNames, chunk_.persistentNames);
+
     // Allocate registers for parameters (they come pre-loaded by VM)
-    // Parameters get their value at call entry — mark as assigned so the
-    // debug workspace distinguishes them from simple reads.
     for (auto &param : funcDef->paramNames) {
         varRegWrite(param);
     }
@@ -4672,49 +5123,221 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         varRegWrite(ret); // will be populated by the body
     }
 
+    for (auto &gn : chunk_.globalNames)
+        varRegWrite(gn);
+    for (auto &pn : chunk_.persistentNames)
+        varRegWrite(pn);
+
     // Always allocate nargin/nargout so they're visible in debugger (pre-
-    // loaded by the VM on entry). Not user-assigned; assignedVars is left
-    // untouched so the snapshot still hides them via kBuiltinNames.
+    // loaded by the VM on entry).
     uint16_t narginReg = varRegLookup("nargin");
     uint16_t nargoutReg = varRegLookup("nargout");
 
-    // Cluster all body-assigned locals at low contiguous slots BEFORE compiling
-    // the body — same pass the top-level script gets via preImportGlobals.
-    // Without it, locals adopt whatever high temp slot their first assignment
-    // landed in, fragmenting the range and creeping maxVarReg_ (the temp-release
-    // floor) until a moderately large function false-positives on register
-    // exhaustion. (params/returns/nargin/nargout are already allocated above and
-    // skipped by the count() guard.)
-    // Pre-load referenced built-in constants (pi, eps, inf, i, j, ...) at
-    // function entry when they are not shadowed by parameters, returns, or
-    // body assignments. Without this, if the first lexical read of `pi` in a
-    // function sits inside a conditional branch (`elseif c <= -1, q = pi;`)
-    // that is not taken at runtime, the lazy LOAD_CONST emitted inside that
-    // branch is skipped and subsequent reads of `pi` see an unset register.
-    {
-        std::vector<std::string> assignedVec;
-        collectAssignedNames(funcDef->children[0].get(), assignedVec);
-        std::unordered_set<std::string> assignedSet(assignedVec.begin(), assignedVec.end());
-        std::unordered_set<std::string> identifiers;
-        collectAllIdentifiers(funcDef->children[0].get(), identifiers);
-        for (const auto &name : identifiers) {
-            if (varRegisters_.count(name) || assignedSet.count(name))
+    // Collect direct nested function definitions and set up lexical upvalues.
+    std::vector<const ASTNode *> directNestedDefs;
+    if (bodyRoot)
+        collectDirectNestedDefs(bodyRoot, directNestedDefs);
+
+    std::unordered_set<std::string> ownDeclaredShadow;
+    for (const auto &p : funcDef->paramNames) ownDeclaredShadow.insert(p);
+    for (const auto &r : funcDef->returnNames) ownDeclaredShadow.insert(r);
+    for (const auto &g : chunk_.globalNames) ownDeclaredShadow.insert(g);
+    for (const auto &p : chunk_.persistentNames) ownDeclaredShadow.insert(p);
+
+    std::vector<std::string> activeUpvalues;
+    if (lexicalCtx) {
+        for (const auto &u : lexicalCtx->inheritedUpvalueNames) {
+            uint16_t boxReg = allocPinnedReg();
+            chunk_.upvalueParamRegs.push_back(boxReg);
+            allScopeUpvalueBoxRegs_[u] = boxReg;
+            activeUpvalues.push_back(u);
+            if (!ownDeclaredShadow.count(u) && !isPseudoScopeVar(u)) {
+                varRegLookup(u, /*preloadReserved=*/false);
+                upvalueRegs_[u] = boxReg;
+                chunk_.upvalueBoxRegs[u] = boxReg;
+            }
+        }
+        for (const auto &[sibName, sibInfo] : lexicalCtx->siblingNestedFuncs)
+            nestedFuncInfo_[sibName] = sibInfo;
+    }
+
+    std::vector<std::string> assignedVec;
+    if (bodyRoot)
+        collectAssignedNames(bodyRoot, assignedVec);
+    std::unordered_set<std::string> assignedSet(assignedVec.begin(), assignedVec.end());
+    std::unordered_set<std::string> identifiers;
+    if (bodyRoot)
+        collectAllIdentifiers(bodyRoot, identifiers);
+
+    if (!directNestedDefs.empty()) {
+        std::unordered_set<std::string> directNestedNames;
+        for (const ASTNode *nd : directNestedDefs)
+            directNestedNames.insert(nd->strValue);
+
+        auto collectDescendantRefs = [&](auto &self, const ASTNode *nfn,
+                                         std::unordered_set<std::string> &allRefs,
+                                         std::unordered_set<std::string> &asgnRefs) -> void {
+            if (!nfn || nfn->children.empty())
+                return;
+            const ASTNode *nb = nfn->children[0].get();
+            std::unordered_set<std::string> shadow;
+            for (const auto &p : nfn->paramNames) shadow.insert(p);
+            for (const auto &r : nfn->returnNames) shadow.insert(r);
+            std::vector<std::string> ng, np;
+            collectScopeGlobalPersistentDecls(nb, ng, np);
+            for (const auto &g : ng) shadow.insert(g);
+            for (const auto &p : np) shadow.insert(p);
+
+            std::unordered_set<std::string> nIds;
+            collectAllIdentifiers(nb, nIds);
+            std::vector<std::string> nAsgnVec;
+            collectAssignedNames(nb, nAsgnVec);
+
+            for (const auto &id : nIds) {
+                if (!shadow.count(id) && !isPseudoScopeVar(id))
+                    allRefs.insert(id);
+            }
+            for (const auto &asgn : nAsgnVec) {
+                if (!shadow.count(asgn) && !isPseudoScopeVar(asgn)) {
+                    allRefs.insert(asgn);
+                    asgnRefs.insert(asgn);
+                }
+            }
+
+            std::vector<const ASTNode *> subDefs;
+            collectDirectNestedDefs(nb, subDefs);
+            for (const ASTNode *sd : subDefs)
+                shadow.insert(sd->strValue);
+            for (const ASTNode *sd : subDefs) {
+                std::unordered_set<std::string> subAll, subAsgn;
+                self(self, sd, subAll, subAsgn);
+                for (const auto &id : subAll)
+                    if (!shadow.count(id) && !isPseudoScopeVar(id))
+                        allRefs.insert(id);
+                for (const auto &asgn : subAsgn)
+                    if (!shadow.count(asgn) && !isPseudoScopeVar(asgn))
+                        asgnRefs.insert(asgn);
+            }
+        };
+
+        std::unordered_set<std::string> descAllRefs, descAsgnRefs;
+        for (const ASTNode *nd : directNestedDefs)
+            collectDescendantRefs(collectDescendantRefs, nd, descAllRefs, descAsgnRefs);
+
+        std::unordered_set<std::string> ownDeclaredOrAssigned = ownDeclaredShadow;
+        for (const auto &a : assignedVec)
+            ownDeclaredOrAssigned.insert(a);
+
+        // Deterministic order for newly boxed variables of this scope
+        std::vector<std::string> candidateVars;
+        auto addCandidate = [&](const std::string &nm) {
+            if (nm.empty() || isPseudoScopeVar(nm) || directNestedNames.count(nm)
+                || allScopeUpvalueBoxRegs_.count(nm))
+                return;
+            if (std::find(candidateVars.begin(), candidateVars.end(), nm) == candidateVars.end())
+                candidateVars.push_back(nm);
+        };
+        for (const auto &p : funcDef->paramNames) addCandidate(p);
+        for (const auto &r : funcDef->returnNames) addCandidate(r);
+        for (const auto &g : chunk_.globalNames) addCandidate(g);
+        for (const auto &p : chunk_.persistentNames) addCandidate(p);
+        for (const auto &a : assignedVec) addCandidate(a);
+        for (const auto &id : identifiers) {
+            if (descAsgnRefs.count(id))
+                addCandidate(id);
+        }
+
+        std::unordered_set<std::string> preloadedOnEntry;
+        for (const auto &p : funcDef->paramNames) preloadedOnEntry.insert(p);
+        for (const auto &r : funcDef->returnNames) preloadedOnEntry.insert(r);
+        for (const auto &g : chunk_.globalNames) preloadedOnEntry.insert(g);
+        for (const auto &p : chunk_.persistentNames) preloadedOnEntry.insert(p);
+
+        for (const auto &nm : candidateVars) {
+            const bool shared = (ownDeclaredOrAssigned.count(nm) && descAllRefs.count(nm))
+                                || (identifiers.count(nm) && descAsgnRefs.count(nm));
+            if (!shared)
                 continue;
-            if (engine_.isReservedName(name)) {
-                varRegLookup(name, /*preloadReserved=*/true);
+            uint16_t mirrorReg = varRegLookup(nm, /*preloadReserved=*/false);
+            uint16_t boxReg = allocPinnedReg();
+            uint16_t initSrc = preloadedOnEntry.count(nm) ? mirrorReg : kInvalidReg;
+            emitAB(OpCode::UPVAL_NEW, boxReg, initSrc);
+            upvalueRegs_[nm] = boxReg;
+            allScopeUpvalueBoxRegs_[nm] = boxReg;
+            chunk_.upvalueBoxRegs[nm] = boxReg;
+            activeUpvalues.push_back(nm);
+            chunk_.assignedVars.insert(nm);
+        }
+
+        // Register all direct nested functions before compiling any of them so
+        // mutual recursion between siblings and self-recursion resolve cleanly.
+        for (const ASTNode *nd : directNestedDefs) {
+            std::string compiledName = chunk_.name + ">" + nd->strValue;
+            std::string dispSrc = compiledName;
+            std::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
+            nestedFuncInfo_[nd->strValue] = NestedFuncInfo{
+                compiledName, dispSrc, activeUpvalues};
+        }
+
+        EnclosingLexicalContext childLexCtx{activeUpvalues, nestedFuncInfo_};
+        for (const ASTNode *nd : directNestedDefs) {
+            const NestedFuncInfo &info = nestedFuncInfo_.at(nd->strValue);
+            ASTNode nestedNode(NodeType::FUNCTION_DEF);
+            nestedNode.strValue = info.compiledName;
+            nestedNode.paramNames = nd->paramNames;
+            nestedNode.returnNames = nd->returnNames;
+            nestedNode.line = nd->line;
+            nestedNode.col = nd->col;
+            nestedNode.endLine = nd->endLine;
+            if (!nd->children.empty())
+                nestedNode.children.push_back(cloneNode(nd->children[0].get()));
+
+            pendingLexicalCtx_ = &childLexCtx;
+            BytecodeChunk nestedChunk = compileFunction(&nestedNode, chunk_.sourceCode);
+            pendingLexicalCtx_ = nullptr;
+            nestedChunk.parentFuncName = chunk_.parentFuncName.empty()
+                                             ? chunk_.name
+                                             : chunk_.parentFuncName;
+
+            UserFunction nuf;
+            nuf.name = info.compiledName;
+            nuf.params = nd->paramNames;
+            nuf.returns = nd->returnNames;
+            if (!nd->children.empty())
+                nuf.body = std::shared_ptr<const ASTNode>(cloneNode(nd->children[0].get()));
+            nuf.closureEnv = nullptr;
+            nuf.numUpvalueCaptures = info.upvalueNames.size();
+
+            if (scriptDepth_ > 0) {
+                scriptLocalCompiledFuncs_[info.compiledName] = std::move(nestedChunk);
+                engine_.adoptUserFunction(info.compiledName, std::move(nuf), /*scriptScope=*/true);
+            } else {
+                compiledFuncs_[info.compiledName] = std::move(nestedChunk);
+                engine_.adoptUserFunction(info.compiledName, std::move(nuf), /*scriptScope=*/false);
             }
         }
     }
 
-    preallocateAssignedVars(funcDef->children[0].get());
-    preallocatePinnedConstants(funcDef->children[0].get());
+    for (const auto &name : identifiers) {
+        if (varRegisters_.count(name) || assignedSet.count(name) || upvalueRegs_.count(name))
+            continue;
+        if (engine_.isReservedName(name)) {
+            varRegLookup(name, /*preloadReserved=*/true);
+        }
+    }
+
+    if (bodyRoot) {
+        preallocateAssignedVars(bodyRoot);
+        preallocatePinnedConstants(bodyRoot);
+    }
     if (!mayClear_) {
         definedRegs_.set(narginReg);
         definedRegs_.set(nargoutReg);
     }
 
     // Compile body
-    compileNode(funcDef->children[0].get());
+    if (bodyRoot)
+        compileNode(bodyRoot);
 
     // Set source location to the 'end' keyword so breakpoints on it fire
     if (funcDef->endLine > 0)
@@ -4724,22 +5347,21 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     const auto &rnames = funcDef->returnNames;
     const bool hasVarargout = !rnames.empty() && rnames.back() == "varargout";
     if (hasVarargout) {
-        // varargout return: gather the fixed leading outputs into consecutive
-        // slots, then RET_VARARGOUT expands the varargout cell after them
-        // (dynamic count). See compileReturn for the explicit-`return` mirror.
         emitVarargoutReturn();
     } else if (rnames.size() == 1) {
         uint16_t retReg = varRegLookup(funcDef->returnNames[0]);
+        emitUpvalLoadRawIfShared(funcDef->returnNames[0], retReg);
         emitA(OpCode::RET, retReg);
     } else if (funcDef->returnNames.empty()) {
         emitNone(OpCode::RET_EMPTY);
     } else {
-        // Multi-return: collect return regs into consecutive slots then RET_MULTI
         size_t nret = funcDef->returnNames.size();
         std::vector<uint16_t> retRegs;
-        for (auto &name : funcDef->returnNames)
-            retRegs.push_back(varRegLookup(name));
-        // Check if already consecutive
+        for (auto &name : funcDef->returnNames) {
+            uint16_t r = varRegLookup(name);
+            emitUpvalLoadRawIfShared(name, r);
+            retRegs.push_back(r);
+        }
         bool consecutive = true;
         for (size_t i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
@@ -4769,12 +5391,14 @@ void Compiler::emitVarargoutReturn()
     const auto &rns = chunk_.returnNames;
     const size_t numFixed = rns.size() - 1;
     uint16_t vaReg = varRegLookup("varargout");
+    emitUpvalLoadRawIfShared("varargout", vaReg);
     uint16_t fixedBase = 0;
     if (numFixed > 0) {
         fixedBase = static_cast<uint16_t>(nextReg_);
         for (size_t i = 0; i < numFixed; ++i) {
             uint16_t slot = tempReg();
             uint16_t r = varRegLookup(rns[i]);
+            emitUpvalLoadRawIfShared(rns[i], r);
             if (r != slot)
                 emitAB(OpCode::MOVE, slot, r);
         }
@@ -4792,16 +5416,19 @@ uint16_t Compiler::compileReturn(const ASTNode * /*node*/)
     if (chunk_.returnNames.size() <= 1) {
         if (!chunk_.returnNames.empty()) {
             uint16_t retReg = varRegLookup(chunk_.returnNames[0]);
+            emitUpvalLoadRawIfShared(chunk_.returnNames[0], retReg);
             emitA(OpCode::RET, retReg);
         } else {
             emitNone(OpCode::RET_EMPTY);
         }
     } else {
-        // Multi-return: same logic as end-of-function
         size_t nret = chunk_.returnNames.size();
         std::vector<uint16_t> retRegs;
-        for (auto &name : chunk_.returnNames)
-            retRegs.push_back(varRegLookup(name));
+        for (auto &name : chunk_.returnNames) {
+            uint16_t r = varRegLookup(name);
+            emitUpvalLoadRawIfShared(name, r);
+            retRegs.push_back(r);
+        }
         bool consecutive = true;
         for (size_t i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
@@ -4822,8 +5449,6 @@ uint16_t Compiler::compileReturn(const ASTNode * /*node*/)
 
 uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
 {
-    // AST: children[0] = lhs (CALL node: children[0]=IDENTIFIER, children[1..]=indices)
-    // Semantics: v(idx) = []  →  delete elements
     auto *lhs = node->children[0].get();
     if (lhs->type != NodeType::CALL || lhs->children.empty())
         throw std::runtime_error("Compiler: invalid delete assignment syntax");
@@ -4832,9 +5457,8 @@ uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
     if (target->type != NodeType::IDENTIFIER)
         throw std::runtime_error("Compiler: invalid delete target");
 
-    // `v(idx) = []` mutates v — counts as an assignment site so the debug
-    // workspace lists v (and shadowed built-ins) correctly.
     uint16_t arr = varRegWrite(target->strValue);
+    emitUpvalLoadRawIfShared(target->strValue, arr);
     size_t nargs = lhs->children.size() - 1;
 
     {
@@ -4849,7 +5473,6 @@ uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
             uint16_t col = compileNode(lhs->children[2].get());
             emitABC(OpCode::INDEX_DELETE_2D, arr, row, col);
         } else {
-            // ND delete (3D+): compile indices into consecutive registers
             std::vector<uint16_t> idxRegs;
             for (size_t i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
@@ -4866,6 +5489,7 @@ uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
         }
     }
 
+    emitUpvalStoreIfShared(target->strValue, arr);
     return arr;
 }
 
@@ -5135,6 +5759,12 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
             return "CALL_METHOD_MULTI";
         case OpCode::CLOSURE_MAKE:
             return "CLOSURE_MAKE";
+        case OpCode::UPVAL_NEW:
+            return "UPVAL_NEW";
+        case OpCode::UPVAL_LOAD:
+            return "UPVAL_LOAD";
+        case OpCode::UPVAL_STORE:
+            return "UPVAL_STORE";
         case OpCode::CALL_MULTI:
             return "CALL_MULTI";
         case OpCode::AND_SC:

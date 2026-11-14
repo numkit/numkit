@@ -72,6 +72,7 @@ void warning(Engine &engine, Span<const Value> args)
     } else {
         msg = first;
     }
+    engine.setLastWarn(msg, id);
     gLastWarnMsg = msg;
     gLastWarnId  = id;
     engine.outputText("Warning: " + msg + "\n");
@@ -172,9 +173,8 @@ void lastwarn_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     auto *mr = ctx.engine->resource();
     // Two-output read form: [msg, id] = lastwarn();
     if (args.empty()) {
-        auto lw = lastwarnGet();
-        outs[0] = Value::fromString(lw.msg, mr);
-        if (nargout > 1) outs[1] = Value::fromString(lw.id, mr);
+        outs[0] = Value::fromString(ctx.engine->lastWarnMsg(), mr);
+        if (nargout > 1) outs[1] = Value::fromString(ctx.engine->lastWarnId(), mr);
         return;
     }
     // Set form: lastwarn(msg) or lastwarn(msg, id).
@@ -189,7 +189,7 @@ void lastwarn_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                          0, 0, "lastwarn", "", "numkit:lastwarn:badId");
         id = args[1].toString();
     }
-    lastwarnSet(msg, id);
+    ctx.engine->setLastWarn(msg, id);
     // MATLAB's set form returns nothing; we mirror that.
     if (nargout > 0) outs[0] = Value::fromString("", mr);
 }

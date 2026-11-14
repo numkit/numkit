@@ -306,13 +306,35 @@ void registerReflectionRuntime(Engine &engine)
             outs[0] = buildMetaClass(cn, *ctx.engine, mr);
         });
 
-    // ── Pack 36: type-predicate stubs for absent types ─────────────
-    auto alwaysFalsePredicate =
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
-            outs[0] = Value::logicalScalar(false, ctx.engine->resource());
-        };
-    engine.registerFunction("iscategorical",     alwaysFalsePredicate);
-    engine.registerFunction("istimetable",       alwaysFalsePredicate);
+    auto checkIsClassOrSub = [](const Value &v, const char *target, Engine &eng) -> bool {
+        if (!v.isObject())
+            return false;
+        const std::string cn = v.objectClassName();
+        if (cn == target)
+            return true;
+        if (const BuiltinClass *cls = eng.findClass(cn)) {
+            for (const auto &s : cls->superclasses)
+                if (s == target)
+                    return true;
+        }
+        return false;
+    };
+    engine.registerFunction("iscategorical",
+        [checkIsClassOrSub](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            if (args.size() != 1)
+                throw Error("iscategorical: requires 1 argument", 0, 0, "iscategorical", "",
+                            "numkit:iscategorical:nargin");
+            outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "categorical", *ctx.engine),
+                                           ctx.engine->resource());
+        });
+    engine.registerFunction("istimetable",
+        [checkIsClassOrSub](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+            if (args.size() != 1)
+                throw Error("istimetable: requires 1 argument", 0, 0, "istimetable", "",
+                            "numkit:istimetable:nargin");
+            outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "timetable", *ctx.engine),
+                                           ctx.engine->resource());
+        });
 }
 
 } // namespace numkit::runtime

@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 
 #ifdef _WIN32
@@ -47,7 +48,7 @@ namespace numkit {
 
 namespace {
 
-class HostPluginContext : public PluginContext, public std::enable_shared_from_this<HostPluginContext> {
+class HostPluginContext final : public PluginContext {
 public:
     HostPluginContext(Engine &engine, const std::string &prefixNs, const std::string &defaultNs)
         : engine_(engine), prefixNs_(prefixNs), defaultNs_(defaultNs)
@@ -65,21 +66,11 @@ public:
         return engine_.resource();
     }
 
-    ExternalFunc wrapFunc(ExternalFunc func) {
-        auto self = shared_from_this();
-        return [self, fn = std::move(func)](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
-            CallContext pluginCtx = ctx;
-            pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
-            fn(args, nargout, outs, pluginCtx);
-        };
-    }
-
     void registerFunction(const std::string &ns, const std::string &name, ExternalFunc func) override {
-        auto wrapped = wrapFunc(std::move(func));
         if (!prefixNs_.empty()) {
             // Primary namespace registration: prefixNs_.name (e.g. custom_sig.butter)
             try {
-                engine_.registerFunction(prefixNs_, name, wrapped);
+                engine_.registerFunction(prefixNs_, name, func);
             } catch (...) {}
 
             // Sub-namespace registration: prefixNs_.sub.name (e.g. custom_sig.filter_design.butter)
@@ -90,7 +81,7 @@ public:
             }
             if (!sub.empty() && sub != prefixNs_) {
                 try {
-                    engine_.registerFunction(prefixNs_ + "." + sub, name, wrapped);
+                    engine_.registerFunction(prefixNs_ + "." + sub, name, func);
                 } catch (...) {}
             }
         } else if (ns.empty()) {
@@ -98,11 +89,11 @@ public:
             // (shortNameIndex_ resolves bare calls in Compat mode; Isolated mode stays clean).
             if (!defaultNs_.empty()) {
                 try {
-                    engine_.registerFunction(defaultNs_, name, wrapped);
+                    engine_.registerFunction(defaultNs_, name, std::move(func));
                 } catch (const std::exception &) {}
             } else {
                 try {
-                    engine_.registerFunction(name, wrapped);
+                    engine_.registerFunction(name, std::move(func));
                 } catch (const std::exception &) {}
             }
         } else {
@@ -110,43 +101,42 @@ public:
             std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
             engine_.markPluginNamespace(topNs, /*isolated=*/false);
             try {
-                engine_.registerFunction(ns, name, wrapped);
+                engine_.registerFunction(ns, name, func);
             } catch (const std::exception &) {
                 // Ignore duplicate registration when replacing or already present
             }
             if (dot != std::string::npos) {
                 try {
-                    engine_.registerFunction(topNs, name, wrapped);
+                    engine_.registerFunction(topNs, name, std::move(func));
                 } catch (const std::exception &) {}
             }
         }
     }
 
     void registerFunction(const std::string &name, ExternalFunc func) override {
-        auto wrapped = wrapFunc(std::move(func));
         if (!prefixNs_.empty()) {
             try {
-                engine_.registerFunction(prefixNs_, name, wrapped);
+                engine_.registerFunction(prefixNs_, name, std::move(func));
             } catch (...) {}
         } else if (!defaultNs_.empty()) {
             try {
-                engine_.registerFunction(defaultNs_, name, wrapped);
+                engine_.registerFunction(defaultNs_, name, std::move(func));
             } catch (const std::exception &) {}
         } else {
             try {
-                engine_.registerFunction(name, wrapped);
+                engine_.registerFunction(name, std::move(func));
             } catch (const std::exception &) {
                 // Ignore duplicate registration when replacing or already present
             }
         }
     }
 
-    Value callFunctionHandle(const Value &handle, Span<const Value> args, void *env = nullptr) override {
-        return engine_.callFunctionHandle(handle, args, static_cast<Environment *>(env));
+    Value callFunctionHandle(const Value &handle, Span<const Value> args, Environment *env = nullptr) override {
+        return engine_.callFunctionHandle(handle, args, env);
     }
 
-    std::vector<Value> callFunctionHandleMulti(const Value &handle, Span<const Value> args, size_t nargout, void *env = nullptr) override {
-        return engine_.callFunctionHandleMulti(handle, args, nargout, static_cast<Environment *>(env));
+    std::vector<Value> callFunctionHandleMulti(const Value &handle, Span<const Value> args, size_t nargout, Environment *env = nullptr) override {
+        return engine_.callFunctionHandleMulti(handle, args, nargout, env);
     }
 
     ops::RngContext &rng() override {
@@ -169,50 +159,7 @@ public:
         return engine_.findExternal(name, env);
     }
 
-    ObjectMethod wrapMethod(ObjectMethod m) {
-        if (!m) return {};
-        auto self = shared_from_this();
-        return [self, fn = std::move(m)](Value &obj, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
-            CallContext pluginCtx = ctx;
-            pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
-            fn(obj, args, nargout, outs, pluginCtx);
-        };
-    }
-
     void registerClass(BuiltinClass cls) override {
-        auto self = shared_from_this();
-        if (cls.construct) {
-            auto origCtor = std::move(cls.construct);
-            cls.construct = [self, fn = std::move(origCtor)](Span<const Value> args, CallContext &ctx) -> Value {
-                CallContext pluginCtx = ctx;
-                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
-                return fn(args, pluginCtx);
-            };
-        }
-        if (cls.propGet) {
-            auto origGet = std::move(cls.propGet);
-            cls.propGet = [self, fn = std::move(origGet)](const Value &obj, const std::string &name, Value &out, CallContext &ctx) -> bool {
-                CallContext pluginCtx = ctx;
-                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
-                return fn(obj, name, out, pluginCtx);
-            };
-        }
-        if (cls.propSet) {
-            auto origSet = std::move(cls.propSet);
-            cls.propSet = [self, fn = std::move(origSet)](Value &obj, const std::string &name, const Value &val, CallContext &ctx) -> bool {
-                CallContext pluginCtx = ctx;
-                pluginCtx.engine = reinterpret_cast<Engine *>(static_cast<PluginContext *>(self.get()));
-                return fn(obj, name, val, pluginCtx);
-            };
-        }
-        cls.subsref = wrapMethod(std::move(cls.subsref));
-        cls.subsasgn = wrapMethod(std::move(cls.subsasgn));
-        for (auto &kv : cls.methods) {
-            kv.second = wrapMethod(std::move(kv.second));
-        }
-        for (auto &kv : cls.ops) {
-            kv.second = wrapMethod(std::move(kv.second));
-        }
         try {
             engine_.registerClass(std::move(cls));
         } catch (const std::exception &) {}
@@ -363,13 +310,20 @@ PluginLoader::PluginLoader(Engine &engine)
     }
 }
 
-PluginLoader::~PluginLoader()
-{
-    for (void *h : handles_) {
-        osCloseLibrary(h);
-    }
-    handles_.clear();
+PluginLoader::~PluginLoader() = default;
+
+namespace {
+struct PinnedPluginRegistry {
+    std::mutex mutex;
+    std::unordered_map<std::string, NumkitPluginInitFn> loadedInitFns;
+    std::vector<void *> pinnedHandles;
+};
+
+PinnedPluginRegistry &pinnedPluginRegistry() {
+    static PinnedPluginRegistry reg;
+    return reg;
 }
+} // namespace
 
 bool PluginLoader::loadModule(const std::string &pathInput, const std::string &targetNamespace)
 {
@@ -388,39 +342,55 @@ bool PluginLoader::loadModule(const std::string &pathInput, const std::string &t
         return true;
     }
 
-    void *h = osLoadLibrary(path.c_str());
-    if (!h) {
-        std::string withExt = path;
+    NumkitPluginInitFn initFn = nullptr;
+    {
+        auto &reg = pinnedPluginRegistry();
+        std::lock_guard<std::mutex> lock(reg.mutex);
+        auto it = reg.loadedInitFns.find(normPath);
+        if (it != reg.loadedInitFns.end()) {
+            initFn = it->second;
+        } else {
+            void *h = osLoadLibrary(path.c_str());
+            if (!h) {
+                std::string withExt = path;
 #ifdef _WIN32
-        if (p.extension() != ".dll") withExt += ".dll";
+                if (p.extension() != ".dll") withExt += ".dll";
 #elif defined(__APPLE__)
-        if (p.extension() != ".dylib") withExt += ".dylib";
+                if (p.extension() != ".dylib") withExt += ".dylib";
 #else
-        if (p.extension() != ".so") withExt += ".so";
+                if (p.extension() != ".so") withExt += ".so";
 #endif
-        h = osLoadLibrary(withExt.c_str());
+                h = osLoadLibrary(withExt.c_str());
 #ifndef _WIN32
-        if (!h) {
-            std::filesystem::path libPrefixed = p.parent_path() / ("lib" + p.filename().string());
-            std::string lpStr = libPrefixed.string();
+                if (!h) {
+                    std::filesystem::path libPrefixed = p.parent_path() / ("lib" + p.filename().string());
+                    std::string lpStr = libPrefixed.string();
 #if defined(__APPLE__)
-            if (libPrefixed.extension() != ".dylib") lpStr += ".dylib";
+                    if (libPrefixed.extension() != ".dylib") lpStr += ".dylib";
 #else
-            if (libPrefixed.extension() != ".so") lpStr += ".so";
+                    if (libPrefixed.extension() != ".so") lpStr += ".so";
 #endif
-            h = osLoadLibrary(lpStr.c_str());
+                    h = osLoadLibrary(lpStr.c_str());
+                }
+#endif
+            }
+
+            if (!h) {
+                throw std::runtime_error("loadmodule: failed to load '" + pathInput + "': " + osLastError());
+            }
+
+            initFn = reinterpret_cast<NumkitPluginInitFn>(osGetProcAddress(h, "numkit_plugin_init"));
+            if (!initFn) {
+                osCloseLibrary(h);
+                throw std::runtime_error("loadmodule: library '" + pathInput + "' does not export numkit_plugin_init entry point");
+            }
+
+            // Pin valid plugin shared libraries for the process lifetime so
+            // NativePayload / std::function vtables inside Values outliving an
+            // Engine or shared across Engines can never dangle.
+            reg.pinnedHandles.push_back(h);
+            reg.loadedInitFns[normPath] = initFn;
         }
-#endif
-    }
-
-    if (!h) {
-        throw std::runtime_error("loadmodule: failed to load '" + pathInput + "': " + osLastError());
-    }
-
-    auto initFn = reinterpret_cast<NumkitPluginInitFn>(osGetProcAddress(h, "numkit_plugin_init"));
-    if (!initFn) {
-        osCloseLibrary(h);
-        throw std::runtime_error("loadmodule: library '" + pathInput + "' does not export numkit_plugin_init entry point");
     }
 
     std::string stem = p.stem().string();
@@ -433,13 +403,11 @@ bool PluginLoader::loadModule(const std::string &pathInput, const std::string &t
         stem = stem.substr(7);
     }
 
-    auto ctx = std::make_shared<HostPluginContext>(engine_, targetNamespace, stem);
-    if (!initFn(*ctx)) {
-        osCloseLibrary(h);
+    HostPluginContext ctx(engine_, targetNamespace, stem);
+    if (!initFn(ctx)) {
         throw std::runtime_error("loadmodule: initialization failed for '" + pathInput + "' (ABI mismatch)");
     }
 
-    handles_.push_back(h);
     loadedPaths_.insert(cacheKey);
     if (targetNamespace.empty()) {
         loadedPaths_.insert(normPath);

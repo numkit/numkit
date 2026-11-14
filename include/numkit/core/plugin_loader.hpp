@@ -48,7 +48,6 @@ private:
     Engine &engine_;
     std::vector<std::string> searchPaths_;
     std::unordered_set<std::string> loadedPaths_;
-    std::vector<void *> handles_;
 
     std::unordered_map<std::string, std::string> manifestIndex_;
     bool manifestsScanned_{false};

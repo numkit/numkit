@@ -121,7 +121,7 @@ public:
         return { f.chunk, f.R };
     }
 
-    int callDepth() const { return std::max(0, static_cast<int>(frames_.size()) - 1); }
+    int callDepth() const;
 
     const std::string &currentMethodClass() const
     {
@@ -152,6 +152,9 @@ public:
 
     void writeToFrameMatchingEnv(Environment *env, const std::string &name,
                                  const Value &val);
+    void syncFrameToEnv(Environment *env);
+    void syncEnvRemovalsToFrame(Environment *env);
+    bool hasActiveFrameNamed(const std::string &funcName) const;
     void flushWorkspaceFrame();
 
     const std::vector<std::string> &currentFrameCallerArgNames() const
@@ -203,6 +206,7 @@ private:
         size_t nargout = 1;
         std::string ownerClass;
         bool isCtor = false;
+        bool isScriptFrame = false;
 
         std::unordered_map<std::string, Value> *dynVars = nullptr;
         std::unique_ptr<Environment> env;
@@ -253,6 +257,7 @@ public:
             chunkCallCache;
         bool wasReentrantEval = false;
     };
+    std::vector<PausedState *> activePausedStates_;
 private:
 
     int maxRecursion_ = 200;
@@ -278,6 +283,7 @@ private:
     bool startContinuation(std::shared_ptr<VmContinuation> cont);
 
     Environment *currentCallEnv();
+    Environment *materializeFrameEnv(CallFrame &f, const Value *frameRegs);
     void exportTopLevelVariables();
 
     bool dispatchTryCatch(const char *msg, const char *identifier);

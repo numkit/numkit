@@ -135,7 +135,8 @@ void loadAscii(Engine &engine, Environment &env,
     if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
     if (stem.empty() || !(std::isalpha(static_cast<unsigned char>(stem[0])) || stem[0] == '_'))
         throw Error("load: cannot derive a valid variable name from filename");
-    env.set(stem, std::move(M));
+    env.set(stem, M);
+    engine.assignToCaller(0, stem, std::move(M));
 }
 
 } // namespace numkit::runtime

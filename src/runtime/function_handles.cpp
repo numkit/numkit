@@ -75,13 +75,13 @@ void registerFunctionHandles(Engine &engine)
                                     throw std::runtime_error(
                                         "func2str: argument must be a function handle");
                                 const std::string name = h->funcHandleName();
-                                // Anonymous handles carry their source text;
-                                // named handles (sin, foo, …) return the name.
+                                const std::string src = h->funcHandleSource();
                                 const bool isAnon = name.rfind("__anon_", 0) == 0;
                                 std::string text;
-                                if (isAnon) {
-                                    const std::string src = h->funcHandleSource();
-                                    text = !src.empty() ? src : ("@" + name);
+                                if (!src.empty()) {
+                                    text = src;
+                                } else if (isAnon) {
+                                    text = "@" + name;
                                 } else {
                                     text = name;
                                 }

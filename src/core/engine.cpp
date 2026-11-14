@@ -13,8 +13,10 @@
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -59,7 +61,7 @@ Engine::Engine() : Engine(numkit::defaultCachedResource()) {}
 Engine::Engine(std::pmr::memory_resource *mr)
     : mr_(mr ? mr : numkit::defaultCachedResource())
 {
-    globalsEnv_ = std::make_unique<Environment>();
+    globalsEnv_ = std::make_shared<Environment>();
     constantsEnv_ = std::make_unique<Environment>(nullptr, globalsEnv_.get());
     workspaceEnv_ = std::make_unique<Environment>(constantsEnv_.get(), globalsEnv_.get());
     treeWalker_ = std::make_unique<TreeWalker>(*this);
@@ -232,7 +234,9 @@ bool Engine::isUserCodeHandle(const Value &handle) const
 {
     if (!handle.isFuncHandle())
         return false;
-    return lookupUserFunctionLocal(handle.funcHandleName()) != nullptr;
+    const std::string &fn = handle.funcHandleName();
+    return lookupUserFunctionLocal(fn) != nullptr
+           || (compiler_ && compiler_->findCompiled(fn) != nullptr);
 }
 
 std::string Engine::formatObjectDisplay(const std::string &name, const Value &obj) const
@@ -786,9 +790,10 @@ void Engine::unregisterClassDef(const std::string &name)
         classDefs_.erase(dit);
     }
     // Drop compiled method chunks ("Name>method") so rewritten bodies recompile
-    // instead of serving the stale cache — the core of the redefinition bug.
+    // instead of serving the stale cache.
     if (compiler_)
         compiler_->eraseCompiledFuncsForClass(name);
+    clearPersistentForFunc(name);
     // Source AST kept for derived-class re-merge — drop it too (the cascade in
     // reregisterDerivedClasses holds its own shared_ptr across this erase).
     classDefAst_.erase(name);
@@ -1154,15 +1159,19 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     }
     cls.propGet = [desc](const Value &self, const std::string &name, Value &out,
                          CallContext &ctx) -> bool {
-        // Enforce GetAccess for restricted properties (a class with only
-        // public properties skips the lookup entirely).
         if (desc->anyNonPublicProp)
             if (const PropInfo *pi = findProp(*desc, name);
                 pi && pi->getAccess != Access::Public)
                 enforceAccess(ctx.engine, pi->getAccess, pi->declClass, "property", name);
-        // A `get.Prop` accessor overrides the stored value.
         auto git = desc->getters.find(name);
-        if (git != desc->getters.end()) {
+        if (git != desc->getters.end()
+            && !ctx.engine->isPropAccessorActive(git->second->name)) {
+            struct AccessorGuard {
+                Engine *eng;
+                ~AccessorGuard() { eng->popPropAccessor(); }
+            };
+            ctx.engine->pushPropAccessor(git->second->name);
+            AccessorGuard guard{ctx.engine};
             auto r = ctx.engine->invokeClassMethod(*git->second,
                                                    Span<const Value>(&self, 1), 1);
             out = r.empty() ? Value() : std::move(r[0]);
@@ -1179,16 +1188,29 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     };
     cls.propSet = [desc](Value &self, const std::string &name, const Value &val,
                          CallContext &ctx) -> bool {
-        // Enforce SetAccess (incl. immutable) for restricted properties.
-        if (desc->anyNonPublicProp)
-            if (const PropInfo *pi = findProp(*desc, name);
-                pi && pi->setAccess != Access::Public)
+        const PropInfo *pi = findProp(*desc, name);
+        if (pi) {
+            if (pi->isConstant)
+                throw std::runtime_error("Cannot set Constant property '" + name
+                                         + "' of class '" + desc->name + "'");
+            if (pi->setAccess != Access::Public)
                 enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", name);
-        // A `set.Prop` accessor overrides the store. A value-class accessor
-        // returns the modified object (`function obj = set.Prop(obj, v)`),
-        // which we write back; a handle accessor mutates in place.
+        } else if (!desc->setters.count(name)
+                   && std::find(desc->superclasses.begin(), desc->superclasses.end(),
+                                "dynamicprops")
+                          == desc->superclasses.end()) {
+            throw std::runtime_error("No public property '" + name
+                                     + "' for class '" + desc->name + "'");
+        }
         auto sit = desc->setters.find(name);
-        if (sit != desc->setters.end()) {
+        if (sit != desc->setters.end()
+            && !ctx.engine->isPropAccessorActive(sit->second->name)) {
+            struct AccessorGuard {
+                Engine *eng;
+                ~AccessorGuard() { eng->popPropAccessor(); }
+            };
+            ctx.engine->pushPropAccessor(sit->second->name);
+            AccessorGuard guard{ctx.engine};
             Value callArgs[2] = {self, val};
             auto r = ctx.engine->invokeClassMethod(*sit->second,
                                                    Span<const Value>(callArgs, 2), 1);
@@ -1545,7 +1567,11 @@ const UserFunction *Engine::classGetter(const std::string &className,
     if (it == classDefs_.end())
         return nullptr;
     auto git = it->second->getters.find(prop);
-    return git != it->second->getters.end() ? git->second.get() : nullptr;
+    if (git == it->second->getters.end())
+        return nullptr;
+    if (isPropAccessorActive(git->second->name))
+        return nullptr;
+    return git->second.get();
 }
 
 const UserFunction *Engine::classSetter(const std::string &className,
@@ -1555,7 +1581,21 @@ const UserFunction *Engine::classSetter(const std::string &className,
     if (it == classDefs_.end())
         return nullptr;
     auto sit = it->second->setters.find(prop);
-    return sit != it->second->setters.end() ? sit->second.get() : nullptr;
+    if (sit == it->second->setters.end())
+        return nullptr;
+    if (isPropAccessorActive(sit->second->name))
+        return nullptr;
+    return sit->second.get();
+}
+
+bool Engine::isPropAccessorActive(const std::string &accessorName) const
+{
+    if (std::find(activePropAccessors_.begin(), activePropAccessors_.end(), accessorName)
+        != activePropAccessors_.end())
+        return true;
+    if (vm_ && vm_->hasActiveFrameNamed(accessorName))
+        return true;
+    return false;
 }
 
 void Engine::enforcePropGetAccess(const std::string &className, const std::string &prop)
@@ -1570,10 +1610,22 @@ void Engine::enforcePropGetAccess(const std::string &className, const std::strin
 void Engine::enforcePropSetAccess(const std::string &className, const std::string &prop)
 {
     auto it = classDefs_.find(className);
-    if (it == classDefs_.end() || !it->second->anyNonPublicProp)
+    if (it == classDefs_.end())
         return;
-    if (const PropInfo *pi = findProp(*it->second, prop); pi && pi->setAccess != Access::Public)
-        enforceAccess(this, pi->setAccess, pi->declClass, "property", prop);
+    const ClassDefDesc &desc = *it->second;
+    const PropInfo *pi = findProp(desc, prop);
+    if (pi) {
+        if (pi->isConstant)
+            throw std::runtime_error("Cannot set Constant property '" + prop
+                                     + "' of class '" + className + "'");
+        if (pi->setAccess != Access::Public)
+            enforceAccess(this, pi->setAccess, pi->declClass, "property", prop);
+    } else if (!desc.setters.count(prop)
+               && std::find(desc.superclasses.begin(), desc.superclasses.end(), "dynamicprops")
+                      == desc.superclasses.end()) {
+        throw std::runtime_error("No public property '" + prop
+                                 + "' for class '" + className + "'");
+    }
 }
 
 Value Engine::superConstruct(const std::string &base, const Value &seed,
@@ -2287,6 +2339,7 @@ void Engine::adoptUserFunction(const std::string &name,
                                 UserFunction uf,
                                 bool scriptScope)
 {
+    clearPersistentForFunc(name);
     if (scriptScope)
         scriptLocalUserFuncs_[name] = std::move(uf);
     else
@@ -2384,6 +2437,7 @@ void Engine::rehashMFiles()
     std::vector<std::string> unregisteredClasses;
     for (const auto &[name, entry] : mFileCache_) {
         userFuncs_.erase(name);
+        clearPersistentForFunc(name);
         if (compiler_)
             compiler_->eraseCompiledFunc(name);
         if (classDefs_.count(name)) {
@@ -2447,6 +2501,7 @@ void Engine::refreshStaleMFiles()
         auto it = mFileCache_.find(name);
         if (it != mFileCache_.end()) {
             userFuncs_.erase(name);
+            clearPersistentForFunc(name);
             if (compiler_)
                 compiler_->eraseCompiledFunc(name);
             if (classDefs_.count(name)) {
@@ -2885,6 +2940,11 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
         return out;
     }
 
+    if (compiler_) {
+        if (const BytecodeChunk *fc = compiler_->findCompiled(name))
+            return vm_->callReentrant(*fc, args, nout);
+    }
+
     if (const UserFunction *uf = lookupUserFunction(name, e)) {
         const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
         if (!cc)
@@ -2948,6 +3008,45 @@ void Engine::assignToCaller(int n, const std::string &name, Value val)
     env->set(name, std::move(val));
 }
 
+void Engine::assignInBase(const std::string &name, Value val)
+{
+    if (vm_ && backend_ == Backend::VM)
+        vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
+    workspaceEnv_->set(name, std::move(val));
+}
+
+void Engine::syncFrameToEnv(Environment *env)
+{
+    if (vm_ && backend_ == Backend::VM)
+        vm_->syncFrameToEnv(env);
+}
+
+void Engine::syncEnvRemovalsToFrame(Environment *env)
+{
+    if (vm_ && backend_ == Backend::VM)
+        vm_->syncEnvRemovalsToFrame(env);
+}
+
+void Engine::clearPersistentForFunc(const std::string &funcName)
+{
+    auto it = persistentStore_.find(funcName);
+    if (it != persistentStore_.end() && it->second)
+        it->second->clear();
+    const std::string prefix = funcName + ">";
+    for (auto &[key, bucket] : persistentStore_) {
+        if (bucket && key.rfind(prefix, 0) == 0)
+            bucket->clear();
+    }
+}
+
+std::string Engine::getEnvVar(const std::string &name) const
+{
+    auto it = envOverlay_.find(name);
+    if (it != envOverlay_.end())
+        return it->second;
+    return numkit::envGet(name.c_str());
+}
+
 std::string Engine::inputName(int k)
 {
     if (k < 1)
@@ -2975,10 +3074,8 @@ std::string Engine::inputName(int k)
 
 void Engine::clearUserFunctions()
 {
-    // Only the workspace bucket — script-local functions live in
-    // scriptLocalUserFuncs_/scriptLocalCompiledFuncs_ and are
-    // managed by begin/endScript.
     userFuncs_.clear();
+    clearAllPersistent();
     if (compiler_)
         compiler_->clearCompiledFuncs();
 }
@@ -3152,13 +3249,17 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
             continue;
         if (!std::isalnum(static_cast<unsigned char>(arg[1])) && arg[1] != '.')
             continue;
-        if (!workspaceEnv_->getLocal(name))
+        if (!getVariable(name) && !isReservedName(name))
             continue;
         const std::string tail = arg.substr(1);
-        bool isNum = !tail.empty();
-        for (char c : tail)
-            if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.'))
-                { isNum = false; break; }
+        char *endPtr = nullptr;
+        errno = 0;
+        double parsedNum = 0.0;
+        bool isNum = false;
+        if (!tail.empty() && tail != ".") {
+            parsedNum = std::strtod(tail.c_str(), &endPtr);
+            isNum = (errno == 0 && endPtr == tail.c_str() + tail.size());
+        }
         bool isIdent = !tail.empty()
                        && (std::isalpha(static_cast<unsigned char>(tail[0]))
                            || tail[0] == '_');
@@ -3175,7 +3276,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         std::unique_ptr<ASTNode> operand;
         if (isNum) {
             operand = std::make_unique<ASTNode>(NodeType::NUMBER_LITERAL);
-            operand->numValue = std::stod(tail);
+            operand->numValue = parsedNum;
         } else {
             operand = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
             operand->strValue = tail;
@@ -3367,6 +3468,8 @@ void Engine::syncVMToWorkspace()
 {
     if (clearAllCalled_) {
         workspaceEnv_->clearAll();
+        if (vm_ && backend_ == Backend::VM)
+            vm_->syncEnvRemovalsToFrame(workspaceEnv_.get());
         clearAllCalled_ = false;
     }
     for (auto &[name, val] : vm_->lastVarMap()) {
@@ -3392,6 +3495,8 @@ void Engine::syncVMToScope(Environment *scope)
     }
     if (clearAllCalled_) {
         scope->clearAll();
+        if (vm_ && backend_ == Backend::VM)
+            vm_->syncEnvRemovalsToFrame(scope);
         clearAllCalled_ = false;
     }
     for (auto &[name, val] : vm_->lastVarMap()) {

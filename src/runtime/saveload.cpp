@@ -64,6 +64,7 @@ void save(Engine &engine, Environment &env, Span<const Value> args)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("save: filename required");
+    engine.syncFrameToEnv(&env);
     std::string filename = args[0].toString();
 
     // Three-way mode pick: explicit flag wins; otherwise extension hint;

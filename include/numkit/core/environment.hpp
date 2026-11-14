@@ -11,6 +11,8 @@
 
 namespace numkit {
 
+struct UserFunction;
+
 // A single `import` declaration active in the current scope. See
 // namespace_design.md Sections 3-4 for resolution semantics.
 struct Import
@@ -31,6 +33,10 @@ public:
     // For snapshots/closures: owning parent
     explicit Environment(std::shared_ptr<Environment> owningParent, Environment *globalsEnv);
 
+    ~Environment();
+    Environment(Environment &&) noexcept;
+    Environment &operator=(Environment &&) noexcept;
+
     void set(const std::string &name, Value val);
     Value *get(const std::string &name);
     bool has(const std::string &name) const;
@@ -49,6 +55,23 @@ public:
 
     void declareGlobal(const std::string &name);
     bool isGlobal(const std::string &name) const;
+
+    void bindPersistentBucket(std::shared_ptr<std::unordered_map<std::string, Value>> bucket) noexcept
+    {
+        persistentBucket_ = std::move(bucket);
+    }
+    void declarePersistent(const std::string &name);
+    bool isPersistent(const std::string &name) const;
+    const std::unordered_set<std::string> &persistentNames() const { return persistents_; }
+
+    // Lexical scope support for nested functions in TreeWalker:
+    void markLexicalScope(bool on = true) noexcept { isLexicalScope_ = on; }
+    bool isLexicalScope() const noexcept { return isLexicalScope_; }
+    void declareLexicalVar(const std::string &name) { lexicalVars_.insert(name); }
+    bool hasLexicalVar(const std::string &name) const { return lexicalVars_.count(name) > 0; }
+    bool hasLocalSlot(const std::string &name) const;
+    void defineNestedFunc(const std::string &name, UserFunction uf);
+    const UserFunction *findNestedFunc(const std::string &name) const;
 
     // Names this environment has declared `global`. The VALUE of each lives in
     // globalsEnv_ (get/set delegate there), never in this env's local storage —
@@ -97,11 +120,17 @@ private:
     std::unordered_map<std::string, Value> vars_;
 
     std::unordered_set<std::string> globals_;
+    std::unordered_set<std::string> persistents_;
+    std::unordered_set<std::string> lexicalVars_;
+    std::unique_ptr<std::unordered_map<std::string, UserFunction>> nestedFuncs_;
     std::vector<Import> activeImports_;
     Environment *parent_ = nullptr;             // non-owning, for lookup
     std::shared_ptr<Environment> owningParent_; // owning, for snapshots only
     Environment *globalsEnv_ = nullptr;
+    std::shared_ptr<std::unordered_map<std::string, Value>> persistentBucket_;
     bool hasGlobals_ = false;
+    bool hasPersistents_ = false;
+    bool isLexicalScope_ = false;
 
     // Internal helpers
     Value *sboFind(const std::string &name);

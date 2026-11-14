@@ -2785,7 +2785,8 @@ void registerContainersRuntime(Engine &engine)
     engine.registerFunction("istable",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "istable");
-            outs[0] = Value::logicalScalar(tableCst(args[0]) != nullptr, ctx.engine->resource());
+            const TablePayload *p = tableCst(args[0]);
+            outs[0] = Value::logicalScalar(p != nullptr && !p->isTimetable, ctx.engine->resource());
         });
     engine.registerFunction("istabular",
         [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {

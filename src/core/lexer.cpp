@@ -97,7 +97,7 @@ char Lexer::advance()
 
 void Lexer::addToken(TokenType type, const std::string &val, int line, int col)
 {
-    tokens_.push_back({type, val, line, col});
+    tokens_.push_back({type, val, line, col, line_, col_});
 }
 
 // ─── bracket tracking ──────────────────────────────────────────────────
@@ -203,8 +203,7 @@ bool Lexer::isTransposeContext() const
     // quote after whitespace starts a STRING (command syntax: disp 'abc').
     // Whitespace = a gap between the previous token's end column and this
     // quote's column (verified on R2025b: y = x ' -> Invalid expression).
-    return line_ == prev.line
-        && col_ == prev.col + static_cast<int>(prev.value.size());
+    return line_ == prev.endLine && col_ == prev.endCol;
 }
 
 // ─── implicit comma inside [] and {} ────────────────────────────────────
@@ -241,8 +240,19 @@ void Lexer::insertImplicitComma()
 
     size_t scanPos = pos_;
 
-    while (scanPos < src_.size() && (src_[scanPos] == ' ' || src_[scanPos] == '\t'))
-        scanPos++;
+    while (scanPos < src_.size()) {
+        if (src_[scanPos] == ' ' || src_[scanPos] == '\t') {
+            scanPos++;
+        } else if (src_[scanPos] == '.' && scanPos + 2 < src_.size()
+                   && src_[scanPos + 1] == '.' && src_[scanPos + 2] == '.') {
+            while (scanPos < src_.size() && src_[scanPos] != '\n')
+                scanPos++;
+            if (scanPos < src_.size())
+                scanPos++;
+        } else {
+            break;
+        }
+    }
 
     if (scanPos >= src_.size())
         return;
@@ -359,6 +369,11 @@ void Lexer::skipSpacesAndComments()
                 advance();
             if (pos_ < src_.size())
                 advance();
+            if (inMatrixContext()) {
+                while (pos_ < src_.size() && (peek() == ' ' || peek() == '\t'))
+                    advance();
+                insertImplicitComma();
+            }
         } else {
             break;
         }
@@ -688,14 +703,14 @@ bool Lexer::readOperator()
     int startCol = col_;
 
     auto twoChar = [&](TokenType t, const char *s) {
+        advance();
+        advance();
         addToken(t, s, startLine, startCol);
-        advance();
-        advance();
         return true;
     };
     auto oneChar = [&](TokenType t, const char *s) {
-        addToken(t, s, startLine, startCol);
         advance();
+        addToken(t, s, startLine, startCol);
         return true;
     };
 
@@ -825,8 +840,9 @@ std::vector<Token> Lexer::tokenize()
 
         if (c == '\'') {
             if (isTransposeContext()) {
-                addToken(TokenType::APOSTROPHE, "'", line_, col_);
+                int al = line_, ac = col_;
                 advance();
+                addToken(TokenType::APOSTROPHE, "'", al, ac);
                 continue;
             }
             readString(line_, col_);

@@ -1,5 +1,6 @@
 // src/environment.cpp
 #include <numkit/core/environment.hpp>
+#include <numkit/core/types.hpp>
 
 namespace numkit {
 
@@ -65,21 +66,55 @@ Environment::Environment(std::shared_ptr<Environment> owningParent, Environment 
     , globalsEnv_(globalsEnv)
 {}
 
+Environment::~Environment() = default;
+Environment::Environment(Environment &&) noexcept = default;
+Environment &Environment::operator=(Environment &&) noexcept = default;
+
+bool Environment::hasLocalSlot(const std::string &name) const
+{
+    if (!vars_.empty())
+        return vars_.count(name) > 0;
+    return sboFind(name) != nullptr;
+}
+
 void Environment::set(const std::string &name, Value val)
 {
     if (hasGlobals_ && globals_.count(name) && globalsEnv_) {
         globalsEnv_->set(name, std::move(val));
-    } else {
-        sboSet(name, std::move(val));
+        return;
     }
+    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
+        (*persistentBucket_)[name] = std::move(val);
+        return;
+    }
+    if (!hasLocalSlot(name) && !hasLexicalVar(name)) {
+        for (Environment *p = parent_; p && p->isLexicalScope_; p = p->parent_) {
+            if (p->hasGlobals_ && p->globals_.count(name) && p->globalsEnv_) {
+                p->globalsEnv_->set(name, std::move(val));
+                return;
+            }
+            if (p->hasPersistents_ && p->persistents_.count(name) && p->persistentBucket_) {
+                (*p->persistentBucket_)[name] = std::move(val);
+                return;
+            }
+            if (p->hasLexicalVar(name) || p->hasLocalSlot(name)) {
+                p->setLocal(name, std::move(val));
+                return;
+            }
+        }
+    }
+    sboSet(name, std::move(val));
 }
 
 Value *Environment::get(const std::string &name)
 {
     if (hasGlobals_ && globals_.count(name) && globalsEnv_)
         return globalsEnv_->get(name);
+    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
+        auto [it, inserted] = persistentBucket_->emplace(name, Value::Empty);
+        return &it->second;
+    }
     if (!vars_.empty()) {
-        // Overflowed — use map only
         auto it = vars_.find(name);
         if (it != vars_.end())
             return &it->second;
@@ -97,6 +132,8 @@ bool Environment::has(const std::string &name) const
 {
     if (hasGlobals_ && globals_.count(name) && globalsEnv_)
         return globalsEnv_->get(name) != nullptr;
+    if (hasPersistents_ && persistents_.count(name) && persistentBucket_)
+        return true;
     if (!vars_.empty()) {
         if (vars_.count(name))
             return true;
@@ -143,6 +180,40 @@ bool Environment::isGlobal(const std::string &name) const
     return hasGlobals_ && globals_.count(name) > 0;
 }
 
+void Environment::declarePersistent(const std::string &name)
+{
+    persistents_.insert(name);
+    hasPersistents_ = true;
+    if (persistentBucket_ && persistentBucket_->find(name) == persistentBucket_->end()) {
+        (*persistentBucket_)[name] = Value::Empty;
+    }
+}
+
+bool Environment::isPersistent(const std::string &name) const
+{
+    return hasPersistents_ && persistents_.count(name) > 0;
+}
+
+void Environment::defineNestedFunc(const std::string &name, UserFunction uf)
+{
+    if (!nestedFuncs_) {
+        nestedFuncs_ = std::make_unique<std::unordered_map<std::string, UserFunction>>();
+    }
+    (*nestedFuncs_)[name] = std::move(uf);
+}
+
+const UserFunction *Environment::findNestedFunc(const std::string &name) const
+{
+    if (nestedFuncs_) {
+        auto it = nestedFuncs_->find(name);
+        if (it != nestedFuncs_->end())
+            return &it->second;
+    }
+    if (parent_)
+        return parent_->findNestedFunc(name);
+    return nullptr;
+}
+
 void Environment::forEachLocal(
     const std::function<void(const std::string &, const Value &)> &fn) const
 {
@@ -175,6 +246,14 @@ std::shared_ptr<Environment> Environment::snapshot(std::shared_ptr<Environment> 
 
     snap->globals_ = globals_;
     snap->hasGlobals_ = hasGlobals_;
+    snap->persistents_ = persistents_;
+    snap->hasPersistents_ = hasPersistents_;
+    snap->persistentBucket_ = persistentBucket_;
+    snap->lexicalVars_ = lexicalVars_;
+    snap->isLexicalScope_ = isLexicalScope_;
+    if (nestedFuncs_) {
+        snap->nestedFuncs_ = std::make_unique<std::unordered_map<std::string, UserFunction>>(*nestedFuncs_);
+    }
 
     return snap;
 }
@@ -185,6 +264,9 @@ void Environment::remove(const std::string &name)
     if (hasGlobals_ && globals_.count(name) && globalsEnv_) {
         globalsEnv_->remove(name);
     }
+    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
+        persistentBucket_->erase(name);
+    }
 
     for (size_t i = 0; i < sboCount_; ++i) {
         if (sbo_[i].name == name) {
@@ -194,6 +276,9 @@ void Environment::remove(const std::string &name)
             globals_.erase(name);
             if (globals_.empty())
                 hasGlobals_ = false;
+            persistents_.erase(name);
+            if (persistents_.empty())
+                hasPersistents_ = false;
             return;
         }
     }
@@ -201,14 +286,23 @@ void Environment::remove(const std::string &name)
     globals_.erase(name);
     if (globals_.empty())
         hasGlobals_ = false;
+    persistents_.erase(name);
+    if (persistents_.empty())
+        hasPersistents_ = false;
 }
 
 void Environment::clearAll(bool keepImports)
 {
+    if (hasPersistents_ && persistentBucket_) {
+        for (const auto &pname : persistents_)
+            persistentBucket_->erase(pname);
+    }
     sboCount_ = 0;
     vars_.clear();
     globals_.clear();
     hasGlobals_ = false;
+    persistents_.clear();
+    hasPersistents_ = false;
     if (!keepImports) {
         activeImports_.clear();
     }
@@ -224,6 +318,12 @@ void Environment::reset(Environment *parent, Environment *gs)
     vars_.clear();
     globals_.clear();
     hasGlobals_ = false;
+    persistents_.clear();
+    hasPersistents_ = false;
+    persistentBucket_.reset();
+    lexicalVars_.clear();
+    isLexicalScope_ = false;
+    nestedFuncs_.reset();
     activeImports_.clear();
     parent_ = parent;
     owningParent_.reset();

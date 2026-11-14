@@ -84,6 +84,8 @@ struct Token
     std::string value;
     int line = 0;
     int col = 0;
+    int endLine = 0;
+    int endCol = 0;
 };
 
 class Lexer

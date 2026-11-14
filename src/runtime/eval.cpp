@@ -28,8 +28,8 @@ void registerEvalFamily(Engine &engine)
     // leaked variables and imports into workspaceEnv. Provided as an
     // escape hatch for code that depended on the old (buggy) scope.
     auto resolveEvalScope = [](CallContext &ctx) -> Environment * {
-        const char *legacy = std::getenv("NUMKIT_LEGACY_EVAL_SCOPE");
-        if (legacy && legacy[0] == '1' && legacy[1] == '\0')
+        std::string legacy = ctx.engine->getEnvVar("NUMKIT_LEGACY_EVAL_SCOPE");
+        if (legacy == "1")
             return &ctx.engine->workspaceEnv();
         return ctx.env;
     };

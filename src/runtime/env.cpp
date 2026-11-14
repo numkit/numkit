@@ -62,14 +62,29 @@ void setenv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
 {
     (void)nargout;
     (void)outs;
-    (void)ctx;
-    setenv(args);
+    if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+        throw Error("setenv: first argument must be a variable name");
+    std::string name = args[0].toString();
+    if (name.empty())
+        throw Error("setenv: variable name cannot be empty");
+    if (name.find('=') != std::string::npos)
+        throw Error("setenv: variable name cannot contain '='");
+    std::string value;
+    if (args.size() >= 2) {
+        if (!args[1].isChar() && !args[1].isString())
+            throw Error("setenv: value must be a char array");
+        value = args[1].toString();
+    }
+    ctx.engine->setEnvVar(name, value);
 }
 
 void getenv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
 {
     (void)nargout;
-    outs[0] = getenv(args, ctx.engine->resource());
+    if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+        throw Error("getenv: argument must be a variable name");
+    outs[0] = Value::fromString(ctx.engine->getEnvVar(args[0].toString()),
+                                ctx.engine->resource());
 }
 
 void loadmodule_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)

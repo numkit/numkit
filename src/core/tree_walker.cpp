@@ -405,10 +405,12 @@ Value TreeWalker::execIdentifier(const ASTNode *node, Environment *env, size_t n
     if (val)
         return *val;
 
-    // MATLAB precedence: user-defined functions win over external
-    // (builtin) registrations that share a short name. e.g. user defines
-    // `function y = square(x)` while `compat.square` is imported — the
-    // user function must be called.
+    // MATLAB precedence: lexical nested functions first, then user-defined
+    // functions, then external (builtin) registrations sharing a short name.
+    if (env) {
+        if (const UserFunction *nf = env->findNestedFunc(name))
+            return callUserFunction(*nf, {}, env);
+    }
     if (auto *_uf = engine_.lookupUserFunction(name, env))
         return callUserFunction(*_uf, {}, env);
     if (const ExternalFunc *fn = engine_.findExternal(name, env)) {
@@ -443,7 +445,8 @@ Value TreeWalker::execAssign(const ASTNode *node, Environment *env)
     if (lhs->type == NodeType::IDENTIFIER) {
         // Fast path: if variable already exists as a scalar double
         // and rhs is scalar double, write in-place (no hash lookup for set)
-        if (rhs.isScalar() && rhs.type() == ValueType::DOUBLE) {
+        if (rhs.isScalar() && rhs.type() == ValueType::DOUBLE
+            && !env->isGlobal(lhs->strValue) && !env->isPersistent(lhs->strValue)) {
             Value *existing = env->getLocal(lhs->strValue);
             if (existing && existing->isScalar() && existing->type() == ValueType::DOUBLE) {
                 *existing->doubleDataMut() = rhs.toScalar();
@@ -479,6 +482,10 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
         std::string fname = execNode(lhs->children[1].get(), env).toString();
         if (objNode->type == NodeType::IDENTIFIER) {
             auto *var = env->get(objNode->strValue);
+            if (var && engine_.constantsEnv_
+                && var == engine_.constantsEnv_->getLocal(objNode->strValue)) {
+                var = nullptr;
+            }
             if (!var) {
                 env->set(objNode->strValue, Value::structure());
                 var = env->get(objNode->strValue);
@@ -801,6 +808,10 @@ Value &TreeWalker::resolveObjectSlot(const ASTNode *node, Environment *env)
     switch (node->type) {
     case NodeType::IDENTIFIER: {
         Value *var = env->get(node->strValue);
+        if (var && engine_.constantsEnv_
+            && var == engine_.constantsEnv_->getLocal(node->strValue)) {
+            var = nullptr;
+        }
         if (!var) {
             env->set(node->strValue, Value());
             var = env->get(node->strValue);
@@ -1255,8 +1266,12 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
         }
     }
 
-    // User-defined functions take precedence over external builtins
-    // sharing the same short name.
+    // Lexical nested functions first, then user-defined functions over builtins.
+    if (env) {
+        if (const UserFunction *nf = env->findNestedFunc(funcName)) {
+            return callUserFunctionMulti(*nf, args, env, nout, node);
+        }
+    }
     if (auto *_uf = engine_.lookupUserFunction(funcName, env)) {
         return callUserFunctionMulti(*_uf, args, env, nout, node);
     }
@@ -1283,6 +1298,10 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
         throw std::runtime_error("Invalid delete target");
 
     auto *var = env->get(target->strValue);
+    if (var && engine_.constantsEnv_
+        && var == engine_.constantsEnv_->getLocal(target->strValue)) {
+        var = nullptr;
+    }
     if (!var)
         throw std::runtime_error("Undefined variable: " + target->strValue);
 
@@ -1485,12 +1504,6 @@ std::vector<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
     }
     Environment *e = env ? env : engine_.workspaceEnv_.get();
     const std::string &name = handle.funcHandleName();
-    if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
-        std::vector<Value> outBuf(nout);
-        CallContext ctx{&engine_, e};
-        (*fn)(args, nout, Span<Value>(outBuf), ctx);
-        return outBuf;
-    }
     if (auto *_uf = engine_.lookupUserFunction(name, e))
         return callUserFunctionMulti(*_uf, args, e, nout, callNode);
     if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
@@ -1849,7 +1862,12 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
             }
         }
 
-        // User-defined first (precedence over imports/builtins).
+        // Lexical nested functions first, then user-defined over imports/builtins.
+        if (env) {
+            if (const UserFunction *nf = env->findNestedFunc(name)) {
+                return callUserFunction(*nf, args, env, node);
+            }
+        }
         if (auto *uf = engine_.lookupUserFunction(name, env)) {
             return callUserFunction(*uf, args, env, node);
         }
@@ -2668,6 +2686,11 @@ Value TreeWalker::execSwitch(const ASTNode *node, Environment *env)
 Value TreeWalker::execFunctionDef(const ASTNode *node, Environment *env)
 {
     (void) env;
+    // Nested FUNCTION_DEFs inside a user function are registered lexically
+    // on function entry — never pollute global/script function tables.
+    if (!activeFrames_.empty())
+        return Value();
+
     UserFunction func;
     func.name = node->strValue;
     func.params = node->paramNames;
@@ -2699,7 +2722,10 @@ Value TreeWalker::execExprStmt(const ASTNode *node, Environment *env)
     std::string displayName;
     if (child->type == NodeType::IDENTIFIER) {
         const std::string &name = child->strValue;
-        if (env->getLocal(name)) {
+        const Value *found = env->get(name);
+        const bool isUnshadowedConst =
+            found && engine_.constantsEnv_ && found == engine_.constantsEnv_->getLocal(name);
+        if (found && !isUnshadowedConst) {
             bareUserVar = true;
             displayName = name;
         }
@@ -2748,22 +2774,23 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
 
     // MATLAB (probed R2025b): a variable-headed glued -/ form (`N-1`,
     // `x -1`, `a/2` — the `which -all` idiom shape) is the binary
-    // expression when the head is a VARIABLE. The VM handles this via
-    // Engine::rewriteVarHeadedCommands before compiling; TW executes the
-    // AST directly, so disambiguate here at runtime with the live env.
+    // expression when the head is a VARIABLE.
     if (node->children.size() == 1
         && node->children[0]->type == NodeType::STRING_LITERAL) {
         const std::string &arg = node->children[0]->strValue;
+        const Value *cand = env->get(name);
+        const bool isUnshadowedConst =
+            cand && engine_.constantsEnv_ && cand == engine_.constantsEnv_->getLocal(name);
         const Value *lhs = (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')
                             && (std::isalnum(static_cast<unsigned char>(arg[1]))
-                                || arg[1] == '.'))
-                               ? env->getLocal(name) : nullptr;
+                                || arg[1] == '.')
+                            && !isUnshadowedConst)
+                               ? cand : nullptr;
         if (lhs) {
             const std::string tail = arg.substr(1);
-            bool isNum = !tail.empty();
-            for (char c : tail)
-                if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.'))
-                    { isNum = false; break; }
+            char *endp = nullptr;
+            const double parsedNum = std::strtod(tail.c_str(), &endp);
+            const bool isNum = !tail.empty() && endp == tail.c_str() + tail.size();
             bool isIdent = !tail.empty()
                            && (std::isalpha(static_cast<unsigned char>(tail[0]))
                                || tail[0] == '_');
@@ -2772,15 +2799,11 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
                     if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
                         { isIdent = false; break; }
             if (isNum || isIdent) {
-                Value rhs;
-                if (isNum) {
-                    rhs = Value::scalar(std::stod(tail), engine_.mr_);
-                } else {
-                    const Value *rv = env->getLocal(tail);
+                if (!isNum) {
+                    const Value *rv = env->get(tail);
                     if (!rv)
                         throw std::runtime_error(
                             "Undefined function or variable '" + tail + "'");
-                    rhs = *rv;
                 }
                 // Reuse the expression evaluator: rebuild a tiny
                 // BINARY_OP AST and exec it (same path as parsed code).
@@ -2790,7 +2813,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
                 l->strValue = name;
                 auto r = std::make_unique<ASTNode>(
                     isNum ? NodeType::NUMBER_LITERAL : NodeType::IDENTIFIER);
-                if (isNum) r->numValue = std::stod(tail);
+                if (isNum) r->numValue = parsedNum;
                 else r->strValue = tail;
                 bin->children.push_back(std::move(l));
                 bin->children.push_back(std::move(r));
@@ -2807,10 +2830,18 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
     for (auto &child : node->children)
         args.push_back(Value::fromString(child->strValue, engine_.mr_));
 
-    // 1. User functions take precedence over external builtins
-    //    (MATLAB semantics: a user-defined `function y = clear(x)` shadows
-    //    the `clear` builtin even in command-style call form).
+    // 1. Lexical nested functions, then user functions over external builtins.
     Value result;
+    if (env) {
+        if (const UserFunction *nf = env->findNestedFunc(name)) {
+            result = callUserFunction(*nf, args, env);
+            if (!node->suppressOutput && !result.isEmpty()) {
+                env->set("ans", result);
+                displayValue("ans", result);
+            }
+            return result;
+        }
+    }
     if (auto *_uf = engine_.lookupUserFunction(name, env)) {
         result = callUserFunction(*_uf, args, env);
         if (!node->suppressOutput && !result.isEmpty()) {
@@ -2841,8 +2872,24 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
 // ============================================================
 Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
 {
-    if (!node->strValue.empty() && node->children.empty())
+    if (!node->strValue.empty() && node->children.empty()) {
+        if (env) {
+            if (const UserFunction *nf = env->findNestedFunc(node->strValue)) {
+                int nid = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+                std::string nestedHandleId = "__nested_fh_" + std::to_string(nid);
+                UserFunction escaped = *nf;
+                if (!escaped.closureEnv)
+                    escaped.closureEnv = escaped.weakClosureEnv.lock();
+                std::string dispSrc = escaped.name;
+                std::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
+                engine_.userFuncs_[nestedHandleId] = std::move(escaped);
+                Value h = Value::funcHandle(nestedHandleId, engine_.mr_);
+                h.setFuncHandleSource(dispSrc);
+                return h;
+            }
+        }
         return Value::funcHandle(node->strValue, engine_.mr_);
+    }
 
     // Engine-wide counter (shared with the VM compiler) — see the comment
     // on Engine::anonNameCounter_: a TreeWalker-executed literal must never
@@ -2862,7 +2909,13 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
         && bodyExpr->children[0]->strValue != "__numkit_fwd_call__";
     if (forwardVarargout) {
         const std::string &callee = bodyExpr->children[0]->strValue;
-        bool calleeIsVar = env && (env->getLocal(callee) != nullptr || env->isGlobal(callee));
+        const Value *cand = env ? env->get(callee) : nullptr;
+        const bool isUnshadowedConst =
+            cand && engine_.constantsEnv_ && cand == engine_.constantsEnv_->getLocal(callee);
+        bool calleeIsVar = env && ((cand != nullptr && !isUnshadowedConst)
+                                   || env->isGlobal(callee)
+                                   || env->isPersistent(callee)
+                                   || env->findNestedFunc(callee) != nullptr);
         for (const auto &p : node->paramNames)
             if (p == callee) { calleeIsVar = true; break; }
         if (calleeIsVar)
@@ -2904,6 +2957,23 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
 
     std::vector<std::string> capturedNames;
     std::vector<Value> capturedVals;
+    std::shared_ptr<Environment> anonNestedEnv;
+    auto bindNestedRef = [&](const std::string &nm) {
+        if (!env || nm.empty())
+            return;
+        if (const UserFunction *nf = env->findNestedFunc(nm)) {
+            if (!anonNestedEnv) {
+                anonNestedEnv = std::make_shared<Environment>(
+                    &engine_.constantsEnv(), engine_.globalsEnv_.get());
+            }
+            if (!anonNestedEnv->findNestedFunc(nm)) {
+                UserFunction escaped = *nf;
+                if (!escaped.closureEnv)
+                    escaped.closureEnv = escaped.weakClosureEnv.lock();
+                anonNestedEnv->defineNestedFunc(nm, std::move(escaped));
+            }
+        }
+    };
     auto collectFree = [&](auto &self, const ASTNode *cur,
                            const std::vector<std::string> &bound) -> void {
         if (!cur)
@@ -2921,16 +2991,21 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
             if (!env)
                 return;
             const Value *valPtr = env->get(nm);
-            if (!valPtr || valPtr->isUnset() || valPtr->isDeleted())
+            if (!valPtr || valPtr->isUnset() || valPtr->isDeleted()) {
+                bindNestedRef(nm);
                 return;
-            if (!env->getLocal(nm) && !env->isGlobal(nm)
-                && engine_.constantsEnv_ && engine_.constantsEnv_->getLocal(nm))
+            }
+            if (engine_.constantsEnv_ && valPtr == engine_.constantsEnv_->getLocal(nm))
                 return;
             capturedNames.push_back(nm);
             capturedVals.push_back(*valPtr);
             return;
         }
         if (cur->type == NodeType::ANON_FUNC) {
+            if (!cur->strValue.empty() && cur->children.empty()) {
+                bindNestedRef(cur->strValue);
+                return;
+            }
             std::vector<std::string> merged = bound;
             merged.insert(merged.end(), cur->paramNames.begin(), cur->paramNames.end());
             for (const auto &ch : cur->children)
@@ -2949,7 +3024,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     collectFree(collectFree, bodyExpr, node->paramNames);
     for (const auto &cn : capturedNames)
         uf.params.push_back(cn);
-    uf.closureEnv = nullptr;
+    uf.closureEnv = std::move(anonNestedEnv);
     // Provenance is fixed at creation (reference rule for anonymous
     // functions): a handle born in a script/file keeps THAT file, one born
     // at the command window keeps '' — masking any caller's file later.
@@ -3001,6 +3076,13 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
 // ============================================================
 Value TreeWalker::execGlobalPersistent(const ASTNode *node, Environment *env)
 {
+    if (node->type == NodeType::PERSISTENT_STMT) {
+        if (activeFrames_.empty())
+            throw std::runtime_error("persistent declarations are only allowed inside functions");
+        for (auto &name : node->paramNames)
+            env->declarePersistent(name);
+        return Value();
+    }
     for (auto &name : node->paramNames) {
         env->declareGlobal(name);
         // A freshly declared global with no value yet IS [] in MATLAB (visible
@@ -3012,6 +3094,186 @@ Value TreeWalker::execGlobalPersistent(const ASTNode *node, Environment *env)
     }
     return Value();
 }
+
+namespace {
+
+void twCollectDirectNestedDefs(const ASTNode *node, std::vector<const ASTNode *> &out)
+{
+    if (!node)
+        return;
+    if (node->type == NodeType::FUNCTION_DEF) {
+        out.push_back(node);
+        return;
+    }
+    if (node->type == NodeType::CLASSDEF_DEF)
+        return;
+    for (const auto &ch : node->children)
+        twCollectDirectNestedDefs(ch.get(), out);
+    for (const auto &[a, b] : node->branches) {
+        twCollectDirectNestedDefs(a.get(), out);
+        twCollectDirectNestedDefs(b.get(), out);
+    }
+    if (node->elseBranch)
+        twCollectDirectNestedDefs(node->elseBranch.get(), out);
+}
+
+const ASTNode *twRootTargetId(const ASTNode *lhs)
+{
+    const ASTNode *cur = lhs;
+    while (cur && !cur->children.empty()
+           && (cur->type == NodeType::CALL || cur->type == NodeType::FIELD_ACCESS
+               || cur->type == NodeType::DYNAMIC_FIELD_ACCESS
+               || cur->type == NodeType::CELL_INDEX)) {
+        cur = cur->children[0].get();
+    }
+    return (cur && cur->type == NodeType::IDENTIFIER) ? cur : nullptr;
+}
+
+void twScanBodyLexical(const ASTNode *node,
+                       std::unordered_set<std::string> &assigned,
+                       std::unordered_set<std::string> &identifiers,
+                       std::unordered_set<std::string> &ownGlobPers)
+{
+    if (!node || node->type == NodeType::FUNCTION_DEF || node->type == NodeType::CLASSDEF_DEF)
+        return;
+    switch (node->type) {
+    case NodeType::IDENTIFIER:
+        if (!node->strValue.empty())
+            identifiers.insert(node->strValue);
+        break;
+    case NodeType::ASSIGN:
+    case NodeType::DELETE_ASSIGN:
+        if (!node->children.empty()) {
+            if (const ASTNode *id = twRootTargetId(node->children[0].get()))
+                assigned.insert(id->strValue);
+        }
+        break;
+    case NodeType::MULTI_ASSIGN:
+        for (const auto &rn : node->returnNames)
+            if (!rn.empty() && rn != "~")
+                assigned.insert(rn);
+        for (const auto &lt : node->lhsTargets) {
+            if (const ASTNode *id = twRootTargetId(lt.get()))
+                assigned.insert(id->strValue);
+        }
+        break;
+    case NodeType::FOR_STMT:
+        if (!node->strValue.empty())
+            assigned.insert(node->strValue);
+        break;
+    case NodeType::TRY_STMT:
+        if (!node->strValue.empty() && node->children.size() > 1)
+            assigned.insert(node->strValue);
+        break;
+    case NodeType::GLOBAL_STMT:
+    case NodeType::PERSISTENT_STMT:
+        for (const auto &nm : node->paramNames)
+            ownGlobPers.insert(nm);
+        break;
+    default:
+        break;
+    }
+    for (const auto &lt : node->lhsTargets)
+        twScanBodyLexical(lt.get(), assigned, identifiers, ownGlobPers);
+    for (const auto &ch : node->children)
+        twScanBodyLexical(ch.get(), assigned, identifiers, ownGlobPers);
+    for (const auto &[a, b] : node->branches) {
+        twScanBodyLexical(a.get(), assigned, identifiers, ownGlobPers);
+        twScanBodyLexical(b.get(), assigned, identifiers, ownGlobPers);
+    }
+    if (node->elseBranch)
+        twScanBodyLexical(node->elseBranch.get(), assigned, identifiers, ownGlobPers);
+}
+
+void twCollectDescendantAssigned(const ASTNode *nestedFn,
+                                 std::unordered_set<std::string> &descAssigned)
+{
+    if (!nestedFn || nestedFn->children.empty())
+        return;
+    const ASTNode *nb = nestedFn->children[0].get();
+    std::unordered_set<std::string> localAssigned;
+    std::unordered_set<std::string> localIds;
+    std::unordered_set<std::string> localGP;
+    twScanBodyLexical(nb, localAssigned, localIds, localGP);
+    std::unordered_set<std::string> ownShadow = localGP;
+    for (const auto &p : nestedFn->paramNames) ownShadow.insert(p);
+    for (const auto &r : nestedFn->returnNames) ownShadow.insert(r);
+    for (const auto &a : localAssigned)
+        if (!ownShadow.count(a))
+            descAssigned.insert(a);
+
+    std::vector<const ASTNode *> deeper;
+    twCollectDirectNestedDefs(nb, deeper);
+    for (const ASTNode *d : deeper) {
+        std::unordered_set<std::string> sub;
+        twCollectDescendantAssigned(d, sub);
+        for (const auto &a : sub)
+            if (!ownShadow.count(a))
+                descAssigned.insert(a);
+    }
+}
+
+bool twAncestorOwnsVar(const Environment *parentEnv, const std::string &nm)
+{
+    for (const Environment *p = parentEnv; p && p->isLexicalScope(); p = p->parentForImports()) {
+        if (p->hasLexicalVar(nm) || p->hasLocalSlot(nm)
+            || p->isGlobal(nm) || p->isPersistent(nm)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void twPopulateLexicalEnv(const UserFunction &func,
+                          const std::shared_ptr<Environment> &heapEnv,
+                          const std::vector<const ASTNode *> &directNested,
+                          const std::shared_ptr<Environment> &resolvedClosure)
+{
+    heapEnv->markLexicalScope(true);
+    std::unordered_set<std::string> assigned;
+    std::unordered_set<std::string> identifiers;
+    std::unordered_set<std::string> ownGlobPers;
+    twScanBodyLexical(func.body.get(), assigned, identifiers, ownGlobPers);
+
+    for (const auto &p : func.params) heapEnv->declareLexicalVar(p);
+    for (const auto &r : func.returns) heapEnv->declareLexicalVar(r);
+    heapEnv->declareLexicalVar("nargin");
+    heapEnv->declareLexicalVar("nargout");
+
+    std::unordered_set<std::string> descAssigned;
+    for (const ASTNode *nd : directNested)
+        twCollectDescendantAssigned(nd, descAssigned);
+
+    auto maybeDeclareOwn = [&](const std::string &nm) {
+        if (nm.empty() || nm == "~" || ownGlobPers.count(nm))
+            return;
+        if (!twAncestorOwnsVar(resolvedClosure.get(), nm))
+            heapEnv->declareLexicalVar(nm);
+    };
+    for (const auto &a : assigned)
+        maybeDeclareOwn(a);
+    for (const auto &id : identifiers)
+        if (descAssigned.count(id))
+            maybeDeclareOwn(id);
+
+    for (const ASTNode *nd : directNested) {
+        if (!nd || nd->children.empty())
+            continue;
+        UserFunction nuf;
+        nuf.name = func.name + ">" + nd->strValue;
+        nuf.params = nd->paramNames;
+        nuf.returns = nd->returnNames;
+        nuf.body = std::shared_ptr<const ASTNode>(cloneNode(nd->children[0].get()));
+        nuf.weakClosureEnv = heapEnv;
+        nuf.originKnown = func.originKnown;
+        nuf.sourceFs = func.sourceFs;
+        nuf.sourceDir = func.sourceDir;
+        nuf.sourceFile = func.sourceFile;
+        heapEnv->defineNestedFunc(nd->strValue, std::move(nuf));
+    }
+}
+
+} // namespace
 
 // Extract bare-identifier arg names from a CALL AST node for inputname(k).
 // Returns empty vector if callNode is null. Reserved names (pi, eps, …)
@@ -3042,6 +3304,7 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
                                     Environment *env,
                                     const ASTNode *callNode)
 {
+    (void) env;
     RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
 
     // varargin: the LAST declared parameter absorbs any extra arguments
@@ -3050,16 +3313,30 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     const size_t required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size())
         throw std::runtime_error("Too many input arguments for function '" + func.name + "'");
-    // Too-few args stays LENIENT (missing params unbound) — MATLAB errors
-    // for user functions, but nk's m-source toolbox shims emulate
-    // builtins with optional args via `if nargin < k` guards and depend
-    // on this (fmincon/lsqnonlin family).
 
-    // Regular functions: parent = constantsEnv (see pi/eps/inf but NOT global variables)
-    // Closures: parent = captured scope (already contains correct chain)
-    Environment *parentEnv = func.closureEnv ? func.closureEnv.get()
-                                             : &engine_.constantsEnv();
-    Environment localEnv(parentEnv, engine_.globalsEnv_.get());
+    std::shared_ptr<Environment> resolvedClosure =
+        func.closureEnv ? func.closureEnv : func.weakClosureEnv.lock();
+    std::vector<const ASTNode *> directNested;
+    twCollectDirectNestedDefs(func.body.get(), directNested);
+    const bool useLexicalHeap =
+        !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
+
+    std::optional<Environment> stackEnv;
+    std::shared_ptr<Environment> heapEnv;
+    if (useLexicalHeap) {
+        heapEnv = resolvedClosure
+                      ? std::make_shared<Environment>(resolvedClosure, engine_.globalsEnv_.get())
+                      : std::make_shared<Environment>(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    } else if (resolvedClosure) {
+        stackEnv.emplace(resolvedClosure, engine_.globalsEnv_.get());
+    } else {
+        stackEnv.emplace(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    }
+    Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
+    if (useLexicalHeap)
+        twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
+
     FrameGuard frameGuard(activeFrames_, &localEnv,
                           extractCallerArgNames(callNode, engine_));
 
@@ -3074,10 +3351,6 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
         localEnv.setLocal("varargin", std::move(vaCell));
     }
 
-    // Always set nargin/nargout — VM unconditionally reserves slots for
-    // them (compiler.cpp:2986-2987), and TW's old astUsesIdentifier
-    // optimization missed references hidden inside eval'd string
-    // literals (`eval('nargin')`), causing TW/VM divergence.
     func.usesNarginNargout = 1;
     if (func.usesNarginNargout) {
         size_t nout = std::max(func.returns.size(), size_t(1));
@@ -3094,10 +3367,6 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
         dbgFrame.emplace(*ctl, std::move(frame));
     }
 
-    // m-file provenance: the body runs under the function's own origin so
-    // mfilename()/sibling lookup see its file (a KNOWN-but-empty origin
-    // masks the caller's file — command-window-born functions).
-    // Truncate-on-exit (RAII) covers return and throw alike.
     std::optional<FsContext::OriginFrame> originGuard;
     if (func.originKnown)
         originGuard.emplace(engine_.fsContext(), func.sourceFs,
@@ -3122,10 +3391,13 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
         return Value();
     }
 
-    auto *val = localEnv.getLocal(func.returns[0]);
-    if (!val)
-        val = localEnv.get(func.returns[0]);
-    return val ? std::move(*val) : Value();
+    const std::string &r0 = func.returns[0];
+    if (!useLexicalHeap && !localEnv.isGlobal(r0) && !localEnv.isPersistent(r0)) {
+        if (auto *localVal = localEnv.getLocal(r0))
+            return std::move(*localVal);
+    }
+    auto *val = localEnv.get(r0);
+    return val ? *val : Value();
 }
 
 std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
@@ -3134,20 +3406,37 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
                                                       size_t nout,
                                                       const ASTNode *callNode)
 {
+    (void) env;
     RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
 
     const bool va = !func.params.empty() && func.params.back() == "varargin";
     const size_t required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size())
         throw std::runtime_error("Too many input arguments for function '" + func.name + "'");
-    // Too-few args stays LENIENT (missing params unbound) — MATLAB errors
-    // for user functions, but nk's m-source toolbox shims emulate
-    // builtins with optional args via `if nargin < k` guards and depend
-    // on this (fmincon/lsqnonlin family).
 
-    Environment *parentEnv = func.closureEnv ? func.closureEnv.get()
-                                             : &engine_.constantsEnv();
-    Environment localEnv(parentEnv, engine_.globalsEnv_.get());
+    std::shared_ptr<Environment> resolvedClosure =
+        func.closureEnv ? func.closureEnv : func.weakClosureEnv.lock();
+    std::vector<const ASTNode *> directNested;
+    twCollectDirectNestedDefs(func.body.get(), directNested);
+    const bool useLexicalHeap =
+        !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
+
+    std::optional<Environment> stackEnv;
+    std::shared_ptr<Environment> heapEnv;
+    if (useLexicalHeap) {
+        heapEnv = resolvedClosure
+                      ? std::make_shared<Environment>(resolvedClosure, engine_.globalsEnv_.get())
+                      : std::make_shared<Environment>(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    } else if (resolvedClosure) {
+        stackEnv.emplace(resolvedClosure, engine_.globalsEnv_.get());
+    } else {
+        stackEnv.emplace(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    }
+    Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
+    if (useLexicalHeap)
+        twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
+
     FrameGuard frameGuard(activeFrames_, &localEnv,
                           extractCallerArgNames(callNode, engine_));
 
@@ -3181,7 +3470,6 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
         dbgFrame.emplace(*ctl, std::move(frame));
     }
 
-    // m-file provenance — same guard as the single-output path.
     std::optional<FsContext::OriginFrame> originGuard;
     if (func.originKnown)
         originGuard.emplace(engine_.fsContext(), func.sourceFs,
@@ -3194,17 +3482,22 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     if (flowSignal_ == FlowSignal::RETURN)
         flowSignal_ = FlowSignal::NONE;
 
+    auto readRet = [&](const std::string &rname) -> Value {
+        if (!useLexicalHeap && !localEnv.isGlobal(rname) && !localEnv.isPersistent(rname)) {
+            if (auto *lv = localEnv.getLocal(rname))
+                return std::move(*lv);
+        }
+        auto *val = localEnv.get(rname);
+        return val ? *val : Value();
+    };
+
     const bool hasVarargout = !func.returns.empty() && func.returns.back() == "varargout";
     std::vector<Value> results;
     if (hasVarargout) {
         const size_t numFixed = func.returns.size() - 1;
         results.reserve(nout);
-        for (size_t i = 0; i < numFixed && results.size() < nout; ++i) {
-            auto *val = localEnv.getLocal(func.returns[i]);
-            if (!val)
-                val = localEnv.get(func.returns[i]);
-            results.push_back(val ? std::move(*val) : Value());
-        }
+        for (size_t i = 0; i < numFixed && results.size() < nout; ++i)
+            results.push_back(readRet(func.returns[i]));
         auto *vaVal = localEnv.getLocal("varargout");
         if (!vaVal)
             vaVal = localEnv.get("varargout");
@@ -3221,12 +3514,8 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     if (func.returns.size() < nout)
         throw std::runtime_error("Too many output arguments.");
     results.reserve(std::min(func.returns.size(), nout));
-    for (size_t i = 0; i < func.returns.size() && i < nout; ++i) {
-        auto *val = localEnv.getLocal(func.returns[i]);
-        if (!val)
-            val = localEnv.get(func.returns[i]);
-        results.push_back(val ? std::move(*val) : Value());
-    }
+    for (size_t i = 0; i < func.returns.size() && i < nout; ++i)
+        results.push_back(readRet(func.returns[i]));
     return results;
 }
 
@@ -3248,19 +3537,35 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
                                Span<const Value> args)
 {
     RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
-    // varargin: pack extras into a cell exactly like the regular
-    // function-call path — the old positional-only binding handed a
-    // ctor's varargin the RAW first argument, so varargin{1} died on TW
-    // ("Cell contents indexing requires a cell array"; the inline
-    // classdef ctor, bugs/.../treewalker-inline-classdef-ctor).
     const bool va = !func.params.empty() && func.params.back() == "varargin";
     const size_t required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size())
         throw std::runtime_error("Too many input arguments to constructor '" + func.name
                                  + "'");
-    Environment *parentEnv = func.closureEnv ? func.closureEnv.get()
-                                             : &engine_.constantsEnv();
-    Environment localEnv(parentEnv, engine_.globalsEnv_.get());
+
+    std::shared_ptr<Environment> resolvedClosure =
+        func.closureEnv ? func.closureEnv : func.weakClosureEnv.lock();
+    std::vector<const ASTNode *> directNested;
+    twCollectDirectNestedDefs(func.body.get(), directNested);
+    const bool useLexicalHeap =
+        !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
+
+    std::optional<Environment> stackEnv;
+    std::shared_ptr<Environment> heapEnv;
+    if (useLexicalHeap) {
+        heapEnv = resolvedClosure
+                      ? std::make_shared<Environment>(resolvedClosure, engine_.globalsEnv_.get())
+                      : std::make_shared<Environment>(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    } else if (resolvedClosure) {
+        stackEnv.emplace(resolvedClosure, engine_.globalsEnv_.get());
+    } else {
+        stackEnv.emplace(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+    }
+    Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
+    if (useLexicalHeap)
+        twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
+
     FrameGuard frameGuard(activeFrames_, &localEnv, {});
 
     for (size_t i = 0; i < required && i < args.size(); ++i)
@@ -3279,8 +3584,6 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
     localEnv.setLocal("nargin", Value::scalar(static_cast<double>(args.size()), engine_.mr_));
     localEnv.setLocal("nargout", Value::scalar(1.0, engine_.mr_));
 
-    // Classdef file provenance — same rule as methods (mfilename reports
-    // the class file, stamped by registerClassDef).
     std::optional<FsContext::OriginFrame> originGuard;
     if (func.originKnown)
         originGuard.emplace(engine_.fsContext(), func.sourceFs,
@@ -3292,10 +3595,13 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
 
     if (func.returns.empty())
         return seed;
-    auto *val = localEnv.getLocal(func.returns[0]);
-    if (!val)
-        val = localEnv.get(func.returns[0]);
-    return val ? std::move(*val) : seed;
+    const std::string &r0 = func.returns[0];
+    if (!useLexicalHeap && !localEnv.isGlobal(r0) && !localEnv.isPersistent(r0)) {
+        if (auto *localVal = localEnv.getLocal(r0))
+            return std::move(*localVal);
+    }
+    auto *val = localEnv.get(r0);
+    return val ? *val : seed;
 }
 
 // ============================================================

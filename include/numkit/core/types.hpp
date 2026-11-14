@@ -78,6 +78,7 @@ struct UserFunction
     std::vector<std::string> returns;
     std::shared_ptr<const ASTNode> body;
     std::shared_ptr<Environment> closureEnv;
+    std::weak_ptr<Environment> weakClosureEnv;
     mutable int8_t usesNarginNargout = -1;
     // classdef methods/constructors only: the class that declares this body.
     // Drives the member-access execution context (pushed while the body runs).
@@ -96,6 +97,78 @@ struct UserFunction
     std::string sourceFs;
     std::string sourceDir;
     std::string sourceFile;
+    size_t numUpvalueCaptures = 0;
 };
+
+// Shared mutable box for nested-function lexical variables (Upvalues).
+// Backed by a handle ObjectState (`isHandle = true`), so copying the Value
+// across VM registers and closure captures shares the exact same cell.
+struct UpvaluePayload final : NativePayload
+{
+    Value value;
+    std::shared_ptr<Environment> globalEnv;
+    std::shared_ptr<std::unordered_map<std::string, Value>> persistentBucket;
+    std::string backingName;
+
+    explicit UpvaluePayload(Value v = Value()) : value(std::move(v)) {}
+
+    Value read() const
+    {
+        if (globalEnv) {
+            if (Value *gv = globalEnv->get(backingName))
+                return *gv;
+            return Value::Empty;
+        }
+        if (persistentBucket) {
+            auto it = persistentBucket->find(backingName);
+            return (it != persistentBucket->end()) ? it->second : Value::Empty;
+        }
+        return value;
+    }
+
+    void write(Value v)
+    {
+        if (globalEnv) {
+            if (v.isDeleted() || v.isUnset())
+                globalEnv->remove(backingName);
+            else
+                globalEnv->set(backingName, std::move(v));
+            return;
+        }
+        if (persistentBucket) {
+            if (v.isDeleted() || v.isUnset())
+                persistentBucket->erase(backingName);
+            else
+                (*persistentBucket)[backingName] = std::move(v);
+            return;
+        }
+        value = std::move(v);
+    }
+
+    std::shared_ptr<NativePayload> clone() const override
+    {
+        auto cp = std::make_shared<UpvaluePayload>(value);
+        cp->globalEnv = globalEnv;
+        cp->persistentBucket = persistentBucket;
+        cp->backingName = backingName;
+        return cp;
+    }
+};
+
+inline Value makeUpvalueBox(Value init = Value(), std::pmr::memory_resource *mr = nullptr)
+{
+    auto *res = mr ? mr : std::pmr::get_default_resource();
+    auto st = std::make_shared<ObjectState>(res);
+    st->native = std::make_shared<UpvaluePayload>(std::move(init));
+    return Value::object("__upvalue__", std::move(st), /*isHandle=*/true, res);
+}
+
+inline UpvaluePayload *asUpvalueBox(const Value &v) noexcept
+{
+    if (!v.isObject() || v.objectClassName() != "__upvalue__")
+        return nullptr;
+    const ObjectState *st = v.objectStateConst();
+    return st ? static_cast<UpvaluePayload *>(st->native.get()) : nullptr;
+}
 
 } // namespace numkit

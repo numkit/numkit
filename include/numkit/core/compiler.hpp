@@ -78,8 +78,8 @@ public:
     }
     void clearCompiledFuncs() { compiledFuncs_.clear(); }
     // Drop a single compiled chunk by name (used by rehash to invalidate just
-    // the reloaded m-file, not every compiled function).
-    void eraseCompiledFunc(const std::string &name) { compiledFuncs_.erase(name); }
+    // the reloaded m-file, not every compiled function), plus any nested chunks.
+    void eraseCompiledFunc(const std::string &name);
     // Drop every compiled classdef-method chunk for `className` — keys of the
     // form "ClassName>method" — so redefining the class recompiles its bodies
     // from scratch instead of reusing stale cached chunks.
@@ -165,6 +165,7 @@ private:
     // releases between statements.
     int maxVarReg_ = 0;
     bool isTopLevel_ = false;
+    bool inFunctionBody_ = false;
     // True while compiling a fusion idiom's fallback path (the normal compile),
     // so the nested compileCall doesn't re-attempt fusion (infinite recursion).
     bool inFusionFallback_ = false;
@@ -216,6 +217,7 @@ private:
     uint16_t varRegWrite(const std::string &name);
     uint16_t varRegRead(const std::string &name);
     uint16_t varRegLookup(const std::string &name, bool preloadReserved = true);
+    uint16_t allocPinnedReg();
     void markAssigned(const std::string &name) { chunk_.assignedVars.insert(name); }
     void preImportGlobals(const ASTNode *ast);
     void collectAllIdentifiers(const ASTNode *node, std::unordered_set<std::string> &out);
@@ -318,6 +320,29 @@ private:
     // Defined register tracking (dynamic bitset across 16-bit register space)
     RegBitset definedRegs_;
     bool mayClear_ = false;
+    bool mayInjectVars_ = false;
+
+    struct NestedFuncInfo
+    {
+        std::string compiledName;
+        std::string displaySource;
+        std::vector<std::string> upvalueNames;
+    };
+
+    struct EnclosingLexicalContext
+    {
+        std::vector<std::string> inheritedUpvalueNames;
+        std::unordered_map<std::string, NestedFuncInfo> siblingNestedFuncs;
+    };
+
+    std::unordered_map<std::string, uint16_t> upvalueRegs_;
+    std::unordered_map<std::string, uint16_t> allScopeUpvalueBoxRegs_;
+    std::unordered_map<std::string, NestedFuncInfo> nestedFuncInfo_;
+    const EnclosingLexicalContext *pendingLexicalCtx_ = nullptr;
+
+    void emitUpvalLoadRawIfShared(const std::string &name, uint16_t reg);
+    void emitUpvalStoreIfShared(const std::string &name, uint16_t reg);
+    uint16_t emitNestedFuncHandle(const NestedFuncInfo &info);
 
     void peepholeOptimize();
 

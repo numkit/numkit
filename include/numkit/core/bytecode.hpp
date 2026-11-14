@@ -234,6 +234,9 @@ enum class OpCode : uint8_t {
     GLOBAL_DECL,     // [reserved] compiler writes to chunk.globalNames instead
     PERSISTENT_DECL, // [reserved] compiler writes to chunk.globalNames instead
     CLOSURE_MAKE,    // dst, base, count       R[dst] = R[base] (FUNC_HANDLE) with captures R[base+1..base+count-1]
+    UPVAL_NEW,       // a=boxReg, b=initReg    R[a] = makeUpvalueBox(b != kInvalidReg ? R[b] : Value())
+    UPVAL_LOAD,      // a=dst, b=boxReg, c=mode, d=nameIdx  c=0: checked, c=1: raw, c=2: take
+    UPVAL_STORE,     // a=boxReg, b=srcReg     asUpvalueBox(R[a])->value = R[b]
     CLEAR_VAR,       // reg                    R[reg] = empty (clear variable)
     CLEAR_DYN,       // nameReg                lookup name in varMap, clear register
     EXIST_VAR,       // dst, nameReg, filterReg  check name in varMap/functions → 0/1/5
@@ -407,6 +410,15 @@ struct BytecodeChunk
     // Excluding the inherited seed is what keeps `clear global g` from being
     // resurrected by a later chunk that merely inherited g.
     std::vector<std::string> ownGlobalDecls;
+
+    // Function-scoped `persistent` variable names (isolated per function in
+    // Engine::persistentStore_, completely separate from globalsEnv_).
+    std::vector<std::string> persistentNames;
+
+    // Hidden trailing upvalue-box parameter registers for nested functions.
+    std::vector<uint16_t> upvalueParamRegs;
+    // Map of variable name -> register holding its shared UpvaluePayload box.
+    std::unordered_map<std::string, uint16_t> upvalueBoxRegs;
 
     // Per-CALL-site arg names — populated by the compiler for each
     // CALL / CALL_MULTI it emits. Key = index into `code` of the CALL

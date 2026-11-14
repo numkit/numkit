@@ -35,7 +35,7 @@ enum class NamespaceMode
     Isolated   // Strict namespaces: toolbox functions require qualification or `import`
 };
 
-class Engine
+class Engine : public PluginContext
 {
 public:
     // Default ctor: uses std::pmr::get_default_resource() for all allocations.
@@ -44,7 +44,7 @@ public:
     // and every Value/DataBuffer it produces. Pass a subclass of
     // std::pmr::memory_resource (or one of std::pmr's built-in resources).
     explicit Engine(std::pmr::memory_resource *mr);
-    ~Engine();
+    ~Engine() override;
 
     Engine(const Engine &) = delete;
     Engine &operator=(const Engine &) = delete;
@@ -53,7 +53,7 @@ public:
 
     // The memory_resource used for persistent (output-Value) allocations.
     // Internal helpers and ScratchArena upstream-spill flow through here.
-    std::pmr::memory_resource *resource() const noexcept { return mr_; }
+    std::pmr::memory_resource *resource() const noexcept override { return mr_; }
 
     void registerBinaryOp(const std::string &op, BinaryOpFunc func);
     void registerUnaryOp(const std::string &op, UnaryOpFunc func);
@@ -67,18 +67,18 @@ public:
     //          1-arg form.
     // Both forms throw std::runtime_error on duplicate full names.
     // See namespace_design.md for the rules.
-    void registerFunction(const std::string &name, ExternalFunc func);
+    void registerFunction(const std::string &name, ExternalFunc func) override;
     void registerFunction(const std::string &ns,
                           const std::string &name,
-                          ExternalFunc func);
+                          ExternalFunc func) override;
 
     // ── Class registry (object model — see object_model.md) ──────
     // Register a builtin (C++-backed) class. Later, user classdef
     // populates the same registry via an adapter. Throws on duplicate.
-    void registerClass(BuiltinClass cls);
+    void registerClass(BuiltinClass cls) override;
     // Look up a registered class by name (e.g. "containers.Map"), or
     // nullptr. Used by constructor / method / property dispatch.
-    const BuiltinClass *findClass(const std::string &name) const;
+    const BuiltinClass *findClass(const std::string &name) const override;
 
     // ── State-machine callbacks (callback_builtin.hpp, vm_callbacks_plan.md) ──
     // Register a higher-order builtin (cellfun/arrayfun/…) that can drive its
@@ -102,7 +102,7 @@ public:
     // after `clear all/classes/functions` — MATLAB transparently reloads
     // cleared functions from disk; these have no disk backing, so the engine
     // re-registers them instead (bugs/opened/runtime/clear-all-wipes-builtin-msources.md).
-    void registerBuiltinMSource(const std::string &src);
+    void registerBuiltinMSource(const std::string &src) override;
     // Same contract for startup `classdef` sources (e.g. the inline class):
     // parses and registers each top-level CLASSDEF_DEF via registerClassDef —
     // the identical call the compiler makes for a classdef statement — and
@@ -320,7 +320,7 @@ public:
     //      - alias    `import a.b as x`  → only resolves x.<name> (handled
     //                                       in dotted-name lookup, not here)
     const ExternalFunc *findExternal(const std::string &name,
-                                      const Environment *env) const;
+                                      const Environment *env = nullptr) const override;
 
     // Returns the full qualified name for a bare leaf name (e.g. "fft" →
     // "signal.transforms.fft") — the namespace source that the bare-name
@@ -418,7 +418,7 @@ public:
     std::vector<std::string> workspaceVarNames() const;
     void outputText(const std::string &s);
 
-    FigureManager &figureManager() { return figureManager_; }
+    FigureManager &figureManager() override { return figureManager_; }
     const FigureManager &figureManager() const { return figureManager_; }
 
     PluginLoader &pluginLoader();
@@ -450,11 +450,11 @@ public:
     // `nout` slots).
     Value callFunctionHandle(const Value &handle,
                              Span<const Value> args,
-                             Environment *env = nullptr);
+                             Environment *env = nullptr) override;
     std::vector<Value> callFunctionHandleMulti(const Value &handle,
                                                Span<const Value> args,
                                                size_t nout,
-                                               Environment *env = nullptr);
+                                               Environment *env = nullptr) override;
 
     // Unified lookup — script-scope first, then workspace-scope, then
     // an m-file resolver pass over the configured search path
@@ -613,7 +613,51 @@ public:
     // such that the caller can subsequently read it back. In VM mode,
     // also performs write-through to the caller's frame register if the
     // name is statically allocated (chunk.varMap hit). Used by assignin.
-    void assignToCaller(int n, const std::string &name, Value val);
+    void assignToCaller(int n, const std::string &name, Value val) override;
+    void assignInBase(const std::string &name, Value val);
+    void syncFrameToEnv(Environment *env);
+    void syncEnvRemovalsToFrame(Environment *env);
+
+    // Per-function persistent variable storage (isolated per function & per Engine)
+    const std::shared_ptr<std::unordered_map<std::string, Value>> &persistentBucketPtr(const std::string &funcName)
+    {
+        auto &ptr = persistentStore_[funcName];
+        if (!ptr)
+            ptr = std::make_shared<std::unordered_map<std::string, Value>>();
+        return ptr;
+    }
+    std::unordered_map<std::string, Value> &persistentBucket(const std::string &funcName)
+    {
+        return *persistentBucketPtr(funcName);
+    }
+    void clearPersistentForFunc(const std::string &funcName);
+    void clearAllPersistent()
+    {
+        for (auto &[k, b] : persistentStore_)
+            if (b)
+                b->clear();
+    }
+
+    // Per-Engine warning state (`lastwarn`) and environment variable overlay (`setenv`/`getenv`)
+    void setLastWarn(std::string msg, std::string id = {})
+    {
+        lastWarnMsg_ = std::move(msg);
+        lastWarnId_ = std::move(id);
+    }
+    const std::string &lastWarnMsg() const noexcept { return lastWarnMsg_; }
+    const std::string &lastWarnId() const noexcept { return lastWarnId_; }
+
+    void setEnvVar(const std::string &name, const std::string &val) { envOverlay_[name] = val; }
+    std::string getEnvVar(const std::string &name) const;
+
+    // Property accessor recursion guard (`get.Prop` / `set.Prop`)
+    bool isPropAccessorActive(const std::string &accessorName) const;
+    void pushPropAccessor(std::string accessorName) { activePropAccessors_.push_back(std::move(accessorName)); }
+    void popPropAccessor()
+    {
+        if (!activePropAccessors_.empty())
+            activePropAccessors_.pop_back();
+    }
 
     // Returns the source-text name of the k-th input arg as written at
     // the call site of the currently-running user function (1-indexed,
@@ -691,7 +735,7 @@ public:
     // The path-resolution result type lives on FsContext (fs/, L0); aliased
     // here so existing callers keep writing Engine::ResolvedPath.
     using ResolvedPath = FsContext::ResolvedPath;
-    ResolvedPath resolvePath(const std::string &userPath) const;
+    ResolvedPath resolvePath(const std::string &userPath) const override;
 
     // Direct handle to the filesystem session (VFS registry + script-origin
     // stack + cwd + resolver). Lets core-free toolbox code (io codecs, …)
@@ -703,7 +747,7 @@ public:
     // The session RNG stream (rand/randn/randi/randperm + rng() control + every
     // toolbox *rnd sampler draw from this). Registration adapters pass
     // engine.rng() to the ops generators / RngContext&-taking samplers.
-    ops::RngContext &rng() noexcept { return rng_; }
+    ops::RngContext &rng() noexcept override { return rng_; }
     const ops::RngContext &rng() const noexcept { return rng_; }
 
     // ── MATLAB-style file descriptor table ────────────────────
@@ -724,7 +768,7 @@ public:
 
 private:
     std::pmr::memory_resource *mr_;  // not owned; caller-supplied or get_default_resource()
-    std::unique_ptr<Environment> globalsEnv_;     // MATLAB 'global' variables — shared across functions
+    std::shared_ptr<Environment> globalsEnv_;     // shared across functions & closures
     std::unique_ptr<Environment> constantsEnv_;  // pi, eps, inf, etc. — parent for all scopes
     std::unique_ptr<Environment> workspaceEnv_;  // top-level workspace (base workspace)
 
@@ -750,6 +794,11 @@ private:
     // before the synchronous external path. Full type in callback_builtin.hpp.
     std::unordered_map<std::string, std::shared_ptr<CallbackBuiltin>> callbackBuiltins_;
     std::unordered_map<std::string, UserFunction> userFuncs_;
+    std::unordered_map<std::string, std::shared_ptr<std::unordered_map<std::string, Value>>> persistentStore_;
+    std::string lastWarnMsg_;
+    std::string lastWarnId_;
+    std::unordered_map<std::string, std::string> envOverlay_;
+    std::vector<std::string> activePropAccessors_;
     // Startup registration sources retained for post-clear replay
     // (reinstallBuiltinSources): m-source function texts and classdef
     // source texts. Cleared functions/classes reload from disk in MATLAB —
