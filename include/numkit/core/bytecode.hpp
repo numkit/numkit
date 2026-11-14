@@ -159,6 +159,12 @@ enum class OpCode : uint8_t {
     // element. Coerce an unset/empty receiver to a struct array.
     STRUCT_ELEM_GET_OR_CREATE, // a=dst, b=obj, c=base, e=nargs
     STRUCT_ELEM_SET,           // a=obj, b=base, c=nargs, e=valReg
+    // Compound-lvalue temporary unshare: when R[b] has heapRefCount()==1 and
+    // R[a] is not an OBJECT, clears R[b]'s field/cell slot and records an
+    // unwind-safe LvalDetach so the inner INDEX_SET/FIELD_SET/CELL_SET mutates
+    // R[a] in place without COW cloning.
+    LVAL_UNSHARE_FIELD,        // a=childReg, b=objReg, c=isDyn(0/1), d=nameIdx, e=nameReg
+    LVAL_UNSHARE_CELL,         // a=childReg, b=cellReg, c=idxBase, e=nargs
 
     // ── Cell array access ────────────────────────────────────
     CELL_GET,      // dst, cell, idx         R[dst] = R[cell]{R[idx]}        1D
@@ -434,6 +440,13 @@ struct BytecodeChunk
 
     // Original source text (shared across chunks compiled from the same source)
     std::shared_ptr<const std::string> sourceCode;
+
+    // Precomputed special register slots for O(1) pushCallFrame setup
+    uint16_t narginReg = kInvalidReg;
+    uint16_t nargoutReg = kInvalidReg;
+    uint16_t vararginReg = kInvalidReg;
+    uint16_t firstReturnReg = kInvalidReg;
+    bool mayUseInputname = false;
 
     // m-file provenance — stamped by the engine's m-file resolver (file
     // functions), at compilation for anonymous functions and by

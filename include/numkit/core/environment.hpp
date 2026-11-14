@@ -96,6 +96,7 @@ public:
     void reset(Environment *parent, Environment *gs);
 
     std::vector<std::string> localNames() const;
+    bool hasLocals() const noexcept { return sboCount_ > 0 || !vars_.empty(); }
 
     // ── Active imports (scope-local) ──────────────────────────
     // Imports added via `import` statements at this scope. Lookups
@@ -104,6 +105,13 @@ public:
     const std::vector<Import> &activeImports() const { return activeImports_; }
     void clearImports() { activeImports_.clear(); }
     Environment *parentForImports() const { return parent_; }
+    bool hasAnyActiveImports() const noexcept
+    {
+        for (const Environment *e = this; e; e = e->parent_)
+            if (!e->activeImports_.empty())
+                return true;
+        return false;
+    }
 
 private:
     // Small buffer: inline storage for first N variables (avoids unordered_map for small scopes)

@@ -177,6 +177,7 @@ if(NUMKIT_BUILD_TESTS)
         tests/gtest/wave1_safety_test.cpp
         tests/gtest/wave2_vm_tw_independence_test.cpp
         tests/gtest/wave3_semantics_isolation_test.cpp
+        tests/gtest/wave4_perf_and_debloat_test.cpp
     )
 
     add_executable(numkit_gtest ${NUMKIT_TEST_SOURCES})

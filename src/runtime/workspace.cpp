@@ -11,6 +11,7 @@
 
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/core/figure_manager.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)

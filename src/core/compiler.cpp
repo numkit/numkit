@@ -70,6 +70,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     isTopLevel_ = true;
     inFunctionBody_ = false;
     inFusionFallback_ = false;
+    fusedOperandRegs_.clear();
     nargoutContext_ = 1;
     activeTryDepth_ = 0;
     indexContextArr_ = kInvalidReg;
@@ -697,6 +698,11 @@ int32_t Compiler::addStringConstant(const std::string &s)
 
 uint16_t Compiler::compileNode(const ASTNode *node)
 {
+    if (node && !fusedOperandRegs_.empty()) {
+        auto it = fusedOperandRegs_.find(node);
+        if (it != fusedOperandRegs_.end())
+            return it->second;
+    }
     // Single-value sink: a brace cell-index c{sub} may produce a comma-separated list
     // once the producer emits one; collapse it in place so single-value contexts never
     // see a CSL. COLLAPSE is a runtime no-op on a non-CSL, so this is inert until the
@@ -714,6 +720,11 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
 {
     if (!node)
         return 0;
+    if (!fusedOperandRegs_.empty()) {
+        auto it = fusedOperandRegs_.find(node);
+        if (it != fusedOperandRegs_.end())
+            return it->second;
+    }
 
     StackGuard::check("bytecode compilation");
 
@@ -1589,7 +1600,8 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
         std::vector<const ASTNode *> levels;
         const ASTNode *n = node;
         while (n->type == NodeType::BINARY_OP && n->children.size() == 2
-               && n->strValue != "&&" && n->strValue != "||") {
+               && n->strValue != "&&" && n->strValue != "||"
+               && (n == node || fusedOperandRegs_.find(n) == fusedOperandRegs_.end())) {
             levels.push_back(n);
             n = n->children[0].get();
         }
@@ -1599,7 +1611,8 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
             const std::string &lOp = lv->strValue;
             const ASTNode *rhs = lv->children[1].get();
             if ((lOp == "+" || lOp == "-") && rhs->type == NodeType::BINARY_OP
-                && (rhs->strValue == "*" || rhs->strValue == ".*")) {
+                && (rhs->strValue == "*" || rhs->strValue == ".*")
+                && fusedOperandRegs_.find(rhs) == fusedOperandRegs_.end()) {
                 acc = emitFusedMulAdd(lOp == "+", rhs, acc);
                 continue;
             }
@@ -1618,7 +1631,8 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
     if (op == "+" || op == "-") {
         const ASTNode *rhs = node->children[1].get();
         if (rhs->type == NodeType::BINARY_OP
-            && (rhs->strValue == "*" || rhs->strValue == ".*"))
+            && (rhs->strValue == "*" || rhs->strValue == ".*")
+            && fusedOperandRegs_.find(rhs) == fusedOperandRegs_.end())
             return emitFusedMulAdd(op == "+", rhs, compileNode(node->children[0].get()));
     }
 
@@ -2929,6 +2943,15 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
             intermediates.push_back(dst);
         }
 
+        // Unshare non-aliased parent containers before mutating the deepest
+        // struct so nested field updates do not trigger O(N) COW clones.
+        for (size_t idx = 0; idx + 1 < intermediates.size(); ++idx) {
+            size_t fi = fieldChain.size() - 1 - idx;
+            int32_t nameIdx = addStringConstant(fieldChain[fi]);
+            emitABC(OpCode::LVAL_UNSHARE_FIELD, intermediates[idx + 1], intermediates[idx], 0);
+            chunk_.code.back().d = nameIdx;
+        }
+
         // Step 2: FIELD_SET on the deepest intermediate
         uint16_t deepest = intermediates.back();
         int32_t leafIdx = addStringConstant(fieldChain[0]);
@@ -3422,6 +3445,28 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
         }
     };
 
+    // ── Unshare non-aliased intermediate containers before mutating regs[n-1] ──
+    for (size_t k = 0; k + 1 < n; ++k) {
+        switch (acc[k].kind) {
+        case LvAcc::Field: {
+            int32_t nameIdx = addStringConstant(acc[k].node->strValue);
+            emitABC(OpCode::LVAL_UNSHARE_FIELD, regs[k + 1], regs[k], 0);
+            chunk_.code.back().d = nameIdx;
+            break;
+        }
+        case LvAcc::DynField:
+            emit(Instruction::make_abcde(OpCode::LVAL_UNSHARE_FIELD, regs[k + 1],
+                                         regs[k], 1, 0, nameReg[k]));
+            break;
+        case LvAcc::Cell:
+            emit(Instruction::make_abcde(OpCode::LVAL_UNSHARE_CELL, regs[k + 1],
+                                         regs[k], idxBase[k], 0, idxN[k]));
+            break;
+        case LvAcc::Index:
+            break;
+        }
+    }
+
     // ── Final write on the deepest container, then write-back up. ──
     emitSet(n - 1, val);
     for (size_t k = n - 1; k-- > 0;)
@@ -3500,12 +3545,25 @@ uint16_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
         auto savedScalars = scalarRegs_;
         struct Guard {
             bool &f;
-            explicit Guard(bool &x) : f(x) { f = true; }
-            ~Guard() { f = false; }
-        } guard(inFusionFallback_);
+            std::unordered_map<const ASTNode *, uint16_t> &opMap;
+            std::unordered_map<const ASTNode *, uint16_t> savedOpMap;
+            Guard(bool &x, std::unordered_map<const ASTNode *, uint16_t> &m)
+                : f(x), opMap(m), savedOpMap(m)
+            {
+                f = true;
+            }
+            ~Guard()
+            {
+                f = false;
+                opMap = std::move(savedOpMap);
+            }
+        } guard(inFusionFallback_, fusedOperandRegs_);
+        fusedOperandRegs_.clear();
+        for (size_t i = 0; i < operands.size(); ++i)
+            fusedOperandRegs_[operands[i]] = static_cast<uint16_t>(opBase + i);
         // Fall back to the node's OWN normal compile (the guard stops it from
-        // re-attempting fusion). A clamp idiom roots at a CALL, an affine idiom
-        // at a BINARY_OP — dispatch by type so each gets exact per-op semantics.
+        // re-attempting fusion, and fusedOperandRegs_ reuses the pre-evaluated
+        // operand registers so side-effecting operands never evaluate twice).
         switch (node->type) {
             case NodeType::BINARY_OP: fbDst = compileBinaryOp(node); break;
             case NodeType::UNARY_OP:  fbDst = compileUnaryOp(node);  break;
@@ -5383,6 +5441,24 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     for (auto &[name, reg] : varRegisters_)
         chunk_.varMap.push_back({name, reg});
 
+    chunk_.narginReg = narginReg;
+    chunk_.nargoutReg = nargoutReg;
+    if (auto it = varRegisters_.find("varargin"); it != varRegisters_.end())
+        chunk_.vararginReg = it->second;
+    if (!chunk_.returnNames.empty()) {
+        if (auto it = varRegisters_.find(chunk_.returnNames[0]); it != varRegisters_.end())
+            chunk_.firstReturnReg = it->second;
+    }
+    chunk_.mayUseInputname = mayInjectVars_;
+    if (!chunk_.mayUseInputname) {
+        for (const auto &s : chunk_.strings) {
+            if (s == "inputname" || s == "eval" || s == "evalin" || s == "feval") {
+                chunk_.mayUseInputname = true;
+                break;
+            }
+        }
+    }
+
     return std::move(chunk_);
 }
 
@@ -5721,6 +5797,10 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
             return "STRUCT_ELEM_GET_OR_CREATE";
         case OpCode::STRUCT_ELEM_SET:
             return "STRUCT_ELEM_SET";
+        case OpCode::LVAL_UNSHARE_FIELD:
+            return "LVAL_UNSHARE_FIELD";
+        case OpCode::LVAL_UNSHARE_CELL:
+            return "LVAL_UNSHARE_CELL";
         case OpCode::HORZCAT_APPEND_CSL:
             return "HORZCAT_APPEND_CSL";
         case OpCode::CELL_LITERAL:

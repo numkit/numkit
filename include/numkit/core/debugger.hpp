@@ -34,6 +34,9 @@ enum class DebugAction : uint8_t {
     Stop      // abort execution
 };
 
+// Result of a dispatch loop iteration — Completed or Paused (for debugger)
+enum class ExecStatus : uint8_t { Completed, Paused };
+
 // ============================================================
 // StackFrame — one entry in the call stack
 //

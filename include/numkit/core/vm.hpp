@@ -5,6 +5,7 @@
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/environment.hpp>
+#include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 
 #include <exception>
@@ -17,9 +18,6 @@ namespace numkit {
 
 class Engine;
 struct UserFunction;
-
-// Result of a dispatch loop iteration — Completed or Paused (for debugger)
-enum class ExecStatus : uint8_t { Completed, Paused };
 
 class VM
 {
@@ -243,17 +241,35 @@ private:
     };
     std::vector<TryHandler> tryStack_;
 
+    struct CallCacheEntry
+    {
+        const BytecodeChunk *userChunk = nullptr;
+        const ExternalFunc *extFunc = nullptr;
+        uint64_t epoch = 0;
+    };
+
+    struct LvalDetach
+    {
+        enum class Kind : uint8_t { Field, Cell };
+        size_t containerRegAbs = 0;
+        size_t valRegAbs = 0;
+        Kind kind = Kind::Field;
+        std::string fieldName;
+        size_t cellLinearIdx = 0;
+    };
+
 public:
     struct PausedState
     {
         std::vector<CallFrame> frames;
         std::vector<ForState> forStack;
         std::vector<TryHandler> tryStack;
+        std::vector<LvalDetach> lvalDetaches;
         std::vector<Value> regSnapshot;
         size_t regStackTop = 0;
         Value lastResult;
         std::unordered_map<const BytecodeChunk *,
-                           std::vector<const BytecodeChunk *>>
+                           std::vector<CallCacheEntry>>
             chunkCallCache;
         bool wasReentrantEval = false;
     };
@@ -262,8 +278,15 @@ private:
 
     int maxRecursion_ = 200;
 
-    // Per-chunk call target cache
-    std::unordered_map<const BytecodeChunk *, std::vector<const BytecodeChunk *>> chunkCallCache_;
+    // Per-chunk call target inline cache (user functions + external builtins)
+    std::unordered_map<const BytecodeChunk *, std::vector<CallCacheEntry>> chunkCallCache_;
+
+    // Unwind-safe temporary unshare stack for compound lvalues (`s.arr(i) = x`)
+    std::vector<LvalDetach> lvalDetaches_;
+    void rollbackLvalDetaches();
+
+    // Reusable Environment pool to avoid heap allocations per function call
+    std::vector<std::unique_ptr<Environment>> envPool_;
 
     // Exported variables after execution
     std::vector<std::pair<std::string, Value>> lastVarMap_;

@@ -169,6 +169,9 @@ private:
     // True while compiling a fusion idiom's fallback path (the normal compile),
     // so the nested compileCall doesn't re-attempt fusion (infinite recursion).
     bool inFusionFallback_ = false;
+    // Maps pre-evaluated fusion operand AST nodes to their registers while
+    // emitting the fallback path of FUSE_EWISE so operands never evaluate twice.
+    std::unordered_map<const ASTNode *, uint16_t> fusedOperandRegs_;
     uint16_t nargoutContext_ = 1; // expected number of outputs (0=statement, 1=expression)
     int activeTryDepth_ = 0;      // active enclosing TRY_BEGIN depth in current chunk
 

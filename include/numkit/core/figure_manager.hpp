@@ -447,7 +447,7 @@ struct FigureState
     }
 };
 
-static std::string jsonEscapeFig(const std::string &s)
+inline std::string jsonEscapeFig(const std::string &s)
 {
     std::string out;
     out.reserve(s.size());

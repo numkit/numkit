@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -655,6 +656,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         }
 
         auto indices = resolveIndex(lhs->children[1].get(), *var, 0, 1, env);
+        if (!rhs.isScalar() && rhs.numel() != indices.size())
+            throw std::runtime_error("Subscripted assignment dimension mismatch");
         for (auto idx : indices)
             var->ensureSize(idx, engine_.mr_);
         var->indexSet(indices.data(), indices.size(), rhs);
@@ -697,6 +700,10 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 maxC = (rowIdx.size() == 1) ? rhs.numel() : rhs.dims().cols();
             }
         }
+        const size_t target2D = (riIsColon ? maxR : rowIdx.size())
+                              * (ciIsColon ? maxC : colIdx.size());
+        if (!rhs.isScalar() && rhs.numel() != target2D)
+            throw std::runtime_error("Subscripted assignment dimension mismatch");
         if (maxR > var->dims().rows() || maxC > var->dims().cols())
             var->resize(maxR, maxC, engine_.mr_);
 
@@ -774,6 +781,11 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 if (piColon) maxP = nextRhsDim();
             }
         }
+        const size_t target3D = (riColon ? maxR : rowIdx.size())
+                              * (ciColon ? maxC : colIdx.size())
+                              * (piColon ? maxP : pageIdx.size());
+        if (!rhs.isScalar() && rhs.numel() != target3D)
+            throw std::runtime_error("Subscripted assignment dimension mismatch");
         if (maxR > var->dims().rows() || maxC > var->dims().cols() || maxP > var->dims().pages())
             var->resize3d(std::max(var->dims().rows(), maxR),
                           std::max(var->dims().cols(), maxC),
@@ -1003,10 +1015,8 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
                             maxLen = idx + 1;
                     }
                     if (maxLen > cellVar.numel()) {
-                        auto nc = Value::cell(1, maxLen);
-                        for (size_t k = 0; k < cellVar.numel(); ++k)
-                            nc.cellAt(k) = cellVar.cellAt(k);
-                        cellVar = std::move(nc);
+                        size_t lastCoord = maxLen - 1;
+                        cellVar.growCellTo(&lastCoord, 1, engine_.mr_);
                     }
                 }
                 auto indices = Value::resolveIndices(sub, cellVar.numel());

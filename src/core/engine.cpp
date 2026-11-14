@@ -1,6 +1,7 @@
 // src/engine.cpp
 #include <cstdio>
 #include <numkit/core/engine.hpp>
+#include <numkit/core/figure_manager.hpp>
 #include <numkit/core/caching_memory_resource.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/lexer.hpp>
@@ -64,6 +65,7 @@ Engine::Engine(std::pmr::memory_resource *mr)
     globalsEnv_ = std::make_shared<Environment>();
     constantsEnv_ = std::make_unique<Environment>(nullptr, globalsEnv_.get());
     workspaceEnv_ = std::make_unique<Environment>(constantsEnv_.get(), globalsEnv_.get());
+    figureManager_ = std::make_unique<FigureManager>();
     treeWalker_ = std::make_unique<TreeWalker>(*this);
     compiler_ = std::make_unique<Compiler>(*this);
     vm_ = std::make_unique<VM>(*this);
@@ -116,6 +118,7 @@ Engine::~Engine()
     externalFuncs_.clear();
     shortNameIndex_.clear();
     pluginLoader_.reset();
+    figureManager_.reset();
 }
 
 void Engine::reinstallConstants()
@@ -187,6 +190,7 @@ void Engine::registerFunctionImpl_(const std::string &fullName,
     }
     externalFuncs_.emplace(fullName, std::move(func));
     shortNameIndex_.emplace(leafName, fullName);
+    bumpCallCacheEpoch();
 
     // Track top-level namespace (everything before the first '.').
     // Core registrations (no '.') do not introduce a namespace.
@@ -211,6 +215,7 @@ void Engine::registerClass(BuiltinClass cls)
         throw std::runtime_error("Engine::registerClass: duplicate class '" + cls.name + "'");
     std::string key = cls.name;
     classes_.emplace(std::move(key), std::move(cls));
+    bumpCallCacheEpoch();
 }
 
 const BuiltinClass *Engine::findClass(const std::string &name) const
@@ -222,6 +227,7 @@ const BuiltinClass *Engine::findClass(const std::string &name) const
 void Engine::registerCallbackBuiltin(const std::string &name, std::shared_ptr<CallbackBuiltin> cb)
 {
     callbackBuiltins_[name] = std::move(cb);
+    bumpCallCacheEpoch();
 }
 
 CallbackBuiltin *Engine::callbackBuiltin(const std::string &name) const
@@ -800,6 +806,7 @@ void Engine::unregisterClassDef(const std::string &name)
     // Drop the registry class last: registerClass throws on a duplicate, so the
     // re-registration that follows depends on this entry being gone.
     classes_.erase(name);
+    bumpCallCacheEpoch();
 }
 
 void Engine::dropFileClassCtorExternal_(const std::string &name)
@@ -814,6 +821,7 @@ void Engine::dropFileClassCtorExternal_(const std::string &name)
     auto range = shortNameIndex_.equal_range(name);
     for (auto it = range.first; it != range.second;)
         it = (it->second == name) ? shortNameIndex_.erase(it) : std::next(it);
+    bumpCallCacheEpoch();
 }
 
 void Engine::clearClassDefs()
@@ -829,6 +837,7 @@ void Engine::clearClassDefs()
         dropFileClassCtorExternal_(name); // enable file-class reload on next ref
         unregisterClassDef(name);
     }
+    bumpCallCacheEpoch();
 }
 
 void Engine::registerClassDef(const ASTNode *cd, const std::string &qualifiedName)
@@ -1927,6 +1936,7 @@ void Engine::markPluginNamespace(const std::string &ns, bool isolated)
     if (isolated) {
         isolatedPluginNamespaces_.insert(topNs);
     }
+    bumpCallCacheEpoch();
 }
 
 bool Engine::isPluginNamespace(const std::string &ns) const
@@ -2194,7 +2204,7 @@ Value *Engine::getVariable(const std::string &name)
 void Engine::setOutputFunc(OutputFunc f)
 {
     outputFunc_ = f;
-    figureManager_.setOutputFunc(std::move(f));
+    figureManager_->setOutputFunc(std::move(f));
 }
 
 void Engine::setMaxRecursionDepth(int d)
@@ -2300,6 +2310,7 @@ void Engine::addPath(const std::string &dir)
     }
     mFileMissCache_.clear();
     mPath_.push_back(effectiveDir);
+    bumpCallCacheEpoch();
 }
 
 void Engine::rmPath(const std::string &dir)
@@ -2332,6 +2343,7 @@ void Engine::rmPath(const std::string &dir)
     if (it != mPath_.end()) {
         mFileMissCache_.clear();
         mPath_.erase(it);
+        bumpCallCacheEpoch();
     }
 }
 
@@ -2344,6 +2356,7 @@ void Engine::adoptUserFunction(const std::string &name,
         scriptLocalUserFuncs_[name] = std::move(uf);
     else
         userFuncs_[name] = std::move(uf);
+    bumpCallCacheEpoch();
 }
 
 void Engine::registerBuiltinMSource(const std::string &src)
@@ -2378,6 +2391,7 @@ void Engine::adoptBuiltinMSource_(const std::string &src)
             }
         }
         userFuncs_[func.name] = std::move(func);
+        bumpCallCacheEpoch();
     };
     if (ast->type == NodeType::FUNCTION_DEF) {
         adopt(ast.get());
@@ -2456,6 +2470,7 @@ void Engine::rehashMFiles()
     }
     mFileCache_.clear();
     mFileMissCache_.clear();
+    bumpCallCacheEpoch();
 
     // An INLINE subclass of a just-unregistered file base survives rehash still
     // holding the old base snapshot (it is not in mFileCache_, so the loop above
@@ -2484,9 +2499,15 @@ void Engine::refreshStaleMFiles()
             continue;
         }
         auto st = rp.fs->stat(rp.path);
-        int64_t curMtime = st ? st->mtime : 0;
-        if (curMtime != 0 && entry.mtime != 0 && curMtime != entry.mtime) {
-            stale.push_back(name);
+        const bool haveCachedStat = (entry.mtime != 0 || entry.mtimeNs != 0);
+        const bool haveCurStat = st.has_value() && (st->mtime != 0 || st->mtimeNs != 0);
+        if (haveCachedStat && haveCurStat) {
+            const bool sameMtime = (entry.mtimeNs != 0 && st->mtimeNs != 0)
+                ? (st->mtimeNs == entry.mtimeNs)
+                : (st->mtime == entry.mtime);
+            const bool sameSize = (entry.fileSize < 0) || (st->size == entry.fileSize);
+            if (!sameMtime || !sameSize)
+                stale.push_back(name);
         } else {
             try {
                 std::string content = rp.fs->readFile(rp.path);
@@ -2497,6 +2518,8 @@ void Engine::refreshStaleMFiles()
             }
         }
     }
+    if (!stale.empty())
+        bumpCallCacheEpoch();
     for (const auto &name : stale) {
         auto it = mFileCache_.find(name);
         if (it != mFileCache_.end()) {
@@ -2619,18 +2642,26 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         if (cit != mFileCache_.end()
             && (cit->second.fullPath == cachePath || cit->second.fullPath == userPath)) {
             auto st = rp.fs->stat(rp.path);
-            int64_t curMtime = st ? st->mtime : 0;
-            if (curMtime != 0 && curMtime == cit->second.mtime) {
-                if (auto *uf = lookupUserFunctionLocal(name))
-                    return uf;
-                if (cit->second.hasExternal && externalFuncs_.count(name))
-                    return nullptr;
+            const bool haveCachedStat = (cit->second.mtime != 0 || cit->second.mtimeNs != 0);
+            const bool haveCurStat = st.has_value() && (st->mtime != 0 || st->mtimeNs != 0);
+            if (haveCachedStat && haveCurStat) {
+                const bool sameMtime = (cit->second.mtimeNs != 0 && st->mtimeNs != 0)
+                    ? (st->mtimeNs == cit->second.mtimeNs)
+                    : (st->mtime == cit->second.mtime);
+                const bool sameSize = (cit->second.fileSize < 0) || (st->size == cit->second.fileSize);
+                if (sameMtime && sameSize) {
+                    if (auto *uf = lookupUserFunctionLocal(name))
+                        return uf;
+                    if (cit->second.hasExternal && externalFuncs_.count(name))
+                        return nullptr;
+                }
             }
             // Stale or no mtime — drop and re-parse.
             if (cit->second.hasExternal)
                 dropFileClassCtorExternal_(name);
             mFileCache_.erase(cit);
             userFuncs_.erase(name);
+            bumpCallCacheEpoch();
         }
 
         // Read + parse + extract FUNCTION_DEF. The file EXISTS (checked above),
@@ -2730,11 +2761,15 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 });
                 MFileCacheEntry ce;
                 ce.fullPath = cachePath;
-                if (auto st = rp.fs->stat(rp.path))
+                if (auto st = rp.fs->stat(rp.path)) {
                     ce.mtime = st->mtime;
+                    ce.mtimeNs = st->mtimeNs;
+                    ce.fileSize = st->size;
+                }
                 ce.sourceCode = std::make_shared<const std::string>(std::move(content));
                 ce.hasExternal = true;
                 mFileCache_[name] = std::move(ce);
+                bumpCallCacheEpoch();
                 return nullptr; // class + ctor-external resolve the call
             }
             if (!hasExternalFunction(name) && !findExternal(name, nullptr)) {
@@ -2771,11 +2806,15 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 });
                 MFileCacheEntry ce;
                 ce.fullPath = cachePath;
-                if (auto st = rp.fs->stat(rp.path))
+                if (auto st = rp.fs->stat(rp.path)) {
                     ce.mtime = st->mtime;
+                    ce.mtimeNs = st->mtimeNs;
+                    ce.fileSize = st->size;
+                }
                 ce.sourceCode = std::move(srcPtr);
                 ce.hasExternal = true;
                 mFileCache_[name] = std::move(ce);
+                bumpCallCacheEpoch();
                 return nullptr;
             }
             continue;
@@ -2821,10 +2860,14 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // Cache stat metadata for mtime-based invalidation.
         MFileCacheEntry e;
         e.fullPath = cachePath;
-        if (auto st = rp.fs->stat(rp.path))
+        if (auto st = rp.fs->stat(rp.path)) {
             e.mtime = st->mtime;
+            e.mtimeNs = st->mtimeNs;
+            e.fileSize = st->size;
+        }
         e.sourceCode = std::make_shared<const std::string>(std::move(content));
         mFileCache_[name] = std::move(e);
+        bumpCallCacheEpoch();
 
         // Register the file's OTHER top-level functions as local
         // (sub)functions — a `.m` file may define a main function followed by
@@ -3078,6 +3121,7 @@ void Engine::clearUserFunctions()
     clearAllPersistent();
     if (compiler_)
         compiler_->clearCompiledFuncs();
+    bumpCallCacheEpoch();
 }
 
 void Engine::beginScript(const ASTNode *ast)
@@ -3086,6 +3130,7 @@ void Engine::beginScript(const ASTNode *ast)
     scriptLocalUserFuncs_.clear();
     if (compiler_)
         compiler_->beginScriptScope();
+    bumpCallCacheEpoch();
     if (!ast)
         return;
     // Pre-register the script's top-level FUNCTION_DEFs into the
@@ -3122,6 +3167,7 @@ void Engine::endScript()
 {
     if (compiler_)
         compiler_->endScriptScope();
+    bumpCallCacheEpoch();
     if (savedScriptLocalUserFuncs_.empty()) {
         scriptLocalUserFuncs_.clear();
         return;
@@ -3140,6 +3186,7 @@ void Engine::promoteScriptLocalsToWorkspace()
     scriptLocalUserFuncs_.clear();
     if (compiler_)
         compiler_->promoteScriptLocalsToWorkspace();
+    bumpCallCacheEpoch();
 }
 
 void Engine::setDebugObserver(std::shared_ptr<DebugObserver> observer)
@@ -3625,6 +3672,7 @@ std::vector<std::string> Engine::workspaceVarNames() const
 void Engine::registerVirtualFS(std::unique_ptr<VirtualFS> fs)
 {
     fsCtx_.registerVirtualFS(std::move(fs));
+    bumpCallCacheEpoch();
 }
 
 VirtualFS *Engine::findVirtualFS(const std::string &name) const

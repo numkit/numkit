@@ -14,7 +14,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
-#include <numkit/core/figure_render.hpp>
+#include <numkit/graphics/figure_render.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/image/io/io.hpp>
 #include <numkit/value/argcheck.hpp>

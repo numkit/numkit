@@ -32,7 +32,7 @@
 
 #include <numkit/core/engine.hpp>  // Engine, CallContext, ExternalFunc, Span, Value
 #include <numkit/core/figure_manager.hpp>
-#include <numkit/core/figure_render.hpp>
+#include <numkit/graphics/figure_render.hpp>
 #include <numkit/value/object.hpp>
 
 #include <cstddef>

@@ -2,6 +2,7 @@
 #include <numkit/builtin/lang.hpp>
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
+#include <algorithm>
 
 using namespace numkit;
 

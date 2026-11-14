@@ -17,6 +17,7 @@
 
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/core/figure_manager.hpp>
 
 #include <memory_resource>
 

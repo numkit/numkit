@@ -19,11 +19,11 @@
 /// port), polar, text overlays, yyaxis right-scale, annotations —
 /// tracked in bugs/opened/graphics/handle-surface-gaps.md sibling
 /// export-gaps file.
-#pragma once
-
+#include <numkit/graphics/figure_render.hpp>
 #include <numkit/core/figure_manager.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -308,7 +308,7 @@ inline const NamedPaletteHex kNamedPaletteHex[] = {
 };
 
 // Parsed-once 256x3 RGB tables, keyed by name (lowercase).
-inline const std::uint8_t *namedPalette(const std::string &name, int &n)
+const std::uint8_t *namedPalette(const std::string &name, int &n)
 {
     static const std::map<std::string, std::vector<std::uint8_t>> tables = [] {
         std::map<std::string, std::vector<std::uint8_t>> m;
@@ -468,8 +468,8 @@ inline std::vector<std::uint8_t> imageCmdRgb(const Cmd &c)
 // Null entries (NaN cells) → NaN. Depth-tracked: only INNER brackets
 // (depth 2) delimit rows — the outer pair is the wrapper (counting it
 // as a row over-read the value vector).
-inline void parseNestedDoubles(const std::string &j, std::vector<double> &out,
-                               size_t &rows, size_t &cols)
+void parseNestedDoubles(const std::string &j, std::vector<double> &out,
+                        size_t &rows, size_t &cols)
 {
     out.clear();
     rows = cols = 0;
@@ -518,7 +518,7 @@ inline void parseNestedDoubles(const std::string &j, std::vector<double> &out,
 // MATLAB-exact auto ticks (probe-verified R2025b, portion 34): target
 // 10 intervals, ladder breakpoints 1/2/5 — [0,10]→step 1 (11 ticks),
 // [0,3]→step 0.5 (7), [0,7]→step 1 (8).
-inline std::vector<double> niceTicks(double mn, double mx, int target = 10)
+std::vector<double> niceTicks(double mn, double mx, int target)
 {
     std::vector<double> major;
     double range = mx - mn;
@@ -535,7 +535,7 @@ inline std::vector<double> niceTicks(double mn, double mx, int target = 10)
     return major;
 }
 
-inline std::vector<double> logTicks(double mn, double mx)
+std::vector<double> logTicks(double mn, double mx)
 {
     std::vector<double> major;
     if (!(mn > 0) || !(mx > mn))
@@ -552,7 +552,7 @@ inline std::vector<double> logTicks(double mn, double mx)
 
 // Default tick label: %g-style with trailing-zero trim + exponent
 // compaction ("1e+06" → "1e6").
-inline std::string tickLabel(double v)
+std::string tickLabel(double v)
 {
     if (v == 0)
         return "0";
@@ -1998,11 +1998,8 @@ inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
 // for SVG (a data: URL). The figure layer stays free of codec code —
 // the bundle export glue supplies a PNG+base64 implementation; without
 // one, SVG export skips IMAGE cmds (raster export always renders them).
-using SvgImageEmbedder =
-    std::function<std::string(const std::vector<std::uint8_t> &, int, int)>;
-
-inline std::string renderFigureSvg(const FigureState &fig, int W, int H,
-                                   const SvgImageEmbedder &embed = {})
+std::string renderFigureSvg(const FigureState &fig, int W, int H,
+                            const SvgImageEmbedder &embed)
 {
     std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -2111,7 +2108,7 @@ inline std::string renderFigureSvg(const FigureState &fig, int W, int H,
     return s;
 }
 
-inline std::string renderFigureEps(const FigureState &fig, int W, int H)
+std::string renderFigureEps(const FigureState &fig, int W, int H)
 {
     std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
     std::string s = "%!PS-Adobe-3.0 EPSF-3.0\n"
@@ -2172,7 +2169,7 @@ inline std::string renderFigureEps(const FigureState &fig, int W, int H)
     return s;
 }
 
-inline std::string renderFigurePdf(const FigureState &fig, int W, int H)
+std::string renderFigurePdf(const FigureState &fig, int W, int H)
 {
     std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
     std::string stream = "1 1 1 rg 0 0 " + std::to_string(W) + " " + std::to_string(H) + " re f\n";
@@ -2477,8 +2474,8 @@ private:
 };
 
 // Render to a top-down RGB buffer (H×W×3 bytes).
-inline std::vector<std::uint8_t> renderFigureRgb(const FigureState &fig,
-                                                 int W, int H)
+std::vector<std::uint8_t> renderFigureRgb(const FigureState &fig,
+                                          int W, int H)
 {
     Raster r(W, H);
     for (const Cmd &c : renderFigureDisplay(fig, W, H)) {

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -608,6 +609,7 @@ std::unique_ptr<VM::PausedState> VM::savePausedState()
     s->frames = std::move(frames_);
     s->forStack = std::move(forStack_);
     s->tryStack = std::move(tryStack_);
+    s->lvalDetaches = std::move(lvalDetaches_);
     s->regStackTop = regStackTop_;
     s->lastResult = std::move(lastResult_);
     // BUG #3: rescue chunkCallCache_ before startExecution clears it.
@@ -638,6 +640,7 @@ void VM::restorePausedState(std::unique_ptr<PausedState> s)
     frames_ = std::move(s->frames);
     forStack_ = std::move(s->forStack);
     tryStack_ = std::move(s->tryStack);
+    lvalDetaches_ = std::move(s->lvalDetaches);
     regStackTop_ = s->regStackTop;
     lastResult_ = std::move(s->lastResult);
     // BUG #3: restore the outer's call-target cache. The inner's
@@ -686,6 +689,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, siz
     frames_.clear();
     forStack_.clear();
     tryStack_.clear();
+    lvalDetaches_.clear();
     regStackTop_ = 0;
     returnBuf_.clear();
     lastResult_ = Value();
@@ -773,9 +777,25 @@ ExecStatus VM::resumeExecution()
 // Internal dispatch — Value directly, scalar fast paths
 // ============================================================
 
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((flatten))
-#endif
+void VM::rollbackLvalDetaches()
+{
+    while (!lvalDetaches_.empty()) {
+        LvalDetach d = std::move(lvalDetaches_.back());
+        lvalDetaches_.pop_back();
+        if (d.containerRegAbs < regStack_.size() && d.valRegAbs < regStack_.size()) {
+            Value &cont = regStack_[d.containerRegAbs];
+            Value &val = regStack_[d.valRegAbs];
+            if (d.kind == LvalDetach::Kind::Field) {
+                if (cont.isStruct() && !cont.isStructArray())
+                    cont.field(d.fieldName) = std::move(val);
+            } else {
+                if (cont.isCell() && d.cellLinearIdx < cont.numel())
+                    cont.cellAt(d.cellLinearIdx) = std::move(val);
+            }
+        }
+    }
+}
+
 // Forward declarations for helpers defined later in this translation unit
 // but called from dispatchLoop's catch blocks.
 static std::string describeInstruction(const Instruction &instr,
@@ -1850,7 +1870,7 @@ enter_frame:
                         break;
                     }
 
-                    if (dst.isEmpty() || dst.isScalar() || i >= dst.numel())
+                    if (rhs.isScalar() && (dst.isEmpty() || dst.isScalar() || i >= dst.numel()))
                         dst.ensureSize(i, engine_.mr_);
                     dst.elemSet(i, rhs);
                 } else if (ix.isChar() && ix.numel() == 1 && ix.charData()[0] == ':') {
@@ -1918,7 +1938,8 @@ enter_frame:
                 } else {
                     // Vector or logical index
                     auto indices = Value::resolveIndicesUnchecked(ix);
-                    if (!indices.empty()) {
+                    if (!indices.empty()
+                        && (R[I.c].isScalar() || R[I.c].numel() == indices.size())) {
                         // Auto-grow if needed
                         size_t maxIdx = 0;
                         for (size_t idx : indices) maxIdx = std::max(maxIdx, idx);
@@ -2010,8 +2031,14 @@ enter_frame:
                         maxC = (rowIds.count == 1) ? val.numel() : val.dims().cols();
                     }
                 }
-                if (maxR > curRows || maxC > curColDim)
-                    R[I.a].resize(maxR, maxC, engine_.mr_);
+                if (maxR > curRows || maxC > curColDim) {
+                    const size_t propR = std::max(curRows, maxR);
+                    const size_t propC = std::max(curColDim, maxC);
+                    const size_t targetCnt =
+                        (riIsColon ? propR : rowIds.count) * (ciIsColon ? propC : colIds.count);
+                    if (val.isScalar() || val.numel() == targetCnt)
+                        R[I.a].resize(maxR, maxC, engine_.mr_);
+                }
 
                 const size_t finalRows = R[I.a].dims().rows();
                 const size_t finalColDim = R[I.a].dims().ndim() > 2
@@ -2392,6 +2419,13 @@ enter_frame:
                 // array sets f on every element (MATLAB semantics).
                 if (R[I.a].isStructArray()) {
                     R[I.a].setFieldAll(fname, R[I.b]);  // BUG #15
+                } else if (!lvalDetaches_.empty()
+                           && lvalDetaches_.back().kind == LvalDetach::Kind::Field
+                           && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                           && lvalDetaches_.back().valRegAbs == frame.regBase + I.b
+                           && lvalDetaches_.back().fieldName == fname) {
+                    lvalDetaches_.pop_back();
+                    R[I.a].field(fname) = std::move(R[I.b]);
                 } else {
                     R[I.a].field(fname) = R[I.b];        // tracks via field()
                 }
@@ -2535,7 +2569,57 @@ enter_frame:
                     R[I.a] = Value::structure();
                 if (!R[I.a].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
-                R[I.a].field(fname) = R[I.c];
+                if (!lvalDetaches_.empty()
+                    && lvalDetaches_.back().kind == LvalDetach::Kind::Field
+                    && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                    && lvalDetaches_.back().valRegAbs == frame.regBase + I.c
+                    && lvalDetaches_.back().fieldName == fname) {
+                    lvalDetaches_.pop_back();
+                    R[I.a].field(fname) = std::move(R[I.c]);
+                } else {
+                    R[I.a].field(fname) = R[I.c];
+                }
+                break;
+            }
+            case OpCode::LVAL_UNSHARE_FIELD: {
+                // a=childReg, b=objReg, c=isDyn(0/1), d=nameIdx, e=nameReg
+                Value &obj = R[I.b];
+                if (obj.isStruct() && !obj.isStructArray() && obj.heapRefCount() == 1
+                    && !R[I.a].isObject()) {
+                    std::string fname = (I.c == 0) ? chunk.strings[I.d] : R[I.e].toString();
+                    if (obj.hasField(fname)) {
+                        obj.field(fname) = Value();
+                        lvalDetaches_.push_back({frame.regBase + I.b, frame.regBase + I.a,
+                                                 LvalDetach::Kind::Field, std::move(fname), 0});
+                    }
+                }
+                break;
+            }
+            case OpCode::LVAL_UNSHARE_CELL: {
+                // a=childReg, b=cellReg, c=idxBase, e=nargs
+                Value &cell = R[I.b];
+                if (cell.isCell() && cell.heapRefCount() == 1 && !R[I.a].isObject()) {
+                    const int nargs = I.e;
+                    if (nargs > 0 && nargs <= Dims::kMaxRank) {
+                        size_t linear = 0;
+                        if (nargs == 1) {
+                            linear = Value::checkedScalarIndex(R[I.c].toScalar());
+                        } else {
+                            const auto &d = cell.dims();
+                            size_t stride = 1;
+                            for (int k = 0; k < nargs; ++k) {
+                                size_t ck = Value::checkedScalarIndex(R[I.c + k].toScalar());
+                                linear += ck * stride;
+                                stride *= d.dim(k);
+                            }
+                        }
+                        if (linear < cell.numel()) {
+                            cell.cellAt(linear) = Value();
+                            lvalDetaches_.push_back({frame.regBase + I.b, frame.regBase + I.a,
+                                                     LvalDetach::Kind::Cell, {}, linear});
+                        }
+                    }
+                }
                 break;
             }
 
@@ -2607,23 +2691,21 @@ enter_frame:
             case OpCode::CELL_APPEND_FLATTEN: {
                 Value &acc = R[I.a];
                 if (!acc.isCell())
-                    acc = Value::cell(1, 0);
+                    acc = Value::cell(1, 0, engine_.mr_);
                 size_t       n    = acc.numel();
                 const Value &elem = R[I.b];
                 if (elem.isCsl()) {
-                    size_t m     = elem.cslCount();
-                    auto   grown = Value::cell(1, n + m);
-                    for (size_t i = 0; i < n; ++i)
-                        grown.cellAt(i) = std::move(acc.cellAt(i));
-                    for (size_t j = 0; j < m; ++j)
-                        grown.cellAt(n + j) = elem.cslAt(j);
-                    acc = std::move(grown);
+                    size_t m = elem.cslCount();
+                    if (m > 0) {
+                        size_t lastCoord = n + m - 1;
+                        acc.growCellTo(&lastCoord, 1, engine_.mr_);
+                        for (size_t j = 0; j < m; ++j)
+                            acc.cellAt(n + j) = elem.cslAt(j);
+                    }
                 } else {
-                    auto grown = Value::cell(1, n + 1);
-                    for (size_t i = 0; i < n; ++i)
-                        grown.cellAt(i) = std::move(acc.cellAt(i));
-                    grown.cellAt(n) = elem;
-                    acc = std::move(grown);
+                    size_t lastCoord = n;
+                    acc.growCellTo(&lastCoord, 1, engine_.mr_);
+                    acc.cellAt(n) = elem;
                 }
                 break;
             }
@@ -2761,10 +2843,8 @@ enter_frame:
                                 maxLen = idx + 1;
                         }
                         if (maxLen > R[I.a].numel()) {
-                            auto nc = Value::cell(1, maxLen);
-                            for (size_t k = 0; k < R[I.a].numel(); ++k)
-                                nc.cellAt(k) = R[I.a].cellAt(k);
-                            R[I.a] = std::move(nc);
+                            size_t lastCoord = maxLen - 1;
+                            R[I.a].growCellTo(&lastCoord, 1, engine_.mr_);
                         }
                     }
                     auto indices = Value::resolveIndices(R[I.b], R[I.a].numel());
@@ -2773,14 +2853,18 @@ enter_frame:
                     break;
                 }
                 size_t i = Value::checkedScalarIndex(R[I.b].toScalar());
-                if (i >= R[I.a].numel()) {
-                    size_t ns = i + 1;
-                    auto nc = Value::cell(1, ns);
-                    for (size_t k = 0; k < R[I.a].numel(); ++k)
-                        nc.cellAt(k) = R[I.a].cellAt(k);
-                    R[I.a] = std::move(nc);
+                if (i >= R[I.a].numel())
+                    R[I.a].growCellTo(&i, 1, engine_.mr_);
+                if (!lvalDetaches_.empty()
+                    && lvalDetaches_.back().kind == LvalDetach::Kind::Cell
+                    && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                    && lvalDetaches_.back().valRegAbs == frame.regBase + I.c
+                    && lvalDetaches_.back().cellLinearIdx == i) {
+                    lvalDetaches_.pop_back();
+                    R[I.a].cellAt(i) = std::move(R[I.c]);
+                } else {
+                    R[I.a].cellAt(i) = R[I.c];
                 }
-                R[I.a].cellAt(i) = R[I.c];
                 break;
             }
             case OpCode::CELL_SET_2D: {
@@ -2810,7 +2894,17 @@ enter_frame:
                             grown.cellAt(cc * newR + rr) = R[I.a].cellAt(cc * nr + rr);
                     R[I.a] = std::move(grown);
                 }
-                R[I.a].cellAt(R[I.a].dims().sub2ind(r, c)) = R[I.e];
+                size_t lin = R[I.a].dims().sub2ind(r, c);
+                if (!lvalDetaches_.empty()
+                    && lvalDetaches_.back().kind == LvalDetach::Kind::Cell
+                    && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                    && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
+                    && lvalDetaches_.back().cellLinearIdx == lin) {
+                    lvalDetaches_.pop_back();
+                    R[I.a].cellAt(lin) = std::move(R[I.e]);
+                } else {
+                    R[I.a].cellAt(lin) = R[I.e];
+                }
                 break;
             }
             case OpCode::CELL_GET_ND: {
@@ -2867,7 +2961,16 @@ enter_frame:
                         R[I.a] = std::move(grown);
                     }
                     size_t idx = R[I.a].dims().sub2ind(r, c, p);
-                    R[I.a].cellAt(idx) = R[I.e];
+                    if (!lvalDetaches_.empty()
+                        && lvalDetaches_.back().kind == LvalDetach::Kind::Cell
+                        && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                        && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
+                        && lvalDetaches_.back().cellLinearIdx == idx) {
+                        lvalDetaches_.pop_back();
+                        R[I.a].cellAt(idx) = std::move(R[I.e]);
+                    } else {
+                        R[I.a].cellAt(idx) = R[I.e];
+                    }
                 } else {
                     // General ND (≥4): auto-grow on out-of-range subscripts
                     // (rank ↑ for new trailing axes, axis-size ↑ otherwise),
@@ -2895,7 +2998,16 @@ enter_frame:
                         idx += coords[i] * stride;
                         stride *= d.dim(i);
                     }
-                    R[I.a].cellAt(idx) = R[I.e];
+                    if (!lvalDetaches_.empty()
+                        && lvalDetaches_.back().kind == LvalDetach::Kind::Cell
+                        && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
+                        && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
+                        && lvalDetaches_.back().cellLinearIdx == idx) {
+                        lvalDetaches_.pop_back();
+                        R[I.a].cellAt(idx) = std::move(R[I.e]);
+                    } else {
+                        R[I.a].cellAt(idx) = R[I.e];
+                    }
                 }
                 break;
             }
@@ -2913,7 +3025,7 @@ enter_frame:
 
                 // Dynamically injected local variable (via eval/load/assignin)
                 // shadows functions and builtins.
-                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
                     const std::string &candName = chunk.strings[funcIdx];
                     bool clearedInChunk = false;
                     if (chunk.assignedVars.count(candName)) {
@@ -2956,18 +3068,47 @@ enter_frame:
                     }
                 }
 
-                // Try resolved cache first
+                const uint64_t curEpoch = engine_.callCacheEpoch();
+                const Environment *scopeForImports = frame.isScriptFrame
+                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                    : frame.env.get();
+                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+                const bool originStable = chunk.originKnown
+                    || !engine_.currentScriptDir()
+                    || engine_.currentScriptDir()->empty();
+
+                // Try resolved inline cache first
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
-                    targetChunk = resolvedFuncs[funcIdx];
+                if (funcIdx < static_cast<int32_t>(resolvedFuncs.size())
+                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
+                    const auto &ce = resolvedFuncs[funcIdx];
+                    if (ce.userChunk) {
+                        targetChunk = ce.userChunk;
+                    } else if (ce.extFunc && !hasImports && originStable
+                               && !(na >= 1 && R[argBase].isObject())) {
+                        Span<const Value> as(&R[argBase], na);
+                        Value ob[1];
+                        bool canHint = nargout_val > 0 && R[I.a].hasHeap();
+                        for (uint16_t i = 0; i < na && canHint; ++i)
+                            if (&R[argBase + i] == &R[I.a])
+                                canHint = false;
+                        if (canHint)
+                            ob[0] = std::move(R[I.a]);
+                        Span<Value> os(ob, 1);
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        (*ce.extFunc)(as, nargout_val, os, ctx);
+                        R[I.a] = std::move(ob[0]);
+                        break;
+                    }
+                }
 
                 if (!targetChunk) {
                     const std::string &funcName = chunk.strings[funcIdx];
                     const BytecodeChunk *found = findCompiledFunc(funcName);
                     if (found) {
-                        if (funcIdx >= (int32_t) resolvedFuncs.size())
-                            resolvedFuncs.resize(funcIdx + 1, nullptr);
-                        resolvedFuncs[funcIdx] = found;
+                        if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                            resolvedFuncs.resize(funcIdx + 1);
+                        resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         targetChunk = found;
                     }
                 }
@@ -3066,15 +3207,18 @@ enter_frame:
                         const BytecodeChunk *found = findCompiledFunc(uf->name);
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
-                        if (funcIdx >= (int32_t) resolvedFuncs.size())
-                            resolvedFuncs.resize(funcIdx + 1, nullptr);
-                        resolvedFuncs[funcIdx] = found;
+                        if (!hasImports && originStable) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+                        }
                         frame.ip = ip + 1;
                         pushCallFrame(*found, &R[argBase], na, I.a, nargout_val);
                         goto enter_frame;
                     }
 
-                    if (CallbackBuiltin *cb = engine_.callbackBuiltin(funcName)) {
+                    CallbackBuiltin *cb = engine_.callbackBuiltin(funcName);
+                    if (cb) {
                         Span<const Value> as(&R[argBase], na);
                         auto outBox = std::make_shared<Value>();
                         if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
@@ -3092,6 +3236,13 @@ enter_frame:
                     const ExternalFunc *fnPtr = engine_.findExternal(
                         funcName, currentCallEnv());
                     if (fnPtr) {
+                        if (!cb && !hasImports && originStable
+                            && !(na >= 1 && R[argBase].isObject())
+                            && !engine_.findClass(funcName)) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
+                        }
                         Span<const Value> as(&R[argBase], na);
                         Value ob[1];
                         // Output-reuse hint: when no argument register
@@ -3251,7 +3402,7 @@ enter_frame:
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
 
-                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
                     const std::string &candName = chunk.strings[funcIdx];
                     const Value *dynLocal = nullptr;
                     if (frame.dynVars) {
@@ -3281,15 +3432,26 @@ enter_frame:
                     }
                 }
 
+                const uint64_t curEpoch = engine_.callCacheEpoch();
+                const Environment *scopeForImports = frame.isScriptFrame
+                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                    : frame.env.get();
+                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+                const bool originStable = chunk.originKnown
+                    || !engine_.currentScriptDir()
+                    || engine_.currentScriptDir()->empty();
+
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
-                    targetChunk = resolvedFuncs[funcIdx];
+                if (funcIdx < static_cast<int32_t>(resolvedFuncs.size())
+                    && resolvedFuncs[funcIdx].epoch == curEpoch
+                    && resolvedFuncs[funcIdx].userChunk)
+                    targetChunk = resolvedFuncs[funcIdx].userChunk;
                 if (!targetChunk) {
                     const std::string &funcName = chunk.strings[funcIdx];
                     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                        if (funcIdx >= (int32_t) resolvedFuncs.size())
-                            resolvedFuncs.resize(funcIdx + 1, nullptr);
-                        resolvedFuncs[funcIdx] = found;
+                        if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                            resolvedFuncs.resize(funcIdx + 1);
+                        resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         targetChunk = found;
                     }
                 }
@@ -3357,9 +3519,11 @@ enter_frame:
                         const BytecodeChunk *found = findCompiledFunc(uf->name);
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
-                        if (funcIdx >= (int32_t) resolvedFuncs.size())
-                            resolvedFuncs.resize(funcIdx + 1, nullptr);
-                        resolvedFuncs[funcIdx] = found;
+                        if (!hasImports && originStable) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+                        }
                         frame.ip = ip + 1;
                         pushCallFrame(*found, AB, NF, I.a, nargout_val);
                         goto enter_frame;
@@ -3406,7 +3570,7 @@ enter_frame:
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
 
-                if (frame.dynVars || frame.env || frame.isScriptFrame) {
+                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
                     const Value *dynLocal = nullptr;
                     if (frame.dynVars) {
                         auto it = frame.dynVars->find(funcName);
@@ -3437,21 +3601,63 @@ enter_frame:
                             goto enter_frame;
                         }
                         if (const ExternalFunc *fp = engine_.findExternal(hName, currentCallEnv())) {
-                            std::vector<Value> ob(nout);
+                            Value smallOb[8];
+                            std::vector<Value> bigOb;
+                            Value *obPtr = (nout <= 8) ? smallOb : (bigOb.resize(nout), bigOb.data());
                             CallContext ctx{&engine_, currentCallEnv()};
-                            (*fp)(Span<const Value>(cargs.data(), NF), nout, Span<Value>(ob.data(), nout), ctx);
+                            (*fp)(Span<const Value>(cargs.data(), NF), nout, Span<Value>(obPtr, nout), ctx);
                             for (uint16_t i = 0; i < nout; ++i)
-                                if (ob[i].isUnset())
+                                if (obPtr[i].isUnset())
                                     throw std::runtime_error("Too many output arguments.");
                             for (uint16_t i = 0; i < nout; ++i)
-                                R[outBase + i] = std::move(ob[i]);
+                                R[outBase + i] = std::move(obPtr[i]);
                             break;
                         }
                     }
                 }
 
+                const uint64_t curEpoch = engine_.callCacheEpoch();
+                const Environment *scopeForImports = frame.isScriptFrame
+                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                    : frame.env.get();
+                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+                const bool originStable = chunk.originKnown
+                    || !engine_.currentScriptDir()
+                    || engine_.currentScriptDir()->empty();
+
+                // Inline cache check (user chunk or external builtin)
+                if (funcIdx < static_cast<int32_t>(resolvedFuncs.size())
+                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
+                    const auto &ce = resolvedFuncs[funcIdx];
+                    if (ce.userChunk) {
+                        frame.ip = ip + 1;
+                        returnBuf_.clear();
+                        pushCallFrame(*ce.userChunk, AB, NF, 0, nout, true, outBase, nout);
+                        goto enter_frame;
+                    }
+                    if (ce.extFunc && !hasImports && originStable
+                        && !(NF >= 1 && AB[0].isObject())) {
+                        Value smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+                        Span<const Value> as(AB, NF);
+                        Span<Value> os(outPtr, nout);
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        (*ce.extFunc)(as, nout, os, ctx);
+                        for (uint16_t i = 0; i < nout; ++i)
+                            if (outPtr[i].isUnset())
+                                throw std::runtime_error("Too many output arguments.");
+                        for (size_t i = 0; i < nout; ++i)
+                            R[outBase + i] = std::move(outPtr[i]);
+                        break;
+                    }
+                }
+
                 // Try compiled user function first.
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
+                    if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                        resolvedFuncs.resize(funcIdx + 1);
+                    resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                     frame.ip = ip + 1;
                     returnBuf_.clear();
                     pushCallFrame(*found, AB, NF,
@@ -3482,15 +3688,17 @@ enter_frame:
                     if (cls && cls->methods.count(funcName)) {
                         Value self = AB[0];
                         Span<const Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                        std::vector<Value> outBuf(nout);
+                        Value smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         CallContext ctx{&engine_, currentCallEnv()};
                         cls->methods.at(funcName)(self, rest, nout,
-                                                  Span<Value>(outBuf.data(), nout), ctx);
+                                                  Span<Value>(outPtr, nout), ctx);
                         for (uint16_t i = 0; i < nout; ++i)
-                            if (outBuf[i].isUnset())
+                            if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outBuf[i]);
+                            R[outBase + i] = std::move(outPtr[i]);
                         break;
                     }
                 }
@@ -3508,6 +3716,11 @@ enter_frame:
                         const BytecodeChunk *found = findCompiledFunc(uf->name);
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
+                        if (!hasImports && originStable) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+                        }
                         frame.ip = ip + 1;
                         returnBuf_.clear();
                         pushCallFrame(*found, AB, NF,
@@ -3518,9 +3731,19 @@ enter_frame:
                     const ExternalFunc *fnPtr = engine_.findExternal(
                         funcName, currentCallEnv());
                     if (fnPtr) {
-                        std::vector<Value> outBuf(nout);
+                        if (!hasImports && originStable
+                            && !(NF >= 1 && AB[0].isObject())
+                            && !engine_.callbackBuiltin(funcName)
+                            && !engine_.findClass(funcName)) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
+                        }
+                        Value smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         Span<const Value> as(AB, NF);
-                        Span<Value> os(outBuf.data(), nout);
+                        Span<Value> os(outPtr, nout);
                         CallContext ctx{&engine_, currentCallEnv()};
                         (*fnPtr)(as, nout, os, ctx);
                         // MATLAB: asking for more outputs than the builtin
@@ -3528,10 +3751,10 @@ enter_frame:
                         // a silently-unset target that later reads as a
                         // phantom undefined function (bug #44).
                         for (uint16_t i = 0; i < nout; ++i)
-                            if (outBuf[i].isUnset())
+                            if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outBuf[i]);
+                            R[outBase + i] = std::move(outPtr[i]);
                         break;
                     }
                     throw std::runtime_error(
@@ -3552,7 +3775,46 @@ enter_frame:
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
 
+                const uint64_t curEpoch = engine_.callCacheEpoch();
+                const Environment *scopeForImports = frame.isScriptFrame
+                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+                    : frame.env.get();
+                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+                const bool originStable = chunk.originKnown
+                    || !engine_.currentScriptDir()
+                    || engine_.currentScriptDir()->empty();
+
+                if (funcIdx < static_cast<int32_t>(resolvedFuncs.size())
+                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
+                    const auto &ce = resolvedFuncs[funcIdx];
+                    if (ce.userChunk) {
+                        frame.ip = ip + 1;
+                        returnBuf_.clear();
+                        pushCallFrame(*ce.userChunk, AB, NF, 0, nout, true, outBase, nout);
+                        goto enter_frame;
+                    }
+                    if (ce.extFunc && !hasImports && originStable
+                        && !(NF >= 1 && AB[0].isObject())) {
+                        Value smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+                        Span<const Value> as(AB, NF);
+                        Span<Value> os(outPtr, nout);
+                        CallContext ctx{&engine_, currentCallEnv()};
+                        (*ce.extFunc)(as, nout, os, ctx);
+                        for (uint16_t i = 0; i < nout; ++i)
+                            if (outPtr[i].isUnset())
+                                throw std::runtime_error("Too many output arguments.");
+                        for (size_t i = 0; i < nout; ++i)
+                            R[outBase + i] = std::move(outPtr[i]);
+                        break;
+                    }
+                }
+
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
+                    if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                        resolvedFuncs.resize(funcIdx + 1);
+                    resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                     frame.ip = ip + 1;
                     returnBuf_.clear();
                     pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
@@ -3577,15 +3839,17 @@ enter_frame:
                     if (cls && cls->methods.count(funcName)) {
                         Value              self = AB[0];
                         Span<const Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                        std::vector<Value> outBuf(nout);
+                        Value              smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         CallContext        ctx{&engine_, currentCallEnv()};
                         cls->methods.at(funcName)(self, rest, nout,
-                                                  Span<Value>(outBuf.data(), nout), ctx);
+                                                  Span<Value>(outPtr, nout), ctx);
                         for (uint16_t i = 0; i < nout; ++i)
-                            if (outBuf[i].isUnset())
+                            if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outBuf[i]);
+                            R[outBase + i] = std::move(outPtr[i]);
                         break;
                     }
                 }
@@ -3595,6 +3859,11 @@ enter_frame:
                         const BytecodeChunk *found = findCompiledFunc(uf->name);
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
+                        if (!hasImports && originStable) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+                        }
                         frame.ip = ip + 1;
                         returnBuf_.clear();
                         pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
@@ -3603,16 +3872,26 @@ enter_frame:
                     const ExternalFunc *fnPtr = engine_.findExternal(
                         funcName, currentCallEnv());
                     if (fnPtr) {
-                        std::vector<Value> outBuf(nout);
+                        if (!hasImports && originStable
+                            && !(NF >= 1 && AB[0].isObject())
+                            && !engine_.callbackBuiltin(funcName)
+                            && !engine_.findClass(funcName)) {
+                            if (funcIdx >= static_cast<int32_t>(resolvedFuncs.size()))
+                                resolvedFuncs.resize(funcIdx + 1);
+                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
+                        }
+                        Value              smallOut[8];
+                        std::vector<Value> bigOut;
+                        Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         Span<const Value>  as(AB, NF);
-                        Span<Value>        os(outBuf.data(), nout);
+                        Span<Value>        os(outPtr, nout);
                         CallContext        ctx{&engine_, currentCallEnv()};
                         (*fnPtr)(as, nout, os, ctx);
                         for (uint16_t i = 0; i < nout; ++i)
-                            if (outBuf[i].isUnset())
+                            if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outBuf[i]);
+                            R[outBase + i] = std::move(outPtr[i]);
                         break;
                     }
                     throw std::runtime_error(
@@ -4188,8 +4467,10 @@ enter_frame:
             ++ip;
         } // while
     } catch (const DebugStopException &) {
+        rollbackLvalDetaches();
         throw; // pass through — not a user error
     } catch (Error &mle) {
+        rollbackLvalDetaches();
         std::string id = mle.identifier().empty() ? "numkit:error" : mle.identifier();
         if (dispatchTryCatch(mle.what(), id.c_str()))
             goto enter_frame;
@@ -4214,6 +4495,7 @@ enter_frame:
         }
         throw;
     } catch (const std::exception &ex) {
+        rollbackLvalDetaches();
         if (dispatchTryCatch(ex.what(), "numkit:error"))
             goto enter_frame;
         if (stopOnError_ && debugCtl()) {
@@ -4489,9 +4771,15 @@ Environment *VM::currentCallEnv()
         return inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv();
     auto &frame = frames_.back();
     if (!frame.env) {
-        frame.env = std::make_unique<Environment>(
-            &engine_.constantsEnv(),
-            engine_.globalsEnv_.get());
+        if (!envPool_.empty()) {
+            frame.env = std::move(envPool_.back());
+            envPool_.pop_back();
+            frame.env->reset(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+        } else {
+            frame.env = std::make_unique<Environment>(
+                &engine_.constantsEnv(),
+                engine_.globalsEnv_.get());
+        }
     }
     return frame.env.get();
 }
@@ -4501,9 +4789,15 @@ Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
     if (f.isScriptFrame)
         return f.env ? f.env.get() : (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv());
     if (!f.env) {
-        f.env = std::make_unique<Environment>(
-            &engine_.constantsEnv(),
-            engine_.globalsEnv_.get());
+        if (!envPool_.empty()) {
+            f.env = std::move(envPool_.back());
+            envPool_.pop_back();
+            f.env->reset(&engine_.constantsEnv(), engine_.globalsEnv_.get());
+        } else {
+            f.env = std::make_unique<Environment>(
+                &engine_.constantsEnv(),
+                engine_.globalsEnv_.get());
+        }
     }
     if (f.chunk && frameRegs) {
         if (!f.chunk->persistentNames.empty()) {
@@ -4853,14 +5147,19 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
 
     // Copy args, upvalue boxes, varargin, and ctorSeed BEFORE ensureRegStackCapacity,
     // since `args` or `ctorSeed` may point into caller registers inside regStack_.
-    std::vector<Value> argsCopy(pc);
+    // Use stack buffers for common arities to avoid heap allocation per call.
+    Value smallArgs[16];
+    std::vector<Value> bigArgs;
+    Value *argsPtr = (pc <= 16) ? smallArgs : (bigArgs.resize(pc), bigArgs.data());
     for (size_t i = 0; i < pc; ++i)
-        argsCopy[i] = args[i];
+        argsPtr[i] = args[i];
 
-    std::vector<Value> upvalsCopy(nUpvals);
+    Value smallUpvals[8];
+    std::vector<Value> bigUpvals;
+    Value *upvalsPtr = (nUpvals <= 8) ? smallUpvals : (bigUpvals.resize(nUpvals), bigUpvals.data());
     if (nUpvals > 0 && nargs >= nUpvals) {
         for (size_t i = 0; i < nUpvals; ++i)
-            upvalsCopy[i] = args[userNargs + i];
+            upvalsPtr[i] = args[userNargs + i];
     }
 
     Value vaCell;
@@ -4888,55 +5187,69 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
     for (size_t i = 0; i < nUpvals; ++i) {
         uint16_t uvReg = funcChunk.upvalueParamRegs[i];
         if (uvReg < nregs)
-            newR[uvReg] = std::move(upvalsCopy[i]);
+            newR[uvReg] = std::move(upvalsPtr[i]);
     }
 
     for (size_t i = 0; i < pc; ++i)
-        newR[i] = std::move(argsCopy[i]);
+        newR[i] = std::move(argsPtr[i]);
 
     if (va) {
-        for (auto &[vname, reg] : funcChunk.varMap)
-            if (vname == "varargin" && reg < nregs) {
-                newR[reg] = std::move(vaCell);
-                break;
-            }
+        if (funcChunk.vararginReg < nregs) {
+            newR[funcChunk.vararginReg] = std::move(vaCell);
+        } else {
+            for (auto &[vname, reg] : funcChunk.varMap)
+                if (vname == "varargin" && reg < nregs) {
+                    newR[reg] = std::move(vaCell);
+                    break;
+                }
+        }
     }
 
-    // Inject nargin/nargout into function scope
-    for (auto &[vname, reg] : funcChunk.varMap) {
-        if (vname == "nargin" && reg < nregs)
-            newR[reg] = Value::scalar(static_cast<double>(userNargs), nullptr);
-        else if (vname == "nargout" && reg < nregs)
-            newR[reg] = Value::scalar(static_cast<double>(nargout), nullptr);
+    // Inject nargin/nargout into function scope in O(1)
+    if (funcChunk.narginReg < nregs)
+        newR[funcChunk.narginReg] = Value::scalar(static_cast<double>(userNargs), nullptr);
+    if (funcChunk.nargoutReg < nregs)
+        newR[funcChunk.nargoutReg] = Value::scalar(static_cast<double>(nargout), nullptr);
+    if (funcChunk.narginReg == kInvalidReg && funcChunk.nargoutReg == kInvalidReg) {
+        for (auto &[vname, reg] : funcChunk.varMap) {
+            if (vname == "nargin" && reg < nregs)
+                newR[reg] = Value::scalar(static_cast<double>(userNargs), nullptr);
+            else if (vname == "nargout" && reg < nregs)
+                newR[reg] = Value::scalar(static_cast<double>(nargout), nullptr);
+        }
     }
 
     if (hasSeed) {
-        const std::string &rn = funcChunk.returnNames[0];
-        for (auto &[vname, reg] : funcChunk.varMap)
-            if (vname == rn && reg < nregs) {
-                newR[reg] = std::move(seedCopy);
-                break;
-            }
+        if (funcChunk.firstReturnReg < nregs) {
+            newR[funcChunk.firstReturnReg] = std::move(seedCopy);
+        } else {
+            const std::string &rn = funcChunk.returnNames[0];
+            for (auto &[vname, reg] : funcChunk.varMap)
+                if (vname == rn && reg < nregs) {
+                    newR[reg] = std::move(seedCopy);
+                    break;
+                }
+        }
     }
 
     // Sync caller's live global/persistent registers before importing into callee
     if (!frames_.empty()) {
         const auto &cf0 = frames_.back();
-        if (cf0.chunk) {
+        if (cf0.chunk && (!cf0.chunk->globalNames.empty() || !cf0.chunk->persistentNames.empty())) {
             exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *cf0.chunk, cf0.R,
                                              cf0.nregs, cf0.isScriptFrame);
         }
     }
 
     // Import global and persistent variables (seed [] if uninitialized)
-    importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, funcChunk, newR, nregs,
-                                     /*isTopLevel=*/false, /*seedMissing=*/true);
+    if (!funcChunk.globalNames.empty() || !funcChunk.persistentNames.empty()) {
+        importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, funcChunk, newR, nregs,
+                                         /*isTopLevel=*/false, /*seedMissing=*/true);
+    }
 
-    // Pre-compute caller's CALL-site arg names so the new frame can
-    // expose them via inputname(k). caller's frame.ip was advanced past
-    // the CALL instruction at the dispatch site, so CALL is at ip-1.
+    // Pre-compute caller's CALL-site arg names only when callee may inspect inputname(k).
     std::vector<std::string> callerArgNames;
-    if (!frames_.empty()) {
+    if (funcChunk.mayUseInputname && !frames_.empty()) {
         const auto &callerFrame = frames_.back();
         if (callerFrame.chunk && callerFrame.ip
             && callerFrame.ip > callerFrame.chunk->code.data()) {
@@ -5013,8 +5326,12 @@ void VM::popCallFrame(Value retVal)
     }
 
     bool isScriptFrame = frame.isScriptFrame;
+    const bool isMultiReturn = frame.isMultiReturn;
+    const uint16_t outBase = frame.outBase;
+    const uint16_t nout = frame.nout;
+    const uint16_t destReg = frame.destReg;
 
-    if (frame.chunk) {
+    if (frame.chunk && (!frame.chunk->globalNames.empty() || !frame.chunk->persistentNames.empty())) {
         exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *frame.chunk, frame.R,
                                          frame.nregs, isScriptFrame);
     }
@@ -5026,6 +5343,11 @@ void VM::popCallFrame(Value retVal)
     for (uint32_t i = 0; i < frame.nregs; ++i) {
         if (!frame.R[i].isDoubleScalar() && !frame.R[i].isEmpty())
             frame.R[i] = Value();
+    }
+
+    if (frame.env && !isScriptFrame && envPool_.size() < 32) {
+        frame.env->reset(nullptr, nullptr);
+        envPool_.push_back(std::move(frame.env));
     }
 
     // Restore stack pointers
@@ -5045,31 +5367,31 @@ void VM::popCallFrame(Value retVal)
     if (!frames_.empty()) {
         CallFrame &caller = frames_.back();
         R_ = caller.R;
-        if (caller.chunk) {
+        if (caller.chunk && (!caller.chunk->globalNames.empty() || !caller.chunk->persistentNames.empty())) {
             importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *caller.chunk, caller.R,
                                              caller.nregs, caller.isScriptFrame,
                                              /*seedMissing=*/false);
         }
 
-        if (frame.isMultiReturn) {
+        if (isMultiReturn) {
             size_t produced = !returnBuf_.empty()
                                    ? returnBuf_.size()
                                    : (retVal.isUnset() ? 0u : 1u);
-            if (produced < frame.nout) {
+            if (produced < nout) {
                 returnBuf_.clear();
                 throw std::runtime_error("Too many output arguments.");
             }
             if (!returnBuf_.empty()) {
-                for (size_t i = 0; i < frame.nout && i < returnBuf_.size(); ++i)
-                    caller.R[frame.outBase + i] = std::move(returnBuf_[i]);
+                for (size_t i = 0; i < nout && i < returnBuf_.size(); ++i)
+                    caller.R[outBase + i] = std::move(returnBuf_[i]);
                 returnBuf_.clear();
             } else {
-                caller.R[frame.outBase] = std::move(retVal);
-                for (size_t i = 1; i < frame.nout; ++i)
-                    caller.R[frame.outBase + i] = Value();
+                caller.R[outBase] = std::move(retVal);
+                for (size_t i = 1; i < nout; ++i)
+                    caller.R[outBase + i] = Value();
             }
         } else {
-            caller.R[frame.destReg] = std::move(retVal);
+            caller.R[destReg] = std::move(retVal);
             returnBuf_.clear();
         }
     } else {

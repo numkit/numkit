@@ -2,14 +2,12 @@
 #pragma once
 
 #include <numkit/core/debugger.hpp>
-#include <numkit/core/figure_manager.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/fusion_rule.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
 #include <numkit/ops/rng_context.hpp>
-#include <numkit/core/vm.hpp>
 
 #include <atomic>
 #include <memory>
@@ -24,6 +22,7 @@ namespace numkit {
 class TreeWalker;
 class VM;
 class Compiler;
+class FigureManager;
 class DebugFacade;       // grouped debugger handle (engine.debug()); defined below
 struct ClassDefDesc;     // user-classdef descriptor; full type in engine.cpp
 struct CallbackBuiltin;  // higher-order builtin driver; callback_builtin.hpp
@@ -288,7 +287,7 @@ public:
     // Top-level namespaces in registration order. `compat` shows up
     // here once the first MATLAB-mirror library calls
     // registerFunction("compat", …).
-    void setNamespaceMode(NamespaceMode mode) noexcept { namespaceMode_ = mode; }
+    void setNamespaceMode(NamespaceMode mode) noexcept { namespaceMode_ = mode; bumpCallCacheEpoch(); }
     NamespaceMode namespaceMode() const noexcept { return namespaceMode_; }
 
     void markPluginNamespace(const std::string &topNs, bool isolated = false);
@@ -418,8 +417,8 @@ public:
     std::vector<std::string> workspaceVarNames() const;
     void outputText(const std::string &s);
 
-    FigureManager &figureManager() override { return figureManager_; }
-    const FigureManager &figureManager() const { return figureManager_; }
+    FigureManager &figureManager() override { return *figureManager_; }
+    const FigureManager &figureManager() const { return *figureManager_; }
 
     PluginLoader &pluginLoader();
     const PluginLoader &pluginLoader() const;
@@ -730,7 +729,7 @@ public:
     // without having to call setCwd, while still letting in-engine
     // `cd` calls take precedence once they happen.
     const std::string &cwd() const { return fsCtx_.cwd(); }
-    void setCwd(const std::string &p) { mFileMissCache_.clear(); fsCtx_.setCwd(p); }
+    void setCwd(const std::string &p) { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.setCwd(p); }
 
     // The path-resolution result type lives on FsContext (fs/, L0); aliased
     // here so existing callers keep writing Engine::ResolvedPath.
@@ -760,8 +759,8 @@ public:
     using OpenFile = FsContext::OpenFile;
     int openFile(const std::string &userPath, const std::string &mode)
     { return fsCtx_.openFile(userPath, mode); }
-    bool closeFile(int fid) { mFileMissCache_.clear(); return fsCtx_.closeFile(fid); }
-    void closeAllFiles() { mFileMissCache_.clear(); fsCtx_.closeAllFiles(); }
+    bool closeFile(int fid) { mFileMissCache_.clear(); bumpCallCacheEpoch(); return fsCtx_.closeFile(fid); }
+    void closeAllFiles() { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.closeAllFiles(); }
     OpenFile *findFile(int fid) { return fsCtx_.findFile(fid); }
     std::vector<int> openFileIds() const { return fsCtx_.openFileIds(); }
     const std::string &lastFopenError() const { return fsCtx_.lastFopenError(); }
@@ -870,7 +869,7 @@ private:
 
     OutputFunc outputFunc_;
     InputProvider inputProvider_;   // empty → input() reads stdin
-    FigureManager figureManager_;
+    std::unique_ptr<FigureManager> figureManager_;
     mutable std::unique_ptr<PluginLoader> pluginLoader_;
 
     // Tic/toc timer
@@ -900,6 +899,8 @@ private:
     {
         std::string fullPath;       // VFS-prefixed, the resolved location
         int64_t mtime = 0;          // 0 if backend can't supply mtime
+        int64_t mtimeNs = 0;        // nanosecond mtime when available
+        int64_t fileSize = -1;      // file size from stat (-1 if unknown)
         std::string contentHash;    // fallback when mtime is unavailable
         std::shared_ptr<const std::string> sourceCode;  // keeps AST live
         bool hasExternal = false;   // true when resolveMFile_ registered externalFuncs_[name]
@@ -932,8 +933,11 @@ private:
 
 public:
     void markClearAll() { clearAllCalled_ = true; }
+    uint64_t callCacheEpoch() const noexcept { return callCacheEpoch_; }
+    void bumpCallCacheEpoch() noexcept { ++callCacheEpoch_; }
 
 private:
+    uint64_t callCacheEpoch_ = 1;
     std::unique_ptr<TreeWalker> treeWalker_;
         // Engine-wide anonymous-function name counter. The VM compiler and
     // the TreeWalker fallback mint __anon_<N> names from this ONE source
