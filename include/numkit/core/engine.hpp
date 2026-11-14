@@ -383,12 +383,6 @@ public:
     // dispatch — the register-exhaustion fallback contract for chunk-less
     // (TW-only) user functions whose schema/body the VM's operand space
     // cannot hold (e.g. >255 named parameters). Single- and multi-output.
-    Value callUserFunctionOnTreeWalker(const UserFunction &uf,
-                                       Span<const Value> args);
-    std::vector<Value> callUserFunctionOnTreeWalkerMulti(const UserFunction &uf,
-                                                         Span<const Value> args,
-                                                         size_t nout);
-
     enum class Backend { VM, TreeWalker };
     void setBackend(Backend b) { backend_ = b; }
     Backend backend() const { return backend_; }
@@ -904,8 +898,10 @@ private:
 
 public:
     Compiler *compilerPtr() { return compiler_.get(); }
+    bool inScriptScope() const { return !savedScriptLocalUserFuncs_.empty(); }
 
 private:
+    Value evalConstExpr(const ASTNode *expr);
     std::unique_ptr<VM> vm_;
     Backend backend_ = Backend::VM;
 

@@ -4,6 +4,7 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
 
+#include <cmath>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -13,7 +14,7 @@ namespace numkit {
 class IndexContextGuard
 {
 public:
-    IndexContextGuard(Compiler &c, uint8_t arr, uint8_t ndims)
+    IndexContextGuard(Compiler &c, uint16_t arr, uint16_t ndims)
         : comp_(c)
         , savedArr_(c.indexContextArr_)
         , savedDim_(c.indexContextDim_)
@@ -29,14 +30,14 @@ public:
         comp_.indexContextDim_ = savedDim_;
         comp_.indexContextNdims_ = savedNdims_;
     }
-    void setDim(uint8_t d) { comp_.indexContextDim_ = d; }
+    void setDim(uint16_t d) { comp_.indexContextDim_ = d; }
 
     IndexContextGuard(const IndexContextGuard &) = delete;
     IndexContextGuard &operator=(const IndexContextGuard &) = delete;
 
 private:
     Compiler &comp_;
-    uint8_t savedArr_, savedDim_, savedNdims_;
+    uint16_t savedArr_, savedDim_, savedNdims_;
 };
 
 
@@ -61,6 +62,12 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     maxVarReg_ = 0;
     currentLoc_ = {};
     isTopLevel_ = true;
+    inFusionFallback_ = false;
+    nargoutContext_ = 1;
+    activeTryDepth_ = 0;
+    indexContextArr_ = kInvalidReg;
+    indexContextDim_ = 0;
+    indexContextNdims_ = 1;
 
     // Inherit prior-chunk `global X` declarations so split-mode execution
     // keeps routing writes through globalsEnv_. The base workspace's global
@@ -74,7 +81,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     // This prevents imports inside loops from resetting each iteration.
     preImportGlobals(ast);
 
-    uint8_t lastReg = compileNode(ast);
+    uint16_t lastReg = compileNode(ast);
     emitA(OpCode::RET, lastReg);
 
     peepholeOptimize();
@@ -82,7 +89,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     // Use the peak nextReg_ over the chunk — nextReg_ shrinks at
     // statement boundaries (compileBlock releases temps), but the
     // runtime needs to size R[] for the highest slot ever written.
-    chunk_.numRegisters = static_cast<uint8_t>(peakReg_);
+    chunk_.numRegisters = static_cast<uint32_t>(peakReg_);
 
     // Save variable→register mapping for environment export
     for (auto &[name, reg] : varRegisters_)
@@ -129,14 +136,14 @@ void Compiler::preImportGlobals(const ASTNode *ast)
         // Import any defined value (including `[]` empty matrices, which
         // are legal MATLAB values). Only unset / deleted slots get skipped.
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
-            if (nextReg_ >= 255)
-                throw RegisterExhaustionError(
-                    "Compiler: register exhaustion during preImportGlobals");
-            uint8_t r = static_cast<uint8_t>(nextReg_++);
+            if (nextReg_ >= static_cast<int>(kInvalidReg))
+                throw std::runtime_error(
+                    "Compiler: register limit exceeded (>65534 registers in chunk)");
+            uint16_t r = static_cast<uint16_t>(nextReg_++);
             if (nextReg_ > peakReg_) peakReg_ = nextReg_;
             if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
             varRegisters_[name] = r;
-            int16_t idx = appendConstant(*existing);
+            int32_t idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
             definedRegs_.set(r);
         }
@@ -165,10 +172,10 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
             continue;
         if (engine_.isReservedName(name))
             continue; // reserved/pseudo-vars are looked up on demand
-        if (nextReg_ >= 255)
-            throw RegisterExhaustionError(
-                "Compiler: register exhaustion during pre-allocation of assigned vars");
-        uint8_t r = static_cast<uint8_t>(nextReg_++);
+        if (nextReg_ >= static_cast<int>(kInvalidReg))
+            throw std::runtime_error(
+                "Compiler: register limit exceeded (>65534 registers in chunk)");
+        uint16_t r = static_cast<uint16_t>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         varRegisters_[name] = r;
@@ -226,12 +233,12 @@ void Compiler::preallocatePinnedConstants(const ASTNode *body)
     if (mayClear_)
         definedRegs_.reset();
     for (double v : loopNums) {
-        if (nextReg_ >= 200 || pinnedConstRegs_.size() >= 16)
+        if (nextReg_ >= 65000 || pinnedConstRegs_.size() >= 16)
             break;
-        int16_t idx = addConstant(v);
+        int32_t idx = addConstant(v);
         if (pinnedConstRegs_.count(idx))
             continue;
-        uint8_t r = static_cast<uint8_t>(nextReg_++);
+        uint16_t r = static_cast<uint16_t>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         emitAD(OpCode::LOAD_CONST, r, idx);
@@ -349,7 +356,7 @@ void Compiler::collectAllIdentifiers(const ASTNode *node, std::unordered_set<std
         out.insert(node->strValue);
 }
 
-uint8_t Compiler::varRegWrite(const std::string &name)
+uint16_t Compiler::varRegWrite(const std::string &name)
 {
     chunk_.assignedVars.insert(name);
     // A write target (param / assignment) gets its value from the call or the
@@ -358,16 +365,16 @@ uint8_t Compiler::varRegWrite(const std::string &name)
     return varRegLookup(name, /*preloadReserved=*/false);
 }
 
-uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
+uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
 {
     auto it = varRegisters_.find(name);
     if (it != varRegisters_.end())
         return it->second;
     int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
-    if (allocReg >= 255)
-        throw RegisterExhaustionError(
-            "Compiler: register exhaustion (>255 registers needed in chunk)");
-    uint8_t r = static_cast<uint8_t>(allocReg);
+    if (allocReg >= static_cast<int>(kInvalidReg))
+        throw std::runtime_error(
+            "Compiler: register limit exceeded (>65534 registers in chunk)");
+    uint16_t r = static_cast<uint16_t>(allocReg);
     peakReg_ = allocReg + 1;
     nextReg_ = allocReg + 1;
     if (nextReg_ > maxVarReg_)
@@ -385,7 +392,7 @@ uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
         if (!existing)
             existing = engine_.getVariable(name);
         if (existing && !existing->isEmpty()) {
-            int16_t idx = appendConstant(*existing);
+            int32_t idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
             if (!mayClear_)
                 definedRegs_.set(r);
@@ -395,7 +402,7 @@ uint8_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     return r;
 }
 
-uint8_t Compiler::varRegRead(const std::string &name)
+uint16_t Compiler::varRegRead(const std::string &name)
 {
     // Check if variable is already known (local scope)
     auto it = varRegisters_.find(name);
@@ -406,7 +413,7 @@ uint8_t Compiler::varRegRead(const std::string &name)
         // and skip when definedRegs_ proves the variable is already defined.
         if (!engine_.isReservedName(name)) {
             if (mayClear_ || !definedRegs_.test(it->second)) {
-                int16_t nameIdx = addStringConstant(name);
+                int32_t nameIdx = addStringConstant(name);
                 emitAD(OpCode::ASSERT_DEF, it->second, nameIdx);
                 if (!mayClear_ && it->second < chunk_.numParams)
                     definedRegs_.set(it->second);
@@ -444,9 +451,9 @@ uint8_t Compiler::varRegRead(const std::string &name)
     const BuiltinClass *kls = engine_.findClass(name);
     if (engine_.hasFunction(name) || engine_.isKnownLeafName(name)
         || (kls && kls->construct)) {
-        uint8_t argBase = nextReg_;
-        uint8_t dst = tempReg();
-        int16_t funcIdx = addStringConstant(name);
+        uint16_t argBase = nextReg_;
+        uint16_t dst = tempReg();
+        int32_t funcIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, nargoutContext_));
         return dst;
     }
@@ -454,29 +461,29 @@ uint8_t Compiler::varRegRead(const std::string &name)
     // Unknown variable — allocate register and emit runtime check.
     // At runtime, ASSERT_DEF checks the register; if unset, checks dynVars
     // (for debug eval / runtime eval); if still not found, throws error.
-    uint8_t reg = varRegLookup(name);
-    int16_t nameIdx = addStringConstant(name);
+    uint16_t reg = varRegLookup(name);
+    int32_t nameIdx = addStringConstant(name);
     emitAD(OpCode::ASSERT_DEF, reg, nameIdx);
     return reg;
 }
 
-uint8_t Compiler::tempReg()
+uint16_t Compiler::tempReg()
 {
-    // Bytecode reg fields are uint8_t — max 256 distinct slots (0..255).
-    // numRegisters is uint8_t, so its count must fit too: cap at 255.
+    // Bytecode reg fields are uint16_t — max 256 distinct slots (0..255).
+    // numRegisters is uint16_t, so its count must fit too: cap at 255.
     // Throw early rather than wrap nextReg_ and silently corrupt slot 0+.
-    if (nextReg_ >= 255)
-        throw RegisterExhaustionError(
-            "Compiler: register exhaustion (>255 registers needed in chunk)");
-    uint8_t r = static_cast<uint8_t>(nextReg_++);
+    if (nextReg_ >= static_cast<int>(kInvalidReg))
+        throw std::runtime_error(
+            "Compiler: register limit exceeded (>65534 registers in chunk)");
+    uint16_t r = static_cast<uint16_t>(nextReg_++);
     if (nextReg_ > peakReg_)
         peakReg_ = nextReg_;
     return r;
 }
 
-uint8_t Compiler::reserveRegs(size_t n)
+uint16_t Compiler::reserveRegs(size_t n)
 {
-    uint8_t base = nextReg_;
+    uint16_t base = nextReg_;
     for (size_t i = 0; i < n; ++i)
         tempReg();
     return base;
@@ -507,27 +514,27 @@ void Compiler::emit(Instruction instr)
     chunk_.sourceMap.push_back(currentLoc_);
 }
 
-void Compiler::emitABC(OpCode op, uint8_t a, uint8_t b, uint8_t c)
+void Compiler::emitABC(OpCode op, uint16_t a, uint16_t b, uint16_t c)
 {
     emit(Instruction::make_abc(op, a, b, c));
 }
 
-void Compiler::emitAB(OpCode op, uint8_t a, uint8_t b)
+void Compiler::emitAB(OpCode op, uint16_t a, uint16_t b)
 {
     emit(Instruction::make_abc(op, a, b, 0));
 }
 
-void Compiler::emitAD(OpCode op, uint8_t a, int16_t d)
+void Compiler::emitAD(OpCode op, uint16_t a, int32_t d)
 {
     emit(Instruction::make_ad(op, a, d));
 }
 
-void Compiler::emitA(OpCode op, uint8_t a)
+void Compiler::emitA(OpCode op, uint16_t a)
 {
     emit(Instruction::make_a(op, a));
 }
 
-void Compiler::emitD(OpCode op, int16_t d)
+void Compiler::emitD(OpCode op, int32_t d)
 {
     emit(Instruction::make_d(op, d));
 }
@@ -544,58 +551,53 @@ size_t Compiler::currentPos() const
 
 void Compiler::patchJump(size_t instrPos, int32_t offset)
 {
-    if (offset > INT16_MAX || offset < INT16_MIN)
-        throw ChunkOverflowError(
-            "Compiler: jump offset " + std::to_string(offset)
-            + " exceeds the int16 bytecode field - split the script/function");
-    chunk_.code[instrPos].d = static_cast<int16_t>(offset);
+    chunk_.code[instrPos].d = offset;
 }
 
 // ============================================================
 // Constant pool
 // ============================================================
 
-// The single choke point for pool growth: the int16 index space is checked
+// The single choke point for pool growth: the int32 index space is checked
 // here so no caller can wrap it silently (PVS V1029 family).
-int16_t Compiler::appendConstant(Value v)
+int32_t Compiler::appendConstant(Value v)
 {
-    if (chunk_.constants.size() >= static_cast<size_t>(INT16_MAX))
-        throw ChunkOverflowError(
-            "Compiler: constant pool exhausted (>32767 entries in one chunk) - "
-            "split the script/function");
-    int16_t idx = static_cast<int16_t>(chunk_.constants.size());
+    if (chunk_.constants.size() >= static_cast<size_t>(INT32_MAX))
+        throw std::runtime_error(
+            "Compiler: constant pool limit exceeded (>2^31-1 entries in one chunk)");
+    int32_t idx = static_cast<int32_t>(chunk_.constants.size());
     chunk_.constants.push_back(std::move(v));
     return idx;
 }
 
-int16_t Compiler::appendString(const std::string &s)
+int32_t Compiler::appendString(const std::string &s)
 {
-    if (chunk_.strings.size() >= static_cast<size_t>(INT16_MAX))
-        throw ChunkOverflowError(
-            "Compiler: string pool exhausted (>32767 entries in one chunk) - "
-            "split the script/function");
-    int16_t idx = static_cast<int16_t>(chunk_.strings.size());
+    if (chunk_.strings.size() >= static_cast<size_t>(INT32_MAX))
+        throw std::runtime_error(
+            "Compiler: string pool limit exceeded (>2^31-1 entries in one chunk)");
+    int32_t idx = static_cast<int32_t>(chunk_.strings.size());
     chunk_.strings.push_back(s);
     return idx;
 }
 
-int16_t Compiler::addConstant(double value)
+int32_t Compiler::addConstant(double value)
 {
-    // Check if constant already exists
+    // Check if constant already exists (preserve -0.0 vs +0.0 signbit)
     for (size_t i = 0; i < chunk_.constants.size(); ++i) {
-        if (chunk_.constants[i].isScalar() && chunk_.constants[i].type() == ValueType::DOUBLE
-            && chunk_.constants[i].toScalar() == value) {
-            return static_cast<int16_t>(i);
+        if (chunk_.constants[i].isScalar() && chunk_.constants[i].type() == ValueType::DOUBLE) {
+            double cv = chunk_.constants[i].toScalar();
+            if (cv == value && std::signbit(cv) == std::signbit(value))
+                return static_cast<int32_t>(i);
         }
     }
     return appendConstant(Value::scalar(value, engine_.resource()));
 }
 
-int16_t Compiler::addStringConstant(const std::string &s)
+int32_t Compiler::addStringConstant(const std::string &s)
 {
     for (size_t i = 0; i < chunk_.strings.size(); ++i) {
         if (chunk_.strings[i] == s)
-            return static_cast<int16_t>(i);
+            return static_cast<int32_t>(i);
     }
     return appendString(s);
 }
@@ -604,14 +606,14 @@ int16_t Compiler::addStringConstant(const std::string &s)
 // AST compilation
 // ============================================================
 
-uint8_t Compiler::compileNode(const ASTNode *node)
+uint16_t Compiler::compileNode(const ASTNode *node)
 {
     // Single-value sink: a brace cell-index c{sub} may produce a comma-separated list
     // once the producer emits one; collapse it in place so single-value contexts never
     // see a CSL. COLLAPSE is a runtime no-op on a non-CSL, so this is inert until the
     // CELL_GET producer is flipped (brick 5b). Splice contexts call compileNodeExpand
     // directly and skip this. See dev-docs/memory/csl_first_class.md.
-    uint8_t reg = compileNodeExpand(node);
+    uint16_t reg = compileNodeExpand(node);
     if (node && (node->type == NodeType::CELL_INDEX
                  || node->type == NodeType::FIELD_ACCESS
                  || node->type == NodeType::DYNAMIC_FIELD_ACCESS))
@@ -619,7 +621,7 @@ uint8_t Compiler::compileNode(const ASTNode *node)
     return reg;
 }
 
-uint8_t Compiler::compileNodeExpand(const ASTNode *node)
+uint16_t Compiler::compileNodeExpand(const ASTNode *node)
 {
     if (!node)
         return 0;
@@ -639,8 +641,8 @@ uint8_t Compiler::compileNodeExpand(const ASTNode *node)
         return compileNumber(node);
     case NodeType::IMAG_LITERAL: {
         // 3i → complexScalar(0, 3)
-        uint8_t dst = tempReg();
-        int16_t idx = appendConstant(
+        uint16_t dst = tempReg();
+        int32_t idx = appendConstant(
             Value::complexScalar(0.0, node->numValue, nullptr));
         emitAD(OpCode::LOAD_CONST, dst, idx);
         return dst;
@@ -648,8 +650,8 @@ uint8_t Compiler::compileNodeExpand(const ASTNode *node)
     case NodeType::STRING_LITERAL:
         return compileString(node);
     case NodeType::DQSTRING_LITERAL: {
-        uint8_t dst = tempReg();
-        int16_t idx = appendConstant(Value::stringScalar(node->strValue, nullptr));
+        uint16_t dst = tempReg();
+        int32_t idx = appendConstant(Value::stringScalar(node->strValue, nullptr));
         emitAD(OpCode::LOAD_CONST, dst, idx);
         return dst;
     }
@@ -680,9 +682,9 @@ uint8_t Compiler::compileNodeExpand(const ASTNode *node)
         return compileFieldAccess(node);
     case NodeType::DYNAMIC_FIELD_ACCESS: {
         // s.(expr) — child[0]=obj, child[1]=field name expr
-        uint8_t obj = compileNode(node->children[0].get());
-        uint8_t nameReg = compileNode(node->children[1].get());
-        uint8_t dst = tempReg();
+        uint16_t obj = compileNode(node->children[0].get());
+        uint16_t nameReg = compileNode(node->children[1].get());
+        uint16_t dst = tempReg();
         emitABC(OpCode::FIELD_GET_DYN, dst, obj, nameReg);
         return dst;
     }
@@ -717,15 +719,29 @@ uint8_t Compiler::compileNodeExpand(const ASTNode *node)
         return 0;
     case NodeType::RETURN_STMT:
         return compileReturn(node);
+    case NodeType::SUPERCLASS_REF: {
+        uint16_t msgReg = tempReg();
+        int32_t msgIdx = addStringConstant(
+            "superclass reference '" + node->strValue
+            + "' must be called: use lhs@" + node->strValue + "(...)");
+        emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
+        emitA(OpCode::THROW, msgReg);
+        return msgReg;
+    }
     case NodeType::END_VAL: {
-        // 'end' in indexing context — emit LOAD_END
-        // a=dst, b=arrReg, c=dim, d=ndims
-        uint8_t dst = tempReg();
+        if (indexContextArr_ == kInvalidReg) {
+            uint16_t msgReg = tempReg();
+            int32_t msgIdx = addStringConstant("'end' used outside of indexing context");
+            emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
+            emitA(OpCode::THROW, msgReg);
+            return msgReg;
+        }
+        uint16_t dst = tempReg();
         emit(Instruction::make_abcde(OpCode::LOAD_END,
                                      dst,
                                      indexContextArr_,
                                      indexContextDim_,
-                                     static_cast<int16_t>(indexContextNdims_),
+                                     static_cast<int32_t>(indexContextNdims_),
                                      0));
         return dst;
     }
@@ -737,13 +753,13 @@ uint8_t Compiler::compileNodeExpand(const ASTNode *node)
     }
 }
 
-uint8_t Compiler::compileBlock(const ASTNode *node)
+uint16_t Compiler::compileBlock(const ASTNode *node)
 {
     // Release transient temps allocated during each statement so
     // subsequent statements can reuse those slots. Without this, a
     // long block (e.g. the heavy try-body in audio_cepstral) bumps
     // nextReg_ past the 256-slot bytecode limit; the old code silently
-    // wrapped uint8_t and corrupted variable slot 0.
+    // wrapped uint16_t and corrupted variable slot 0.
     //
     // Floor is max(entryNext, maxVarReg_):
     //   * entryNext preserves temps that the *parent* compileX
@@ -766,7 +782,7 @@ uint8_t Compiler::compileBlock(const ASTNode *node)
     // saw R[S]=1 and never threw — turning the expected outer-catch
     // into a silent computation of `r + 1`.)
     const int entryNext = nextReg_;
-    uint8_t last = 0;
+    uint16_t last = 0;
     for (auto &child : node->children) {
         last = compileNode(child.get());
         const int floor = entryNext > maxVarReg_ ? entryNext : maxVarReg_;
@@ -779,9 +795,9 @@ uint8_t Compiler::compileBlock(const ASTNode *node)
     return last;
 }
 
-uint8_t Compiler::compileNumber(const ASTNode *node)
+uint16_t Compiler::compileNumber(const ASTNode *node)
 {
-    int16_t idx = addConstant(node->numValue);
+    int32_t idx = addConstant(node->numValue);
     auto pit = pinnedConstRegs_.find(idx);
     if (pit != pinnedConstRegs_.end()) {
         scalarRegs_.set(pit->second);
@@ -793,36 +809,36 @@ uint8_t Compiler::compileNumber(const ASTNode *node)
         scalarRegs_.set(it->second);
         return it->second;
     }
-    uint8_t dst = tempReg();
+    uint16_t dst = tempReg();
     emitAD(OpCode::LOAD_CONST, dst, idx);
     constRegCache_[idx] = dst;
     scalarRegs_.set(dst);
     return dst;
 }
 
-uint8_t Compiler::compileString(const ASTNode *node)
+uint16_t Compiler::compileString(const ASTNode *node)
 {
-    uint8_t dst = tempReg();
-    int16_t idx = addStringConstant(node->strValue);
+    uint16_t dst = tempReg();
+    int32_t idx = addStringConstant(node->strValue);
     emitAD(OpCode::LOAD_STRING, dst, idx);
     return dst;
 }
 
-uint8_t Compiler::compileBool(const ASTNode *node)
+uint16_t Compiler::compileBool(const ASTNode *node)
 {
-    uint8_t dst = tempReg();
+    uint16_t dst = tempReg();
     // Store as logical (tag-based, no heap allocation) for islogical() correctness
-    int16_t idx = appendConstant(Value::logicalScalar(node->boolValue, nullptr));
+    int32_t idx = appendConstant(Value::logicalScalar(node->boolValue, nullptr));
     emitAD(OpCode::LOAD_CONST, dst, idx);
     return dst;
 }
 
-uint8_t Compiler::compileIdentifier(const ASTNode *node)
+uint16_t Compiler::compileIdentifier(const ASTNode *node)
 {
     return varRegRead(node->strValue);
 }
 
-uint8_t Compiler::compileAssign(const ASTNode *node)
+uint16_t Compiler::compileAssign(const ASTNode *node)
 {
     auto *lhs = node->children[0].get();
     auto *rhs = node->children[1].get();
@@ -843,21 +859,21 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
             && rhs->children[0]->children[0]->type == NodeType::IDENTIFIER
             && rhs->children[0]->children[0]->strValue == lhs->strValue
             && varRegisters_.find(lhs->strValue) != varRegisters_.end()) {
-            uint8_t valReg = compileNode(rhs->children[0]->children[1].get());
-            uint8_t dst = varRegLookup(lhs->strValue);
+            uint16_t valReg = compileNode(rhs->children[0]->children[1].get());
+            uint16_t dst = varRegLookup(lhs->strValue);
             markAssigned(lhs->strValue);
             emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
             scalarRegs_.reset(dst);  // result is no longer scalar
             if (!mayClear_)
                 definedRegs_.set(dst);
             if (!node->suppressOutput) {
-                int16_t nameIdx = addStringConstant(lhs->strValue);
+                int32_t nameIdx = addStringConstant(lhs->strValue);
                 emitAD(OpCode::DISPLAY, dst, nameIdx);
             }
             return dst;
         }
 
-        uint8_t src = compileNode(rhs);
+        uint16_t src = compileNode(rhs);
 
         // MOVE elimination: redirect last instruction to write directly to var register
         auto varIt = varRegisters_.find(lhs->strValue);
@@ -877,7 +893,7 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
         // regardless of which codegen path we take below.
         markAssigned(lhs->strValue);
 
-        uint8_t dst;
+        uint16_t dst;
         if (canEliminate && varIt == varRegisters_.end()) {
             // First assignment: adopt temp register as the variable.
             // We MUST pin this slot in maxVarReg_ so the compileBlock
@@ -911,7 +927,7 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
 
         // Display if no semicolon
         if (!node->suppressOutput) {
-            int16_t nameIdx = addStringConstant(lhs->strValue);
+            int32_t nameIdx = addStringConstant(lhs->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         return dst;
@@ -935,14 +951,14 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
         auto *objNode = lhs->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
-        uint8_t obj = varRegWrite(objNode->strValue);
-        uint8_t val = compileNode(node->children[1].get());
-        uint8_t nameReg = compileNode(lhs->children[1].get());
+        uint16_t obj = varRegWrite(objNode->strValue);
+        uint16_t val = compileNode(node->children[1].get());
+        uint16_t nameReg = compileNode(lhs->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, val);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!node->suppressOutput) {
-            int16_t dispIdx = addStringConstant(objNode->strValue);
+            int32_t dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
         }
         return obj;
@@ -955,7 +971,7 @@ uint8_t Compiler::compileAssign(const ASTNode *node)
     throw std::runtime_error("Compiler: unsupported assignment target");
 }
 
-uint8_t Compiler::compileMultiAssign(const ASTNode *node)
+uint16_t Compiler::compileMultiAssign(const ASTNode *node)
 {
     // [a, b, c] = func(args)  OR  [a, b] = c{idx}
     // node->returnNames = ["a", "b", "c"]  (~ means ignore)
@@ -973,7 +989,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
 
     // Allocate destination registers for outputs (simple path only; the
     // complex path materialises outputs at outBase then stores them).
-    std::vector<uint8_t> outRegs;
+    std::vector<uint16_t> outRegs;
     if (!complex) {
         for (auto &name : node->returnNames) {
             if (name == "~")
@@ -996,7 +1012,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
             throw std::runtime_error(
                 "Compiler: too many output arguments for single-valued "
                 "right-hand side");
-        uint8_t src = compileNode(rhsNode);
+        uint16_t src = compileNode(rhsNode);
         // Complex single target (`[s.f] = 5`, `[a(i)] = x`): route the
         // value through the general lvalue store.
         if (complex) {
@@ -1005,7 +1021,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
                                    node->suppressOutput);
             return src;
         }
-        uint8_t dst = outRegs.empty() ? src : outRegs[0];
+        uint16_t dst = outRegs.empty() ? src : outRegs[0];
         if (!outRegs.empty() && dst != src)
             emitAB(OpCode::MOVE, dst, src);
         if (scalarRegs_.test(src)) scalarRegs_.set(dst);
@@ -1014,7 +1030,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
             definedRegs_.set(dst);
         if (!node->suppressOutput && !node->returnNames.empty()
             && node->returnNames[0] != "~") {
-            int16_t nameIdx = addStringConstant(node->returnNames[0]);
+            int32_t nameIdx = addStringConstant(node->returnNames[0]);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         return dst;
@@ -1022,26 +1038,26 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
 
     // Distribute the nout outputs sitting at [outBase, outBase+nout) into
     // their destinations and emit displays. Shared by both RHS shapes.
-    auto distribute = [&](uint8_t outBase) {
+    auto distribute = [&](uint16_t outBase) {
         if (complex) {
             for (size_t i = 0; i < nout; ++i) {
                 const ASTNode *t = node->lhsTargets[i].get();
                 if (t)
-                    compileStoreLValue(t, outBase + static_cast<uint8_t>(i),
+                    compileStoreLValue(t, outBase + static_cast<uint16_t>(i),
                                        node->suppressOutput);
             }
             return;
         }
         for (size_t i = 0; i < nout; ++i) {
             if (outRegs[i] != outBase + i)
-                emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<uint8_t>(i));
+                emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<uint16_t>(i));
             if (!mayClear_ && i < node->returnNames.size() && node->returnNames[i] != "~")
                 definedRegs_.set(outRegs[i]);
         }
         if (!node->suppressOutput) {
             for (size_t i = 0; i < node->returnNames.size(); ++i)
                 if (node->returnNames[i] != "~") {
-                    int16_t nameIdx = addStringConstant(node->returnNames[i]);
+                    int32_t nameIdx = addStringConstant(node->returnNames[i]);
                     emitAD(OpCode::DISPLAY, outRegs[i], nameIdx);
                 }
         }
@@ -1050,19 +1066,19 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
     // Cell CSL: [a, b] = c{idx}  (1-D)  or  [a, b] = c{r, cols}  (2-D).
     if (rhsNode->type == NodeType::CELL_INDEX) {
         size_t  nidx    = rhsNode->children.size() - 1;
-        uint8_t cellReg = compileNode(rhsNode->children[0].get());
+        uint16_t cellReg = compileNode(rhsNode->children[0].get());
 
         if (nidx == 2) {
             // 2-D subscript [a,b]=c{r,:} / c{:,j}: resolveIndices per dim + sub2ind.
             // Guard so `end` binds to the cell rows (dim 0) / cols (dim 1).
             IndexContextGuard guard(*this, cellReg, 2);
-            uint8_t rowReg = compileNode(rhsNode->children[1].get());
+            uint16_t rowReg = compileNode(rhsNode->children[1].get());
             guard.setDim(1);
-            uint8_t colReg = compileNode(rhsNode->children[2].get());
-            uint8_t outBase = reserveRegs(nout);
+            uint16_t colReg = compileNode(rhsNode->children[2].get());
+            uint16_t outBase = reserveRegs(nout);
             emit(Instruction::make_abcde(OpCode::CELL_GET_MULTI_2D,
                                          outBase, cellReg, rowReg, colReg,
-                                         static_cast<uint8_t>(nout)));
+                                         static_cast<uint16_t>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
@@ -1074,13 +1090,13 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
 
         // 1-D subscript [a,b]=c{:} / c{vec}. Guard so `end` binds to the cell numel.
         IndexContextGuard guard(*this, cellReg, 1);
-        uint8_t idxReg = compileNode(rhsNode->children[1].get());
+        uint16_t idxReg = compileNode(rhsNode->children[1].get());
 
-        uint8_t outBase = reserveRegs(nout);
+        uint16_t outBase = reserveRegs(nout);
 
         emit(Instruction::make_abcde(OpCode::CELL_GET_MULTI,
                                      outBase, cellReg, idxReg, 0,
-                                     static_cast<uint8_t>(nout)));
+                                     static_cast<uint16_t>(nout)));
 
         distribute(outBase);
         if (complex)
@@ -1093,9 +1109,9 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
     // Superclass multi-output method call: [a,b] = method@Base(obj, …).
     // Compiled into the method/ctor chunk so the body runs on the VM (P2).
     if (callNode->children[0]->type == NodeType::SUPERCLASS_REF) {
-        uint8_t outBase = reserveRegs(nout);
+        uint16_t outBase = reserveRegs(nout);
         compileSuperCall(callNode, callNode->children[0].get(),
-                         static_cast<int>(outBase), static_cast<uint8_t>(nout));
+                         static_cast<int>(outBase), static_cast<uint16_t>(nout));
         distribute(outBase);
         if (complex)
             return nout ? outBase : 0;
@@ -1119,7 +1135,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
             rootIsVar = varRegisters_.find(root) != varRegisters_.end()
                         || engine_.workspaceEnv().getLocal(root) != nullptr;
         }
-        auto compileArgsBlock = [&](uint8_t &argBaseOut, bool splatCsl) {
+        auto compileArgsBlock = [&](uint16_t &argBaseOut, bool splatCsl) {
             // splatCsl: a brace-index arg (obj.method(c{:})) stays an
             // uncollapsed CSL so the VM handler flattens it at runtime —
             // same split as the single-output CALL_METHOD compile
@@ -1131,7 +1147,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
                         anyBrace = true;
                         break;
                     }
-            std::vector<uint8_t> ar;
+            std::vector<uint16_t> ar;
             ar.reserve(callNode->children.size() - 1);
             for (size_t i = 1; i < callNode->children.size(); ++i)
                 ar.push_back(anyBrace
@@ -1139,7 +1155,7 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
                                  : compileNode(callNode->children[i].get()));
             argBaseOut = nextReg_;
             for (size_t i = 0; i < ar.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (ar[i] != slot)
                     emitAB(OpCode::MOVE, slot, ar[i]);
             }
@@ -1155,13 +1171,13 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
                  && !engine_.findClass(rootIdent->strValue)
                  && !engine_.classCtor(rootIdent->strValue)
                  && !engine_.hasExternalFunction(qualified))) {
-            uint8_t argBase = 0;
+            uint16_t argBase = 0;
             size_t nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
-            uint8_t outBase = reserveRegs(nout);
-            int16_t funcIdx = addStringConstant(qualified);
+            uint16_t outBase = reserveRegs(nout);
+            int32_t funcIdx = addStringConstant(qualified);
             emit(Instruction::make_abcde(OpCode::CALL_MULTI, outBase, argBase,
-                                         static_cast<uint8_t>(nargs), funcIdx,
-                                         static_cast<uint8_t>(nout)));
+                                         static_cast<uint16_t>(nargs), funcIdx,
+                                         static_cast<uint16_t>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
@@ -1172,13 +1188,13 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
         // an rvalue expression (`f().m()`, `a.b.m()`), so no IDENTIFIER gate:
         // CALL_METHOD_MULTI dispatches on the value in objReg either way (a
         // handle's shared state still propagates through the register copy).
-        if (nout <= 15 && (callNode->children.size() - 1) <= 15) {
-            uint8_t objReg = compileNode(fa->children[0].get());
-            uint8_t argBase = 0;
+        if (nout <= 255 && (callNode->children.size() - 1) <= 255) {
+            uint16_t objReg = compileNode(fa->children[0].get());
+            uint16_t argBase = 0;
             size_t nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
-            uint8_t outBase = reserveRegs(nout);
-            int16_t nameIdx = addStringConstant(fa->strValue);
-            uint8_t packed = static_cast<uint8_t>((nargs << 4) | (nout & 0x0F));
+            uint16_t outBase = reserveRegs(nout);
+            int32_t nameIdx = addStringConstant(fa->strValue);
+            uint16_t packed = static_cast<uint16_t>((nargs << 8) | (nout & 0xFF));
             emit(Instruction::make_abcde(OpCode::CALL_METHOD_MULTI, outBase, objReg,
                                          argBase, nameIdx, packed));
             distribute(outBase);
@@ -1186,6 +1202,52 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
                 return nout ? outBase : 0;
             return outRegs.empty() ? 0 : outRegs[0];
         }
+    }
+
+    if (callNode->children[0]->type != NodeType::IDENTIFIER) {
+        uint16_t fhReg = compileNode(callNode->children[0].get());
+        bool anyBraceArg = false;
+        for (size_t i = 1; i < callNode->children.size(); ++i)
+            if (callNode->children[i]->type == NodeType::CELL_INDEX) {
+                anyBraceArg = true;
+                break;
+            }
+        std::vector<uint16_t> argRegs;
+        argRegs.reserve(callNode->children.size() - 1);
+        for (size_t i = 1; i < callNode->children.size(); ++i) {
+            argRegs.push_back(anyBraceArg
+                                  ? compileNodeExpand(callNode->children[i].get())
+                                  : compileNode(callNode->children[i].get()));
+        }
+        uint16_t argBase = nextReg_;
+        for (size_t i = 0; i < argRegs.size(); ++i) {
+            uint16_t slot = tempReg();
+            if (argRegs[i] != slot)
+                emitAB(OpCode::MOVE, slot, argRegs[i]);
+        }
+        if (anyBraceArg) {
+            const uint16_t noutF = static_cast<uint16_t>(std::max<size_t>(nout, 1));
+            uint16_t outBase = reserveRegs(noutF);
+            emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
+                                         outBase, fhReg, argBase,
+                                         static_cast<int32_t>(argRegs.size()),
+                                         noutF));
+            distribute(outBase);
+            if (complex)
+                return nout ? outBase : 0;
+            return outRegs.empty() ? 0 : outRegs[0];
+        }
+        uint16_t outBase = reserveRegs(nout);
+        size_t callIdx = chunk_.code.size();
+        emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_MULTI,
+                                     outBase, fhReg, argBase,
+                                     static_cast<int32_t>(argRegs.size()),
+                                     static_cast<uint16_t>(nout)));
+        recordCallArgNames(callNode, callIdx);
+        distribute(outBase);
+        if (complex)
+            return nout ? outBase : 0;
+        return outRegs.empty() ? 0 : outRegs[0];
     }
 
     // First-class multi-output call args [a,b]=f(x, c{idx}): if any arg is a brace cell-
@@ -1202,20 +1264,20 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
         const bool calleeIsVar = varRegisters_.find(fname) != varRegisters_.end()
                                  || engine_.workspaceEnv().getLocal(fname) != nullptr;
         if (anyBraceArg && !calleeIsVar) {
-            std::vector<uint8_t> argRegs;
+            std::vector<uint16_t> argRegs;
             for (size_t i = 1; i < callNode->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(callNode->children[i].get()));
-            uint8_t argBase = nextReg_;
+            uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint8_t outBase = reserveRegs(nout);
-            int16_t funcIdx = addStringConstant(fname);
+            uint16_t outBase = reserveRegs(nout);
+            int32_t funcIdx = addStringConstant(fname);
             emit(Instruction::make_abcde(OpCode::CALL_FLATTEN_MULTI, outBase, argBase,
-                                         static_cast<uint8_t>(argRegs.size()), funcIdx,
-                                         static_cast<uint8_t>(nout)));
+                                         static_cast<uint16_t>(argRegs.size()), funcIdx,
+                                         static_cast<uint16_t>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
@@ -1227,23 +1289,23 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
         // resolves the callee value
         // (bugs/closed/lang/handle-call-csl-splat).
         if (anyBraceArg && calleeIsVar) {
-            std::vector<uint8_t> flatRegs;
+            std::vector<uint16_t> flatRegs;
             for (size_t i = 1; i < callNode->children.size(); ++i)
                 flatRegs.push_back(compileNodeExpand(callNode->children[i].get()));
-            uint8_t flatBase = nextReg_;
+            uint16_t flatBase = nextReg_;
             for (size_t i = 0; i < flatRegs.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (flatRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, flatRegs[i]);
             }
-            uint8_t fhReg = varRegLookup(fname);
-            int16_t nameIdx = addStringConstant(fname);
+            uint16_t fhReg = varRegLookup(fname);
+            int32_t nameIdx = addStringConstant(fname);
             emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
-            const uint8_t noutF = static_cast<uint8_t>(std::max<size_t>(nout, 1));
-            uint8_t outBase = reserveRegs(noutF);
+            const uint16_t noutF = static_cast<uint16_t>(std::max<size_t>(nout, 1));
+            uint16_t outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          outBase, fhReg, flatBase,
-                                         static_cast<uint8_t>(flatRegs.size()),
+                                         static_cast<uint16_t>(flatRegs.size()),
                                          noutF));
             distribute(outBase);
             if (complex)
@@ -1253,19 +1315,19 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
     }
 
     // Compile call arguments
-    std::vector<uint8_t> argRegs;
+    std::vector<uint16_t> argRegs;
     for (size_t i = 1; i < callNode->children.size(); ++i)
         argRegs.push_back(compileNode(callNode->children[i].get()));
 
-    uint8_t argBase = nextReg_;
+    uint16_t argBase = nextReg_;
     for (size_t i = 0; i < argRegs.size(); ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (argRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, argRegs[i]);
     }
 
     // Allocate consecutive registers for output
-    uint8_t outBase = reserveRegs(nout);
+    uint16_t outBase = reserveRegs(nout);
 
     const std::string &funcName = callNode->children[0]->strValue;
 
@@ -1286,13 +1348,13 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
         }
     }
     if (calleeIsVar) {
-        uint8_t fhReg = varRegLookup(funcName);
+        uint16_t fhReg = varRegLookup(funcName);
         size_t callIdx = chunk_.code.size();
         // CALL_INDIRECT_MULTI: a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_MULTI,
                                      outBase, fhReg, argBase,
-                                     static_cast<int16_t>(argRegs.size()),
-                                     static_cast<uint8_t>(nout)));
+                                     static_cast<int32_t>(argRegs.size()),
+                                     static_cast<uint16_t>(nout)));
         recordCallArgNames(callNode, callIdx);
         distribute(outBase);
         if (complex)
@@ -1300,16 +1362,16 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
         return outRegs.empty() ? 0 : outRegs[0];
     }
 
-    int16_t funcIdx = addStringConstant(funcName);
+    int32_t funcIdx = addStringConstant(funcName);
 
     // CALL_MULTI: a=outBase, d=funcIdx, b=argBase, c=nargs, e=nout
     size_t callMultiIdx = chunk_.code.size();
     emit(Instruction::make_abcde(OpCode::CALL_MULTI,
                                  outBase,
                                  argBase,
-                                 static_cast<uint8_t>(argRegs.size()),
+                                 static_cast<uint16_t>(argRegs.size()),
                                  funcIdx,
-                                 static_cast<uint8_t>(nout)));
+                                 static_cast<uint16_t>(nout)));
     recordCallArgNames(callNode, callMultiIdx);
 
     distribute(outBase);
@@ -1319,16 +1381,16 @@ uint8_t Compiler::compileMultiAssign(const ASTNode *node)
     return outRegs.empty() ? 0 : outRegs[0];
 }
 
-uint8_t Compiler::compileBinaryOp(const ASTNode *node)
+uint16_t Compiler::compileBinaryOp(const ASTNode *node)
 {
     const std::string &op = node->strValue;
 
     // Short-circuit: && and || need special handling
     // (right operand should not be evaluated if left decides result)
     if (op == "&&" || op == "||") {
-        uint8_t dst = tempReg();
-        uint8_t left = compileNode(node->children[0].get());
-        emitAB(OpCode::MOVE, dst, left);
+        uint16_t dst = tempReg();
+        uint16_t left = compileNode(node->children[0].get());
+        emitAB(OpCode::TO_LOGICAL_SCALAR, dst, left);
         size_t jumpPos = currentPos();
         emitAD(op == "&&" ? OpCode::JMP_FALSE : OpCode::JMP_TRUE, dst, 0); // placeholder
         // The right operand is conditionally executed: whatever it
@@ -1342,11 +1404,12 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
         savedConsts.swap(constRegCache_);
         auto savedScalars = scalarRegs_;
         auto savedDefined = definedRegs_;
-        uint8_t right = compileNode(node->children[1].get());
-        emitAB(OpCode::MOVE, dst, right);
-        patchJump(jumpPos, currentPos() - jumpPos);
+        uint16_t right = compileNode(node->children[1].get());
+        emitAB(OpCode::TO_LOGICAL_SCALAR, dst, right);
+        patchJump(jumpPos, static_cast<int32_t>(currentPos()) - static_cast<int32_t>(jumpPos));
         constRegCache_.swap(savedConsts);
         scalarRegs_ = savedScalars;
+        scalarRegs_.reset(dst);
         definedRegs_ = savedDefined;
         return dst;
     }
@@ -1355,7 +1418,7 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
     // emits FUSE_EWISE + the normally compiled op as fallback. After the
     // short-circuit ops (never fusable); a matched node has an array operand so
     // it can't constant-fold, so checking here vs. below is equivalent.
-    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint8_t>(r);
+    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint16_t>(r);
 
     // Constant folding: both operands are number literals → compute at compile time
     if (node->children[0]->type == NodeType::NUMBER_LITERAL
@@ -1376,7 +1439,7 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
         else if (op == ".^") { if (lv < 0.0 && rv != std::floor(rv)) folded = false; else result = std::pow(lv, rv); }
         else folded = false;
         if (folded) {
-            int16_t idx = addConstant(result);
+            int32_t idx = addConstant(result);
             auto pit = pinnedConstRegs_.find(idx);
             if (pit != pinnedConstRegs_.end()) {
                 scalarRegs_.set(pit->second);
@@ -1387,7 +1450,7 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
                 scalarRegs_.set(it->second);
                 return it->second;
             }
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitAD(OpCode::LOAD_CONST, dst, idx);
             constRegCache_[idx] = dst;
             scalarRegs_.set(dst);
@@ -1416,7 +1479,7 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
             levels.push_back(n);
             n = n->children[0].get();
         }
-        uint8_t acc = compileNode(n);
+        uint16_t acc = compileNode(n);
         for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
             const ASTNode *lv = *it;
             const std::string &lOp = lv->strValue;
@@ -1426,7 +1489,7 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
                 acc = emitFusedMulAdd(lOp == "+", rhs, acc);
                 continue;
             }
-            uint8_t right = compileNode(rhs);
+            uint16_t right = compileNode(rhs);
             acc = emitPlainBinary(lOp, acc, right);
         }
         return acc;
@@ -1445,18 +1508,18 @@ uint8_t Compiler::compileBinaryOp(const ASTNode *node)
             return emitFusedMulAdd(op == "+", rhs, compileNode(node->children[0].get()));
     }
 
-    uint8_t left = compileNode(node->children[0].get());
-    uint8_t right = compileNode(node->children[1].get());
+    uint16_t left = compileNode(node->children[0].get());
+    uint16_t right = compileNode(node->children[1].get());
     return emitPlainBinary(op, left, right);
 }
 
 // Fused multiply-add/sub helper: `acc ± a*b` where `rhs` is the product
 // node — compiles its operands and emits one MULADD/MULSUB opcode.
-uint8_t Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint8_t acc)
+uint16_t Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint16_t acc)
 {
-    uint8_t mulA = compileNode(rhs->children[0].get());
-    uint8_t mulB = compileNode(rhs->children[1].get());
-    uint8_t dst  = tempReg();
+    uint16_t mulA = compileNode(rhs->children[0].get());
+    uint16_t mulB = compileNode(rhs->children[1].get());
+    uint16_t dst  = tempReg();
     const bool ewise = (rhs->strValue == ".*");
     OpCode fop = isPlus ? (ewise ? OpCode::EMULADD : OpCode::MULADD)
                         : (ewise ? OpCode::EMULSUB : OpCode::MULSUB);
@@ -1468,9 +1531,9 @@ uint8_t Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint8_t acc)
 
 // The plain (unfused, unfolded) binary-op tail: opcode selection over
 // already-compiled operand registers, emit, scalar-result tracking.
-uint8_t Compiler::emitPlainBinary(const std::string &op, uint8_t left, uint8_t right)
+uint16_t Compiler::emitPlainBinary(const std::string &op, uint16_t left, uint16_t right)
 {
-    uint8_t dst = tempReg();
+    uint16_t dst = tempReg();
     bool bothScalar = scalarRegs_.test(left) && scalarRegs_.test(right);
 
     OpCode opcode;
@@ -1522,27 +1585,27 @@ uint8_t Compiler::emitPlainBinary(const std::string &op, uint8_t left, uint8_t r
     return dst;
 }
 
-uint8_t Compiler::compileUnaryOp(const ASTNode *node)
+uint16_t Compiler::compileUnaryOp(const ASTNode *node)
 {
     const std::string &op = node->strValue;
 
     // Constant folding: -<number> → load negated constant directly
     if (op == "-" && node->children[0]->type == NodeType::NUMBER_LITERAL) {
-        int16_t idx = addConstant(-node->children[0]->numValue);
+        int32_t idx = addConstant(-node->children[0]->numValue);
         auto it = constRegCache_.find(idx);
         if (it != constRegCache_.end()) {
             scalarRegs_.set(it->second);
             return it->second;
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitAD(OpCode::LOAD_CONST, dst, idx);
         constRegCache_[idx] = dst;
         scalarRegs_.set(dst);
         return dst;
     }
 
-    uint8_t src = compileNode(node->children[0].get());
-    uint8_t dst = tempReg();
+    uint16_t src = compileNode(node->children[0].get());
+    uint16_t dst = tempReg();
 
     if (op == "-") {
         if (scalarRegs_.test(src)) {
@@ -1565,7 +1628,7 @@ uint8_t Compiler::compileUnaryOp(const ASTNode *node)
     return dst;
 }
 
-uint8_t Compiler::compileExprStmt(const ASTNode *node)
+uint16_t Compiler::compileExprStmt(const ASTNode *node)
 {
     auto *child = node->children[0].get();
 
@@ -1573,13 +1636,13 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
     // functions should not produce output values (tic, figure, fprintf, etc.).
     // Non-call expressions (e.g. `1 + numel(dir(p))`) evaluate operands in
     // value context (nargout=1).
-    const uint8_t stmtNargout =
+    const uint16_t stmtNargout =
         (child->type == NodeType::CALL || child->type == NodeType::COMMAND_CALL) ? 0 : 1;
     struct NargoutGuard
     {
-        uint8_t &ref;
-        uint8_t saved;
-        NargoutGuard(uint8_t &r, uint8_t v)
+        uint16_t &ref;
+        uint16_t saved;
+        NargoutGuard(uint16_t &r, uint16_t v)
             : ref(r)
             , saved(r)
         {
@@ -1676,30 +1739,30 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
             }
 
             // Compile as zero-arg CALL (nargout=0 for statement context).
-            uint8_t argBase = nextReg_;
-            uint8_t dst = tempReg();
-            int16_t funcIdx = addStringConstant(name);
+            uint16_t argBase = nextReg_;
+            uint16_t dst = tempReg();
+            int32_t funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
 
             // Anonymous call result → bind to `ans`.
-            uint8_t ansReg = varRegWrite("ans");
+            uint16_t ansReg = varRegWrite("ans");
             if (ansReg != dst)
                 emitAB(OpCode::MOVE, ansReg, dst);
             if (!node->suppressOutput) {
-                int16_t nameIdx = addStringConstant("ans");
+                int32_t nameIdx = addStringConstant("ans");
                 emitAD(OpCode::DISPLAY, ansReg, nameIdx);
             }
             return ansReg;
         }
     }
 
-    uint8_t reg = compileNodeExpand(child);
+    uint16_t reg = compileNodeExpand(child);
 
     if (bareUserVar) {
         // Display-by-name; no ans store — reading an existing name should
         // not reassign the anonymous-result slot.
         if (!node->suppressOutput) {
-            int16_t nameIdx = addStringConstant(displayName);
+            int32_t nameIdx = addStringConstant(displayName);
             emitAD(OpCode::DISPLAY, reg, nameIdx);
         }
         return reg;
@@ -1707,10 +1770,10 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
 
     // Non-bare expression — display each element if CSL, then bind to `ans`.
     if (!node->suppressOutput) {
-        int16_t nameIdx = addStringConstant("ans");
+        int32_t nameIdx = addStringConstant("ans");
         emitAD(OpCode::DISPLAY, reg, nameIdx);
     }
-    uint8_t ansReg = varRegWrite("ans");
+    uint16_t ansReg = varRegWrite("ans");
     emitABC(OpCode::COLLAPSE, ansReg, reg, 1);
     return ansReg;
 }
@@ -1719,7 +1782,7 @@ uint8_t Compiler::compileExprStmt(const ASTNode *node)
 // Phase 2: Control flow
 // ============================================================
 
-uint8_t Compiler::compileIf(const ASTNode *node)
+uint16_t Compiler::compileIf(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset(); // branches may skip LOAD_CONST
     // branches: vector<pair<condition, body>>
@@ -1749,7 +1812,7 @@ uint8_t Compiler::compileIf(const ASTNode *node)
         constRegCache_.clear(); scalarRegs_.reset();
         definedRegs_ = savedDefined;
         // Compile condition
-        uint8_t condReg = compileNode(cond.get());
+        uint16_t condReg = compileNode(cond.get());
 
         // JMP_FALSE to next branch (placeholder)
         size_t skipPos = currentPos();
@@ -1795,7 +1858,7 @@ uint8_t Compiler::compileIf(const ASTNode *node)
 // ============================================================
 // Switch/case
 // ============================================================
-uint8_t Compiler::compileSwitch(const ASTNode *node)
+uint16_t Compiler::compileSwitch(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // AST: children[0] = switch expression
@@ -1820,10 +1883,10 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
     // L_end:
 
     // Compile switch expression
-    uint8_t switchReg = compileNode(node->children[0].get());
+    uint16_t switchReg = compileNode(node->children[0].get());
 
     // Temp register for comparison result
-    uint8_t cmpReg = tempReg();
+    uint16_t cmpReg = tempReg();
 
     std::vector<size_t> endJumps;
     auto savedDefined = definedRegs_;
@@ -1841,19 +1904,19 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
             }
 
             // Compile: cmpReg = (sv==el1) | (sv==el2) | ...
-            uint8_t tmpCmp = tempReg();
+            uint16_t tmpCmp = tempReg();
             // Start with false
-            int16_t zeroIdx = addConstant(0.0);
+            int32_t zeroIdx = addConstant(0.0);
             emitAD(OpCode::LOAD_CONST, cmpReg, zeroIdx);
 
             for (size_t ei = 0; ei < elements->size(); ++ei) {
-                uint8_t elReg = compileNode((*elements)[ei].get());
+                uint16_t elReg = compileNode((*elements)[ei].get());
                 emitABC(OpCode::EQ, tmpCmp, switchReg, elReg);
                 emitABC(OpCode::OR, cmpReg, cmpReg, tmpCmp);
             }
         } else {
             // Simple case: scalar comparison
-            uint8_t caseReg = compileNode(caseExpr.get());
+            uint16_t caseReg = compileNode(caseExpr.get());
             emitABC(OpCode::EQ, cmpReg, switchReg, caseReg);
         }
 
@@ -1899,7 +1962,7 @@ uint8_t Compiler::compileSwitch(const ASTNode *node)
 // ============================================================
 // Global / Persistent
 // ============================================================
-uint8_t Compiler::compileGlobalPersistent(const ASTNode *node)
+uint16_t Compiler::compileGlobalPersistent(const ASTNode *node)
 {
     const bool isGlobal = (node->type == NodeType::GLOBAL_STMT);
     for (auto &name : node->paramNames) {
@@ -1917,7 +1980,7 @@ uint8_t Compiler::compileGlobalPersistent(const ASTNode *node)
 // ============================================================
 // Try/catch
 // ============================================================
-uint8_t Compiler::compileTryCatch(const ASTNode *node)
+uint16_t Compiler::compileTryCatch(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // AST: children[0] = try body
@@ -1936,7 +1999,7 @@ uint8_t Compiler::compileTryCatch(const ASTNode *node)
     auto savedDefined = definedRegs_;
 
     // Register for exception variable (if named)
-    uint8_t exReg = 0;
+    uint16_t exReg = 0;
     if (!node->strValue.empty()) {
         exReg = varRegWrite(node->strValue);
     } else {
@@ -1947,8 +2010,15 @@ uint8_t Compiler::compileTryCatch(const ASTNode *node)
     size_t tryBeginPos = currentPos();
     emitAD(OpCode::TRY_BEGIN, exReg, 0);
 
-    // Compile try body
-    compileNode(node->children[0].get());
+    // Compile try body (track activeTryDepth_ so break/continue inside try pop TRY_END)
+    {
+        struct TryDepthGuard {
+            int &depth;
+            explicit TryDepthGuard(int &d) : depth(d) { ++depth; }
+            ~TryDepthGuard() { --depth; }
+        } tryDepthGuard(activeTryDepth_);
+        compileNode(node->children[0].get());
+    }
 
     // TRY_END
     emitA(OpCode::TRY_END, 0);
@@ -1982,7 +2052,7 @@ uint8_t Compiler::compileTryCatch(const ASTNode *node)
     return 0;
 }
 
-uint8_t Compiler::compileWhile(const ASTNode *node)
+uint16_t Compiler::compileWhile(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // children[0] = condition, children[1] = body
@@ -1994,13 +2064,13 @@ uint8_t Compiler::compileWhile(const ASTNode *node)
     //   JMP → L_start
     // L_end:
 
-    loopStack_.push_back(LoopContext{});
+    loopStack_.push_back(LoopContext{{}, {}, false, activeTryDepth_});
 
     size_t loopStart = currentPos();
 
     // Compile condition
     const int condMark = nextReg_;
-    uint8_t condReg = compileNode(node->children[0].get());
+    uint16_t condReg = compileNode(node->children[0].get());
 
     // JMP_FALSE to end (placeholder)
     size_t exitPos = currentPos();
@@ -2025,7 +2095,7 @@ uint8_t Compiler::compileWhile(const ASTNode *node)
         currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
 
     // JMP back to start
-    emitD(OpCode::JMP, static_cast<int16_t>(loopStart - currentPos()));
+    emitD(OpCode::JMP, static_cast<int32_t>(loopStart) - static_cast<int32_t>(currentPos()));
 
     // Patch JMP_FALSE exit
     patchJump(exitPos, currentPos() - exitPos);
@@ -2040,37 +2110,33 @@ uint8_t Compiler::compileWhile(const ASTNode *node)
     return 0;
 }
 
-uint8_t Compiler::compileBreak(const ASTNode * /*node*/)
+uint16_t Compiler::compileBreak(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: break outside of loop");
 
-    // For for-loops, need to pop forStack_ before jumping out.
-    // Count how many for-loop levels we need to pop (usually 1 — the innermost)
-    if (loopStack_.back().isForLoop) {
-        // Emit FOR_NEXT with the loop's variable that will force-exit.
-        // Actually, simpler: emit a NOP that VM interprets as forStack pop.
-        // Use TRY_END as a safe NOP-like... no.
-        // Just emit a JMP to FOR_NEXT instead of past it.
-        // The FOR_NEXT will pop forStack when index >= count.
-        // But we need to set index = count first...
+    int triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
+    for (int i = 0; i < triesToPop; ++i)
+        emitA(OpCode::TRY_END, 0);
 
-        // Simplest: jump to a landing pad that pops forStack then jumps to end.
-        // We'll patch both: first a forStack pop placeholder, then JMP.
-        emitA(OpCode::NOP, 1); // NOP with a=1 means "pop forStack" — VM convention
+    if (loopStack_.back().isForLoop) {
+        emitA(OpCode::NOP, 1);
     }
 
     loopStack_.back().breakPatches.push_back(currentPos());
-    emitD(OpCode::JMP, 0); // placeholder — patched when loop ends
+    emitD(OpCode::JMP, 0);
     return 0;
 }
 
-uint8_t Compiler::compileContinue(const ASTNode * /*node*/)
+uint16_t Compiler::compileContinue(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: continue outside of loop");
+    int triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
+    for (int i = 0; i < triesToPop; ++i)
+        emitA(OpCode::TRY_END, 0);
     loopStack_.back().continuePatches.push_back(currentPos());
-    emitD(OpCode::JMP, 0); // placeholder — patched when loop ends
+    emitD(OpCode::JMP, 0);
     return 0;
 }
 
@@ -2078,7 +2144,7 @@ uint8_t Compiler::compileContinue(const ASTNode * /*node*/)
 // Phase 3: For-loop, colon, arrays, indexing
 // ============================================================
 
-uint8_t Compiler::compileFor(const ASTNode *node)
+uint16_t Compiler::compileFor(const ASTNode *node)
 {
     // node->strValue = loop variable name
     // children[0] = range expression
@@ -2107,12 +2173,12 @@ uint8_t Compiler::compileFor(const ASTNode *node)
     // Then capture forInitPos so the patchJump after the body targets
     // the FOR_INIT[_RANGE] instruction itself, not whatever range
     // emission ended up first in the bytecode.
-    uint8_t startReg = 0, stopReg = 0, stepReg = 0xFF, rangeReg = 0;
+    uint16_t startReg = 0, stopReg = 0, stepReg = kInvalidReg, rangeReg = 0;
     if (isColonRange) {
         startReg = compileNode(rangeNode->children[0].get());
         if (rangeNode->children.size() == 2) {
             stopReg = compileNode(rangeNode->children[1].get());
-            stepReg = 0xFF;  // sentinel: implicit step=1
+            stepReg = kInvalidReg;  // sentinel: implicit step=1
         } else {
             stepReg = compileNode(rangeNode->children[1].get());
             stopReg = compileNode(rangeNode->children[2].get());
@@ -2120,8 +2186,8 @@ uint8_t Compiler::compileFor(const ASTNode *node)
     } else {
         rangeReg = compileNode(rangeNode);
     }
-    uint8_t vReg = varRegWrite(node->strValue);
-    loopStack_.push_back(LoopContext{{}, {}, true});
+    uint16_t vReg = varRegWrite(node->strValue);
+    loopStack_.push_back(LoopContext{{}, {}, true, activeTryDepth_});
 
     size_t forInitPos = currentPos();
     if (isColonRange) {
@@ -2155,15 +2221,9 @@ uint8_t Compiler::compileFor(const ASTNode *node)
     if (node->endLine > 0)
         currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
 
-    // FOR_NEXT: a=varReg, d=backOffset (negative, jumps to bodyStart)
-    emitAD(OpCode::FOR_NEXT, vReg, static_cast<int16_t>(bodyStart - (currentPos() + 1)));
-    // +1 because offset is relative to the FOR_NEXT instruction itself,
-    // but ip will be at FOR_NEXT when it executes. We want ip+d = bodyStart.
-    // Actually: ip += d then continue (no ++ip). So d = bodyStart - forNextPos.
-    // Let me fix: FOR_NEXT is at forNextPos = currentPos()-1 (just emitted)
-    // We want ip = bodyStart, so d = bodyStart - (currentPos()-1)
-    // Rewrite:
-    chunk_.code.back().d = static_cast<int16_t>(bodyStart - (currentPos() - 1));
+    emitAD(OpCode::FOR_NEXT, vReg, 0);
+    chunk_.code.back().d =
+        static_cast<int32_t>(bodyStart) - static_cast<int32_t>(currentPos() - 1);
 
     // Patch FOR_INIT endOffset → jump past FOR_NEXT
     patchJump(forInitPos, currentPos() - forInitPos);
@@ -2178,30 +2238,30 @@ uint8_t Compiler::compileFor(const ASTNode *node)
     return 0;
 }
 
-uint8_t Compiler::compileColonExpr(const ASTNode *node)
+uint16_t Compiler::compileColonExpr(const ASTNode *node)
 {
     // No children = bare ":" (colon-all marker)
     if (node->children.empty()) {
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitA(OpCode::COLON_ALL, dst);
         return dst;
     }
 
     // 2 children: start:stop
     if (node->children.size() == 2) {
-        uint8_t start = compileNode(node->children[0].get());
-        uint8_t stop = compileNode(node->children[1].get());
-        uint8_t dst = tempReg();
+        uint16_t start = compileNode(node->children[0].get());
+        uint16_t stop = compileNode(node->children[1].get());
+        uint16_t dst = tempReg();
         emitABC(OpCode::COLON, dst, start, stop);
         return dst;
     }
 
     // 3 children: start:step:stop
     if (node->children.size() == 3) {
-        uint8_t start = compileNode(node->children[0].get());
-        uint8_t step = compileNode(node->children[1].get());
-        uint8_t stop = compileNode(node->children[2].get());
-        uint8_t dst = tempReg();
+        uint16_t start = compileNode(node->children[0].get());
+        uint16_t step = compileNode(node->children[1].get());
+        uint16_t stop = compileNode(node->children[2].get());
+        uint16_t dst = tempReg();
         // COLON3: dst, start, step, stop — need 4 regs
         // Use: a=dst, b=start, c=step, d is not suitable (int16), e=stop
         emit(Instruction::make_abcde(OpCode::COLON3, dst, start, step, 0, stop));
@@ -2211,13 +2271,13 @@ uint8_t Compiler::compileColonExpr(const ASTNode *node)
     throw std::runtime_error("Compiler: invalid colon expression");
 }
 
-uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
+uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
 {
     // node->children = rows
     // Each row's children = elements
 
     if (node->children.empty()) {
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitA(OpCode::LOAD_EMPTY, dst);
         return dst;
     }
@@ -2242,9 +2302,9 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // literal) into a single register. Shared by the vertical
     // strategies below so both produce identical row semantics.
     constexpr size_t kLiteralBlockMax = 16;
-    auto compileRow = [&](const ASTNode *row) -> uint8_t {
+    auto compileRow = [&](const ASTNode *row) -> uint16_t {
         if (row->children.empty()) {
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             return dst;
         }
@@ -2264,23 +2324,23 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
 
         if (hasCsl) {
             // Build dst incrementally. Seed as empty, then append each element.
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             for (auto &elem : row->children) {
                 if (elem->type == NodeType::CELL_INDEX || elem->type == NodeType::DYNAMIC_FIELD_ACCESS) {
                     // cell CSL c{:} / c{vec} / c{idx} / c{r,:} or s.(f): compileNodeExpand
                     // preserves a CSL; HORZCAT_APPEND_FLATTEN appends all of a CSL or one
                     // of a non-CSL at runtime. See csl_first_class.md.
-                    uint8_t v = compileNodeExpand(elem.get());
+                    uint16_t v = compileNodeExpand(elem.get());
                     emitAB(OpCode::HORZCAT_APPEND_FLATTEN, dst, v);
                 } else if (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty()) {
                     // struct-array field [s.field] or chained [s.sub.field]
-                    uint8_t baseReg = compileNode(elem->children[0].get());
-                    int16_t nameIdx = addStringConstant(elem->strValue);
+                    uint16_t baseReg = compileNode(elem->children[0].get());
+                    int32_t nameIdx = addStringConstant(elem->strValue);
                     emit(Instruction::make_abcde(
                         OpCode::HORZCAT_APPEND_CSL, dst, baseReg, 0, nameIdx, 0));
                 } else {
-                    uint8_t valReg = compileNode(elem.get());
+                    uint16_t valReg = compileNode(elem.get());
                     emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
                 }
             }
@@ -2305,11 +2365,11 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
         // two-element horzcat (O(N²) total for exotic all-matrix
         // literals — documented, rare).
         if (row->children.size() > kLiteralBlockMax) {
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             const int mark = nextReg_;
             for (auto &elem : row->children) {
-                uint8_t v = compileNode(elem.get());
+                uint16_t v = compileNode(elem.get());
                 emitAB(OpCode::HORZCAT_APPEND, dst, v);
                 const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
                 if (nextReg_ > floor) {
@@ -2322,21 +2382,21 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
         }
 
         // Multi-element row: compile each, move into consecutive block, HORZCAT
-        std::vector<uint8_t> elemRegs;
+        std::vector<uint16_t> elemRegs;
         for (auto &elem : row->children) {
             elemRegs.push_back(compileNode(elem.get()));
         }
 
-        uint8_t hBase = nextReg_;
+        uint16_t hBase = nextReg_;
         for (size_t i = 0; i < elemRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (elemRegs[i] != slot) {
                 emitAB(OpCode::MOVE, slot, elemRegs[i]);
             }
         }
 
-        uint8_t dst = tempReg();
-        emitABC(OpCode::HORZCAT, dst, hBase, static_cast<uint8_t>(elemRegs.size()));
+        uint16_t dst = tempReg();
+        emitABC(OpCode::HORZCAT, dst, hBase, static_cast<uint16_t>(elemRegs.size()));
         return dst;
     };
 
@@ -2349,11 +2409,11 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // a 1000-row column literal `[1;2;3;…]` compiles in O(1)
     // registers (the block path burned one per row).
     if (rowCount > kLiteralBlockMax) {
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitA(OpCode::LOAD_EMPTY, dst);
         const int mark = nextReg_;
         for (auto &row : node->children) {
-            uint8_t rr = compileRow(row.get());
+            uint16_t rr = compileRow(row.get());
             emitAB(OpCode::VERTCAT_APPEND, dst, rr);
             const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
             if (nextReg_ > floor) {
@@ -2366,24 +2426,24 @@ uint8_t Compiler::compileMatrixLiteral(const ASTNode *node)
     }
 
     // Few rows: compile each, move into consecutive block, VERTCAT
-    std::vector<uint8_t> rowRegs;
+    std::vector<uint16_t> rowRegs;
     for (auto &row : node->children)
         rowRegs.push_back(compileRow(row.get()));
 
-    uint8_t vBase = nextReg_;
+    uint16_t vBase = nextReg_;
     for (size_t i = 0; i < rowRegs.size(); ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (rowRegs[i] != slot) {
             emitAB(OpCode::MOVE, slot, rowRegs[i]);
         }
     }
 
-    uint8_t dst = tempReg();
-    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint8_t>(rowRegs.size()));
+    uint16_t dst = tempReg();
+    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint16_t>(rowRegs.size()));
     return dst;
 }
 
-uint8_t Compiler::compileIndexExpr(const ASTNode *node)
+uint16_t Compiler::compileIndexExpr(const ASTNode *node)
 {
     // For CALL nodes: children[0] = base identifier, children[1..] = index args
     // For INDEX nodes: strValue = name, children = index args
@@ -2402,59 +2462,59 @@ uint8_t Compiler::compileIndexExpr(const ASTNode *node)
         argOffset = 0;
     }
 
-    uint8_t arr = varRegLookup(name);
+    uint16_t arr = varRegLookup(name);
 
     if (nargs == 1) {
         IndexContextGuard guard(*this, arr, 1);
-        uint8_t idx = compileNode(node->children[argOffset].get());
-        uint8_t dst = tempReg();
+        uint16_t idx = compileNode(node->children[argOffset].get());
+        uint16_t dst = tempReg();
         emitABC(OpCode::INDEX_GET, dst, arr, idx);
         return dst;
     }
 
     if (nargs == 2) {
         IndexContextGuard guard(*this, arr, 2);
-        uint8_t row = compileNode(node->children[argOffset].get());
+        uint16_t row = compileNode(node->children[argOffset].get());
         guard.setDim(1);
-        uint8_t col = compileNode(node->children[argOffset + 1].get());
-        uint8_t dst = tempReg();
+        uint16_t col = compileNode(node->children[argOffset + 1].get());
+        uint16_t dst = tempReg();
         emit(Instruction::make_abcde(OpCode::INDEX_GET_2D, dst, arr, row, 0, col));
         return dst;
     }
 
     // ND indexing (3D+): compile indices into consecutive registers
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint8_t>(nargs));
-        std::vector<uint8_t> idxRegs;
+        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
+        std::vector<uint16_t> idxRegs;
         for (size_t i = 0; i < nargs; ++i) {
             idxRegs.push_back(compileNode(node->children[argOffset + i].get()));
             if (i + 1 < nargs)
-                guard.setDim(static_cast<uint8_t>(i + 1));
+                guard.setDim(static_cast<uint16_t>(i + 1));
         }
-        uint8_t base = nextReg_;
+        uint16_t base = nextReg_;
         for (size_t i = 0; i < nargs; ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emit(Instruction::make_abcde(OpCode::INDEX_GET_ND,
                                      dst,
                                      arr,
                                      base,
                                      0,
-                                     static_cast<uint8_t>(nargs)));
+                                     static_cast<uint16_t>(nargs)));
         return dst;
     }
 }
 
-uint8_t Compiler::compileIndexAssign(const ASTNode *node)
+uint16_t Compiler::compileIndexAssign(const ASTNode *node)
 {
     return compileIndexStore(node->children[0].get(), node->children[1].get(),
                              -1, node->suppressOutput);
 }
 
-uint8_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
+uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
                                     int inValReg, bool suppress)
 {
     // lhs = CALL or INDEX node; rhs = RHS expr (used only when valReg < 0)
@@ -2475,41 +2535,41 @@ uint8_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
         argOffset = 0;
     }
 
-    uint8_t arr = varRegWrite(name);
-    uint8_t val = (inValReg >= 0) ? static_cast<uint8_t>(inValReg) : compileNode(rhs);
+    uint16_t arr = varRegWrite(name);
+    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint8_t>(nargs));
+        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
 
         if (nargs == 1) {
-            uint8_t idx = compileNode(lhs->children[argOffset].get());
+            uint16_t idx = compileNode(lhs->children[argOffset].get());
             emitABC(OpCode::INDEX_SET, arr, idx, val);
         } else if (nargs == 2) {
-            uint8_t row = compileNode(lhs->children[argOffset].get());
+            uint16_t row = compileNode(lhs->children[argOffset].get());
             guard.setDim(1);
-            uint8_t col = compileNode(lhs->children[argOffset + 1].get());
+            uint16_t col = compileNode(lhs->children[argOffset + 1].get());
             emit(Instruction::make_abcde(OpCode::INDEX_SET_2D, arr, row, col, 0, val));
         } else {
             // ND indexed assign (3D+)
-            std::vector<uint8_t> idxRegs;
+            std::vector<uint16_t> idxRegs;
             for (size_t i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[argOffset + i].get()));
                 if (i + 1 < nargs)
-                    guard.setDim(static_cast<uint8_t>(i + 1));
+                    guard.setDim(static_cast<uint16_t>(i + 1));
             }
-            uint8_t base = nextReg_;
+            uint16_t base = nextReg_;
             for (size_t i = 0; i < nargs; ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (idxRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, idxRegs[i]);
             }
-            uint8_t safeVal = tempReg();
+            uint16_t safeVal = tempReg();
             if (val != safeVal)
                 emitAB(OpCode::MOVE, safeVal, val);
             emit(Instruction::make_abcde(OpCode::INDEX_SET_ND,
                                          arr,
                                          base,
-                                         static_cast<uint8_t>(nargs),
+                                         static_cast<uint16_t>(nargs),
                                          0,
                                          safeVal));
         }
@@ -2518,7 +2578,7 @@ uint8_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(arr);
     if (!suppress) {
-        int16_t nameIdx = addStringConstant(name);
+        int32_t nameIdx = addStringConstant(name);
         emitAD(OpCode::DISPLAY, arr, nameIdx);
     }
 
@@ -2529,7 +2589,7 @@ uint8_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
 // Struct field access and assignment
 // ============================================================
 
-uint8_t Compiler::compileFieldAccess(const ASTNode *node)
+uint16_t Compiler::compileFieldAccess(const ASTNode *node)
 {
     // Bare qualified access `Pkg.member` / `ClassName.Const`: when the root
     // identifier is not a known variable, resolve as a 0-arg qualified call
@@ -2587,28 +2647,28 @@ uint8_t Compiler::compileFieldAccess(const ASTNode *node)
                     && !engine_.findClass(segs[0])
                     && !engine_.classCtor(segs[0])
                     && engine_.hasCallableName(segs[0])) {
-                    uint8_t hd = tempReg();
-                    uint8_t argBase = nextReg_;
-                    int16_t funcIdx = addStringConstant(segs[0]);
+                    uint16_t hd = tempReg();
+                    uint16_t argBase = nextReg_;
+                    int32_t funcIdx = addStringConstant(segs[0]);
                     emit(Instruction::make_abcde(OpCode::CALL, hd, argBase, 0,
                                                  funcIdx, 0));
                     for (size_t i = 1; i < segs.size(); ++i) {
-                        uint8_t nd = tempReg();
-                        int16_t nameIdx = addStringConstant(segs[i]);
+                        uint16_t nd = tempReg();
+                        int32_t nameIdx = addStringConstant(segs[i]);
                         emitABC(OpCode::FIELD_GET, nd, hd, 0);
                         chunk_.code.back().d = nameIdx;
                         hd = nd;
                     }
                     return hd;
                 }
-                uint8_t dst = tempReg();
-                uint8_t argBase = nextReg_;
-                int16_t funcIdx = addStringConstant(join(prefixLen));
+                uint16_t dst = tempReg();
+                uint16_t argBase = nextReg_;
+                int32_t funcIdx = addStringConstant(join(prefixLen));
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
                 // Trailing segments (if the prefix was a value) → field reads.
                 for (size_t i = prefixLen; i < segs.size(); ++i) {
-                    uint8_t nd = tempReg();
-                    int16_t nameIdx = addStringConstant(segs[i]);
+                    uint16_t nd = tempReg();
+                    int32_t nameIdx = addStringConstant(segs[i]);
                     emitABC(OpCode::FIELD_GET, nd, dst, 0);
                     chunk_.code.back().d = nameIdx;
                     dst = nd;
@@ -2619,22 +2679,22 @@ uint8_t Compiler::compileFieldAccess(const ASTNode *node)
     }
     // node->children[0] = object expression
     // node->strValue = field name
-    uint8_t obj = compileNode(node->children[0].get());
-    uint8_t dst = tempReg();
-    int16_t nameIdx = addStringConstant(node->strValue);
+    uint16_t obj = compileNode(node->children[0].get());
+    uint16_t dst = tempReg();
+    int32_t nameIdx = addStringConstant(node->strValue);
     emitABC(OpCode::FIELD_GET, dst, obj, 0);
     // Store nameIdx in d field
     chunk_.code.back().d = nameIdx;
     return dst;
 }
 
-uint8_t Compiler::compileFieldAssign(const ASTNode *node)
+uint16_t Compiler::compileFieldAssign(const ASTNode *node)
 {
     return compileFieldStore(node->children[0].get(), node->children[1].get(),
                              -1, node->suppressOutput);
 }
 
-uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
+uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
                                     int inValReg, bool suppress)
 {
     // lhs = FIELD_ACCESS node; rhs = RHS expr (used only when valReg < 0)
@@ -2658,17 +2718,21 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         && cur->children.size() == 2
         && cur->children[0]->type == NodeType::IDENTIFIER) {
         const std::string &rootName = cur->children[0]->strValue;
-        uint8_t rootReg = varRegWrite(rootName);
-        uint8_t idxReg = compileNode(cur->children[1].get());
-        uint8_t valReg = (inValReg >= 0) ? static_cast<uint8_t>(inValReg)
-                                         : compileNode(rhs);
-        int16_t nameIdx = addStringConstant(fieldChain[0]);
+        uint16_t rootReg = varRegWrite(rootName);
+        uint16_t idxReg;
+        {
+            IndexContextGuard guard(*this, rootReg, 1);
+            idxReg = compileNode(cur->children[1].get());
+        }
+        uint16_t valReg = (inValReg >= 0) ? static_cast<uint16_t>(inValReg)
+                                          : compileNode(rhs);
+        int32_t nameIdx = addStringConstant(fieldChain[0]);
         emit(Instruction::make_abcde(OpCode::STRUCT_ELEM_FIELD_SET,
                                      rootReg, idxReg, valReg, nameIdx, 0));
         if (!mayClear_)
             definedRegs_.set(rootReg);
         if (!suppress) {
-            int16_t dispIdx = addStringConstant(rootName);
+            int32_t dispIdx = addStringConstant(rootName);
             emitAD(OpCode::DISPLAY, rootReg, dispIdx);
         }
         return rootReg;
@@ -2679,12 +2743,12 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 
     // fieldChain is in reverse: ["b", "a"] for s.a.b
     // Root variable
-    uint8_t rootReg = varRegWrite(cur->strValue);
-    uint8_t val = (inValReg >= 0) ? static_cast<uint8_t>(inValReg) : compileNode(rhs);
+    uint16_t rootReg = varRegWrite(cur->strValue);
+    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     if (fieldChain.size() == 1) {
         // Simple: s.x = val
-        int16_t nameIdx = addStringConstant(fieldChain[0]);
+        int32_t nameIdx = addStringConstant(fieldChain[0]);
         emitABC(OpCode::FIELD_SET, rootReg, val, 0);
         chunk_.code.back().d = nameIdx;
     } else {
@@ -2693,32 +2757,32 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         //   intermediates[0] = s (rootReg)
         //   intermediates[1] = FIELD_GET s."a" → t1
         //   For s.a.b.c: intermediates[2] = FIELD_GET t1."b" → t2
-        std::vector<uint8_t> intermediates;
+        std::vector<uint16_t> intermediates;
         intermediates.push_back(rootReg);
 
         // Walk from deepest to shallowest: fieldChain reversed = ["a", "b"]
         for (size_t i = fieldChain.size() - 1; i >= 1; --i) {
-            uint8_t src = intermediates.back();
-            uint8_t dst = tempReg();
-            int16_t nameIdx = addStringConstant(fieldChain[i]);
+            uint16_t src = intermediates.back();
+            uint16_t dst = tempReg();
+            int32_t nameIdx = addStringConstant(fieldChain[i]);
             emitABC(OpCode::FIELD_GET_OR_CREATE, dst, src, 0);
             chunk_.code.back().d = nameIdx;
             intermediates.push_back(dst);
         }
 
         // Step 2: FIELD_SET on the deepest intermediate
-        uint8_t deepest = intermediates.back();
-        int16_t leafIdx = addStringConstant(fieldChain[0]);
+        uint16_t deepest = intermediates.back();
+        int32_t leafIdx = addStringConstant(fieldChain[0]);
         emitABC(OpCode::FIELD_SET, deepest, val, 0);
         chunk_.code.back().d = leafIdx;
 
         // Step 3: Write back chain (reverse order)
         for (size_t i = intermediates.size() - 1; i >= 1; --i) {
-            uint8_t child = intermediates[i];
-            uint8_t parent = intermediates[i - 1];
+            uint16_t child = intermediates[i];
+            uint16_t parent = intermediates[i - 1];
             // fieldChain index: fieldChain[intermediates.size() - i]
             size_t fi = fieldChain.size() - i;
-            int16_t nameIdx = addStringConstant(fieldChain[fi]);
+            int32_t nameIdx = addStringConstant(fieldChain[fi]);
             emitABC(OpCode::FIELD_SET, parent, child, 0);
             chunk_.code.back().d = nameIdx;
         }
@@ -2727,7 +2791,7 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
-        int16_t dispIdx = addStringConstant(cur->strValue);
+        int32_t dispIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, dispIdx);
     }
 
@@ -2738,10 +2802,10 @@ uint8_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 // Cell operations
 // ============================================================
 
-uint8_t Compiler::compileCellLiteral(const ASTNode *node)
+uint16_t Compiler::compileCellLiteral(const ASTNode *node)
 {
     if (node->children.empty()) {
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitABC(OpCode::CELL_LITERAL, dst, 0, 0);
         return dst;
     }
@@ -2751,10 +2815,10 @@ uint8_t Compiler::compileCellLiteral(const ASTNode *node)
     // {a, b, c}    → 1 BLOCK child: BLOCK(a,b,c) → 1x3 cell
 
     // Compile each row into a cell row
-    std::vector<uint8_t> rowRegs;
+    std::vector<uint16_t> rowRegs;
     for (auto &row : node->children) {
         if (row->children.empty()) {
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitABC(OpCode::CELL_LITERAL, dst, 0, 0);
             rowRegs.push_back(dst);
             continue;
@@ -2777,10 +2841,10 @@ uint8_t Compiler::compileCellLiteral(const ASTNode *node)
                 break;
             }
         if (hasBraceIndex) {
-            uint8_t acc = tempReg();
+            uint16_t acc = tempReg();
             emitABC(OpCode::CELL_LITERAL, acc, 0, 0);  // seed an empty 1x0 cell
             for (auto &elem : row->children) {
-                uint8_t v = compileNodeExpand(elem.get());  // preserve a CSL
+                uint16_t v = compileNodeExpand(elem.get());  // preserve a CSL
                 emitAB(OpCode::CELL_APPEND_FLATTEN, acc, v);
             }
             rowRegs.push_back(acc);
@@ -2788,19 +2852,19 @@ uint8_t Compiler::compileCellLiteral(const ASTNode *node)
         }
 
         // Compile row elements into consecutive registers → CELL_LITERAL
-        std::vector<uint8_t> elemRegs;
+        std::vector<uint16_t> elemRegs;
         for (auto &elem : row->children)
             elemRegs.push_back(compileNode(elem.get()));
 
-        uint8_t base = nextReg_;
+        uint16_t base = nextReg_;
         for (size_t i = 0; i < elemRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (elemRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, elemRegs[i]);
         }
 
-        uint8_t dst = tempReg();
-        emitABC(OpCode::CELL_LITERAL, dst, base, static_cast<uint8_t>(elemRegs.size()));
+        uint16_t dst = tempReg();
+        emitABC(OpCode::CELL_LITERAL, dst, base, static_cast<uint16_t>(elemRegs.size()));
         rowRegs.push_back(dst);
     }
 
@@ -2808,74 +2872,74 @@ uint8_t Compiler::compileCellLiteral(const ASTNode *node)
         return rowRegs[0];
 
     // Multiple rows: vertcat the cell rows
-    uint8_t vBase = nextReg_;
+    uint16_t vBase = nextReg_;
     for (size_t i = 0; i < rowRegs.size(); ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (rowRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, rowRegs[i]);
     }
 
-    uint8_t dst = tempReg();
-    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint8_t>(rowRegs.size()));
+    uint16_t dst = tempReg();
+    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint16_t>(rowRegs.size()));
     return dst;
 }
 
-uint8_t Compiler::compileCellIndex(const ASTNode *node)
+uint16_t Compiler::compileCellIndex(const ASTNode *node)
 {
     // node->children[0] = cell variable
     // node->children[1..] = indices
-    uint8_t cell = compileNode(node->children[0].get());
+    uint16_t cell = compileNode(node->children[0].get());
     size_t nidx = node->children.size() - 1;
 
     if (nidx == 1) {
         IndexContextGuard guard(*this, cell, 1);
-        uint8_t idx = compileNode(node->children[1].get());
-        uint8_t dst = tempReg();
+        uint16_t idx = compileNode(node->children[1].get());
+        uint16_t dst = tempReg();
         emitABC(OpCode::CELL_GET, dst, cell, idx);
         return dst;
     }
     if (nidx == 2) {
         IndexContextGuard guard(*this, cell, 2);
-        uint8_t row = compileNode(node->children[1].get());
+        uint16_t row = compileNode(node->children[1].get());
         guard.setDim(1);
-        uint8_t col = compileNode(node->children[2].get());
-        uint8_t dst = tempReg();
+        uint16_t col = compileNode(node->children[2].get());
+        uint16_t dst = tempReg();
         emit(Instruction::make_abcde(OpCode::CELL_GET_2D, dst, cell, row, 0, col));
         return dst;
     }
     // ND cell indexing (3D+): use CELL_GET_ND — returns content, not sub-cell
     {
-        IndexContextGuard guard(*this, cell, static_cast<uint8_t>(nidx));
-        std::vector<uint8_t> idxRegs;
+        IndexContextGuard guard(*this, cell, static_cast<uint16_t>(nidx));
+        std::vector<uint16_t> idxRegs;
         for (size_t i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(node->children[1 + i].get()));
             if (i + 1 < nidx)
-                guard.setDim(static_cast<uint8_t>(i + 1));
+                guard.setDim(static_cast<uint16_t>(i + 1));
         }
-        uint8_t base = nextReg_;
+        uint16_t base = nextReg_;
         for (size_t i = 0; i < nidx; ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emit(Instruction::make_abcde(OpCode::CELL_GET_ND,
                                      dst,
                                      cell,
                                      base,
                                      0,
-                                     static_cast<uint8_t>(nidx)));
+                                     static_cast<uint16_t>(nidx)));
         return dst;
     }
 }
 
-uint8_t Compiler::compileCellAssign(const ASTNode *node)
+uint16_t Compiler::compileCellAssign(const ASTNode *node)
 {
     return compileCellStore(node->children[0].get(), node->children[1].get(),
                             -1, node->suppressOutput);
 }
 
-uint8_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
+uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
                                    int inValReg, bool suppress)
 {
     // lhs = CELL_INDEX node; rhs = RHS expr (used only when inValReg < 0)
@@ -2883,42 +2947,42 @@ uint8_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     if (target->type != NodeType::IDENTIFIER)
         throw std::runtime_error("Compiler: invalid cell assignment target");
 
-    uint8_t cell = varRegWrite(target->strValue);
-    uint8_t val = (inValReg >= 0) ? static_cast<uint8_t>(inValReg) : compileNode(rhs);
+    uint16_t cell = varRegWrite(target->strValue);
+    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
 
     size_t nidx = lhs->children.size() - 1;
     if (nidx == 1) {
         IndexContextGuard guard(*this, cell, 1);
-        uint8_t idx = compileNode(lhs->children[1].get());
+        uint16_t idx = compileNode(lhs->children[1].get());
         emitABC(OpCode::CELL_SET, cell, idx, val);
     } else if (nidx == 2) {
         IndexContextGuard guard(*this, cell, 2);
-        uint8_t row = compileNode(lhs->children[1].get());
+        uint16_t row = compileNode(lhs->children[1].get());
         guard.setDim(1);
-        uint8_t col = compileNode(lhs->children[2].get());
+        uint16_t col = compileNode(lhs->children[2].get());
         emit(Instruction::make_abcde(OpCode::CELL_SET_2D, cell, row, col, 0, val));
     } else {
         // ND cell assign
-        IndexContextGuard guard(*this, cell, static_cast<uint8_t>(nidx));
-        std::vector<uint8_t> idxRegs;
+        IndexContextGuard guard(*this, cell, static_cast<uint16_t>(nidx));
+        std::vector<uint16_t> idxRegs;
         for (size_t i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
             if (i + 1 < nidx)
-                guard.setDim(static_cast<uint8_t>(i + 1));
+                guard.setDim(static_cast<uint16_t>(i + 1));
         }
-        uint8_t base = nextReg_;
+        uint16_t base = nextReg_;
         for (size_t i = 0; i < nidx; ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint8_t safeVal = tempReg();
+        uint16_t safeVal = tempReg();
         if (val != safeVal)
             emitAB(OpCode::MOVE, safeVal, val);
         emit(Instruction::make_abcde(OpCode::CELL_SET_ND,
                                      cell,
                                      base,
-                                     static_cast<uint8_t>(nidx),
+                                     static_cast<uint16_t>(nidx),
                                      0,
                                      safeVal));
     }
@@ -2926,7 +2990,7 @@ uint8_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(cell);
     if (!suppress) {
-        int16_t nameIdx = addStringConstant(target->strValue);
+        int32_t nameIdx = addStringConstant(target->strValue);
         emitAD(OpCode::DISPLAY, cell, nameIdx);
     }
 
@@ -2935,7 +2999,7 @@ uint8_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
 
 // Dispatch an already-materialised value register into any lvalue target.
 // Used by compileMultiAssign for complex outputs (`[s.f, a(i)] = ...`).
-void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool suppress)
+void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool suppress)
 {
     if (target->type != NodeType::IDENTIFIER && needsGeneralLValuePath(target)) {
         compileLValueStore(target, nullptr, static_cast<int>(valReg), suppress);
@@ -2943,7 +3007,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool su
     }
     switch (target->type) {
     case NodeType::IDENTIFIER: {
-        uint8_t dst = varRegWrite(target->strValue);
+        uint16_t dst = varRegWrite(target->strValue);
         if (dst != valReg)
             emitAB(OpCode::MOVE, dst, valReg);
         if (scalarRegs_.test(valReg))
@@ -2953,7 +3017,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool su
         if (!mayClear_)
             definedRegs_.set(dst);
         if (!suppress) {
-            int16_t nameIdx = addStringConstant(target->strValue);
+            int32_t nameIdx = addStringConstant(target->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         break;
@@ -2973,13 +3037,13 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint8_t valReg, bool su
         auto *objNode = target->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
-        uint8_t obj = varRegWrite(objNode->strValue);
-        uint8_t nameReg = compileNode(target->children[1].get());
+        uint16_t obj = varRegWrite(objNode->strValue);
+        uint16_t nameReg = compileNode(target->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, valReg);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!suppress) {
-            int16_t dispIdx = addStringConstant(objNode->strValue);
+            int32_t dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
         }
         break;
@@ -3049,7 +3113,7 @@ struct LvAcc
 };
 } // namespace
 
-uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
+uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
                                      int inValReg, bool suppress)
 {
     // ── Flatten the accessor chain (root → outermost) ──
@@ -3080,39 +3144,39 @@ uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
             acc[k].structElem = true;
 
     // Value to store (multi-assign output register, or compile the RHS).
-    uint8_t val = (inValReg >= 0) ? static_cast<uint8_t>(inValReg) : compileNode(rhsNode);
+    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhsNode);
 
-    uint8_t rootReg = varRegWrite(cur->strValue);
+    uint16_t rootReg = varRegWrite(cur->strValue);
 
     // regs[k] = container that accessor k applies to (regs[0] = root).
-    std::vector<uint8_t> regs(n + 1, 0);
+    std::vector<uint16_t> regs(n + 1, 0);
     regs[0] = rootReg;
     // Per-accessor subscripts packed into a consecutive register block
     // [idxBase, idxBase+idxN) (for the (base, nargs) opcodes), or a
     // dynamic-field-name register. Computed once in the forward pass and
     // reused for write-back so `end` / side-effecting subscripts evaluate
     // exactly once.
-    std::vector<uint8_t> idxBase(n, 0), idxN(n, 0), nameReg(n, 0);
+    std::vector<uint16_t> idxBase(n, 0), idxN(n, 0), nameReg(n, 0);
 
     auto compileIdxArgs = [&](size_t k) {
         const ASTNode *node = acc[k].node;
         size_t nargs = node->children.size() - 1; // children[0] is the object
-        std::vector<uint8_t> tmp;
+        std::vector<uint16_t> tmp;
         {
-            IndexContextGuard guard(*this, regs[k], static_cast<uint8_t>(nargs));
+            IndexContextGuard guard(*this, regs[k], static_cast<uint16_t>(nargs));
             for (size_t a = 0; a < nargs; ++a) {
                 if (a > 0)
-                    guard.setDim(static_cast<uint8_t>(a));
+                    guard.setDim(static_cast<uint16_t>(a));
                 tmp.push_back(compileNode(node->children[a + 1].get()));
             }
         }
-        idxN[k] = static_cast<uint8_t>(nargs);
+        idxN[k] = static_cast<uint16_t>(nargs);
         if (nargs == 1) {
             idxBase[k] = tmp[0]; // single subscript is trivially "consecutive"
         } else {
-            uint8_t base = nextReg_;
+            uint16_t base = nextReg_;
             for (size_t a = 0; a < nargs; ++a) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (tmp[a] != slot)
                     emitAB(OpCode::MOVE, slot, tmp[a]);
             }
@@ -3128,10 +3192,10 @@ uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
             compileIdxArgs(k);
 
         if (k + 1 < n) {
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             switch (acc[k].kind) {
             case LvAcc::Field: {
-                int16_t nameIdx = addStringConstant(acc[k].node->strValue);
+                int32_t nameIdx = addStringConstant(acc[k].node->strValue);
                 emitABC(OpCode::FIELD_GET_OR_CREATE, dst, regs[k], 0);
                 chunk_.code.back().d = nameIdx;
                 break;
@@ -3153,11 +3217,11 @@ uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
     }
 
     // emitSet: apply accessor k as a SET on regs[k] with `value`.
-    auto emitSet = [&](size_t k, uint8_t value) {
-        const uint8_t b = idxBase[k], na = idxN[k];
+    auto emitSet = [&](size_t k, uint16_t value) {
+        const uint16_t b = idxBase[k], na = idxN[k];
         switch (acc[k].kind) {
         case LvAcc::Field: {
-            int16_t nameIdx = addStringConstant(acc[k].node->strValue);
+            int32_t nameIdx = addStringConstant(acc[k].node->strValue);
             emitABC(OpCode::FIELD_SET, regs[k], value, 0);
             chunk_.code.back().d = nameIdx;
             break;
@@ -3200,7 +3264,7 @@ uint8_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
-        int16_t nameIdx = addStringConstant(cur->strValue);
+        int32_t nameIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, nameIdx);
     }
     return rootReg;
@@ -3240,30 +3304,30 @@ void Compiler::recordCallArgNames(const ASTNode *callNode, size_t callInstrIdx)
     }
 }
 
-uint8_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
+uint16_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
                                const std::vector<const ASTNode *> &operands)
 {
     // 1. Compile the operand sub-exprs into a contiguous register block
     //    (same shape as call args) so the VM can read R[base..base+n).
-    std::vector<uint8_t> opRegs;
+    std::vector<uint16_t> opRegs;
     opRegs.reserve(operands.size());
     for (const ASTNode *op : operands)
         opRegs.push_back(compileNode(op));
-    const uint8_t opBase = static_cast<uint8_t>(nextReg_);
-    for (uint8_t r : opRegs) {
-        uint8_t slot = tempReg();
+    const uint16_t opBase = static_cast<uint16_t>(nextReg_);
+    for (uint16_t r : opRegs) {
+        uint16_t slot = tempReg();
         if (r != slot) emitAB(OpCode::MOVE, slot, r);
     }
     // 2. FUSE_EWISE with placeholder dst (a) and skip (e) — patched in step 4.
     emit(Instruction::make_abcde(OpCode::FUSE_EWISE, /*dst*/ 0, opBase,
-                                 static_cast<uint8_t>(operands.size()),
-                                 static_cast<int16_t>(ruleIdx), /*skip*/ 0));
+                                 static_cast<uint16_t>(operands.size()),
+                                 static_cast<int32_t>(ruleIdx), /*skip*/ 0));
     const size_t fusePos = chunk_.code.size() - 1;
     const size_t spanStart = chunk_.code.size();
     // 3. Fallback = the normally compiled idiom (exact per-op semantics). The
     //    flag stops the nested compileCall from re-attempting fusion; reset is
     //    exception-safe (compileNode may throw RegisterExhaustionError).
-    uint8_t fbDst;
+    uint16_t fbDst;
     {
         auto savedConstCache = constRegCache_;
         auto savedScalars = scalarRegs_;
@@ -3285,31 +3349,26 @@ uint8_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
     }
     // 4. Both paths write fbDst; on success FUSE_EWISE skips the fallback span.
     const size_t span = chunk_.code.size() - spanStart;
-    if (span > 255) {
-        // Fallback too large for the 8-bit skip field (never happens for the
-        // small idioms we fuse). Neuter the FUSE into a no-op; the fallback
-        // alone produces the result.
+    if (span > 65534) {
         chunk_.code[fusePos] = Instruction::make_abc(OpCode::MOVE, fbDst, fbDst, 0);
         return fbDst;
     }
     chunk_.code[fusePos].a = fbDst;
-    chunk_.code[fusePos].e = static_cast<uint8_t>(span);
+    chunk_.code[fusePos].e = static_cast<uint16_t>(span);
     // Both paths write fbDst — FUSE_EWISE on success (then skips the span),
     // the fallback's last op on decline. Funnel through one explicit MOVE
     // (placed AFTER the skipped span, so it runs on both paths) into a fresh
     // result register. Without this, an enclosing assignment's MOVE-elimination
     // keys off the fallback's last instruction and never receives the
     // FUSE-success write, so the target variable is left unset.
-    const uint8_t res = tempReg();
+    const uint16_t res = tempReg();
     emitAB(OpCode::MOVE, res, fbDst);
     return res;
 }
 
 int Compiler::tryCompileFused(const ASTNode *node)
 {
-    // Skipped while compiling a fallback (no recursion) and under register
-    // pressure (keep headroom below the 255-register limit).
-    if (inFusionFallback_ || !engine_.fusionEnabled() || nextReg_ >= 200)
+    if (inFusionFallback_ || !engine_.fusionEnabled() || nextReg_ >= 65000)
         return -1;
     auto isKnownVarOrConst = [&](const ASTNode *op) -> bool {
         while (op && (op->type == NodeType::UNARY_OP || op->type == NodeType::FIELD_ACCESS)
@@ -3344,20 +3403,20 @@ int Compiler::tryCompileFused(const ASTNode *node)
     return -1;
 }
 
-uint8_t Compiler::compileCall(const ASTNode *node)
+uint16_t Compiler::compileCall(const ASTNode *node)
 {
-    const uint8_t callNargout = nargoutContext_;
+    const uint16_t callNargout = nargoutContext_;
     struct NargoutRestore
     {
-        uint8_t &ref;
-        uint8_t saved;
+        uint16_t &ref;
+        uint16_t saved;
         ~NargoutRestore() { ref = saved; }
     } nargoutGuard{nargoutContext_, callNargout};
     nargoutContext_ = 1;
 
     // Element-wise fusion fast path: if `node` matches a registered idiom, emit
     // FUSE_EWISE + the normally compiled idiom as fallback.
-    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint8_t>(r);
+    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint16_t>(r);
 
     auto *funcNode = node->children[0].get();
 
@@ -3421,25 +3480,25 @@ uint8_t Compiler::compileCall(const ASTNode *node)
                         anyBraceArg = true;
                         break;
                     }
-                std::vector<uint8_t> argRegs;
+                std::vector<uint16_t> argRegs;
                 argRegs.reserve(nargs);
                 for (size_t i = 1; i < node->children.size(); ++i)
                     argRegs.push_back(anyBraceArg
                                           ? compileNodeExpand(node->children[i].get())
                                           : compileNode(node->children[i].get()));
-                uint8_t argBase = nextReg_;
+                uint16_t argBase = nextReg_;
                 for (size_t i = 0; i < argRegs.size(); ++i) {
-                    uint8_t slot = tempReg();
+                    uint16_t slot = tempReg();
                     if (argRegs[i] != slot)
                         emitAB(OpCode::MOVE, slot, argRegs[i]);
                 }
-                uint8_t dst = tempReg();
-                int16_t funcIdx = addStringConstant(qualified);
+                uint16_t dst = tempReg();
+                int32_t funcIdx = addStringConstant(qualified);
                 emit(Instruction::make_abcde(anyBraceArg ? OpCode::CALL_FLATTEN
                                                          : OpCode::CALL,
                                              dst,
                                              argBase,
-                                             static_cast<uint8_t>(nargs),
+                                             static_cast<uint16_t>(nargs),
                                              funcIdx,
                                              anyBraceArg ? callNargout : 0));
                 return dst;
@@ -3460,7 +3519,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     // `end` to the materialised field value. `end` in a method arg is
     // not meaningful, so objects lose nothing.
     if (funcNode->type == NodeType::FIELD_ACCESS && !argHasEnd) {
-        uint8_t objReg = compileNode(funcNode->children[0].get());
+        uint16_t objReg = compileNode(funcNode->children[0].get());
         const size_t nargs = node->children.size() - 1;
         // Brace-index args with a dotted callee (obj.fh(c{:}),
         // obj.method(c{:})): expansion compile — the CALL_METHOD handler
@@ -3470,29 +3529,29 @@ uint8_t Compiler::compileCall(const ASTNode *node)
         for (size_t i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { mAnyBrace = true; break; }
-        std::vector<uint8_t> argRegs;
+        std::vector<uint16_t> argRegs;
         argRegs.reserve(nargs);
         if (mAnyBrace) {
             for (size_t i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
         } else {
-            IndexContextGuard guard(*this, objReg, static_cast<uint8_t>(nargs));
+            IndexContextGuard guard(*this, objReg, static_cast<uint16_t>(nargs));
             for (size_t i = 1; i < node->children.size(); ++i) {
-                guard.setDim(static_cast<uint8_t>(i - 1));
+                guard.setDim(static_cast<uint16_t>(i - 1));
                 argRegs.push_back(compileNode(node->children[i].get()));
             }
         }
-        uint8_t argBase = nextReg_;
+        uint16_t argBase = nextReg_;
         for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint8_t dst = tempReg();
-        int16_t nameIdx = addStringConstant(funcNode->strValue);
+        uint16_t dst = tempReg();
+        int32_t nameIdx = addStringConstant(funcNode->strValue);
         size_t callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_METHOD, dst, objReg, argBase,
-                                     nameIdx, static_cast<uint8_t>(argRegs.size())));
+                                     nameIdx, static_cast<uint16_t>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
@@ -3505,7 +3564,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     // For function-handle invocation `end` isn't legal in MATLAB anyway, so
     // binding the guard to fhReg is harmless there.
     if (funcNode->type != NodeType::IDENTIFIER) {
-        uint8_t fhReg = compileNode(funcNode);
+        uint16_t fhReg = compileNode(funcNode);
         const size_t nargs = node->children.size() - 1;
         // Brace-index args with a computed callee (obj.fh(c{:}),
         // s.f(x, c{:})): expansion compile + CALL_INDIRECT_FLATTEN —
@@ -3516,45 +3575,45 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { faAnyBrace = true; break; }
         if (faAnyBrace) {
-            std::vector<uint8_t> argRegs;
+            std::vector<uint16_t> argRegs;
             for (size_t i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
-            uint8_t argBase = nextReg_;
+            uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
-                                         static_cast<uint8_t>(argRegs.size()),
+                                         static_cast<uint16_t>(argRegs.size()),
                                          std::max<size_t>(nargoutContext_, 1)));
             return dst;
         }
-        std::vector<uint8_t> argRegs;
+        std::vector<uint16_t> argRegs;
         argRegs.reserve(nargs);
         {
-            IndexContextGuard guard(*this, fhReg, static_cast<uint8_t>(nargs));
+            IndexContextGuard guard(*this, fhReg, static_cast<uint16_t>(nargs));
             for (size_t i = 1; i < node->children.size(); ++i) {
-                guard.setDim(static_cast<uint8_t>(i - 1));
+                guard.setDim(static_cast<uint16_t>(i - 1));
                 argRegs.push_back(compileNode(node->children[i].get()));
             }
         }
-        uint8_t argBase = nextReg_;
+        uint16_t argBase = nextReg_;
         for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         size_t callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT,
                                      dst,
                                      fhReg,
                                      argBase,
                                      0,
-                                     static_cast<uint8_t>(argRegs.size())));
+                                     static_cast<uint16_t>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
@@ -3571,7 +3630,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             if (argNode->type == NodeType::STRING_LITERAL) {
                 const std::string &tok = argNode->strValue;
                 if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
-                    uint8_t reg = varRegWrite(tok);
+                    uint16_t reg = varRegWrite(tok);
                     if (!mayClear_)
                         definedRegs_.set(reg);
                 }
@@ -3583,12 +3642,12 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     if (!isTopLevel_) {
         // exist(expr) or exist(expr, filter) → EXIST_VAR dst, nameReg, filterReg
         if (name == "exist" && (nargs == 1 || nargs == 2)) {
-            uint8_t nameReg = compileNode(node->children[1].get());
-            uint8_t filterReg = 0;
+            uint16_t nameReg = compileNode(node->children[1].get());
+            uint16_t filterReg = 0;
             if (nargs == 2) {
                 filterReg = compileNode(node->children[2].get());
             }
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emitABC(OpCode::EXIST_VAR, dst, nameReg, filterReg);
             return dst;
         }
@@ -3597,7 +3656,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     // clear(expr) works both inside functions and at top-level
     if (name == "clear") {
         bool anyBrace = false;
-        std::vector<uint8_t> argRegs;
+        std::vector<uint16_t> argRegs;
         argRegs.reserve(nargs);
         for (size_t i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
@@ -3611,8 +3670,8 @@ uint8_t Compiler::compileCall(const ASTNode *node)
                 const bool isBrace = (argNode->type == NodeType::CELL_INDEX);
                 if (isBrace)
                     anyBrace = true;
-                uint8_t nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
-                emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<uint8_t>(nargs));
+                uint16_t nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
+                emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<uint16_t>(nargs));
                 if (isTopLevel_)
                     argRegs.push_back(nameReg);
             }
@@ -3630,18 +3689,18 @@ uint8_t Compiler::compileCall(const ASTNode *node)
         // `clear('-regexp', '^foo')` because intermediate temps from
         // compileNode displaced subsequent slots.
         if (isTopLevel_) {
-            uint8_t argBase = nextReg_;
+            uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint8_t dst = tempReg();
-            int16_t funcIdx = addStringConstant(name);
+            uint16_t dst = tempReg();
+            int32_t funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(anyBrace ? OpCode::CALL_FLATTEN : OpCode::CALL,
                                          dst,
                                          argBase,
-                                         static_cast<uint8_t>(nargs),
+                                         static_cast<uint16_t>(nargs),
                                          funcIdx,
                                          0));
             return dst;
@@ -3656,16 +3715,16 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             if (nargs == 0) {
                 emitAB(op, 0, 0);
             } else {
-                std::vector<uint8_t> argRegs;
+                std::vector<uint16_t> argRegs;
                 for (size_t i = 1; i <= nargs; ++i)
                     argRegs.push_back(compileNode(node->children[i].get()));
-                uint8_t base = nextReg_;
+                uint16_t base = nextReg_;
                 for (size_t i = 0; i < argRegs.size(); ++i) {
-                    uint8_t slot = tempReg();
+                    uint16_t slot = tempReg();
                     if (argRegs[i] != slot)
                         emitAB(OpCode::MOVE, slot, argRegs[i]);
                 }
-                emitAB(op, base, static_cast<uint8_t>(argRegs.size()));
+                emitAB(op, base, static_cast<uint16_t>(argRegs.size()));
             }
             return tempReg();
         }
@@ -3701,7 +3760,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     }
 
     if (isKnownVar) {
-        uint8_t fhReg = varRegLookup(name);
+        uint16_t fhReg = varRegLookup(name);
 
         // Brace-index args with a VARIABLE callee: compile expanded
         // (CSL-preserving) and emit CALL_INDIRECT_FLATTEN so the runtime
@@ -3713,46 +3772,46 @@ uint8_t Compiler::compileCall(const ASTNode *node)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { varAnyBrace = true; break; }
         if (varAnyBrace) {
-            std::vector<uint8_t> argRegs;
+            std::vector<uint16_t> argRegs;
             for (size_t i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
-            uint8_t argBase = nextReg_;
+            uint16_t argBase = nextReg_;
             for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint8_t dst = tempReg();
+            uint16_t dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
-                                         static_cast<uint8_t>(argRegs.size()),
+                                         static_cast<uint16_t>(argRegs.size()),
                                          std::max<size_t>(nargoutContext_, 1)));
             return dst;
         }
 
-        IndexContextGuard guard(*this, fhReg, static_cast<uint8_t>(nargs));
+        IndexContextGuard guard(*this, fhReg, static_cast<uint16_t>(nargs));
 
-        std::vector<uint8_t> argRegs;
+        std::vector<uint16_t> argRegs;
         for (size_t i = 1; i < node->children.size(); ++i) {
-            guard.setDim(static_cast<uint8_t>(i - 1));
+            guard.setDim(static_cast<uint16_t>(i - 1));
             argRegs.push_back(compileNode(node->children[i].get()));
         }
         // guard restores here (but we can let it live until return — same scope)
 
-        uint8_t argBase = static_cast<uint8_t>(nextReg_);
+        uint16_t argBase = static_cast<uint16_t>(nextReg_);
         for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         size_t callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT,
                                      dst,
                                      fhReg,
                                      argBase,
                                      0,
-                                     static_cast<uint8_t>(argRegs.size())));
+                                     static_cast<uint16_t>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
@@ -3761,11 +3820,11 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     {
         int8_t builtinId = resolveBuiltinId(name, nargs);
         if (builtinId >= 0 && nargs == 1) {
-            uint8_t arg = compileNode(node->children[1].get());
-            uint8_t dst = tempReg();
+            uint16_t arg = compileNode(node->children[1].get());
+            uint16_t dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                          dst, arg, 1,
-                                         static_cast<int16_t>(builtinId), 0));
+                                         static_cast<int32_t>(builtinId), 0));
             // Every 1-arg inline builtin (ids 0..15 in resolveBuiltinId:
             // abs/floor/…/sign/isnan/isinf) is elementwise scalar→scalar, so a
             // scalar argument yields a scalar result — propagate the tag.
@@ -3797,38 +3856,38 @@ uint8_t Compiler::compileCall(const ASTNode *node)
     for (size_t i = 1; i < node->children.size(); ++i)
         if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
     if (anyBraceArg) {
-        std::vector<uint8_t> argRegs;
+        std::vector<uint16_t> argRegs;
         for (size_t i = 1; i < node->children.size(); ++i)
             argRegs.push_back(compileNodeExpand(node->children[i].get()));
-        uint8_t argBase = nextReg_;
+        uint16_t argBase = nextReg_;
         for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint8_t slot = tempReg();
+            uint16_t slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint8_t dst     = tempReg();
-        int16_t funcIdx = addStringConstant(name);
+        uint16_t dst     = tempReg();
+        int32_t funcIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::CALL_FLATTEN, dst, argBase,
-                                     static_cast<uint8_t>(argRegs.size()), funcIdx,
+                                     static_cast<uint16_t>(argRegs.size()), funcIdx,
                                      callNargout));
         return dst;
     }
 
     // Compile arguments into consecutive registers
-    std::vector<uint8_t> argRegs;
+    std::vector<uint16_t> argRegs;
     for (size_t i = 1; i < node->children.size(); ++i) {
         argRegs.push_back(compileNode(node->children[i].get()));
     }
 
-    uint8_t argBase = nextReg_;
+    uint16_t argBase = nextReg_;
     for (size_t i = 0; i < argRegs.size(); ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (argRegs[i] != slot) {
             emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
     }
 
-    uint8_t dst = tempReg();
+    uint16_t dst = tempReg();
 
     // Try to resolve as inline scalar builtin (numeric ID)
     int8_t builtinId = resolveBuiltinId(name, nargs);
@@ -3836,19 +3895,19 @@ uint8_t Compiler::compileCall(const ASTNode *node)
         emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                      dst,
                                      argBase,
-                                     static_cast<uint8_t>(nargs),
-                                     static_cast<int16_t>(builtinId),
+                                     static_cast<uint16_t>(nargs),
+                                     static_cast<int32_t>(builtinId),
                                      0));
         return dst;
     }
 
     // General CALL
-    int16_t funcIdx = addStringConstant(name);
+    int32_t funcIdx = addStringConstant(name);
     size_t callIdx = chunk_.code.size();
     emit(Instruction::make_abcde(OpCode::CALL,
                                  dst,
                                  argBase,
-                                 static_cast<uint8_t>(nargs),
+                                 static_cast<uint16_t>(nargs),
                                  funcIdx,
                                  callNargout));
     recordCallArgNames(node, callIdx);
@@ -3866,7 +3925,7 @@ uint8_t Compiler::compileCall(const ASTNode *node)
 // which the VM dispatches through externalFuncs_ like any other call.
 // ============================================================
 
-uint8_t Compiler::compileCommandCall(const ASTNode *node)
+uint16_t Compiler::compileCommandCall(const ASTNode *node)
 {
     const std::string &name = node->strValue;
     size_t nargs = node->children.size();
@@ -3906,18 +3965,18 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
         // Step 2: call externalFunc for side effects on top level,
         // or for flags that need runtime handling (global, -regexp, etc.)
         if (isTopLevel_ || isFlag) {
-            uint8_t argBase = nextReg_;
+            uint16_t argBase = nextReg_;
             for (size_t i = 0; i < nargs; ++i) {
-                uint8_t slot = tempReg();
-                int16_t strIdx = addStringConstant(node->children[i]->strValue);
+                uint16_t slot = tempReg();
+                int32_t strIdx = addStringConstant(node->children[i]->strValue);
                 emitAD(OpCode::LOAD_STRING, slot, strIdx);
             }
-            uint8_t dst = tempReg();
-            int16_t funcIdx = addStringConstant(name);
+            uint16_t dst = tempReg();
+            int32_t funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::CALL,
                                          dst,
                                          argBase,
-                                         static_cast<uint8_t>(nargs),
+                                         static_cast<uint16_t>(nargs),
                                          funcIdx,
                                          0));
             return dst;
@@ -3936,13 +3995,13 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
             if (nargs == 0) {
                 emitAB(op, 0, 0);
             } else {
-                uint8_t base = nextReg_;
+                uint16_t base = nextReg_;
                 for (size_t i = 0; i < nargs; ++i) {
-                    uint8_t slot = tempReg();
-                    int16_t strIdx = addStringConstant(node->children[i]->strValue);
+                    uint16_t slot = tempReg();
+                    int32_t strIdx = addStringConstant(node->children[i]->strValue);
                     emitAD(OpCode::LOAD_STRING, slot, strIdx);
                 }
-                emitAB(op, base, static_cast<uint8_t>(nargs));
+                emitAB(op, base, static_cast<uint16_t>(nargs));
             }
             return tempReg();
         }
@@ -3950,16 +4009,16 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
 
     // ── exist x [type] inside function → EXIST_VAR ──
     if (!isTopLevel_ && name == "exist" && (nargs == 1 || nargs == 2)) {
-        uint8_t nameReg = tempReg();
-        int16_t strIdx = addStringConstant(node->children[0]->strValue);
+        uint16_t nameReg = tempReg();
+        int32_t strIdx = addStringConstant(node->children[0]->strValue);
         emitAD(OpCode::LOAD_STRING, nameReg, strIdx);
-        uint8_t filterReg = 0;
+        uint16_t filterReg = 0;
         if (nargs == 2) {
             filterReg = tempReg();
-            int16_t fIdx = addStringConstant(node->children[1]->strValue);
+            int32_t fIdx = addStringConstant(node->children[1]->strValue);
             emitAD(OpCode::LOAD_STRING, filterReg, fIdx);
         }
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         emitABC(OpCode::EXIST_VAR, dst, nameReg, filterReg);
         return dst;
     }
@@ -3972,7 +4031,7 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
         for (size_t i = 0; i < nargs; ++i) {
             const std::string &tok = node->children[i]->strValue;
             if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
-                uint8_t reg = varRegWrite(tok);
+                uint16_t reg = varRegWrite(tok);
                 if (!mayClear_)
                     definedRegs_.set(reg);
             }
@@ -3980,21 +4039,21 @@ uint8_t Compiler::compileCommandCall(const ASTNode *node)
     }
 
     // Compile arguments: each child is a STRING_LITERAL
-    uint8_t argBase = nextReg_;
+    uint16_t argBase = nextReg_;
     for (size_t i = 0; i < nargs; ++i) {
-        uint8_t slot = tempReg();
-        int16_t strIdx = addStringConstant(node->children[i]->strValue);
+        uint16_t slot = tempReg();
+        int32_t strIdx = addStringConstant(node->children[i]->strValue);
         emitAD(OpCode::LOAD_STRING, slot, strIdx);
     }
 
-    uint8_t dst = tempReg();
-    int16_t funcIdx = addStringConstant(name);
+    uint16_t dst = tempReg();
+    int32_t funcIdx = addStringConstant(name);
     emit(
-        Instruction::make_abcde(OpCode::CALL, dst, argBase, static_cast<uint8_t>(nargs), funcIdx, 0));
+        Instruction::make_abcde(OpCode::CALL, dst, argBase, static_cast<uint16_t>(nargs), funcIdx, 0));
 
     // Display result if no semicolon (rare for commands, but correct)
     if (!node->suppressOutput) {
-        int16_t nameIdx = addStringConstant("ans");
+        int32_t nameIdx = addStringConstant("ans");
         emitAD(OpCode::DISPLAY, dst, nameIdx);
     }
 
@@ -4034,6 +4093,14 @@ void Compiler::collectFreeVars(const ASTNode *node,
         return;
     }
 
+    if (node->type == NodeType::ANON_FUNC) {
+        std::vector<std::string> mergedParams = params;
+        mergedParams.insert(mergedParams.end(), node->paramNames.begin(), node->paramNames.end());
+        for (auto &child : node->children)
+            collectFreeVars(child.get(), mergedParams, freeVars);
+        return;
+    }
+
     // Recurse into children
     for (auto &child : node->children)
         collectFreeVars(child.get(), params, freeVars);
@@ -4045,13 +4112,13 @@ void Compiler::collectFreeVars(const ASTNode *node,
         collectFreeVars(node->elseBranch.get(), params, freeVars);
 }
 
-uint8_t Compiler::compileAnonFunc(const ASTNode *node)
+uint16_t Compiler::compileAnonFunc(const ASTNode *node)
 {
     // Case 1: @funcname — handle to existing function
     if (!node->strValue.empty() && node->children.empty()) {
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         Value fh = Value::funcHandle(node->strValue, engine_.resource());
-        int16_t constIdx = appendConstant(std::move(fh));
+        int32_t constIdx = appendConstant(std::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
@@ -4130,7 +4197,7 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
 
     // Find free variables in body that exist in outer scope but are not params
     std::vector<std::string> capturedNames;
-    std::vector<uint8_t> capturedOuterRegs;
+    std::vector<uint16_t> capturedOuterRegs;
     collectFreeVars(node->children[0].get(), node->paramNames, capturedNames);
 
     // Add captured vars as extra hidden parameters
@@ -4187,10 +4254,10 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
 
     if (capturedOuterRegs.empty()) {
         // No captures — simple func handle
-        uint8_t dst = tempReg();
+        uint16_t dst = tempReg();
         Value fh = Value::funcHandle(anonName, engine_.resource());
         fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-        int16_t constIdx = appendConstant(std::move(fh));
+        int32_t constIdx = appendConstant(std::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
@@ -4199,34 +4266,34 @@ uint8_t Compiler::compileAnonFunc(const ASTNode *node)
     size_t totalSlots = 1 + capturedOuterRegs.size();
 
     // Compile elements: funcHandle, then captured values
-    std::vector<uint8_t> elemRegs;
+    std::vector<uint16_t> elemRegs;
     // funcHandle constant
-    uint8_t fhReg = tempReg();
+    uint16_t fhReg = tempReg();
     Value fh = Value::funcHandle(anonName, engine_.resource());
     fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-    int16_t constIdx = appendConstant(std::move(fh));
+    int32_t constIdx = appendConstant(std::move(fh));
     emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
     elemRegs.push_back(fhReg);
 
-    for (uint8_t outerReg : capturedOuterRegs) {
+    for (uint16_t outerReg : capturedOuterRegs) {
         elemRegs.push_back(outerReg);
     }
 
     // Pack into consecutive registers for CLOSURE_MAKE (FUNC_HANDLE with captures)
-    uint8_t base = nextReg_;
+    uint16_t base = nextReg_;
     for (size_t i = 0; i < totalSlots; ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (elemRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, elemRegs[i]);
     }
 
-    uint8_t dst = tempReg();
-    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint8_t>(totalSlots));
+    uint16_t dst = tempReg();
+    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint16_t>(totalSlots));
     return dst;
 }
 
-uint8_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
-                                   int explicitOutBase, uint8_t nout)
+uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
+                                   int explicitOutBase, uint16_t nout)
 {
     const std::string &base = superRef->strValue;
     const ASTNode *lhs = superRef->children[0].get();
@@ -4236,7 +4303,7 @@ uint8_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *super
                         && varRegisters_.find(lhs->strValue) != varRegisters_.end();
 
     // Constructor: the seed object comes from lhs; args are the ctor args.
-    uint8_t objReg = isCtor ? compileNode(lhs) : 0;
+    uint16_t objReg = isCtor ? compileNode(lhs) : 0;
 
     // Compile the call args (children[1..]) into a contiguous register
     // block. Brace-index args (obj@Base(c{:})) compile expand so the
@@ -4248,17 +4315,17 @@ uint8_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *super
             anyBrace = true;
             break;
         }
-    std::vector<uint8_t> ar;
+    std::vector<uint16_t> ar;
     for (size_t i = 1; i < callNode->children.size(); ++i)
         ar.push_back(anyBrace ? compileNodeExpand(callNode->children[i].get())
                               : compileNode(callNode->children[i].get()));
-    uint8_t argBase = nextReg_;
+    uint16_t argBase = nextReg_;
     for (size_t i = 0; i < ar.size(); ++i) {
-        uint8_t slot = tempReg();
+        uint16_t slot = tempReg();
         if (ar[i] != slot)
             emitAB(OpCode::MOVE, slot, ar[i]);
     }
-    const uint8_t nargs = static_cast<uint8_t>(ar.size());
+    const uint16_t nargs = static_cast<uint16_t>(ar.size());
 
     if (isCtor) {
         // The super-ctor initialises obj in place: MATLAB's `obj@Base(a)`
@@ -4269,28 +4336,28 @@ uint8_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *super
         // compileAssign's dst==src check). Saves the extra temp
         // register the tempReg()+MOVE sequence spent
         // (bugs/closed/core/super-ctor-result-discarded.md).
-        uint8_t dst = (explicitOutBase >= 0) ? static_cast<uint8_t>(explicitOutBase)
+        uint16_t dst = (explicitOutBase >= 0) ? static_cast<uint16_t>(explicitOutBase)
                                              : objReg;
-        int16_t baseIdx = addStringConstant(base);
+        int32_t baseIdx = addStringConstant(base);
         emit(Instruction::make_abcde(OpCode::CALL_SUPER_CTOR, dst, objReg, argBase, baseIdx,
                                      nargs));
         if (dst != objReg)
             emitAB(OpCode::MOVE, objReg, dst);
         return dst;
     }
-    uint8_t outBase;
+    uint16_t outBase;
     if (explicitOutBase >= 0) {
-        outBase = static_cast<uint8_t>(explicitOutBase);
+        outBase = static_cast<uint16_t>(explicitOutBase);
     } else {
-        outBase = reserveRegs(std::max<uint8_t>(nout, 1));
+        outBase = reserveRegs(std::max<uint16_t>(nout, 1));
     }
-    int16_t qualIdx = addStringConstant(base + ">" + lhs->strValue);
+    int32_t qualIdx = addStringConstant(base + ">" + lhs->strValue);
     emit(Instruction::make_abcde(OpCode::CALL_SUPER_METHOD, outBase, argBase, nargs, qualIdx,
                                  nout));
     return outBase;
 }
 
-uint8_t Compiler::compileFunctionDef(const ASTNode *node)
+uint16_t Compiler::compileFunctionDef(const ASTNode *node)
 {
     // Compile function body into a separate BytecodeChunk. Which
     // bucket it lands in depends on whether we're inside a script
@@ -4300,20 +4367,8 @@ uint8_t Compiler::compileFunctionDef(const ASTNode *node)
         (!isTopLevel_ && !chunk_.name.empty() && chunk_.name != "<script>")
             ? (chunk_.parentFuncName.empty() ? chunk_.name : chunk_.parentFuncName)
             : std::string();
-    BytecodeChunk funcChunk;
-    bool twOnly = false;
-    try {
-        funcChunk = compileFunction(node);
-        funcChunk.parentFuncName = enclosingFunc;
-    } catch (const CompilerLimitError &) {
-        // Schema/body exceeds the VM operand space (registers or the
-        // 255-param schema). Register the function TreeWalker-only — the
-        // documented oversized-chunk fallback contract
-        // (bugs/closed/core/register-exhaustion-no-fallback.md): calls
-        // dispatch via lookupUserFunction and run inline on the
-        // TreeWalker instead of failing script load.
-        twOnly = true;
-    }
+    BytecodeChunk funcChunk = compileFunction(node);
+    funcChunk.parentFuncName = enclosingFunc;
 
     UserFunction uf;
     uf.name = node->strValue;
@@ -4323,12 +4378,10 @@ uint8_t Compiler::compileFunctionDef(const ASTNode *node)
     uf.closureEnv = nullptr;
 
     if (scriptDepth_ > 0) {
-        if (!twOnly)
-            scriptLocalCompiledFuncs_[node->strValue] = std::move(funcChunk);
+        scriptLocalCompiledFuncs_[node->strValue] = std::move(funcChunk);
         engine_.adoptUserFunction(node->strValue, std::move(uf), /*scriptScope=*/true);
     } else {
-        if (!twOnly)
-            compiledFuncs_[node->strValue] = std::move(funcChunk);
+        compiledFuncs_[node->strValue] = std::move(funcChunk);
         engine_.adoptUserFunction(node->strValue, std::move(uf), /*scriptScope=*/false);
     }
     return 0;
@@ -4436,20 +4489,12 @@ void Compiler::eraseCompiledFuncsForClass(const std::string &className)
     };
     for (auto it = compiledFuncs_.begin(); it != compiledFuncs_.end();)
         it = matches(it->first) ? compiledFuncs_.erase(it) : std::next(it);
-    for (auto it = uncompilableClassMethods_.begin(); it != uncompilableClassMethods_.end();)
-        it = matches(*it) ? uncompilableClassMethods_.erase(it) : std::next(it);
 }
 
 const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
 {
     if (const BytecodeChunk *existing = findCompiled(uf.name))
         return existing;
-    if (uncompilableClassMethods_.count(uf.name))
-        return nullptr; // a construct the VM can't compile yet → use the TW hook
-    // Reconstruct a FUNCTION_DEF from the UserFunction and compile it into the
-    // GLOBAL table. compileFunction saves/restores compiler state, so this is
-    // safe even when invoked lazily from the VM run loop (the compiler is
-    // otherwise idle then).
     ASTNode fn(NodeType::FUNCTION_DEF);
     fn.strValue = uf.name;
     fn.paramNames = uf.params;
@@ -4457,25 +4502,10 @@ const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
     if (uf.body)
         fn.children.push_back(cloneNode(uf.body.get()));
     BytecodeChunk chunk;
-    try {
-        // Anonymous functions born inside a method capture the classdef
-        // file, same rule as the method body itself.
+    {
         AnonOriginSentry sentry(*this, uf.originKnown, uf.sourceFs,
                                  uf.sourceDir, uf.sourceFile);
         chunk = compileFunction(&fn);
-    } catch (const CompilerLimitError &) {        // Size problem (registers or pool), not an unsupported construct —
-        // surface it loudly with the method name rather than silently
-        // dropping to a TW-only (non-debuggable) method body. Re-thrown as
-        // CompilerLimitError so it reaches the user with a clear cause.
-        throw CompilerLimitError("classdef method '" + uf.name
-            + "' needs more than the 255-register VM limit in one chunk — split it "
-            "into smaller helper methods/functions");
-    } catch (const std::exception &) {
-        // A construct the VM compiler cannot yet lower → fall back to running
-        // this method body on the TreeWalker. (Super-calls DO compile now — P2;
-        // RegisterExhaustionError is handled loudly above, not here.)
-        uncompilableClassMethods_.insert(uf.name);
-        return nullptr;
     }
     chunk.name = uf.name;
     // The method body runs under the classdef file's provenance —
@@ -4529,36 +4559,96 @@ void Compiler::promoteScriptLocalsToWorkspace()
 BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
                                         std::shared_ptr<const std::string> sourceCode)
 {
-    // Save current compilation state
-    auto savedChunk = std::move(chunk_);
-    auto savedVarRegs = std::move(varRegisters_);
-    auto savedLoopStack = std::move(loopStack_);
-    auto savedConstCache = std::move(constRegCache_);
-    auto savedPinnedConsts = std::move(pinnedConstRegs_);
-    auto savedScalarRegs = scalarRegs_;
-    auto savedDefinedRegs = definedRegs_;
-    bool savedMayClear = mayClear_;
-    int savedNextReg = nextReg_;
-    int savedPeakReg = peakReg_;
-    int savedMaxVarReg = maxVarReg_;
-    bool savedTopLevel = isTopLevel_;
-    SourceLoc savedLoc = currentLoc_;
-    isTopLevel_ = false;
+    struct FunctionCompileGuard
+    {
+        Compiler &c;
+        BytecodeChunk savedChunk;
+        std::unordered_map<std::string, uint16_t> savedVarRegs;
+        std::vector<LoopContext> savedLoopStack;
+        std::unordered_map<int32_t, uint16_t> savedConstCache;
+        std::unordered_map<int32_t, uint16_t> savedPinnedConsts;
+        RegBitset savedScalarRegs;
+        RegBitset savedDefinedRegs;
+        bool savedMayClear;
+        int savedNextReg;
+        int savedPeakReg;
+        int savedMaxVarReg;
+        bool savedTopLevel;
+        bool savedInFusionFallback;
+        uint16_t savedNargoutContext;
+        int savedActiveTryDepth;
+        uint16_t savedIdxArr;
+        uint16_t savedIdxDim;
+        uint16_t savedIdxNdims;
+        SourceLoc savedLoc;
 
-    // Start fresh for function — share source code with parent chunk if not provided
+        explicit FunctionCompileGuard(Compiler &comp)
+            : c(comp)
+            , savedChunk(std::move(comp.chunk_))
+            , savedVarRegs(std::move(comp.varRegisters_))
+            , savedLoopStack(std::move(comp.loopStack_))
+            , savedConstCache(std::move(comp.constRegCache_))
+            , savedPinnedConsts(std::move(comp.pinnedConstRegs_))
+            , savedScalarRegs(std::move(comp.scalarRegs_))
+            , savedDefinedRegs(std::move(comp.definedRegs_))
+            , savedMayClear(comp.mayClear_)
+            , savedNextReg(comp.nextReg_)
+            , savedPeakReg(comp.peakReg_)
+            , savedMaxVarReg(comp.maxVarReg_)
+            , savedTopLevel(comp.isTopLevel_)
+            , savedInFusionFallback(comp.inFusionFallback_)
+            , savedNargoutContext(comp.nargoutContext_)
+            , savedActiveTryDepth(comp.activeTryDepth_)
+            , savedIdxArr(comp.indexContextArr_)
+            , savedIdxDim(comp.indexContextDim_)
+            , savedIdxNdims(comp.indexContextNdims_)
+            , savedLoc(comp.currentLoc_)
+        {}
+
+        ~FunctionCompileGuard()
+        {
+            c.chunk_ = std::move(savedChunk);
+            c.varRegisters_ = std::move(savedVarRegs);
+            c.loopStack_ = std::move(savedLoopStack);
+            c.constRegCache_ = std::move(savedConstCache);
+            c.pinnedConstRegs_ = std::move(savedPinnedConsts);
+            c.scalarRegs_ = std::move(savedScalarRegs);
+            c.definedRegs_ = std::move(savedDefinedRegs);
+            c.mayClear_ = savedMayClear;
+            c.nextReg_ = savedNextReg;
+            c.peakReg_ = savedPeakReg;
+            c.maxVarReg_ = savedMaxVarReg;
+            c.isTopLevel_ = savedTopLevel;
+            c.inFusionFallback_ = savedInFusionFallback;
+            c.nargoutContext_ = savedNargoutContext;
+            c.activeTryDepth_ = savedActiveTryDepth;
+            c.indexContextArr_ = savedIdxArr;
+            c.indexContextDim_ = savedIdxDim;
+            c.indexContextNdims_ = savedIdxNdims;
+            c.currentLoc_ = savedLoc;
+        }
+    } stateGuard(*this);
+
+    isTopLevel_ = false;
+    inFusionFallback_ = false;
+    nargoutContext_ = 1;
+    activeTryDepth_ = 0;
+    indexContextArr_ = kInvalidReg;
+    indexContextDim_ = 0;
+    indexContextNdims_ = 1;
+
     chunk_ = BytecodeChunk{};
     chunk_.name = funcDef->strValue;
-    chunk_.sourceCode = sourceCode ? std::move(sourceCode) : savedChunk.sourceCode;
+    chunk_.sourceCode = sourceCode ? std::move(sourceCode) : stateGuard.savedChunk.sourceCode;
     chunk_.paramNames = funcDef->paramNames;
     chunk_.returnNames = funcDef->returnNames;
-    // The chunk schema carries param/return counts in uint8 fields; a
-    // declaration beyond 255 would wrap silently (PVS V1029 cousins).
-    if (funcDef->paramNames.size() > 255 || funcDef->returnNames.size() > 255)
-        throw CompilerLimitError(
-            "Compiler: function '" + funcDef->strValue + "' declares more "
-            "than 255 named parameters/returns — the bytecode ABI is uint8");
-    chunk_.numParams = static_cast<uint8_t>(funcDef->paramNames.size());
-    chunk_.numReturns = static_cast<uint8_t>(funcDef->returnNames.size());
+    if (funcDef->paramNames.size() >= static_cast<size_t>(kInvalidReg)
+        || funcDef->returnNames.size() >= static_cast<size_t>(kInvalidReg))
+        throw std::runtime_error(
+            "Compiler: function '" + funcDef->strValue
+            + "' declares more than 65534 parameters or returns");
+    chunk_.numParams = static_cast<uint16_t>(funcDef->paramNames.size());
+    chunk_.numReturns = static_cast<uint16_t>(funcDef->returnNames.size());
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();
@@ -4585,8 +4675,8 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     // Always allocate nargin/nargout so they're visible in debugger (pre-
     // loaded by the VM on entry). Not user-assigned; assignedVars is left
     // untouched so the snapshot still hides them via kBuiltinNames.
-    uint8_t narginReg = varRegLookup("nargin");
-    uint8_t nargoutReg = varRegLookup("nargout");
+    uint16_t narginReg = varRegLookup("nargin");
+    uint16_t nargoutReg = varRegLookup("nargout");
 
     // Cluster all body-assigned locals at low contiguous slots BEFORE compiling
     // the body — same pass the top-level script gets via preImportGlobals.
@@ -4639,14 +4729,14 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         // (dynamic count). See compileReturn for the explicit-`return` mirror.
         emitVarargoutReturn();
     } else if (rnames.size() == 1) {
-        uint8_t retReg = varRegLookup(funcDef->returnNames[0]);
+        uint16_t retReg = varRegLookup(funcDef->returnNames[0]);
         emitA(OpCode::RET, retReg);
     } else if (funcDef->returnNames.empty()) {
         emitNone(OpCode::RET_EMPTY);
     } else {
         // Multi-return: collect return regs into consecutive slots then RET_MULTI
         size_t nret = funcDef->returnNames.size();
-        std::vector<uint8_t> retRegs;
+        std::vector<uint16_t> retRegs;
         for (auto &name : funcDef->returnNames)
             retRegs.push_back(varRegLookup(name));
         // Check if already consecutive
@@ -4654,67 +4744,46 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         for (size_t i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
         if (consecutive) {
-            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint8_t>(nret));
+            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint16_t>(nret));
         } else {
-            uint8_t base = nextReg_;
+            uint16_t base = nextReg_;
             for (size_t i = 0; i < nret; ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (retRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, retRegs[i]);
             }
-            emitAB(OpCode::RET_MULTI, base, static_cast<uint8_t>(nret));
+            emitAB(OpCode::RET_MULTI, base, static_cast<uint16_t>(nret));
         }
     }
 
-    chunk_.numRegisters = static_cast<uint8_t>(peakReg_);
+    chunk_.numRegisters = static_cast<uint32_t>(peakReg_);
 
-    // Save variable→register mapping (needed for global var import/export)
     for (auto &[name, reg] : varRegisters_)
         chunk_.varMap.push_back({name, reg});
 
-    BytecodeChunk result = std::move(chunk_);
-
-    // Restore previous state
-    chunk_ = std::move(savedChunk);
-    varRegisters_ = std::move(savedVarRegs);
-    loopStack_ = std::move(savedLoopStack);
-    constRegCache_ = std::move(savedConstCache);
-    pinnedConstRegs_ = std::move(savedPinnedConsts);
-    scalarRegs_ = savedScalarRegs;
-    definedRegs_ = savedDefinedRegs;
-    mayClear_ = savedMayClear;
-    nextReg_ = savedNextReg;
-    peakReg_ = savedPeakReg;
-    maxVarReg_ = savedMaxVarReg;
-    isTopLevel_ = savedTopLevel;
-    currentLoc_ = savedLoc;
-
-    return result;
+    return std::move(chunk_);
 }
 
 void Compiler::emitVarargoutReturn()
 {
-    // chunk_.returnNames.back() == "varargout". Gather the fixed leading
-    // outputs into consecutive slots, then RET_VARARGOUT expands the
-    // varargout cell after them (dynamic count).
     const auto &rns = chunk_.returnNames;
     const size_t numFixed = rns.size() - 1;
-    uint8_t vaReg = varRegLookup("varargout");
-    uint8_t fixedBase = 0;
+    uint16_t vaReg = varRegLookup("varargout");
+    uint16_t fixedBase = 0;
     if (numFixed > 0) {
-        fixedBase = static_cast<uint8_t>(nextReg_);
+        fixedBase = static_cast<uint16_t>(nextReg_);
         for (size_t i = 0; i < numFixed; ++i) {
-            uint8_t slot = tempReg();
-            uint8_t r = varRegLookup(rns[i]);
+            uint16_t slot = tempReg();
+            uint16_t r = varRegLookup(rns[i]);
             if (r != slot)
                 emitAB(OpCode::MOVE, slot, r);
         }
     }
     emit(Instruction::make_abcde(OpCode::RET_VARARGOUT, fixedBase,
-                                 static_cast<int16_t>(numFixed), vaReg, 0, 0));
+                                 static_cast<uint16_t>(numFixed), vaReg, 0, 0));
 }
 
-uint8_t Compiler::compileReturn(const ASTNode * /*node*/)
+uint16_t Compiler::compileReturn(const ASTNode * /*node*/)
 {
     if (!chunk_.returnNames.empty() && chunk_.returnNames.back() == "varargout") {
         emitVarargoutReturn();
@@ -4722,7 +4791,7 @@ uint8_t Compiler::compileReturn(const ASTNode * /*node*/)
     }
     if (chunk_.returnNames.size() <= 1) {
         if (!chunk_.returnNames.empty()) {
-            uint8_t retReg = varRegLookup(chunk_.returnNames[0]);
+            uint16_t retReg = varRegLookup(chunk_.returnNames[0]);
             emitA(OpCode::RET, retReg);
         } else {
             emitNone(OpCode::RET_EMPTY);
@@ -4730,28 +4799,28 @@ uint8_t Compiler::compileReturn(const ASTNode * /*node*/)
     } else {
         // Multi-return: same logic as end-of-function
         size_t nret = chunk_.returnNames.size();
-        std::vector<uint8_t> retRegs;
+        std::vector<uint16_t> retRegs;
         for (auto &name : chunk_.returnNames)
             retRegs.push_back(varRegLookup(name));
         bool consecutive = true;
         for (size_t i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
         if (consecutive) {
-            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint8_t>(nret));
+            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint16_t>(nret));
         } else {
-            uint8_t base = nextReg_;
+            uint16_t base = nextReg_;
             for (size_t i = 0; i < nret; ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (retRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, retRegs[i]);
             }
-            emitAB(OpCode::RET_MULTI, base, static_cast<uint8_t>(nret));
+            emitAB(OpCode::RET_MULTI, base, static_cast<uint16_t>(nret));
         }
     }
     return 0;
 }
 
-uint8_t Compiler::compileDeleteAssign(const ASTNode *node)
+uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
 {
     // AST: children[0] = lhs (CALL node: children[0]=IDENTIFIER, children[1..]=indices)
     // Semantics: v(idx) = []  →  delete elements
@@ -4765,35 +4834,35 @@ uint8_t Compiler::compileDeleteAssign(const ASTNode *node)
 
     // `v(idx) = []` mutates v — counts as an assignment site so the debug
     // workspace lists v (and shadowed built-ins) correctly.
-    uint8_t arr = varRegWrite(target->strValue);
+    uint16_t arr = varRegWrite(target->strValue);
     size_t nargs = lhs->children.size() - 1;
 
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint8_t>(nargs));
+        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
 
         if (nargs == 1) {
-            uint8_t idx = compileNode(lhs->children[1].get());
+            uint16_t idx = compileNode(lhs->children[1].get());
             emitAB(OpCode::INDEX_DELETE, arr, idx);
         } else if (nargs == 2) {
-            uint8_t row = compileNode(lhs->children[1].get());
+            uint16_t row = compileNode(lhs->children[1].get());
             guard.setDim(1);
-            uint8_t col = compileNode(lhs->children[2].get());
+            uint16_t col = compileNode(lhs->children[2].get());
             emitABC(OpCode::INDEX_DELETE_2D, arr, row, col);
         } else {
             // ND delete (3D+): compile indices into consecutive registers
-            std::vector<uint8_t> idxRegs;
+            std::vector<uint16_t> idxRegs;
             for (size_t i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
                 if (i + 1 < nargs)
-                    guard.setDim(static_cast<uint8_t>(i + 1));
+                    guard.setDim(static_cast<uint16_t>(i + 1));
             }
-            uint8_t base = nextReg_;
+            uint16_t base = nextReg_;
             for (size_t i = 0; i < nargs; ++i) {
-                uint8_t slot = tempReg();
+                uint16_t slot = tempReg();
                 if (idxRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, idxRegs[i]);
             }
-            emitABC(OpCode::INDEX_DELETE_ND, arr, base, static_cast<uint8_t>(nargs));
+            emitABC(OpCode::INDEX_DELETE_ND, arr, base, static_cast<uint16_t>(nargs));
         }
     }
 
@@ -5086,6 +5155,8 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
             return "GLOBAL_DECL";
         case OpCode::PERSISTENT_DECL:
             return "PERSISTENT_DECL";
+        case OpCode::TO_LOGICAL_SCALAR:
+            return "TO_LOGICAL_SCALAR";
         default:
             return "???";
         }
@@ -5104,14 +5175,14 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
         os << "[" << i << "] " << opName(ins.op) << " a=" << (int) ins.a << " b=" << (int) ins.b
            << " c=" << (int) ins.c << " d=" << ins.d << " e=" << (int) ins.e;
 
-        if (ins.op == OpCode::LOAD_CONST && ins.d < (int16_t) chunk.constants.size()) {
-            if (ins.d >= 0 && ins.d < (int16_t) chunk.constants.size()) {
-                auto &cv = chunk.constants[ins.d];
-                if (cv.isDoubleScalar())
-                    os << "  ; val=" << cv.scalarVal();
-                else
-                    os << "  ; " << cv.debugString();
-            }
+        if (ins.op == OpCode::LOAD_CONST
+            && ins.d >= 0
+            && static_cast<size_t>(ins.d) < chunk.constants.size()) {
+            auto &cv = chunk.constants[ins.d];
+            if (cv.isDoubleScalar())
+                os << "  ; val=" << cv.scalarVal();
+            else
+                os << "  ; " << cv.debugString();
         }
         os << "\n";
     }

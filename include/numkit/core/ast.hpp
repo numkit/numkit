@@ -100,13 +100,6 @@ struct ASTNode
     std::vector<std::pair<ASTNodePtr, ASTNodePtr>> branches;
     ASTNodePtr elseBranch;
 
-    // Cached operator function pointer (set on first eval, avoids hash lookup)
-    mutable const void *cachedOp = nullptr;
-    // Cached builtin ID for inline scalar evaluation (0 = not resolved, -1 = not a builtin)
-    mutable int8_t cachedBuiltinId = 0;
-    // Cached pointer to UserFunction (for user-defined function calls)
-    mutable const void *cachedUserFunc = nullptr;
-
     ASTNode()
         : type(NodeType::NUMBER_LITERAL)
     {}

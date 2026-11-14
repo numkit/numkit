@@ -103,7 +103,7 @@ struct ResolvedSubscript {
 // into) go out of scope; pushCallFrame copies its args, so a
 // subsequent `goto enter_frame` out of the case block is safe.
 class SplatArgs;
-static SplatArgs splatCallArgs(const Value *, uint8_t, uint8_t);
+static SplatArgs splatCallArgs(const Value *, uint16_t, uint16_t);
 
 class SplatArgs
 {
@@ -119,7 +119,7 @@ public:
     const Value &operator[](size_t i) const { return ptr_[i]; }
 
 private:
-    friend SplatArgs splatCallArgs(const Value *, uint8_t, uint8_t);
+    friend SplatArgs splatCallArgs(const Value *, uint16_t, uint16_t);
 
     SplatArgs() = default;
     std::vector<Value> buf_; // filled only on the mixed-position path
@@ -127,11 +127,11 @@ private:
     size_t n_ = 0;
 };
 
-static SplatArgs splatCallArgs(const Value *R, uint8_t base, uint8_t n)
+static SplatArgs splatCallArgs(const Value *R, uint16_t base, uint16_t n)
 {
     SplatArgs r;
     bool anyCsl = false;
-    for (uint8_t i = 0; i < n; ++i)
+    for (uint16_t i = 0; i < n; ++i)
         if (R[base + i].isCsl()) {
             anyCsl = true;
             break;
@@ -147,7 +147,7 @@ static SplatArgs splatCallArgs(const Value *R, uint8_t base, uint8_t n)
         return r;
     }
     r.buf_.reserve(n);
-    for (uint8_t i = 0; i < n; ++i) {
+    for (uint16_t i = 0; i < n; ++i) {
         const Value &a = R[base + i];
         if (a.isCsl())
             for (size_t k = 0; k < a.cslCount(); ++k)
@@ -194,10 +194,57 @@ static bool tryInPlaceBinaryOp(Value &dst, OpCode op,
     }
 }
 
+namespace {
+
+struct RegDestContinuation : VmContinuation
+{
+    std::shared_ptr<VmContinuation> inner;
+    std::shared_ptr<Value> outBox;
+    size_t targetRegOffset = 0;
+
+    RegDestContinuation(std::shared_ptr<VmContinuation> in,
+                        std::shared_ptr<Value> box,
+                        size_t offset)
+        : inner(std::move(in))
+        , outBox(std::move(box))
+        , targetRegOffset(offset)
+    {}
+
+    bool step(VM &vm, Value *prevResult,
+              const std::shared_ptr<VmContinuation> &self) override
+    {
+        if (inner->step(vm, prevResult, self))
+            return true;
+        vm.writeRegAtOffset(targetRegOffset, std::move(*outBox));
+        return false;
+    }
+};
+
+} // namespace
+
 VM::VM(Engine &engine)
     : engine_(engine)
 {
-    regStack_.resize(kRegStackSize);
+    regStack_.resize(kInitialRegStackSize);
+}
+
+void VM::ensureRegStackCapacity(size_t needed)
+{
+    if (needed <= regStack_.size())
+        return;
+    size_t newCap = std::max(regStack_.size(), kInitialRegStackSize);
+    while (newCap < needed)
+        newCap *= 2;
+    regStack_.resize(newCap);
+    for (auto &f : frames_)
+        f.R = regStack_.data() + f.regBase;
+    R_ = frames_.empty() ? regStack_.data() : frames_.back().R;
+    if (auto *ctl = debugCtl()) {
+        auto &stack = ctl->callStack();
+        const size_t n = std::min(stack.size(), frames_.size());
+        for (size_t i = 0; i < n; ++i)
+            stack[i].registers = frames_[i].R;
+    }
 }
 
 // Single source of truth for inline-builtin id → name. Must track the unary
@@ -263,7 +310,7 @@ static std::vector<size_t> resolveStoreSubscript(const Value &s, size_t curDim)
 // Public API
 // ============================================================
 
-Value VM::execute(const BytecodeChunk &chunk, const Value *args, uint8_t nargs)
+Value VM::execute(const BytecodeChunk &chunk, const Value *args, size_t nargs)
 {
     // Re-entrancy: a builtin invoked during dispatch (e.g. the `run`
     // builtin or any future eval-from-handler) may call back into
@@ -377,11 +424,11 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, Span<const Valu
     const bool multi = nout > 1;
     std::vector<Value> argbuf(args.begin(), args.end());
 
-    returnCount_ = 0;
+    returnBuf_.clear();
     lastResult_ = Value();
     pushCallFrame(chunk, argbuf.empty() ? nullptr : argbuf.data(),
                   argbuf.size(), /*destReg=*/0, nout,
-                  /*isMulti=*/multi, /*outBase=*/0, /*nout=*/static_cast<uint8_t>(nout),
+                  /*isMulti=*/multi, /*outBase=*/0, /*nout=*/static_cast<uint16_t>(nout),
                   ownerClass, isCtor, ctorSeed);
 
     ExecStatus status = dispatchLoop();
@@ -392,11 +439,9 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, Span<const Valu
     }
 
     std::vector<Value> results;
-    if (returnCount_ > 0) {
-        results.reserve(returnCount_);
-        for (uint8_t i = 0; i < returnCount_; ++i)
-            results.push_back(std::move(returnBuf_[i]));
-        returnCount_ = 0;
+    if (!returnBuf_.empty()) {
+        results = std::move(returnBuf_);
+        returnBuf_.clear();
     } else if (!lastResult_.isUnset()) {
         results.push_back(std::move(lastResult_));
     }
@@ -465,7 +510,8 @@ void VM::restorePausedState(std::unique_ptr<PausedState> s)
     // outer's nodes reclaim their original addresses, so the dispatch
     // loop's captured `resolvedFuncs` reference becomes live again.
     chunkCallCache_ = std::move(s->chunkCallCache);
-    // Restore registers
+    // Restore registers (grow regStack_ first if needed)
+    ensureRegStackCapacity(std::max(s->regSnapshot.size(), s->regStackTop));
     std::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
     // Fix R pointers in frames (they pointed into regStack_)
     R_ = regStack_.data();
@@ -501,36 +547,36 @@ void VM::restorePausedState(std::unique_ptr<PausedState> s)
 
 // ── Debug-aware execution API ───────────────────────────────
 
-ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, uint8_t nargs,
+ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, size_t nargs,
                               DebugAction initialAction)
 {
     chunkCallCache_.clear();
     if (!frames_.empty()) {
-        // Defensive: a direct debug-API entry with leftover frames abandons
-        // them — drop their origin pushes with them.
         engine_.truncateScriptOrigins(frames_.front().originDepth);
     }
     frames_.clear();
     forStack_.clear();
     tryStack_.clear();
     regStackTop_ = 0;
-    returnCount_ = 0;
+    returnBuf_.clear();
     lastResult_ = Value();
-    atErrorPause_ = false; // fresh run — drop any stale dbstop-if-error state
+    atErrorPause_ = false;
     pausedError_ = nullptr;
 
-    // Allocate registers for top-level frame
-    uint8_t nregs = chunk.numRegisters;
+    uint32_t nregs = chunk.numRegisters;
+    size_t pc = args ? std::min(nargs, static_cast<size_t>(chunk.numParams)) : 0;
+    std::vector<Value> argsCopy(pc);
+    for (size_t i = 0; i < pc; ++i)
+        argsCopy[i] = args[i];
+
+    ensureRegStackCapacity(nregs);
     R_ = regStack_.data();
 
-    for (uint8_t i = 0; i < nregs; ++i)
+    for (uint32_t i = 0; i < nregs; ++i)
         R_[i] = Value();
 
-    if (args) {
-        uint8_t pc = std::min(nargs, chunk.numParams);
-        for (uint8_t i = 0; i < pc; ++i)
-            R_[i] = args[i];
-    }
+    for (size_t i = 0; i < pc; ++i)
+        R_[i] = std::move(argsCopy[i]);
 
     regStackTop_ = nregs;
 
@@ -940,16 +986,20 @@ enter_frame:
                 break;
             case OpCode::AND:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    R[I.a].setLogicalFast(
-                        R[I.b].scalarVal() != 0.0 && R[I.c].scalarVal() != 0.0);
+                    double bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
+                    if (std::isnan(bv) || std::isnan(cv))
+                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                    R[I.a].setLogicalFast(bv != 0.0 && cv != 0.0);
                 } else
                     { if (tryBinaryOpFrame(I.a, I.op, I.b, I.c, frame, ip)) goto enter_frame;
                           R[I.a] = binarySlowPath(I.op, R[I.b], R[I.c]); }
                 break;
             case OpCode::OR:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    R[I.a].setLogicalFast(
-                        R[I.b].scalarVal() != 0.0 || R[I.c].scalarVal() != 0.0);
+                    double bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
+                    if (std::isnan(bv) || std::isnan(cv))
+                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                    R[I.a].setLogicalFast(bv != 0.0 || cv != 0.0);
                 } else
                     { if (tryBinaryOpFrame(I.a, I.op, I.b, I.c, frame, ip)) goto enter_frame;
                           R[I.a] = binarySlowPath(I.op, R[I.b], R[I.c]); }
@@ -968,11 +1018,23 @@ enter_frame:
                 break;
             case OpCode::NOT:
                 if (R[I.b].isDoubleScalar()) {
-                    R[I.a].setLogicalFast(R[I.b].scalarVal() == 0.0);
+                    double bv = R[I.b].scalarVal();
+                    if (std::isnan(bv))
+                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                    R[I.a].setLogicalFast(bv == 0.0);
                 } else
                     { if (tryUnaryOpFrame(I.a, I.op, I.b, frame, ip)) goto enter_frame;
                           R[I.a] = unarySlowPath(I.op, R[I.b]); }
                 break;
+            case OpCode::TO_LOGICAL_SCALAR: {
+                const Value &src = R[I.b];
+                if (!src.isScalar() || src.isEmpty() || src.isUnset()) {
+                    throw std::runtime_error(
+                        "Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values.");
+                }
+                R[I.a].setLogicalFast(src.toBool());
+                break;
+            }
             case OpCode::CTRANSPOSE:
             case OpCode::TRANSPOSE:
                 if (R[I.b].isDoubleScalar()) {
@@ -1015,6 +1077,10 @@ enter_frame:
                     }
                     break;
                 }
+                if (R[I.a].isEmpty() && !R[I.a].isUnset()
+                    && (R[I.a].isNumeric() || R[I.a].isLogical() || R[I.a].isChar())) {
+                    break;
+                }
                 if (R[I.a].toBool()) {
                     ip += I.d;
                     continue;
@@ -1027,6 +1093,11 @@ enter_frame:
                         continue;
                     }
                     break;
+                }
+                if (R[I.a].isEmpty() && !R[I.a].isUnset()
+                    && (R[I.a].isNumeric() || R[I.a].isLogical() || R[I.a].isChar())) {
+                    ip += I.d;
+                    continue;
                 }
                 if (!R[I.a].toBool()) {
                     ip += I.d;
@@ -1065,21 +1136,112 @@ enter_frame:
             }
             case OpCode::FOR_INIT_RANGE: {
                 // Fused `for v = start:stop` / `for v = start:step:stop`.
-                // No COLON allocation: start/step/count live in the
-                // ForState, the loop var is recomputed as start + index*step
-                // each iteration.
+                // No COLON allocation when all operands are DOUBLE: start/step/count
+                // live in the ForState, the loop var is recomputed as start + index*step
+                // each iteration. Non-double or object operands materialize the typed
+                // colon range so char/integer/custom-class loops match COLON semantics.
                 auto colonScalar = [](const Value &v) -> double {
                     return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
                 };
+                const bool allDouble = (R[I.b].type() == ValueType::DOUBLE)
+                                       && (R[I.c].type() == ValueType::DOUBLE)
+                                       && (I.e == kInvalidReg || R[I.e].type() == ValueType::DOUBLE);
+                if (!allDouble) {
+                    Value rangeVal;
+                    if (I.e == kInvalidReg) {
+                        if (R[I.b].isObject() || R[I.c].isObject()) {
+                            const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
+                            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                            if (cls && cls->ops.count("colon")) {
+                                Value self = dom;
+                                Value ops[2] = {R[I.b], R[I.c]};
+                                Value out[1];
+                                CallContext ctx{&engine_, currentCallEnv()};
+                                cls->ops.at("colon")(self, Span<const Value>(ops, 2), 1,
+                                                     Span<Value>(out, 1), ctx);
+                                rangeVal = std::move(out[0]);
+                            }
+                        }
+                        if (rangeVal.isUnset()) {
+                            ValueType ta = R[I.b].type(), tb = R[I.c].type();
+                            ValueType t = (ta != ValueType::DOUBLE) ? ta
+                                        : (tb != ValueType::DOUBLE) ? tb
+                                        : ValueType::DOUBLE;
+                            if (ta != ValueType::DOUBLE && tb != ValueType::DOUBLE && ta != tb)
+                                throw std::runtime_error(
+                                    "Colon operands must be all the same type, "
+                                    "or mixed with real scalar doubles");
+                            if (R[I.b].isEmpty() || R[I.c].isEmpty())
+                                rangeVal = Value::matrix(1, 0, t, engine_.mr_);
+                            else
+                                rangeVal = Value::colonRangeTyped(colonScalar(R[I.b]),
+                                                                  colonScalar(R[I.c]), t,
+                                                                  engine_.mr_);
+                        }
+                    } else {
+                        if (R[I.b].isObject() || R[I.e].isObject() || R[I.c].isObject()) {
+                            const Value &dom = R[I.b].isObject() ? R[I.b]
+                                             : (R[I.c].isObject() ? R[I.c] : R[I.e]);
+                            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                            if (cls && cls->ops.count("colon")) {
+                                Value self = dom;
+                                Value ops[3] = {R[I.b], R[I.e], R[I.c]};
+                                Value out[1];
+                                CallContext ctx{&engine_, currentCallEnv()};
+                                cls->ops.at("colon")(self, Span<const Value>(ops, 3), 1,
+                                                     Span<Value>(out, 1), ctx);
+                                rangeVal = std::move(out[0]);
+                            }
+                        }
+                        if (rangeVal.isUnset()) {
+                            ValueType ts[3] = {R[I.b].type(), R[I.e].type(), R[I.c].type()};
+                            ValueType t = ValueType::DOUBLE;
+                            bool found = false;
+                            for (ValueType ti : ts) {
+                                if (ti == ValueType::DOUBLE) continue;
+                                if (!found) { t = ti; found = true; }
+                                else if (ti != t)
+                                    throw std::runtime_error(
+                                        "Colon operands must be all the same type, "
+                                        "or mixed with real scalar doubles");
+                            }
+                            if (R[I.b].isEmpty() || R[I.e].isEmpty() || R[I.c].isEmpty())
+                                rangeVal = Value::matrix(1, 0, t, engine_.mr_);
+                            else
+                                rangeVal = Value::colonRangeTyped(
+                                    colonScalar(R[I.b]), colonScalar(R[I.e]),
+                                    colonScalar(R[I.c]), t, engine_.mr_);
+                        }
+                    }
+                    ForState fs;
+                    fs.index = 0;
+                    if (!rangeVal.isEmpty()) {
+                        fs.range = std::move(rangeVal);
+                        fs.rangeType = fs.range.type();
+                        const auto &dims = fs.range.dims();
+                        fs.rows = dims.rows();
+                        fs.count = (fs.rows > 0) ? (dims.numel() / fs.rows) : 0;
+                        if (fs.rangeType == ValueType::DOUBLE)
+                            fs.data = fs.range.doubleData();
+                    }
+                    if (fs.count == 0) {
+                        R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
+                        ip += I.d;
+                        continue;
+                    }
+                    forStack_.push_back(std::move(fs));
+                    forSetVar(R[I.a], forStack_.back());
+                    break;
+                }
                 if (R[I.b].isEmpty() || R[I.c].isEmpty()
-                    || (I.e != 0xFF && R[I.e].isEmpty())) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
+                    || (I.e != kInvalidReg && R[I.e].isEmpty())) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
                     continue;
                 }
                 const double start = colonScalar(R[I.b]);
                 const double stop  = colonScalar(R[I.c]);
-                const double step  = (I.e == 0xFF) ? 1.0
-                                                   : colonScalar(R[I.e]);
+                const double step  = (I.e == kInvalidReg) ? 1.0
+                                                          : colonScalar(R[I.e]);
                 const size_t count = Value::colonCount(start, step, stop);
                 if (count == 0) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
@@ -1195,7 +1357,7 @@ enter_frame:
                     break;
                 }
                 bool handled = false;
-                for (uint8_t k = 0; k < I.c; ++k) {
+                for (uint16_t k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
                         const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
                         if (cls && cls->ops.count("horzcat")) {
@@ -1247,7 +1409,7 @@ enter_frame:
                     break;
                 }
                 bool handled = false;
-                for (uint8_t k = 0; k < I.c; ++k) {
+                for (uint16_t k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
                         const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
                         if (cls && cls->ops.count("vertcat")) {
@@ -1739,13 +1901,13 @@ enter_frame:
             // ── ND array/cell indexing (3D+) ─────────────────────
             case OpCode::INDEX_GET_ND: {
                 // a=dst, b=arr/cell, c=base, e=ndims
-                uint8_t base = I.c, ndims = I.e;
+                uint16_t base = I.c, ndims = I.e;
                 const Value &mv = R[I.b];
                 // OBJECT: a custom subsref controls indexing; otherwise the
                 // builtin N-D path below (indexGet3D/indexGetND) handles it.
                 if (mv.isObject()) {
                     std::vector<Value> idx(ndims);
-                    for (uint8_t i = 0; i < ndims; ++i)
+                    for (uint16_t i = 0; i < ndims; ++i)
                         idx[i] = R[base + i];
                     // classdef subsref → same-stack VM frame (pausable, P4)
                     if (tryObjectSubsrefFrame(I.a, I.b, Span<const Value>(idx.data(), ndims),
@@ -1785,7 +1947,7 @@ enter_frame:
             }
             case OpCode::INDEX_SET_ND: {
                 // a=arr/cell, b=base, c=ndims, e=val
-                uint8_t base = I.b, ndims = I.c;
+                uint16_t base = I.b, ndims = I.c;
                 // OBJECT: arr(i,j,k,…) = obj — builtin N-D element store + grow.
                 if (R[I.e].isObject()) {
                     Value &dst = R[I.a];
@@ -1801,7 +1963,7 @@ enter_frame:
                             || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
                     if (newable || sameArr) {
                         std::vector<std::vector<size_t>> perDim(ndims);
-                        for (uint8_t i = 0; i < ndims; ++i) {
+                        for (uint16_t i = 0; i < ndims; ++i) {
                             size_t curDim =
                                 dst.isObject()
                                     ? (i < dst.dims().ndim() ? dst.dims().dim(i) : 1)
@@ -1934,13 +2096,13 @@ enter_frame:
 
             case OpCode::INDEX_DELETE_ND: {
                 // a=arr, b=base, c=ndims
-                uint8_t base = I.b, ndims = I.c;
+                uint16_t base = I.b, ndims = I.c;
                 std::vector<std::vector<size_t>> perDim(ndims);
                 std::vector<const size_t *> perDimPtrs(ndims);
                 std::vector<size_t> perDimCount(ndims);
                 const auto &srcDims = R[I.a].dims();
                 const int srcNd = srcDims.ndim();
-                for (uint8_t i = 0; i < ndims; ++i) {
+                for (uint16_t i = 0; i < ndims; ++i) {
                     const size_t lim = (i < srcNd) ? srcDims.dim(i) : 1;
                     perDim[i] = Value::resolveIndices(R[base + i], lim);
                     perDimPtrs[i]  = perDim[i].data();
@@ -2252,7 +2414,7 @@ enter_frame:
 
             // ── Cell & closure operations ─────────────────────────
             case OpCode::CLOSURE_MAKE: {
-                uint8_t base = I.b, count = I.c;
+                uint16_t base = I.b, count = I.c;
                 Value fh = R[base];
                 if (count > 1)
                     fh.setFuncHandleCaptures(&R[base + 1], count - 1);
@@ -2260,9 +2422,9 @@ enter_frame:
                 break;
             }
             case OpCode::CELL_LITERAL: {
-                uint8_t base = I.b, count = I.c;
+                uint16_t base = I.b, count = I.c;
                 auto cell = Value::cell(count == 0 ? 0 : 1, count);
-                for (uint8_t i = 0; i < count; ++i) {
+                for (uint16_t i = 0; i < count; ++i) {
                     cell.cellAt(i) = R[base + i];
                 }
                 R[I.a] = std::move(cell);
@@ -2377,8 +2539,8 @@ enter_frame:
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
                 auto indices = Value::resolveIndices(R[I.c], R[I.b].numel());
-                uint8_t outBase = I.a, nout = I.e;
-                for (uint8_t i = 0; i < nout && i < indices.size(); ++i)
+                uint16_t outBase = I.a, nout = I.e;
+                for (uint16_t i = 0; i < nout && i < indices.size(); ++i)
                     R[outBase + i] = R[I.b].cellAt(indices[i]);
                 break;
             }
@@ -2388,7 +2550,7 @@ enter_frame:
                 const Value &cell   = R[I.b];
                 auto         rowIdx = Value::resolveIndices(R[I.c], cell.dims().rows());
                 auto         colIdx = Value::resolveIndices(R[I.d], cell.dims().cols());
-                uint8_t      outBase = I.a, nout = I.e;
+                uint16_t      outBase = I.a, nout = I.e;
                 size_t       k = 0;
                 for (size_t c : colIdx) {
                     for (size_t r : rowIdx) {
@@ -2481,7 +2643,7 @@ enter_frame:
                 // a=dst, b=cell, c=base, e=ndims
                 if (!R[I.b].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
-                uint8_t base = I.c, ndims = I.e;
+                uint16_t base = I.c, ndims = I.e;
                 if (ndims == 3) {
                     size_t r = Value::checkedScalarIndex(R[base].toScalar());
                     size_t c = Value::checkedScalarIndex(R[base + 1].toScalar());
@@ -2493,7 +2655,7 @@ enter_frame:
                     // per-axis subscripts using actual dim(i).
                     const auto &d = R[I.b].dims();
                     size_t idx = 0, stride = 1;
-                    for (uint8_t i = 0; i < ndims; ++i) {
+                    for (uint16_t i = 0; i < ndims; ++i) {
                         size_t si = Value::checkedScalarIndex(R[base + i].toScalar());
                         idx += si * stride;
                         stride *= d.dim(i);
@@ -2508,7 +2670,7 @@ enter_frame:
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
-                uint8_t base = I.b, ndims = I.c;
+                uint16_t base = I.b, ndims = I.c;
                 if (ndims == 3) {
                     size_t r = Value::checkedScalarIndex(R[base].toScalar());
                     size_t c = Value::checkedScalarIndex(R[base + 1].toScalar());
@@ -2537,7 +2699,7 @@ enter_frame:
                     // (rank ↑ for new trailing axes, axis-size ↑ otherwise),
                     // then column-major linear-index assign.
                     std::vector<size_t> coords(ndims);
-                    for (uint8_t i = 0; i < ndims; ++i)
+                    for (uint16_t i = 0; i < ndims; ++i)
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(static_cast<int>(ndims), curNd);
@@ -2545,7 +2707,7 @@ enter_frame:
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     bool grow = (static_cast<int>(ndims) > curNd);
-                    for (uint8_t i = 0; i < ndims; ++i) {
+                    for (uint16_t i = 0; i < ndims; ++i) {
                         if (coords[i] + 1 > need[i]) {
                             need[i] = coords[i] + 1;
                             grow = true;
@@ -2555,7 +2717,7 @@ enter_frame:
                         R[I.a].resizeND(need.data(), newNd, engine_.mr_);
                     const auto &d = R[I.a].dims();
                     size_t idx = 0, stride = 1;
-                    for (uint8_t i = 0; i < ndims; ++i) {
+                    for (uint16_t i = 0; i < ndims; ++i) {
                         idx += coords[i] * stride;
                         stride *= d.dim(i);
                     }
@@ -2571,20 +2733,20 @@ enter_frame:
 
             // ── General function calls ───────────────────────────
             case OpCode::CALL: {
-                uint8_t argBase = I.b, na = I.c;
-                uint8_t nargout_val = I.e; // 0=statement, 1=expression
-                int16_t funcIdx = I.d;
+                uint16_t argBase = I.b, na = I.c;
+                uint16_t nargout_val = I.e; // 0=statement, 1=expression
+                int32_t funcIdx = I.d;
 
                 // Try resolved cache first
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < (int16_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
+                if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
                     targetChunk = resolvedFuncs[funcIdx];
 
                 if (!targetChunk) {
                     const std::string &funcName = chunk.strings[funcIdx];
                     const BytecodeChunk *found = findCompiledFunc(funcName);
                     if (found) {
-                        if (funcIdx >= (int16_t) resolvedFuncs.size())
+                        if (funcIdx >= (int32_t) resolvedFuncs.size())
                             resolvedFuncs.resize(funcIdx + 1, nullptr);
                         resolvedFuncs[funcIdx] = found;
                         targetChunk = found;
@@ -2682,32 +2844,28 @@ enter_frame:
                     if (auto *uf =
                             engine_.lookupUserFunction(funcName,
                                                         currentCallEnv())) {
-                        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-                            if (funcIdx >= (int16_t) resolvedFuncs.size())
-                                resolvedFuncs.resize(funcIdx + 1, nullptr);
-                            resolvedFuncs[funcIdx] = found;
-                            frame.ip = ip + 1;
-                            pushCallFrame(*found, &R[argBase], na, I.a, nargout_val);
-                            goto enter_frame;
-                        }
-                        callTwOnlySingle(R, *uf, &R[argBase], na, I.a);
-                        break;
+                        const BytecodeChunk *found = findCompiledFunc(uf->name);
+                        if (!found)
+                            found = engine_.ensureClassMethodChunk(*uf);
+                        if (funcIdx >= (int32_t) resolvedFuncs.size())
+                            resolvedFuncs.resize(funcIdx + 1, nullptr);
+                        resolvedFuncs[funcIdx] = found;
+                        frame.ip = ip + 1;
+                        pushCallFrame(*found, &R[argBase], na, I.a, nargout_val);
+                        goto enter_frame;
                     }
 
-                    // Higher-order builtin (cellfun/arrayfun/…) whose function
-                    // handle is user code: drive its callbacks as pausable VM
-                    // frames via a continuation, instead of the synchronous
-                    // builtin (whose callbacks would run on the non-pausable
-                    // callReentrant path). tryStart returns nullptr — fall
-                    // through to the synchronous builtin below — for a builtin
-                    // handle or an arg form the state machine doesn't cover.
                     if (CallbackBuiltin *cb = engine_.callbackBuiltin(funcName)) {
                         Span<const Value> as(&R[argBase], na);
-                        if (auto cont = cb->tryStart(as, nargout_val, &R[I.a], engine_)) {
+                        auto outBox = std::make_shared<Value>();
+                        if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
+                            auto cont = std::make_shared<RegDestContinuation>(
+                                std::move(inner), std::move(outBox), frame.regBase + I.a);
                             frame.ip = ip + 1;
                             if (startContinuation(std::move(cont)))
-                                goto enter_frame; // suspended on first callback frame
-                            break;                // finished synchronously (empty input)
+                                goto enter_frame;
+                            R = frame.R;
+                            break;
                         }
                     }
 
@@ -2731,7 +2889,7 @@ enter_frame:
                         // moved-out heap is freed when ob[0] is
                         // overwritten.
                         bool canHint = nargout_val > 0 && R[I.a].hasHeap();
-                        for (uint8_t i = 0; i < na && canHint; ++i)
+                        for (uint16_t i = 0; i < na && canHint; ++i)
                             if (&R[argBase + i] == &R[I.a])
                                 canHint = false;
                         if (canHint)
@@ -2852,20 +3010,20 @@ enter_frame:
                 // external) over AB/NF. Emitted only when an arg could be a CSL, so the
                 // hot no-CSL CALL is untouched. pushCallFrame copies args, so flatArgs may
                 // die after the goto. See dev-docs/memory/csl_first_class.md.
-                uint8_t argBase = I.b, na = I.c;
-                uint8_t nargout_val = I.e;
-                int16_t funcIdx = I.d;
+                uint16_t argBase = I.b, na = I.c;
+                uint16_t nargout_val = I.e;
+                int32_t funcIdx = I.d;
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *AB = splat.data();
                 size_t NF = splat.size();
 
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < (int16_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
+                if (funcIdx < (int32_t) resolvedFuncs.size() && resolvedFuncs[funcIdx])
                     targetChunk = resolvedFuncs[funcIdx];
                 if (!targetChunk) {
                     const std::string &funcName = chunk.strings[funcIdx];
                     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                        if (funcIdx >= (int16_t) resolvedFuncs.size())
+                        if (funcIdx >= (int32_t) resolvedFuncs.size())
                             resolvedFuncs.resize(funcIdx + 1, nullptr);
                         resolvedFuncs[funcIdx] = found;
                         targetChunk = found;
@@ -2932,23 +3090,26 @@ enter_frame:
                     const std::string &funcName = chunk.strings[funcIdx];
                     if (auto *uf =
                             engine_.lookupUserFunction(funcName, currentCallEnv())) {
-                        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-                            if (funcIdx >= (int16_t) resolvedFuncs.size())
-                                resolvedFuncs.resize(funcIdx + 1, nullptr);
-                            resolvedFuncs[funcIdx] = found;
-                            frame.ip = ip + 1;
-                            pushCallFrame(*found, AB, NF, I.a, nargout_val);
-                            goto enter_frame;
-                        }
-                        callTwOnlySingle(R, *uf, AB, NF, I.a);
-                        break;
+                        const BytecodeChunk *found = findCompiledFunc(uf->name);
+                        if (!found)
+                            found = engine_.ensureClassMethodChunk(*uf);
+                        if (funcIdx >= (int32_t) resolvedFuncs.size())
+                            resolvedFuncs.resize(funcIdx + 1, nullptr);
+                        resolvedFuncs[funcIdx] = found;
+                        frame.ip = ip + 1;
+                        pushCallFrame(*found, AB, NF, I.a, nargout_val);
+                        goto enter_frame;
                     }
                     if (CallbackBuiltin *cb = engine_.callbackBuiltin(funcName)) {
                         Span<const Value> as(AB, NF);
-                        if (auto cont = cb->tryStart(as, nargout_val, &R[I.a], engine_)) {
+                        auto outBox = std::make_shared<Value>();
+                        if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
+                            auto cont = std::make_shared<RegDestContinuation>(
+                                std::move(inner), std::move(outBox), frame.regBase + I.a);
                             frame.ip = ip + 1;
                             if (startContinuation(std::move(cont)))
                                 goto enter_frame;
+                            R = frame.R;
                             break;
                         }
                     }
@@ -2972,8 +3133,8 @@ enter_frame:
             // ── Multi-return function call ──────────────────────
             case OpCode::CALL_MULTI: {
                 // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout
-                uint8_t outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
-                int16_t funcIdx = I.d;
+                uint16_t outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
+                int32_t funcIdx = I.d;
                 const std::string &funcName = chunk.strings[funcIdx];
                 // Splat any runtime CSL arg (pkg.fn(c{:})); zero-copy on a
                 // pure splice (bugs/closed/core/qualified-call-no-csl-splat).
@@ -2984,7 +3145,7 @@ enter_frame:
                 // Try compiled user function first.
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
                     frame.ip = ip + 1;
-                    returnCount_ = 0;
+                    returnBuf_.clear();
                     pushCallFrame(*found, AB, NF,
                                   0, nout, true, outBase, nout);
                     goto enter_frame;
@@ -2996,6 +3157,20 @@ enter_frame:
                 if (NF >= 1 && AB[0].isObject()) {
                     const BuiltinClass *cls =
                         engine_.findClass(AB[0].objectClassName());
+                    if (cls) {
+                        auto fit = cls->methodFns.find(funcName);
+                        if (fit != cls->methodFns.end()) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                            if (mc) {
+                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                frame.ip = ip + 1;
+                                returnBuf_.clear();
+                                pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
+                                              fit->second->ownerClass, false);
+                                goto enter_frame;
+                            }
+                        }
+                    }
                     if (cls && cls->methods.count(funcName)) {
                         Value self = AB[0];
                         Span<const Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
@@ -3003,7 +3178,7 @@ enter_frame:
                         CallContext ctx{&engine_, currentCallEnv()};
                         cls->methods.at(funcName)(self, rest, nout,
                                                   Span<Value>(outBuf.data(), nout), ctx);
-                        for (uint8_t i = 0; i < nout; ++i)
+                        for (uint16_t i = 0; i < nout; ++i)
                             if (outBuf[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
@@ -3022,15 +3197,14 @@ enter_frame:
                     if (auto *uf =
                             engine_.lookupUserFunction(funcName,
                                                         currentCallEnv())) {
-                        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-                            frame.ip = ip + 1;
-                            returnCount_ = 0;
-                            pushCallFrame(*found, AB, NF,
-                                          0, nout, true, outBase, nout);
-                            goto enter_frame;
-                        }
-                        callTwOnlyMulti(R, *uf, AB, NF, outBase, nout);
-                        break;
+                        const BytecodeChunk *found = findCompiledFunc(uf->name);
+                        if (!found)
+                            found = engine_.ensureClassMethodChunk(*uf);
+                        frame.ip = ip + 1;
+                        returnBuf_.clear();
+                        pushCallFrame(*found, AB, NF,
+                                      0, nout, true, outBase, nout);
+                        goto enter_frame;
                     }
                     // External function with nout — call directly.
                     const ExternalFunc *fnPtr = engine_.findExternal(
@@ -3045,7 +3219,7 @@ enter_frame:
                         // produces is "Too many output arguments" here, not
                         // a silently-unset target that later reads as a
                         // phantom undefined function (bug #44).
-                        for (uint8_t i = 0; i < nout; ++i)
+                        for (uint16_t i = 0; i < nout; ++i)
                             if (outBuf[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
@@ -3063,8 +3237,8 @@ enter_frame:
                 // arg into a runtime arg vector, then run the CALL_MULTI target dispatch
                 // (compiled user fn / object method / m-file / external) over AB/NF.
                 // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout.
-                uint8_t outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
-                int16_t funcIdx = I.d;
+                uint16_t outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
+                int32_t funcIdx = I.d;
                 const std::string &funcName = chunk.strings[funcIdx];
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *AB = splat.data();
@@ -3072,12 +3246,26 @@ enter_frame:
 
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
                     frame.ip = ip + 1;
-                    returnCount_ = 0;
+                    returnBuf_.clear();
                     pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
                     goto enter_frame;
                 }
                 if (NF >= 1 && AB[0].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
+                    if (cls) {
+                        auto fit = cls->methodFns.find(funcName);
+                        if (fit != cls->methodFns.end()) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                            if (mc) {
+                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                frame.ip = ip + 1;
+                                returnBuf_.clear();
+                                pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
+                                              fit->second->ownerClass, false);
+                                goto enter_frame;
+                            }
+                        }
+                    }
                     if (cls && cls->methods.count(funcName)) {
                         Value              self = AB[0];
                         Span<const Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
@@ -3085,7 +3273,7 @@ enter_frame:
                         CallContext        ctx{&engine_, currentCallEnv()};
                         cls->methods.at(funcName)(self, rest, nout,
                                                   Span<Value>(outBuf.data(), nout), ctx);
-                        for (uint8_t i = 0; i < nout; ++i)
+                        for (uint16_t i = 0; i < nout; ++i)
                             if (outBuf[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
@@ -3096,14 +3284,13 @@ enter_frame:
                 {
                     if (auto *uf =
                             engine_.lookupUserFunction(funcName, currentCallEnv())) {
-                        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-                            frame.ip = ip + 1;
-                            returnCount_ = 0;
-                            pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
-                            goto enter_frame;
-                        }
-                        callTwOnlyMulti(R, *uf, AB, NF, outBase, nout);
-                        break;
+                        const BytecodeChunk *found = findCompiledFunc(uf->name);
+                        if (!found)
+                            found = engine_.ensureClassMethodChunk(*uf);
+                        frame.ip = ip + 1;
+                        returnBuf_.clear();
+                        pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
+                        goto enter_frame;
                     }
                     const ExternalFunc *fnPtr = engine_.findExternal(
                         funcName, currentCallEnv());
@@ -3113,7 +3300,7 @@ enter_frame:
                         Span<Value>        os(outBuf.data(), nout);
                         CallContext        ctx{&engine_, currentCallEnv()};
                         (*fnPtr)(as, nout, os, ctx);
-                        for (uint8_t i = 0; i < nout; ++i)
+                        for (uint16_t i = 0; i < nout; ++i)
                             if (outBuf[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (size_t i = 0; i < nout; ++i)
@@ -3195,10 +3382,10 @@ enter_frame:
             // ── Dotted multi-output method: [a,b] = obj.m(args) ──
             case OpCode::CALL_METHOD_MULTI: {
                 // a=outBase, b=objReg, c=argBase, d=nameIdx,
-                // e=(nargs<<4)|nout (each nibble ≤15).
-                uint8_t outBase = I.a, objReg = I.b, argBase = I.c;
-                uint8_t na = static_cast<uint8_t>((I.e >> 4) & 0x0F);
-                uint8_t nout = static_cast<uint8_t>(I.e & 0x0F);
+                // e=(nargs<<8)|nout (each byte <= 255).
+                uint16_t outBase = I.a, objReg = I.b, argBase = I.c;
+                uint16_t na = static_cast<uint16_t>((I.e >> 8) & 0xFF);
+                uint16_t nout = static_cast<uint16_t>(I.e & 0xFF);
                 const std::string &mname = chunk.strings[I.d];
                 Value &obj = R[objReg];
                 if (!obj.isObject())
@@ -3225,6 +3412,7 @@ enter_frame:
                             for (size_t k = 0; k < argN; ++k)
                                 frameArgs.push_back(argPtr[k]);
                             frame.ip = ip + 1;
+                            returnBuf_.clear();
                             pushCallFrame(*mc, frameArgs.data(),
                                           frameArgs.size(), 0, nout, true,
                                           outBase, nout, fit->second->ownerClass, false);
@@ -3240,7 +3428,7 @@ enter_frame:
                 std::vector<Value> outBuf(nout);
                 CallContext ctx{&engine_, currentCallEnv()};
                 cls->methods.at(mname)(self, args, nout, Span<Value>(outBuf.data(), nout), ctx);
-                for (uint8_t i = 0; i < nout; ++i)
+                for (uint16_t i = 0; i < nout; ++i)
                     if (outBuf[i].isUnset())
                         throw std::runtime_error("Too many output arguments.");
                 for (size_t i = 0; i < nout; ++i)
@@ -3269,14 +3457,14 @@ enter_frame:
                 size_t gt = qual.find('>');
                 std::string base = qual.substr(0, gt);
                 std::string method = qual.substr(gt + 1);
-                uint8_t outBase = I.a, argBase = I.b, nout = I.e;
+                uint16_t outBase = I.a, argBase = I.b, nout = I.e;
                 SplatArgs splat = splatCallArgs(R, argBase, I.c);
                 const Value *argPtr = splat.data();
                 size_t argN = splat.size();
                 auto results = engine_.superMethod(
                     base, method, Span<const Value>(argPtr, argN),
                     std::max<size_t>(nout, 1));
-                for (uint8_t i = 0; i < nout; ++i)
+                for (uint16_t i = 0; i < nout; ++i)
                     R[outBase + i] = (i < results.size()) ? std::move(results[i]) : Value();
                 break;
             }
@@ -3294,10 +3482,10 @@ enter_frame:
                 // f(c{:}) with a variable callee: flatten any CSL arg,
                 // then the CALL_INDIRECT(_MULTI) dispatch over the
                 // flattened span (bugs/closed/lang/handle-call-csl-splat).
-                const uint8_t fhReg = I.b, fargBase = I.c, fna = I.d;
-                const uint8_t fnout = I.e;
+                const uint16_t fhReg = I.b, fargBase = I.c, fna = I.d;
+                const uint16_t fnout = I.e;
                 bool anyCsl = false;
-                for (uint8_t i = 0; i < fna; ++i)
+                for (uint16_t i = 0; i < fna; ++i)
                     if (R[fargBase + i].isCsl()) { anyCsl = true; break; }
                 if (!anyCsl && fnout <= 1) {
                     if (execCallIndirectSpan(R[fhReg], I.a,
@@ -3337,22 +3525,20 @@ enter_frame:
                 const size_t ctot = cargs.size();
                 if (const BytecodeChunk *fc = findCompiledFunc(fName)) {
                     frame.ip = ip + 1;
-                    returnCount_ = 0;
+                    returnBuf_.clear();
                     pushCallFrame(*fc, cargs.data(), ctot, 0, fnout,
                                   true, I.a, fnout);
                     goto enter_frame;
                 }
                 if (auto *uf = engine_.lookupUserFunction(fName, currentCallEnv())) {
-                    if (const BytecodeChunk *fc = findCompiledFunc(uf->name)) {
-                        frame.ip = ip + 1;
-                        returnCount_ = 0;
-                        pushCallFrame(*fc, cargs.data(), ctot, 0, fnout,
-                                      true, I.a, fnout);
-                        goto enter_frame;
-                    }
-                    // TW-only body (no chunk): inline TreeWalker multi call.
-                    callTwOnlyMulti(R, *uf, cargs.data(), ctot, I.a, fnout);
-                    break;
+                    const BytecodeChunk *fc = findCompiledFunc(uf->name);
+                    if (!fc)
+                        fc = engine_.ensureClassMethodChunk(*uf);
+                    frame.ip = ip + 1;
+                    returnBuf_.clear();
+                    pushCallFrame(*fc, cargs.data(), ctot, 0, fnout,
+                                  true, I.a, fnout);
+                    goto enter_frame;
                 }
                 if (const ExternalFunc *fp =
                         engine_.findExternal(fName, currentCallEnv())) {
@@ -3360,10 +3546,10 @@ enter_frame:
                     CallContext ctx{&engine_, currentCallEnv()};
                     (*fp)(Span<const Value>(cargs.data(), ctot), fnout,
                           Span<Value>(ob.data(), fnout), ctx);
-                    for (uint8_t i = 0; i < fnout; ++i)
+                    for (uint16_t i = 0; i < fnout; ++i)
                         if (ob[i].isUnset())
                             throw std::runtime_error("Too many output arguments.");
-                    for (uint8_t i = 0; i < fnout; ++i)
+                    for (uint16_t i = 0; i < fnout; ++i)
                         R[I.a + i] = std::move(ob[i]);
                     break;
                 }
@@ -3378,39 +3564,36 @@ enter_frame:
 
             // ── Return ───────────────────────────────────────────
             case OpCode::RET:
-                returnCount_ = 0;
+                returnBuf_.clear();
                 popCallFrame(R[I.a]);
                 goto enter_frame;
             case OpCode::RET_MULTI: {
-                // a=base, b=count — store return values in returnBuf_
-                uint8_t base = I.a, count = I.b;
-                uint8_t capped = static_cast<uint8_t>(std::min<size_t>(count, kMaxReturns));
-                returnCount_ = capped;
-                for (uint8_t i = 0; i < capped; ++i)
-                    returnBuf_[i] = R[base + i];
-                popCallFrame(R[base]); // first value as primary return
+                uint16_t base = I.a, count = I.b;
+                returnBuf_.clear();
+                returnBuf_.reserve(count);
+                for (uint16_t i = 0; i < count; ++i)
+                    returnBuf_.push_back(R[base + i]);
+                popCallFrame(count > 0 ? Value(returnBuf_[0]) : Value());
                 goto enter_frame;
             }
             case OpCode::RET_VARARGOUT: {
-                // a=fixedBase, b=numFixed, c=varargoutReg. Dynamic return
-                // count = numFixed + numel(varargout cell).
-                uint8_t fixedBase = I.a, numFixed = I.b, vaReg = I.c;
-                uint8_t count = 0;
-                for (uint8_t i = 0; i < numFixed && count < kMaxReturns; ++i)
-                    returnBuf_[count++] = R[fixedBase + i];
+                uint16_t fixedBase = I.a, numFixed = I.b, vaReg = I.c;
+                returnBuf_.clear();
                 const Value &va = R[vaReg];
+                const size_t n = va.isCell() ? va.numel() : 0;
+                returnBuf_.reserve(numFixed + n);
+                for (uint16_t i = 0; i < numFixed; ++i)
+                    returnBuf_.push_back(R[fixedBase + i]);
                 if (va.isCell()) {
-                    const size_t n = va.numel();
-                    for (size_t i = 0; i < n && count < kMaxReturns; ++i)
-                        returnBuf_[count++] = va.cellAt(i);
+                    for (size_t i = 0; i < n; ++i)
+                        returnBuf_.push_back(va.cellAt(i));
                 }
-                returnCount_ = count;
-                popCallFrame(count > 0 ? Value(returnBuf_[0]) : Value());
+                popCallFrame(!returnBuf_.empty() ? Value(returnBuf_[0]) : Value());
                 goto enter_frame;
             }
             case OpCode::RET_EMPTY:
             case OpCode::HALT:
-                returnCount_ = 0;
+                returnBuf_.clear();
                 popCallFrame(Value());
                 goto enter_frame;
             case OpCode::NOP:
@@ -3519,13 +3702,12 @@ enter_frame:
                     {
                         const std::string &nn = chunk.strings[I.d];
                         if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
-                            if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-                                frame.ip = ip + 1;
-                                pushCallFrame(*found, nullptr, 0, I.a, 1);
-                                goto enter_frame;
-                            }
-                            callTwOnlySingle(R, *uf, nullptr, 0, I.a);
-                            break;
+                            const BytecodeChunk *found = findCompiledFunc(uf->name);
+                            if (!found)
+                                found = engine_.ensureClassMethodChunk(*uf);
+                            frame.ip = ip + 1;
+                            pushCallFrame(*found, nullptr, 0, I.a, 1);
+                            goto enter_frame;
                         }
                         if (const ExternalFunc *fnPtr = engine_.findExternal(nn, currentCallEnv())) {
                             Value ob[1];
@@ -3748,7 +3930,7 @@ enter_frame:
 // and clobbering the live value). Global membership is O(1) via a set built once
 // — and skipped entirely when the chunk declares no globals (the common case).
 static void rebuildLocalVarMap(std::vector<std::pair<std::string, Value>> &out,
-                               const BytecodeChunk &chunk, const Value *R, uint8_t nregs)
+                               const BytecodeChunk &chunk, const Value *R, uint32_t nregs)
 {
     out.clear();
     const auto &assigned = chunk.assignedVars;
@@ -3817,7 +3999,7 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
         // Trim for-loop stack
         forStack_.resize(std::min(forStack_.size(), f.forStackBase));
         // Cleanup registers
-        for (uint8_t i = 0; i < f.nregs; ++i)
+        for (uint32_t i = 0; i < f.nregs; ++i)
             if (!f.R[i].isDoubleScalar() && !f.R[i].isEmpty())
                 f.R[i] = Value();
         regStackTop_ = f.regBase;
@@ -3850,8 +4032,8 @@ static std::string describeInstruction(const Instruction &instr,
     // Function calls
     case OpCode::CALL:
     case OpCode::CALL_MULTI: {
-        int16_t funcIdx = instr.d;
-        if (funcIdx >= 0 && funcIdx < (int16_t)chunk.strings.size())
+        int32_t funcIdx = instr.d;
+        if (funcIdx >= 0 && funcIdx < (int32_t)chunk.strings.size())
             return "in call to '" + chunk.strings[funcIdx] + "'";
         return "in function call";
     }
@@ -3865,8 +4047,8 @@ static std::string describeInstruction(const Instruction &instr,
         return "in function call";
     case OpCode::CALL_METHOD:
     case OpCode::CALL_METHOD_MULTI: {
-        int16_t nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (int16_t)chunk.strings.size())
+        int32_t nameIdx = instr.d;
+        if (nameIdx >= 0 && nameIdx < (int32_t)chunk.strings.size())
             return "in method call '." + chunk.strings[nameIdx] + "'";
         return "in method call";
     }
@@ -3886,8 +4068,8 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::FIELD_GET:
     case OpCode::FIELD_GET_OR_CREATE:
     case OpCode::FIELD_SET: {
-        int16_t nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (int16_t)chunk.strings.size())
+        int32_t nameIdx = instr.d;
+        if (nameIdx >= 0 && nameIdx < (int32_t)chunk.strings.size())
             return "in field access '." + chunk.strings[nameIdx] + "'";
         return "in field access";
     }
@@ -3896,8 +4078,8 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::FIELD_SET_DYN:
         return "in dynamic field access";
     case OpCode::STRUCT_ELEM_FIELD_SET: {
-        int16_t nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (int16_t)chunk.strings.size())
+        int32_t nameIdx = instr.d;
+        if (nameIdx >= 0 && nameIdx < (int32_t)chunk.strings.size())
             return "in struct-array element write '." + chunk.strings[nameIdx] + "'";
         return "in struct-array element write";
     }
@@ -4124,8 +4306,8 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
 }
 
 void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t nargs,
-                       uint8_t destReg, size_t nargout,
-                       bool isMulti, uint8_t outBase, uint8_t nout,
+                       uint16_t destReg, size_t nargout,
+                       bool isMulti, uint16_t outBase, uint16_t nout,
                        const std::string &ownerClass, bool isCtor,
                        const Value *ctorSeed)
 {
@@ -4141,35 +4323,41 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
     // Too-few stays lenient (toolbox shims use `if nargin < k` guards —
     // see the TreeWalker note).
 
-    uint8_t nregs = funcChunk.numRegisters;
-    if (regStackTop_ + nregs > kRegStackSize)
-        throw std::runtime_error("VM: register stack overflow");
-
+    uint32_t nregs = funcChunk.numRegisters;
     size_t pc = std::min(nargs, static_cast<size_t>(funcChunk.numParams));
 
-    // Defensive copy: args may point into regStack_ near regStackTop_
+    // Copy args, varargin, and ctorSeed BEFORE ensureRegStackCapacity, since
+    // `args` or `ctorSeed` may point into caller registers inside regStack_.
     std::vector<Value> argsCopy(pc);
     for (size_t i = 0; i < pc; ++i)
         argsCopy[i] = args[i];
 
+    Value vaCell;
+    if (va) {
+        const size_t required = funcChunk.numParams - 1;
+        vaCell = nargs > required
+                     ? Value::cell(1, nargs - required, engine_.mr_)
+                     : Value::cell(0, 0, engine_.mr_);
+        for (size_t i = required; i < nargs; ++i)
+            vaCell.cellAt(i - required) = args[i];
+    }
+
+    Value seedCopy;
+    const bool hasSeed = (ctorSeed != nullptr && !funcChunk.returnNames.empty());
+    if (hasSeed)
+        seedCopy = *ctorSeed;
+
+    ensureRegStackCapacity(regStackTop_ + nregs);
+
     // Allocate registers
     Value *newR = regStack_.data() + regStackTop_;
-    for (uint8_t i = 0; i < nregs; ++i)
+    for (uint32_t i = 0; i < nregs; ++i)
         newR[i] = Value();
 
     for (size_t i = 0; i < pc; ++i)
         newR[i] = std::move(argsCopy[i]);
 
-    // Pack the varargin cell into its declared parameter register. All
-    // reads of `args` happen before any newR write below, so the aliasing
-    // concern that motivated argsCopy does not apply here.
     if (va) {
-        const size_t required = funcChunk.numParams - 1;
-        Value vaCell = nargs > required
-                           ? Value::cell(1, nargs - required, engine_.mr_)
-                           : Value::cell(0, 0, engine_.mr_);
-        for (size_t i = required; i < nargs; ++i)
-            vaCell.cellAt(i - required) = args[i];
         for (auto &[vname, reg] : funcChunk.varMap)
             if (vname == "varargin" && reg < nregs) {
                 newR[reg] = std::move(vaCell);
@@ -4185,13 +4373,11 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t
             newR[reg] = Value::scalar(static_cast<double>(nargout), nullptr);
     }
 
-    // Constructor seed: bind the output variable to the default instance before
-    // the body runs (MATLAB seeds `obj` so the ctor only fills/overrides it).
-    if (ctorSeed && !funcChunk.returnNames.empty()) {
+    if (hasSeed) {
         const std::string &rn = funcChunk.returnNames[0];
         for (auto &[vname, reg] : funcChunk.varMap)
             if (vname == rn && reg < nregs) {
-                newR[reg] = *ctorSeed;
+                newR[reg] = std::move(seedCopy);
                 break;
             }
     }
@@ -4334,7 +4520,7 @@ void VM::popCallFrame(Value retVal)
         rebuildLocalVarMap(lastVarMap_, *frame.chunk, frame.R, frame.nregs);
 
     // Cleanup: release heap objects in frame
-    for (uint8_t i = 0; i < frame.nregs; ++i) {
+    for (uint32_t i = 0; i < frame.nregs; ++i) {
         if (!frame.R[i].isDoubleScalar() && !frame.R[i].isEmpty())
             frame.R[i] = Value();
     }
@@ -4376,36 +4562,25 @@ void VM::popCallFrame(Value retVal)
         }
 
         if (frame.isMultiReturn) {
-            // MATLAB: a `[...] = f()` destructure that requests more
-            // outputs than the callee produces is "Too many output
-            // arguments" (bug #44 — parity with the TreeWalker and the
-            // external-builtin path above).
-            size_t produced = (returnCount_ > 0)
-                                   ? returnCount_
+            size_t produced = !returnBuf_.empty()
+                                   ? returnBuf_.size()
                                    : (retVal.isUnset() ? 0u : 1u);
             if (produced < frame.nout) {
-                // Restore caller register window before unwinding so the
-                // exception propagates from a consistent VM state.
+                returnBuf_.clear();
                 throw std::runtime_error("Too many output arguments.");
             }
-            // Multi-return: distribute returnBuf_ into caller's registers
-            if (returnCount_ > 0) {
-                for (size_t i = 0; i < frame.nout && i < returnCount_; ++i)
+            if (!returnBuf_.empty()) {
+                for (size_t i = 0; i < frame.nout && i < returnBuf_.size(); ++i)
                     caller.R[frame.outBase + i] = std::move(returnBuf_[i]);
-                for (uint8_t i = 0; i < returnCount_; ++i)
-                    returnBuf_[i] = Value();
-                returnCount_ = 0;
+                returnBuf_.clear();
             } else {
-                // Single return via RET — store in first output slot
                 caller.R[frame.outBase] = std::move(retVal);
                 for (size_t i = 1; i < frame.nout; ++i)
                     caller.R[frame.outBase + i] = Value();
             }
         } else {
             caller.R[frame.destReg] = std::move(retVal);
-            for (uint8_t i = 0; i < returnCount_; ++i)
-                returnBuf_[i] = Value();
-            returnCount_ = 0;
+            returnBuf_.clear();
         }
     } else {
         R_ = nullptr;
@@ -4438,7 +4613,16 @@ bool VM::pushCallbackFrame(const Value &handle, Span<const Value> args, size_t n
     }
     const UserFunction *uf = engine_.lookupUserFunctionLocal(handle.funcHandleName());
     if (!uf)
+        uf = engine_.lookupUserFunction(handle.funcHandleName(), currentCallEnv());
+    if (!uf) {
+        if (const BytecodeChunk *fc = findCompiledFunc(handle.funcHandleName())) {
+            pushCallFrame(*fc, args.data(), args.size(), /*destReg=*/0, nargout,
+                          /*isMulti=*/false, 0, 0, std::string(), /*isCtor=*/false, /*ctorSeed=*/nullptr);
+            frames_.back().cont = std::move(cont);
+            return true;
+        }
         return false; // not user code — caller must use the synchronous path
+    }
     const BytecodeChunk *cc = engine_.ensureClassMethodChunk(*uf);
     if (!cc)
         return false;
@@ -4598,7 +4782,7 @@ Value VM::unarySlowPath(OpCode op, const Value &operand)
     throw std::runtime_error("VM: unsupported unary op");
 }
 
-bool VM::tryBinaryOpFrame(uint8_t dst, OpCode op, uint8_t lhsReg, uint8_t rhsReg,
+bool VM::tryBinaryOpFrame(uint16_t dst, OpCode op, uint16_t lhsReg, uint16_t rhsReg,
                           CallFrame &frame, const Instruction *ip)
 {
     Value *R = frame.R;
@@ -4618,7 +4802,7 @@ bool VM::tryBinaryOpFrame(uint8_t dst, OpCode op, uint8_t lhsReg, uint8_t rhsReg
     return true;
 }
 
-bool VM::tryUnaryOpFrame(uint8_t dst, OpCode op, uint8_t operandReg,
+bool VM::tryUnaryOpFrame(uint16_t dst, OpCode op, uint16_t operandReg,
                          CallFrame &frame, const Instruction *ip)
 {
     Value *R = frame.R;
@@ -4637,7 +4821,7 @@ bool VM::tryUnaryOpFrame(uint8_t dst, OpCode op, uint8_t operandReg,
     return true;
 }
 
-bool VM::tryObjectSubsrefFrame(uint8_t dst, uint8_t selfReg, Span<const Value> idx,
+bool VM::tryObjectSubsrefFrame(uint16_t dst, uint16_t selfReg, Span<const Value> idx,
                                CallFrame &frame, const Instruction *ip)
 {
     Value *R = frame.R;
@@ -4646,7 +4830,7 @@ bool VM::tryObjectSubsrefFrame(uint8_t dst, uint8_t selfReg, Span<const Value> i
     return tryObjectSubsrefFrameObj(R[selfReg], dst, idx, frame, ip);
 }
 
-bool VM::tryObjectSubsrefFrameObj(const Value &self, uint8_t dst, Span<const Value> idx,
+bool VM::tryObjectSubsrefFrameObj(const Value &self, uint16_t dst, Span<const Value> idx,
                                   CallFrame &frame, const Instruction *ip)
 {
     if (!self.isObject())
@@ -4662,7 +4846,7 @@ bool VM::tryObjectSubsrefFrameObj(const Value &self, uint8_t dst, Span<const Val
     return true;
 }
 
-bool VM::tryObjectSubsasgnFrame(uint8_t objReg, Span<const Value> idxAndVal,
+bool VM::tryObjectSubsasgnFrame(uint16_t objReg, Span<const Value> idxAndVal,
                                 CallFrame &frame, const Instruction *ip)
 {
     Value *R = frame.R;
@@ -4683,8 +4867,8 @@ bool VM::tryObjectSubsasgnFrame(uint8_t objReg, Span<const Value> idxAndVal,
 
 void VM::execCallBuiltin(const Instruction &I, Value *R)
 {
-    uint8_t argBase = I.b, na = I.c;
-    int16_t bid = I.d;
+    uint16_t argBase = I.b, na = I.c;
+    int32_t bid = I.d;
 
     // 1-arg scalar fast path
     if (na == 1 && R[argBase].isDoubleScalar()) {
@@ -4780,7 +4964,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
             // adapters (NUMKIT_UNARY_ADAPTER_HINT) reuse its buffer
             // instead of allocating fresh.
             bool canHint = R[I.a].hasHeap();
-            for (uint8_t i = 0; i < na && canHint; ++i)
+            for (uint16_t i = 0; i < na && canHint; ++i)
                 if (&R[argBase + i] == &R[I.a])
                     canHint = false;
             if (canHint)
@@ -4801,7 +4985,7 @@ bool VM::execCallIndirect(const Instruction &I, Value *R,
     return execCallIndirectTarget(R[I.b], I.a, I.c, I.e, R, frame, ip);
 }
 
-bool VM::execCallIndirectTarget(const Value &target, uint8_t dstReg, uint8_t argBase, uint8_t na,
+bool VM::execCallIndirectTarget(const Value &target, uint16_t dstReg, uint16_t argBase, uint16_t na,
                                 Value *R, CallFrame &frame, const Instruction *ip)
 {
     return execCallIndirectSpan(target, dstReg, na ? &R[argBase] : nullptr, na,
@@ -4813,24 +4997,7 @@ bool VM::execCallIndirectTarget(const Value &target, uint8_t dstReg, uint8_t arg
 // CALL_INDIRECT_FLATTEN path materializes its flattened CSL args in a
 // vector and reuses this dispatch verbatim
 // (bugs/closed/lang/handle-call-csl-splat).
-void VM::callTwOnlySingle(Value *R, const UserFunction &uf,
-                          const Value *args, size_t nargs, uint8_t dstReg)
-{
-    R[dstReg] = engine_.callUserFunctionOnTreeWalker(
-        uf, Span<const Value>(args, nargs));
-}
-
-void VM::callTwOnlyMulti(Value *R, const UserFunction &uf,
-                         const Value *args, size_t nargs,
-                         uint8_t outBase, uint8_t nout)
-{
-    auto res = engine_.callUserFunctionOnTreeWalkerMulti(
-        uf, Span<const Value>(args, nargs), nout);
-    for (size_t i = 0; i < nout && i < res.size(); ++i)
-        R[outBase + i] = std::move(res[i]);
-}
-
-bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *AB, size_t na,
+bool VM::execCallIndirectSpan(const Value &target, uint16_t dstReg, const Value *AB, size_t na,
                               Value *R, CallFrame &frame, const Instruction *ip)
 {
     // Resolve function handle (plain or closure)
@@ -4926,13 +5093,12 @@ bool VM::execCallIndirectSpan(const Value &target, uint8_t dstReg, const Value *
     // a direct call (script-origin dirs included)
     // (bugs/opened/lang/handle-to-file-function-unresolved.md).
     if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
-        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-            frame.ip = ip + 1;
-            pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
-            return true;
-        }
-        callTwOnlySingle(R, *uf, argsBuf.data(), totalArgs, dstReg);
-        return false;
+        const BytecodeChunk *found = findCompiledFunc(uf->name);
+        if (!found)
+            found = engine_.ensureClassMethodChunk(*uf);
+        frame.ip = ip + 1;
+        pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
+        return true;
     }
     throw std::runtime_error("VM: undefined function in handle '@" + funcName + "'");
 }
@@ -4941,9 +5107,9 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
                                CallFrame &frame, const Instruction *ip)
 {
     // a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
-    uint8_t outBase = I.a, fhReg = I.b, argBase = I.c;
-    uint8_t na = static_cast<uint8_t>(I.d);
-    uint8_t nout = I.e;
+    uint16_t outBase = I.a, fhReg = I.b, argBase = I.c;
+    uint16_t na = static_cast<uint16_t>(I.d);
+    uint16_t nout = I.e;
 
     // Resolve the function handle (plain or closure) + its captures.
     Value funcHandleVal;
@@ -4989,7 +5155,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     // runs with nargout = nout and RET_MULTI distributes back to outBase).
     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
         frame.ip = ip + 1;
-        returnCount_ = 0;
+        returnBuf_.clear();
         pushCallFrame(*found, argsBuf.data(), totalArgs,
                       0, nout, true, outBase, nout);
         return true; // caller re-enters the dispatch loop
@@ -5003,7 +5169,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         Span<Value> os(outBuf.data(), nout);
         CallContext ctx{&engine_, currentCallEnv()};
         (*fnPtr)(as, nout, os, ctx);
-        for (uint8_t i = 0; i < nout; ++i)
+        for (uint16_t i = 0; i < nout; ++i)
             if (outBuf[i].isUnset())
                 throw std::runtime_error("Too many output arguments.");
         for (size_t i = 0; i < nout; ++i)
@@ -5011,17 +5177,15 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         return false;
     }
 
-    // M-file fallback (see the single-output execCallIndirect note).
     if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
-        if (const BytecodeChunk *found = findCompiledFunc(uf->name)) {
-            frame.ip = ip + 1;
-            returnCount_ = 0;
-            pushCallFrame(*found, argsBuf.data(), totalArgs,
-                          0, nout, true, outBase, nout);
-            return true;
-        }
-        callTwOnlyMulti(R, *uf, argsBuf.data(), totalArgs, outBase, nout);
-        return false;
+        const BytecodeChunk *found = findCompiledFunc(uf->name);
+        if (!found)
+            found = engine_.ensureClassMethodChunk(*uf);
+        frame.ip = ip + 1;
+        returnBuf_.clear();
+        pushCallFrame(*found, argsBuf.data(), totalArgs,
+                      0, nout, true, outBase, nout);
+        return true;
     }
     throw std::runtime_error("VM: undefined function in handle '@" + funcName + "'");
 }
@@ -5031,14 +5195,12 @@ void VM::execIndirectIndex(const Instruction &I, Value *R)
     execIndirectIndexTarget(R[I.b], I.a, I.c, I.e, R);
 }
 
-void VM::execIndirectIndexTarget(const Value &mv, uint8_t dstReg, uint8_t argBase, uint8_t na, Value *R)
+void VM::execIndirectIndexTarget(const Value &mv, uint16_t dstReg, uint16_t argBase, uint16_t na, Value *R)
 {
     execIndirectIndexSpan(mv, dstReg, na ? &R[argBase] : nullptr, na, R);
 }
 
-// Span twin of execIndirectIndexTarget (AB[0..na) args) — shared with the
-// CALL_INDIRECT_FLATTEN dispatch.
-void VM::execIndirectIndexSpan(const Value &mv, uint8_t dstReg, const Value *AB, uint8_t na, Value *R)
+void VM::execIndirectIndexSpan(const Value &mv, uint16_t dstReg, const Value *AB, size_t na, Value *R)
 {
     if (na == 1) {
         const Value &ix = AB[0];
@@ -5181,7 +5343,7 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
                 names.push_back(vn);
         }
     } else {
-        for (uint8_t i = 0; i < I.b; ++i) {
+        for (uint16_t i = 0; i < I.b; ++i) {
             std::string reqName = R[I.a + i].toString();
             for (auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()) {
@@ -5215,7 +5377,7 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
                 names.push_back(vn);
         }
     } else {
-        for (uint8_t i = 0; i < I.b; ++i) {
+        for (uint16_t i = 0; i < I.b; ++i) {
             std::string reqName = R[I.a + i].toString();
             for (auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters && !R[reg].isUnset() && !R[reg].isDeleted()) {

@@ -113,50 +113,6 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
         return false;
     }
 
-    // Fast path for simple binary expressions on scalars: B(i+1), B(2*j)
-    if (indexExpr->type == NodeType::BINARY_OP && indexExpr->cachedOp) {
-        auto *left = indexExpr->children[0].get();
-        auto *right = indexExpr->children[1].get();
-
-        // Only handle two-identifier or identifier-literal combos
-        double lv, rv;
-        bool lOk = false, rOk = false;
-
-        if (left->type == NodeType::NUMBER_LITERAL) {
-            lv = left->numValue;
-            lOk = true;
-        } else if (left->type == NodeType::IDENTIFIER) {
-            auto *val = env->get(left->strValue);
-            if (val && val->isScalar() && val->type() == ValueType::DOUBLE) {
-                lv = val->toScalar();
-                lOk = true;
-            }
-        }
-        if (right->type == NodeType::NUMBER_LITERAL) {
-            rv = right->numValue;
-            rOk = true;
-        } else if (right->type == NodeType::IDENTIFIER) {
-            auto *val = env->get(right->strValue);
-            if (val && val->isScalar() && val->type() == ValueType::DOUBLE) {
-                rv = val->toScalar();
-                rOk = true;
-            }
-        }
-
-        if (lOk && rOk) {
-            Value lm = Value::scalar(lv, engine_.mr_);
-            Value rm = Value::scalar(rv, engine_.mr_);
-            Value result = (*static_cast<const BinaryOpFunc *>(indexExpr->cachedOp))(lm, rm);
-            if (result.isScalar()) {
-                double v = result.toScalar();
-                if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
-                    outIdx = static_cast<size_t>(v) - 1;
-                    return true;
-                }
-            }
-        }
-    }
-
     return false;
 }
 
@@ -418,539 +374,6 @@ Value TreeWalker::execNodeExpand(const ASTNode *node, Environment *env)
     }
 }
 
-// Returns true and sets `out` on success, false on failure (caller falls back to execNode).
-// ============================================================
-// tryEvalFast — fast-path evaluation returning Value
-//
-// Handles double scalars, logical scalars, and comparison ops
-// without falling through to the full execNode path.
-// Returns true if the expression was evaluated successfully.
-// ============================================================
-
-// Helper: extract a double scalar from an Value (double or logical)
-static inline bool asDouble(const Value &v, double &d)
-{
-    if (v.isDoubleScalar()) {
-        d = v.scalarVal();
-        return true;
-    }
-    if (v.isLogicalScalar()) {
-        d = v.fastScalarVal();
-        return true;
-    }
-    return false;
-}
-
-// Apply a scalar binary op in the fast path: the direct scalar set for
-// the known ops, then the node's cachedOp fallback. Extracted so the
-// single-op case and the iterative left-spine fold below share it.
-static bool applyFastBinOp(const ASTNode *node, const std::string &opStr,
-                           double lv, double rv, std::pmr::memory_resource *mr,
-                           Value &out)
-{
-    // Direct scalar arithmetic — bypass std::function overhead
-    if (opStr.size() == 1) {
-        switch (opStr[0]) {
-        case '+':
-            out.setScalarFast(lv + rv);
-            return true;
-        case '-':
-            out.setScalarFast(lv - rv);
-            return true;
-        case '*':
-            out.setScalarFast(lv * rv);
-            return true;
-        case '/':
-            out.setScalarFast(lv / rv);
-            return true;
-        case '^':
-            out.setScalarFast(std::pow(lv, rv));
-            return true;
-        case '<':
-            out.setLogicalFast(lv < rv);
-            return true;
-        case '>':
-            out.setLogicalFast(lv > rv);
-            return true;
-        default:
-            break;
-        }
-    } else if (opStr == ".*") {
-        out.setScalarFast(lv * rv);
-        return true;
-    } else if (opStr == "./") {
-        out.setScalarFast(lv / rv);
-        return true;
-    } else if (opStr == ".^") {
-        // negative base ^ non-integer exp -> complex; let the full path handle it.
-        if (lv < 0.0 && rv != std::floor(rv))
-            return false;
-        out.setScalarFast(std::pow(lv, rv));
-        return true;
-    } else if (opStr == "<=") {
-        out.setLogicalFast(lv <= rv);
-        return true;
-    } else if (opStr == ">=") {
-        out.setLogicalFast(lv >= rv);
-        return true;
-    } else if (opStr == "==") {
-        out.setLogicalFast(lv == rv);
-        return true;
-    } else if (opStr == "~=") {
-        out.setLogicalFast(lv != rv);
-        return true;
-    }
-
-    // Unknown op — fall back to cached BinaryOpFunc
-    if (!node->cachedOp)
-        return false;
-    Value lArg = Value::scalar(lv, mr);
-    Value rArg = Value::scalar(rv, mr);
-    Value result = (*static_cast<const BinaryOpFunc *>(node->cachedOp))(lArg, rArg);
-    if (result.isScalar()) {
-        ValueType t = result.type();
-        if (t == ValueType::DOUBLE || t == ValueType::LOGICAL) {
-            out = std::move(result);
-            return true;
-        }
-    }
-    return false;
-}
-
-bool TreeWalker::tryEvalFast(const ASTNode *expr, Environment *env, Value &out)
-{
-    switch (expr->type) {
-    case NodeType::NUMBER_LITERAL:
-        out.setScalarFast(expr->numValue);
-        return true;
-
-    case NodeType::IDENTIFIER: {
-        Value *v = env->get(expr->strValue);
-        if (v && v->isScalar()) {
-            ValueType t = v->type();
-            if (t == ValueType::DOUBLE) {
-                out.setScalarFast(v->toScalar());
-                return true;
-            }
-            if (t == ValueType::LOGICAL) {
-                out.setLogicalFast(v->toBool());
-                return true;
-            }
-        }
-        return false;
-    }
-
-    case NodeType::FIELD_ACCESS: {
-        // p.x where p is a struct and p.x is a scalar double/logical
-        if (expr->children.size() == 1 && expr->children[0]->type == NodeType::IDENTIFIER) {
-            Value *obj = env->get(expr->children[0]->strValue);
-            if (obj && obj->isStruct() && obj->hasField(expr->strValue)) {
-                const Value &fv = obj->field(expr->strValue);
-                if (fv.isScalar()) {
-                    ValueType t = fv.type();
-                    if (t == ValueType::DOUBLE) {
-                        out.setScalarFast(fv.toScalar());
-                        return true;
-                    }
-                    if (t == ValueType::LOGICAL) {
-                        out.setLogicalFast(fv.toBool());
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    case NodeType::BINARY_OP: {
-        if (expr->children.size() != 2)
-            return false;
-        // Short-circuit operators must NOT use fast-path
-        // (both operands would be evaluated before checking the operator)
-        const std::string &opStr = expr->strValue;
-        if (opStr == "&&" || opStr == "||")
-            return false;
-
-        // Right operands and the base of the spine still recurse (they
-        // are subtrees) — keep the guard for them. The spine descent
-        // itself is iterative, so a left-assoc chain `1+2+...+N` no
-        // longer recurses per level and cannot blow the stack
-        // (bugs/closed/core/debug-compiler-overflow-crash.md).
-        StackGuard::check("tree walker execution");
-
-        if (expr->children[0]->type != NodeType::BINARY_OP) {
-            // The overwhelmingly common single-op shape `a op b`: no
-            // spine machinery, no allocation.
-            Value lm, rm;
-            if (!tryEvalFast(expr->children[0].get(), env, lm))
-                return false;
-            if (!tryEvalFast(expr->children[1].get(), env, rm))
-                return false;
-
-            // Extract double values for arithmetic (works for both
-            // double and logical scalars)
-            double lv, rv;
-            if (!asDouble(lm, lv) || !asDouble(rm, rv))
-                return false;
-            return applyFastBinOp(expr, opStr, lv, rv, engine_.mr_, out);
-        }
-
-        // Deeper left-assoc chain `((a+b)+c)+d`: collect the spine
-        // (op node + right operand) down to the base, then fold
-        // bottom-up in O(1) stack. Evaluation order stays left-to-right
-        // (base, then each right operand innermost-first), matching the
-        // recursive form.
-        std::vector<std::pair<const ASTNode *, const ASTNode *>> spine;
-        const ASTNode *n = expr;
-        while (n->type == NodeType::BINARY_OP && n->children.size() == 2) {
-            if (n->strValue == "&&" || n->strValue == "||")
-                return false; // whole spine falls back: short-circuit semantics
-            spine.emplace_back(n, n->children[1].get());
-            n = n->children[0].get();
-        }
-        Value acc;
-        if (!tryEvalFast(n, env, acc))
-            return false;
-        double lv;
-        if (!asDouble(acc, lv))
-            return false;
-        for (auto it = spine.rbegin(); it != spine.rend(); ++it) {
-            Value rm;
-            if (!tryEvalFast(it->second, env, rm))
-                return false;
-            double rv;
-            if (!asDouble(rm, rv))
-                return false;
-            Value step;
-            if (!applyFastBinOp(it->first, it->first->strValue, lv, rv,
-                                engine_.mr_, step))
-                return false;
-            // The final value keeps its own type (a comparison chain
-            // must yield logical); intermediates feed the next op as 0/1.
-            if (it + 1 == spine.rend())
-                out = std::move(step);
-            else if (!asDouble(step, lv))
-                return false;
-        }
-        return true;
-    }
-
-    case NodeType::UNARY_OP: {
-        if (expr->children.size() != 1)
-            return false;
-        Value operandM;
-        if (!tryEvalFast(expr->children[0].get(), env, operandM))
-            return false;
-
-        double operand;
-        if (!asDouble(operandM, operand))
-            return false;
-
-        const std::string &op = expr->strValue;
-        if (op == "-") {
-            out.setScalarFast(-operand);
-            return true;
-        }
-        if (op == "+") {
-            out.setScalarFast(operand);
-            return true;
-        }
-        if (op == "~") {
-            out.setLogicalFast(operand == 0.0);
-            return true;
-        }
-
-        if (!expr->cachedOp)
-            return false;
-        Value om = Value::scalar(operand, engine_.mr_);
-        Value result = (*static_cast<const UnaryOpFunc *>(expr->cachedOp))(om);
-        if (result.isScalar()) {
-            ValueType t = result.type();
-            if (t == ValueType::DOUBLE || t == ValueType::LOGICAL) {
-                out = std::move(result);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    case NodeType::CALL: {
-        // func(a, b, ...) where all args are scalar
-        if (expr->children.empty())
-            return false;
-        auto *funcNode = expr->children[0].get();
-        size_t nargs = expr->children.size() - 1;
-        if (nargs > 4)
-            return false;
-
-        // Resolve builtin ID on first call (0 = unresolved)
-        if (funcNode->cachedBuiltinId == 0 && funcNode->type == NodeType::IDENTIFIER) {
-            const auto &fn = funcNode->strValue;
-            // IDs: 1-19 = known builtins, -1 = not a scalar builtin
-            if (fn == "mod")
-                funcNode->cachedBuiltinId = 1;
-            else if (fn == "abs")
-                funcNode->cachedBuiltinId = 2;
-            else if (fn == "floor")
-                funcNode->cachedBuiltinId = 3;
-            else if (fn == "ceil")
-                funcNode->cachedBuiltinId = 4;
-            else if (fn == "round")
-                funcNode->cachedBuiltinId = 5;
-            else if (fn == "fix")
-                funcNode->cachedBuiltinId = 6;
-            else if (fn == "sin")
-                funcNode->cachedBuiltinId = 7;
-            else if (fn == "cos")
-                funcNode->cachedBuiltinId = 8;
-            else if (fn == "sqrt")
-                funcNode->cachedBuiltinId = 9;
-            else if (fn == "exp")
-                funcNode->cachedBuiltinId = 10;
-            else if (fn == "log")
-                funcNode->cachedBuiltinId = 11;
-            else if (fn == "min")
-                funcNode->cachedBuiltinId = 12;
-            else if (fn == "max")
-                funcNode->cachedBuiltinId = 13;
-            else if (fn == "sign")
-                funcNode->cachedBuiltinId = 14;
-            else if (fn == "tan")
-                funcNode->cachedBuiltinId = 15;
-            else if (fn == "log2")
-                funcNode->cachedBuiltinId = 16;
-            else if (fn == "log10")
-                funcNode->cachedBuiltinId = 17;
-            else if (fn == "rem")
-                funcNode->cachedBuiltinId = 18;
-            else
-                funcNode->cachedBuiltinId = -1;
-        }
-
-        int8_t bid = funcNode->cachedBuiltinId;
-        if (bid > 0) {
-            Value argMs[4];
-            double argVals[4];
-            for (size_t i = 0; i < nargs; ++i) {
-                if (!tryEvalFast(expr->children[i + 1].get(), env, argMs[i]))
-                    return false;
-                if (!asDouble(argMs[i], argVals[i]))
-                    return false;
-            }
-            double r;
-            bool ok = false;
-            switch (bid) {
-            case 1: // mod
-                if (nargs == 2) {
-                    // MATLAB: mod(a, 0) == a (std::fmod(a, 0) would be NaN).
-                    if (argVals[1] == 0.0) {
-                        r = argVals[0];
-                    } else {
-                        r = std::fmod(argVals[0], argVals[1]);
-                        if (r != 0 && ((r < 0) != (argVals[1] < 0)))
-                            r += argVals[1];
-                    }
-                    ok = true;
-                }
-                break;
-            case 2:
-                if (nargs == 1) {
-                    r = std::abs(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 3:
-                if (nargs == 1) {
-                    r = std::floor(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 4:
-                if (nargs == 1) {
-                    r = std::ceil(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 5:
-                if (nargs == 1) {
-                    r = std::round(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 6:
-                if (nargs == 1) {
-                    r = std::trunc(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 7:
-                if (nargs == 1) {
-                    r = std::sin(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 8:
-                if (nargs == 1) {
-                    r = std::cos(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 9:
-                if (nargs == 1 && argVals[0] >= 0) {
-                    r = std::sqrt(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 10:
-                if (nargs == 1) {
-                    r = std::exp(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 11:
-                // log of a negative promotes to complex — defer to the full
-                // builtin (mirrors the sqrt guard above).
-                if (nargs == 1 && argVals[0] >= 0) {
-                    r = std::log(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 12:
-                if (nargs == 2) {
-                    r = std::fmin(argVals[0], argVals[1]);
-                    ok = true;
-                } else if (nargs == 1) {
-                    r = argVals[0];
-                    ok = true;
-                }
-                break;
-            case 13:
-                if (nargs == 2) {
-                    r = std::fmax(argVals[0], argVals[1]);
-                    ok = true;
-                } else if (nargs == 1) {
-                    r = argVals[0];
-                    ok = true;
-                }
-                break;
-            case 14:
-                if (nargs == 1) {
-                    r = std::isnan(argVals[0]) ? std::numeric_limits<double>::quiet_NaN()
-                        : (argVals[0] > 0) ? 1.0
-                        : (argVals[0] < 0) ? -1.0
-                                           : 0.0;
-                    ok = true;
-                }
-                break;
-            case 15:
-                if (nargs == 1) {
-                    r = std::tan(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 16:
-                if (nargs == 1 && argVals[0] >= 0) {
-                    r = std::log2(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 17:
-                if (nargs == 1 && argVals[0] >= 0) {
-                    r = std::log10(argVals[0]);
-                    ok = true;
-                }
-                break;
-            case 18:
-                if (nargs == 2) {
-                    r = std::fmod(argVals[0], argVals[1]);
-                    ok = true;
-                }
-                break;
-            }
-            if (ok) {
-                out.setScalarFast(r);
-                return true;
-            }
-            // nargs mismatch — fall through to ExternalFunc path
-        }
-
-        if (!funcNode->cachedOp) {
-            // Try array scalar indexing: A(i) or A(i,j) where A is a double array
-            if (funcNode->type == NodeType::IDENTIFIER) {
-                if (nargs == 1) {
-                    Value idxM;
-                    if (tryEvalFast(expr->children[1].get(), env, idxM)) {
-                        double idxVal;
-                        if (asDouble(idxM, idxVal)
-                            && idxVal >= 1.0 && idxVal == std::floor(idxVal)
-                            && idxVal < 9007199254740992.0) {
-                            Value *arr = env->get(funcNode->strValue);
-                            if (arr && arr->type() == ValueType::DOUBLE) {
-                                size_t idx = static_cast<size_t>(idxVal) - 1;
-                                if (idx < arr->numel()) {
-                                    out.setScalarFast(arr->doubleData()[idx]);
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                } else if (nargs == 2) {
-                    Value rowM, colM;
-                    if (tryEvalFast(expr->children[1].get(), env, rowM)
-                        && tryEvalFast(expr->children[2].get(), env, colM)) {
-                        double rowVal, colVal;
-                        if (asDouble(rowM, rowVal) && asDouble(colM, colVal)
-                            && rowVal >= 1.0 && rowVal == std::floor(rowVal)
-                            && rowVal < 9007199254740992.0
-                            && colVal >= 1.0 && colVal == std::floor(colVal)
-                            && colVal < 9007199254740992.0) {
-                            Value *arr = env->get(funcNode->strValue);
-                            if (arr && arr->type() == ValueType::DOUBLE && arr->dims().ndim() <= 2) {
-                                size_t r = static_cast<size_t>(rowVal) - 1;
-                                size_t c = static_cast<size_t>(colVal) - 1;
-                                if (r < arr->dims().rows() && c < arr->dims().cols()) {
-                                    out.setScalarFast(arr->doubleData()[arr->dims().sub2ind(r, c)]);
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-        // ExternalFunc fast path — all args must be scalar doubles
-        Value argMs[4];
-        double argVals[4];
-        for (size_t i = 0; i < nargs; ++i) {
-            if (!tryEvalFast(expr->children[i + 1].get(), env, argMs[i]))
-                return false;
-            if (!asDouble(argMs[i], argVals[i]))
-                return false;
-        }
-        // Reuse engine-owned buffer to avoid heap allocation per call
-        callArgsBuf_.clear();
-        for (size_t i = 0; i < nargs; ++i)
-            callArgsBuf_.push_back(Value::scalar(argVals[i], engine_.mr_));
-        Value outBuf[1];
-        CallContext ctx{&engine_, env};
-        (*static_cast<const ExternalFunc *>(
-            funcNode->cachedOp))(callArgsBuf_, 1, Span<Value>(outBuf, 1), ctx);
-        if (outBuf[0].isScalar()) {
-            ValueType t = outBuf[0].type();
-            if (t == ValueType::DOUBLE || t == ValueType::LOGICAL) {
-                out = std::move(outBuf[0]);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    default:
-        return false;
-    }
-}
-
 Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
 {
     StackGuard::check("tree walker execution");
@@ -963,146 +386,6 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
                                     static_cast<uint16_t>(child->col),
                                     currentRecursionDepth_))
                     throw DebugStopException();
-            }
-        }
-
-        // ── Fast paths for ASSIGN with suppressed output ──
-        if (child->type == NodeType::ASSIGN && child->suppressOutput
-            && child->children.size() == 2) {
-            const auto *lhsNode = child->children[0].get();
-            const auto *rhsNode = child->children[1].get();
-
-            // x = <scalar expr>
-            if (lhsNode->type == NodeType::IDENTIFIER) {
-                const std::string &lhsName = lhsNode->strValue;
-                Value fastVal;
-                if (tryEvalFast(rhsNode, env, fastVal)) {
-                    if (fastVal.isDoubleScalar()) {
-                        // Double scalar — try in-place update
-                        double dv = fastVal.scalarVal();
-                        Value *existing = env->getLocal(lhsName);
-                        if (existing && existing->isDoubleScalar()) {
-                            existing->setScalarVal(dv);
-                            last = *existing;
-                        } else {
-                            env->set(lhsName, Value::scalar(dv, engine_.mr_));
-                            last = *env->get(lhsName);
-                        }
-                    } else {
-                        // Logical scalar — preserve type
-                        env->set(lhsName, std::move(fastVal));
-                        last = *env->get(lhsName);
-                    }
-                    continue;
-                }
-                // x = A(i) — scalar indexed read
-                if (rhsNode->type == NodeType::CALL && rhsNode->children.size() == 2
-                    && rhsNode->children[0]->type == NodeType::IDENTIFIER) {
-                    Value *arr = env->get(rhsNode->children[0]->strValue);
-                    if (arr && arr->type() == ValueType::DOUBLE) {
-                        Value idxM;
-                        if (tryEvalFast(rhsNode->children[1].get(), env, idxM)) {
-                            double idxVal;
-                            if (asDouble(idxM, idxVal)
-                                && idxVal >= 1.0 && idxVal == std::floor(idxVal)
-                                && idxVal < 9007199254740992.0) {
-                                size_t idx = static_cast<size_t>(idxVal) - 1;
-                                if (idx < arr->numel()) {
-                                    double v = arr->doubleData()[idx];
-                                    Value *existing = env->getLocal(lhsName);
-                                    if (existing && existing->isDoubleScalar()) {
-                                        existing->setScalarVal(v);
-                                    } else {
-                                        env->set(lhsName, Value::scalar(v, engine_.mr_));
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // A(i) = <scalar> or A(i,j) = <scalar>
-            if (lhsNode->type == NodeType::CALL
-                && lhsNode->children[0]->type == NodeType::IDENTIFIER) {
-                size_t lhsArgs = lhsNode->children.size();
-                const std::string &arrName = lhsNode->children[0]->strValue;
-                Value *arr = env->get(arrName);
-
-                if (arr && arr->type() == ValueType::DOUBLE) {
-                    if (lhsArgs == 2) {
-                        // 1D: A(i) = val
-                        Value idxM, rhsM;
-                        if (tryEvalFast(lhsNode->children[1].get(), env, idxM)
-                            && tryEvalFast(rhsNode, env, rhsM)) {
-                            double idxVal, rhsVal;
-                            if (asDouble(idxM, idxVal) && asDouble(rhsM, rhsVal)
-                                && idxVal >= 1.0 && idxVal == std::floor(idxVal)
-                                && idxVal < 9007199254740992.0) {
-                                size_t idx = static_cast<size_t>(idxVal) - 1;
-                                if (idx < arr->numel()) {
-                                    arr->doubleDataMut()[idx] = rhsVal;
-                                } else {
-                                    arr->ensureSize(idx, engine_.mr_);
-                                    arr->doubleDataMut()[idx] = rhsVal;
-                                }
-                                continue;
-                            }
-                        }
-                    } else if (lhsArgs == 3 && arr->dims().ndim() <= 2) {
-                        // 2D: A(i,j) = val
-                        Value rowM, colM, rhsM;
-                        if (tryEvalFast(lhsNode->children[1].get(), env, rowM)
-                            && tryEvalFast(lhsNode->children[2].get(), env, colM)
-                            && tryEvalFast(rhsNode, env, rhsM)) {
-                            double rowVal, colVal, rhsVal;
-                            if (asDouble(rowM, rowVal) && asDouble(colM, colVal)
-                                && asDouble(rhsM, rhsVal)
-                                && rowVal >= 1.0 && rowVal == std::floor(rowVal)
-                                && rowVal < 9007199254740992.0
-                                && colVal >= 1.0 && colVal == std::floor(colVal)
-                                && colVal < 9007199254740992.0) {
-                                size_t r = static_cast<size_t>(rowVal) - 1;
-                                size_t c = static_cast<size_t>(colVal) - 1;
-                                if (r < arr->dims().rows() && c < arr->dims().cols()) {
-                                    arr->doubleDataMut()[arr->dims().sub2ind(r, c)] = rhsVal;
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // p.x = <scalar> — struct field scalar assign. Single-
-            // struct only; multi-element arrays fall through to
-            // execFieldAssign so the broadcast path runs.
-            if (lhsNode->type == NodeType::FIELD_ACCESS && lhsNode->children.size() == 1
-                && lhsNode->children[0]->type == NodeType::IDENTIFIER) {
-                Value fastVal;
-                if (tryEvalFast(rhsNode, env, fastVal)) {
-                    if (fastVal.isDoubleScalar()) {
-                        double dv = fastVal.scalarVal();
-                        Value *obj = env->get(lhsNode->children[0]->strValue);
-                        if (obj && obj->isStruct() && !obj->isStructArray()) {
-                            Value &fv = obj->field(lhsNode->strValue);
-                            if (fv.isScalar() && fv.type() == ValueType::DOUBLE) {
-                                *fv.doubleDataMut() = dv;
-                                continue;
-                            }
-                            fv = Value::scalar(dv, engine_.mr_);
-                            continue;
-                        }
-                    } else {
-                        // Logical or other fast type — set directly
-                        Value *obj = env->get(lhsNode->children[0]->strValue);
-                        if (obj && obj->isStruct() && !obj->isStructArray()) {
-                            obj->field(lhsNode->strValue) = std::move(fastVal);
-                            continue;
-                        }
-                    }
-                }
             }
         }
 
@@ -1853,8 +1136,14 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
                 if (cls && cls->methods.count(mname)) {
                     std::vector<Value> margs;
                     margs.reserve(node->children.size() - 1);
-                    for (size_t i = 1; i < node->children.size(); ++i)
-                        margs.push_back(execNode(node->children[i].get(), env));
+                    for (size_t i = 1; i < node->children.size(); ++i) {
+                        Value v = execNodeExpand(node->children[i].get(), env);
+                        if (v.isCsl())
+                            for (size_t k = 0; k < v.cslCount(); ++k)
+                                margs.push_back(std::move(v.cslAt(k)));
+                        else
+                            margs.push_back(std::move(v));
+                    }
                     Value self = *objPtr; // handle: shares state; value: own copy
                     std::vector<Value> outBuf(nout);
                     CallContext ctx{&engine_, env};
@@ -1862,11 +1151,65 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
                                            nout, Span<Value>(outBuf), ctx);
                     return outBuf;
                 }
+                Value prop = objectPropGet(*objPtr, mname, env);
+                if (prop.isFuncHandle()) {
+                    std::vector<Value> pargs;
+                    pargs.reserve(node->children.size() - 1);
+                    for (size_t i = 1; i < node->children.size(); ++i) {
+                        Value v = execNodeExpand(node->children[i].get(), env);
+                        if (v.isCsl())
+                            for (size_t k = 0; k < v.cslCount(); ++k)
+                                pargs.push_back(std::move(v.cslAt(k)));
+                        else
+                            pargs.push_back(std::move(v));
+                    }
+                    return callFuncHandleMulti(prop, pargs, env, nout, node);
+                }
+            } else if (objPtr && objPtr->isStruct() && objPtr->hasField(headNode->strValue)) {
+                Value fld = objPtr->field(headNode->strValue);
+                if (fld.isFuncHandle()) {
+                    std::vector<Value> fargs;
+                    fargs.reserve(node->children.size() - 1);
+                    for (size_t i = 1; i < node->children.size(); ++i) {
+                        Value v = execNodeExpand(node->children[i].get(), env);
+                        if (v.isCsl())
+                            for (size_t k = 0; k < v.cslCount(); ++k)
+                                fargs.push_back(std::move(v.cslAt(k)));
+                        else
+                            fargs.push_back(std::move(v));
+                    }
+                    return callFuncHandleMulti(fld, fargs, env, nout, node);
+                }
             }
         }
         funcName = std::move(dotted);
+    } else if (headNode->type != NodeType::IDENTIFIER) {
+        Value callee = execNode(headNode, env);
+        std::vector<Value> cargs;
+        cargs.reserve(node->children.size() - 1);
+        for (size_t i = 1; i < node->children.size(); ++i) {
+            Value v = execNodeExpand(node->children[i].get(), env);
+            if (v.isCsl())
+                for (size_t k = 0; k < v.cslCount(); ++k)
+                    cargs.push_back(std::move(v.cslAt(k)));
+            else
+                cargs.push_back(std::move(v));
+        }
+        if (callee.isFuncHandle())
+            return callFuncHandleMulti(callee, cargs, env, nout, node);
+        if (callee.isObject()) {
+            const BuiltinClass *cls = engine_.findClass(callee.objectClassName());
+            if (cls && cls->subsref) {
+                std::vector<Value> outBuf(nout);
+                CallContext ctx{&engine_, env};
+                cls->subsref(callee, Span<const Value>(cargs.data(), cargs.size()), nout,
+                             Span<Value>(outBuf), ctx);
+                return outBuf;
+            }
+        }
+        throw std::runtime_error("Cannot invoke non-function value with multiple outputs");
     } else {
-        funcName = node->children[0]->strValue;
+        funcName = headNode->strValue;
     }
 
     std::vector<Value> args;
@@ -1912,25 +1255,12 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
         }
     }
 
-    // Fast path: cached function pointer
-    auto *funcNode = node->children[0].get();
-    if (funcNode->cachedOp) {
-        std::vector<Value> outBuf(nout);
-        CallContext ctx{&engine_, env};
-        (*static_cast<const ExternalFunc *>(
-            funcNode->cachedOp))(args, nout, Span<Value>(outBuf), ctx);
-        return outBuf;
-    }
-
     // User-defined functions take precedence over external builtins
-    // sharing the same short name (MATLAB semantics).
+    // sharing the same short name.
     if (auto *_uf = engine_.lookupUserFunction(funcName, env)) {
-        funcNode->cachedUserFunc = _uf;
         return callUserFunctionMulti(*_uf, args, env, nout, node);
     }
     if (const ExternalFunc *fn = engine_.findExternal(funcName, env)) {
-        if (engine_.hasExternalFunction(funcName))
-            funcNode->cachedOp = fn;
         std::vector<Value> outBuf(nout);
         CallContext ctx{&engine_, env};
         (*fn)(args, nout, Span<Value>(outBuf), ctx);
@@ -1994,81 +1324,122 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
     return Value();
 }
 
+namespace {
+
+bool toLogicalScalarBool(const Value &v)
+{
+    if (!v.isScalar() || v.isEmpty() || v.isUnset()) {
+        throw std::runtime_error(
+            "Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values.");
+    }
+    return v.toBool();
+}
+
+bool condTruth(const Value &v)
+{
+    if (v.isEmpty() && !v.isDeleted()
+        && (v.isUnset() || v.isNumeric() || v.isLogical() || v.isChar())) {
+        return false;
+    }
+    return v.toBool();
+}
+
+} // namespace
+
 // ============================================================
 Value TreeWalker::execBinaryOp(const ASTNode *node, Environment *env)
 {
     const std::string &op = node->strValue;
 
-    if (op == "&&") {
-        auto l = execNode(node->children[0].get(), env);
-        if (!l.toBool())
-            return Value::logicalScalar(false, engine_.mr_);
-        return Value::logicalScalar(execNode(node->children[1].get(), env).toBool(),
-                                     engine_.mr_);
-    }
-    if (op == "||") {
-        auto l = execNode(node->children[0].get(), env);
-        if (l.toBool())
-            return Value::logicalScalar(true, engine_.mr_);
-        return Value::logicalScalar(execNode(node->children[1].get(), env).toBool(),
-                                     engine_.mr_);
+    if (op == "&&" || op == "||") {
+        std::vector<const ASTNode *> spine;
+        const ASTNode *cur = node;
+        while (cur->type == NodeType::BINARY_OP
+               && (cur->strValue == "&&" || cur->strValue == "||")) {
+            spine.push_back(cur);
+            cur = cur->children[0].get();
+        }
+        bool acc = toLogicalScalarBool(execNode(cur, env));
+        for (auto it = spine.rbegin(); it != spine.rend(); ++it) {
+            const ASTNode *step = *it;
+            if (step->strValue == "&&") {
+                if (acc)
+                    acc = toLogicalScalarBool(execNode(step->children[1].get(), env));
+            } else {
+                if (!acc)
+                    acc = toLogicalScalarBool(execNode(step->children[1].get(), env));
+            }
+        }
+        return Value::logicalScalar(acc, engine_.mr_);
     }
 
     // Element-wise fusion fast path: a binary-rooted idiom (affine `a.*x+b`, …)
     // runs as one fused SIMD kernel. Operands are gated side-effect-free, so a
     // declined kernel falls back to the normal per-op path below.
     if (engine_.fusionEnabled()) {
-        Value fused;
-        if (tryFusion(node, env, fused)) return fused;
+        const ASTNode *probe = node;
+        int spineDepth = 0;
+        while (probe->type == NodeType::BINARY_OP && ++spineDepth <= 5)
+            probe = probe->children[0].get();
+        if (spineDepth <= 5) {
+            Value fused;
+            if (tryFusion(node, env, fused))
+                return fused;
+        }
+    }
+
+    auto evalPair = [&](const std::string &stepOp, const Value &left, const Value &right) -> Value {
+        if (left.isObject() || right.isObject()) {
+            Value out;
+            if (engine_.tryObjectBinaryOp(stepOp, left, right, env, out))
+                return out;
+        }
+        auto it = engine_.binaryOps_.find(stepOp);
+        if (it != engine_.binaryOps_.end())
+            return it->second(left, right);
+        throw std::runtime_error("Undefined binary operator: " + stepOp);
+    };
+
+    if (node->children[0]->type == NodeType::BINARY_OP
+        && node->children[0]->strValue != "&&"
+        && node->children[0]->strValue != "||") {
+        std::vector<const ASTNode *> spine;
+        const ASTNode *cur = node;
+        while (cur->type == NodeType::BINARY_OP
+               && cur->strValue != "&&"
+               && cur->strValue != "||") {
+            spine.push_back(cur);
+            cur = cur->children[0].get();
+        }
+        Value acc = execNode(cur, env);
+        for (auto it = spine.rbegin(); it != spine.rend(); ++it) {
+            const ASTNode *step = *it;
+            Value right = execNode(step->children[1].get(), env);
+            acc = evalPair(step->strValue, acc, right);
+        }
+        return acc;
     }
 
     auto left = execNode(node->children[0].get(), env);
     auto right = execNode(node->children[1].get(), env);
-
-    // OBJECT operator overloading: dispatch to the dominant object's class
-    // `ops` before the numeric/cached builtin path. Checked first so a
-    // cachedOp from an earlier numeric evaluation of this node can't
-    // hijack an object operand (throws if no matching overload exists).
-    if (left.isObject() || right.isObject()) {
-        Value out;
-        if (engine_.tryObjectBinaryOp(op, left, right, env, out))
-            return out;
-    }
-
-    // Use cached function pointer if available
-    if (node->cachedOp) {
-        return (*static_cast<const BinaryOpFunc *>(node->cachedOp))(left, right);
-    }
-
-    auto it = engine_.binaryOps_.find(op);
-    if (it != engine_.binaryOps_.end()) {
-        node->cachedOp = &it->second;
-        return it->second(left, right);
-    }
-
-    throw std::runtime_error("Undefined binary operator: " + op);
+    return evalPair(op, left, right);
 }
 
 Value TreeWalker::execUnaryOp(const ASTNode *node, Environment *env)
 {
     auto operand = execNode(node->children[0].get(), env);
 
-    // OBJECT unary operator overloading — before the cached/builtin path.
+    // OBJECT unary operator overloading — before the builtin path.
     if (operand.isObject()) {
         Value out;
         if (engine_.tryObjectUnaryOp(node->strValue, operand, env, out))
             return out;
     }
 
-    if (node->cachedOp) {
-        return (*static_cast<const UnaryOpFunc *>(node->cachedOp))(operand);
-    }
-
     auto it = engine_.unaryOps_.find(node->strValue);
-    if (it != engine_.unaryOps_.end()) {
-        node->cachedOp = &it->second;
+    if (it != engine_.unaryOps_.end())
         return it->second(operand);
-    }
+
     throw std::runtime_error("Undefined unary operator: " + node->strValue);
 }
 
@@ -2102,15 +1473,32 @@ std::vector<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
                                                     size_t nout,
                                                     const ASTNode *callNode)
 {
+    std::vector<Value> withCaptures;
+    if (handle.funcHandleCaptureCount() > 0) {
+        const std::size_t ncaps = handle.funcHandleCaptureCount();
+        withCaptures.reserve(args.size() + ncaps);
+        for (const auto &a : args)
+            withCaptures.push_back(a);
+        for (std::size_t i = 0; i < ncaps; ++i)
+            withCaptures.push_back(handle.funcHandleCapture(i));
+        args = Span<const Value>(withCaptures.data(), withCaptures.size());
+    }
+    Environment *e = env ? env : engine_.workspaceEnv_.get();
     const std::string &name = handle.funcHandleName();
-    if (engine_.externalFuncs_.count(name)) {
+    if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
         std::vector<Value> outBuf(nout);
-        CallContext ctx{&engine_, env};
-        engine_.externalFuncs_[name](args, nout, Span<Value>(outBuf), ctx);
+        CallContext ctx{&engine_, e};
+        (*fn)(args, nout, Span<Value>(outBuf), ctx);
         return outBuf;
     }
-    if (auto *_uf = engine_.lookupUserFunction(name, env))
-        return callUserFunctionMulti(*_uf, args, env, nout, callNode);
+    if (auto *_uf = engine_.lookupUserFunction(name, e))
+        return callUserFunctionMulti(*_uf, args, e, nout, callNode);
+    if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
+        std::vector<Value> outBuf(nout);
+        CallContext ctx{&engine_, e};
+        (*fn)(args, nout, Span<Value>(outBuf), ctx);
+        return outBuf;
+    }
     throw std::runtime_error("Undefined function in handle: @" + name);
 }
 
@@ -2371,44 +1759,6 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
 
     const std::string &name = funcNode->strValue;
 
-    // ── Fast path: cached function pointers (skip env lookup and hash tables) ──
-    if (funcNode->cachedUserFunc) {
-        Value argsBuf[4];
-        size_t nargs = node->children.size() - 1;
-        if (nargs <= 4) {
-            for (size_t i = 0; i < nargs; ++i)
-                argsBuf[i] = execNode(node->children[i + 1].get(), env);
-            return callUserFunction(*static_cast<const UserFunction *>(funcNode->cachedUserFunc),
-                                    Span<const Value>(argsBuf, nargs),
-                                    env, node);
-        }
-        // >4 args — fall through to vector path
-        std::vector<Value> args;
-        args.reserve(nargs);
-        for (size_t i = 1; i < node->children.size(); ++i)
-            args.push_back(execNode(node->children[i].get(), env));
-        return callUserFunction(*static_cast<const UserFunction *>(funcNode->cachedUserFunc),
-                                args,
-                                env, node);
-    }
-
-    if (funcNode->cachedOp) {
-        size_t nargs = node->children.size() - 1;
-        Value argsBuf[4];
-        if (nargs <= 4) {
-            for (size_t i = 0; i < nargs; ++i)
-                argsBuf[i] = execNode(node->children[i + 1].get(), env);
-            Value outBuf[1];
-            CallContext ctx{&engine_, env};
-            (*static_cast<const ExternalFunc *>(funcNode->cachedOp))(Span<const Value>(argsBuf,
-                                                                                        nargs),
-                                                                     1,
-                                                                     Span<Value>(outBuf, 1),
-                                                                     ctx);
-            return outBuf[0];
-        }
-    }
-
     auto buildArgs = [&]() {
         std::vector<Value> args;
         args.reserve(node->children.size() - 1);
@@ -2499,22 +1849,11 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, size_t nargout
             }
         }
 
-        if (funcNode->cachedOp) {
-            Value outBuf[1];
-            CallContext ctx{&engine_, env};
-            (*static_cast<const ExternalFunc *>(
-                funcNode->cachedOp))(args, nargout, Span<Value>(outBuf, 1), ctx);
-            return outBuf[0];
-        }
-
-        // User-defined first (MATLAB precedence over imports/builtins).
+        // User-defined first (precedence over imports/builtins).
         if (auto *uf = engine_.lookupUserFunction(name, env)) {
-            funcNode->cachedUserFunc = uf;
             return callUserFunction(*uf, args, env, node);
         }
         if (const ExternalFunc *fn = engine_.findExternal(name, env)) {
-            if (engine_.hasExternalFunction(name))
-                funcNode->cachedOp = fn;
             Value outBuf[1];
             CallContext ctx{&engine_, env};
             (*fn)(args, nargout, Span<Value>(outBuf, 1), ctx);
@@ -2883,7 +2222,7 @@ void TreeWalker::objectPropSet(Value &objSlot, const std::string &name,
 Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
 {
     if (node->children.empty())
-        return Value();
+        return Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
 
     // NOTE: there is deliberately NO in-place row-append fast path here.
     // execMatrixLiteral is target-agnostic — it does not know the assignment
@@ -3169,13 +2508,7 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
 Value TreeWalker::execIf(const ASTNode *node, Environment *env)
 {
     for (auto &[cond, body] : node->branches) {
-        Value condM;
-        bool taken;
-        if (tryEvalFast(cond.get(), env, condM))
-            taken = (condM.fastScalarVal() != 0.0);
-        else
-            taken = execNode(cond.get(), env).toBool();
-        if (taken)
+        if (condTruth(execNode(cond.get(), env)))
             return execNode(body.get(), env);
     }
     if (node->elseBranch)
@@ -3271,13 +2604,7 @@ Value TreeWalker::execWhile(const ASTNode *node, Environment *env)
 {
     auto *condNode = node->children[0].get();
     for (;;) {
-        Value condM;
-        bool cond;
-        if (tryEvalFast(condNode, env, condM))
-            cond = (condM.fastScalarVal() != 0.0);
-        else
-            cond = execNode(condNode, env).toBool();
-        if (!cond)
+        if (!condTruth(execNode(condNode, env)))
             break;
         execNode(node->children[1].get(), env);
         if (flowSignal_ == FlowSignal::BREAK) {
@@ -3350,11 +2677,13 @@ Value TreeWalker::execFunctionDef(const ASTNode *node, Environment *env)
     // Route to the script-lexical bucket while inside a script
     // scope — matches the compiler's rule so `clear all` in TW
     // mode behaves the same as in VM mode (local functions survive).
-    auto *cp = engine_.compilerPtr();
-    if (cp && cp->inScriptScope())
+    if (engine_.inScriptScope()) {
         engine_.scriptLocalUserFuncs_[func.name] = std::move(func);
-    else
+    } else {
+        if (auto *cp = engine_.compilerPtr())
+            cp->eraseCompiledFunc(func.name);
         engine_.userFuncs_[func.name] = std::move(func);
+    }
     return Value();
 }
 
@@ -3524,23 +2853,103 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     UserFunction uf;
     uf.name = anonName;
     uf.params = node->paramNames;
-    uf.returns = {"__result__"};
+
+    const ASTNode *bodyExpr = node->children[0].get();
+    bool forwardVarargout =
+        bodyExpr->type == NodeType::CALL
+        && !bodyExpr->children.empty()
+        && bodyExpr->children[0]->type == NodeType::IDENTIFIER
+        && bodyExpr->children[0]->strValue != "__numkit_fwd_call__";
+    if (forwardVarargout) {
+        const std::string &callee = bodyExpr->children[0]->strValue;
+        bool calleeIsVar = env && (env->getLocal(callee) != nullptr || env->isGlobal(callee));
+        for (const auto &p : node->paramNames)
+            if (p == callee) { calleeIsVar = true; break; }
+        if (calleeIsVar)
+            forwardVarargout = false;
+    }
 
     auto bodyBlock = std::make_shared<ASTNode>(NodeType::BLOCK);
-
     auto assignNode = std::make_unique<ASTNode>(NodeType::ASSIGN);
-    auto resultId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
-    resultId->strValue = "__result__";
-    assignNode->children.push_back(std::move(resultId));
-    assignNode->children.push_back(cloneNode(node->children[0].get()));
     assignNode->suppressOutput = true;
+
+    if (forwardVarargout) {
+        uf.returns = {"varargout"};
+        auto vaId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        vaId->strValue = "varargout";
+        assignNode->children.push_back(std::move(vaId));
+        auto fwdCall = std::make_unique<ASTNode>(NodeType::CALL);
+        auto fwdId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        fwdId->strValue = "__numkit_fwd_call__";
+        fwdCall->children.push_back(std::move(fwdId));
+        auto nargoutId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        nargoutId->strValue = "nargout";
+        fwdCall->children.push_back(std::move(nargoutId));
+        auto fnameStr = std::make_unique<ASTNode>(NodeType::STRING_LITERAL);
+        fnameStr->strValue = bodyExpr->children[0]->strValue;
+        fwdCall->children.push_back(std::move(fnameStr));
+        for (size_t i = 1; i < bodyExpr->children.size(); ++i)
+            fwdCall->children.push_back(cloneNode(bodyExpr->children[i].get()));
+        assignNode->children.push_back(std::move(fwdCall));
+    } else {
+        uf.returns = {"__result__"};
+        auto resultId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        resultId->strValue = "__result__";
+        assignNode->children.push_back(std::move(resultId));
+        assignNode->children.push_back(cloneNode(bodyExpr));
+    }
 
     bodyBlock->children.push_back(std::move(assignNode));
     uf.body = std::move(bodyBlock);
 
-    uf.closureEnv = env->snapshot(std::shared_ptr<Environment>(engine_.constantsEnv_.get(),
-                                                               [](Environment *) {}),
-                                  engine_.globalsEnv_.get());
+    std::vector<std::string> capturedNames;
+    std::vector<Value> capturedVals;
+    auto collectFree = [&](auto &self, const ASTNode *cur,
+                           const std::vector<std::string> &bound) -> void {
+        if (!cur)
+            return;
+        if (cur->type == NodeType::IDENTIFIER) {
+            const std::string &nm = cur->strValue;
+            if (nm == "__result__" || nm == "varargout")
+                return;
+            for (const auto &p : bound)
+                if (p == nm)
+                    return;
+            for (const auto &c : capturedNames)
+                if (c == nm)
+                    return;
+            if (!env)
+                return;
+            const Value *valPtr = env->get(nm);
+            if (!valPtr || valPtr->isUnset() || valPtr->isDeleted())
+                return;
+            if (!env->getLocal(nm) && !env->isGlobal(nm)
+                && engine_.constantsEnv_ && engine_.constantsEnv_->getLocal(nm))
+                return;
+            capturedNames.push_back(nm);
+            capturedVals.push_back(*valPtr);
+            return;
+        }
+        if (cur->type == NodeType::ANON_FUNC) {
+            std::vector<std::string> merged = bound;
+            merged.insert(merged.end(), cur->paramNames.begin(), cur->paramNames.end());
+            for (const auto &ch : cur->children)
+                self(self, ch.get(), merged);
+            return;
+        }
+        for (const auto &ch : cur->children)
+            self(self, ch.get(), bound);
+        for (const auto &[a, b] : cur->branches) {
+            self(self, a.get(), bound);
+            self(self, b.get(), bound);
+        }
+        if (cur->elseBranch)
+            self(self, cur->elseBranch.get(), bound);
+    };
+    collectFree(collectFree, bodyExpr, node->paramNames);
+    for (const auto &cn : capturedNames)
+        uf.params.push_back(cn);
+    uf.closureEnv = nullptr;
     // Provenance is fixed at creation (reference rule for anonymous
     // functions): a handle born in a script/file keeps THAT file, one born
     // at the command window keeps '' — masking any caller's file later.
@@ -3549,6 +2958,8 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     engine_.userFuncs_[anonName] = std::move(uf);
     Value h = Value::funcHandle(anonName, engine_.mr_);
     h.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
+    if (!capturedVals.empty())
+        h.setFuncHandleCaptures(capturedVals.data(), capturedVals.size());
     return h;
 }
 
@@ -3600,26 +3011,6 @@ Value TreeWalker::execGlobalPersistent(const ASTNode *node, Environment *env)
             engine_.globalsEnv_->set(name, Value::Empty);
     }
     return Value();
-}
-
-static bool astUsesIdentifier(const ASTNode *node, const char *name1, const char *name2)
-{
-    if (!node)
-        return false;
-    if (node->type == NodeType::IDENTIFIER && (node->strValue == name1 || node->strValue == name2))
-        return true;
-    for (auto &c : node->children)
-        if (astUsesIdentifier(c.get(), name1, name2))
-            return true;
-    for (auto &[cond, body] : node->branches) {
-        if (astUsesIdentifier(cond.get(), name1, name2))
-            return true;
-        if (astUsesIdentifier(body.get(), name1, name2))
-            return true;
-    }
-    if (node->elseBranch && astUsesIdentifier(node->elseBranch.get(), name1, name2))
-        return true;
-    return false;
 }
 
 // Extract bare-identifier arg names from a CALL AST node for inputname(k).
@@ -3722,6 +3113,15 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     if (func.returns.empty())
         return Value();
 
+    if (func.returns[0] == "varargout") {
+        auto *vaVal = localEnv.getLocal("varargout");
+        if (!vaVal)
+            vaVal = localEnv.get("varargout");
+        if (vaVal && vaVal->isCell() && vaVal->numel() > 0)
+            return vaVal->cellAt(0);
+        return Value();
+    }
+
     auto *val = localEnv.getLocal(func.returns[0]);
     if (!val)
         val = localEnv.get(func.returns[0]);
@@ -3762,8 +3162,7 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
         localEnv.setLocal("varargin", std::move(vaCell));
     }
 
-    if (func.usesNarginNargout == -1)
-        func.usesNarginNargout = astUsesIdentifier(func.body.get(), "nargin", "nargout") ? 1 : 0;
+    func.usesNarginNargout = 1;
     if (func.usesNarginNargout) {
         localEnv.setLocal("nargin",
                           Value::scalar(static_cast<double>(args.size()), engine_.mr_));
@@ -3795,7 +3194,32 @@ std::vector<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     if (flowSignal_ == FlowSignal::RETURN)
         flowSignal_ = FlowSignal::NONE;
 
+    const bool hasVarargout = !func.returns.empty() && func.returns.back() == "varargout";
     std::vector<Value> results;
+    if (hasVarargout) {
+        const size_t numFixed = func.returns.size() - 1;
+        results.reserve(nout);
+        for (size_t i = 0; i < numFixed && results.size() < nout; ++i) {
+            auto *val = localEnv.getLocal(func.returns[i]);
+            if (!val)
+                val = localEnv.get(func.returns[i]);
+            results.push_back(val ? std::move(*val) : Value());
+        }
+        auto *vaVal = localEnv.getLocal("varargout");
+        if (!vaVal)
+            vaVal = localEnv.get("varargout");
+        if (vaVal && vaVal->isCell()) {
+            const size_t n = vaVal->numel();
+            for (size_t k = 0; k < n && results.size() < nout; ++k)
+                results.push_back(vaVal->cellAt(k));
+        }
+        if (results.size() < nout)
+            throw std::runtime_error("Too many output arguments.");
+        return results;
+    }
+
+    if (func.returns.size() < nout)
+        throw std::runtime_error("Too many output arguments.");
     results.reserve(std::min(func.returns.size(), nout));
     for (size_t i = 0; i < func.returns.size() && i < nout; ++i) {
         auto *val = localEnv.getLocal(func.returns[i]);

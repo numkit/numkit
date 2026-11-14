@@ -52,11 +52,12 @@ enum class OpCode : uint8_t {
     GE, // dst, a, b              R[dst] = R[a] >= R[b]
 
     // ── Logical ──────────────────────────────────────────────
-    AND,    // dst, a, b              R[dst] = R[a] & R[b]
-    OR,     // dst, a, b              R[dst] = R[a] | R[b]
-    NOT,    // dst, src               R[dst] = ~R[src]
-    AND_SC, // [reserved] && short-circuit — compiler uses JMP_FALSE chain instead
-    OR_SC,  // [reserved] || short-circuit — compiler uses JMP_TRUE chain instead
+    AND,               // dst, a, b              R[dst] = R[a] & R[b]
+    OR,                // dst, a, b              R[dst] = R[a] | R[b]
+    NOT,               // dst, src               R[dst] = ~R[src]
+    TO_LOGICAL_SCALAR, // dst, src               R[dst] = logicalScalar(R[src]) (for && / ||)
+    AND_SC,            // [reserved] && short-circuit — compiler uses TO_LOGICAL_SCALAR + JMP_FALSE
+    OR_SC,             // [reserved] || short-circuit — compiler uses TO_LOGICAL_SCALAR + JMP_TRUE
 
     // ── Control flow ─────────────────────────────────────────
     JMP,       // offset(int16)          unconditional jump
@@ -266,35 +267,32 @@ enum class OpCode : uint8_t {
     HALT, //                        stop execution
 };
 
+inline constexpr uint16_t kInvalidReg = 0xFFFF;
+
 // ============================================================
-// Instruction: fixed 8-byte encoding
+// Instruction: fixed 16-byte wide encoding
 // ============================================================
 //
-//  Byte:  0       1       2       3       4       5       6       7
-//        [opcode] [  a  ] [  b  ] [  c  ] [    d (int16)   ] [  e  ]
+//  Byte:  0       1       2..3    4..5    6..7    8..9    10..11  12..15
+//        [opcode] [ pad ] [  a  ] [  b  ] [  c  ] [  e  ] [pad2 ] [  d (int32) ]
 //
-//  a, b, c, e — register indices (0-255) or small immediates
-//  d          — signed 16-bit: jump offset, constant/string/func index
+//  a, b, c, e — 16-bit register indices (0..65534; 0xFFFF = kInvalidReg) or immediates
+//  d          — signed 32-bit jump offset or constant/string/func pool index
 //
 struct Instruction
 {
-    OpCode op;
-    uint8_t a; // dst / reg
-    uint8_t b; // src1 / base
-    uint8_t c; // src2 / nargs
-    int16_t d; // offset / constIdx / funcIdx / nameIdx
-    uint8_t e; // 5th operand (nout for CALL_MULTI, etc.)
+    OpCode op = OpCode::HALT;
+    uint8_t pad = 0;
+    uint16_t a = 0; // dst / reg
+    uint16_t b = 0; // src1 / base
+    uint16_t c = 0; // src2 / nargs
+    uint16_t e = 0; // 5th operand (nout for CALL_MULTI, etc.)
+    uint16_t pad2 = 0;
+    int32_t d = 0;  // offset / constIdx / funcIdx / nameIdx
 
-    Instruction()
-        : op(OpCode::HALT)
-        , a(0)
-        , b(0)
-        , c(0)
-        , d(0)
-        , e(0)
-    {}
+    Instruction() = default;
 
-    static Instruction make_abcde(OpCode op, uint8_t a, uint8_t b, uint8_t c, int16_t d, uint8_t e)
+    static Instruction make_abcde(OpCode op, uint16_t a, uint16_t b, uint16_t c, int32_t d, uint16_t e)
     {
         Instruction i;
         i.op = op;
@@ -305,7 +303,7 @@ struct Instruction
         i.e = e;
         return i;
     }
-    static Instruction make_abc(OpCode op, uint8_t a, uint8_t b, uint8_t c)
+    static Instruction make_abc(OpCode op, uint16_t a, uint16_t b, uint16_t c)
     {
         Instruction i;
         i.op = op;
@@ -314,7 +312,7 @@ struct Instruction
         i.c = c;
         return i;
     }
-    static Instruction make_abd(OpCode op, uint8_t a, uint8_t b, int16_t d)
+    static Instruction make_abd(OpCode op, uint16_t a, uint16_t b, int32_t d)
     {
         Instruction i;
         i.op = op;
@@ -323,7 +321,7 @@ struct Instruction
         i.d = d;
         return i;
     }
-    static Instruction make_ad(OpCode op, uint8_t a, int16_t d)
+    static Instruction make_ad(OpCode op, uint16_t a, int32_t d)
     {
         Instruction i;
         i.op = op;
@@ -331,14 +329,14 @@ struct Instruction
         i.d = d;
         return i;
     }
-    static Instruction make_a(OpCode op, uint8_t a)
+    static Instruction make_a(OpCode op, uint16_t a)
     {
         Instruction i;
         i.op = op;
         i.a = a;
         return i;
     }
-    static Instruction make_d(OpCode op, int16_t d)
+    static Instruction make_d(OpCode op, int32_t d)
     {
         Instruction i;
         i.op = op;
@@ -353,7 +351,7 @@ struct Instruction
     }
 };
 
-static_assert(sizeof(Instruction) == 8, "Instruction must be 8 bytes");
+static_assert(sizeof(Instruction) == 16, "Instruction must be 16 bytes");
 
 // ============================================================
 // Source location for debugging / error reporting
@@ -378,17 +376,17 @@ struct BytecodeChunk
     // Metadata
     std::string name;         // function name or "<script>"
     std::string parentFuncName; // enclosing function name for nested functions
-    uint8_t numRegisters = 0; // total registers needed
-    uint8_t numParams = 0;
-    uint8_t numReturns = 0;
+    uint32_t numRegisters = 0; // total registers needed (0..65535)
+    uint16_t numParams = 0;
+    uint16_t numReturns = 0;
     std::vector<std::string> paramNames;
     std::vector<std::string> returnNames;
 
     // Closure support: indices of captured variables from parent scope
-    std::vector<uint8_t> capturedRegisters;
+    std::vector<uint16_t> capturedRegisters;
 
     // Variable name → register mapping (for exporting to environment after execution)
-    std::vector<std::pair<std::string, uint8_t>> varMap;
+    std::vector<std::pair<std::string, uint16_t>> varMap;
 
     // Names of variables the compiler emits a write for (STORE, param intro,
     // for-loop var, catch var, global/persistent decl, etc). Reads alone do

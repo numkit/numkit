@@ -64,9 +64,7 @@ public:
     // default values at registration time).
     Value evalExpressionPublic(const ASTNode *expr, Environment *env);
 
-    // Function call — public re-entry points: the VM's TW-only fallback
-    // (chunk-less user functions, e.g. >255-register schemas) runs the
-    // body here mid-dispatch via Engine::callUserFunctionOnTreeWalker.
+    // Function call — public entry points for TreeWalker user-function dispatch.
     // Optional `callNode` extracts caller's arg names for inputname(k);
     // nullptr falls back to no names.
     Value callUserFunction(const UserFunction &func, Span<const Value> args,
@@ -92,7 +90,6 @@ private:
         int ndims = 1;
     };
     std::vector<IndexContext> indexContextStack_;
-    std::vector<Value> callArgsBuf_;
 
     // Parallel call stack of (localEnv, argNames) — pushed on entry to
     // callUserFunction(), popped on exit (RAII). Lifetime safe because
@@ -167,7 +164,6 @@ private:
     Value execNodeExpand(const ASTNode *node, Environment *env);
     Value execNodeInner(const ASTNode *node, Environment *env);
     Value execBlock(const ASTNode *node, Environment *env);
-    bool tryEvalFast(const ASTNode *expr, Environment *env, Value &out);
 
     // Element-wise fusion: if `node` matches a registered idiom, evaluate its
     // (side-effect-free) operands and run the fused kernel into `out`; returns

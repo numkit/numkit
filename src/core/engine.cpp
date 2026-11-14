@@ -65,6 +65,8 @@ Engine::Engine(std::pmr::memory_resource *mr)
     treeWalker_ = std::make_unique<TreeWalker>(*this);
     compiler_ = std::make_unique<Compiler>(*this);
     vm_ = std::make_unique<VM>(*this);
+    vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
+                          &compiler_->scriptLocalCompiledFuncs());
     pluginLoader_ = std::make_unique<PluginLoader>(*this);
 
     reinstallConstants();
@@ -888,9 +890,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         }
         if (child->type == NodeType::CLASSDEF_PROPERTY) {
             Value def = Value::Empty;
-            if (!child->children.empty() && treeWalker_)
-                def = treeWalker_->evalExpressionPublic(child->children[0].get(),
-                                                        &constantsEnv());
+            if (!child->children.empty())
+                def = evalConstExpr(child->children[0].get());
             // Record non-public get/set access (this class is the declarer).
             // A `Constant` property is also exposed as `ClassName.Prop`; the
             // qualified external is registered after the merge (so inherited
@@ -1356,10 +1357,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 if (child->type != NodeType::CLASSDEF_ENUM_MEMBER)
                     continue;
                 std::vector<Value> args;
-                if (treeWalker_)
-                    for (const auto &a : child->children)
-                        args.push_back(
-                            treeWalker_->evalExpressionPublic(a.get(), &constantsEnv()));
+                for (const auto &a : child->children)
+                    args.push_back(evalConstExpr(a.get()));
                 CallContext ctx{this, workspaceEnv_.get()};
                 Value inst = ecls->construct(Span<const Value>(args.data(), args.size()), ctx);
                 if (inst.isObject())
@@ -1459,10 +1458,15 @@ std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, Span<const 
     // execute on the same engine as the rest of the program. callReentrant
     // carries the class context on the frame (ownerClass), so no ClassCtxGuard
     // is needed. Falls back to the TreeWalker if the body can't VM-compile.
-    if (vm_ && backend_ == Backend::VM)
-        if (const BytecodeChunk *cc = ensureClassMethodChunk(uf))
-            return vm_->callReentrant(*cc, args, std::max<size_t>(nout, 1), uf.ownerClass,
-                                      /*isCtor=*/false);
+    if (backend_ == Backend::VM) {
+        if (!vm_)
+            throw std::runtime_error("classdef methods require an active VM");
+        const BytecodeChunk *cc = ensureClassMethodChunk(uf);
+        if (!cc)
+            throw std::runtime_error("Failed to compile classdef method '" + uf.name + "'");
+        return vm_->callReentrant(*cc, args, std::max<size_t>(nout, 1), uf.ownerClass,
+                                  /*isCtor=*/false);
+    }
     if (treeWalker_) {
         ClassCtxGuard ctx(this, uf.ownerClass, /*isCtor=*/false);
         return treeWalker_->runClassMethod(uf, args, nout);
@@ -1473,21 +1477,50 @@ std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, Span<const 
 Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
                               Span<const Value> args)
 {
-    // VM backend: run the constructor body on the VM (P4), seeding the output
-    // variable with the default instance. Reached for C++-initiated
-    // construction (object-array growth, constructChecked from a builtin) and
-    // super-constructor targets; in-bytecode `ClassName(args)` pushes its ctor
-    // frame directly (P2). Falls back to the TreeWalker if it can't VM-compile.
-    if (vm_ && backend_ == Backend::VM)
-        if (const BytecodeChunk *cc = ensureClassMethodChunk(ctor)) {
-            auto r = vm_->callReentrant(*cc, args, 1, ctor.ownerClass, /*isCtor=*/true, &seed);
-            return r.empty() ? seed : std::move(r[0]);
-        }
+    if (backend_ == Backend::VM) {
+        if (!vm_)
+            throw std::runtime_error("classdef constructor requires an active VM");
+        const BytecodeChunk *cc = ensureClassMethodChunk(ctor);
+        if (!cc)
+            throw std::runtime_error("Failed to compile classdef constructor '" + ctor.name + "'");
+        auto r = vm_->callReentrant(*cc, args, 1, ctor.ownerClass, /*isCtor=*/true, &seed);
+        return r.empty() ? seed : std::move(r[0]);
+    }
     if (treeWalker_) {
         ClassCtxGuard ctx(this, ctor.ownerClass, /*isCtor=*/true);
         return treeWalker_->runClassCtor(ctor, seed, args);
     }
     throw std::runtime_error("classdef constructor requires the interpreter backend");
+}
+
+Value Engine::evalConstExpr(const ASTNode *expr)
+{
+    if (!expr)
+        return Value::Empty;
+    if (backend_ == Backend::VM) {
+        if (!compiler_ || !vm_)
+            throw std::runtime_error("evalConstExpr: VM backend is unavailable");
+        ASTNode fn(NodeType::FUNCTION_DEF);
+        fn.strValue = "__const_expr__";
+        fn.returnNames = {"__result__"};
+        auto bodyBlock = std::make_unique<ASTNode>(NodeType::BLOCK);
+        auto assignNode = std::make_unique<ASTNode>(NodeType::ASSIGN);
+        assignNode->suppressOutput = true;
+        auto resultId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        resultId->strValue = "__result__";
+        assignNode->children.push_back(std::move(resultId));
+        assignNode->children.push_back(cloneNode(expr));
+        bodyBlock->children.push_back(std::move(assignNode));
+        fn.children.push_back(std::move(bodyBlock));
+        BytecodeChunk chunk = compiler_->compileFunction(&fn);
+        vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
+                              &compiler_->scriptLocalCompiledFuncs());
+        auto r = vm_->callReentrant(chunk, Span<const Value>{}, 1);
+        return r.empty() ? Value::Empty : std::move(r[0]);
+    }
+    if (treeWalker_)
+        return treeWalker_->evalExpressionPublic(expr, &constantsEnv());
+    throw std::runtime_error("evalConstExpr: interpreter backend is unavailable");
 }
 
 const BytecodeChunk *Engine::ensureClassMethodChunk(const UserFunction &uf)
@@ -2260,18 +2293,6 @@ void Engine::adoptUserFunction(const std::string &name,
         userFuncs_[name] = std::move(uf);
 }
 
-Value Engine::callUserFunctionOnTreeWalker(const UserFunction &uf,
-                                           Span<const Value> args)
-{
-    return treeWalker_->callUserFunction(uf, args, nullptr, nullptr);
-}
-
-std::vector<Value> Engine::callUserFunctionOnTreeWalkerMulti(
-    const UserFunction &uf, Span<const Value> args, size_t nout)
-{
-    return treeWalker_->callUserFunctionMulti(uf, args, nullptr, nout, nullptr);
-}
-
 void Engine::registerBuiltinMSource(const std::string &src)
 {
     builtinMSourceTexts_.push_back(src);
@@ -2298,19 +2319,9 @@ void Engine::adoptBuiltinMSource_(const std::string &src)
         if (compiler_) {
             try {
                 compiler_->registerFunctionAs(func.name, fd);
-            } catch (const CompilerLimitError &) {
-                // Our own embedded wrappers MUST run on the VM (that is the
-                // whole point — pausability). A too-large chunk would silently
-                // drop to TW-only and surface later as a misleading "undefined
-                // function" on the VM. Fail loudly at registration instead.
-                throw Error("registerBuiltinMSource: embedded function '" + func.name
-                    + "' needs more than the 255-register VM limit in one chunk — "
-                    "split it into helper functions (see dev-docs/handbook/callback_pausability.md)",
-                    0, 0, "registerBuiltinMSource", "",
-                    "numkit:compiler:registerExhaustion");
             } catch (const std::exception &) {
-                // Other VM-compile failures stay non-fatal — TW dispatches via
-                // userFuncs_.
+                // Non-fatal at adopt time — userFuncs_ remains populated and
+                // VM call sites re-trigger compilation via ensureClassMethodChunk.
             }
         }
         userFuncs_[func.name] = std::move(func);
@@ -2744,21 +2755,8 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // is not active yet at resolve-time compilation).
                 compiler_->registerFunctionAs(name, funcDef, rp.fs->name(),
                                               scriptDir, rp.path);
-            } catch (const CompilerLimitError &) {
-                // Too large for the bytecode VM: register TreeWalker-only.
-                // The VM's user-function chains dispatch chunk-less
-                // functions inline on the TreeWalker
-                // (bugs/closed/core/function-def-register-limit-no-fallback.md),
-                // so the old loud error — motivated by the misleading
-                // "undefined function" a TW-only function used to produce —
-                // is obsolete: user m-files keep MATLAB semantics (any
-                // size runs). Builtin embedded wrappers still fail loudly
-                // at registerBuiltinMSource (they must be VM-pausable).
             } catch (const std::exception &) {
-                // Other compiler errors are non-fatal here — TW will still
-                // dispatch through userFuncs_; only VM-mode invocations
-                // will fall through to the generic CALL → external
-                // path, which fails cleanly.
+                // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
         }
         userFuncs_[name] = std::move(func);
@@ -2852,61 +2850,57 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
                                                     size_t nout,
                                                     Environment *env)
 {
-    // Closure form: VM packages `@(x) x + capture` as a FUNC_HANDLE
-    // carrying captured values to append to the user-supplied args.
     if (!handle.isFuncHandle())
         throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
+    Environment *e = env ? env : workspaceEnv_.get();
+
+    // TreeWalker mode: dispatch strictly on TreeWalker (which unwraps
+    // funcHandleCaptures, resolves externals/imports, and lazy-loads .m files).
+    if (backend_ != Backend::VM) {
+        if (!treeWalker_)
+            throw std::runtime_error("callFunctionHandleMulti: TreeWalker backend is unavailable");
+        return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
+    }
+
+    // VM mode: dispatch strictly on VM (zero TreeWalker fallback).
+    if (!vm_)
+        throw std::runtime_error("callFunctionHandleMulti: VM backend is unavailable");
+
     std::vector<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
         const std::size_t ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
-        for (const auto &a : args) withCaptures.push_back(a);
+        for (const auto &a : args)
+            withCaptures.push_back(a);
         for (std::size_t i = 0; i < ncaps; ++i)
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = Span<const Value>(withCaptures.data(), withCaptures.size());
     }
-    Environment *e = env ? env : workspaceEnv_.get();
     const std::string name = handle.funcHandleName();
 
-    // 1) Built-in (registered external) — works regardless of backend.
-    {
-        if (const ExternalFunc *fn = findExternal(name, e)) {
-            std::vector<Value> out(nout);
-            CallContext ctx{this, e};
-            (*fn)(args, nout, Span<Value>(out), ctx);
-            return out;
-        }
+    if (const ExternalFunc *fn = findExternal(name, e)) {
+        std::vector<Value> out(nout);
+        CallContext ctx{this, e};
+        (*fn)(args, nout, Span<Value>(out), ctx);
+        return out;
     }
 
-    // 2) VM user-function path (active backend == VM). Run the handle's body
-    // as a re-entrant VM frame so it executes on the same engine as the rest
-    // of the program (debuggable; consistent with classdef methods/ctors which
-    // are VM-native — vm_callbacks_plan.md P3). The handle's UserFunction is in
-    // userFuncs_ (named funcs, and VM/TW anon-funcs mirror-registered by
-    // Compiler::compileAnonFunc) with params == [user_params…, captures…];
-    // captures already arrive as appended args from the closure-cell unwrap
-    // above, so the arg layout matches the compiled chunk. Falls through to the
-    // TreeWalker when the name is not a free user function or cannot compile.
-    if (vm_ && backend_ == Backend::VM) {
-        if (const UserFunction *uf = lookupUserFunctionLocal(name))
-            if (const BytecodeChunk *cc = ensureClassMethodChunk(*uf))
-                return vm_->callReentrant(*cc, args, nout);
+    if (const UserFunction *uf = lookupUserFunction(name, e)) {
+        const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
+        if (!cc)
+            throw std::runtime_error("Failed to compile function handle target '@" + name + "'");
+        return vm_->callReentrant(*cc, args, nout);
     }
 
-    // 3) TW user-function path. Works for any named user function and
-    // for anonymous handles regardless of which backend created them:
-    // VM-compiled anon-funcs are mirror-registered into
-    // engine.userFuncs_ by Compiler::compileAnonFunc, so TW finds them
-    // here even when the VM was the active backend at handle creation
-    // time. Captures travel as appended args (the closure-cell unwrap
-    // above) — both backends use the same `[user_params, captures]`
-    // parameter layout. Pass the BARE handle (not the closure cell) so
-    // TW resolves the funcHandleName correctly.
-    if (treeWalker_)
-        return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
+    // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
+    if (const ExternalFunc *fn = findExternal(name, e)) {
+        std::vector<Value> out(nout);
+        CallContext ctx{this, e};
+        (*fn)(args, nout, Span<Value>(out), ctx);
+        return out;
+    }
 
-    throw std::runtime_error("callFunctionHandle: undefined function in handle '@"
-                             + name + "'");
+    throw std::runtime_error("Undefined function in handle: @" + name);
 }
 
 bool Engine::isInsideFunctionCall() const
@@ -2993,24 +2987,37 @@ void Engine::beginScript(const ASTNode *ast)
 {
     savedScriptLocalUserFuncs_.push_back(std::move(scriptLocalUserFuncs_));
     scriptLocalUserFuncs_.clear();
-    if (!compiler_)
-        return;
-    compiler_->beginScriptScope();
+    if (compiler_)
+        compiler_->beginScriptScope();
     if (!ast)
         return;
-    // Pre-compile the script's top-level FUNCTION_DEFs into the
-    // (now-active) script-local buckets. Forward references inside
-    // the script resolve, and a single FUNCTION_DEF file (AST is
-    // the function itself) still registers cleanly.
-    auto registerNode = [&](const ASTNode *f) {
-        if (f && f->type == NodeType::FUNCTION_DEF)
-            compiler_->registerFunction(f);
+    // Pre-register the script's top-level FUNCTION_DEFs into the
+    // (now-active) script-local buckets so forward references inside
+    // the script resolve on the active backend.
+    auto adoptLocal = [&](const ASTNode *f) {
+        if (!f || f->type != NodeType::FUNCTION_DEF || f->children.empty())
+            return;
+        if (backend_ == Backend::VM && compiler_) {
+            try {
+                compiler_->registerFunction(f);
+                return;
+            } catch (const std::exception &) {
+                // Defer compile-time errors (e.g. bare 'end') until called.
+            }
+        }
+        UserFunction uf;
+        uf.name = f->strValue;
+        uf.params = f->paramNames;
+        uf.returns = f->returnNames;
+        uf.body = std::shared_ptr<const ASTNode>(cloneNode(f->children[0].get()));
+        uf.closureEnv = nullptr;
+        scriptLocalUserFuncs_[uf.name] = std::move(uf);
     };
     if (ast->type == NodeType::BLOCK) {
         for (const auto &c : ast->children)
-            registerNode(c.get());
+            adoptLocal(c.get());
     } else {
-        registerNode(ast);
+        adoptLocal(ast);
     }
 }
 
@@ -3028,8 +3035,11 @@ void Engine::endScript()
 
 void Engine::promoteScriptLocalsToWorkspace()
 {
-    for (auto &entry : scriptLocalUserFuncs_)
+    for (auto &entry : scriptLocalUserFuncs_) {
+        if (backend_ != Backend::VM && compiler_)
+            compiler_->eraseCompiledFunc(entry.first);
         userFuncs_[entry.first] = std::move(entry.second);
+    }
     scriptLocalUserFuncs_.clear();
     if (compiler_)
         compiler_->promoteScriptLocalsToWorkspace();
@@ -3056,30 +3066,7 @@ Value Engine::runOneChunk(const ASTNode *ast, std::shared_ptr<const std::string>
     clearAllCalled_ = false;
     vm_->clearLastVarMap();
 
-    auto chunk = [&]() {
-        try {
-            return compiler_->compile(ast, src);
-        } catch (const CompilerLimitError &) {
-            // The documented dual-engine contract: a chunk that cannot
-            // fit the 255-register VM limit executes on the TreeWalker
-            // instead of dying with an internal compiler error
-            // (bugs/closed/core/register-exhaustion-no-fallback).
-            // Under an attached debug observer we RE-THROW — silently
-            // switching to the TW would disable breakpoints/stepping
-            // for this code without any signal.
-            if (debugObserver_)
-                throw;
-            if (!treeWalker_)
-                throw;
-            return BytecodeChunk();
-        }
-    }();
-    if (chunk.code.empty() && chunk.varMap.empty() && chunk.numRegisters == 0
-        && chunk.constants.empty() && chunk.strings.empty()) {
-        // Fallback path: run the AST on the TreeWalker against the
-        // workspace, mirroring the TW branch of Engine::eval.
-        return treeWalker_->execute(ast, workspaceEnv_.get());
-    }
+    auto chunk = compiler_->compile(ast, src);
     vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
                           &compiler_->scriptLocalCompiledFuncs());
 
