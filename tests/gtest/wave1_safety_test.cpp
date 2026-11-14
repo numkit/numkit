@@ -320,3 +320,36 @@ TEST(Wave1SysAndMatSafetyTest, PackageManagerTraversalAndCommandInjectionBlocked
     std::error_code ec;
     fs::remove_all(tmpRoot, ec);
 }
+
+// 14. Canonical Size/Index conversion boundary parity (VM + TreeWalker)
+TEST_P(Wave1SafetyTest, CanonicalIndexAndDimBoundsParity)
+{
+    eval("a = [10, 20, 30];");
+    EXPECT_DOUBLE_EQ(evalScalar("a(1)"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("a(3)"), 30.0);
+
+    // Non-positive, fractional, non-finite, flintmax (2^53), and huge doubles
+    // are rejected without UB across both literal and variable index paths.
+    for (const char *expr : {
+             "a(0);",
+             "a(-1);",
+             "a(1.5);",
+             "a(NaN);",
+             "a(Inf);",
+             "a(9007199254740992);",
+             "a(1e300);",
+             "k = 9007199254740992; a(k);",
+             "k = 1e300; a(k);",
+             "zeros(0, 9007199254740992);",
+             "zeros(0, 1e300);",
+         }) {
+        EXPECT_THROW(eval(expr), std::exception) << expr;
+    }
+
+    if constexpr (sizeof(numkit::Size) >= 8) {
+        // Largest contiguous exact double integer (2^53 - 1) is accepted as an
+        // empty-array dimension without allocating storage.
+        EXPECT_DOUBLE_EQ(evalScalar("size(zeros(0, 9007199254740991), 2)"),
+                         9007199254740991.0);
+    }
+}

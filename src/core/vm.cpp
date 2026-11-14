@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <numkit/core/vm.hpp>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/index.hpp>
 #include <numkit/value/span.hpp>
 
 #include <algorithm>
@@ -275,22 +276,17 @@ static inline double asScalar(const Value &v)
     return v.fastScalarVal();
 }
 
-static inline size_t checkedIndex(double idx, size_t numel)
+static inline Size checkedIndex(double idx, Size numel)
 {
-    if (idx >= 1.0 && idx <= 9007199254740992.0) {
-        size_t u = static_cast<size_t>(idx);
-        if (static_cast<double>(u) == idx) {
-            if (u - 1 < numel)
-                return u - 1;
-            throw std::runtime_error("Index " + std::to_string(u) + " exceeds array size "
-                                     + std::to_string(numel));
-        }
-    }
-    size_t i = Value::checkedScalarIndex(idx);
-    if (i >= numel)
-        throw std::runtime_error("Index " + std::to_string((size_t) idx) + " exceeds array size "
+    Size i = 0;
+    if (tryIndex0(idx, i)) {
+        if (i < numel)
+            return i;
+        throw std::runtime_error("Index " + std::to_string(i + 1) + " exceeds array size "
                                  + std::to_string(numel));
-    return i;
+    }
+    (void) Value::checkedScalarIndex(idx);
+    return 0;
 }
 
 // Resolve one assignment subscript to 0-based indices for an object-array

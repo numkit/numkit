@@ -3,6 +3,7 @@
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
+#include <numkit/value/index.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -76,24 +77,19 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
 {
     // Fast path for number literals: B(3)
     if (indexExpr->type == NodeType::NUMBER_LITERAL) {
-        double v = indexExpr->numValue;
-        if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
-            outIdx = static_cast<size_t>(v) - 1;
-            return true;
-        }
-        return false;
+        return tryIndex0(indexExpr->numValue, outIdx);
     }
 
     // Fast path for simple identifiers: B(i)
     if (indexExpr->type == NodeType::IDENTIFIER) {
         const std::string &name = indexExpr->strValue;
         if (name == "end") {
-            size_t sz;
+            Size sz;
             if (ndims == 1) {
                 sz = array.numel();
-            } else if (dim == ndims - 1 && array.dims().ndim() > static_cast<size_t>(ndims)) {
+            } else if (dim == ndims - 1 && array.dims().ndim() > static_cast<int>(ndims)) {
                 sz = 1;
-                for (size_t d = static_cast<size_t>(dim); d < array.dims().ndim(); ++d)
+                for (int d = dim; d < array.dims().ndim(); ++d)
                     sz *= array.dims().dimSize(d);
             } else {
                 sz = array.dims().dimSize(dim);
@@ -105,11 +101,7 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
         }
         auto *val = env->get(name);
         if (val && val->isScalar() && val->type() == ValueType::DOUBLE) {
-            double v = val->toScalar();
-            if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
-                outIdx = static_cast<size_t>(v) - 1;
-                return true;
-            }
+            return tryIndex0(val->toScalar(), outIdx);
         }
         return false;
     }
