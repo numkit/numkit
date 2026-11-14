@@ -3388,7 +3388,7 @@ void Engine::syncVMToWorkspace()
             if (vm_ && backend_ == Backend::VM)
                 vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
         } else {
-            Value *gsVal = globalsEnv_->get(name);
+            Value *gsVal = workspaceEnv_->isGlobal(name) ? globalsEnv_->get(name) : nullptr;
             const Value &finalVal = gsVal ? *gsVal : val;
             workspaceEnv_->set(name, finalVal);
             if (vm_ && backend_ == Backend::VM)
@@ -3467,11 +3467,23 @@ Value Engine::eval(const std::string &code, Environment *scope,
     });
     vm_->setNextFrameDynVars(callerSnapshot.empty() ? nullptr : &callerSnapshot);
 
-    // VM path: route inner top-level's ctx.env via inheritedScope_,
-    // sync registers to scope after exec.
     Environment *prevInherited = vm_->inheritedScope_;
-    vm_->inheritedScope_ = scope;
     bool prevClearAll = clearAllCalled_;
+    struct ScopedEvalGuard {
+        Engine *eng;
+        VM *vm;
+        Environment *prevInherited;
+        bool prevClearAll;
+        ~ScopedEvalGuard() {
+            if (vm) {
+                vm->setNextFrameDynVars(nullptr);
+                vm->inheritedScope_ = prevInherited;
+            }
+            eng->clearAllCalled_ = prevClearAll;
+        }
+    } guard{this, vm_.get(), prevInherited, prevClearAll};
+
+    vm_->inheritedScope_ = scope;
     clearAllCalled_ = false;
     vm_->clearLastVarMap();
 
@@ -3482,16 +3494,16 @@ Value Engine::eval(const std::string &code, Environment *scope,
     Value result;
     try {
         result = vm_->execute(chunk);
+        vm_->setNextFrameDynVars(nullptr);
         vm_->inheritedScope_ = prevInherited;
         syncVMToScope(scope);
     } catch (...) {
+        vm_->setNextFrameDynVars(nullptr);
         vm_->inheritedScope_ = prevInherited;
         syncVMToScope(scope);
-        clearAllCalled_ = prevClearAll;
         throw;
     }
 
-    clearAllCalled_ = prevClearAll;
     return result;
 }
 

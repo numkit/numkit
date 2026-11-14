@@ -215,7 +215,7 @@ public:
     };
 
     Tag readTag() {
-        if (pos + 8 > len) throw Error("load: truncated MAT tag");
+        if (pos > len || len - pos < 8) throw Error("load: truncated MAT tag");
         std::uint32_t tag0 = peekU32At(data + pos);
         
         Tag t;
@@ -223,6 +223,8 @@ public:
             // Small Data Element Format (SDEF)
             t.type = tag0 & 0xFFFF;
             t.byteCount = (tag0 >> 16) & 0xFFFF;
+            if (t.byteCount > 4)
+                throw Error("load: invalid SDEF byte count");
             t.payload = data + pos + 4;
             t.totalAdvance = 8;
             pos += 8;
@@ -230,23 +232,25 @@ public:
             // Standard format
             t.type = tag0;
             t.byteCount = peekU32At(data + pos + 4);
+            const std::size_t bc = static_cast<std::size_t>(t.byteCount);
+            const std::size_t availAfterHdr = len - pos - 8;
+            if (bc > availAfterHdr)
+                throw Error("load: corrupted MAT element length");
             t.payload = data + pos + 8;
-            std::size_t padded = (t.byteCount + 7) & ~7;
+            std::size_t padded = (bc + 7u) & ~std::size_t(7u);
             if (t.type == miCOMPRESSED) {
-                std::size_t unpaddedEnd = pos + 8 + t.byteCount;
+                std::size_t unpaddedEnd = pos + 8 + bc;
                 if (unpaddedEnd == len) {
-                    padded = t.byteCount;
-                } else if (unpaddedEnd + 8 <= len) {
+                    padded = bc;
+                } else if (len - unpaddedEnd >= 8) {
                     std::uint32_t nextType = peekU32At(data + unpaddedEnd);
                     if (nextType == miCOMPRESSED || nextType == miMATRIX) {
-                        padded = t.byteCount;
+                        padded = bc;
                     }
                 }
             }
-            if (pos + 8 + padded > len) {
-                if (pos + 8 + t.byteCount > len)
-                    throw Error("load: corrupted MAT element length");
-                padded = t.byteCount;
+            if (padded > availAfterHdr) {
+                padded = bc;
             }
             t.totalAdvance = 8 + padded;
             pos += t.totalAdvance;
@@ -257,7 +261,7 @@ public:
 
 // Forward declarations for recursive encoding / decoding
 void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v);
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem);
+std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem, int depth = 0);
 
 // ============================================================================
 // MAT5 Serialization (Value -> Bytes)
@@ -433,7 +437,10 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
 // MAT5 Deserialization (Bytes -> Value)
 // ============================================================================
 
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem) {
+std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem, int depth) {
+    if (depth > 64) {
+        throw Error("load: MAT5 nesting depth exceeds limit");
+    }
     auto matrixTag = mr.readTag();
     if (matrixTag.type != miMATRIX) {
         throw Error("load: expected miMATRIX element in MAT5 file");
@@ -452,16 +459,26 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 
     // 2. Dimensions Array
     auto dimsTag = ir.readTag();
-    int nd = static_cast<int>(dimsTag.byteCount / sizeof(std::int32_t));
-    if (nd < 2) nd = 2;
+    const int rawNd = static_cast<int>(dimsTag.byteCount / sizeof(std::int32_t));
+    if (rawNd > Dims::kMaxRank)
+        throw Error("load: MAT5 array rank exceeds maximum supported rank");
+    int nd = rawNd < 2 ? 2 : rawNd;
     std::vector<size_t> d(nd, 1);
+    std::size_t numElems = 1;
     for (int i = 0; i < nd; ++i) {
-        d[i] = (i < static_cast<int>(dimsTag.byteCount / 4))
-                   ? static_cast<size_t>(static_cast<std::int32_t>(ir.peekU32At(dimsTag.payload + i * 4)))
-                   : 1;
+        if (i < rawNd) {
+            std::int32_t rawDim = static_cast<std::int32_t>(ir.peekU32At(dimsTag.payload + i * 4));
+            if (rawDim < 0)
+                throw Error("load: negative dimension in MAT5 file");
+            d[i] = static_cast<size_t>(rawDim);
+        } else {
+            d[i] = 1;
+        }
+        if (d[i] > 0 && numElems > SIZE_MAX / d[i])
+            throw Error("load: MAT5 array size overflows address space");
+        numElems *= d[i];
     }
     Dims shape(d.data(), nd);
-    std::size_t numElems = shape.numel();
 
     // 3. Array Name
     auto nameTag = ir.readTag();
@@ -477,7 +494,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
     if (arrayClass == mxCELL_CLASS) {
         result = createCell(shape, mem);
         for (std::size_t i = 0; i < numElems; ++i) {
-            auto [childName, childVal] = decodeMat5Matrix(ir, mem);
+            auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
             result.cellAt(i) = childVal;
         }
     } else if (arrayClass == mxSTRUCT_CLASS || arrayClass == mxOBJECT_CLASS) {
@@ -486,6 +503,8 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             auto classNameTag = ir.readTag();
             if (classNameTag.payload && classNameTag.byteCount > 0) {
                 objClassName = std::string(reinterpret_cast<const char*>(classNameTag.payload), classNameTag.byteCount);
+                while (!objClassName.empty() && objClassName.back() == '\0')
+                    objClassName.pop_back();
             }
         }
 
@@ -499,6 +518,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         auto fnamesTag = ir.readTag();
         std::size_t numFields = fnamesTag.byteCount / fnLen;
         std::vector<std::string> fnames;
+        fnames.reserve(numFields);
         for (std::size_t fi = 0; fi < numFields; ++fi) {
             const char *fnPtr = reinterpret_cast<const char*>(fnamesTag.payload + fi * fnLen);
             std::size_t curLen = 0;
@@ -506,19 +526,25 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             fnames.emplace_back(fnPtr, curLen);
         }
 
+        if (fnames.size() > 0 && numElems > SIZE_MAX / fnames.size())
+            throw Error("load: MAT5 struct field table overflows address space");
+
         std::vector<std::vector<Value>> fieldVals(fnames.size(), std::vector<Value>(numElems));
         for (std::size_t ei = 0; ei < numElems; ++ei) {
             for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
-                auto [childName, childVal] = decodeMat5Matrix(ir, mem);
+                auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
                 fieldVals[fi][ei] = std::move(childVal);
             }
         }
 
         if (arrayClass == mxSTRUCT_CLASS) {
-            if (numElems == 1) {
+            if (numElems == 1 && shape.ndims() <= 2) {
                 result = Value::structure(mem);
-            } else {
+            } else if (shape.ndims() <= 2) {
                 result = Value::structArray(shape.rows(), shape.cols(), mem);
+            } else {
+                result = Value::structArray(0, 0, mem);
+                result.resizeND(d.data(), nd, mem);
             }
             for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
                 if (numElems == 0) {
@@ -531,7 +557,9 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             }
         } else {
             // mxOBJECT_CLASS
-            if (numElems <= 1) {
+            if (numElems == 0) {
+                result = Value::objectArray(objClassName, shape, {}, false, mem);
+            } else if (numElems == 1 && shape.ndims() <= 2) {
                 auto st = std::make_shared<ObjectState>(mem);
                 for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
                     st->props[fnames[fi]] = std::move(fieldVals[fi][0]);
@@ -556,8 +584,10 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         char *out = result.charDataMut();
         if (dataTag.type == miUINT16 || dataTag.type == miUTF16) {
             std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount / 2));
-            for (std::size_t i = 0; i < charCount; ++i) {
-                out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
+            if (charCount > 0 && dataTag.payload) {
+                for (std::size_t i = 0; i < charCount; ++i) {
+                    out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
+                }
             }
         } else if (dataTag.type == miUTF8 || dataTag.type == miUINT8 || dataTag.type == miINT8) {
             std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount));
@@ -591,7 +621,12 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         auto realTag = ir.readTag();
 
         auto readTagElemAsDouble = [&ir](const MatReader::Tag &tag, std::size_t idx) -> double {
-            if (!tag.payload) return 0.0;
+            if (!tag.payload) throw Error("load: truncated MAT5 numeric payload");
+            const std::size_t avail = static_cast<std::size_t>(tag.byteCount);
+            auto checkBounds = [avail](std::size_t idx0, std::size_t sz) {
+                if (idx0 > avail / sz || avail - idx0 * sz < sz)
+                    throw Error("load: truncated MAT5 numeric payload");
+            };
             auto readVal = [&ir](const std::uint8_t *p, std::size_t sz, void *dst) {
                 if (ir.bigEndian) {
                     auto *d = static_cast<std::uint8_t *>(dst);
@@ -602,43 +637,55 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             };
             switch (tag.type) {
                 case miDOUBLE: {
+                    checkBounds(idx, 8);
                     double v = 0.0;
                     readVal(tag.payload + idx * 8, 8, &v);
                     return v;
                 }
                 case miSINGLE: {
+                    checkBounds(idx, 4);
                     float v = 0.0f;
                     readVal(tag.payload + idx * 4, 4, &v);
                     return static_cast<double>(v);
                 }
-                case miINT8:   return static_cast<double>(reinterpret_cast<const std::int8_t*>(tag.payload)[idx]);
-                case miUINT8:  return static_cast<double>(reinterpret_cast<const std::uint8_t*>(tag.payload)[idx]);
+                case miINT8:
+                    checkBounds(idx, 1);
+                    return static_cast<double>(reinterpret_cast<const std::int8_t*>(tag.payload)[idx]);
+                case miUINT8:
+                    checkBounds(idx, 1);
+                    return static_cast<double>(reinterpret_cast<const std::uint8_t*>(tag.payload)[idx]);
                 case miINT16: {
+                    checkBounds(idx, 2);
                     std::int16_t v = 0;
                     readVal(tag.payload + idx * 2, 2, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT16: {
+                    checkBounds(idx, 2);
                     std::uint16_t v = 0;
                     readVal(tag.payload + idx * 2, 2, &v);
                     return static_cast<double>(v);
                 }
                 case miINT32: {
+                    checkBounds(idx, 4);
                     std::int32_t v = 0;
                     readVal(tag.payload + idx * 4, 4, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT32: {
+                    checkBounds(idx, 4);
                     std::uint32_t v = 0;
                     readVal(tag.payload + idx * 4, 4, &v);
                     return static_cast<double>(v);
                 }
                 case miINT64: {
+                    checkBounds(idx, 8);
                     std::int64_t v = 0;
                     readVal(tag.payload + idx * 8, 8, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT64: {
+                    checkBounds(idx, 8);
                     std::uint64_t v = 0;
                     readVal(tag.payload + idx * 8, 8, &v);
                     return static_cast<double>(v);
@@ -795,7 +842,8 @@ void saveMat4(const std::string &osPath,
     fs.writeFileBytes(osPath, std::string(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
 }
 
-void loadMat4(const std::string &osPath,
+void loadMat4(Engine &engine,
+              const std::string &osPath,
               VirtualFS &fs,
               Environment &env,
               size_t nargout,
@@ -811,12 +859,20 @@ void loadMat4(const std::string &osPath,
     if (nargout > 0) asStruct = Value::structure(mr);
     std::size_t loadedCount = 0;
 
-    while (pos + 20 <= len) {
-        std::int32_t mType = *reinterpret_cast<const std::int32_t*>(p + pos);
-        std::int32_t rows  = *reinterpret_cast<const std::int32_t*>(p + pos + 4);
-        std::int32_t cols  = *reinterpret_cast<const std::int32_t*>(p + pos + 8);
-        std::int32_t imagf = *reinterpret_cast<const std::int32_t*>(p + pos + 12);
-        std::int32_t namlen= *reinterpret_cast<const std::int32_t*>(p + pos + 16);
+    auto readI32LE = [](const std::uint8_t *src) -> std::int32_t {
+        std::uint32_t u = static_cast<std::uint32_t>(src[0]) |
+                          (static_cast<std::uint32_t>(src[1]) << 8) |
+                          (static_cast<std::uint32_t>(src[2]) << 16) |
+                          (static_cast<std::uint32_t>(src[3]) << 24);
+        return static_cast<std::int32_t>(u);
+    };
+
+    while (len - pos >= 20) {
+        std::int32_t mType  = readI32LE(p + pos);
+        std::int32_t rows   = readI32LE(p + pos + 4);
+        std::int32_t cols   = readI32LE(p + pos + 8);
+        std::int32_t imagf  = readI32LE(p + pos + 12);
+        std::int32_t namlen = readI32LE(p + pos + 16);
         pos += 20;
 
         // Validation for MAT4 header
@@ -832,11 +888,20 @@ void loadMat4(const std::string &osPath,
             throw Error("load: invalid or corrupted .mat file");
         }
 
-        if (pos + namlen > len) throw Error("load: truncated MAT4 file");
-        std::string name(reinterpret_cast<const char*>(p + pos));
-        pos += namlen;
+        const std::size_t nameBytes = static_cast<std::size_t>(namlen);
+        if (nameBytes > len - pos) throw Error("load: truncated MAT4 file");
+        const void *nulPtr = std::memchr(p + pos, '\0', nameBytes);
+        if (!nulPtr) throw Error("load: invalid or corrupted .mat file");
+        const std::size_t actualNameLen =
+            static_cast<const std::uint8_t *>(nulPtr) - (p + pos);
+        std::string name(reinterpret_cast<const char *>(p + pos), actualNameLen);
+        pos += nameBytes;
 
-        std::size_t numElems = static_cast<std::size_t>(rows * cols);
+        const std::size_t rSz = static_cast<std::size_t>(rows);
+        const std::size_t cSz = static_cast<std::size_t>(cols);
+        if (cSz > 0 && rSz > SIZE_MAX / cSz)
+            throw Error("load: MAT4 matrix dimensions overflow address space");
+        std::size_t numElems = rSz * cSz;
         std::size_t elemSize = sizeof(double);
         ValueType vt = ValueType::DOUBLE;
         if (pType == 1) { vt = ValueType::SINGLE; elemSize = 4; }
@@ -849,20 +914,25 @@ void loadMat4(const std::string &osPath,
 
         Value v;
         if (imagf == 1) {
-            v = Value::complexMatrix(rows, cols, mr);
-            auto *cdata = v.complexDataMut();
+            if (numElems > SIZE_MAX / (2 * sizeof(double)))
+                throw Error("load: MAT4 complex data size overflow");
             std::size_t realBytes = numElems * sizeof(double);
-            if (pos + realBytes * 2 > len) throw Error("load: truncated MAT4 complex data");
-            const auto *rp = reinterpret_cast<const double*>(p + pos);
-            const auto *ip = reinterpret_cast<const double*>(p + pos + realBytes);
+            if (realBytes * 2 > len - pos) throw Error("load: truncated MAT4 complex data");
+            v = Value::complexMatrix(rSz, cSz, mr);
+            auto *cdata = v.complexDataMut();
             for (std::size_t i = 0; i < numElems; ++i) {
-                cdata[i] = std::complex<double>(rp[i], ip[i]);
+                double rv = 0.0, iv = 0.0;
+                std::memcpy(&rv, p + pos + i * sizeof(double), sizeof(double));
+                std::memcpy(&iv, p + pos + realBytes + i * sizeof(double), sizeof(double));
+                cdata[i] = std::complex<double>(rv, iv);
             }
             pos += realBytes * 2;
         } else {
-            v = Value::matrix(rows, cols, vt, mr);
+            if (elemSize > 0 && numElems > SIZE_MAX / elemSize)
+                throw Error("load: MAT4 data size overflow");
             std::size_t dataBytes = numElems * elemSize;
-            if (pos + dataBytes > len) throw Error("load: truncated MAT4 data");
+            if (dataBytes > len - pos) throw Error("load: truncated MAT4 data");
+            v = Value::matrix(rSz, cSz, vt, mr);
             if (dataBytes > 0) {
                 std::memcpy(v.rawDataMut(), p + pos, dataBytes);
                 pos += dataBytes;
@@ -870,8 +940,12 @@ void loadMat4(const std::string &osPath,
         }
 
         if (!name.empty()) {
-            if (nargout > 0) asStruct.setField(0, name, v);
-            else env.set(name, std::move(v));
+            if (nargout > 0) {
+                if (!outs.empty()) asStruct.setField(0, name, v);
+            } else {
+                env.set(name, v);
+                engine.assignToCaller(0, name, std::move(v));
+            }
             ++loadedCount;
         }
     }
@@ -880,7 +954,7 @@ void loadMat4(const std::string &osPath,
         throw Error("load: invalid or corrupted .mat file");
     }
 
-    if (nargout > 0) outs[0] = std::move(asStruct);
+    if (nargout > 0 && !outs.empty()) outs[0] = std::move(asStruct);
 }
 
 } // anonymous namespace
@@ -1016,10 +1090,10 @@ void loadMat(Engine &engine, Environment &env,
             throw Error("load: invalid or corrupted MAT5 file");
         }
 
-        if (nargout > 0) outs[0] = std::move(asStruct);
+        if (nargout > 0 && !outs.empty()) outs[0] = std::move(asStruct);
     } else {
         // MAT4 fallback
-        loadMat4(resolved.path, *resolved.fs, env, nargout, outs, mr);
+        loadMat4(engine, resolved.path, *resolved.fs, env, nargout, outs, mr);
     }
 }
 

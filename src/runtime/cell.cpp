@@ -43,6 +43,28 @@ Value cell(size_t rows, size_t cols, size_t pages, std::pmr::memory_resource *)
     return Value::cell(rows, cols);
 }
 
+static Value allocMatrixShape(const Dims &d, ValueType t, std::pmr::memory_resource *mr)
+{
+    if (d.ndim() <= 2)
+        return Value::matrix(d.rows(), d.cols(), t, mr);
+    size_t buf[Dims::kMaxRank];
+    const int nd = d.ndim();
+    for (int i = 0; i < nd; ++i)
+        buf[i] = d.dim(i);
+    return Value::matrixND(buf, nd, t, mr);
+}
+
+static Value allocCellShape(const Dims &d, std::pmr::memory_resource *mr)
+{
+    if (d.ndim() <= 2)
+        return Value::cell(d.rows(), d.cols(), mr);
+    size_t buf[Dims::kMaxRank];
+    const int nd = d.ndim();
+    for (int i = 0; i < nd; ++i)
+        buf[i] = d.dim(i);
+    return Value::cellND(buf, nd, mr);
+}
+
 Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
               std::pmr::memory_resource *mr)
 {
@@ -67,12 +89,7 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
         // Pack as DOUBLE / LOGICAL based on first result's type.
         const ValueType outT = (n > 0 && results[0].isLogical())
                            ? ValueType::LOGICAL : ValueType::DOUBLE;
-        const auto &d = c.dims();
-        const size_t r = d.rows();
-        const size_t cc = d.cols();
-        const size_t p = d.is3D() ? d.pages() : 0;
-        auto out = (p > 0) ? Value::matrix3d(r, cc, p, outT, mr)
-                           : Value::matrix(r, cc, outT, mr);
+        auto out = allocMatrixShape(c.dims(), outT, mr);
         for (size_t i = 0; i < n; ++i) {
             const Value &v = results[i];
             if (!v.isScalar())
@@ -87,11 +104,7 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
     }
 
     // Cell output, same shape as C.
-    const auto &d = c.dims();
-    const size_t r = d.rows();
-    const size_t cc = d.cols();
-    const size_t p = d.is3D() ? d.pages() : 0;
-    Value out = (p > 0) ? Value::cell3D(r, cc, p) : Value::cell(r, cc);
+    Value out = allocCellShape(c.dims(), mr);
     for (size_t i = 0; i < n; ++i)
         out.cellAt(i) = std::move(results[i]);
     return out;
@@ -440,8 +453,7 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
         const bool uniform = hf::parseUniformOutputFlag(args, 2, "cellfun");
         auto *mr = eng.resource();
         Value cellArg = args[1];
-        const auto &d = cellArg.dims();
-        const std::size_t rows = d.rows(), cols = d.cols(), pages = d.is3D() ? d.pages() : 0;
+        Dims outDims = cellArg.dims();
         auto cont = std::make_shared<LoopContinuation>();
         cont->handle = args[0];
         cont->n = cellArg.numel();
@@ -450,13 +462,12 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
             return {cellArg.cellAt(i)};
         };
         // Mirror the synchronous cellfun() helper's output construction.
-        cont->pack = [uniform, rows, cols, pages, mr](std::vector<Value> &results) -> Value {
+        cont->pack = [uniform, outDims, mr](std::vector<Value> &results) -> Value {
             const std::size_t n = results.size();
             if (uniform) {
                 const ValueType outT = (n > 0 && results[0].isLogical()) ? ValueType::LOGICAL
                                                                          : ValueType::DOUBLE;
-                Value out = (pages > 0) ? Value::matrix3d(rows, cols, pages, outT, mr)
-                                        : Value::matrix(rows, cols, outT, mr);
+                Value out = allocMatrixShape(outDims, outT, mr);
                 for (std::size_t k = 0; k < n; ++k) {
                     const Value &v = results[k];
                     if (!v.isScalar())
@@ -470,7 +481,7 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
                 }
                 return out;
             }
-            Value out = (pages > 0) ? Value::cell3D(rows, cols, pages) : Value::cell(rows, cols);
+            Value out = allocCellShape(outDims, mr);
             for (std::size_t k = 0; k < n; ++k)
                 out.cellAt(k) = results[k];
             return out;
@@ -503,12 +514,10 @@ static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
         results.push_back(std::move(out));
     }
     const auto &d = C0.dims();
-    const size_t r = d.rows(), cc = d.cols(), p = d.is3D() ? d.pages() : 0;
     if (uniformOutput) {
         const ValueType outT = (n > 0 && results[0].isLogical())
                                ? ValueType::LOGICAL : ValueType::DOUBLE;
-        Value out = (p > 0) ? Value::matrix3d(r, cc, p, outT, mr)
-                            : Value::matrix(r, cc, outT, mr);
+        Value out = allocMatrixShape(d, outT, mr);
         for (size_t i = 0; i < n; ++i) {
             const Value &v = results[i];
             if (!v.isScalar())
@@ -519,7 +528,7 @@ static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
         }
         return out;
     }
-    Value out = (p > 0) ? Value::cell3D(r, cc, p) : Value::cell(r, cc);
+    Value out = allocCellShape(d, mr);
     for (size_t i = 0; i < n; ++i) out.cellAt(i) = std::move(results[i]);
     return out;
 }
@@ -566,10 +575,8 @@ static Value cellfunStringForm(Span<const Value> args, std::pmr::memory_resource
     }
 
     const auto &d = C.dims();
-    const size_t r = d.rows(), cc = d.cols(), p = d.is3D() ? d.pages() : 0;
     const ValueType outT = wantLogical ? ValueType::LOGICAL : ValueType::DOUBLE;
-    Value out = (p > 0) ? Value::matrix3d(r, cc, p, outT, mr)
-                        : Value::matrix(r, cc, outT, mr);
+    Value out = allocMatrixShape(d, outT, mr);
     for (size_t i = 0; i < n; ++i) {
         const Value e = C.cellAt(i);
         double val = 0.0;
@@ -792,8 +799,7 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
             if (p.numel() != n)
                 return nullptr; // size mismatch -> sync path throws the error
         auto *mr = eng.resource();
-        const std::size_t rows = (*inputs)[0].dims().rows();
-        const std::size_t cols = (*inputs)[0].dims().cols();
+        Dims outDims = (*inputs)[0].dims();
         auto cont = std::make_shared<LoopContinuation>();
         cont->handle = args[0];
         cont->n = n;
@@ -804,15 +810,15 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
                 callArgs[k] = Value::scalar((*inputs)[k].elemAsDouble(i), mr);
             return callArgs;
         };
-        cont->pack = [uniform, rows, cols, mr](std::vector<Value> &results) -> Value {
+        cont->pack = [uniform, outDims, mr](std::vector<Value> &results) -> Value {
             const std::size_t n = results.size();
             if (uniform) {
-                Value out = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
+                Value out = allocMatrixShape(outDims, ValueType::DOUBLE, mr);
                 for (std::size_t k = 0; k < n; ++k)
                     out.doubleDataMut()[k] = results[k].toScalar();
                 return out;
             }
-            Value out = Value::cell(rows, cols, mr);
+            Value out = allocCellShape(outDims, mr);
             for (std::size_t k = 0; k < n; ++k)
                 out.cellAt(k) = results[k];
             return out;
@@ -915,9 +921,7 @@ void registerCellsRuntime(Engine &engine)
 
             std::vector<Value> callArgs(inputs.size());
             if (uniformOutput) {
-                auto out = Value::matrix(inputs[0]->dims().rows(),
-                                         inputs[0]->dims().cols(),
-                                         ValueType::DOUBLE, mr);
+                auto out = allocMatrixShape(inputs[0]->dims(), ValueType::DOUBLE, mr);
                 for (size_t i = 0; i < n; ++i) {
                     for (size_t k = 0; k < inputs.size(); ++k)
                         callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
@@ -927,10 +931,10 @@ void registerCellsRuntime(Engine &engine)
                         ctx.env);
                     out.doubleDataMut()[i] = r.toScalar();
                 }
-                outs[0] = std::move(out);
+                if (!outs.empty())
+                    outs[0] = std::move(out);
             } else {
-                auto cell = Value::cell(inputs[0]->dims().rows(),
-                                        inputs[0]->dims().cols(), mr);
+                auto cell = allocCellShape(inputs[0]->dims(), mr);
                 for (size_t i = 0; i < n; ++i) {
                     for (size_t k = 0; k < inputs.size(); ++k)
                         callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
@@ -940,7 +944,8 @@ void registerCellsRuntime(Engine &engine)
                         ctx.env);
                     cell.cellAt(i) = std::move(r);
                 }
-                outs[0] = std::move(cell);
+                if (!outs.empty())
+                    outs[0] = std::move(cell);
             }
         });
 

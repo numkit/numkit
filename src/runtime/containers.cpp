@@ -295,34 +295,49 @@ void registerContainersRuntime(Engine &engine)
             return d;
         };
         dict.subsref = [](Value &self, Span<const Value> args, size_t, Span<Value> out,
-                          CallContext &) { out[0] = containers::get(self, args[0]); };
+                          CallContext &) {
+            if (args.empty())
+                throw std::runtime_error("dictionary: key subscript required");
+            if (!out.empty())
+                out[0] = containers::get(self, args[0]);
+        };
         dict.subsasgn = [](Value &self, Span<const Value> args, size_t, Span<Value>,
                            CallContext &) {
+            if (args.size() < 2)
+                throw std::runtime_error("dictionary: key and value required for assignment");
             containers::set(self, args[0], args[args.size() - 1]);
         };
         dict.methods["numEntries"] = [](Value &self, Span<const Value>, size_t,
                                         Span<Value> out, CallContext &ctx) {
-            out[0] = Value::scalar(static_cast<double>(containers::count(self)),
-                                   ctx.engine->resource());
+            if (!out.empty())
+                out[0] = Value::scalar(static_cast<double>(containers::count(self)),
+                                       ctx.engine->resource());
         };
         dict.methods["isKey"] = [](Value &self, Span<const Value> a, size_t, Span<Value> out,
                                    CallContext &ctx) {
-            out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->resource());
+            if (a.empty())
+                throw std::runtime_error("dictionary.isKey: key argument required");
+            if (!out.empty())
+                out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->resource());
         };
         dict.methods["keys"] = [](Value &self, Span<const Value>, size_t, Span<Value> out,
                                   CallContext &ctx) {
-            out[0] = containers::keys(self, ctx.engine->resource());
+            if (!out.empty())
+                out[0] = containers::keys(self, ctx.engine->resource());
         };
         dict.methods["values"] = [](Value &self, Span<const Value>, size_t, Span<Value> out,
                                     CallContext &ctx) {
-            out[0] = containers::values(self, ctx.engine->resource());
+            if (!out.empty())
+                out[0] = containers::values(self, ctx.engine->resource());
         };
         dict.methods["isConfigured"] = [](Value &self, Span<const Value>, size_t,
                                           Span<Value> out, CallContext &ctx) {
-            out[0] = Value::logicalScalar(cst(self)->configured, ctx.engine->resource());
+            const KVPayload *p = require(self);
+            if (!out.empty())
+                out[0] = Value::logicalScalar(p->configured, ctx.engine->resource());
         };
         dict.dispText = [](const Value &self) -> std::string {
-            const KVPayload *p = cst(self);
+            const KVPayload *p = require(self);
             std::ostringstream os;
             const char *kt = (p->keyKind == KVPayload::Num) ? "double" : "string";
             os << "  dictionary (" << kt << " --> " << p->valType << ") with " << p->count()
@@ -375,36 +390,52 @@ void registerContainersRuntime(Engine &engine)
             return m;
         };
         cm.subsref = [](Value &self, Span<const Value> args, size_t, Span<Value> out,
-                        CallContext &) { out[0] = containers::get(self, args[0]); };
+                        CallContext &) {
+            if (args.empty())
+                throw std::runtime_error("containers.Map: key subscript required");
+            if (!out.empty())
+                out[0] = containers::get(self, args[0]);
+        };
         cm.subsasgn = [](Value &self, Span<const Value> args, size_t, Span<Value>,
                          CallContext &) {
+            if (args.size() < 2)
+                throw std::runtime_error("containers.Map: key and value required for assignment");
             containers::set(self, args[0], args[args.size() - 1]);
         };
         cm.methods["keys"] = [](Value &self, Span<const Value>, size_t, Span<Value> out,
                                 CallContext &ctx) {
-            out[0] = containers::keys(self, ctx.engine->resource());
+            if (!out.empty())
+                out[0] = containers::keys(self, ctx.engine->resource());
         };
         cm.methods["values"] = [](Value &self, Span<const Value>, size_t, Span<Value> out,
                                   CallContext &ctx) {
-            out[0] = containers::values(self, ctx.engine->resource());
+            if (!out.empty())
+                out[0] = containers::values(self, ctx.engine->resource());
         };
         cm.methods["isKey"] = [](Value &self, Span<const Value> a, size_t, Span<Value> out,
                                  CallContext &ctx) {
-            out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->resource());
+            if (a.empty())
+                throw std::runtime_error("containers.Map.isKey: key argument required");
+            if (!out.empty())
+                out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->resource());
         };
         cm.methods["length"] = [](Value &self, Span<const Value>, size_t, Span<Value> out,
                                   CallContext &ctx) {
-            out[0] = Value::scalar(static_cast<double>(containers::count(self)),
-                                   ctx.engine->resource());
+            if (!out.empty())
+                out[0] = Value::scalar(static_cast<double>(containers::count(self)),
+                                       ctx.engine->resource());
         };
         cm.methods["remove"] = [](Value &self, Span<const Value> a, size_t, Span<Value> out,
                                   CallContext &) {
+            if (a.empty())
+                throw std::runtime_error("containers.Map.remove: key argument required");
             containers::remove(self, a[0]);
-            out[0] = self; // MATLAB returns the (mutated) map
+            if (!out.empty())
+                out[0] = self; // MATLAB returns the (mutated) map
         };
         cm.propGet = [](const Value &self, const std::string &name, Value &out,
                         CallContext &ctx) -> bool {
-            const KVPayload *p = cst(self);
+            const KVPayload *p = require(self);
             auto *mr = ctx.engine->resource();
             if (name == "Count") {
                 out = Value::scalar(static_cast<double>(p->count()), mr);
@@ -421,7 +452,7 @@ void registerContainersRuntime(Engine &engine)
             return false;
         };
         cm.dispText = [](const Value &self) -> std::string {
-            const KVPayload *p = cst(self);
+            const KVPayload *p = require(self);
             std::ostringstream os;
             os << "  Map with properties:\n\n"
                << "        Count: " << p->count() << "\n"
@@ -1180,6 +1211,8 @@ void registerContainersRuntime(Engine &engine)
         tbl.subsref = [](Value &self, Span<const Value> args, size_t, Span<Value> out,
                          CallContext &ctx) {
             const TablePayload *p = tableCst(self);
+            if (!p)
+                throw std::runtime_error("table: invalid table payload");
             auto *mr = ctx.engine->resource();
             if (args.empty() || args.size() > 2)
                 throw Error("table: parenthesis indexing requires 1 or 2 subscripts",
@@ -1213,12 +1246,15 @@ void registerContainersRuntime(Engine &engine)
                 for (size_t ri : rIdx)
                     sub->rowNames.push_back(p->rowNames[ri]);
             }
-            out[0] = makeTableValue(std::move(sub), mr);
+            if (!out.empty())
+                out[0] = makeTableValue(std::move(sub), mr);
         };
 
         tbl.subsasgn = [](Value &self, Span<const Value> args, size_t, Span<Value>,
                           CallContext &ctx) {
             TablePayload *p = tableMut(self);
+            if (!p)
+                throw std::runtime_error("table: invalid table payload");
             auto *mr = ctx.engine->resource();
             if (args.size() < 2 || args.size() > 3)
                 throw Error("table: parenthesis assignment requires 1 or 2 subscripts",
@@ -2319,12 +2355,10 @@ void registerContainersRuntime(Engine &engine)
                 if (origSt) {
                     st->props = origSt->props;
                     if (origSt->native) {
-                        st->native = origSt->native->clone();
+                        st->native = origSt->native->fromScalarDouble(sd);
+                        if (!st->native)
+                            st->native = origSt->native->clone();
                     }
-                }
-                if (st->native) {
-                    double *dptr = reinterpret_cast<double *>(reinterpret_cast<char *>(st->native.get()) + sizeof(void *));
-                    *dptr = sd;
                 }
                 return Value::object("datetime", std::move(st), false, mr);
             };

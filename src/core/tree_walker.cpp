@@ -76,7 +76,7 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
     // Fast path for number literals: B(3)
     if (indexExpr->type == NodeType::NUMBER_LITERAL) {
         double v = indexExpr->numValue;
-        if (v >= 1.0 && v == std::floor(v)) {
+        if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
             outIdx = static_cast<size_t>(v) - 1;
             return true;
         }
@@ -97,13 +97,15 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
             } else {
                 sz = array.dims().dimSize(dim);
             }
+            if (sz == 0)
+                return false;
             outIdx = sz - 1;
             return true;
         }
         auto *val = env->get(name);
         if (val && val->isScalar() && val->type() == ValueType::DOUBLE) {
             double v = val->toScalar();
-            if (v >= 1.0 && v == std::floor(v)) {
+            if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
                 outIdx = static_cast<size_t>(v) - 1;
                 return true;
             }
@@ -147,7 +149,7 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
             Value result = (*static_cast<const BinaryOpFunc *>(indexExpr->cachedOp))(lm, rm);
             if (result.isScalar()) {
                 double v = result.toScalar();
-                if (v >= 1.0 && v == std::floor(v)) {
+                if (v >= 1.0 && v == std::floor(v) && v < 9007199254740992.0) {
                     outIdx = static_cast<size_t>(v) - 1;
                     return true;
                 }
@@ -879,7 +881,9 @@ bool TreeWalker::tryEvalFast(const ASTNode *expr, Environment *env, Value &out)
                     Value idxM;
                     if (tryEvalFast(expr->children[1].get(), env, idxM)) {
                         double idxVal;
-                        if (asDouble(idxM, idxVal)) {
+                        if (asDouble(idxM, idxVal)
+                            && idxVal >= 1.0 && idxVal == std::floor(idxVal)
+                            && idxVal < 9007199254740992.0) {
                             Value *arr = env->get(funcNode->strValue);
                             if (arr && arr->type() == ValueType::DOUBLE) {
                                 size_t idx = static_cast<size_t>(idxVal) - 1;
@@ -895,9 +899,13 @@ bool TreeWalker::tryEvalFast(const ASTNode *expr, Environment *env, Value &out)
                     if (tryEvalFast(expr->children[1].get(), env, rowM)
                         && tryEvalFast(expr->children[2].get(), env, colM)) {
                         double rowVal, colVal;
-                        if (asDouble(rowM, rowVal) && asDouble(colM, colVal)) {
+                        if (asDouble(rowM, rowVal) && asDouble(colM, colVal)
+                            && rowVal >= 1.0 && rowVal == std::floor(rowVal)
+                            && rowVal < 9007199254740992.0
+                            && colVal >= 1.0 && colVal == std::floor(colVal)
+                            && colVal < 9007199254740992.0) {
                             Value *arr = env->get(funcNode->strValue);
-                            if (arr && arr->type() == ValueType::DOUBLE) {
+                            if (arr && arr->type() == ValueType::DOUBLE && arr->dims().ndim() <= 2) {
                                 size_t r = static_cast<size_t>(rowVal) - 1;
                                 size_t c = static_cast<size_t>(colVal) - 1;
                                 if (r < arr->dims().rows() && c < arr->dims().cols()) {
@@ -995,7 +1003,9 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
                         Value idxM;
                         if (tryEvalFast(rhsNode->children[1].get(), env, idxM)) {
                             double idxVal;
-                            if (asDouble(idxM, idxVal)) {
+                            if (asDouble(idxM, idxVal)
+                                && idxVal >= 1.0 && idxVal == std::floor(idxVal)
+                                && idxVal < 9007199254740992.0) {
                                 size_t idx = static_cast<size_t>(idxVal) - 1;
                                 if (idx < arr->numel()) {
                                     double v = arr->doubleData()[idx];
@@ -1029,7 +1039,7 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
                             double idxVal, rhsVal;
                             if (asDouble(idxM, idxVal) && asDouble(rhsM, rhsVal)
                                 && idxVal >= 1.0 && idxVal == std::floor(idxVal)
-                                && !std::isinf(idxVal)) {
+                                && idxVal < 9007199254740992.0) {
                                 size_t idx = static_cast<size_t>(idxVal) - 1;
                                 if (idx < arr->numel()) {
                                     arr->doubleDataMut()[idx] = rhsVal;
@@ -1040,7 +1050,7 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
                                 continue;
                             }
                         }
-                    } else if (lhsArgs == 3) {
+                    } else if (lhsArgs == 3 && arr->dims().ndim() <= 2) {
                         // 2D: A(i,j) = val
                         Value rowM, colM, rhsM;
                         if (tryEvalFast(lhsNode->children[1].get(), env, rowM)
@@ -1048,7 +1058,11 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
                             && tryEvalFast(rhsNode, env, rhsM)) {
                             double rowVal, colVal, rhsVal;
                             if (asDouble(rowM, rowVal) && asDouble(colM, colVal)
-                                && asDouble(rhsM, rhsVal)) {
+                                && asDouble(rhsM, rhsVal)
+                                && rowVal >= 1.0 && rowVal == std::floor(rowVal)
+                                && rowVal < 9007199254740992.0
+                                && colVal >= 1.0 && colVal == std::floor(colVal)
+                                && colVal < 9007199254740992.0) {
                                 size_t r = static_cast<size_t>(rowVal) - 1;
                                 size_t c = static_cast<size_t>(colVal) - 1;
                                 if (r < arr->dims().rows() && c < arr->dims().cols()) {
@@ -1568,12 +1582,14 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
             throw std::runtime_error("Indexed field assignment on a non-struct value");
 
         const size_t nargs = objNode->children.size() - 1;
+        if (nargs > static_cast<size_t>(Dims::kMaxRank))
+            throw std::runtime_error("Struct array indexing rank exceeds maximum supported rank");
         std::vector<size_t> coords(nargs);
         for (size_t a = 0; a < nargs; ++a) {
             IndexContextGuard guard(indexContextStack_,
                                     {var, static_cast<int>(a), static_cast<int>(nargs)});
             Value v = execNode(objNode->children[a + 1].get(), env);
-            coords[a] = static_cast<size_t>(v.toScalar()) - 1;
+            coords[a] = Value::checkedScalarIndex(v.toScalar());
         }
         size_t linear;
         if (nargs == 1) {
@@ -3172,24 +3188,28 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
     const std::string &varName = node->strValue;
     auto rangeVal = execNode(node->children[0].get(), env);
 
-    // Empty range — body never executes (MATLAB behavior)
-    if (rangeVal.isEmpty()) { env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE)); return Value(); }
-    if (false)
-    if (rangeVal.isEmpty())
+    // Empty range — body never executes
+    if (rangeVal.isEmpty()) {
+        env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_));
         return Value();
+    }
 
-    if (rangeVal.isCell()) {
-        size_t cols = rangeVal.dims().cols();
-        size_t rows = rangeVal.dims().rows();
-        for (size_t c = 0; c < cols; ++c) {
-            if (rows == 1) {
-                env->set(varName, rangeVal.cellAt(c));
-            } else {
-                auto col = Value::cell(rows, 1);
-                for (size_t r = 0; r < rows; ++r)
-                    col.cellAt(r) = rangeVal.cellAt(rangeVal.dims().sub2ind(r, c));
-                env->set(varName, col);
-            }
+    const auto &dims = rangeVal.dims();
+    const size_t rows = dims.rows();
+    const size_t count = (rows > 0) ? (dims.numel() / rows) : 0;
+    if (count == 0) {
+        env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_));
+        return Value();
+    }
+
+    if (rangeVal.type() == ValueType::DOUBLE && rows == 1) {
+        // Fast path: scalar iteration over row vector
+        const double *src = rangeVal.doubleData();
+        env->set(varName, Value::scalar(0.0, engine_.mr_));
+        Value *varPtr = env->get(varName);
+        double *slot = varPtr->doubleDataMut();
+        for (size_t c = 0; c < count; ++c) {
+            *slot = src[c];
             execNode(node->children[1].get(), env);
             if (flowSignal_ == FlowSignal::BREAK) {
                 flowSignal_ = FlowSignal::NONE;
@@ -3201,118 +3221,50 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
             }
             if (flowSignal_ == FlowSignal::RETURN)
                 return Value();
-        }
-        return Value();
-    }
-
-    if (rangeVal.type() == ValueType::DOUBLE) {
-        auto dims = rangeVal.dims();
-        if (dims.rows() == 1) {
-            // ── Fast path: scalar iteration over row vector ──
-            // Set the variable once, then update its value in-place
-            // to avoid env->set() hash lookup + Value creation each iteration.
-            const double *src = rangeVal.doubleData();
-            env->set(varName, Value::scalar(0.0, engine_.mr_));
-            Value *varPtr = env->get(varName);
-            double *slot = varPtr->doubleDataMut();
-            for (size_t c = 0; c < dims.cols(); ++c) {
-                *slot = src[c];
-                execNode(node->children[1].get(), env);
-                if (flowSignal_ == FlowSignal::BREAK) {
-                    flowSignal_ = FlowSignal::NONE;
-                    break;
-                }
-                if (flowSignal_ == FlowSignal::CONTINUE) {
-                    flowSignal_ = FlowSignal::NONE;
-                    continue;
-                }
-                if (flowSignal_ == FlowSignal::RETURN)
-                    return Value();
-                // Re-fetch pointer: body may have reassigned the loop variable
-                varPtr = env->get(varName);
-                if (!varPtr || !varPtr->isScalar() || varPtr->type() != ValueType::DOUBLE) {
-                    // Variable was changed to non-scalar — fall back to slow path
-                    for (size_t c2 = c + 1; c2 < dims.cols(); ++c2) {
-                        env->set(varName, Value::scalar(src[c2], engine_.mr_));
-                        execNode(node->children[1].get(), env);
-                        if (flowSignal_ == FlowSignal::BREAK) {
-                            flowSignal_ = FlowSignal::NONE;
-                            return Value();
-                        }
-                        if (flowSignal_ == FlowSignal::CONTINUE) {
-                            flowSignal_ = FlowSignal::NONE;
-                            continue;
-                        }
-                        if (flowSignal_ == FlowSignal::RETURN)
-                            return Value();
+            varPtr = env->get(varName);
+            if (!varPtr || !varPtr->isScalar() || varPtr->type() != ValueType::DOUBLE) {
+                for (size_t c2 = c + 1; c2 < count; ++c2) {
+                    env->set(varName, Value::scalar(src[c2], engine_.mr_));
+                    execNode(node->children[1].get(), env);
+                    if (flowSignal_ == FlowSignal::BREAK) {
+                        flowSignal_ = FlowSignal::NONE;
+                        return Value();
                     }
-                    return Value();
+                    if (flowSignal_ == FlowSignal::CONTINUE) {
+                        flowSignal_ = FlowSignal::NONE;
+                        continue;
+                    }
+                    if (flowSignal_ == FlowSignal::RETURN)
+                        return Value();
                 }
-                slot = varPtr->doubleDataMut();
+                return Value();
             }
+            slot = varPtr->doubleDataMut();
+        }
+        return Value();
+    }
+
+    // Unified path for all ValueTypes (DOUBLE matrix, SINGLE, INT8..UINT64,
+    // COMPLEX, LOGICAL, CHAR, CELL, STRING, STRUCT, OBJECT) and N-D arrays.
+    for (size_t c = 0; c < count; ++c) {
+        if (rows == 1) {
+            env->set(varName, rangeVal.elemAt(c, engine_.mr_));
         } else {
-            for (size_t c = 0; c < dims.cols(); ++c) {
-                auto col = Value::matrix(dims.rows(), 1, ValueType::DOUBLE, engine_.mr_);
-                double *dst = col.doubleDataMut();
-                for (size_t r = 0; r < dims.rows(); ++r)
-                    dst[r] = rangeVal(r, c);
-                env->set(varName, col);
-                execNode(node->children[1].get(), env);
-                if (flowSignal_ == FlowSignal::BREAK) {
-                    flowSignal_ = FlowSignal::NONE;
-                    break;
-                }
-                if (flowSignal_ == FlowSignal::CONTINUE) {
-                    flowSignal_ = FlowSignal::NONE;
-                    continue;
-                }
-                if (flowSignal_ == FlowSignal::RETURN)
-                    return Value();
-            }
+            env->set(varName, rangeVal.indexGet2D(nullptr, rows, &c, 1, engine_.mr_));
         }
-        return Value();
-    }
-
-    if (rangeVal.isChar()) {
-        const char *cd = rangeVal.charData();
-        for (size_t i = 0; i < rangeVal.numel(); ++i) {
-            env->set(varName, Value::fromString(std::string(1, cd[i]), engine_.mr_));
-            execNode(node->children[1].get(), env);
-            if (flowSignal_ == FlowSignal::BREAK) {
-                flowSignal_ = FlowSignal::NONE;
-                break;
-            }
-            if (flowSignal_ == FlowSignal::CONTINUE) {
-                flowSignal_ = FlowSignal::NONE;
-                continue;
-            }
-            if (flowSignal_ == FlowSignal::RETURN)
-                return Value();
+        execNode(node->children[1].get(), env);
+        if (flowSignal_ == FlowSignal::BREAK) {
+            flowSignal_ = FlowSignal::NONE;
+            break;
         }
-        return Value();
-    }
-
-    if (rangeVal.isLogical()) {
-        const uint8_t *ld = rangeVal.logicalData();
-        for (size_t i = 0; i < rangeVal.numel(); ++i) {
-            env->set(varName, Value::scalar(static_cast<double>(ld[i]), engine_.mr_));
-            execNode(node->children[1].get(), env);
-            if (flowSignal_ == FlowSignal::BREAK) {
-                flowSignal_ = FlowSignal::NONE;
-                break;
-            }
-            if (flowSignal_ == FlowSignal::CONTINUE) {
-                flowSignal_ = FlowSignal::NONE;
-                continue;
-            }
-            if (flowSignal_ == FlowSignal::RETURN)
-                return Value();
+        if (flowSignal_ == FlowSignal::CONTINUE) {
+            flowSignal_ = FlowSignal::NONE;
+            continue;
         }
-        return Value();
+        if (flowSignal_ == FlowSignal::RETURN)
+            return Value();
     }
-
-    throw std::runtime_error("Unsupported type in for loop: "
-                             + std::string(mtypeName(rangeVal.type())));
+    return Value();
 }
 
 Value TreeWalker::execWhile(const ASTNode *node, Environment *env)

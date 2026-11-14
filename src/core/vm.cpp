@@ -1049,13 +1049,11 @@ enter_frame:
                 } else {
                     fs.range = R[I.b];
                     fs.rangeType = fs.range.type();
-                    auto &dims = fs.range.dims();
-                    fs.count = dims.cols();
+                    const auto &dims = fs.range.dims();
                     fs.rows = dims.rows();
+                    fs.count = (fs.rows > 0) ? (dims.numel() / fs.rows) : 0;
                     if (fs.rangeType == ValueType::DOUBLE)
                         fs.data = fs.range.doubleData();
-                    else
-                        fs.rawData = fs.range.rawData();
                 }
                 if (fs.count == 0) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
                     ip += I.d;
@@ -1447,10 +1445,13 @@ enter_frame:
                 }
                 // ── Scalar fast path: A(i,j) with scalar double indices ──
                 if (R[I.c].isDoubleScalar() && R[I.e].isDoubleScalar()
-                    && mv.isHeapDouble()) {
-                    size_t r = static_cast<size_t>(R[I.c].scalarVal()) - 1;
-                    size_t c = static_cast<size_t>(R[I.e].scalarVal()) - 1;
-                    R[I.a].setScalarFast(mv.doubleDataFast()[mv.heapDims().sub2ind(r, c)]);
+                    && mv.isHeapDouble() && mv.heapDims().ndim() <= 2) {
+                    const auto &hd = mv.heapDims();
+                    size_t r = Value::checkedScalarIndex(R[I.c].scalarVal());
+                    size_t c = Value::checkedScalarIndex(R[I.e].scalarVal());
+                    if (r >= hd.rows() || c >= hd.cols())
+                        throw std::runtime_error("Index exceeds array dimensions");
+                    R[I.a].setScalarFast(mv.doubleDataFast()[hd.sub2ind(r, c)]);
                     break;
                 }
                 auto rowIds = ResolvedSubscript::resolve(R[I.c], mv.dims().rows());
@@ -1679,9 +1680,10 @@ enter_frame:
 
                 // ── Scalar fast path: Z(i,j) = scalar ──
                 if (ri.isDoubleScalar() && ci.isDoubleScalar()
-                    && val.isDoubleScalar() && R[I.a].isHeapDouble()) {
-                    size_t r = static_cast<size_t>(ri.scalarVal()) - 1;
-                    size_t c = static_cast<size_t>(ci.scalarVal()) - 1;
+                    && val.isDoubleScalar() && R[I.a].isHeapDouble()
+                    && R[I.a].heapDims().ndim() <= 2) {
+                    size_t r = Value::checkedScalarIndex(ri.scalarVal());
+                    size_t c = Value::checkedScalarIndex(ci.scalarVal());
                     const auto &d = R[I.a].heapDims();
                     if (r < d.rows() && c < d.cols()) {
                         // In-bounds: direct write, skip detach overhead
@@ -1701,9 +1703,14 @@ enter_frame:
                 bool riIsColon = rowIds.isColon;
                 bool ciIsColon = colIds.isColon;
 
+                const size_t curRows = R[I.a].dims().rows();
+                const size_t curColDim = R[I.a].dims().ndim() > 2
+                    ? (curRows > 0 ? R[I.a].dims().numel() / curRows : R[I.a].dims().cols())
+                    : R[I.a].dims().cols();
+
                 // Grow if needed
-                size_t maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
-                size_t maxC = colIds.maxPlusOne(R[I.a].dims().cols());
+                size_t maxR = rowIds.maxPlusOne(curRows);
+                size_t maxC = colIds.maxPlusOne(curColDim);
                 if (R[I.a].isEmpty()) {
                     if (riIsColon && ciIsColon) {
                         maxR = val.dims().rows();
@@ -1714,13 +1721,18 @@ enter_frame:
                         maxC = (rowIds.count == 1) ? val.numel() : val.dims().cols();
                     }
                 }
-                if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols())
+                if (maxR > curRows || maxC > curColDim)
                     R[I.a].resize(maxR, maxC, engine_.mr_);
 
+                const size_t finalRows = R[I.a].dims().rows();
+                const size_t finalColDim = R[I.a].dims().ndim() > 2
+                    ? (finalRows > 0 ? R[I.a].dims().numel() / finalRows : R[I.a].dims().cols())
+                    : R[I.a].dims().cols();
+
                 R[I.a].indexSet2D(rowIds.data(),
-                                  riIsColon ? R[I.a].dims().rows() : rowIds.count,
+                                  riIsColon ? finalRows : rowIds.count,
                                   colIds.data(),
-                                  ciIsColon ? R[I.a].dims().cols() : colIds.count, val);
+                                  ciIsColon ? finalColDim : colIds.count, val);
                 break;
             }
 
@@ -2099,7 +2111,7 @@ enter_frame:
             case OpCode::STRUCT_ELEM_FIELD_SET: {
                 // a=obj (struct array, in/out), b=idxReg, c=valReg, d=nameIdx
                 const std::string &fname = chunk.strings[I.d];
-                size_t idx = static_cast<size_t>(R[I.b].toScalar()) - 1;
+                size_t idx = Value::checkedScalarIndex(R[I.b].toScalar());
                 Value &obj = R[I.a];
                 obj.growStructArrayTo(idx, engine_.resource());
                 obj.setField(idx, fname, R[I.c]);  // BUG #15
@@ -2114,9 +2126,11 @@ enter_frame:
                 if (!obj.isStruct())
                     throw std::runtime_error("Indexed assignment on a non-struct value");
                 const int nargs = I.e;
+                if (nargs <= 0 || nargs > Dims::kMaxRank)
+                    throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 size_t coords[Dims::kMaxRank];
                 for (int k = 0; k < nargs; ++k)
-                    coords[k] = static_cast<size_t>(R[I.c + k].toScalar()) - 1;
+                    coords[k] = Value::checkedScalarIndex(R[I.c + k].toScalar());
                 size_t linear;
                 if (nargs == 1) {
                     linear = coords[0];
@@ -2135,9 +2149,11 @@ enter_frame:
                 if (!obj.isStruct())
                     throw std::runtime_error("Indexed assignment on a non-struct value");
                 const int nargs = I.c;
+                if (nargs <= 0 || nargs > Dims::kMaxRank)
+                    throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 size_t coords[Dims::kMaxRank];
                 for (int k = 0; k < nargs; ++k)
-                    coords[k] = static_cast<size_t>(R[I.b + k].toScalar()) - 1;
+                    coords[k] = Value::checkedScalarIndex(R[I.b + k].toScalar());
                 size_t linear;
                 if (nargs == 1) {
                     linear = coords[0];
@@ -4475,63 +4491,33 @@ void VM::forSetVar(Value &varReg, const ForState &fs)
         return;
     }
 
-    // Handle non-double types
-    if (fs.rangeType == ValueType::CHAR) {
-        const char *src = static_cast<const char *>(fs.rawData);
+    // Fast double row-vector / matrix path
+    if (fs.rangeType == ValueType::DOUBLE && fs.data != nullptr) {
         if (fs.rows == 1) {
-            varReg = Value::fromString(std::string(1, src[fs.index]), engine_.mr_);
-        } else {
-            auto col = Value::matrix(fs.rows, 1, ValueType::CHAR, engine_.mr_);
-            char *dst = col.charDataMut();
-            const char *colSrc = src + fs.index * fs.rows;
-            for (size_t r = 0; r < fs.rows; ++r)
-                dst[r] = colSrc[r];
-            varReg = std::move(col);
+            if (varReg.isDoubleScalar())
+                varReg.setScalarFast(fs.data[fs.index]);
+            else
+                varReg.setScalarVal(fs.data[fs.index]);
+            return;
         }
-        return;
-    }
-    if (fs.rangeType == ValueType::LOGICAL) {
-        const uint8_t *src = static_cast<const uint8_t *>(fs.rawData);
-        if (fs.rows == 1) {
-            varReg = Value::logicalScalar(src[fs.index] != 0);
-        } else {
-            auto col = Value::matrix(fs.rows, 1, ValueType::LOGICAL, engine_.mr_);
-            uint8_t *dst = col.logicalDataMut();
-            const uint8_t *colSrc = src + fs.index * fs.rows;
-            for (size_t r = 0; r < fs.rows; ++r)
-                dst[r] = colSrc[r];
-            varReg = std::move(col);
-        }
-        return;
-    }
-    if (fs.rangeType == ValueType::CELL) {
-        if (fs.rows == 1) {
-            varReg = fs.range.cellAt(fs.index);
-        } else {
-            auto col = Value::cell(fs.rows, 1);
-            for (size_t r = 0; r < fs.rows; ++r)
-                col.cellAt(r) = fs.range.cellAt(fs.index * fs.rows + r);
-            varReg = std::move(col);
-        }
+        size_t rows = fs.rows;
+        auto col = Value::matrix(rows, 1, ValueType::DOUBLE, engine_.mr_);
+        double *dst = col.doubleDataMut();
+        const double *src = fs.data + fs.index * rows;
+        for (size_t r = 0; r < rows; ++r)
+            dst[r] = src[r];
+        varReg = std::move(col);
         return;
     }
 
-    // Double path (original)
+    // Unified path for all other ValueTypes (SINGLE, INT8..UINT64, COMPLEX,
+    // LOGICAL, CHAR, CELL, STRING, STRUCT, OBJECT) and N-D arrays.
     if (fs.rows == 1) {
-        // Row vector — most common. After first iteration, varReg is always scalar.
-        if (varReg.isDoubleScalar())
-            varReg.setScalarFast(fs.data[fs.index]);
-        else
-            varReg.setScalarVal(fs.data[fs.index]);
+        varReg = fs.range.elemAt(fs.index, engine_.mr_);
         return;
     }
-    size_t rows = fs.rows;
-    auto col = Value::matrix(rows, 1, ValueType::DOUBLE, engine_.mr_);
-    double *dst = col.doubleDataMut();
-    const double *src = fs.data + fs.index * rows;
-    for (size_t r = 0; r < rows; ++r)
-        dst[r] = src[r];
-    varReg = std::move(col);
+    size_t colIdx = fs.index;
+    varReg = fs.range.indexGet2D(nullptr, fs.rows, &colIdx, 1, engine_.mr_);
 }
 
 // ============================================================

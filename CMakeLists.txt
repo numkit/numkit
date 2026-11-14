@@ -174,6 +174,7 @@ if(NUMKIT_BUILD_TESTS)
         tests/gtest/package_manager_test.cpp
         tests/gtest/reactive_session_test.cpp
         tests/gtest/known_bugs_test.cpp
+        tests/gtest/wave1_safety_test.cpp
     )
 
     add_executable(numkit_gtest ${NUMKIT_TEST_SOURCES})

@@ -308,6 +308,11 @@ struct DatetimeElemPayload : NativePayload
     }
 
     double asDouble() const override { return serialDay; }
+
+    std::shared_ptr<NativePayload> fromScalarDouble(double v) const override
+    {
+        return std::make_shared<DatetimeElemPayload>(v, format, timeZone);
+    }
 };
 
 struct DurationElemPayload : NativePayload
@@ -325,6 +330,11 @@ struct DurationElemPayload : NativePayload
     }
 
     double asDouble() const override { return seconds; }
+
+    std::shared_ptr<NativePayload> fromScalarDouble(double v) const override
+    {
+        return std::make_shared<DurationElemPayload>(v, format);
+    }
 };
 
 struct CalDurElemPayload : NativePayload

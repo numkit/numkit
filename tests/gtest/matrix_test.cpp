@@ -1759,10 +1759,21 @@ TEST_P(GridKronTest, NdgridThreeArgsShape)
     EXPECT_DOUBLE_EQ((*Z)(1, 2, 2), 3.0);
 }
 
-TEST_P(GridKronTest, NdgridFourArgsThrows)
+TEST_P(GridKronTest, NdgridFourArgs4D)
 {
-    EXPECT_THROW(eval("[A, B, C, D] = ndgrid(1:2, 1:2, 1:2, 1:2);"),
-                 std::exception);
+    eval("[A, B, C, D] = ndgrid(1:2, 10:11, 20:21, 30:31);");
+    auto *A = getVarPtr("A");
+    auto *D = getVarPtr("D");
+    ASSERT_NE(A, nullptr);
+    ASSERT_NE(D, nullptr);
+    EXPECT_EQ(A->dims().ndim(), 4);
+    EXPECT_EQ(A->numel(), 16u);
+    EXPECT_EQ(D->dims().ndim(), 4);
+    EXPECT_EQ(D->numel(), 16u);
+    EXPECT_DOUBLE_EQ(evalScalar("A(2, 1, 1, 1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("B(1, 2, 1, 1)"), 11.0);
+    EXPECT_DOUBLE_EQ(evalScalar("C(1, 1, 2, 1)"), 21.0);
+    EXPECT_DOUBLE_EQ(evalScalar("D(1, 1, 1, 2)"), 31.0);
 }
 
 TEST_P(GridKronTest, NdgridSingleArgAndZeroArgs)

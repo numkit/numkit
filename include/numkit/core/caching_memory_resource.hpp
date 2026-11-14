@@ -51,7 +51,7 @@ public:
     CachingMemoryResource &operator=(const CachingMemoryResource &) = delete;
 
     // Return every pooled block to upstream (e.g. to reclaim memory at idle).
-    void releaseCached() {
+    void releaseCached() noexcept {
         std::lock_guard<std::mutex> lk(mu_);
         for (auto &kv : free_)
             for (void *p : kv.second)
@@ -84,11 +84,16 @@ private:
 
     void do_deallocate(void *p, std::size_t bytes, std::size_t align) override {
         if (bytes >= minCache_) {
-            std::lock_guard<std::mutex> lk(mu_);
-            if (cachedBytes_ + bytes <= maxCached_) {
-                free_[Key{bytes, align}].push_back(p);
-                cachedBytes_ += bytes;
-                return;
+            try {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (cachedBytes_ + bytes <= maxCached_) {
+                    free_[Key{bytes, align}].push_back(p);
+                    cachedBytes_ += bytes;
+                    return;
+                }
+            } catch (...) {
+                // Never allow vector/map growth failure inside noexcept deallocate
+                // to terminate the process; fall through and release to upstream.
             }
         }
         upstream_->deallocate(p, bytes, align);

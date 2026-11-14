@@ -140,10 +140,73 @@ bool parseSemVerTag(const std::string &tag, SemVerTag &out)
     return true;
 }
 
+bool hasControlChars(const std::string &s)
+{
+    for (unsigned char ch : s) {
+        if (ch < 0x20 || ch == 0x7F)
+            return true;
+    }
+    return false;
+}
+
+bool isValidPackageName(const std::string &name)
+{
+    if (name.empty() || name == "." || name == ".." || name[0] == '-')
+        return false;
+    for (unsigned char ch : name) {
+        if (!(std::isalnum(ch) || ch == '_' || ch == '-' || ch == '.'))
+            return false;
+    }
+    return true;
+}
+
+std::string quoteShellArg(const std::string &s)
+{
+#ifdef _WIN32
+    std::string out = "\"";
+    for (char ch : s) {
+        if (ch == '"')
+            out += "\\\"";
+        else
+            out.push_back(ch);
+    }
+    out.push_back('"');
+    return out;
+#else
+    std::string out = "'";
+    for (char ch : s) {
+        if (ch == '\'')
+            out += "'\\''";
+        else
+            out.push_back(ch);
+    }
+    out.push_back('\'');
+    return out;
+#endif
+}
+
+bool isStrictSubpath(const fs::path &parentDir, const fs::path &candidate)
+{
+    std::error_code ec1, ec2;
+    fs::path pCanon = fs::weakly_canonical(parentDir, ec1);
+    fs::path cCanon = fs::weakly_canonical(candidate, ec2);
+    if (ec1 || ec2 || pCanon.empty() || cCanon.empty() || pCanon == cCanon)
+        return false;
+    auto pIt = pCanon.begin();
+    auto cIt = cCanon.begin();
+    for (; pIt != pCanon.end(); ++pIt, ++cIt) {
+        if (cIt == cCanon.end() || *pIt != *cIt)
+            return false;
+    }
+    return cIt != cCanon.end();
+}
+
 std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const std::string &gitUrl)
 {
     std::vector<SemVerTag> tags;
-    std::string cmd = "\"" + gitPath + "\" ls-remote --tags --refs \"" + gitUrl + "\"";
+    if (gitUrl.empty() || gitUrl[0] == '-' || hasControlChars(gitUrl) || hasControlChars(gitPath))
+        return tags;
+    std::string cmd = quoteShellArg(gitPath) + " ls-remote --tags --refs -- " + quoteShellArg(gitUrl);
     auto res = sys::runProcess(cmd);
     if (!res.ok()) return tags;
 
@@ -166,7 +229,10 @@ std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const s
 std::string queryRemoteRefCommit(const std::string &gitPath, const std::string &gitUrl,
                                  const std::string &ref)
 {
-    std::string cmd = "\"" + gitPath + "\" ls-remote \"" + gitUrl + "\" \"" + ref + "\"";
+    if (gitUrl.empty() || gitUrl[0] == '-' || ref.empty() || ref[0] == '-'
+        || hasControlChars(gitUrl) || hasControlChars(ref) || hasControlChars(gitPath))
+        return {};
+    std::string cmd = quoteShellArg(gitPath) + " ls-remote -- " + quoteShellArg(gitUrl) + " " + quoteShellArg(ref);
     auto res = sys::runProcess(cmd);
     if (!res.ok() || res.output.empty()) return {};
     std::istringstream iss(res.output);
@@ -468,8 +534,20 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
 
     PackageTarget target = resolveTarget(targetInput);
+    if (!isValidPackageName(target.name)) {
+        std::cerr << "Error: Invalid package name '" << target.name << "'.\n";
+        return 1;
+    }
+    if (hasControlChars(target.gitUrl) || hasControlChars(target.tagOrBranch) || hasControlChars(target.localPath)) {
+        std::cerr << "Error: Package target contains invalid control characters.\n";
+        return 1;
+    }
 
     if (!target.isLocal) {
+        if (target.gitUrl.empty() || target.gitUrl[0] == '-') {
+            std::cerr << "Error: Invalid git URL '" << target.gitUrl << "'.\n";
+            return 1;
+        }
         auto gitTool = sys::findGit();
         if (!gitTool.found) {
             std::cerr << "Error: 'git' command is not available in PATH.\n";
@@ -490,6 +568,10 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     } else {
         auto gitTool = sys::findGit();
         resolvedRef = resolveRemoteRef(target, forceHead);
+        if (resolvedRef.empty() || resolvedRef[0] == '-' || hasControlChars(resolvedRef)) {
+            std::cerr << "Error: Invalid git ref '" << resolvedRef << "'.\n";
+            return 1;
+        }
         if (verbose) {
             std::cout << "Installing package '" << target.name << "' (ref: " << resolvedRef << ")...\n";
         }
@@ -499,13 +581,13 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
             if (verbose) {
                 std::cout << "Fetching " << resolvedRef << " from " << target.gitUrl << "...\n";
             }
-            std::string fetchCmd = "\"" + gitTool.path + "\" -C \"" + sourceDir
-                                 + "\" fetch --depth 1 origin \"" + resolvedRef + "\"";
+            std::string fetchCmd = quoteShellArg(gitTool.path) + " -C " + quoteShellArg(sourceDir)
+                                 + " fetch --depth 1 origin -- " + quoteShellArg(resolvedRef);
             auto fetchRes = sys::runProcess(fetchCmd);
             bool switched = false;
             if (fetchRes.ok()) {
-                std::string coCmd = "\"" + gitTool.path + "\" -C \"" + sourceDir
-                                  + "\" checkout --force FETCH_HEAD";
+                std::string coCmd = quoteShellArg(gitTool.path) + " -C " + quoteShellArg(sourceDir)
+                                  + " checkout --force FETCH_HEAD";
                 switched = sys::runProcess(coCmd).ok();
             }
             if (!switched) {
@@ -513,16 +595,17 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
                     std::cout << "Cache switch failed, cloning fresh...\n";
                 }
                 std::error_code rec;
-                fs::remove_all(sourceDir, rec);
+                if (isStrictSubpath(cacheDir_, sourceDir))
+                    fs::remove_all(sourceDir, rec);
             }
         }
 
         if (!fs::exists(sourceDir)) {
-            std::string cloneCmd = "\"" + gitTool.path + "\" clone --depth 1 ";
+            std::string cloneCmd = quoteShellArg(gitTool.path) + " clone --depth 1 ";
             if (!resolvedRef.empty() && resolvedRef != "HEAD") {
-                cloneCmd += "--branch \"" + resolvedRef + "\" ";
+                cloneCmd += "--branch " + quoteShellArg(resolvedRef) + " ";
             }
-            cloneCmd += "\"" + target.gitUrl + "\" \"" + sourceDir + "\"";
+            cloneCmd += "-- " + quoteShellArg(target.gitUrl) + " " + quoteShellArg(sourceDir);
 
             if (verbose) {
                 std::cout << "Cloning " << target.gitUrl << " (" << resolvedRef << ")...\n";
@@ -535,7 +618,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
             }
         }
 
-        auto revRes = sys::runProcess("\"" + gitTool.path + "\" -C \"" + sourceDir + "\" rev-parse --short HEAD");
+        auto revRes = sys::runProcess(quoteShellArg(gitTool.path) + " -C " + quoteShellArg(sourceDir) + " rev-parse --short HEAD");
         if (revRes.ok()) {
             shortSha = trimString(revRes.output);
         }
@@ -550,8 +633,9 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
 
     // Configure CMake build
     std::string buildDir = (fs::path(sourceDir) / "build").string();
-    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + sourceDir
-                       + "\" -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
+    std::string cfgCmd = quoteShellArg(cmakeTool.path) + " -B " + quoteShellArg(buildDir)
+                       + " -S " + quoteShellArg(sourceDir)
+                       + " -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
     if (verbose) {
         std::cout << "Configuring CMake project...\n";
     }
@@ -562,7 +646,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
 
     // Build project
-    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release --parallel";
+    std::string buildCmd = quoteShellArg(cmakeTool.path) + " --build " + quoteShellArg(buildDir) + " --config Release --parallel";
     if (verbose) {
         std::cout << "Building shared module...\n";
     }
@@ -805,20 +889,26 @@ int PackageManager::build(const std::string &dir, bool verbose)
         return 1;
     }
 
+    if (hasControlChars(dir)) {
+        std::cerr << "Error: Directory path contains invalid control characters.\n";
+        return 1;
+    }
+
     std::string buildDir = (fs::path(dir) / "build").string();
     if (verbose) {
         std::cout << "Building module in " << dir << "...\n";
     }
 
-    std::string cfgCmd = "\"" + cmakeTool.path + "\" -B \"" + buildDir + "\" -S \"" + dir
-                       + "\" -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
+    std::string cfgCmd = quoteShellArg(cmakeTool.path) + " -B " + quoteShellArg(buildDir)
+                       + " -S " + quoteShellArg(dir)
+                       + " -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
     auto cfgRes = sys::runProcess(cfgCmd);
     if (!cfgRes.ok()) {
         std::cerr << "CMake configuration failed:\n" << cfgRes.output << "\n";
         return 1;
     }
 
-    std::string buildCmd = "\"" + cmakeTool.path + "\" --build \"" + buildDir + "\" --config Release --parallel";
+    std::string buildCmd = quoteShellArg(cmakeTool.path) + " --build " + quoteShellArg(buildDir) + " --config Release --parallel";
     auto buildRes = sys::runProcess(buildCmd);
     if (!buildRes.ok()) {
         std::cerr << "CMake build failed:\n" << buildRes.output << "\n";
@@ -837,8 +927,16 @@ int PackageManager::remove(const std::string &nameInput)
     if (name.rfind("numkit-", 0) == 0) {
         name = name.substr(7);
     }
+    if (!isValidPackageName(name)) {
+        std::cerr << "Error: Invalid package name '" << nameInput << "'.\n";
+        return 1;
+    }
 
     fs::path targetDir = fs::path(modulesDir_) / name;
+    if (!isStrictSubpath(modulesDir_, targetDir)) {
+        std::cerr << "Error: Refusing to remove path outside modules directory.\n";
+        return 1;
+    }
     std::error_code ec;
     if (!fs::exists(targetDir, ec)) {
         std::cerr << "Error: Package '" << nameInput << "' is not installed in " << modulesDir_ << "\n";
@@ -860,6 +958,10 @@ int PackageManager::load(const std::string &nameInput, Engine &engine, const std
     std::string name = nameInput;
     if (name.rfind("numkit-", 0) == 0) {
         name = name.substr(7);
+    }
+    if (!isValidPackageName(name)) {
+        std::cerr << "Error: Invalid package name '" << nameInput << "'.\n";
+        return 1;
     }
 
     fs::path targetDir = fs::path(modulesDir_) / name;

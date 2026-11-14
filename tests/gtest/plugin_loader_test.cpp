@@ -4,11 +4,33 @@
 // custom namespace dispatch, multi-output return).
 
 #include "dual_engine_fixture.hpp"
+#include <numkit/core/plugin_loader.hpp>
 #include <filesystem>
 
 using namespace m_test;
 
-class PluginLoaderTest : public DualEngineTest {};
+class PluginLoaderTest : public DualEngineTest {
+protected:
+    std::string findPluginLib(const std::string &pkgName) {
+        namespace fs = std::filesystem;
+        std::string found = engine.pluginLoader().findPackageLibrary(pkgName);
+        if (!found.empty() && fs::exists(found))
+            return found;
+        const std::vector<std::string> candidates = {
+            "build/lib/libnumkit_" + pkgName + ".so",
+            "build/lib/libnumkit_" + pkgName + ".dylib",
+            "build/bin/numkit_" + pkgName + ".dll",
+            "build/bin/modules/" + pkgName + "/libnumkit_" + pkgName + ".so",
+            "../lib/libnumkit_" + pkgName + ".so",
+            "C:/Users/User/Projects/numkit/" + pkgName + "/build/Release/numkit_" + pkgName + ".dll"
+        };
+        for (const auto &c : candidates) {
+            if (fs::exists(c))
+                return fs::absolute(c).generic_string();
+        }
+        return {};
+    }
+};
 
 
 
@@ -27,9 +49,9 @@ TEST_P(PluginLoaderTest, LoadModuleInvalidPath)
 
 TEST_P(PluginLoaderTest, DynamicSignalModule)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/signal/build/Release/numkit_signal.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_signal.dll not found at " << modPath;
+    std::string modPath = findPluginLib("signal");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_signal plugin library not found";
     }
 
     eval("loadmodule('" + modPath + "', 'custom_sig');");
@@ -72,9 +94,9 @@ TEST_P(PluginLoaderTest, DynamicSignalModule)
 
 TEST_P(PluginLoaderTest, CompatModeBareAndQualifiedCalls)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/signal/build/Release/numkit_signal.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_signal.dll not found at " << modPath;
+    std::string modPath = findPluginLib("signal");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_signal plugin library not found";
     }
 
     EXPECT_EQ(engine.namespaceMode(), numkit::NamespaceMode::Compat);
@@ -88,9 +110,9 @@ TEST_P(PluginLoaderTest, CompatModeBareAndQualifiedCalls)
 
 TEST_P(PluginLoaderTest, IsolatedModeCoreWorksAndBarePluginRejectedWithHint)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/signal/build/Release/numkit_signal.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_signal.dll not found at " << modPath;
+    std::string modPath = findPluginLib("signal");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_signal plugin library not found";
     }
 
     engine.setNamespaceMode(numkit::NamespaceMode::Isolated);
@@ -130,9 +152,9 @@ TEST_P(PluginLoaderTest, IsolatedModeCoreWorksAndBarePluginRejectedWithHint)
 
 TEST_P(PluginLoaderTest, IsolatedModeImportAliasSelectiveAndWildcard)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/signal/build/Release/numkit_signal.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_signal.dll not found at " << modPath;
+    std::string modPath = findPluginLib("signal");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_signal plugin library not found";
     }
 
     eval("pkg mode isolated;");
@@ -165,9 +187,9 @@ TEST_P(PluginLoaderTest, IsolatedModeImportAliasSelectiveAndWildcard)
 
 TEST_P(PluginLoaderTest, IsolatedModeDynamicSwitchAndPkgLoadAs)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/signal/build/Release/numkit_signal.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_signal.dll not found at " << modPath;
+    std::string modPath = findPluginLib("signal");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_signal plugin library not found";
     }
 
     // Load signal into custom namespace via `pkg load signal as sig_ns`
@@ -188,9 +210,9 @@ TEST_P(PluginLoaderTest, IsolatedModeDynamicSwitchAndPkgLoadAs)
 
 TEST_P(PluginLoaderTest, IsolatedModeImageModuleCollisionWithCoreImageBuiltin)
 {
-    std::string modPath = "C:/Users/User/Projects/numkit/image/build/Release/numkit_image.dll";
-    if (!std::filesystem::exists(modPath)) {
-        GTEST_SKIP() << "numkit_image.dll not found at " << modPath;
+    std::string modPath = findPluginLib("image");
+    if (modPath.empty()) {
+        GTEST_SKIP() << "numkit_image plugin library not found";
     }
 
     engine.setNamespaceMode(numkit::NamespaceMode::Isolated);
