@@ -199,7 +199,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         appendDefaultWhitespace(delims);
     }
     for (keel::usize k = optStart; k + 1 < args.size(); k += 2) {
-        std::string name = args[k].toString();
+        keel::String name = args[k].toString();
         std::transform(name.begin(), name.end(), name.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         if (name == "collapsedelimiters")
@@ -245,7 +245,7 @@ static bool parseIgnoreCaseOption(keel::ArrayRef<Value> args, keel::usize optSta
 {
     for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString()) continue;
-        std::string k = args[i].toString();
+        keel::String k = args[i].toString();
         for (char &c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (k == "ignorecase")
             return args[i + 1].toBool();
@@ -322,7 +322,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
     for (keel::usize k = 1; k < args.size(); ++k) {
         const Value &a = args[k];
         if (a.type() == ValueType::CHAR || a.isString()) {
-            std::string s = a.toString();
+            keel::String s = a.toString();
             std::transform(s.begin(), s.end(), s.begin(),
                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
             if (s == "class") withClass = true;
@@ -333,8 +333,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
     }
     Value r = mat2str(args[0], prec, mr);
     if (withClass) {
-        std::string wrapped = std::string(mtypeName(args[0].type())) + "(" +
-                              r.toString() + ")";
+        keel::String wrapped = keel::format("{}({})", mtypeName(args[0].type()), r.toString());
         r = Value::fromString(wrapped, mr);
     }
     outs[0] = r;
@@ -676,7 +675,7 @@ void strtok_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
 {
     argcheck::checkNargin(args.size(), 1, 2, "strtok");
     const std::string delim = (args.size() >= 2)
-                                  ? args[1].toString()
+                                  ? std::string(args[1].toString().as_ref())
                                   : std::string(" \t\r\n\f\v");
     auto [tok, rem] = numkit::builtin::strtok(args[0], delim,
                                               ctx.engine->allocator());

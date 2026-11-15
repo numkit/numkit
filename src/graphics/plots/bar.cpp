@@ -62,7 +62,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::string mode = "grouped";
             for (keel::usize i = nvStart; i < args.size(); ++i) {
                 if (args[i].isChar()) {
-                    std::string s = args[i].toString();
+                    std::string s(args[i].toString().as_ref());
                     for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                     if (s == "stacked" || s == "grouped"
                         || s == "histc"  || s == "hist") {
@@ -586,7 +586,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // open (the renderer draws an outline unless the style says filled).
             for (keel::usize k = 2; k < args.size(); ++k) {
                 if (args[k].isChar()) {
-                    std::string s = args[k].toString();
+                    std::string s(args[k].toString().as_ref());
                     for (auto &c : s) c = static_cast<char>(std::tolower(c));
                     if (s == "filled") { ds.style = "filled=1"; break; }
                 }
@@ -718,7 +718,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             double faceAlpha = 0.6;   // MATLAB default (probe R2025b)
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar()) continue;
-                std::string key = args[i].toString();
+                std::string key(args[i].toString().as_ref());
                 for (auto &c : key) c = (char)std::tolower((unsigned char)c);
                 if (key == "binwidth" && args[i + 1].isNumeric())
                     binWidthNV = args[i + 1].elemAsDouble(0);
@@ -735,7 +735,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                     char hex[8];
                     std::string *kv = key == "facecolor" ? &faceKV : &edgeKV;
                     if (cv.isChar()) {
-                        std::string c = cv.toString();
+                        std::string c(cv.toString().as_ref());
                         for (auto &ch : c) ch = (char)std::tolower((unsigned char)ch);
                         static const std::pair<const char *, const char *> shorts[] = {
                             {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
@@ -990,7 +990,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         if (args.size() > colorIdx) {
             const auto &Carg = args[colorIdx];
             if (Carg.isChar()) {
-                std::string s = Carg.toString();
+                std::string s(Carg.toString().as_ref());
                 if (!s.empty()) {
                     static const std::map<char, const char*> kShort = {
                         {'r', "#d62728"}, {'g', "#2ca02c"}, {'b', "#1f77b4"},
@@ -1466,7 +1466,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
 
             std::string color = "#9467bd";
             if (args.size() >= 4 && args[3].isChar()) {
-                std::string s = args[3].toString();
+                std::string s(args[3].toString().as_ref());
                 if (s.size() >= 4 && s[0] == '#') color = s;
             }
 
@@ -1607,7 +1607,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 0; i < a.size(); ++i) {
                 if (a[i].isChar()) {
                     if (i + 1 < a.size()) {
-                        std::string key = a[i].toString();
+                        std::string key(a[i].toString().as_ref());
                         for (auto &cc : key)
                             cc = (char)std::tolower((unsigned char)cc);
                         if (key == "colormap" && a[i + 1].isChar()) {
@@ -1615,7 +1615,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                             ++i; continue;
                         }
                         if (key == "celllabel" && a[i + 1].isChar()) {
-                            std::string v = a[i + 1].toString();
+                            std::string v(a[i + 1].toString().as_ref());
                             for (auto &cc : v) cc = (char)std::tolower((unsigned char)cc);
                             cellLabel = (v != "off");
                             ++i; continue;
@@ -1700,7 +1700,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 for (keel::usize i = 0; i < n; ++i) {
                     if (i) js << ',';
                     Value elem = cn.elemAt(i, gc.mr);
-                    std::string s = elem.isChar() ? elem.toString() : "";
+                    std::string s = elem.isChar() ? std::string(elem.toString().as_ref()) : std::string();
                     js << '"';
                     for (char ch : s) {
                         if (ch == '"' || ch == '\\') js << '\\';

@@ -28,7 +28,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         throw Error("pkg: action must be a string (e.g. 'install', 'list', 'load', 'remove', 'mode')");
     }
 
-    std::string action = args[0].toString();
+    std::string action(args[0].toString().as_ref());
     if (action == "list" || action == "status") {
         pm.list(std::cout);
     } else if (action == "avail" || action == "available" || action == "catalog" || action == "search") {
@@ -37,7 +37,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         std::vector<std::string> names;
         for (keel::usize i = 1; i < args.size(); ++i) {
             if (args[i].isChar() || args[i].isString()) {
-                std::string s = args[i].toString();
+                std::string s(args[i].toString().as_ref());
                 if (s != "--all" && s != "-a") names.push_back(std::move(s));
             }
         }
@@ -50,7 +50,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             if (!args[1].isChar() && !args[1].isString()) {
                 throw Error("pkg mode: argument must be 'compat' or 'isolated'");
             }
-            std::string m = args[1].toString();
+            std::string m(args[1].toString().as_ref());
             if (m == "isolated" || m == "strict") {
                 ctx.engine->setNamespaceMode(NamespaceMode::Isolated);
             } else if (m == "compat" || m == "matlab") {
@@ -73,7 +73,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         std::vector<std::string> targets;
         for (keel::usize i = 1; i < args.size(); ++i) {
             if (!args[i].isChar() && !args[i].isString()) continue;
-            std::string s = args[i].toString();
+            std::string s(args[i].toString().as_ref());
             if (s == "--all" || s == "-a") installAll = true;
             else targets.push_back(std::move(s));
         }
@@ -85,7 +85,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (args.size() < 2 || (!args[1].isChar() && !args[1].isString())) {
             throw Error("pkg load: requires a package name argument (e.g. pkg load signal)");
         }
-        std::string name = args[1].toString();
+        std::string name(args[1].toString().as_ref());
         std::string targetNs;
         if (args.size() == 3) {
             if (!args[2].isChar() && !args[2].isString()) {
@@ -109,13 +109,13 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (args.size() < 2 || (!args[1].isChar() && !args[1].isString())) {
             throw Error("pkg remove: requires a package name argument");
         }
-        std::string name = args[1].toString();
+        std::string name(args[1].toString().as_ref());
         int rc = pm.remove(name);
         if (rc != 0) {
             throw Error("pkg remove failed for '" + name + "'");
         }
     } else if (action == "build") {
-        std::string dir = (args.size() >= 2 && (args[1].isChar() || args[1].isString())) ? args[1].toString() : ".";
+        std::string dir = (args.size() >= 2 && (args[1].isChar() || args[1].isString())) ? std::string(args[1].toString().as_ref()) : std::string(".");
         int rc = pm.build(dir);
         if (rc != 0) {
             throw Error("pkg build failed for directory '" + dir + "'");

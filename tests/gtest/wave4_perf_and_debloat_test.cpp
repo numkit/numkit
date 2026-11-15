@@ -1,4 +1,5 @@
 #include <keel/core.h>
+#include <keel/smart_ptr.h>
 #include "dual_engine_fixture.hpp"
 #include <numkit/sys/vfs.hpp>
 
@@ -21,32 +22,33 @@ public:
 
     explicit CountingMemoryFS(std::string fsName) : name_(std::move(fsName)) {}
 
-    std::string name() const override { return name_; }
+    keel::String name() const override { return keel::String::from(name_); }
 
     void put(const std::string &path, std::string content, keel::i64 mtime, keel::i64 mtimeNs)
     {
         files_[norm(path)] = Entry{std::move(content), mtime, mtimeNs};
     }
 
-    std::string readFile(const std::string &path) override
+    keel::String readFile(keel::StringRef path) override
     {
-        auto it = files_.find(norm(path));
+        const std::string p(path);
+        auto it = files_.find(norm(p));
         if (it == files_.end())
-            throw std::runtime_error("file not found: " + path);
+            throw std::runtime_error("file not found: " + p);
         ++readCount;
-        return it->second.content;
+        return keel::String::from(it->second.content);
     }
 
-    void writeFile(const std::string &path, const std::string &content) override
+    void writeFile(keel::StringRef path, keel::StringRef content) override
     {
-        auto &e = files_[norm(path)];
-        e.content = content;
+        auto &e = files_[norm(std::string(path))];
+        e.content.assign(content.data(), content.size());
         ++e.mtimeNs;
     }
 
-    bool exists(const std::string &path) override
+    bool exists(keel::StringRef path) override
     {
-        const std::string p = norm(path);
+        const std::string p = norm(std::string(path));
         if (files_.count(p))
             return true;
         const std::string prefix = p + "/";
@@ -57,25 +59,25 @@ public:
         return false;
     }
 
-    std::vector<DirEntry> listDir(const std::string &path) override
+    keel::Array<DirEntry> listDir(keel::StringRef path) override
     {
-        const std::string dir = norm(path);
+        const std::string dir = norm(std::string(path));
         const std::string prefix = dir.empty() ? "" : (dir + "/");
-        std::vector<DirEntry> out;
+        keel::Array<DirEntry> out;
         for (const auto &kv : files_) {
             if (kv.first.rfind(prefix, 0) == 0) {
                 std::string rest = kv.first.substr(prefix.size());
                 if (rest.find('/') == std::string::npos && !rest.empty())
-                    out.push_back(DirEntry{rest, false});
+                    out.push_back(DirEntry{keel::String::from(rest), false});
             }
         }
         return out;
     }
 
-    std::optional<FileStat> stat(const std::string &path) override
+    keel::Optional<FileStat> stat(keel::StringRef path) override
     {
         ++statCount;
-        const std::string p = norm(path);
+        const std::string p = norm(std::string(path));
         auto it = files_.find(p);
         if (it != files_.end()) {
             FileStat st;
@@ -90,7 +92,7 @@ public:
             st.kind = FileStat::Kind::Directory;
             return st;
         }
-        return std::nullopt;
+        return keel::kNullOpt;
     }
 
     int readCount = 0;
@@ -295,7 +297,7 @@ TEST_P(Wave4PerfTest, FuseEwiseEvaluatesSideEffectingOperandExactlyOnce)
 
 TEST_P(Wave4PerfTest, MFileCacheUsesMtimeWithoutReReadingFileOnEveryEval)
 {
-    auto fs = std::make_unique<CountingMemoryFS>("memw4");
+    auto fs = keel::make_unique<CountingMemoryFS>("memw4");
     CountingMemoryFS *fsPtr = fs.get();
     fsPtr->put("/pkg/triple_val.m",
                "function y = triple_val(x)\n    y = 3 * x;\nend\n",

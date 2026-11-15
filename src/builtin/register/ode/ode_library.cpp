@@ -32,7 +32,7 @@ namespace numkit {
 void OdeLibrary::install(Engine &engine)
 {
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
-        engine.registerFunction(std::string("ode.") + sub, name, fn);
+        engine.registerFunction(std::string("ode.") + sub, name, keel::move(fn));
         // compat.* registration removed — bare-name resolver replaces it
     };
 

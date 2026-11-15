@@ -112,7 +112,7 @@ void groupsummary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (!m.isChar() && !m.isString())
         throw Error("groupsummary: method must be a string",
                     0, 0, "groupsummary", "", "numkit:groupsummary:badMethod");
-    std::string method = m.toString();
+    std::string method(m.toString().as_ref());
 
     GroupsummaryResult r = groupsummary(args[0], args[1], method, ctx.engine->allocator());
     outs[0] = std::move(r.B);
@@ -143,7 +143,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             throw Error("grouptransform: method must be a string or function handle",
                         0, 0, "grouptransform", "",
                         "numkit:grouptransform:method");
-        std::string method = methodV.toString();
+        std::string method(methodV.toString().as_ref());
         outs[0] = grouptransform(A, G, method, mr);
     } else {
         // Function handle callback form

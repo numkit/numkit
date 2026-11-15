@@ -380,9 +380,9 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     auto strArrToJson = [](const Value &v) -> std::string {
         std::ostringstream os;
         os << '[';
-        auto escape = [&](const std::string &s) {
+        auto escape = [&](keel::StringRef s) {
             os << '"';
-            for (char c : s) {
+            for (char c : std::string_view(s)) {
                 if (c == '"' || c == '\\') os << '\\' << c;
                 else if (c == '\n')        os << "\\n";
                 else                       os << c;
@@ -394,11 +394,11 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 0; i < N; ++i) {
                 if (i) os << ',';
                 const Value &el = v.cellAt(i);
-                escape(el.isChar() ? el.toString() : std::string{});
+                escape(el.isChar() ? el.toString().as_ref() : keel::StringRef(""));
             }
         } else if (v.isChar()) {
             // Single label — wrap in 1-element array.
-            escape(v.toString());
+            escape(v.toString().as_ref());
         }
         os << ']';
         return os.str();

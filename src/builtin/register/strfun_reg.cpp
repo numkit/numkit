@@ -107,13 +107,13 @@ void register_strfun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "strmatch");
             auto *mr = ctx.engine->allocator();
-            std::string pat = args[0].toString();
+            std::string pat(args[0].toString().as_ref());
             bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
             std::vector<double> hits;
             const Value &arr = args[1];
             if (arr.isCell() || arr.isString()) {
                 for (keel::usize i = 0; i < arr.numel(); ++i) {
-                    std::string s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
+                    std::string s(arr.isCell() ? arr.cellAt(i).toString().as_ref() : arr.stringElem(i).as_ref());
                     bool m = exact ? (s == pat) : (s.rfind(pat, 0) == 0);
                     if (m) hits.push_back(static_cast<double>(i + 1));
                 }

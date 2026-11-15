@@ -176,7 +176,7 @@ std::string formatPropDouble(double d)
 std::string encodeProp(const Value &v)
 {
     if (v.isChar() || v.isString())
-        return v.toString();
+        return std::string(v.toString().as_ref());
     if (v.isNumeric() && v.isScalar())
         return formatPropDouble(v.toScalar());
     if (v.isLogical() && v.numel() == 1)
@@ -380,7 +380,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     } else if (name == "Visible") {
         ds->visible = !(val.isChar() || val.isString()) || val.toString() != "off";
     } else if (name == "DisplayName") {
-        ds->label = val.isChar() || val.isString() ? val.toString() : "";
+        ds->label = (val.isChar() || val.isString()) ? std::string(val.toString().as_ref()) : std::string();
     } else if ((name == "XData" || name == "YData") && val.isNumeric()) {
         // Replace the series. Huge series: drop the downsample state and
         // re-decide via maybeDownsampleSeries (rare path, correctness first).
@@ -541,7 +541,7 @@ std::string encodeTickLabels(const Value &v)
     for (keel::usize i = 0; i < v.numel(); ++i) {
         if (i)
             out += ",";
-        out += "\"" + v.cellAt(i).toString() + "\"";
+        out += "\"" + std::string(v.cellAt(i).toString().as_ref()) + "\"";
     }
     return out + "]";
 }
@@ -605,7 +605,7 @@ bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
               || name == "ZTickLabel")
              && (val.isCell() || val.isChar() || val.isString())) {
         std::string json = val.isCell() ? encodeTickLabels(val)
-                                        : "[\"" + val.toString() + "\"]";
+                                        : "[\"" + std::string(val.toString().as_ref()) + "\"]";
         (name == "XTickLabel" ? ax->xTickLabelsJson
          : name == "YTickLabel" ? ax->yTickLabelsJson
                                 : ax->zTickLabelsJson) = json;
@@ -982,18 +982,19 @@ Value makeHandleArray(const std::string &className,
 {
     if (ids.empty())
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
-    std::vector<std::shared_ptr<ObjectState>> states;
+    auto *res = mr ? mr : keel::default_allocator();
+    keel::Array<keel::Arc<ObjectState>> states(res);
     states.reserve(ids.size());
     for (int id : ids) {
-        auto payload = std::make_shared<GraphicsHandlePayload>();
+        auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
         payload->handleId = id;
-        auto st = std::make_shared<ObjectState>(mr);
-        st->native = std::move(payload);
-        states.push_back(std::move(st));
+        auto st = keel::make_arc_in<ObjectState>(res, res);
+        st->native = keel::move(payload);
+        states.push_back(keel::move(st));
     }
     Dims d{1, ids.size()};
-    return Value::objectArray(className, d, std::move(states),
-                              /*isHandle=*/true, mr);
+    return Value::objectArray(className, d, keel::move(states),
+                              /*isHandle=*/true, res);
 }
 
 // ── Unified record property access ───────────────────────────────────
@@ -1002,9 +1003,9 @@ Value makeHandleArray(const std::string &className,
 // (Text.String, Legend.Location/Box/Visible, chart XData) read from the
 // figure state; everything user-set lives in rec->props; documented
 // MATLAB defaults fill the rest.
-std::string canonicalPropName(const std::string &raw)
+std::string canonicalPropName(keel::StringRef raw)
 {
-    std::string low = raw;
+    std::string low(raw.data(), raw.size());
     for (char &ch : low)
         if (ch >= 'A' && ch <= 'Z')
             ch = static_cast<char>(ch - 'A' + 'a');
@@ -1041,11 +1042,11 @@ std::string canonicalPropName(const std::string &raw)
     for (const auto &kv : kNames)
         if (low == kv.first)
             return kv.second;
-    return raw;
+    return std::string(raw.data(), raw.size());
 }
 
 Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                    const std::string &rawName, keel::Allocator *mr,
+                    keel::StringRef rawName, keel::Allocator *mr,
                     bool strict = false)
 {
     const std::string name = canonicalPropName(rawName);
@@ -1324,7 +1325,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 
 // Returns true when the property is known/accepted (stored at minimum).
 bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                   const std::string &rawName, const Value &val)
+                   keel::StringRef rawName, const Value &val)
 {
     const std::string name = canonicalPropName(rawName);
     if (name == "Parent" || val.isObject())
@@ -1338,7 +1339,7 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "String") {
             std::string *f = textFieldOf(fm, *rec);
             if (f) {
-                *f = (val.isChar() || val.isString()) ? val.toString() : "";
+                *f = (val.isChar() || val.isString()) ? std::string(val.toString().as_ref()) : std::string();
                 fm.markFigureModified(rec->figureId);
             }
         }
@@ -1360,7 +1361,7 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         } else if (name == "String" && val.isCell()) {
             ax->legendLabels.clear();
             for (keel::usize i = 0; i < val.numel(); ++i)
-                ax->legendLabels.push_back(val.cellAt(i).toString());
+                ax->legendLabels.push_back(std::string(val.cellAt(i).toString().as_ref()));
             fm.markFigureModified(rec->figureId);
         }
         return true;
@@ -1525,7 +1526,7 @@ void registerHandleAccessors(Engine &engine)
                 return;
             }
             if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
-                const std::string prop = args[1].toString();
+                const std::string prop(args[1].toString().as_ref());
                 const auto cat = settableCatalogFor(rec->type);
                 auto it = cat.find(prop);
                 const std::vector<std::string> emptyChoices;
@@ -1592,7 +1593,7 @@ void registerHandleAccessors(Engine &engine)
             const int id = graphicsHandleIdOf(args[0]);
             if (id < 0) {
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
-                    std::string prop = args[1].toString();
+                    std::string prop(args[1].toString().as_ref());
                     std::string lprop = prop;
                     for (char &ch : lprop)
                         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -1732,7 +1733,7 @@ void registerHandleAccessors(Engine &engine)
     }
     // findobj([h][, 'Prop', value, ...] | '-property', Name)
     {
-        ExternalFunc fn = [&engine](
+        auto fn = [&engine](
                 keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                 CallContext &ctx) {
             auto &fm = ctx.engine->figureManager();
@@ -1782,7 +1783,7 @@ void registerHandleAccessors(Engine &engine)
             for (keel::usize i = first; i < args.size(); ++i) {
                 if (!args[i].isChar())
                     continue;
-                std::string key = args[i].toString();
+                std::string key(args[i].toString().as_ref());
                 for (auto &c : key)
                     c = (char)std::tolower((unsigned char)c);
                 if (key == "-property" && i + 1 < args.size()
@@ -1871,7 +1872,7 @@ void registerHandleAccessors(Engine &engine)
                             {"blue", {0, 0, 1}},  {"black", {0, 0, 0}},
                             {"white", {1, 1, 1}},
                         };
-                        std::string want = f.want.toString();
+                        keel::String want = f.want.toString();
                         bool matched = false;
                         for (const auto &cc : kCol) {
                             if (want != cc.n)
@@ -1924,7 +1925,7 @@ void registerHandleAccessors(Engine &engine)
             (void)engine;
         };
         engine.registerFunction("", "findobj", fn);
-        engine.registerFunction("", "findall", std::move(fn));
+        engine.registerFunction("", "findall", fn);
     }
     // isgraphics(h [, type])
     {
@@ -1938,7 +1939,7 @@ void registerHandleAccessors(Engine &engine)
             bool ok = rec != nullptr;
             if (ok && args.size() >= 2
                 && (args[1].isChar() || args[1].isString())) {
-                const std::string want = args[1].toString();
+                const std::string want(args[1].toString().as_ref());
                 ok = rec->type == want || want == "chart"
                      || want == "graphics" || want == "axes"
                      || want == "figure";
@@ -1974,24 +1975,26 @@ void registerHandleAccessors(Engine &engine)
                 r = static_cast<keel::usize>(std::max(0.0, args[0].toScalar()));
                 c = static_cast<keel::usize>(std::max(0.0, args[1].toScalar()));
             }
+            auto *res = mr ? mr : keel::default_allocator();
             keel::usize n = r * c;
-            std::vector<std::shared_ptr<ObjectState>> states(n);
+            keel::Array<keel::Arc<ObjectState>> states(res);
+            states.reserve(n);
             for (keel::usize i = 0; i < n; ++i) {
-                auto payload = std::make_shared<GraphicsHandlePayload>();
+                auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
                 payload->handleId = 0;
-                auto st = std::make_shared<ObjectState>(mr);
-                st->native = std::move(payload);
-                states[i] = std::move(st);
+                auto st = keel::make_arc_in<ObjectState>(res, res);
+                st->native = keel::move(payload);
+                states.push_back(keel::move(st));
             }
             outs[0] = Value::objectArray("matlab.graphics.GraphicsPlaceholder",
-                                         Dims(r, c), std::move(states),
-                                         /*isHandle=*/true, mr);
+                                         Dims(r, c), keel::move(states),
+                                         /*isHandle=*/true, res);
         };
         engine.registerFunction("", "gobjects", std::move(fn));
     }
     // ishandle(h) / isvalid(h)
     {
-        ExternalFunc fn = [&engine](
+        auto fn = [&engine](
                 keel::ArrayRef<Value> args, keel::usize,
                 keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty()) { outs[0] = Value(); return; }
@@ -2001,7 +2004,7 @@ void registerHandleAccessors(Engine &engine)
                 id >= 0 && fm.findHandle(id) != nullptr);
         };
         engine.registerFunction("", "ishandle", fn);
-        engine.registerFunction("", "isvalid", std::move(fn));
+        engine.registerFunction("", "isvalid", fn);
     }
 }
 
@@ -2026,10 +2029,11 @@ void registerGraphicsClasses(Engine &engine)
 
     for (const auto &[clsName, recType] : classToType) {
         BuiltinClass cls;
-        cls.name = clsName;
+        cls.name = keel::String::from(clsName);
         cls.isHandle = true;
-        cls.superclasses = {"matlab.mixin.Handle", "handle"};
-        cls.construct = [&engine, clsName, recType](
+        cls.superclasses.push_back(keel::String::from("matlab.mixin.Handle"));
+        cls.superclasses.push_back(keel::String::from("handle"));
+        cls.construct = [&engine, clsName = std::string(clsName), recType = std::string(recType)](
                 keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto &fm = ctx.engine->figureManager();
             auto *mr = ctx.engine->allocator();
@@ -2081,7 +2085,7 @@ void registerGraphicsClasses(Engine &engine)
         // propGet / propSet mirror set()/get() exactly — one shared body
         // (recordGetProp / recordSetProp), same registry, same defaults,
         // same render-effect.
-        cls.propGet = [&engine](const Value &self, const std::string &name,
+        cls.propGet = [&engine](const Value &self, keel::StringRef name,
                                 Value &out, CallContext &) -> bool {
             const int id = graphicsHandleIdOf(self);
             if (id < 0)
@@ -2096,7 +2100,7 @@ void registerGraphicsClasses(Engine &engine)
             out = std::move(v);
             return true;
         };
-        cls.propSet = [&engine](Value &self, const std::string &name,
+        cls.propSet = [&engine](Value &self, keel::StringRef name,
                                 const Value &val, CallContext &) -> bool {
             const int id = graphicsHandleIdOf(self);
             if (id < 0)
@@ -2111,25 +2115,27 @@ void registerGraphicsClasses(Engine &engine)
         // Handle identity comparison (h1 == h2 ⇔ same registry record).
         // args carries (lhs, rhs) in source order — self is a copy of the
         // dominant operand, NOT an extra argument.
-        cls.ops["eq"] = [](Value &, keel::ArrayRef<Value> args, keel::usize,
-                           keel::MutArrayRef<Value> outs, CallContext &) {
+        cls.ops.put(keel::String::from("eq"),
+                    [](Value &, keel::ArrayRef<Value> args, keel::usize,
+                       keel::MutArrayRef<Value> outs, CallContext &) {
             bool eq = args.size() >= 2
                       && graphicsHandleIdOf(args[0]) >= 0
                       && graphicsHandleIdOf(args[0]) == graphicsHandleIdOf(args[1]);
             outs[0] = Value::logicalScalar(eq);
-        };
-        cls.ops["ne"] = [](Value &, keel::ArrayRef<Value> args, keel::usize,
-                           keel::MutArrayRef<Value> outs, CallContext &) {
+        });
+        cls.ops.put(keel::String::from("ne"),
+                    [](Value &, keel::ArrayRef<Value> args, keel::usize,
+                       keel::MutArrayRef<Value> outs, CallContext &) {
             bool eq = args.size() >= 2
                       && graphicsHandleIdOf(args[0]) >= 0
                       && graphicsHandleIdOf(args[0]) == graphicsHandleIdOf(args[1]);
             outs[0] = Value::logicalScalar(!eq);
-        };
-        cls.dispText = [&engine](const Value &self) -> std::string {
+        });
+        cls.dispText = [&engine](const Value &self) -> keel::String {
             const int id = graphicsHandleIdOf(self);
             auto *rec = id >= 0 ? engine.figureManager().findHandle(id) : nullptr;
             if (!rec)
-                return "  deleted handle\n";
+                return keel::String::from("  deleted handle\n");
             const std::string shortName = rec->className.substr(
                 rec->className.find_last_of('.') + 1);
             std::string s = "  " + shortName + " with properties:\n\n";
@@ -2149,7 +2155,7 @@ void registerGraphicsClasses(Engine &engine)
                 if (!d.isEmpty())
                     line(p, encodeProp(d));
             }
-            return s;
+            return keel::String::from(s);
         };
         engine.registerClass(std::move(cls));
     }
@@ -2185,13 +2191,13 @@ void GraphicsLibrary::install(Engine &engine)
     for (PlotEntry &entry : table) {
         if (kHandleAccessorNames.count(entry.name))
             continue;
-        const std::string name(entry.name);
+        std::string name(entry.name);
         const bool hasHandle = handleTypes().count(name) > 0;
         const bool wrapHandle = kHandleReturning.count(name) > 0;
 
         // The core-free plotting body; moved into the adapter closure.
-        ExternalFunc ext =
-            [fn = std::move(entry.fn), hasHandle, wrapHandle, name](
+        auto ext =
+            [fn = std::move(entry.fn), hasHandle, wrapHandle, name = std::move(name)](
                 keel::ArrayRef<Value> args, keel::usize nargout,
                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 auto &fm = ctx.engine->figureManager();
@@ -2272,22 +2278,25 @@ void GraphicsLibrary::install(Engine &engine)
                             outs[0] = makeGraphicsHandleValue(
                                 hit->second.second, id, ctx.engine->allocator());
                         } else {
-                            std::vector<std::shared_ptr<ObjectState>> states;
+                            auto *res = ctx.engine->allocator()
+                                            ? ctx.engine->allocator()
+                                            : keel::default_allocator();
+                            keel::Array<keel::Arc<ObjectState>> states(res);
+                            states.reserve(static_cast<keel::usize>(nnew));
                             for (int i = 0; i < nnew; ++i) {
                                 const int id = fm.createHandle(
                                     hit->second.first, hit->second.second,
                                     base + static_cast<keel::usize>(i));
-                                auto payload = std::make_shared<GraphicsHandlePayload>();
+                                auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
                                 payload->handleId = id;
-                                auto st = std::make_shared<ObjectState>(
-                                    ctx.engine->allocator());
-                                st->native = std::move(payload);
-                                states.push_back(std::move(st));
+                                auto st = keel::make_arc_in<ObjectState>(res, res);
+                                st->native = keel::move(payload);
+                                states.push_back(keel::move(st));
                             }
                             Dims d{1, static_cast<keel::usize>(nnew)};
                             outs[0] = Value::objectArray(
-                                hit->second.second, d, std::move(states),
-                                /*isHandle=*/true, ctx.engine->allocator());
+                                hit->second.second, d, keel::move(states),
+                                /*isHandle=*/true, res);
                         }
                     }
                 } else if (wrapHandle) {
@@ -2338,9 +2347,12 @@ void GraphicsLibrary::install(Engine &engine)
                 }
             };
 
-        engine.registerFunction(std::string("graphics.") + entry.sub, entry.name, ext);
-        if (entry.core)
-            engine.registerFunction("", entry.name, ext);  // bare core name
+        if (entry.core) {
+            engine.registerFunction(std::string("graphics.") + entry.sub, entry.name, ext);
+            engine.registerFunction("", entry.name, std::move(ext));  // bare core name
+        } else {
+            engine.registerFunction(std::string("graphics.") + entry.sub, entry.name, std::move(ext));
+        }
     }
 
     auto noopGfx = [](keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
@@ -2361,8 +2373,8 @@ void GraphicsLibrary::install(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             Value s = Value::structure(mr);
-            std::string fn = (!args.empty() && (args[0].isChar() || args[0].isString()))
-                                 ? args[0].toString() : "output.avi";
+            keel::String fn = (!args.empty() && (args[0].isChar() || args[0].isString()))
+                                  ? args[0].toString() : keel::String::from("output.avi");
             s.setFieldAll("Filename", Value::fromString(fn, mr));
             s.setFieldAll("FrameRate", Value::scalar(30.0, mr));
             s.setFieldAll("Quality", Value::scalar(75.0, mr));

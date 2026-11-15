@@ -310,12 +310,11 @@ int numkit_engine_call(numkit_engine_ctx *ctx,
                                      const numkit::BuiltinClass *cls =
                                          ctx->engine.findClass(inSpan[0].objectClassName());
                                      if (cls) {
-                                         auto mIt = cls->methods.find(nameStr);
-                                         if (mIt != cls->methods.end() && mIt->second) {
+                                         if (const auto *mPtr = cls->methods.get(nameStr); mPtr && *mPtr) {
                                              numkit::Value selfCopy = inSpan[0];
                                              keel::ArrayRef<numkit::Value> rest(
                                                  inSpan.data() + 1, inSpan.size() - 1);
-                                             mIt->second(selfCopy, rest, nOut, outSpan, callCtx);
+                                             (*mPtr)(selfCopy, rest, nOut, outSpan, callCtx);
                                              return;
                                          }
                                      }
@@ -397,26 +396,25 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
         if (val.isObject()) {
             const numkit::BuiltinClass *cls = ctx->engine.findClass(val.objectClassName());
             if (cls) {
-                auto charIt = cls->methods.find("char");
-                if (charIt != cls->methods.end() && charIt->second) {
+                if (const auto *charPtr = cls->methods.get("char"); charPtr && *charPtr) {
                     numkit::Value selfCopy = val;
                     numkit::Value out;
                     numkit::CallContext callCtx{&ctx->engine, &ctx->engine.workspaceEnv()};
-                    charIt->second(selfCopy, keel::ArrayRef<numkit::Value>(), 1,
-                                   keel::MutArrayRef<numkit::Value>(&out, 1), callCtx);
+                    (*charPtr)(selfCopy, keel::ArrayRef<numkit::Value>(), 1,
+                               keel::MutArrayRef<numkit::Value>(&out, 1), callCtx);
                     if (out.isChar() || out.isString()) {
-                        s = out.toString();
+                        s = std::string(out.toString().as_ref());
                     }
                 }
                 if (s.empty() && cls->dispText) {
-                    s = cls->dispText(val);
+                    s = std::string(cls->dispText(val).as_ref());
                     while (!s.empty() && (s.front() == ' ' || s.front() == '\n'))
                         s.erase(s.begin());
                     while (!s.empty() && (s.back() == ' ' || s.back() == '\n')) s.pop_back();
                 }
             }
         }
-        if (s.empty()) s = val.toString();
+        if (s.empty()) s = std::string(val.toString().as_ref());
         if (!buf || buf_cap == 0) return s.size();
         keel::usize n = std::min(s.size(), buf_cap - 1);
         if (n > 0) std::memcpy(buf, s.data(), n);

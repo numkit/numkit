@@ -70,21 +70,21 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
         return;
     }
 
-    std::string path = args[0].toString();
-    std::string mode = (args.size() >= 2 && args[1].isChar()) ? args[1].toString() : "r";
+    std::string path(args[0].toString().as_ref());
+    std::string mode = (args.size() >= 2 && args[1].isChar()) ? std::string(args[1].toString().as_ref()) : std::string("r");
     bool be = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
-        be = numkit::ops::parseEndian(args[2].toString(), "fopen");
+        be = numkit::ops::parseEndian(std::string(args[2].toString().as_ref()), "fopen");
     }
     int fid = fs.openFile(path, mode);
     if (fid >= 0 && be) {
         if (auto *f = fs.findFile(fid))
-            f->mode += ";be";
+            f->mode.append(";be");
     }
     outs[0] = Value::scalar(static_cast<double>(fid), mr);
     // [fid, errmsg] = fopen(...) — errmsg is '' on success.
     if (nargout > 1)
-        outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError() : std::string(), mr);
+        outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError().as_ref() : keel::StringRef(""), mr);
 }
 
 void fclose(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
@@ -110,7 +110,7 @@ void fgetl(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     auto *f = requireReadFid(fs, args, "fgetl");
 
     if (f->cursor >= f->buffer.size()) {
-        f->lastError = "End of file reached.";
+        f->lastError = keel::String::from("End of file reached.");
         outs[0] = Value::scalar(-1.0, mr);
         return;
     }
@@ -122,7 +122,7 @@ void fgetl(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     keel::usize trimEnd = end;
     if (trimEnd > start && f->buffer[trimEnd - 1] == '\r')
         --trimEnd;
-    std::string line = f->buffer.substr(start, trimEnd - start);
+    keel::StringRef line = f->buffer.substr(start, trimEnd - start);
     f->cursor = (nl == std::string::npos) ? f->buffer.size() : nl + 1;
     outs[0] = Value::fromString(line, mr);
 }
@@ -132,7 +132,7 @@ void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     auto *f = requireReadFid(fs, args, "fgets");
 
     if (f->cursor >= f->buffer.size()) {
-        f->lastError = "End of file reached.";
+        f->lastError = keel::String::from("End of file reached.");
         outs[0] = Value::scalar(-1.0, mr);
         return;
     }
@@ -147,7 +147,7 @@ void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
         end = nlPos + 1; // include newline
     else
         end = std::min(start + nchar, f->buffer.size());
-    std::string line = f->buffer.substr(start, end - start);
+    keel::StringRef line = f->buffer.substr(start, end - start);
     f->cursor = end;
     outs[0] = Value::fromString(line, mr);
 }
@@ -173,7 +173,7 @@ void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel
         throw Error("ferror: invalid file identifier");
 
     bool clear = args.size() >= 2 && args[1].isChar() && args[1].toString() == "clear";
-    std::string msg = f->lastError;
+    std::string msg(f->lastError.as_ref());
     if (clear)
         f->lastError.clear();
 
@@ -217,7 +217,7 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     enum { BOF, COF, EOFO } origin = BOF;
     if (args.size() >= 3) {
         if (args[2].isChar()) {
-            std::string o = args[2].toString();
+            std::string o(args[2].toString().as_ref());
             if (o == "bof") origin = BOF;
             else if (o == "cof") origin = COF;
             else if (o == "eof") origin = EOFO;
@@ -288,7 +288,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
         if (args[3].isChar() || args[3].isString()) {
-            be = numkit::ops::parseEndian(args[3].toString(), "fread");
+            be = numkit::ops::parseEndian(std::string(args[3].toString().as_ref()), "fread");
         } else if (args[3].isScalar() || args[3].isEmpty()) {
             if (args[3].isScalar())
                 skip = static_cast<keel::usize>(std::max(0.0, args[3].toScalar()));
@@ -299,7 +299,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     if (args.size() >= 5) {
         if (!args[4].isChar() && !args[4].isString())
             throw Error("fread: machine format must be a char array");
-        be = numkit::ops::parseEndian(args[4].toString(), "fread");
+        be = numkit::ops::parseEndian(std::string(args[4].toString().as_ref()), "fread");
     }
 
     keel::usize available = f->buffer.size() - f->cursor;
@@ -307,7 +307,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     keel::usize maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
     keel::usize n = std::min(sz.limit, maxElems);
     if (sz.limit != SIZE_MAX && n < sz.limit)
-        f->lastError = "End of file reached.";
+        f->lastError = keel::String::from("End of file reached.");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto values = keel::Array<double>(n, scratch.allocator());
@@ -372,7 +372,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     if (args.size() >= 4) {
         if (!args[3].isChar() && !args[3].isString())
             throw Error("fwrite: machine format must be a char array");
-        be = numkit::ops::parseEndian(args[3].toString(), "fwrite");
+        be = numkit::ops::parseEndian(std::string(args[3].toString().as_ref()), "fwrite");
     }
 
     const Value &A = args[1];

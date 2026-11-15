@@ -59,12 +59,12 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         if (!args[i].isChar() && !args[i].isString())
             throw Error("chol: option must be 'lower' or 'upper'",
                         0, 0, "chol", "", "numkit:chol:BadOpt");
-        std::string s = args[i].toString();
+        std::string s(args[i].toString().as_ref());
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if      (s == "lower") lower = true;
         else if (s == "upper") lower = false;
         else
-            throw Error("chol: unknown option '" + args[i].toString() + "'",
+            throw Error(keel::format("chol: unknown option '{}'", args[i].toString()),
                         0, 0, "chol", "", "numkit:chol:BadOpt");
     }
 
@@ -205,7 +205,7 @@ bool wantsEcon(keel::ArrayRef<Value> args, const char *fn)
                     0, 0, fn, "", std::string("numkit:") + fn + ":nargin");
     const Value &o = args[1];
     if (o.type() == ValueType::CHAR) {
-        std::string s = o.toString();
+        std::string s(o.toString().as_ref());
         std::transform(s.begin(), s.end(), s.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "econ") return true;
@@ -229,7 +229,7 @@ void lu_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         if (args[1].type() != ValueType::CHAR)
             throw Error("lu: second argument must be the flag 'vector'",
                         0, 0, "lu", "", "numkit:lu:badArg");
-        std::string s = args[1].toString();
+        std::string s(args[1].toString().as_ref());
         std::transform(s.begin(), s.end(), s.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "vector") vectorP = true;
@@ -259,7 +259,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
     for (keel::usize i = 1; i < args.size(); ++i) {
         const Value &o = args[i];
         if (o.type() == ValueType::CHAR || o.isString()) {
-            std::string s = o.toString();
+            std::string s(o.toString().as_ref());
             std::transform(s.begin(), s.end(), s.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (s == "econ")        econ = true;
@@ -357,7 +357,7 @@ void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         if (!(args[4].isChar() || args[4].isString()))
             throw Error("qrinsert: orient must be 'col' or 'row'",
                         0, 0, "qrinsert", "", "numkit:qrinsert:badOrient");
-        std::string orient = args[4].toString();
+        keel::String orient = args[4].toString();
         if (orient == "row") isRow = true;
         else if (orient != "col")
             throw Error("qrinsert: orient must be 'col' or 'row'",
@@ -382,7 +382,7 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         if (!(args[3].isChar() || args[3].isString()))
             throw Error("qrdelete: orient must be 'col' or 'row'",
                         0, 0, "qrdelete", "", "numkit:qrdelete:badOrient");
-        std::string orient = args[3].toString();
+        keel::String orient = args[3].toString();
         if (orient == "row") isRow = true;
         else if (orient != "col")
             throw Error("qrdelete: orient must be 'col' or 'row'",
@@ -405,7 +405,7 @@ void cholupdate_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
     int sign = 1;
     if (args.size() == 3) {
         if (args[2].isChar() || args[2].isString()) {
-            std::string s = args[2].toString();
+            keel::String s = args[2].toString();
             if      (s == "+") sign = 1;
             else if (s == "-") sign = -1;
             else throw Error("cholupdate: sign must be '+' or '-'",

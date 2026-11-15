@@ -27,7 +27,7 @@ static bool parseSkewOpt(const Value &v, const char *who)
     if (!v.isChar() && !v.isString())
         throw Error(std::string(who) + ": option must be 'skew' or 'nonskew'",
                     0, 0, who, "", std::string("numkit:") + who + ":BadOpt");
-    std::string s = v.toString();
+    keel::String s = v.toString();
     if (s == "skew")     return true;
     if (s == "nonskew")  return false;
     throw Error(std::string(who) + ": option must be 'skew' or 'nonskew'",

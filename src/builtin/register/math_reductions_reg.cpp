@@ -108,7 +108,7 @@ inline bool isStringArg(const Value &v)
 
 OutTypeMode parseOutTypeMode(const Value &arg, const char *fn)
 {
-    std::string s = arg.toString();
+    std::string s(arg.toString().as_ref());
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (s == "default") return OutTypeMode::Default;
@@ -476,7 +476,7 @@ Value runNativeReduction(const Value &x, int dim, ValueType outType, keel::Alloc
 
 inline std::string lowercaseStr(const Value &v)
 {
-    std::string s = v.toString();
+    std::string s(v.toString().as_ref());
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;

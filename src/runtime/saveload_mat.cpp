@@ -7,6 +7,7 @@
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
 #include <keel/complex.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
@@ -272,7 +273,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
 void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     if (v.type() == ValueType::STRING) {
         if (v.numel() <= 1) {
-            encodeMat5Matrix(mw, name, Value::fromString(v.numel() == 1 ? v.stringElem(0) : ""));
+            encodeMat5Matrix(mw, name, Value::fromString(v.numel() == 1 ? v.stringElem(0).as_ref() : keel::StringRef("")));
             return;
         }
         Value c = createCell(v.dims(), nullptr);
@@ -344,15 +345,19 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     } else if (v.type() == ValueType::STRUCT || v.type() == ValueType::OBJECT) {
         std::vector<std::string> fnames;
         if (v.type() == ValueType::OBJECT) {
-            std::string className = v.objectClassName();
+            std::string className(v.objectClassName().as_ref());
             inner.writeTag(miINT8, className.data(), static_cast<keel::u32>(className.size()));
             if (const auto *st = v.objectStateConst()) {
-                for (const auto &[k, _] : st->props) {
-                    fnames.push_back(k);
+                for (auto entry : st->props) {
+                    fnames.emplace_back(entry.key.as_ref());
                 }
+                std::sort(fnames.begin(), fnames.end());
             }
         } else {
-            fnames = v.fieldNamesInOrder();
+            auto fnOrder = v.fieldNamesInOrder();
+            fnames.reserve(fnOrder.size());
+            for (const auto &fn : fnOrder)
+                fnames.emplace_back(fn.as_ref());
         }
 
         keel::i32 maxLen = 32;
@@ -371,17 +376,14 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
                 if (v.type() == ValueType::OBJECT) {
                     const auto *st = v.objectStateAt(ei);
                     if (st) {
-                        auto it = st->props.find(fnames[fi]);
-                        if (it != st->props.end()) fval = it->second;
+                        if (const Value *fv = st->props.get(fnames[fi])) fval = *fv;
                     }
                 } else if (v.isStructArray()) {
                     auto &m = const_cast<Value&>(v).structArrayElem(ei);
-                    auto it = m.find(fnames[fi]);
-                    if (it != m.end()) fval = it->second;
+                    if (const Value *fv = m.get(fnames[fi])) fval = *fv;
                 } else {
                     auto &m = const_cast<Value&>(v).structFields();
-                    auto it = m.find(fnames[fi]);
-                    if (it != m.end()) fval = it->second;
+                    if (const Value *fv = m.get(fnames[fi])) fval = *fv;
                 }
                 encodeMat5Matrix(inner, "", fval);
             }
@@ -559,21 +561,22 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
             }
         } else {
             // mxOBJECT_CLASS
+            auto *res = mem ? mem : keel::default_allocator();
             if (numElems == 0) {
-                result = Value::objectArray(objClassName, shape, {}, false, mem);
+                result = Value::objectArray(objClassName, shape, keel::Array<keel::Arc<ObjectState>>(res), false, mem);
             } else if (numElems == 1 && shape.ndims() <= 2) {
-                auto st = std::make_shared<ObjectState>(mem);
+                auto st = keel::make_arc_in<ObjectState>(res, res);
                 for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                    st->props[fnames[fi]] = std::move(fieldVals[fi][0]);
+                    st->props.put(keel::String::from(fnames[fi]), std::move(fieldVals[fi][0]));
                 }
                 result = Value::object(objClassName, std::move(st), false, mem);
             } else {
-                std::vector<std::shared_ptr<ObjectState>> states;
+                keel::Array<keel::Arc<ObjectState>> states(res);
                 states.reserve(numElems);
                 for (keel::usize ei = 0; ei < numElems; ++ei) {
-                    auto st = std::make_shared<ObjectState>(mem);
+                    auto st = keel::make_arc_in<ObjectState>(res, res);
                     for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                        st->props[fnames[fi]] = std::move(fieldVals[fi][ei]);
+                        st->props.put(keel::String::from(fnames[fi]), std::move(fieldVals[fi][ei]));
                     }
                     states.push_back(std::move(st));
                 }
@@ -795,7 +798,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
 // MAT4 Codec (-v4)
 // ============================================================================
 
-void saveMat4(const std::string &osPath,
+void saveMat4(keel::StringRef osPath,
               const std::vector<std::pair<std::string, Value>> &vars,
               VirtualFS &fs)
 {
@@ -845,14 +848,14 @@ void saveMat4(const std::string &osPath,
 }
 
 void loadMat4(Engine &engine,
-              const std::string &osPath,
+              keel::StringRef osPath,
               VirtualFS &fs,
               Environment &env,
               keel::usize nargout,
               keel::MutArrayRef<Value> outs,
               keel::Allocator *mr)
 {
-    std::string bytes = fs.readFileBytes(osPath);
+    std::string bytes(fs.readFileBytes(osPath).as_ref());
     const auto *p = reinterpret_cast<const keel::u8*>(bytes.data());
     keel::usize len = bytes.size();
     keel::usize pos = 0;
@@ -1033,7 +1036,7 @@ void loadMat(Engine &engine, Environment &env,
 
     std::string bytes;
     try {
-        bytes = resolved.fs->readFileBytes(resolved.path);
+        bytes.assign(resolved.fs->readFileBytes(resolved.path).as_ref());
     } catch (const std::exception &e) {
         throw Error(std::string("load: ") + e.what());
     }

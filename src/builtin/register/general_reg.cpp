@@ -64,8 +64,8 @@ void register_general(Engine &engine) {
                              "numkit:web:nargin");
             if (!args.empty())
                 ctx.engine->outputText(
-                    "Warning: web: no browser in the nk CLI — URL '"
-                    + args[0].toString() + "' not opened.\n");
+                    std::string(keel::format("Warning: web: no browser in the nk CLI — URL '{}' not opened.\n",
+                                             args[0].toString()).as_ref()));
             else
                 ctx.engine->outputText(
                     "Warning: web: no browser in the nk CLI.\n");
@@ -87,7 +87,9 @@ void register_general(Engine &engine) {
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("which requires a name argument");
-                                std::string qname = (args[0].isChar() || args[0].isString()) ? args[0].toString() : "";
+                                std::string qname = (args[0].isChar() || args[0].isString())
+                                                        ? std::string(args[0].toString().as_ref())
+                                                        : std::string();
                                 std::string baseName = qname;
                                 if (baseName.size() > 2 && baseName.substr(baseName.size() - 2) == ".m")
                                     baseName = baseName.substr(0, baseName.size() - 2);
@@ -225,7 +227,7 @@ void register_general(Engine &engine) {
     // ── pwd / cd (Phase 9c) ────────────────────────────────────
     engine.registerFunction("pwd",
                             [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-                                std::string c = ctx.engine->cwd();
+                                keel::String c = ctx.engine->cwd().clone();
                                 if (c.empty()) {
                                     // No engine-level cwd set — ask the active backend.
                                     try {
@@ -244,15 +246,15 @@ void register_general(Engine &engine) {
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 // No args: behave like pwd (return / print current dir).
                                 auto getActualCwd = [&]() -> std::string {
-                                    std::string c = ctx.engine->cwd();
+                                    std::string c(ctx.engine->cwd().as_ref());
                                     if (c.empty()) {
                                         try {
                                             auto rp0 = ctx.engine->resolvePath(".");
-                                            if (rp0.fs) c = rp0.fs->cwd();
+                                            if (rp0.fs) c.assign(rp0.fs->cwd().as_ref());
                                         } catch (...) {}
                                         if (c.empty()) {
                                             if (auto *fs = ctx.engine->findVirtualFS("native"))
-                                                c = fs->cwd();
+                                                c.assign(fs->cwd().as_ref());
                                         }
                                     }
                                     return c;
@@ -269,7 +271,7 @@ void register_general(Engine &engine) {
                                 }
                                 if (!args[0].isChar())
                                     throw std::runtime_error("cd: directory must be a string");
-                                std::string target = args[0].toString();
+                                std::string target(args[0].toString().as_ref());
                                 auto rp = ctx.engine->resolvePath(target);
                                 if (!rp.fs)
                                     throw std::runtime_error("cd: cannot resolve '" + target + "'");
@@ -306,11 +308,11 @@ void register_general(Engine &engine) {
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty() || !args[0].isChar())
                                     throw std::runtime_error("mkdir requires a directory name");
-                                std::string p = args[0].toString();
+                                std::string p(args[0].toString().as_ref());
                                 if (args.size() >= 2 && args[1].isChar()) {
                                     // mkdir(parent, name) — concatenate.
                                     std::string parent = p;
-                                    std::string name = args[1].toString();
+                                    std::string name(args[1].toString().as_ref());
                                     if (!parent.empty() && parent.back() != '/' && parent.back() != '\\')
                                         parent += '/';
                                     p = parent + name;
@@ -341,7 +343,7 @@ void register_general(Engine &engine) {
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty() || !args[0].isChar())
                                     throw std::runtime_error("rmdir requires a directory name");
-                                std::string p = args[0].toString();
+                                std::string p(args[0].toString().as_ref());
                                 auto rp = ctx.engine->resolvePath(p);
                                 if (!rp.fs)
                                     throw std::runtime_error("rmdir: cannot resolve '" + p + "'");
@@ -396,7 +398,7 @@ void register_general(Engine &engine) {
                                         continue;
                                     if (!a.isChar() && !a.isString())
                                         throw std::runtime_error("delete: filename must be a string");
-                                    std::string p = a.toString();
+                                    std::string p(a.toString().as_ref());
                                     auto rp = ctx.engine->resolvePath(p);
                                     if (!rp.fs)
                                         throw std::runtime_error("delete: cannot resolve '" + p + "'");
@@ -418,17 +420,18 @@ void register_general(Engine &engine) {
     // ── dir / ls ──────────────────────────────────────────────
     engine.registerFunction("dir",
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                                auto *mr = ctx.engine->allocator();
                                 std::string target = args.empty() ? std::string(".")
-                                                                   : args[0].toString();
-                                auto globMatch = [](const std::string &pat, const std::string &str) -> bool {
-                                    keel::usize p = 0, s = 0, starIdx = std::string::npos, matchIdx = 0;
+                                                                   : std::string(args[0].toString().as_ref());
+                                auto globMatch = [](keel::StringRef pat, keel::StringRef str) -> bool {
+                                    keel::usize p = 0, s = 0, starIdx = keel::StringRef::npos, matchIdx = 0;
                                     while (s < str.size()) {
                                         if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
                                             ++p; ++s;
                                         } else if (p < pat.size() && pat[p] == '*') {
                                             starIdx = p++;
                                             matchIdx = s;
-                                        } else if (starIdx != std::string::npos) {
+                                        } else if (starIdx != keel::StringRef::npos) {
                                             p = starIdx + 1;
                                             s = ++matchIdx;
                                         } else {
@@ -439,7 +442,7 @@ void register_general(Engine &engine) {
                                     return p == pat.size();
                                 };
 
-                                std::vector<DirEntry> entries;
+                                keel::Array<DirEntry> entries(mr);
                                 Engine::ResolvedPath rp;
                                 const bool hasWild = target.find('*') != std::string::npos
                                                   || target.find('?') != std::string::npos;
@@ -456,7 +459,7 @@ void register_general(Engine &engine) {
                                         if ((e.name == "." || e.name == "..") && (patPart.empty() || patPart[0] != '.'))
                                             continue;
                                         if (globMatch(patPart, e.name))
-                                            entries.push_back(std::move(e));
+                                            entries.push_back(keel::move(e));
                                     }
                                     std::sort(entries.begin(), entries.end(),
                                               [](const DirEntry &a, const DirEntry &b) { return a.name < b.name; });
@@ -467,20 +470,22 @@ void register_general(Engine &engine) {
                                     auto st = rp.fs->stat(rp.path);
                                     if (st && st->kind == FileStat::Kind::File) {
                                         DirEntry e;
-                                        keel::usize sep = rp.path.find_last_of("/\\");
-                                        e.name = (sep == std::string::npos) ? rp.path : rp.path.substr(sep + 1);
+                                        std::string_view pv = rp.path;
+                                        keel::usize sep = pv.find_last_of("/\\");
+                                        e.name = keel::String(
+                                            (sep == std::string_view::npos) ? rp.path.as_ref() : rp.path.substr(sep + 1),
+                                            mr);
                                         e.isDirectory = false;
-                                        entries.push_back(e);
+                                        entries.push_back(keel::move(e));
                                     } else {
                                         entries = rp.fs->listDir(rp.path);
                                     }
                                 }
 
                                 if (nargout == 0) {
-                                    // Print tabular listing (MATLAB-ish).
                                     std::ostringstream os;
                                     for (const auto &e : entries) {
-                                        os << e.name;
+                                        os << std::string_view(e.name);
                                         if (e.isDirectory) os << "/";
                                         os << "\n";
                                     }
@@ -489,9 +494,6 @@ void register_general(Engine &engine) {
                                     return;
                                 }
 
-                                // n×1 struct array — same fields per element so MATLAB-style
-                                // d(i).name / [d.bytes] usage works.
-                                auto *mr = ctx.engine->allocator();
                                 if (entries.empty()) {
                                     outs[0] = Value::structure(mr);
                                     return;
@@ -499,17 +501,17 @@ void register_general(Engine &engine) {
                                 Value arr = Value::structArray(entries.size(), 1, mr);
                                 for (keel::usize i = 0; i < entries.size(); ++i) {
                                     auto &fields = arr.structArrayElem(i);
-                                    fields["name"]    = Value::fromString(entries[i].name, mr);
-                                    fields["folder"]  = Value::fromString(rp.path, mr);
-                                    fields["isdir"]   = Value::logicalScalar(entries[i].isDirectory, mr);
-                                    std::string full = rp.path;
+                                    fields.put(keel::String("name", mr),    Value::fromString(entries[i].name, mr));
+                                    fields.put(keel::String("folder", mr),  Value::fromString(rp.path, mr));
+                                    fields.put(keel::String("isdir", mr),   Value::logicalScalar(entries[i].isDirectory, mr));
+                                    std::string full(rp.path.as_ref());
                                     if (!full.empty() && full.back() != '/' && full.back() != '\\')
                                         full += '/';
-                                    full += entries[i].name;
+                                    full.append(entries[i].name.c_str(), entries[i].name.size());
                                     auto est = rp.fs->stat(full);
-                                    fields["bytes"]   = Value::scalar(est ? double(est->size) : 0.0, mr);
-                                    fields["datenum"] = Value::scalar(est ? double(est->mtime) : 0.0, mr);
-                                    fields["date"]    = Value::fromString(std::string{}, mr);
+                                    fields.put(keel::String("bytes", mr),   Value::scalar(est ? double(est->size) : 0.0, mr));
+                                    fields.put(keel::String("datenum", mr), Value::scalar(est ? double(est->mtime) : 0.0, mr));
+                                    fields.put(keel::String("date", mr),    Value::fromString("", mr));
                                 }
                                 outs[0] = std::move(arr);
                             });
@@ -517,7 +519,7 @@ void register_general(Engine &engine) {
     engine.registerFunction("ls",
                             [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 std::string target = args.empty() ? std::string(".")
-                                                                   : args[0].toString();
+                                                                   : std::string(args[0].toString().as_ref());
                                 auto rp = ctx.engine->resolvePath(target);
                                 if (!rp.fs)
                                     throw std::runtime_error("ls: cannot resolve '" + target + "'");
@@ -525,15 +527,14 @@ void register_general(Engine &engine) {
                                 if (nargout == 0) {
                                     std::ostringstream os;
                                     for (const auto &e : entries)
-                                        os << e.name << "\n";
+                                        os << std::string_view(e.name) << "\n";
                                     ctx.engine->outputText(os.str());
                                     outs[0] = Value();
                                 } else {
-                                    // Return as newline-joined char vector (MATLAB ls semantics).
                                     std::ostringstream os;
                                     for (keel::usize i = 0; i < entries.size(); ++i) {
                                         if (i) os << "  ";
-                                        os << entries[i].name;
+                                        os << std::string_view(entries[i].name);
                                     }
                                     outs[0] = Value::fromString(os.str(), ctx.engine->allocator());
                                 }
@@ -585,7 +586,7 @@ void register_general(Engine &engine) {
                     "shortg", "longg", "shorte", "longe",
                     "shorteng", "longeng", "rat", "hex", "bank", "+", "default"
                 };
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (!known.count(s))
                     throw std::runtime_error(
@@ -626,7 +627,7 @@ void register_general(Engine &engine) {
             if (args.size() < 2)
                 throw std::runtime_error("optimget requires (options, name[, default])");
             const Value &opts = args[0];
-            const std::string name = args[1].toString();
+            const keel::String name = args[1].toString();
             if (opts.isStruct() && opts.hasField(name)) {
                 outs[0] = opts.field(name);
                 return;
@@ -654,7 +655,7 @@ void register_general(Engine &engine) {
             }
             bool whole = false;
             if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
-                std::string s = args[1].toString();
+                keel::String s = args[1].toString();
                 for (auto &c : s)
                     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 whole = (s == "whole");
@@ -717,7 +718,7 @@ void register_general(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isfile");
             auto *mr = ctx.engine->allocator();
-            auto checkOne = [&](const std::string &p) -> bool {
+            auto checkOne = [&](keel::StringRef p) -> bool {
                 try {
                     auto rp = ctx.engine->resolvePath(p);
                     if (!rp.fs) return false;
@@ -748,7 +749,7 @@ void register_general(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isfolder");
             auto *mr = ctx.engine->allocator();
-            auto checkOne = [&](const std::string &p) -> bool {
+            auto checkOne = [&](keel::StringRef p) -> bool {
                 try {
                     auto rp = ctx.engine->resolvePath(p);
                     if (!rp.fs) return false;

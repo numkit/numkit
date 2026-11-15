@@ -42,7 +42,7 @@ Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr)
             c.cellAt(i) = Value::fromString(kw[i], mr);
         return c;
     }
-    const std::string s = args[0].toString();
+    const std::string s(args[0].toString().as_ref());
     return Value::logicalScalar(iskeyword(s), mr);
 }
 
@@ -61,7 +61,7 @@ Value isvarname(const Value &a, keel::Allocator *mr)
 {
     const bool isText = a.isChar() || (a.isString() && a.numel() == 1);
     if (!isText) return Value::logicalScalar(false, mr);
-    return Value::logicalScalar(isvarname(a.toString()), mr);
+    return Value::logicalScalar(isvarname(std::string(a.toString().as_ref())), mr);
 }
 
 Value isvarname(keel::ArrayRef<Value> args, keel::Allocator *mr)

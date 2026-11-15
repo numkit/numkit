@@ -30,30 +30,31 @@ std::string trimString(std::string s)
     return s;
 }
 
-std::string getUserHomeDir()
-{
-#ifdef _WIN32
-    std::string home = sys::envGet("USERPROFILE");
-    if (home.empty()) {
-        std::string drive = sys::envGet("HOMEDRIVE");
-        std::string path = sys::envGet("HOMEPATH");
-        home = drive + path;
-    }
-    return home.empty() ? "." : home;
-#else
-    std::string home = sys::envGet("HOME");
-    return home.empty() ? "." : home;
-#endif
-}
-
 std::string toStdString(keel::StringRef s)
 {
     return std::string(s.data(), s.size());
 }
 
+std::string getUserHomeDir()
+{
+#ifdef _WIN32
+    keel::String home = sys::envGet("USERPROFILE");
+    if (home.empty()) {
+        keel::String drive = sys::envGet("HOMEDRIVE");
+        keel::String path = sys::envGet("HOMEPATH");
+        std::string combined = toStdString(drive) + toStdString(path);
+        return combined.empty() ? "." : combined;
+    }
+    return toStdString(home);
+#else
+    keel::String home = sys::envGet("HOME");
+    return home.empty() ? "." : toStdString(home);
+#endif
+}
+
 keel::String getNumkitPrefix()
 {
-    std::string custom = sys::envGet("NUMKIT_PREFIX");
+    keel::String custom = sys::envGet("NUMKIT_PREFIX");
     if (!custom.empty()) return keel::path_normalize(custom);
     return keel::path_join(getUserHomeDir(), ".numkit");
 }
@@ -90,10 +91,10 @@ std::string cmakeToolchainFlags(const std::string &buildDir)
         auto ninja = sys::findNinja();
         if (zig.found && ninja.found) {
             return " -G Ninja"
-                   " -DCMAKE_MAKE_PROGRAM=\"" + ninja.path + "\""
-                   " -DCMAKE_CXX_COMPILER=\"" + zig.path + "\""
+                   " -DCMAKE_MAKE_PROGRAM=\"" + toStdString(ninja.path) + "\""
+                   " -DCMAKE_CXX_COMPILER=\"" + toStdString(zig.path) + "\""
                    " -DCMAKE_CXX_COMPILER_ARG1=c++"
-                   " -DCMAKE_C_COMPILER=\"" + zig.path + "\""
+                   " -DCMAKE_C_COMPILER=\"" + toStdString(zig.path) + "\""
                    " -DCMAKE_C_COMPILER_ARG1=cc"
                    " -DNUMKIT_BUILD_TESTS=OFF";
         }
@@ -143,9 +144,10 @@ bool parseSemVerTag(const std::string &tag, SemVerTag &out)
     return true;
 }
 
-bool hasControlChars(const std::string &s)
+bool hasControlChars(keel::StringRef s)
 {
-    for (unsigned char ch : s) {
+    for (char chRaw : s) {
+        unsigned char ch = static_cast<unsigned char>(chRaw);
         if (ch < 0x20 || ch == 0x7F)
             return true;
     }
@@ -163,7 +165,7 @@ bool isValidPackageName(const std::string &name)
     return true;
 }
 
-std::string quoteShellArg(const std::string &s)
+std::string quoteShellArg(keel::StringRef s)
 {
 #ifdef _WIN32
     std::string out = "\"";
@@ -230,7 +232,7 @@ bool isStrictSubpath(keel::StringRef parentDir, keel::StringRef candidate)
     return cRef.size() > pRef.size() + 1 && cRef.starts_with(pRef) && cRef[pRef.size()] == '/';
 }
 
-std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const std::string &gitUrl)
+std::vector<SemVerTag> fetchRemoteSemVerTags(keel::StringRef gitPath, keel::StringRef gitUrl)
 {
     std::vector<SemVerTag> tags;
     if (gitUrl.empty() || gitUrl[0] == '-' || hasControlChars(gitUrl) || hasControlChars(gitPath))
@@ -239,7 +241,7 @@ std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const s
     auto res = sys::runProcess(cmd);
     if (!res.ok()) return tags;
 
-    std::istringstream iss(res.output);
+    std::istringstream iss(toStdString(res.output));
     std::string line;
     const std::string prefix = "refs/tags/";
     while (std::getline(iss, line)) {
@@ -255,8 +257,8 @@ std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const s
     return tags;
 }
 
-std::string queryRemoteRefCommit(const std::string &gitPath, const std::string &gitUrl,
-                                 const std::string &ref)
+std::string queryRemoteRefCommit(keel::StringRef gitPath, keel::StringRef gitUrl,
+                                 keel::StringRef ref)
 {
     if (gitUrl.empty() || gitUrl[0] == '-' || ref.empty() || ref[0] == '-'
         || hasControlChars(gitUrl) || hasControlChars(ref) || hasControlChars(gitPath))
@@ -264,7 +266,7 @@ std::string queryRemoteRefCommit(const std::string &gitPath, const std::string &
     std::string cmd = quoteShellArg(gitPath) + " ls-remote -- " + quoteShellArg(gitUrl) + " " + quoteShellArg(ref);
     auto res = sys::runProcess(cmd);
     if (!res.ok() || res.output.empty()) return {};
-    std::istringstream iss(res.output);
+    std::istringstream iss(toStdString(res.output));
     std::string sha;
     if (iss >> sha && sha.size() >= 7) {
         return sha.substr(0, 7);
@@ -358,9 +360,9 @@ PackageManager::PackageManager(const std::string &modulesDir)
     if (!modulesDir.empty()) {
         modulesDir_ = modulesDir;
     } else {
-        std::string custom = sys::envGet("NUMKIT_MODULES_PATH");
+        keel::String custom = sys::envGet("NUMKIT_MODULES_PATH");
         if (!custom.empty()) {
-            modulesDir_ = custom;
+            modulesDir_ = toStdString(custom);
         } else if (keel::fs_is_dir("modules")) {
             auto absMods = keel::fs_absolute("modules");
             modulesDir_ = absMods.is_ok() ? toStdString(absMods.value()) : std::string("modules");
@@ -637,14 +639,14 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
             auto cloneRes = sys::runProcess(cloneCmd);
             if (!cloneRes.ok()) {
                 std::cerr << "Error cloning repository from " << target.gitUrl << ":\n"
-                          << cloneRes.output << "\n";
+                          << cloneRes.output.c_str() << "\n";
                 return 1;
             }
         }
 
         auto revRes = sys::runProcess(quoteShellArg(gitTool.path) + " -C " + quoteShellArg(sourceDir) + " rev-parse --short HEAD");
         if (revRes.ok()) {
-            shortSha = trimString(revRes.output);
+            shortSha = trimString(toStdString(revRes.output));
         }
         if (!resolvedRef.empty() && (resolvedRef[0] == 'v' || resolvedRef[0] == 'V')) {
             versionLabel = resolvedRef;
@@ -665,7 +667,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
     auto cfgRes = sys::runProcess(cfgCmd);
     if (!cfgRes.ok()) {
-        std::cerr << "CMake configuration failed:\n" << cfgRes.output << "\n";
+        std::cerr << "CMake configuration failed:\n" << cfgRes.output.c_str() << "\n";
         return 1;
     }
 
@@ -676,7 +678,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
     auto buildRes = sys::runProcess(buildCmd);
     if (!buildRes.ok()) {
-        std::cerr << "CMake build failed:\n" << buildRes.output << "\n";
+        std::cerr << "CMake build failed:\n" << buildRes.output.c_str() << "\n";
         return 1;
     }
 
@@ -927,14 +929,14 @@ int PackageManager::build(const std::string &dir, bool verbose)
                        + " -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
     auto cfgRes = sys::runProcess(cfgCmd);
     if (!cfgRes.ok()) {
-        std::cerr << "CMake configuration failed:\n" << cfgRes.output << "\n";
+        std::cerr << "CMake configuration failed:\n" << cfgRes.output.c_str() << "\n";
         return 1;
     }
 
     std::string buildCmd = quoteShellArg(cmakeTool.path) + " --build " + quoteShellArg(buildDir) + " --config Release --parallel";
     auto buildRes = sys::runProcess(buildCmd);
     if (!buildRes.ok()) {
-        std::cerr << "CMake build failed:\n" << buildRes.output << "\n";
+        std::cerr << "CMake build failed:\n" << buildRes.output.c_str() << "\n";
         return 1;
     }
 

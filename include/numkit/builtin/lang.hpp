@@ -7,6 +7,7 @@
 #include <keel/ref.h>
 #include <string>
 #include <vector>
+#include <numkit/sys/env.hpp>
 #include <numkit/value/value.hpp>
 
 namespace numkit::builtin {
@@ -21,8 +22,6 @@ namespace numkit::builtin {
 ///
 /// Provides clean, engine-free C++ API for environment variable access,
 /// keyword inspection, and variable name validation.
-
-#include <numkit/sys/env.hpp>
 
 // ── Environment Variables ───────────────────────────────────────────────────
 

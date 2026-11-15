@@ -37,8 +37,8 @@ void display_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 {
     argcheck::checkNargin(args.size(), 1, 2, "display");
     std::string name = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
-                           ? args[1].toString()
-                           : "ans";
+                           ? std::string(args[1].toString().as_ref())
+                           : std::string("ans");
     if (args[0].isObject()) {
         ctx.engine->displayObject(name, args[0]);
         return;

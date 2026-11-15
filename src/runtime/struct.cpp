@@ -80,7 +80,7 @@ Value structure(keel::ArrayRef<Value> nameValuePairs, keel::Allocator *mr)
     auto s = Value::structArray(arrRows, arrCols, mr);
     const keel::usize numel = arrRows * arrCols;
     for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
-        std::string fname = nameValuePairs[i].toString();
+        std::string fname(nameValuePairs[i].toString().as_ref());
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
             if (v.numel() == 1) {
@@ -117,11 +117,11 @@ Value isfield(const Value &s, const Value &name, keel::Allocator *mr)
     if (!s.isStruct())
         return Value::logicalScalar(false, mr);
     if (s.isStructArray()) {
-        const std::string n = name.toString();
+        const std::string n(name.toString().as_ref());
         if (s.numel() == 0)
             return Value::logicalScalar(false, mr);
         const auto &elem0 = s.structArrayElem(0);
-        return Value::logicalScalar(elem0.count(n) > 0, mr);
+        return Value::logicalScalar(elem0.contains(n), mr);
     }
     return Value::logicalScalar(s.hasField(name.toString()), mr);
 }
@@ -148,8 +148,8 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     keel::Array<Value> results(scratch.allocator());
     results.reserve(n);
-    for (const auto &kv : fields) {
-        Value arg = kv.second;
+    for (auto entry : fields) {
+        Value arg = entry.value;
         Value out;
         keel::ArrayRef<Value> ar(&arg, 1);
         keel::MutArrayRef<Value>       ou(&out, 1);
@@ -192,17 +192,17 @@ Value getfield(const Value &s, const Value &name, keel::Allocator *)
     if (!s.isStruct())
         throw Error("getfield requires a struct", 0, 0, "getfield", "",
                      "numkit:getfield:notStruct");
-    const std::string n = name.toString();
+    const std::string n(name.toString().as_ref());
     if (s.isStructArray()) {
         if (s.numel() == 0)
             throw Error("getfield: struct array is empty", 0, 0, "getfield", "",
                          "numkit:getfield:emptyArray");
         const auto &elem0 = s.structArrayElem(0);
-        auto it = elem0.find(n);
-        if (it == elem0.end())
+        const Value *val = elem0.get(n);
+        if (!val)
             throw Error("getfield: no such field '" + n + "'",
                          0, 0, "getfield", "", "numkit:getfield:noField");
-        return it->second;
+        return *val;
     }
     if (!s.hasField(n))
         throw Error("getfield: no such field '" + n + "'",
@@ -258,12 +258,13 @@ Value orderfields(const Value &s, keel::Allocator *mr)
         // Use map iteration (alphabetical) to seed a fresh tracker.
         std::vector<std::string> sorted;
         if (out.isStructArray()) {
-            for (const auto &[k, _] : out.structArrayElem(0))
-                sorted.push_back(std::string(k));
+            for (auto entry : out.structArrayElem(0))
+                sorted.emplace_back(entry.key.as_ref());
         } else {
-            for (const auto &[k, _] : out.structFields())
-                sorted.push_back(std::string(k));
+            for (auto entry : out.structFields())
+                sorted.emplace_back(entry.key.as_ref());
         }
+        std::sort(sorted.begin(), sorted.end());
         // Build a fresh struct preserving values but in alphabetical order.
         const auto rows = out.dims().rows();
         const auto cols = out.dims().cols();
@@ -271,8 +272,7 @@ Value orderfields(const Value &s, keel::Allocator *mr)
         for (const auto &name : sorted) {
             for (keel::usize i = 0; i < re.numel(); ++i) {
                 const auto &srcMap = out.structArrayElem(i);
-                auto it = srcMap.find(name);
-                if (it != srcMap.end()) re.setField(i, name, it->second);
+                if (const Value *val = srcMap.get(name)) re.setField(i, name, *val);
             }
         }
         return re;
@@ -300,9 +300,9 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     std::vector<std::string> order;
     if (names.isCell()) {
         for (keel::usize i = 0; i < names.numel(); ++i)
-            order.push_back(names.cellAt(i).toString());
+            order.emplace_back(names.cellAt(i).toString().as_ref());
     } else if (names.type() == ValueType::CHAR) {
-        order.push_back(names.toString());
+        order.emplace_back(names.toString().as_ref());
     } else {
         throw Error("orderfields: second argument must be a cell array of names",
                      0, 0, "orderfields", "", "numkit:orderfields:badPerm");
@@ -311,9 +311,9 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     // Existing field names (from element 0 / the single struct).
     std::vector<std::string> existing;
     if (s.isStructArray()) {
-        for (const auto &[k, _] : s.structArrayElem(0)) existing.push_back(std::string(k));
+        for (auto entry : s.structArrayElem(0)) existing.emplace_back(entry.key.as_ref());
     } else {
-        for (const auto &[k, _] : s.structFields()) existing.push_back(std::string(k));
+        for (auto entry : s.structFields()) existing.emplace_back(entry.key.as_ref());
     }
     auto contains = [](const std::vector<std::string> &v, const std::string &x) {
         for (const auto &e : v) if (e == x) return true;
@@ -333,8 +333,7 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     for (const auto &name : finalOrder)
         for (keel::usize i = 0; i < re.numel(); ++i) {
             const auto &srcMap = s.structArrayElem(i);
-            auto it = srcMap.find(name);
-            if (it != srcMap.end()) re.setField(i, name, it->second);
+            if (const Value *val = srcMap.get(name)) re.setField(i, name, *val);
         }
     return re;
 }
@@ -350,8 +349,8 @@ Value struct2cell(const Value &s, keel::Allocator *mr)
         auto c = Value::cell(F, 1, mr);
         const auto &fields = s.structFields();
         for (keel::usize f = 0; f < F; ++f) {
-            auto it = fields.find(names[f]);
-            c.cellAt(f) = (it != fields.end()) ? it->second : Value::Empty;
+            const Value *val = fields.get(names[f]);
+            c.cellAt(f) = val ? *val : Value::Empty;
         }
         return c;
     }
@@ -362,8 +361,8 @@ Value struct2cell(const Value &s, keel::Allocator *mr)
     for (keel::usize k = 0; k < numel; ++k) {
         const auto &elemMap = s.structArrayElem(k);
         for (keel::usize f = 0; f < F; ++f) {
-            auto it = elemMap.find(names[f]);
-            c.cellAt(f + k * F) = (it != elemMap.end()) ? it->second : Value::Empty;
+            const Value *val = elemMap.get(names[f]);
+            c.cellAt(f + k * F) = val ? *val : Value::Empty;
         }
     }
     return c;
@@ -383,7 +382,7 @@ Value cell2struct(const Value &c, const Value &fields, keel::Allocator *mr)
                      0, 0, "cell2struct", "", "numkit:cell2struct:shape");
     auto out = Value::structure(mr);
     for (keel::usize i = 0; i < nFields; ++i) {
-        const std::string name = fields.cellAt(i).toString();
+        const std::string name(fields.cellAt(i).toString().as_ref());
         out.field(name) = c.cellAt(i);
     }
     return out;
@@ -444,8 +443,8 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
         const bool uniform = hf::parseUniformOutputFlag(args, 2, "structfun");
         auto *mr = eng.allocator();
         auto fieldVals = std::make_shared<std::vector<Value>>();
-        for (const auto &kv : args[1].structFields())
-            fieldVals->push_back(kv.second);
+        for (auto entry : args[1].structFields())
+            fieldVals->push_back(entry.value);
         auto cont = std::make_shared<LoopContinuation>();
         cont->handle = args[0];
         cont->n = fieldVals->size();
@@ -533,8 +532,8 @@ void getfield_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
                 Value single = Value::structure(ctx.engine->allocator());
                 const auto &m = cur.structArrayElem(idx);
                 for (const auto &fn : cur.fieldNamesInOrder()) {
-                    auto it = m.find(fn);
-                    single.field(fn) = (it != m.end()) ? it->second : Value();
+                    const Value *val = m.get(fn);
+                    single.field(fn) = val ? *val : Value();
                 }
                 cur = std::move(single);
             }

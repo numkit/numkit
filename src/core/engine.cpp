@@ -77,17 +77,17 @@ Engine::Engine(keel::Allocator *mr)
     pluginLoader_ = std::make_unique<PluginLoader>(*this);
 
     reinstallConstants();
-    registerVirtualFS(std::make_unique<NativeFS>());
+    registerVirtualFS(keel::make_unique<NativeFS>());
 
     // Element-wise fusion default: on unless NUMKIT_FUSE=0 (kill switch). No
     // effect until the standard library registers rules (see fusionEnabled()).
     if (const char *fe = std::getenv("NUMKIT_FUSE"))
         fusionEnabled_ = !(fe[0] == '0' && fe[1] == '\0');
 
-    std::string nm = numkit::envGet("NUMKIT_MODE");
+    keel::String nm = numkit::envGet("NUMKIT_MODE");
     if (nm.empty())
         nm = numkit::envGet("NUMKIT_NAMESPACE_MODE");
-    if (nm == "isolated" || nm == "namespaced" || nm == "strict")
+    if (nm.as_ref() == "isolated" || nm.as_ref() == "namespaced" || nm.as_ref() == "strict")
         namespaceMode_ = NamespaceMode::Isolated;
     // No library installs here — a bare Engine has the language runtime,
     // constants and primitive arithmetic, but no named functions. Call
@@ -206,24 +206,25 @@ void Engine::registerFunctionImpl_(const std::string &fullName,
     }
 }
 
-void Engine::registerFunction(const std::string &name, ExternalFunc func)
+void Engine::registerFunction(keel::StringRef name, ExternalFunc func)
 {
     // 1-arg form: equivalent to namespace = "" (core). full name == leaf name.
-    registerFunctionImpl_(name, name, std::move(func));
+    std::string s(name);
+    registerFunctionImpl_(s, s, std::move(func));
 }
 
 void Engine::registerClass(BuiltinClass cls)
 {
-    if (classes_.count(cls.name))
-        throw std::runtime_error("Engine::registerClass: duplicate class '" + cls.name + "'");
-    std::string key = cls.name;
+    std::string key(cls.name.as_ref());
+    if (classes_.count(key))
+        throw std::runtime_error("Engine::registerClass: duplicate class '" + key + "'");
     classes_.emplace(std::move(key), std::move(cls));
     bumpCallCacheEpoch();
 }
 
-const BuiltinClass *Engine::findClass(const std::string &name) const
+const BuiltinClass *Engine::findClass(keel::StringRef name) const
 {
-    auto it = classes_.find(name);
+    auto it = classes_.find(std::string(name));
     return it == classes_.end() ? nullptr : &it->second;
 }
 
@@ -243,32 +244,33 @@ bool Engine::isUserCodeHandle(const Value &handle) const
 {
     if (!handle.isFuncHandle())
         return false;
-    const std::string &fn = handle.funcHandleName();
+    const std::string fn(handle.funcHandleName().as_ref());
     return lookupUserFunctionLocal(fn) != nullptr
            || (compiler_ && compiler_->findCompiled(fn) != nullptr);
 }
 
 std::string Engine::formatObjectDisplay(const std::string &name, const Value &obj) const
 {
-    const BuiltinClass *cls = findClass(obj.objectClassName());
+    const std::string clsName(obj.objectClassName().as_ref());
+    const BuiltinClass *cls = findClass(clsName);
     std::string body;
     const keel::usize n = obj.objectCount();
     if (cls && cls->dispText) {
-        body = cls->dispText(obj);
+        body = std::string(cls->dispText(obj).as_ref());
     }
     if (body.empty()) {
         if (n == 1) {
-            body = "  " + obj.objectClassName() + "\n";
+            body = "  " + clsName + "\n";
         } else {
             // Object array: "<rows>×<cols> <ClassName> array" + property list.
             const Dims &d = obj.dims();
             std::string hdr = "  " + std::to_string(d.rows()) + "\xC3\x97"
-                              + std::to_string(d.cols()) + " " + obj.objectClassName()
+                              + std::to_string(d.cols()) + " " + clsName
                               + " array";
             if (cls && !cls->propNames.empty()) {
                 hdr += " with properties:\n\n";
                 for (const auto &p : cls->propNames)
-                    hdr += "    " + p + "\n";
+                    hdr += "    " + std::string(p.as_ref()) + "\n";
             } else {
                 hdr += "\n";
             }
@@ -292,16 +294,16 @@ void Engine::displayObject(const std::string &name, const Value &obj)
             m(self, keel::ArrayRef<Value>(nullptr, 0), /*nargout=*/0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
         };
         // `display` owns the entire output (including any variable-name line).
-        if (auto it = cls->methods.find("display"); it != cls->methods.end()) {
-            call(it->second);
+        if (const auto *m = cls->methods.get("display")) {
+            call(*m);
             return;
         }
         // `disp` owns the body; the default `display` prints the `name =`
         // header around it (only when shown as a named variable).
-        if (auto it = cls->methods.find("disp"); it != cls->methods.end()) {
+        if (const auto *m = cls->methods.get("disp")) {
             if (!name.empty())
                 outputText(name + " =\n\n");
-            call(it->second);
+            call(*m);
             if (!name.empty())
                 outputText("\n");
             return;
@@ -364,16 +366,15 @@ bool Engine::tryObjectBinaryOp(const std::string &op, const Value &lhs, const Va
     // The dominant object decides the class (first object operand wins —
     // v1 dispatch fidelity, see object_model.md §3).
     const Value &dom = lhs.isObject() ? lhs : rhs;
-    const std::string &clsName = dom.objectClassName();
+    const std::string clsName(dom.objectClassName().as_ref());
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = operatorMethodName(op); cls && mname) {
-        auto it = cls->ops.find(mname);
-        if (it != cls->ops.end()) {
+        if (const auto *m = cls->ops.get(mname)) {
             Value self = dom;                 // class context for the hook
             Value operands[2] = {lhs, rhs};   // args in source order
             Value res[1];
             CallContext ctx{this, env};
-            it->second(self, keel::ArrayRef<Value>(operands, 2), 1, keel::MutArrayRef<Value>(res, 1), ctx);
+            (*m)(self, keel::ArrayRef<Value>(operands, 2), 1, keel::MutArrayRef<Value>(res, 1), ctx);
             out = std::move(res[0]);
             return true;
         }
@@ -387,15 +388,14 @@ bool Engine::tryObjectUnaryOp(const std::string &op, const Value &operand,
 {
     if (!operand.isObject())
         return false;
-    const std::string &clsName = operand.objectClassName();
+    const std::string clsName(operand.objectClassName().as_ref());
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = unaryOperatorMethodName(op); cls && mname) {
-        auto it = cls->ops.find(mname);
-        if (it != cls->ops.end()) {
+        if (const auto *m = cls->ops.get(mname)) {
             Value self = operand;
             Value res[1];
             CallContext ctx{this, env};
-            it->second(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(res, 1), ctx);
+            (*m)(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(res, 1), ctx);
             out = std::move(res[0]);
             return true;
         }
@@ -445,7 +445,7 @@ const BytecodeChunk *Engine::resolveBinaryOpChunk(const std::string &op, const V
     if (!lhs.isObject() && !rhs.isObject())
         return nullptr; // numeric fast path
     const Value &dom = lhs.isObject() ? lhs : rhs; // first object operand wins
-    const std::string &cn = dom.objectClassName();
+    const std::string cn(dom.objectClassName().as_ref());
     const BuiltinClass *cls = findClass(cn);
     const char *mname = operatorMethodName(op);
     if (!cls || !mname)
@@ -454,10 +454,10 @@ const BytecodeChunk *Engine::resolveBinaryOpChunk(const std::string &op, const V
     // synthetic enum eq/ne live only in `ops` (no UserFunction) → not found
     // here → caller's slow path handles them. Same membership as `ops` for
     // genuine overloads.
-    auto it = cls->methodFns.find(mname);
-    if (it == cls->methodFns.end())
+    const auto *mfp = cls->methodFns.get(mname);
+    if (!mfp)
         return nullptr;
-    const BytecodeChunk *cc = ensureClassMethodChunk(*it->second);
+    const BytecodeChunk *cc = ensureClassMethodChunk(**mfp);
     if (!cc)
         return nullptr; // uncompilable body → slow path (callReentrant / TW)
     enforceMethodAccess(cn, mname);
@@ -470,15 +470,15 @@ const BytecodeChunk *Engine::resolveUnaryOpChunk(const std::string &op, const Va
 {
     if (!operand.isObject())
         return nullptr;
-    const std::string &cn = operand.objectClassName();
+    const std::string cn(operand.objectClassName().as_ref());
     const BuiltinClass *cls = findClass(cn);
     const char *mname = unaryOperatorMethodName(op);
     if (!cls || !mname)
         return nullptr;
-    auto it = cls->methodFns.find(mname);
-    if (it == cls->methodFns.end())
+    const auto *mfp = cls->methodFns.get(mname);
+    if (!mfp)
         return nullptr; // no override → slow path (transpose→builtin, else throw)
-    const BytecodeChunk *cc = ensureClassMethodChunk(*it->second);
+    const BytecodeChunk *cc = ensureClassMethodChunk(**mfp);
     if (!cc)
         return nullptr;
     enforceMethodAccess(cn, mname);
@@ -495,13 +495,14 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayR
                                                  std::string &ownerClassOut,
                                                  std::vector<Value> &argsOut)
 {
-    const BuiltinClass *cls = findClass(self.objectClassName());
+    const std::string cn(self.objectClassName().as_ref());
+    const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsref)
         return nullptr;
-    auto it = cls->methodFns.find("subsref");
-    if (it == cls->methodFns.end())
+    const auto *mfp = cls->methodFns.get("subsref");
+    if (!mfp)
         return nullptr; // builtin/native subsref (no UserFunction) → slow path
-    const BytecodeChunk *cc = ensureClassMethodChunk(*it->second);
+    const BytecodeChunk *cc = ensureClassMethodChunk(**mfp);
     if (!cc)
         return nullptr;
     Value s = buildSubsStruct("()", idx, allocator());
@@ -509,7 +510,7 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayR
     argsOut.reserve(2);
     argsOut.push_back(self);          // subsref(obj, S)
     argsOut.push_back(std::move(s));
-    ownerClassOut = self.objectClassName();
+    ownerClassOut = cn;
     return cc;
 }
 
@@ -517,13 +518,14 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::Array
                                                   std::string &ownerClassOut,
                                                   std::vector<Value> &argsOut)
 {
-    const BuiltinClass *cls = findClass(self.objectClassName());
+    const std::string cn(self.objectClassName().as_ref());
+    const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsasgn)
         return nullptr;
-    auto it = cls->methodFns.find("subsasgn");
-    if (it == cls->methodFns.end())
+    const auto *mfp = cls->methodFns.get("subsasgn");
+    if (!mfp)
         return nullptr;
-    const BytecodeChunk *cc = ensureClassMethodChunk(*it->second);
+    const BytecodeChunk *cc = ensureClassMethodChunk(**mfp);
     if (!cc)
         return nullptr;
     // Hook convention: idxAndVal = [subscripts…, value] (value last).
@@ -534,7 +536,7 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::Array
     argsOut.push_back(self);          // subsasgn(obj, S, val)
     argsOut.push_back(std::move(s));
     argsOut.push_back(nsub < idxAndVal.size() ? idxAndVal[nsub] : Value());
-    ownerClassOut = self.objectClassName();
+    ownerClassOut = cn;
     return cc;
 }
 
@@ -551,10 +553,10 @@ bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usi
     return true;
 }
 
-void Engine::objectStoreSlice(Value &dst, const std::vector<std::vector<keel::usize>> &perDim,
+void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                               const Value &val, Environment *env)
 {
-    const std::string &clsName = dst.isObject() ? dst.objectClassName() : val.objectClassName();
+    const std::string clsName((dst.isObject() ? dst.objectClassName() : val.objectClassName()).as_ref());
     const BuiltinClass *cls = findClass(clsName);
     Value coercedVal = val;
     if (dst.isObject() && !val.isObject() && cls && cls->construct) {
@@ -1110,7 +1112,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     for (const auto &p : desc->props) {
         if (!p.isConstant)
             continue;
-        Value cval = p.def;
+        auto cval = keel::make_arc<Value>(p.def);
         Access getLvl = p.getAccess;
         std::string decl = p.declClass, pn = p.name;
         registerFunction(desc->name, p.name,
@@ -1118,19 +1120,23 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                                                   CallContext &ctx) {
                              if (getLvl != Access::Public)
                                  enforceAccess(ctx.engine, getLvl, decl, "property", pn);
-                             outs[0] = cval;
+                             outs[0] = *cval;
                          });
     }
 
     BuiltinClass cls;
-    cls.name = desc->name;
+    cls.name = keel::String::from(desc->name);
     cls.isHandle = desc->isHandle;
-    cls.hidden = desc->hiddenMembers;
+    cls.hidden.reserve(desc->hiddenMembers.size());
+    for (const auto &h : desc->hiddenMembers)
+        cls.hidden.push_back(keel::String::from(h));
     cls.propNames.reserve(desc->props.size());
     for (const auto &p : desc->props)
-        if (std::find(cls.hidden.begin(), cls.hidden.end(), p.name) == cls.hidden.end())
-            cls.propNames.push_back(p.name); // Hidden props omitted from properties()/disp
-    cls.superclasses = desc->superclasses;
+        if (std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), p.name) == desc->hiddenMembers.end())
+            cls.propNames.push_back(keel::String::from(p.name)); // Hidden props omitted from properties()/disp
+    cls.superclasses.reserve(desc->superclasses.size());
+    for (const auto &s : desc->superclasses)
+        cls.superclasses.push_back(keel::String::from(s));
     cls.isSealed = desc->isSealed;
     cls.isAbstract = desc->isAbstract;
     // ── Reflection metadata (metaclass / meta.property / meta.method) ──
@@ -1144,33 +1150,44 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         };
         for (const auto &p : desc->props)
             if (!isHidden(p.name))
-                cls.propMeta.push_back({p.name, accessName(p.getAccess),
-                                        accessName(p.setAccess), p.isConstant, p.isDependent});
-        std::map<std::string, MethodMeta> mm; // dedup + deterministic order
+                cls.propMeta.push_back({keel::String::from(p.name),
+                                        keel::String::from(accessName(p.getAccess)),
+                                        keel::String::from(accessName(p.setAccess)),
+                                        p.isConstant, p.isDependent});
+        struct TmpMethodMeta {
+            std::string access = "public";
+            bool isStatic = false;
+            bool isAbstract = false;
+        };
+        std::map<std::string, TmpMethodMeta> mm; // dedup + deterministic order
         for (const auto &[name, uf] : desc->methods) {
-            MethodMeta m;
-            m.name = name;
+            TmpMethodMeta m;
             if (auto it = desc->methodAccess.find(name); it != desc->methodAccess.end())
                 m.access = accessName(it->second.level);
             mm[name] = m;
         }
         for (const auto &[name, si] : desc->statics) {
-            MethodMeta &m = mm[name];
-            m.name = name;
+            TmpMethodMeta &m = mm[name];
             m.isStatic = true;
             m.access = accessName(si.access);
         }
         for (const auto &name : desc->abstractMethods) {
-            MethodMeta &m = mm[name];
-            m.name = name;
+            TmpMethodMeta &m = mm[name];
             m.isAbstract = true;
         }
         for (auto &[name, m] : mm)
-            if (!isHidden(name))
-                cls.methodMeta.push_back(m);
+            if (!isHidden(name)) {
+                MethodMeta meta;
+                meta.name = keel::String::from(name);
+                meta.access = keel::String::from(m.access);
+                meta.isStatic = m.isStatic;
+                meta.isAbstract = m.isAbstract;
+                cls.methodMeta.push_back(std::move(meta));
+            }
     }
-    cls.propGet = [desc](const Value &self, const std::string &name, Value &out,
+    cls.propGet = [desc](const Value &self, keel::StringRef nameRef, Value &out,
                          CallContext &ctx) -> bool {
+        const std::string name(nameRef);
         if (desc->anyNonPublicProp)
             if (const PropInfo *pi = findProp(*desc, name);
                 pi && pi->getAccess != Access::Public)
@@ -1192,14 +1209,15 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         const auto *st = self.objectStateConst();
         if (!st)
             return false;
-        auto it = st->props.find(name);
-        if (it == st->props.end())
+        const Value *vp = st->props.get(nameRef);
+        if (!vp)
             return false;
-        out = it->second;
+        out = *vp;
         return true;
     };
-    cls.propSet = [desc](Value &self, const std::string &name, const Value &val,
+    cls.propSet = [desc](Value &self, keel::StringRef nameRef, const Value &val,
                          CallContext &ctx) -> bool {
+        const std::string name(nameRef);
         const PropInfo *pi = findProp(*desc, name);
         if (pi) {
             if (pi->isConstant)
@@ -1230,7 +1248,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 self = std::move(r[0]);
             return true;
         }
-        self.objectStateMut()->props[name] = val;
+        self.objectStateMut()->props.put(keel::String::from(nameRef), val);
         return true;
     };
     cls.construct = [desc](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
@@ -1241,7 +1259,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     };
     for (const auto &[mname, uf] : desc->methods) {
         auto ufCopy = uf; // shared_ptr keeps the body alive
-        cls.methodFns[mname] = uf; // classdef method → VM can run it as a frame
+        cls.methodFns.put(keel::String::from(mname), keel::make_arc<const UserFunction>(*uf)); // classdef method → VM can run it as a frame
         std::string nameCopy = mname;
         Access mlevel = Access::Public;
         std::string mdecl;
@@ -1249,9 +1267,10 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             mlevel = mit->second.level;
             mdecl = mit->second.declClass;
         }
-        cls.methods[mname] = [ufCopy, nameCopy, mlevel, mdecl](
-                                 Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
-                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
+        cls.methods.put(keel::String::from(mname),
+                        [ufCopy, nameCopy, mlevel, mdecl](
+                            Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
+                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (mlevel != Access::Public)
                 enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
             std::vector<Value> callArgs;
@@ -1267,7 +1286,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             const keel::usize writeN = std::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = std::move(results[i]);
-        };
+        });
         // Operator-overload method (plus/minus/eq/uminus/…): also wire it into
         // `ops` so `a + b`, `-a`, `a == b`, … dispatch here. Unlike a regular
         // method, an operator method's parameters ARE its operands (no `self`
@@ -1275,9 +1294,10 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         // arrives as the receiver `self` with empty `args`.
         if (isOperatorMethodName(mname)) {
             auto ufOp = uf;
-            cls.ops[mname] = [ufOp, nameCopy, mlevel, mdecl](
-                                 Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
-                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            cls.ops.put(keel::String::from(mname),
+                        [ufOp, nameCopy, mlevel, mdecl](
+                            Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
+                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 if (mlevel != Access::Public)
                     enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
                 std::vector<Value> callArgs;
@@ -1291,7 +1311,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 const keel::usize writeN = std::min(nout, results.size());
                 for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                     outs[i] = std::move(results[i]);
-            };
+            });
         }
     }
     // Custom indexing: a `subsref` / `subsasgn` method overrides `obj(...)`
@@ -1329,22 +1349,21 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 self = std::move(results[0]);
         };
     }
-    cls.dispText = [desc](const Value &self) -> std::string {
+    cls.dispText = [desc](const Value &self) -> keel::String {
         if (self.objectCount() != 1)
-            return std::string();
+            return keel::String{};
         std::string body = "  " + desc->name + " with properties:\n\n";
         const auto *st = self.objectStateConst();
         for (const auto &p : desc->props) {
             body += "    " + p.name;
             if (st) {
-                auto it = st->props.find(p.name);
-                if (it != st->props.end() && it->second.isScalar()
-                    && it->second.type() == ValueType::DOUBLE)
-                    body += ": " + std::to_string(it->second.toScalar());
+                if (const Value *vp = st->props.get(p.name);
+                    vp && vp->isScalar() && vp->type() == ValueType::DOUBLE)
+                    body += ": " + std::to_string(vp->toScalar());
             }
             body += "\n";
         }
-        return body;
+        return keel::String::from(body);
     };
     // Enumeration defaults: members compare by their member name (so
     // `Color.Red == Color.Red`), and display as that name — unless the class
@@ -1361,21 +1380,26 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             }
             outs[0] = Value::logicalScalar(eq, ctx.engine->allocator());
         };
-        if (!cls.ops.count("eq"))
-            cls.ops["eq"] = enumEq;
-        if (!cls.ops.count("ne"))
-            cls.ops["ne"] = [enumEq](Value &self, keel::ArrayRef<Value> args, keel::usize no,
-                                     keel::MutArrayRef<Value> outs, CallContext &ctx) {
-                enumEq(self, args, no, outs, ctx);
-                if (!outs.empty())
-                    outs[0] = Value::logicalScalar(!outs[0].toBool(), ctx.engine->allocator());
-            };
+        if (!cls.ops.contains("eq"))
+            cls.ops.put(keel::String::from("eq"), enumEq);
+        if (!cls.ops.contains("ne"))
+            cls.ops.put(keel::String::from("ne"),
+                        [enumEq](Value &self, keel::ArrayRef<Value> args, keel::usize no,
+                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                            enumEq(self, args, no, outs, ctx);
+                            if (!outs.empty())
+                                outs[0] = Value::logicalScalar(!outs[0].toBool(), ctx.engine->allocator());
+                        });
         if (!desc->methods.count("disp") && !desc->methods.count("display"))
-            cls.dispText = [](const Value &self) -> std::string {
+            cls.dispText = [](const Value &self) -> keel::String {
                 if (self.objectCount() != 1)
-                    return std::string();
+                    return keel::String{};
                 const auto *st = self.objectStateConst();
-                return (st && !st->enumName.empty()) ? ("    " + st->enumName + "\n") : "";
+                if (st && !st->enumName.empty()) {
+                    std::string out = "    " + std::string(st->enumName.as_ref()) + "\n";
+                    return keel::String::from(out);
+                }
+                return keel::String{};
             };
     }
     registerClass(std::move(cls));
@@ -1396,10 +1420,11 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 CallContext ctx{this, workspaceEnv_.get()};
                 Value inst = ecls->construct(keel::ArrayRef<Value>(args.data(), args.size()), ctx);
                 if (inst.isObject())
-                    inst.objectStateMut()->enumName = child->strValue;
+                    inst.objectStateMut()->enumName = keel::String::from(child->strValue);
+                auto instPtr = keel::make_arc<Value>(std::move(inst));
                 registerFunction(desc->name, child->strValue,
-                                 [inst](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
-                                        CallContext &) { outs[0] = inst; });
+                                 [instPtr](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
+                                           CallContext &) { outs[0] = *instPtr; });
             }
         }
     }
@@ -1736,7 +1761,7 @@ void Engine::enforceCtorAccess(const std::string &className)
 
 Value Engine::constructChecked(const BuiltinClass *cls, keel::ArrayRef<Value> args, CallContext &ctx)
 {
-    enforceCtorAccess(cls->name);
+    enforceCtorAccess(std::string(cls->name.as_ref()));
     return cls->construct(args, ctx);
 }
 
@@ -1749,9 +1774,9 @@ Value Engine::makeDefaultInstance(const std::string &className)
     if (desc->isAbstract)
         throw std::runtime_error("Cannot instantiate abstract class '" + className
                                  + "' (unimplemented abstract method)");
-    auto st = std::make_shared<ObjectState>(mr_);
+    auto st = keel::make_arc_in<ObjectState>(mr_, mr_);
     for (const auto &p : desc->props)
-        st->props.emplace(p.name, p.def);
+        st->props.put(keel::String::from(p.name), p.def);
     return Value::object(desc->name, st, desc->isHandle, mr_);
 }
 
@@ -1763,14 +1788,16 @@ const UserFunction *Engine::classCtor(const std::string &className) const
     return it->second->ctor.get();
 }
 
-void Engine::registerFunction(const std::string &ns,
-                              const std::string &name,
+void Engine::registerFunction(keel::StringRef ns,
+                              keel::StringRef name,
                               ExternalFunc func)
 {
-    if (ns.empty()) {
-        registerFunctionImpl_(name, name, std::move(func));
+    std::string nsStr(ns);
+    std::string nameStr(name);
+    if (nsStr.empty()) {
+        registerFunctionImpl_(nameStr, nameStr, std::move(func));
     } else {
-        registerFunctionImpl_(ns + "." + name, name, std::move(func));
+        registerFunctionImpl_(nsStr + "." + nameStr, nameStr, std::move(func));
     }
 }
 
@@ -2000,9 +2027,10 @@ std::string Engine::formatUndefinedFunctionError(const std::string &name,
     return baseMsg;
 }
 
-const ExternalFunc *Engine::findExternal(const std::string &name,
+const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
                                          const Environment *env) const
 {
+    const std::string name(nameRef);
     // 1. Direct hit — covers core, promotions, and already-qualified names.
     auto it = externalFuncs_.find(name);
     if (it != externalFuncs_.end()) {
@@ -2216,12 +2244,12 @@ void Engine::setMaxRecursionDepth(int d)
     vm_->setMaxRecursionDepth(d);
 }
 
-void Engine::outputText(const std::string &s)
+void Engine::outputText(keel::StringRef s)
 {
     if (outputFunc_)
-        outputFunc_(s);
+        outputFunc_(std::string(s));
     else
-        std::cout << s;
+        std::cout.write(s.data(), static_cast<std::streamsize>(s.size()));
 }
 
 bool Engine::hasFunction(const std::string &name) const
@@ -2281,8 +2309,9 @@ const UserFunction *Engine::lookupUserFunction(const std::string &name,
     return hit;
 }
 
-void Engine::addPath(const std::string &dir)
+void Engine::addPath(keel::StringRef dirRef)
 {
+    const std::string dir(dirRef);
     if (dir.find(';') != std::string::npos) {
         keel::usize start = 0;
         while (start <= dir.size()) {
@@ -2302,9 +2331,11 @@ void Engine::addPath(const std::string &dir)
     try {
         ResolvedPath rp = fsCtx_.resolvePath(dir);
         if (rp.fs && rp.fs->exists(rp.path)) {
-            effectiveDir = (rp.fs->name() != "native")
-                ? (rp.fs->name() + ":" + rp.path)
-                : rp.path;
+            const std::string fsName(rp.fs->name().as_ref());
+            const std::string rpPath(rp.path.as_ref());
+            effectiveDir = (fsName != "native")
+                ? (fsName + ":" + rpPath)
+                : rpPath;
         }
     } catch (...) {}
     // De-dup: ignore if already present.
@@ -2316,8 +2347,9 @@ void Engine::addPath(const std::string &dir)
     bumpCallCacheEpoch();
 }
 
-void Engine::rmPath(const std::string &dir)
+void Engine::rmPath(keel::StringRef dirRef)
 {
+    const std::string dir(dirRef);
     if (dir.find(';') != std::string::npos) {
         keel::usize start = 0;
         while (start <= dir.size()) {
@@ -2335,9 +2367,11 @@ void Engine::rmPath(const std::string &dir)
     try {
         ResolvedPath rp = fsCtx_.resolvePath(dir);
         if (rp.fs) {
-            effectiveDir = (rp.fs->name() != "native")
-                ? (rp.fs->name() + ":" + rp.path)
-                : rp.path;
+            const std::string fsName(rp.fs->name().as_ref());
+            const std::string rpPath(rp.path.as_ref());
+            effectiveDir = (fsName != "native")
+                ? (fsName + ":" + rpPath)
+                : rpPath;
         }
     } catch (...) {}
     auto it = std::find_if(mPath_.begin(), mPath_.end(), [&](const std::string &p) {
@@ -2362,8 +2396,9 @@ void Engine::adoptUserFunction(const std::string &name,
     bumpCallCacheEpoch();
 }
 
-void Engine::registerBuiltinMSource(const std::string &src)
+void Engine::registerBuiltinMSource(keel::StringRef srcRef)
 {
+    std::string src(srcRef);
     builtinMSourceTexts_.push_back(src);
     adoptBuiltinMSource_(src);
 }
@@ -2513,8 +2548,8 @@ void Engine::refreshStaleMFiles()
                 stale.push_back(name);
         } else {
             try {
-                std::string content = rp.fs->readFile(rp.path);
-                if (entry.sourceCode && content != *entry.sourceCode)
+                keel::String content = rp.fs->readFile(rp.path);
+                if (entry.sourceCode && content.as_ref() != *entry.sourceCode)
                     stale.push_back(name);
             } catch (...) {
                 stale.push_back(name);
@@ -2567,8 +2602,9 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
 {
     // Negative-lookup fast path: avoid walking searchDirs and hitting OS
     // filesystem stat/exists on every builtin call inside a hot loop.
-    const std::string *curDir = currentScriptDir();
-    std::string missKey = (curDir && !curDir->empty()) ? (*curDir + '\n' + name) : name;
+    const keel::String *curDir = currentScriptDir();
+    const std::string curDirStr = curDir ? std::string(curDir->as_ref()) : std::string();
+    std::string missKey = !curDirStr.empty() ? (curDirStr + '\n' + name) : name;
     if (mFileMissCache_.count(missKey) > 0)
         return nullptr;
 
@@ -2579,8 +2615,8 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
     // script's FS via `resolvePath` (which also falls back to the
     // origin's fsName when the relative path has no scheme).
     std::vector<std::string> searchDirs;
-    if (curDir && !curDir->empty())
-        searchDirs.push_back(*curDir);
+    if (!curDirStr.empty())
+        searchDirs.push_back(curDirStr);
     searchDirs.insert(searchDirs.end(), mPath_.begin(), mPath_.end());
 
     // Decompose dotted name. "pkg.sub.foo" → +pkg/+sub/foo.m. The leaf
@@ -2618,15 +2654,17 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         }
         if (!rp.fs || !rp.fs->exists(rp.path))
             continue;
+        const std::string rpPath(rp.path.as_ref());
+        const std::string rpFsName(rp.fs->name().as_ref());
         {
             const std::string wantFile = leafName + ".m";
-            auto slashPos = rp.path.find_last_of("/\\");
-            const std::string parentDir = (slashPos == std::string::npos) ? "." : rp.path.substr(0, slashPos);
+            auto slashPos = rpPath.find_last_of("/\\");
+            const std::string parentDir = (slashPos == std::string::npos) ? "." : rpPath.substr(0, slashPos);
             auto entries = rp.fs->listDir(parentDir);
             if (!entries.empty()) {
                 bool exactFound = false;
                 for (const auto &ent : entries) {
-                    if (ent.name == wantFile) {
+                    if (ent.name.as_ref() == wantFile) {
                         exactFound = true;
                         break;
                     }
@@ -2636,9 +2674,9 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
             }
         }
 
-        const std::string cachePath = (rp.fs->name() != "native")
-            ? (rp.fs->name() + ":" + rp.path)
-            : rp.path;
+        const std::string cachePath = (rpFsName != "native")
+            ? (rpFsName + ":" + rpPath)
+            : rpPath;
 
         // Cache hit? Validate via mtime; re-parse if stale.
         auto cit = mFileCache_.find(name);
@@ -2678,7 +2716,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         };
         std::string content;
         try {
-            content = rp.fs->readFile(rp.path);
+            content = std::string(rp.fs->readFile(rp.path).as_ref());
         } catch (const std::exception &e) {
             throw loadError(e);
         }
@@ -2728,11 +2766,11 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // lookups keep working transitively through function calls.
         std::string scriptDir;
         {
-            keel::usize slash = rp.path.find_last_of("/\\");
+            keel::usize slash = rpPath.find_last_of("/\\");
             if (slash == 0)
-                scriptDir.assign(1, rp.path[0]);
+                scriptDir.assign(1, rpPath[0]);
             else if (slash != std::string::npos)
-                scriptDir = rp.path.substr(0, slash);
+                scriptDir = rpPath.substr(0, slash);
         }
 
         if (!funcDef) {
@@ -2752,9 +2790,9 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // — the source node carries only the leaf. The ctor external and
                 // mFileCache_ key below already use the qualified `name`, so all
                 // three now agree (clear/rehash evict cleanly).
-                registerClassDefFrom(classDef, name, rp.fs->name(), scriptDir, rp.path);
-                const std::string cn = name;
-                registerFunction(name, [cn](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                registerClassDefFrom(classDef, name, rpFsName, scriptDir, rpPath);
+                std::string cn = name;
+                registerFunction(name, [cn = std::move(cn)](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                                             CallContext &ctx) {
                     const BuiltinClass *c = ctx.engine->findClass(cn);
                     if (!c || !c->construct)
@@ -2776,12 +2814,16 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 return nullptr; // class + ctor-external resolve the call
             }
             if (!hasExternalFunction(name) && !findExternal(name, nullptr)) {
-                const std::string scriptName = leafName;
-                const std::string fsName = rp.fs->name();
-                const std::string sDir = scriptDir;
-                const std::string sPath = rp.path;
+                std::string scriptName = leafName;
+                std::string fsName = rpFsName;
+                std::string sDir = scriptDir;
+                std::string sPath = rpPath;
                 auto srcPtr = std::make_shared<const std::string>(std::move(content));
-                registerFunction(name, [scriptName, fsName, sDir, sPath, srcPtr](
+                registerFunction(name, [scriptName = std::move(scriptName),
+                                        fsName = std::move(fsName),
+                                        sDir = std::move(sDir),
+                                        sPath = std::move(sPath),
+                                        srcPtr = std::move(srcPtr)](
                                            keel::ArrayRef<Value> args, keel::usize nargout,
                                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
                     if (!args.empty() || nargout > 0)
@@ -2833,9 +2875,9 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         func.body = std::shared_ptr<const ASTNode>(cloneNode(funcDef->children[0].get()));
         func.closureEnv = nullptr;
         func.originKnown = true;
-        func.sourceFs = rp.fs->name();
+        func.sourceFs = rpFsName;
         func.sourceDir = scriptDir;
-        func.sourceFile = rp.path;
+        func.sourceFile = rpPath;
 
         // Register for VM dispatch (mirrors what execFunctionDef +
         // beginScript pre-compile pass do for in-script function defs).
@@ -2850,15 +2892,15 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // Provenance rides along so anonymous functions compiled
                 // inside the body capture THIS file (their origin frame
                 // is not active yet at resolve-time compilation).
-                compiler_->registerFunctionAs(name, funcDef, rp.fs->name(),
-                                              scriptDir, rp.path);
+                compiler_->registerFunctionAs(name, funcDef, rpFsName,
+                                              scriptDir, rpPath);
             } catch (const std::exception &) {
                 // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
         }
         userFuncs_[name] = std::move(func);
         if (compiler_)
-            compiler_->setChunkOrigin(name, rp.fs->name(), scriptDir, rp.path);
+            compiler_->setChunkOrigin(name, rpFsName, scriptDir, rpPath);
 
         // Cache stat metadata for mtime-based invalidation.
         MFileCacheEntry e;
@@ -2894,8 +2936,8 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     continue;
                 if (compiler_) {
                     try {
-                        compiler_->registerFunctionAs(ln, c.get(), rp.fs->name(),
-                                                      scriptDir, rp.path);
+                        compiler_->registerFunctionAs(ln, c.get(), rpFsName,
+                                                      scriptDir, rpPath);
                     }
                     catch (const std::exception &) { /* TW still dispatches via userFuncs_ */ }
                 }
@@ -2906,12 +2948,12 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 lf.body       = std::shared_ptr<const ASTNode>(cloneNode(c->children[0].get()));
                 lf.closureEnv = nullptr;
                 lf.originKnown = true;
-                lf.sourceFs   = rp.fs->name();
+                lf.sourceFs   = rpFsName;
                 lf.sourceDir  = scriptDir;
-                lf.sourceFile = rp.path;
+                lf.sourceFile = rpPath;
                 userFuncs_[ln] = std::move(lf);
                 if (compiler_)
-                    compiler_->setChunkOrigin(ln, rp.fs->name(), scriptDir, rp.path);
+                    compiler_->setChunkOrigin(ln, rpFsName, scriptDir, rpPath);
             }
         }
 
@@ -2946,21 +2988,28 @@ Value Engine::callFunctionHandle(const Value &handle,
     return results.empty() ? Value() : results[0];
 }
 
-std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
-                                                    keel::ArrayRef<Value> args,
-                                                    keel::usize nout,
-                                                    Environment *env)
+keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
+                                                   keel::ArrayRef<Value> args,
+                                                   keel::usize nout,
+                                                   Environment *env)
 {
     if (!handle.isFuncHandle())
         throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
     Environment *e = env ? env : workspaceEnv_.get();
+    auto toArray = [](std::vector<Value> &&vec) {
+        keel::Array<Value> arr;
+        arr.reserve(vec.size());
+        for (auto &v : vec)
+            arr.push_back(std::move(v));
+        return arr;
+    };
 
     // TreeWalker mode: dispatch strictly on TreeWalker (which unwraps
     // funcHandleCaptures, resolves externals/imports, and lazy-loads .m files).
     if (backend_ != Backend::VM) {
         if (!treeWalker_)
             throw std::runtime_error("callFunctionHandleMulti: TreeWalker backend is unavailable");
-        return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
+        return toArray(treeWalker_->callHandleMultiPublic(handle, args, e, nout));
     }
 
     // VM mode: dispatch strictly on VM (zero TreeWalker fallback).
@@ -2977,32 +3026,34 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    const std::string name = handle.funcHandleName();
+    const std::string name(handle.funcHandleName().as_ref());
 
     if (const ExternalFunc *fn = findExternal(name, e)) {
-        std::vector<Value> out(nout);
+        keel::Array<Value> out;
+        out.resize(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, keel::MutArrayRef<Value>(out), ctx);
+        (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
         return out;
     }
 
     if (compiler_) {
         if (const BytecodeChunk *fc = compiler_->findCompiled(name))
-            return vm_->callReentrant(*fc, args, nout);
+            return toArray(vm_->callReentrant(*fc, args, nout));
     }
 
     if (const UserFunction *uf = lookupUserFunction(name, e)) {
         const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
         if (!cc)
             throw std::runtime_error("Failed to compile function handle target '@" + name + "'");
-        return vm_->callReentrant(*cc, args, nout);
+        return toArray(vm_->callReentrant(*cc, args, nout));
     }
 
     // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
     if (const ExternalFunc *fn = findExternal(name, e)) {
-        std::vector<Value> out(nout);
+        keel::Array<Value> out;
+        out.resize(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, keel::MutArrayRef<Value>(out), ctx);
+        (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
         return out;
     }
 
@@ -3043,8 +3094,9 @@ Environment *Engine::callerEnv(int n)
     return workspaceEnv_.get();
 }
 
-void Engine::assignToCaller(int n, const std::string &name, Value val)
+void Engine::assignToCaller(keel::i32 n, keel::StringRef nameRef, Value val)
 {
+    const std::string name(nameRef);
     Environment *env = callerEnv(n);
     if (!env) env = workspaceEnv_.get();
     // Write-through to register if VM caller frame has the name in its
@@ -3085,12 +3137,13 @@ void Engine::clearPersistentForFunc(const std::string &funcName)
     }
 }
 
-std::string Engine::getEnvVar(const std::string &name) const
+std::string Engine::getEnvVar(keel::StringRef nameRef) const
 {
+    const std::string name(nameRef);
     auto it = envOverlay_.find(name);
     if (it != envOverlay_.end())
         return it->second;
-    return numkit::envGet(name.c_str());
+    return std::string(numkit::envGet(name.c_str()).as_ref());
 }
 
 std::string Engine::inputName(int k)
@@ -3349,8 +3402,9 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         node->suppressOutput = suppress;
     }
 }
-Value Engine::eval(const std::string &code, bool suppressTopLevelDisplay)
+Value Engine::eval(keel::StringRef codeRef, bool suppressTopLevelDisplay)
 {
+    const std::string code(codeRef);
     auto src = std::make_shared<const std::string>(code);
     refreshStaleMFiles();
     if (backend_ == Backend::VM && vm_)
@@ -3460,7 +3514,7 @@ Value Engine::evalStatement(const ASTNode *stmt,
 // ============================================================
 // evalSafe
 // ============================================================
-Engine::EvalResult Engine::evalSafe(const std::string &code)
+Engine::EvalResult Engine::evalSafe(keel::StringRef code)
 {
     EvalResult r;
     try {
@@ -3471,11 +3525,11 @@ Engine::EvalResult Engine::evalSafe(const std::string &code)
     } catch (const Error &e) {
         r.ok = false;
         r.errorMessage = e.what();
-        r.errorId = e.identifier();
+        r.errorId = std::string(e.identifier().as_ref());
         r.errorLine = e.line();
         r.errorCol = e.col();
-        r.errorFunc = e.funcName();
-        r.errorContext = e.context();
+        r.errorFunc = std::string(e.funcName().as_ref());
+        r.errorContext = std::string(e.context().as_ref());
     } catch (const std::exception &e) {
         r.ok = false;
         r.errorMessage = e.what();
@@ -3565,12 +3619,13 @@ void Engine::syncVMToScope(Environment *scope)
     }
 }
 
-Value Engine::eval(const std::string &code, Environment *scope,
+Value Engine::eval(keel::StringRef codeRef, Environment *scope,
                    bool suppressTopLevelDisplay)
 {
     if (!scope || scope == workspaceEnv_.get())
-        return eval(code, suppressTopLevelDisplay);
+        return eval(codeRef, suppressTopLevelDisplay);
 
+    const std::string code(codeRef);
     // Scoped re-entrant eval: inner script's imports go to scope, and
     // its top-level variable assignments are pushed back into scope on
     // exit (with VM register write-through where applicable). Used by
@@ -3672,29 +3727,29 @@ std::vector<std::string> Engine::workspaceVarNames() const
 // in-engine callers.
 // ============================================================
 
-void Engine::registerVirtualFS(std::unique_ptr<VirtualFS> fs)
+void Engine::registerVirtualFS(keel::UniquePtr<VirtualFS> fs)
 {
     fsCtx_.registerVirtualFS(std::move(fs));
     bumpCallCacheEpoch();
 }
 
-VirtualFS *Engine::findVirtualFS(const std::string &name) const
+VirtualFS *Engine::findVirtualFS(keel::StringRef name) const
 {
     return fsCtx_.findVirtualFS(name);
 }
 
-void Engine::pushScriptOrigin(const std::string &fsName)
+void Engine::pushScriptOrigin(keel::StringRef fsName)
 {
     fsCtx_.pushScriptOrigin(fsName);
 }
 
-void Engine::pushScriptOrigin(const std::string &fsName, const std::string &scriptDir)
+void Engine::pushScriptOrigin(keel::StringRef fsName, keel::StringRef scriptDir)
 {
     fsCtx_.pushScriptOrigin(fsName, scriptDir);
 }
 
-void Engine::pushScriptOrigin(const std::string &fsName, const std::string &scriptDir,
-                              const std::string &scriptFile)
+void Engine::pushScriptOrigin(keel::StringRef fsName, keel::StringRef scriptDir,
+                              keel::StringRef scriptFile)
 {
     fsCtx_.pushScriptOrigin(fsName, scriptDir, scriptFile);
 }
@@ -3704,33 +3759,34 @@ void Engine::popScriptOrigin()
     fsCtx_.popScriptOrigin();
 }
 
-const std::string *Engine::currentScriptOrigin() const
+const keel::String *Engine::currentScriptOrigin() const
 {
     return fsCtx_.currentScriptOrigin();
 }
 
-const std::string *Engine::currentScriptDir() const
+const keel::String *Engine::currentScriptDir() const
 {
     return fsCtx_.currentScriptDir();
 }
 
-const std::string *Engine::currentScriptFile() const
+const keel::String *Engine::currentScriptFile() const
 {
     return fsCtx_.currentScriptFile();
 }
 
-Engine::ResolvedPath Engine::resolvePath(const std::string &userPath) const
+Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPathRef) const
 {
     // FsContext throws std::runtime_error for unknown/unavailable
     // filesystems; rethrow as numkit::Error so the MATLAB-visible error type
     // (and message) is exactly what in-engine callers saw before.
+    const std::string userPath(userPathRef);
     try {
-        ResolvedPath rp = fsCtx_.resolvePath(userPath);
+        ResolvedPath rp = fsCtx_.resolvePath(userPathRef);
         if ((!rp.fs || !rp.fs->exists(rp.path)) &&
             !userPath.empty() &&
             userPath.find_first_of("/\\:") == std::string::npos) {
-            if (rp.fs && rp.fs->exists(userPath)) {
-                rp.path = userPath;
+            if (rp.fs && rp.fs->exists(userPathRef)) {
+                rp.path = keel::String::from(userPathRef);
                 return rp;
             }
             for (const auto &dir : mPath_) {
@@ -3743,7 +3799,7 @@ Engine::ResolvedPath Engine::resolvePath(const std::string &userPath) const
                 if (cand.fs && cand.fs->exists(cand.path))
                     return cand;
                 if (rp.fs && rp.fs->exists(candPath)) {
-                    rp.path = candPath;
+                    rp.path = keel::String::from(candPath);
                     return rp;
                 }
             }

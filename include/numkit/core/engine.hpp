@@ -67,9 +67,9 @@ public:
     //          1-arg form.
     // Both forms throw std::runtime_error on duplicate full names.
     // See namespace_design.md for the rules.
-    void registerFunction(const std::string &name, ExternalFunc func) override;
-    void registerFunction(const std::string &ns,
-                          const std::string &name,
+    void registerFunction(keel::StringRef name, ExternalFunc func) override;
+    void registerFunction(keel::StringRef ns,
+                          keel::StringRef name,
                           ExternalFunc func) override;
 
     // ── Class registry (object model — see object_model.md) ──────
@@ -78,7 +78,7 @@ public:
     void registerClass(BuiltinClass cls) override;
     // Look up a registered class by name (e.g. "containers.Map"), or
     // nullptr. Used by constructor / method / property dispatch.
-    const BuiltinClass *findClass(const std::string &name) const override;
+    const BuiltinClass *findClass(keel::StringRef name) const override;
 
     // ── State-machine callbacks (callback_builtin.hpp, vm_callbacks_plan.md) ──
     // Register a higher-order builtin (cellfun/arrayfun/…) that can drive its
@@ -102,7 +102,7 @@ public:
     // after `clear all/classes/functions` — MATLAB transparently reloads
     // cleared functions from disk; these have no disk backing, so the engine
     // re-registers them instead (bugs/opened/runtime/clear-all-wipes-builtin-msources.md).
-    void registerBuiltinMSource(const std::string &src) override;
+    void registerBuiltinMSource(keel::StringRef src) override;
     // Same contract for startup `classdef` sources (e.g. the inline class):
     // parses and registers each top-level CLASSDEF_DEF via registerClassDef —
     // the identical call the compiler makes for a classdef statement — and
@@ -274,7 +274,7 @@ public:
     // count. Callers first verify dst is a valid target (empty/unset, or a
     // same-class object array). Centralises the store boilerplate shared by
     // TreeWalker and every VM INDEX_SET* opcode.
-    void objectStoreSlice(Value &dst, const std::vector<std::vector<keel::usize>> &perDim,
+    void objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                           const Value &val, Environment *env);
     // Read counterpart: if `self`'s class defines a custom subsref, dispatch
     // it with `args` and return true (result in `out`); otherwise return
@@ -319,7 +319,7 @@ public:
     //      - explicit `import a.b.c`     → if c == name, try "a.b.c"
     //      - alias    `import a.b as x`  → only resolves x.<name> (handled
     //                                       in dotted-name lookup, not here)
-    const ExternalFunc *findExternal(const std::string &name,
+    const ExternalFunc *findExternal(keel::StringRef name,
                                       const Environment *env = nullptr) const override;
 
     // Returns the full qualified name for a bare leaf name (e.g. "fft" →
@@ -343,7 +343,7 @@ public:
     // return value — matches MATLAB:
     //   r = eval('a + b');   % no inner ans display
     //   eval('a + b');       % inner ans display proceeds normally
-    Value eval(const std::string &code, bool suppressTopLevelDisplay = false);
+    Value eval(keel::StringRef code, bool suppressTopLevelDisplay = false);
 
     // Reactive seam (Play B2): execute ONE pre-parsed top-level
     // statement through the same per-statement path (rewrite +
@@ -361,7 +361,7 @@ public:
     // `eval`/`run` builtins called from inside a function, and by
     // `evalin`. scope=nullptr or scope==&workspaceEnv() falls back to
     // the no-scope overload (REPL-style persistence).
-    Value eval(const std::string &code, Environment *scope,
+    Value eval(keel::StringRef code, Environment *scope,
                bool suppressTopLevelDisplay = false);
 
     // Safe execution — never throws, returns result + error diagnostics
@@ -376,7 +376,7 @@ public:
         std::string errorFunc;
         std::string errorContext;  // e.g. "in call to 'sin'"
     };
-    EvalResult evalSafe(const std::string &code);
+    EvalResult evalSafe(keel::StringRef code);
 
     // Backend selection
     // Run a user function body on the TreeWalker from inside VM
@@ -416,7 +416,7 @@ public:
     void setMaxRecursionDepth(int depth);
 
     std::vector<std::string> workspaceVarNames() const;
-    void outputText(const std::string &s);
+    void outputText(keel::StringRef s);
 
     FigureManager &figureManager() override { return *figureManager_; }
     const FigureManager &figureManager() const { return *figureManager_; }
@@ -451,7 +451,7 @@ public:
     Value callFunctionHandle(const Value &handle,
                              keel::ArrayRef<Value> args,
                              Environment *env = nullptr) override;
-    std::vector<Value> callFunctionHandleMulti(const Value &handle,
+    keel::Array<Value> callFunctionHandleMulti(const Value &handle,
                                                keel::ArrayRef<Value> args,
                                                keel::usize nout,
                                                Environment *env = nullptr) override;
@@ -500,8 +500,8 @@ public:
     // Directories searched (in order) by lookupUserFunction's m-file
     // resolver pass. Paths are VFS-resolvable strings (e.g.
     // "native:/scripts", "local:/work", or just a relative path).
-    void addPath(const std::string &dir);
-    void rmPath(const std::string &dir);
+    void addPath(keel::StringRef dir);
+    void rmPath(keel::StringRef dir);
     const std::vector<std::string> &path() const { return mPath_; }
 
     // Drop all cached m-file entries — next lookup re-scans the disk.
@@ -613,7 +613,7 @@ public:
     // such that the caller can subsequently read it back. In VM mode,
     // also performs write-through to the caller's frame register if the
     // name is statically allocated (chunk.varMap hit). Used by assignin.
-    void assignToCaller(int n, const std::string &name, Value val) override;
+    void assignToCaller(keel::i32 n, keel::StringRef name, Value val) override;
     void assignInBase(const std::string &name, Value val);
     void syncFrameToEnv(Environment *env);
     void syncEnvRemovalsToFrame(Environment *env);
@@ -647,8 +647,8 @@ public:
     const std::string &lastWarnMsg() const noexcept { return lastWarnMsg_; }
     const std::string &lastWarnId() const noexcept { return lastWarnId_; }
 
-    void setEnvVar(const std::string &name, const std::string &val) { envOverlay_[name] = val; }
-    std::string getEnvVar(const std::string &name) const;
+    void setEnvVar(keel::StringRef name, keel::StringRef val) { envOverlay_[std::string(name)] = std::string(val); }
+    std::string getEnvVar(keel::StringRef name) const;
 
     // Property accessor recursion guard (`get.Prop` / `set.Prop`)
     bool isPropAccessorActive(const std::string &accessorName) const;
@@ -683,8 +683,8 @@ public:
     // Relative paths are joined with `cwd_` when set; otherwise with
     // NUMKIT_CWD as a host-runtime fallback. cwd_ takes precedence —
     // once `cd` / setCwd writes to it, the env var is ignored.
-    void registerVirtualFS(std::unique_ptr<VirtualFS> fs);
-    VirtualFS *findVirtualFS(const std::string &name) const;
+    void registerVirtualFS(keel::UniquePtr<VirtualFS> fs);
+    VirtualFS *findVirtualFS(keel::StringRef name) const;
 
     // Each frame carries (fsName, scriptDir):
     //   * fsName     — VFS that the script came from. Used by resolvePath
@@ -695,14 +695,14 @@ public:
     //                  sibling .m files resolve without addpath.
     // 1-arg overload pushes an empty scriptDir — kept for callers that
     // only know the FS (IDE running an unsaved buffer, tests).
-    void pushScriptOrigin(const std::string &fsName);
-    void pushScriptOrigin(const std::string &fsName, const std::string &scriptDir);
-    void pushScriptOrigin(const std::string &fsName, const std::string &scriptDir,
-                          const std::string &scriptFile);
+    void pushScriptOrigin(keel::StringRef fsName);
+    void pushScriptOrigin(keel::StringRef fsName, keel::StringRef scriptDir);
+    void pushScriptOrigin(keel::StringRef fsName, keel::StringRef scriptDir,
+                          keel::StringRef scriptFile);
     void popScriptOrigin();
-    const std::string *currentScriptOrigin() const;   // fsName, may be null
-    const std::string *currentScriptDir() const;      // dir, may be null/empty
-    const std::string *currentScriptFile() const;     // full path, may be null/empty
+    const keel::String *currentScriptOrigin() const;   // fsName, may be null
+    const keel::String *currentScriptDir() const;      // dir, may be null/empty
+    const keel::String *currentScriptFile() const;     // full path, may be null/empty
     // Unwind-safe origin bookkeeping (see FsContext): the VM truncates to
     // a depth captured at frame entry on every frame-removal path.
     keel::usize scriptOriginDepth() const { return fsCtx_.scriptOriginDepth(); }
@@ -714,12 +714,12 @@ public:
     void captureScriptOrigin(UserFunction &uf) const
     {
         uf.originKnown = true;
-        if (const std::string *f = fsCtx_.currentScriptFile())
-            uf.sourceFile = *f;
-        if (const std::string *d = fsCtx_.currentScriptDir())
-            uf.sourceDir = *d;
-        if (const std::string *o = fsCtx_.currentScriptOrigin())
-            uf.sourceFs = *o;
+        if (const keel::String *f = fsCtx_.currentScriptFile())
+            uf.sourceFile.assign(f->data(), f->size());
+        if (const keel::String *d = fsCtx_.currentScriptDir())
+            uf.sourceDir.assign(d->data(), d->size());
+        if (const keel::String *o = fsCtx_.currentScriptOrigin())
+            uf.sourceFs.assign(o->data(), o->size());
     }
 
     // Engine-owned current working directory.
@@ -729,13 +729,13 @@ public:
     // The two-tier model lets hosts seed cwd via `setenv NUMKIT_CWD`
     // without having to call setCwd, while still letting in-engine
     // `cd` calls take precedence once they happen.
-    const std::string &cwd() const { return fsCtx_.cwd(); }
-    void setCwd(const std::string &p) { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.setCwd(p); }
+    const keel::String &cwd() const { return fsCtx_.cwd(); }
+    void setCwd(keel::StringRef p) { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.setCwd(p); }
 
     // The path-resolution result type lives on FsContext (fs/, L0); aliased
     // here so existing callers keep writing Engine::ResolvedPath.
     using ResolvedPath = FsContext::ResolvedPath;
-    ResolvedPath resolvePath(const std::string &userPath) const override;
+    ResolvedPath resolvePath(keel::StringRef userPath) const override;
 
     // Direct handle to the filesystem session (VFS registry + script-origin
     // stack + cwd + resolver). Lets core-free toolbox code (io codecs, …)
@@ -758,13 +758,13 @@ public:
     // callers keep writing `Engine::OpenFile`. fids 0/1/2 are still routed to
     // outputText() by the fprintf builtin, not by this table.
     using OpenFile = FsContext::OpenFile;
-    int openFile(const std::string &userPath, const std::string &mode)
+    keel::i32 openFile(keel::StringRef userPath, keel::StringRef mode)
     { return fsCtx_.openFile(userPath, mode); }
-    bool closeFile(int fid) { mFileMissCache_.clear(); bumpCallCacheEpoch(); return fsCtx_.closeFile(fid); }
+    bool closeFile(keel::i32 fid) { mFileMissCache_.clear(); bumpCallCacheEpoch(); return fsCtx_.closeFile(fid); }
     void closeAllFiles() { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.closeAllFiles(); }
-    OpenFile *findFile(int fid) { return fsCtx_.findFile(fid); }
-    std::vector<int> openFileIds() const { return fsCtx_.openFileIds(); }
-    const std::string &lastFopenError() const { return fsCtx_.lastFopenError(); }
+    OpenFile *findFile(keel::i32 fid) { return fsCtx_.findFile(fid); }
+    keel::Array<keel::i32> openFileIds() const { return fsCtx_.openFileIds(); }
+    const keel::String &lastFopenError() const { return fsCtx_.lastFopenError(); }
 
 private:
     keel::Allocator *mr_;  // not owned; caller-supplied or get_default_resource()

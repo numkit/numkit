@@ -40,7 +40,7 @@ std::string help(const std::string &query)
 
 Value help(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
-    std::string query = args.empty() ? "" : args[0].toString();
+    std::string query = args.empty() ? std::string() : std::string(args[0].toString().as_ref());
     return Value::fromString(help(query), mr);
 }
 
@@ -57,7 +57,7 @@ std::vector<std::string> what(const std::string &category)
 Value what(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     const auto &catalog = HelpCatalog::instance();
-    std::string topic = args.empty() ? "elmat" : args[0].toString();
+    std::string topic = args.empty() ? std::string("elmat") : std::string(args[0].toString().as_ref());
     const HelpCategory *cat = catalog.findCategory(topic);
     std::vector<std::string> funcs = what(topic);
 
@@ -66,10 +66,10 @@ Value what(keel::ArrayRef<Value> args, keel::Allocator *mr)
         cellM.cellAt(i) = Value::fromString(funcs[i], mr);
     }
     Value st = Value::structure(mr);
-    st.structFields()["path"] = Value::fromString(cat ? cat->name : topic, mr);
-    st.structFields()["m"] = std::move(cellM);
-    st.structFields()["classes"] = Value::cell(0, 1, mr);
-    st.structFields()["packages"] = Value::cell(0, 1, mr);
+    st.structFields().put(keel::String::from("path"), Value::fromString(cat ? cat->name : topic, mr));
+    st.structFields().put(keel::String::from("m"), std::move(cellM));
+    st.structFields().put(keel::String::from("classes"), Value::cell(0, 1, mr));
+    st.structFields().put(keel::String::from("packages"), Value::cell(0, 1, mr));
     return st;
 }
 
@@ -84,7 +84,7 @@ std::vector<std::string> builtins(const std::string &category)
 
 Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
-    std::string topic = args.empty() ? "" : args[0].toString();
+    std::string topic = args.empty() ? std::string() : std::string(args[0].toString().as_ref());
     std::vector<std::string> funcs = builtins(topic);
     Value cellOut = Value::cell(funcs.size(), 1, mr);
     for (keel::usize i = 0; i < funcs.size(); ++i) {
@@ -127,8 +127,8 @@ static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     if (args.empty()) {
         text = catalog.formatAllCategories();
     } else {
-        std::string query = args[0].isChar() ? args[0].toString() : "";
-        if (query.empty() && args[0].isString()) query = args[0].toString();
+        std::string query = args[0].isChar() ? std::string(args[0].toString().as_ref()) : std::string();
+        if (query.empty() && args[0].isString()) query = std::string(args[0].toString().as_ref());
 
         const HelpCategory *cat = catalog.findCategory(query);
         if (cat) {
@@ -159,7 +159,7 @@ static void what_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     if (nargout > 0) {
         outs[0] = what(args, ctx.engine->allocator());
     } else {
-        std::string topic = args.empty() ? "elmat" : (args[0].isChar() ? args[0].toString() : "");
+        std::string topic = args.empty() ? std::string("elmat") : (args[0].isChar() ? std::string(args[0].toString().as_ref()) : std::string());
         const auto &catalog = HelpCatalog::instance();
         const HelpCategory *cat = catalog.findCategory(topic);
         std::vector<std::string> funcs = what(topic);

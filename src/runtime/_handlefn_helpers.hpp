@@ -59,9 +59,9 @@ inline bool builtinReturnsString(BuiltinFn f)
     return f == BuiltinFn::ClassName;
 }
 
-inline std::string lowerName(const std::string &s)
+inline std::string lowerName(keel::StringRef s)
 {
-    std::string r = s;
+    std::string r(s);
     std::transform(r.begin(), r.end(), r.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return r;

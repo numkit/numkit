@@ -33,7 +33,7 @@ namespace numkit {
 
 struct ResolvedSubscript {
     keel::usize single = 0;
-    std::vector<keel::usize> vec;
+    keel::Array<keel::usize> vec;
     keel::usize count = 0;
     bool isColon = false;
     bool isSingle = false;
@@ -294,10 +294,11 @@ static inline keel::usize checkedIndex(double idx, keel::usize numel)
 // Resolve one assignment subscript to 0-based indices for an object-array
 // slice store: ':' expands to the whole current dimension; everything else
 // (scalar / range / vector / logical) is grow-friendly (unchecked).
-static std::vector<keel::usize> resolveStoreSubscript(const Value &s, keel::usize curDim)
+static keel::Array<keel::usize> resolveStoreSubscript(const Value &s, keel::usize curDim)
 {
     if (s.isChar() && s.numel() == 1 && s.charData()[0] == ':') {
-        std::vector<keel::usize> out(curDim);
+        keel::Array<keel::usize> out;
+        out.resize(curDim);
         for (keel::usize i = 0; i < curDim; ++i)
             out[i] = i;
         return out;
@@ -891,17 +892,19 @@ enter_frame:
                 int ndims = I.d;
                 if (arr.isObject()) {
                     const BuiltinClass *cls = engine_.findClass(arr.objectClassName());
-                    if (cls && cls->methods.count("__end")) {
-                        Value self = arr;
-                        Value eargs[2] = {
-                            Value::scalar(static_cast<double>(I.c), engine_.mr_),
-                            Value::scalar(static_cast<double>(ndims), engine_.mr_)};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at("__end")(self, keel::ArrayRef<Value>(eargs, 2), 1,
-                                                 keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *endFn = cls->methods.get("__end")) {
+                            Value self = arr;
+                            Value eargs[2] = {
+                                Value::scalar(static_cast<double>(I.c), engine_.mr_),
+                                Value::scalar(static_cast<double>(ndims), engine_.mr_)};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*endFn)(self, keel::ArrayRef<Value>(eargs, 2), 1,
+                                     keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 keel::usize sz;
@@ -1297,14 +1300,16 @@ enter_frame:
                         if (R[I.b].isObject() || R[I.c].isObject()) {
                             const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
                             const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-                            if (cls && cls->ops.count("colon")) {
-                                Value self = dom;
-                                Value ops[2] = {R[I.b], R[I.c]};
-                                Value out[1];
-                                CallContext ctx{&engine_, currentCallEnv()};
-                                cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 2), 1,
-                                                     keel::MutArrayRef<Value>(out, 1), ctx);
-                                rangeVal = std::move(out[0]);
+                            if (cls) {
+                                if (const auto *colonOp = cls->ops.get("colon")) {
+                                    Value self = dom;
+                                    Value ops[2] = {R[I.b], R[I.c]};
+                                    Value out[1];
+                                    CallContext ctx{&engine_, currentCallEnv()};
+                                    (*colonOp)(self, keel::ArrayRef<Value>(ops, 2), 1,
+                                               keel::MutArrayRef<Value>(out, 1), ctx);
+                                    rangeVal = std::move(out[0]);
+                                }
                             }
                         }
                         if (rangeVal.isUnset()) {
@@ -1328,14 +1333,16 @@ enter_frame:
                             const Value &dom = R[I.b].isObject() ? R[I.b]
                                              : (R[I.c].isObject() ? R[I.c] : R[I.e]);
                             const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-                            if (cls && cls->ops.count("colon")) {
-                                Value self = dom;
-                                Value ops[3] = {R[I.b], R[I.e], R[I.c]};
-                                Value out[1];
-                                CallContext ctx{&engine_, currentCallEnv()};
-                                cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 3), 1,
-                                                     keel::MutArrayRef<Value>(out, 1), ctx);
-                                rangeVal = std::move(out[0]);
+                            if (cls) {
+                                if (const auto *colonOp = cls->ops.get("colon")) {
+                                    Value self = dom;
+                                    Value ops[3] = {R[I.b], R[I.e], R[I.c]};
+                                    Value out[1];
+                                    CallContext ctx{&engine_, currentCallEnv()};
+                                    (*colonOp)(self, keel::ArrayRef<Value>(ops, 3), 1,
+                                               keel::MutArrayRef<Value>(out, 1), ctx);
+                                    rangeVal = std::move(out[0]);
+                                }
                             }
                         }
                         if (rangeVal.isUnset()) {
@@ -1425,15 +1432,17 @@ enter_frame:
                 if (R[I.b].isObject() || R[I.c].isObject()) {
                     const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
                     const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-                    if (cls && cls->ops.count("colon")) {
-                        Value self = dom;
-                        Value ops[2] = {R[I.b], R[I.c]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 2), 1,
-                                             keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *colonOp = cls->ops.get("colon")) {
+                            Value self = dom;
+                            Value ops[2] = {R[I.b], R[I.c]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*colonOp)(self, keel::ArrayRef<Value>(ops, 2), 1,
+                                       keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 ValueType ta = R[I.b].type(), tb = R[I.c].type();
@@ -1460,15 +1469,17 @@ enter_frame:
                     const Value &dom = R[I.b].isObject() ? R[I.b]
                                      : (R[I.e].isObject() ? R[I.e] : R[I.c]);
                     const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-                    if (cls && cls->ops.count("colon")) {
-                        Value self = dom;
-                        Value ops[3] = {R[I.b], R[I.c], R[I.e]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 3), 1,
-                                             keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *colonOp = cls->ops.get("colon")) {
+                            Value self = dom;
+                            Value ops[3] = {R[I.b], R[I.c], R[I.e]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*colonOp)(self, keel::ArrayRef<Value>(ops, 3), 1,
+                                       keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 ValueType ta = R[I.b].type(), tb = R[I.c].type(), tc = R[I.e].type();
@@ -1505,14 +1516,16 @@ enter_frame:
                 for (keel::u16 k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
                         const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
-                        if (cls && cls->ops.count("horzcat")) {
-                            Value self = R[I.b];
-                            Value out[1];
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            cls->ops.at("horzcat")(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
-                                                   keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
-                            handled = true;
+                        if (cls) {
+                            if (const auto *catOp = cls->ops.get("horzcat")) {
+                                Value self = R[I.b];
+                                Value out[1];
+                                CallContext ctx{&engine_, currentCallEnv()};
+                                (*catOp)(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
+                                         keel::MutArrayRef<Value>(out, 1), ctx);
+                                R[I.a] = std::move(out[0]);
+                                handled = true;
+                            }
                         }
                         break;
                     }
@@ -1535,14 +1548,16 @@ enter_frame:
                 if (dst.isObject() || val.isObject()) {
                     const Value &obj = dst.isObject() ? dst : val;
                     const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
-                    if (cls && cls->ops.count("horzcat")) {
-                        Value self = dst;
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->ops.at("horzcat")(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
-                                               keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *catOp = cls->ops.get("horzcat")) {
+                            Value self = dst;
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*catOp)(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
+                                     keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 R[I.a] = Value::horzcat(elems, 2, engine_.mr_);
@@ -1557,14 +1572,16 @@ enter_frame:
                 for (keel::u16 k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
                         const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
-                        if (cls && cls->ops.count("vertcat")) {
-                            Value self = R[I.b];
-                            Value out[1];
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            cls->ops.at("vertcat")(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
-                                                   keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
-                            handled = true;
+                        if (cls) {
+                            if (const auto *catOp = cls->ops.get("vertcat")) {
+                                Value self = R[I.b];
+                                Value out[1];
+                                CallContext ctx{&engine_, currentCallEnv()};
+                                (*catOp)(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
+                                         keel::MutArrayRef<Value>(out, 1), ctx);
+                                R[I.a] = std::move(out[0]);
+                                handled = true;
+                            }
                         }
                         break;
                     }
@@ -1591,14 +1608,16 @@ enter_frame:
                 if (dst.isObject() || val.isObject()) {
                     const Value &obj = dst.isObject() ? dst : val;
                     const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
-                    if (cls && cls->ops.count("vertcat")) {
-                        Value self = dst;
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->ops.at("vertcat")(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
-                                               keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *catOp = cls->ops.get("vertcat")) {
+                            Value self = dst;
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*catOp)(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
+                                     keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 R[I.a] = Value::vertcat(elems, 2, engine_.mr_);
@@ -1621,11 +1640,11 @@ enter_frame:
                     elems.reserve(n + 1);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = src.structArrayElem(i);
-                        auto it = m.find(fname);
-                        if (it == m.end())
+                        const Value *vp = m.get(fname);
+                        if (!vp)
                             throw std::runtime_error(
                                 "Reference to non-existent field '" + fname + "'");
-                        elems.push_back(it->second);
+                        elems.push_back(*vp);
                     }
                 } else if (src.isObject()) {
                     // OBJECT array CSL: [arr.prop] expands prop over each
@@ -1635,12 +1654,13 @@ enter_frame:
                     elems.reserve(n + 1);
                     CallContext ctx{&engine_, currentCallEnv()};
                     for (keel::usize i = 0; i < n; ++i) {
-                        Value elem = src.objectSubArray({i}, engine_.mr_);
+                        keel::usize idx = i;
+                        Value elem = src.objectSubArray(keel::ArrayRef<keel::usize>(&idx, 1), engine_.mr_);
                         Value out;
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx))
                             throw std::runtime_error("No appropriate property '" + fname
                                                      + "' for class '"
-                                                     + src.objectClassName() + "'");
+                                                     + std::string(src.objectClassName().as_ref()) + "'");
                         elems.push_back(std::move(out));
                     }
                 } else {
@@ -1813,7 +1833,7 @@ enter_frame:
                                           && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
                 if (R[I.c].isObject() || canPromote1D) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](const std::string &c) {
+                    auto isGfxCls = [](std::string_view c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
                     };
                     if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassName())) {
@@ -1827,15 +1847,17 @@ enter_frame:
                              || (isGfxCls(dst.objectClassName()) && isGfxCls(R[I.c].objectClassName()))));
                     if (newable || sameArr) {
                         // Linear slice: scalar / range / vector / logical / `:`.
-                        std::vector<keel::usize> pos =
+                        keel::Array<keel::usize> pos =
                             resolveStoreSubscript(ix, dst.objectCount());
-                        engine_.objectStoreSlice(dst, {pos}, R[I.c], currentCallEnv());
+                        engine_.objectStoreSlice(
+                            dst, keel::ArrayRef<keel::Array<keel::usize>>(&pos, 1),
+                            R[I.c], currentCallEnv());
                         break;
                     }
                 }
                 if (R[I.a].isObject())
                     throw std::runtime_error("'()' assignment is not defined for class '"
-                                             + R[I.a].objectClassName() + "'");
+                                             + std::string(R[I.a].objectClassName().as_ref()) + "'");
                 if (ix.isDoubleScalar()) {
                     // Fast path: scalar index
                     keel::usize i = Value::checkedScalarIndex(ix.scalarVal());
@@ -1961,7 +1983,7 @@ enter_frame:
                                           && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
                 if (val.isObject() || canPromote2D) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](const std::string &c) {
+                    auto isGfxCls = [](std::string_view c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
                     };
                     if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassName())) {
@@ -1978,10 +2000,12 @@ enter_frame:
                                                 ? dst.dims().rows() : val.dims().rows();
                         const keel::usize cDim = (dst.isObject() && dst.objectCount() > 0)
                                                 ? dst.dims().cols() : val.numel();
-                        std::vector<std::vector<keel::usize>> perDim = {
+                        keel::Array<keel::usize> perDim[2] = {
                             resolveStoreSubscript(ri, rDim),
                             resolveStoreSubscript(ci, cDim)};
-                        engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
+                        engine_.objectStoreSlice(
+                            dst, keel::ArrayRef<keel::Array<keel::usize>>(perDim, 2),
+                            val, currentCallEnv());
                         break;
                     }
                 }
@@ -2083,7 +2107,7 @@ enter_frame:
                 } else {
                     // ND read (≥4): CELL handled by indexGetND directly now.
                     const int nd = static_cast<int>(ndims);
-                    std::vector<std::vector<keel::usize>> idxLists(nd);
+                    std::vector<keel::Array<keel::usize>> idxLists(nd);
                     std::vector<const keel::usize *> idxPtrs(nd);
                     std::vector<keel::usize> idxCounts(nd);
                     for (int i = 0; i < nd; ++i) {
@@ -2106,7 +2130,7 @@ enter_frame:
                     const Value &val = R[I.e];
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    auto isGfxCls = [](const std::string &c) {
+                    auto isGfxCls = [](std::string_view c) {
                         return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
                     };
                     const bool sameArr =
@@ -2114,7 +2138,8 @@ enter_frame:
                         && (dst.objectClassName() == val.objectClassName()
                             || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
                     if (newable || sameArr) {
-                        std::vector<std::vector<keel::usize>> perDim(ndims);
+                        keel::Array<keel::Array<keel::usize>> perDim;
+                        perDim.resize(ndims);
                         for (keel::u16 i = 0; i < ndims; ++i) {
                             keel::usize curDim =
                                 dst.isObject()
@@ -2214,7 +2239,7 @@ enter_frame:
                     if (grow)
                         R[I.a].resizeND(need.data(), newNd, engine_.mr_);
 
-                    std::vector<std::vector<keel::usize>> idxLists(nd);
+                    std::vector<keel::Array<keel::usize>> idxLists(nd);
                     std::vector<const keel::usize *> idxPtrs(nd);
                     std::vector<keel::usize> idxCounts(nd);
                     for (int i = 0; i < nd; ++i) {
@@ -2249,7 +2274,7 @@ enter_frame:
             case OpCode::INDEX_DELETE_ND: {
                 // a=arr, b=base, c=ndims
                 keel::u16 base = I.b, ndims = I.c;
-                std::vector<std::vector<keel::usize>> perDim(ndims);
+                std::vector<keel::Array<keel::usize>> perDim(ndims);
                 std::vector<const keel::usize *> perDimPtrs(ndims);
                 std::vector<keel::usize> perDimCount(ndims);
                 const auto &srcDims = R[I.a].dims();
@@ -2271,7 +2296,7 @@ enter_frame:
                 const std::string &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop via class property hook (object model).
                 if (R[I.b].isObject()) {
-                    const std::string &cn = R[I.b].objectClassName();
+                    std::string cn(R[I.b].objectClassName().as_ref());
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2298,18 +2323,17 @@ enter_frame:
                             }
                         }
                         // Bare obj.method (no parens) → no-arg method call.
-                        auto mit = cls->methods.find(fname);
-                        if (mit != cls->methods.end()) {
+                        if (const auto *mfn = cls->methods.get(fname)) {
                             Value self = R[I.b];
                             Value out[1];
-                            mit->second(self, keel::ArrayRef<Value>(nullptr, 0), 1,
-                                        keel::MutArrayRef<Value>(out, 1), ctx);
+                            (*mfn)(self, keel::ArrayRef<Value>(nullptr, 0), 1,
+                                   keel::MutArrayRef<Value>(out, 1), ctx);
                             R[I.a] = std::move(out[0]);
                             break;
                         }
                     }
                     throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
@@ -2320,10 +2344,10 @@ enter_frame:
                     Value csl = Value::csl(n, engine_.mr_);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
-                        auto it = m.find(fname);
-                        if (it == m.end())
+                        const Value *vp = m.get(fname);
+                        if (!vp)
                             throw std::runtime_error("Reference to non-existent field '" + fname + "'");
-                        csl.cslAt(i) = it->second;
+                        csl.cslAt(i) = *vp;
                     }
                     R[I.a] = std::move(csl);
                     break;
@@ -2359,7 +2383,7 @@ enter_frame:
                         }
                     }
                     throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
                 }
                 if (R[I.b].isEmpty())
                     R[I.b] = Value::structure();
@@ -2373,7 +2397,7 @@ enter_frame:
                 const std::string &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop = val via class property hook (object model).
                 if (R[I.a].isObject()) {
-                    const std::string &cn = R[I.a].objectClassName();
+                    std::string cn(R[I.a].objectClassName().as_ref());
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2406,7 +2430,7 @@ enter_frame:
                         }
                     }
                     throw std::runtime_error("Cannot set property '" + fname
-                                             + "' on class '" + R[I.a].objectClassName() + "'");
+                                             + "' on class '" + std::string(R[I.a].objectClassName().as_ref()) + "'");
                 }
                 if (R[I.a].isEmpty()) {
                     R[I.a] = Value::structure();
@@ -2491,7 +2515,7 @@ enter_frame:
             }
             case OpCode::FIELD_GET_DYN: {
                 // a=dst, b=obj, c=nameReg — s.(R[nameReg])
-                std::string fname = R[I.c].toString();
+                std::string fname(R[I.c].toString().as_ref());
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
                     if (cls && cls->propGet) {
@@ -2503,7 +2527,7 @@ enter_frame:
                         }
                     }
                     throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
@@ -2514,10 +2538,10 @@ enter_frame:
                     Value csl = Value::csl(n, engine_.mr_);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
-                        auto it = m.find(fname);
-                        if (it == m.end())
+                        const Value *vp = m.get(fname);
+                        if (!vp)
                             throw std::runtime_error("Reference to non-existent field '" + fname + "'");
-                        csl.cslAt(i) = it->second;
+                        csl.cslAt(i) = *vp;
                     }
                     R[I.a] = std::move(csl);
                     break;
@@ -2529,7 +2553,7 @@ enter_frame:
             }
             case OpCode::FIELD_GET_OR_CREATE_DYN: {
                 // a=dst, b=obj (in/out), c=nameReg — lvalue dynamic field
-                std::string fname = R[I.c].toString();
+                std::string fname(R[I.c].toString().as_ref());
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
                     if (cls && cls->propGet) {
@@ -2541,7 +2565,7 @@ enter_frame:
                         }
                     }
                     throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + R[I.b].objectClassName() + "'");
+                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
                 }
                 if (R[I.b].isEmpty())
                     R[I.b] = Value::structure();
@@ -2552,7 +2576,7 @@ enter_frame:
             }
             case OpCode::FIELD_SET_DYN: {
                 // a=obj, b=nameReg, c=val — s.(R[nameReg]) = R[val]
-                std::string fname = R[I.b].toString();
+                std::string fname(R[I.b].toString().as_ref());
                 if (R[I.a].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
                     if (cls && cls->propSet) {
@@ -2561,7 +2585,7 @@ enter_frame:
                             break;
                     }
                     throw std::runtime_error("Cannot set property '" + fname
-                                             + "' on class '" + R[I.a].objectClassName() + "'");
+                                             + "' on class '" + std::string(R[I.a].objectClassName().as_ref()) + "'");
                 }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::structure();
@@ -2584,7 +2608,7 @@ enter_frame:
                 Value &obj = R[I.b];
                 if (obj.isStruct() && !obj.isStructArray() && obj.heapRefCount() == 1
                     && !R[I.a].isObject()) {
-                    std::string fname = (I.c == 0) ? chunk.strings[I.d] : R[I.e].toString();
+                    std::string fname = (I.c == 0) ? chunk.strings[I.d] : std::string(R[I.e].toString().as_ref());
                     if (obj.hasField(fname)) {
                         obj.field(fname) = Value();
                         lvalDetaches_.push_back({frame.regBase + I.b, frame.regBase + I.a,
@@ -2710,15 +2734,17 @@ enter_frame:
             case OpCode::CELL_GET: {
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
-                    if (cls && cls->methods.count("__brace_get")) {
-                        Value self = R[I.b];
-                        Value args[1] = {R[I.c]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at("__brace_get")(self, keel::ArrayRef<Value>(args, 1), 1,
-                                                       keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *bgFn = cls->methods.get("__brace_get")) {
+                            Value self = R[I.b];
+                            Value args[1] = {R[I.c]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*bgFn)(self, keel::ArrayRef<Value>(args, 1), 1,
+                                    keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 if (!R[I.b].isCell())
@@ -2753,15 +2779,17 @@ enter_frame:
             case OpCode::CELL_GET_2D: {
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
-                    if (cls && cls->methods.count("__brace_get")) {
-                        Value self = R[I.b];
-                        Value args[2] = {R[I.c], R[I.e]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at("__brace_get")(self, keel::ArrayRef<Value>(args, 2), 1,
-                                                       keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                    if (cls) {
+                        if (const auto *bgFn = cls->methods.get("__brace_get")) {
+                            Value self = R[I.b];
+                            Value args[2] = {R[I.c], R[I.e]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*bgFn)(self, keel::ArrayRef<Value>(args, 2), 1,
+                                    keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                 }
                 if (!R[I.b].isCell())
@@ -2818,20 +2846,22 @@ enter_frame:
             case OpCode::CELL_SET: {
                 if (R[I.a].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
-                    if (cls && cls->methods.count("__brace_set")) {
-                        Value args[2] = {R[I.b], R[I.c]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at("__brace_set")(R[I.a], keel::ArrayRef<Value>(args, 2), 0,
-                                                       keel::MutArrayRef<Value>(out, 1), ctx);
-                        break;
+                    if (cls) {
+                        if (const auto *bsFn = cls->methods.get("__brace_set")) {
+                            Value args[2] = {R[I.b], R[I.c]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*bsFn)(R[I.a], keel::ArrayRef<Value>(args, 2), 0,
+                                    keel::MutArrayRef<Value>(out, 1), ctx);
+                            break;
+                        }
                     }
                 }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
-                const bool isColonSub = R[I.b].isChar() && R[I.b].toString() == ":";
+                const bool isColonSub = R[I.b].isChar() && R[I.b].toString().as_ref() == ":";
                 if (R[I.b].isLogical() || isColonSub || !R[I.b].isScalar()) {
                     keel::usize maxLen = R[I.a].numel();
                     if (!R[I.b].isLogical() && !isColonSub) {
@@ -2868,13 +2898,15 @@ enter_frame:
             case OpCode::CELL_SET_2D: {
                 if (R[I.a].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
-                    if (cls && cls->methods.count("__brace_set")) {
-                        Value args[3] = {R[I.b], R[I.c], R[I.e]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at("__brace_set")(R[I.a], keel::ArrayRef<Value>(args, 3), 0,
-                                                       keel::MutArrayRef<Value>(out, 1), ctx);
-                        break;
+                    if (cls) {
+                        if (const auto *bsFn = cls->methods.get("__brace_set")) {
+                            Value args[3] = {R[I.b], R[I.c], R[I.e]};
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*bsFn)(R[I.a], keel::ArrayRef<Value>(args, 3), 0,
+                                    keel::MutArrayRef<Value>(out, 1), ctx);
+                            break;
+                        }
                     }
                 }
                 if (R[I.a].isEmpty())
@@ -3160,24 +3192,24 @@ enter_frame:
                         // (debuggable). Args are already contiguous at argBase
                         // with self == args[0]. The C++ hook (below) is kept
                         // only for native builtin-class methods.
-                        auto fit = cls->methodFns.find(mnm);
-                        if (fit != cls->methodFns.end()) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                        if (const auto *mfp = cls->methodFns.get(mnm)) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(R[argBase].objectClassName(), mnm);
+                                engine_.enforceMethodAccess(
+                                    std::string(R[argBase].objectClassName().as_ref()), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, &R[argBase], na, I.a, nargout_val, false, 0, 0,
-                                              fit->second->ownerClass, false);
+                                              (*mfp)->ownerClass, false);
                                 goto enter_frame;
                             }
                         }
-                        if (cls->methods.count(mnm)) {
+                        if (const auto *mfn = cls->methods.get(mnm)) {
                             Value self = R[argBase];
                             keel::ArrayRef<Value> rest((na > 1) ? &R[argBase + 1] : nullptr, na - 1);
                             Value out[1];
                             CallContext ctx{&engine_, currentCallEnv()};
-                            cls->methods.at(mnm)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
-                                                 ctx);
+                            (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
+                                   ctx);
                             R[I.a] = std::move(out[0]);
                             break;
                         }
@@ -3486,24 +3518,24 @@ enter_frame:
                     const std::string &mnm = chunk.strings[funcIdx];
                     const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
                     if (cls) {
-                        auto fit = cls->methodFns.find(mnm);
-                        if (fit != cls->methodFns.end()) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                        if (const auto *mfp = cls->methodFns.get(mnm)) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), mnm);
+                                engine_.enforceMethodAccess(
+                                    std::string(AB[0].objectClassName().as_ref()), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, AB, NF, I.a, nargout_val, false, 0, 0,
-                                              fit->second->ownerClass, false);
+                                              (*mfp)->ownerClass, false);
                                 goto enter_frame;
                             }
                         }
-                        if (cls->methods.count(mnm)) {
+                        if (const auto *mfn = cls->methods.get(mnm)) {
                             Value self = AB[0];
                             keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
                             Value out[1];
                             CallContext ctx{&engine_, currentCallEnv()};
-                            cls->methods.at(mnm)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
-                                                 ctx);
+                            (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
+                                   ctx);
                             R[I.a] = std::move(out[0]);
                             break;
                         }
@@ -3588,7 +3620,7 @@ enter_frame:
                     if (dynLocal && dynLocal->isFuncHandle()) {
                         const Value fh = *dynLocal;
                         const keel::usize ncaps = fh.funcHandleCaptureCount();
-                        const std::string &hName = fh.funcHandleName();
+                        std::string hName(fh.funcHandleName().as_ref());
                         std::vector<Value> cargs(NF + ncaps);
                         for (keel::usize i = 0; i < NF; ++i) cargs[i] = AB[i];
                         for (keel::usize i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
@@ -3670,34 +3702,34 @@ enter_frame:
                     const BuiltinClass *cls =
                         engine_.findClass(AB[0].objectClassName());
                     if (cls) {
-                        auto fit = cls->methodFns.find(funcName);
-                        if (fit != cls->methodFns.end()) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                        if (const auto *mfp = cls->methodFns.get(funcName)) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                engine_.enforceMethodAccess(
+                                    std::string(AB[0].objectClassName().as_ref()), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
-                                              fit->second->ownerClass, false);
+                                              (*mfp)->ownerClass, false);
                                 goto enter_frame;
                             }
                         }
-                    }
-                    if (cls && cls->methods.count(funcName)) {
-                        Value self = AB[0];
-                        keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                        Value smallOut[8];
-                        std::vector<Value> bigOut;
-                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at(funcName)(self, rest, nout,
-                                                  keel::MutArrayRef<Value>(outPtr, nout), ctx);
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
-                        break;
+                        if (const auto *mfn = cls->methods.get(funcName)) {
+                            Value self = AB[0];
+                            keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
+                            Value smallOut[8];
+                            std::vector<Value> bigOut;
+                            Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*mfn)(self, rest, nout,
+                                   keel::MutArrayRef<Value>(outPtr, nout), ctx);
+                            for (keel::u16 i = 0; i < nout; ++i)
+                                if (outPtr[i].isUnset())
+                                    throw std::runtime_error("Too many output arguments.");
+                            for (keel::usize i = 0; i < nout; ++i)
+                                R[outBase + i] = std::move(outPtr[i]);
+                            break;
+                        }
                     }
                 }
                 // BUG #1 fix: m-file resolution must beat builtin
@@ -3821,34 +3853,34 @@ enter_frame:
                 if (NF >= 1 && AB[0].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
                     if (cls) {
-                        auto fit = cls->methodFns.find(funcName);
-                        if (fit != cls->methodFns.end()) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                        if (const auto *mfp = cls->methodFns.get(funcName)) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                engine_.enforceMethodAccess(
+                                    std::string(AB[0].objectClassName().as_ref()), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
-                                              fit->second->ownerClass, false);
+                                              (*mfp)->ownerClass, false);
                                 goto enter_frame;
                             }
                         }
-                    }
-                    if (cls && cls->methods.count(funcName)) {
-                        Value              self = AB[0];
-                        keel::ArrayRef<Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                        Value              smallOut[8];
-                        std::vector<Value> bigOut;
-                        Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        CallContext        ctx{&engine_, currentCallEnv()};
-                        cls->methods.at(funcName)(self, rest, nout,
-                                                  keel::MutArrayRef<Value>(outPtr, nout), ctx);
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
-                        break;
+                        if (const auto *mfn = cls->methods.get(funcName)) {
+                            Value              self = AB[0];
+                            keel::ArrayRef<Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
+                            Value              smallOut[8];
+                            std::vector<Value> bigOut;
+                            Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+                            CallContext        ctx{&engine_, currentCallEnv()};
+                            (*mfn)(self, rest, nout,
+                                   keel::MutArrayRef<Value>(outPtr, nout), ctx);
+                            for (keel::u16 i = 0; i < nout; ++i)
+                                if (outPtr[i].isUnset())
+                                    throw std::runtime_error("Too many output arguments.");
+                            for (keel::usize i = 0; i < nout; ++i)
+                                R[outBase + i] = std::move(outPtr[i]);
+                            break;
+                        }
                     }
                 }
                 {
@@ -3916,11 +3948,11 @@ enter_frame:
                     // classdef method → native VM frame (debuggable). Receiver
                     // and args aren't contiguous, so build [self, args…].
                     if (cls) {
-                        auto fit = cls->methodFns.find(mname);
-                        if (fit != cls->methodFns.end()) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                        if (const auto *mfp = cls->methodFns.get(mname)) {
+                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                                engine_.enforceMethodAccess(
+                                    std::string(obj.objectClassName().as_ref()), mname);
                                 std::vector<Value> frameArgs;
                                 frameArgs.reserve(argN + 1);
                                 frameArgs.push_back(obj);
@@ -3929,26 +3961,26 @@ enter_frame:
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, frameArgs.data(),
                                               frameArgs.size(), I.a, 1, false,
-                                              0, 0, fit->second->ownerClass, false);
+                                              0, 0, (*mfp)->ownerClass, false);
                                 goto enter_frame;
                             }
                         }
-                    }
-                    if (cls && cls->methods.count(mname)) {
-                        Value self = obj; // handle: shares state; value: own copy
-                        keel::ArrayRef<Value> args(argPtr, argN);
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->methods.at(mname)(self, args, 1, keel::MutArrayRef<Value>(out, 1), ctx);
-                        R[I.a] = std::move(out[0]);
-                        break;
+                        if (const auto *mfn = cls->methods.get(mname)) {
+                            Value self = obj; // handle: shares state; value: own copy
+                            keel::ArrayRef<Value> args(argPtr, argN);
+                            Value out[1];
+                            CallContext ctx{&engine_, currentCallEnv()};
+                            (*mfn)(self, args, 1, keel::MutArrayRef<Value>(out, 1), ctx);
+                            R[I.a] = std::move(out[0]);
+                            break;
+                        }
                     }
                     // Not a method → property read, then index the result.
                     Value out;
                     CallContext ctx{&engine_, currentCallEnv()};
                     if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
                         throw std::runtime_error("No appropriate property '" + mname
-                                                 + "' for class '" + obj.objectClassName() + "'");
+                                                 + "' for class '" + std::string(obj.objectClassName().as_ref()) + "'");
                     if (execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip))
                         goto enter_frame;
                 } else {
@@ -3986,11 +4018,11 @@ enter_frame:
                 const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
                 // classdef method → native multi-output VM frame.
                 if (cls) {
-                    auto fit = cls->methodFns.find(mname);
-                    if (fit != cls->methodFns.end()) {
-                        const BytecodeChunk *mc = engine_.ensureClassMethodChunk(*fit->second);
+                    if (const auto *mfp = cls->methodFns.get(mname)) {
+                        const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                         if (mc) {
-                            engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                            engine_.enforceMethodAccess(
+                                std::string(obj.objectClassName().as_ref()), mname);
                             std::vector<Value> frameArgs;
                             frameArgs.reserve(argN + 1);
                             frameArgs.push_back(obj);
@@ -4000,19 +4032,20 @@ enter_frame:
                             returnBuf_.clear();
                             pushCallFrame(*mc, frameArgs.data(),
                                           frameArgs.size(), 0, nout, true,
-                                          outBase, nout, fit->second->ownerClass, false);
+                                          outBase, nout, (*mfp)->ownerClass, false);
                             goto enter_frame;
                         }
                     }
                 }
-                if (!cls || !cls->methods.count(mname))
+                const ObjectMethod *mfn = cls ? cls->methods.get(mname) : nullptr;
+                if (!mfn)
                     throw std::runtime_error("No appropriate method '" + mname
-                                             + "' for class '" + obj.objectClassName() + "'");
+                                             + "' for class '" + std::string(obj.objectClassName().as_ref()) + "'");
                 Value self = obj; // handle: shares state; value: own copy
                 keel::ArrayRef<Value> args(argPtr, argN);
                 std::vector<Value> outBuf(nout);
                 CallContext ctx{&engine_, currentCallEnv()};
-                cls->methods.at(mname)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
+                (*mfn)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
                 for (keel::u16 i = 0; i < nout; ++i)
                     if (outBuf[i].isUnset())
                         throw std::runtime_error("Too many output arguments.");
@@ -4102,7 +4135,7 @@ enter_frame:
                 }
                 const Value &fh = R[fhReg];
                 const keel::usize ncaps = fh.funcHandleCaptureCount();
-                const std::string &fName = fh.funcHandleName();
+                std::string fName(fh.funcHandleName().as_ref());
                 std::vector<Value> cargs(nflat + ncaps);
                 for (keel::usize i = 0; i < nflat; ++i) cargs[i] = ABf[i];
                 for (keel::usize i = 0; i < ncaps; ++i)
@@ -4333,20 +4366,20 @@ enter_frame:
                             frame.env->clearAll(/*keepImports=*/true);
                     } else {
                         for (keel::usize k = 0; k < n; ++k)
-                            clearOneVar(R[I.a].cslAt(k).toString());
+                            clearOneVar(std::string(R[I.a].cslAt(k).toString().as_ref()));
                     }
                     break;
                 }
-                clearOneVar(R[I.a].toString());
+                clearOneVar(std::string(R[I.a].toString().as_ref()));
                 break;
             }
 
             case OpCode::EXIST_VAR: {
                 // a=dst, b=nameReg, c=filterReg (0 = no filter)
-                std::string varName = R[I.b].toString();
+                std::string varName(R[I.b].toString().as_ref());
                 std::string filter;
                 if (I.c != 0 && !R[I.c].isEmpty())
-                    filter = R[I.c].toString();
+                    filter = std::string(R[I.c].toString().as_ref());
 
                 double code = 0;
 
@@ -4448,10 +4481,10 @@ enter_frame:
                     throw Error(R[I.a].toString());
                 if (R[I.a].isStruct()) {
                     std::string msg = R[I.a].hasField("message")
-                                          ? R[I.a].field("message").toString()
+                                          ? std::string(R[I.a].field("message").toString().as_ref())
                                           : "User error";
                     std::string id = R[I.a].hasField("identifier")
-                                         ? R[I.a].field("identifier").toString()
+                                         ? std::string(R[I.a].field("identifier").toString().as_ref())
                                          : "";
                     throw Error(msg, 0, 0, "", "", id);
                 }
@@ -4469,7 +4502,9 @@ enter_frame:
         throw; // pass through — not a user error
     } catch (Error &mle) {
         rollbackLvalDetaches();
-        std::string id = mle.identifier().empty() ? "numkit:error" : mle.identifier();
+        std::string id = mle.identifier().empty()
+                             ? "numkit:error"
+                             : std::string(mle.identifier().as_ref());
         if (dispatchTryCatch(mle.what(), id.c_str()))
             goto enter_frame;
         // Enrich with current instruction's source location if missing
@@ -5421,11 +5456,12 @@ bool VM::pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    const UserFunction *uf = engine_.lookupUserFunctionLocal(handle.funcHandleName());
+    std::string fhName(handle.funcHandleName().as_ref());
+    const UserFunction *uf = engine_.lookupUserFunctionLocal(fhName);
     if (!uf)
-        uf = engine_.lookupUserFunction(handle.funcHandleName(), currentCallEnv());
+        uf = engine_.lookupUserFunction(fhName, currentCallEnv());
     if (!uf) {
-        if (const BytecodeChunk *fc = findCompiledFunc(handle.funcHandleName())) {
+        if (const BytecodeChunk *fc = findCompiledFunc(fhName)) {
             pushCallFrame(*fc, args.data(), args.size(), /*destReg=*/0, nargout,
                           /*isMulti=*/false, 0, 0, std::string(), /*isCtor=*/false, /*ctorSeed=*/nullptr);
             frames_.back().cont = std::move(cont);
@@ -5753,14 +5789,16 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
     if (fname) {
         if (na >= 1 && R[argBase].isObject()) {
             const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassName());
-            if (cls && cls->methods.count(fname)) {
-                Value self = R[argBase];
-                keel::ArrayRef<Value> rest((na > 1) ? &R[argBase + 1] : nullptr, na - 1);
-                Value out[1];
-                CallContext ctx{&engine_, currentCallEnv()};
-                cls->methods.at(fname)(self, rest, 1, keel::MutArrayRef<Value>(out, 1), ctx);
-                R[I.a] = std::move(out[0]);
-                return;
+            if (cls) {
+                if (const auto *mfn = cls->methods.get(fname)) {
+                    Value self = R[argBase];
+                    keel::ArrayRef<Value> rest((na > 1) ? &R[argBase + 1] : nullptr, na - 1);
+                    Value out[1];
+                    CallContext ctx{&engine_, currentCallEnv()};
+                    (*mfn)(self, rest, 1, keel::MutArrayRef<Value>(out, 1), ctx);
+                    R[I.a] = std::move(out[0]);
+                    return;
+                }
             }
         }
         const ExternalFunc *fnPtr = engine_.findExternal(
@@ -5851,7 +5889,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
                                    engine_.mr_);
         } else {
             const int nd = static_cast<int>(na);
-            std::vector<std::vector<keel::usize>> lists(nd);
+            std::vector<keel::Array<keel::usize>> lists(nd);
             std::vector<const keel::usize *> ptrs(nd);
             std::vector<keel::usize> counts(nd);
             for (int i = 0; i < nd; ++i) {
@@ -5869,7 +5907,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         return false;
     }
 
-    const std::string &funcName = funcHandleVal.funcHandleName();
+    std::string funcName(funcHandleVal.funcHandleName().as_ref());
 
     // Build args: user args + captured values
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
@@ -5950,7 +5988,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
             "function handle");
     }
 
-    const std::string &funcName = funcHandleVal.funcHandleName();
+    std::string funcName(funcHandleVal.funcHandleName().as_ref());
 
     // Build args: user args followed by captured values.
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
@@ -6093,7 +6131,7 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
     } else {
         // ND indexing fallback for na >= 4. CELL handled by indexGetND.
         const int nd = static_cast<int>(na);
-        std::vector<std::vector<keel::usize>> idxLists(nd);
+        std::vector<keel::Array<keel::usize>> idxLists(nd);
         std::vector<const keel::usize *> idxPtrs(nd);
         std::vector<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
@@ -6159,7 +6197,7 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            std::string reqName = R[I.a + i].toString();
+            std::string reqName(R[I.a + i].toString().as_ref());
             bool found = false;
             for (auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {
@@ -6226,7 +6264,7 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            std::string reqName = R[I.a + i].toString();
+            std::string reqName(R[I.a + i].toString().as_ref());
             bool found = false;
             for (auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {

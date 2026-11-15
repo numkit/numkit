@@ -100,7 +100,7 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
     if (!h.isFuncHandle())
         throw Error("accumarray: fn argument must be a function handle",
                      0, 0, "accumarray", "", "numkit:accumarray:fnType");
-    std::string s = h.funcHandleName();
+    keel::String s = h.funcHandleName();
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (s == "sum")  { op = AccumReducer::Sum;  return true; }
@@ -543,13 +543,13 @@ void register_datafun(Engine &engine) {
             keel::usize nargs = args.size();
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
-                std::string flag = args[nargs - 1].toString();
+                keel::String flag = args[nargs - 1].toString();
                 for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (flag == "symmetric") symmetric = true;
                 else if (flag == "nonsymmetric") symmetric = false;
                 else
-                    throw Error("ifft: unknown option '" + args[nargs - 1].toString() +
-                                    "' (expected 'symmetric' or 'nonsymmetric')",
+                    throw Error(keel::format("ifft: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
+                                             args[nargs - 1].toString()),
                                 0, 0, "ifft", "", "numkit:ifft:badOption");
                 --nargs;
             }
@@ -586,13 +586,13 @@ void register_datafun(Engine &engine) {
             keel::usize nargs = args.size();
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
-                std::string flag = args[nargs - 1].toString();
+                keel::String flag = args[nargs - 1].toString();
                 for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (flag == "symmetric") symmetric = true;
                 else if (flag == "nonsymmetric") symmetric = false;
                 else
-                    throw Error("ifft2: unknown option '" + args[nargs - 1].toString() +
-                                    "' (expected 'symmetric' or 'nonsymmetric')",
+                    throw Error(keel::format("ifft2: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
+                                             args[nargs - 1].toString()),
                                 0, 0, "ifft2", "", "numkit:ifft2:badOption");
                 --nargs;
             }

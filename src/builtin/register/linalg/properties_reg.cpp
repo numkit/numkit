@@ -64,7 +64,7 @@ void cond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     const Value &p = args[1];
     int p_kind = 2;
     if (p.isChar() || p.isString()) {
-        const std::string s = p.toString();
+        const keel::String s = p.toString();
         if      (s == "fro" || s == "Fro") p_kind = 4;
         else if (s == "inf" || s == "Inf") p_kind = 3;
         else throw Error("cond: string p must be 'fro' or 'inf'",

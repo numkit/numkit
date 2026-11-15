@@ -26,23 +26,24 @@ void error(keel::ArrayRef<Value> args)
 
     // error(MException-struct)
     if (args[0].isStruct()) {
-        std::string msg = args[0].hasField("message") ? args[0].field("message").toString()
-                                                      : "Error";
+        std::string msg = args[0].hasField("message") ? std::string(args[0].field("message").toString().as_ref())
+                                                      : std::string("Error");
         std::string id = args[0].hasField("identifier")
-                             ? args[0].field("identifier").toString()
-                             : "";
+                             ? std::string(args[0].field("identifier").toString().as_ref())
+                             : std::string("");
         throw Error(msg, 0, 0, "", "", id);
     }
 
-    std::string first = args[0].toString();
+    std::string first(args[0].toString().as_ref());
 
     // error(id, msg, ...) — identifier contains ':'
     if (args.size() >= 2 && first.find(':') != std::string::npos
         && (args[1].isChar() || args[1].isString())) {
         std::string id = first;
+        std::string second(args[1].toString().as_ref());
         std::string msg = (args.size() > 2)
-                              ? formatOnce(args[1].toString(), args, 2)
-                              : args[1].toString();
+                              ? formatOnce(second, args, 2)
+                              : second;
         throw Error(msg, 0, 0, "", "", id);
     }
 
@@ -62,14 +63,15 @@ void warning(Engine &engine, keel::ArrayRef<Value> args)
 {
     if (args.empty())
         return;
-    std::string first = args[0].toString();
+    std::string first(args[0].toString().as_ref());
     std::string msg;
     std::string id;
     if (args.size() >= 2 && first.find(':') != std::string::npos
         && (args[1].isChar() || args[1].isString())) {
         id  = first;
-        msg = (args.size() > 2) ? formatOnce(args[1].toString(), args, 2)
-                                : args[1].toString();
+        std::string second(args[1].toString().as_ref());
+        msg = (args.size() > 2) ? formatOnce(second, args, 2)
+                                : second;
     } else if (args.size() > 1) {
         msg = formatOnce(first, args, 1);
     } else {
@@ -97,9 +99,10 @@ Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr)
     if (args.size() < 2)
         throw Error("MException requires identifier and message", 0, 0,
                      "MException", "", "numkit:MException:nargin");
-    std::string id = args[0].toString();
-    std::string msg = (args.size() > 2) ? formatOnce(args[1].toString(), args, 2)
-                                        : args[1].toString();
+    std::string id(args[0].toString().as_ref());
+    std::string second(args[1].toString().as_ref());
+    std::string msg = (args.size() > 2) ? formatOnce(second, args, 2)
+                                        : second;
     auto me = Value::structure();
     me.field("identifier") = Value::fromString(id, mr);
     me.field("message") = Value::fromString(msg, mr);
@@ -111,9 +114,9 @@ void rethrowStruct(const Value &me)
     if (!me.isStruct())
         throw Error("rethrow requires an MException struct", 0, 0, "rethrow", "",
                      "numkit:rethrow:notStruct");
-    std::string msg = me.hasField("message") ? me.field("message").toString() : "Error";
+    std::string msg = me.hasField("message") ? std::string(me.field("message").toString().as_ref()) : std::string("Error");
     std::string id =
-        me.hasField("identifier") ? me.field("identifier").toString() : "numkit:error";
+        me.hasField("identifier") ? std::string(me.field("identifier").toString().as_ref()) : std::string("numkit:error");
     throw Error(msg, 0, 0, "", "", id);
 }
 
@@ -130,22 +133,23 @@ void assertCond(keel::ArrayRef<Value> args)
     // assert(cond, MException struct)
     if (args[1].isStruct()) {
         std::string msg = args[1].hasField("message")
-                              ? args[1].field("message").toString()
-                              : "Assertion failed.";
+                              ? std::string(args[1].field("message").toString().as_ref())
+                              : std::string("Assertion failed.");
         std::string id = args[1].hasField("identifier")
-                             ? args[1].field("identifier").toString()
-                             : "numkit:assert";
+                             ? std::string(args[1].field("identifier").toString().as_ref())
+                             : std::string("numkit:assert");
         throw Error(msg, 0, 0, "", "", id);
     }
 
-    std::string first = args[1].toString();
+    std::string first(args[1].toString().as_ref());
 
     // assert(cond, id, msg, ...) — id with ':'
     if (args.size() >= 3 && first.find(':') != std::string::npos) {
         std::string id = first;
+        std::string second(args[2].toString().as_ref());
         std::string msg = (args.size() > 3)
-                              ? formatOnce(args[2].toString(), args, 3)
-                              : args[2].toString();
+                              ? formatOnce(second, args, 3)
+                              : second;
         throw Error(msg, 0, 0, "", "", id);
     }
 
@@ -184,7 +188,7 @@ void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     if (!args[0].isChar() && !args[0].isString())
         throw Error("lastwarn: msg must be a char or string",
                      0, 0, "lastwarn", "", "numkit:lastwarn:badArg");
-    std::string msg = args[0].toString();
+    std::string msg(args[0].toString().as_ref());
     std::string id;
     if (args.size() >= 2) {
         if (!args[1].isChar() && !args[1].isString())

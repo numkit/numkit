@@ -781,7 +781,7 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
         auto inputs = std::make_shared<std::vector<Value>>();
         for (keel::usize k = 1; k < args.size(); ++k) {
             if (args[k].isChar() && k + 1 < args.size()) {
-                std::string key = args[k].toString();
+                std::string key(args[k].toString().as_ref());
                 for (auto &ch : key)
                     ch = static_cast<char>(std::tolower((unsigned char)ch));
                 if (key == "uniformoutput") {
@@ -873,11 +873,11 @@ void registerCellsRuntime(Engine &engine)
             if (!c.isCell())
                 throw std::runtime_error("celldisp: input must be a cell");
             const std::string name = (args.size() >= 2)
-                                          ? args[1].toString()
+                                          ? std::string(args[1].toString().as_ref())
                                           : std::string("ans");
             for (keel::usize i = 0; i < c.numel(); ++i) {
                 ctx.engine->outputText(name + "{" + std::to_string(i + 1) + "} =\n");
-                ctx.engine->outputText(c.cellAt(i).formatDisplay("") + "\n");
+                ctx.engine->outputText(std::string(c.cellAt(i).formatDisplay("").as_ref()) + "\n");
             }
         });
 
@@ -898,7 +898,7 @@ void registerCellsRuntime(Engine &engine)
             inputs.reserve(args.size() - 1);
             for (keel::usize i = 1; i < args.size(); ++i) {
                 if (args[i].isChar() && i + 1 < args.size()) {
-                    std::string key = args[i].toString();
+                    std::string key(args[i].toString().as_ref());
                     for (auto &c : key)
                         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                     if (key == "uniformoutput") {

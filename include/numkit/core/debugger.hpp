@@ -15,6 +15,7 @@
 #include <keel/core.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>

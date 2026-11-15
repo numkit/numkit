@@ -169,7 +169,7 @@ void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     bool wantMatrix = false;
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].type() == ValueType::CHAR) {
-            std::string s = args[i].toString();
+            std::string s(args[i].toString().as_ref());
             std::transform(s.begin(), s.end(), s.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (s == "matrix") wantMatrix = true;

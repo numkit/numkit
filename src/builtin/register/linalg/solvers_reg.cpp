@@ -56,11 +56,11 @@ void lsqnonneg_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         outs[3] = Value::scalar(static_cast<double>(R.exitflag), mr);
     if (nargout >= 5 && outs.size() >= 5) {
         Value out_struct = Value::structure(mr);
-        out_struct.structFields()["iterations"] =
+        out_struct.field("iterations") =
             Value::scalar(static_cast<double>(R.iterations), mr);
-        out_struct.structFields()["algorithm"] =
+        out_struct.field("algorithm") =
             Value::fromString(R.algorithm, mr);
-        out_struct.structFields()["message"] =
+        out_struct.field("message") =
             Value::fromString(R.message, mr);
         outs[4] = std::move(out_struct);
     }

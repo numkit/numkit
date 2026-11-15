@@ -168,9 +168,11 @@ void LinalgLibrary::install(Engine &engine)
     //      after `import linalg.*` or as a fully qualified call.
     //   3. `compat.<name>`                     — picked up by the standard
     //      `import compat.*` test fixture (toolboxes/{stats,signal} pattern).
-    auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
-        engine.registerFunction(name, fn);                                    // 1
-        engine.registerFunction(std::string("linalg.") + sub, name, fn);      // 2
+    using RegFn = void (*)(keel::ArrayRef<Value>, keel::usize,
+                           keel::MutArrayRef<Value>, CallContext &);
+    auto reg = [&](const char *sub, const char *name, RegFn fn) {
+        engine.registerFunction(name, ExternalFunc(fn));                                    // 1
+        engine.registerFunction(std::string("linalg.") + sub, name, ExternalFunc(fn));      // 2
         // compat.* registration removed — bare-name resolver replaces it                          // 3
     };
 

@@ -239,9 +239,9 @@ std::string findCodegenBinary(const char *argv0)
         }
     }
 #ifdef _WIN32
-    std::string home = numkit::envGet("USERPROFILE");
+    keel::String home = numkit::envGet("USERPROFILE");
 #else
-    std::string home = numkit::envGet("HOME");
+    keel::String home = numkit::envGet("HOME");
 #endif
     if (!home.empty()) {
         keel::String p = keel::path_join(home, ".numkit", "bin", binName);

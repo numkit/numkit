@@ -48,7 +48,7 @@ inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!args[i].isChar() && !args[i].isString())
             throw Error(std::string(fn) + ": option must be a string",
                          0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
-        std::string o = args[i].toString();
+        std::string o(args[i].toString().as_ref());
         std::string lo = o;
         for (auto &c : lo) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (lo == "once") { once = true; continue; }
@@ -90,7 +90,7 @@ void regexprep_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     bool once = false;
     for (keel::usize i = 3; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
-            std::string o = args[i].toString();
+            std::string o(args[i].toString().as_ref());
             for (auto &ch : o) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             if      (o == "ignorecase") ignoreCase = true;
             else if (o == "once")       once = true;

@@ -73,7 +73,7 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     double p = 2.0;
     if (args.size() == 2) {
         if (args[1].isChar() || args[1].isString()) {
-            const std::string s = args[1].toString();
+            const keel::String s = args[1].toString();
             if      (s == "fro" || s == "Fro") p = -2.0; // sentinel
             else if (s == "inf" || s == "Inf") p = std::numeric_limits<double>::infinity();
             else throw Error("pagenorm: string p must be 'fro' or 'inf'",

@@ -5893,7 +5893,7 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
             if (cv.isDoubleScalar())
                 os << "  ; val=" << cv.scalarVal();
             else
-                os << "  ; " << cv.debugString();
+                os << "  ; " << cv.debugString().c_str();
         }
         os << "\n";
     }

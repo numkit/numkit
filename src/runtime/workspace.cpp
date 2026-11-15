@@ -63,18 +63,19 @@ void registerWorkspaceRuntime(Engine &engine)
                                     ctx.engine->syncEnvRemovalsToFrame(env);
                                 } else {
                                     std::string first = (args[0].isChar() || args[0].isString())
-                                                            ? args[0].toString()
-                                                            : "";
+                                                            ? std::string(args[0].toString().as_ref())
+                                                            : std::string("");
 
                                     if (first == "-regexp") {
                                         std::vector<std::regex> pats;
                                         for (keel::usize i = 1; i < args.size(); ++i) {
                                             if (!args[i].isChar() && !args[i].isString()) continue;
-                                            try { pats.emplace_back(args[i].toString()); }
+                                            std::string patStr(args[i].toString().as_ref());
+                                            try { pats.emplace_back(patStr); }
                                             catch (const std::regex_error &) {
                                                 throw std::runtime_error(
                                                     "clear -regexp: invalid pattern '"
-                                                    + args[i].toString() + "'");
+                                                    + patStr + "'");
                                             }
                                         }
                                         auto applyTo = [&](Environment *e) {
@@ -111,7 +112,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         } else {
                                             for (keel::usize i = 1; i < args.size(); ++i) {
                                                 if (args[i].isChar() || args[i].isString()) {
-                                                    std::string gname = args[i].toString();
+                                                    std::string gname(args[i].toString().as_ref());
                                                     if (gs)
                                                         gs->remove(gname);
                                                     env->remove(gname);
@@ -159,7 +160,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     } else {
                                         for (auto &a : args) {
                                             if (a.isChar() || a.isString()) {
-                                                std::string vname = a.toString();
+                                                std::string vname(a.toString().as_ref());
                                                 env->remove(vname);
                                                 if (!insideFunc)
                                                     ctx.engine->clearPersistentForFunc(vname);
@@ -184,10 +185,10 @@ void registerWorkspaceRuntime(Engine &engine)
             auto fail = [](const std::string &msg) {
                 throw std::runtime_error("import: " + msg);
             };
-            auto asString = [&](const Value &v, keel::usize i) {
+            auto asString = [&](const Value &v, keel::usize i) -> std::string {
                 if (!v.isChar() && !v.isString())
                     fail("argument " + std::to_string(i + 1) + " must be a string");
-                return v.toString();
+                return std::string(v.toString().as_ref());
             };
             auto parseSpec = [&](const std::string &spec, Import &imp) {
                 if (spec.empty()) fail("empty import specifier");
@@ -256,8 +257,8 @@ void registerWorkspaceRuntime(Engine &engine)
                 throw std::runtime_error("assignin: workspace must be 'base' or 'caller'");
             if (!args[1].isChar())
                 throw std::runtime_error("assignin: name must be a string");
-            std::string where = args[0].toString();
-            std::string name = args[1].toString();
+            std::string where(args[0].toString().as_ref());
+            std::string name(args[1].toString().as_ref());
             if (name.empty())
                 throw std::runtime_error("assignin: name must be non-empty");
             if (where == "base") {
@@ -308,7 +309,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("who -file requires a filename");
-                                    std::string fname = args[1].toString();
+                                    std::string fname(args[1].toString().as_ref());
                                     auto rp = ctx.engine->resolvePath(fname);
                                     if (!rp.fs || !rp.fs->exists(rp.path))
                                         throw std::runtime_error("who -file: file not found: " + fname);
@@ -338,7 +339,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 } else {
                                     for (auto &a : args) {
                                         if (a.isChar() || a.isString()) {
-                                            std::string varName = a.toString();
+                                            std::string varName(a.toString().as_ref());
                                             if (!isPseudo(varName)
                                                 && (env->getLocal(varName)
                                                     || (env->isGlobal(varName) && env->get(varName))
@@ -382,7 +383,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("whos -file requires a filename");
-                                    std::string fname = args[1].toString();
+                                    std::string fname(args[1].toString().as_ref());
                                     auto rp = ctx.engine->resolvePath(fname);
                                     if (!rp.fs || !rp.fs->exists(rp.path))
                                         throw std::runtime_error("whos -file: file not found: " + fname);
@@ -416,7 +417,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 } else {
                                     for (auto &a : args) {
                                         if (a.isChar() || a.isString()) {
-                                            std::string varName = a.toString();
+                                            std::string varName(a.toString().as_ref());
                                             if (!isPseudo(varName)
                                                 && (env->getLocal(varName)
                                                     || (env->isGlobal(varName) && env->get(varName))
@@ -512,7 +513,7 @@ void registerWorkspaceRuntime(Engine &engine)
                             [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("exist requires a name argument");
-                                std::string varName = args[0].toString();
+                                std::string varName(args[0].toString().as_ref());
                                 auto *env = ctx.env;
                                 ctx.engine->syncFrameToEnv(env);
 
@@ -609,7 +610,7 @@ void registerWorkspaceRuntime(Engine &engine)
             std::vector<std::string> names;
             for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                const std::string s = args[i].toString();
+                const std::string s(args[i].toString().as_ref());
                 if (s == "-except") { exceptMode = true; continue; }
                 names.push_back(s);
             }

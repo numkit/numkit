@@ -42,7 +42,7 @@ inline std::vector<int> parseDimSet(const Value &a, std::string_view fn)
     if (!a.dims().isVector())
         throw Error(std::string(fn) + ": dimension argument must be a "
                     "scalar or a vector of unique positive integers "
-                    "(argument is " + argcheck::detail::dimsStr(a) + ").",
+                    "(argument is " + argcheck::detail::dimsStr(a).c_str() + ").",
                     0, 0, std::string(fn), "",
                     "numkit:" + std::string(fn) + ":dimNotVector");
     std::vector<int> set;

@@ -81,7 +81,7 @@ std::string argStr(const Value &v)
         return out;
     }
     if (v.isChar())
-        return v.toString();
+        return std::string(v.toString().as_ref());
     return "";
 }
 
@@ -90,7 +90,7 @@ void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo
     for (keel::usize i = startIdx; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             continue;
-        std::string key = args[i].toString();
+        std::string key(args[i].toString().as_ref());
         for (auto &c : key)
             c = std::tolower(c);
         if (key == "linewidth")

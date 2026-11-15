@@ -33,10 +33,10 @@ void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!args[1].isChar() && !args[1].isString())
             throw Error("balance: optional arg must be 'noperm'",
                         0, 0, "balance", "", "numkit:balance:BadOpt");
-        std::string s = args[1].toString();
+        keel::String s = args[1].toString();
         if (s == "noperm") noperm = true;
         else
-            throw Error("balance: unknown option '" + s + "'",
+            throw Error(keel::format("balance: unknown option '{}'", s),
                         0, 0, "balance", "", "numkit:balance:BadOpt");
     }
 

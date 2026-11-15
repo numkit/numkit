@@ -1467,7 +1467,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             std::string pos = "headlight";
             if (!args.empty() && args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "left" || s == "right" || s == "headlight") pos = s;
             }
@@ -1495,7 +1495,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             std::string m = "gouraud";
             if (!args.empty() && args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "flat" || s == "gouraud" || s == "phong" || s == "none")
                     m = s;
@@ -1513,7 +1513,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             std::string m;
             if (!args.empty() && args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "shiny" || s == "metal" || s == "dull") m = s;
             }

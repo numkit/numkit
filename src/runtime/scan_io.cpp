@@ -53,7 +53,7 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
         sz = numkit::ops::parseReadSize(args[2], "fscanf");
 
     std::string input(f->buffer.begin() + f->cursor, f->buffer.end());
-    std::string fmt = args[1].toString();
+    std::string fmt(args[1].toString().as_ref());
 
     ScanfOut r{0, 0};
     scanfEmit(input, fmt, sz, nargout, outs, r, mr);
@@ -62,9 +62,9 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     // Populate ferror on a partial match so scripts can distinguish
     // "input exhausted" from "fewer items matched than requested".
     if (f->cursor >= f->buffer.size())
-        f->lastError = "End of file reached.";
+        f->lastError = keel::String::from("End of file reached.");
     else if (sz.limit != SIZE_MAX && r.count < sz.limit)
-        f->lastError = "Matching failure.";
+        f->lastError = keel::String::from("Matching failure.");
 }
 
 namespace {
@@ -162,7 +162,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         throw Error("textscan: source must be a file identifier or char array");
     }
 
-    std::string fmt = args[1].toString();
+    std::string fmt(args[1].toString().as_ref());
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto convs = parseTextscanFormat(fmt, scratch.allocator());
 
@@ -181,7 +181,8 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
 
     // Parse name/value options into a TextscanOptions struct.
     TextscanOptions opts{scratch.allocator()};
-    auto lower = [](std::string s) {
+    auto lower = [](keel::StringRef sr) {
+        std::string s(sr);
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
     };
@@ -198,7 +199,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 opts.delimiters.clear();
                 for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &d = val.cellAt(i);
-                    if (d.isChar()) opts.delimiters += d.toString();
+                    if (d.isChar()) opts.delimiters += std::string_view(d.toString());
                 }
             } else {
                 throw Error("textscan: 'Delimiter' must be a char array or cell");
@@ -218,11 +219,11 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             opts.commentStyle = val.toString();
         } else if (name == "treatasempty") {
             if (val.isChar()) {
-                opts.treatAsEmpty.push_back(val.toString());
+                opts.treatAsEmpty.push_back(std::string(val.toString().as_ref()));
             } else if (val.isCell()) {
                 for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &e = val.cellAt(i);
-                    if (e.isChar()) opts.treatAsEmpty.push_back(e.toString());
+                    if (e.isChar()) opts.treatAsEmpty.push_back(std::string(e.toString().as_ref()));
                 }
             } else {
                 throw Error("textscan: 'TreatAsEmpty' must be a char array or cell");
@@ -236,7 +237,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 throw Error("textscan: 'EmptyValue' must be a numeric scalar");
             opts.emptyValue = val.toScalar();
         } else {
-            throw Error("textscan: unsupported option '" + args[argIdx].toString()
+            throw Error("textscan: unsupported option '" + std::string(args[argIdx].toString().as_ref())
                             + "'");
         }
         argIdx += 2;

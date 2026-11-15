@@ -34,7 +34,7 @@ void registerFunctionHandles(Engine &engine)
                                 if (!args[0].isChar() && !args[0].isString())
                                     throw std::runtime_error(
                                         "str2func: argument must be a string");
-                                std::string s = args[0].toString();
+                                std::string s(args[0].toString().as_ref());
                                 // MATLAB str2func accepts three forms:
                                 //   'sin'        -> named handle
                                 //   '@sin'       -> named handle (strip '@')
@@ -75,8 +75,8 @@ void registerFunctionHandles(Engine &engine)
                                 if (!h->isFuncHandle())
                                     throw std::runtime_error(
                                         "func2str: argument must be a function handle");
-                                const std::string name = h->funcHandleName();
-                                const std::string src = h->funcHandleSource();
+                                const std::string name(h->funcHandleName().as_ref());
+                                const std::string src(h->funcHandleSource().as_ref());
                                 const bool isAnon = name.rfind("__anon_", 0) == 0;
                                 std::string text;
                                 if (!src.empty()) {

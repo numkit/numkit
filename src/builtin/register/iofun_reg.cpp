@@ -28,7 +28,7 @@ void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, 
 
 namespace numkit::builtin::detail {
 
-static std::string jsonEscape(const std::string &s) {
+static std::string jsonEscape(keel::StringRef s) {
     std::string out = "\"";
     for (unsigned char c : s) {
         if (c == '\"') out += "\\\"";
@@ -247,7 +247,7 @@ static void jsonencode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArr
 
 static void jsondecode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     argcheck::checkNargin(args.size(), 1, 3, "jsondecode");
-    std::string s = args[0].toString();
+    std::string s(args[0].toString().as_ref());
     JsonParser jp{s, 0, ctx.engine->allocator()};
     outs[0] = jp.parseValue();
 }

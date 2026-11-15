@@ -141,7 +141,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         }
         if (!a.isChar() && !a.isString())
             continue;   // numeric noise (e.g. ignored Name-Value values)
-        std::string s = a.toString();
+        std::string s(a.toString().as_ref());
         std::string sl = s;
         for (char &c : sl)
             c = (char)std::tolower((unsigned char)c);
@@ -292,8 +292,8 @@ void registerFigureExport(Engine &engine)
     }
     // shading('interp'|'flat'|'faceted') / lighting / material / movie
     {
-        ExternalFunc fn = [](keel::ArrayRef<Value>, keel::usize,
-                             keel::MutArrayRef<Value> outs, CallContext &) {
+        auto fn = [](keel::ArrayRef<Value>, keel::usize,
+                     keel::MutArrayRef<Value> outs, CallContext &) {
             if (!outs.empty()) outs[0] = Value();
         };
         engine.registerFunction("", "shading", fn);
@@ -367,8 +367,8 @@ void registerFigureExport(Engine &engine)
     }
     // High-level chart & viewer helpers: imtool, implay, boxchart, heatmap, probplot, dendrogram
     {
-        ExternalFunc chartNoop = [](keel::ArrayRef<Value>, keel::usize nargout,
-                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
+        auto chartNoop = [](keel::ArrayRef<Value>, keel::usize nargout,
+                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
             ctx.engine->figureManager().current();
             if (!outs.empty())
                 outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->allocator()) : Value();

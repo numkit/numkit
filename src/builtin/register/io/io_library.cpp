@@ -60,7 +60,7 @@ void IoLibrary::install(Engine &engine)
     // io is a MATLAB-mirror library — every function dual-registered
     // (io.<sub>.<name> + compat.<name>).
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
-        engine.registerFunction(std::string("io.") + sub, name, fn);
+        engine.registerFunction(std::string("io.") + sub, name, std::move(fn));
         // compat.* registration removed — bare-name resolver replaces it
     };
 

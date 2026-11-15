@@ -66,7 +66,7 @@ void TreeWalker::displayValue(const std::string &name, const Value &val)
         engine_.displayObject(name, val); // honours class disp/display override
         return;
     }
-    output(val.formatDisplay(name));
+    output(std::string(val.formatDisplay(name).as_ref()));
 }
 
 // Returns true and sets `outIdx` if the index expression evaluates to a scalar integer.
@@ -111,16 +111,16 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
     return false;
 }
 
-std::vector<keel::usize> TreeWalker::resolveIndex(
+keel::Array<keel::usize> TreeWalker::resolveIndex(
     const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env)
 {
     IndexContextGuard guard(indexContextStack_, {&array, dim, ndims});
 
     Value val = execNode(indexExpr, env);
 
-    std::vector<keel::usize> indices;
+    keel::Array<keel::usize> indices;
 
-    if (val.isChar() && val.toString() == ":") {
+    if (val.isChar() && val.toString().as_ref() == ":") {
         keel::usize sz;
         if (ndims == 1) {
             sz = array.numel();
@@ -200,7 +200,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
         return execFieldAccess(node, env);
     case NodeType::DYNAMIC_FIELD_ACCESS: {
         auto obj = execNode(node->children[0].get(), env);
-        std::string fname = execNode(node->children[1].get(), env).toString();
+        std::string fname(execNode(node->children[1].get(), env).toString().as_ref());
         if (obj.isObject())
             return objectPropGet(obj, fname, env);
         if (!obj.isStruct())
@@ -212,10 +212,10 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             Value csl = Value::csl(n, engine_.mr_);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto &m = obj.structArrayElem(i);
-                auto it = m.find(fname);
-                if (it == m.end())
+                const Value *vp = m.get(fname);
+                if (!vp)
                     throw std::runtime_error("Reference to non-existent field '" + fname + "'");
-                csl.cslAt(i) = it->second;
+                csl.cslAt(i) = *vp;
             }
             return csl;
         }
@@ -269,15 +269,15 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             auto &ctx = indexContextStack_.back();
             if (ctx.array && ctx.array->isObject()) {
                 const BuiltinClass *cls = engine_.findClass(ctx.array->objectClassName());
-                if (cls && cls->methods.count("__end")) {
+                if (const auto *m = cls ? cls->methods.get("__end") : nullptr) {
                     Value self = *ctx.array;
                     Value eargs[2] = {
                         Value::scalar(static_cast<double>(ctx.dimension), engine_.mr_),
                         Value::scalar(static_cast<double>(ctx.ndims), engine_.mr_)};
                     Value out[1];
                     CallContext cctx{&engine_, env};
-                    cls->methods.at("__end")(self, keel::ArrayRef<Value>(eargs, 2), 1,
-                                             keel::MutArrayRef<Value>(out, 1), cctx);
+                    (*m)(self, keel::ArrayRef<Value>(eargs, 2), 1,
+                         keel::MutArrayRef<Value>(out, 1), cctx);
                     return out[0];
                 }
             }
@@ -474,7 +474,7 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
     } else if (lhs->type == NodeType::DYNAMIC_FIELD_ACCESS) {
         // s.(expr) = val
         auto *objNode = lhs->children[0].get();
-        std::string fname = execNode(lhs->children[1].get(), env).toString();
+        std::string fname(execNode(lhs->children[1].get(), env).toString().as_ref());
         if (objNode->type == NodeType::IDENTIFIER) {
             auto *var = env->get(objNode->strValue);
             if (var && engine_.constantsEnv_
@@ -514,10 +514,12 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
             if (baseObj.isObject()) {
                 const BuiltinClass *cls = engine_.findClass(baseObj.objectClassName());
                 const auto *st = baseObj.objectStateConst();
-                if (cls && cls->propSet && st && st->props.count(cur->strValue)) {
-                    Value updated = st->props.at(cur->strValue);
-                    objectPropSet(baseObj, cur->strValue, updated, env);
-                    break;
+                if (cls && cls->propSet && st) {
+                    if (const Value *vp = st->props.get(cur->strValue)) {
+                        Value updated = *vp;
+                        objectPropSet(baseObj, cur->strValue, updated, env);
+                        break;
+                    }
                 }
             }
         }
@@ -571,7 +573,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                                && var->objectStateConst() && var->objectStateConst()->native
                                && var->objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
     if (rhs.isObject() || canPromoteRhs) {
-        auto isGfxCls = [](const std::string &c) {
+        auto isGfxCls = [](std::string_view c) {
             return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
         };
         if (!var->isObject() && var->isNumeric() && isGfxCls(rhs.objectClassName())) {
@@ -582,7 +584,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             (var->isObject() && (var->objectClassName() == rhs.objectClassName()
                                  || (isGfxCls(var->objectClassName()) && isGfxCls(rhs.objectClassName()))));
         if (newable || sameArr) {
-            std::vector<std::vector<keel::usize>> perDim(nargs);
+            keel::Array<keel::Array<keel::usize>> perDim;
+            perDim.resize(nargs);
             for (keel::usize d = 0; d < nargs; ++d) {
                 const ASTNode *sub = lhs->children[d + 1].get();
                 if ((var->isUnset() || var->isEmpty())
@@ -614,7 +617,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 else
                     var->resize(1, maxIdx, engine_.mr_);
             }
-            const std::string rs = rhs.toString();
+            const std::string rs(rhs.toString().as_ref());
             char *data = var->charDataMut();
             if (rs.size() == 1) {
                 for (auto idx : indices)
@@ -676,8 +679,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         bool riIsColon = (rSub->type == NodeType::COLON_EXPR && rSub->children.empty());
         bool ciIsColon = (cSub->type == NodeType::COLON_EXPR && cSub->children.empty());
 
-        auto rowIdx = riIsColon ? std::vector<keel::usize>() : resolveIndex(rSub, *var, 0, 2, env);
-        auto colIdx = ciIsColon ? std::vector<keel::usize>() : resolveIndex(cSub, *var, 1, 2, env);
+        auto rowIdx = riIsColon ? keel::Array<keel::usize>() : resolveIndex(rSub, *var, 0, 2, env);
+        auto colIdx = ciIsColon ? keel::Array<keel::usize>() : resolveIndex(cSub, *var, 1, 2, env);
 
         keel::usize maxR = var->dims().rows(), maxC = var->dims().cols();
         for (auto r : rowIdx)
@@ -732,9 +735,9 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         bool ciColon = (cSub->type == NodeType::COLON_EXPR && cSub->children.empty());
         bool piColon = (pSub->type == NodeType::COLON_EXPR && pSub->children.empty());
 
-        auto rowIdx = riColon ? std::vector<keel::usize>() : resolveIndex(rSub, *var, 0, 3, env);
-        auto colIdx = ciColon ? std::vector<keel::usize>() : resolveIndex(cSub, *var, 1, 3, env);
-        auto pageIdx = piColon ? std::vector<keel::usize>() : resolveIndex(pSub, *var, 2, 3, env);
+        auto rowIdx = riColon ? keel::Array<keel::usize>() : resolveIndex(rSub, *var, 0, 3, env);
+        auto colIdx = ciColon ? keel::Array<keel::usize>() : resolveIndex(cSub, *var, 1, 3, env);
+        auto pageIdx = piColon ? keel::Array<keel::usize>() : resolveIndex(pSub, *var, 2, 3, env);
 
         keel::usize maxR = var->dims().rows(), maxC = var->dims().cols(), maxP = var->dims().pages();
         for (auto r : rowIdx)
@@ -797,7 +800,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         // ND assign: nargs >= 4. indexSetND auto-grows the target rank
         // (and per-axis size) to fit any out-of-range subscripts.
         const int nd = static_cast<int>(nargs);
-        std::vector<std::vector<keel::usize>> idxLists(nd);
+        std::vector<keel::Array<keel::usize>> idxLists(nd);
         std::vector<const keel::usize *> idxPtrs(nd);
         std::vector<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
@@ -827,7 +830,7 @@ Value &TreeWalker::resolveObjectSlot(const ASTNode *node, Environment *env)
     case NodeType::FIELD_ACCESS:
         return resolveFieldLValue(node, env);
     case NodeType::DYNAMIC_FIELD_ACCESS: {
-        std::string fname = execNode(node->children[1].get(), env).toString();
+        std::string fname(execNode(node->children[1].get(), env).toString().as_ref());
         Value &parent = resolveObjectSlot(node->children[0].get(), env);
         if (!parent.isStruct())
             parent = Value::structure();
@@ -902,13 +905,15 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
 
         auto &fieldMap = var->structArrayElem(linear);
         // BUG #15: track insertion order for fieldnames() before [] auto-creates.
-        if (fieldMap.find(fieldName) == fieldMap.end()) {
+        if (!fieldMap.contains(fieldName)) {
             if (var->isStruct()) {
                 // setField updates fieldOrder for new key; reuse it then return ref.
                 var->setField(linear, fieldName, Value{});
+            } else {
+                fieldMap.put(keel::String::from(fieldName), Value{});
             }
         }
-        return var->structArrayElem(linear)[fieldName];
+        return *var->structArrayElem(linear).get(fieldName);
     }
 
     // General case: the object is any other addressable lvalue
@@ -930,9 +935,11 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
             CallContext ctx{&engine_, env};
             Value cur;
             if (cls->propGet(parent, fieldName, cur, ctx))
-                st->props[fieldName] = std::move(cur);
+                st->props.put(keel::String::from(fieldName), std::move(cur));
         }
-        return st->props[fieldName];
+        if (!st->props.contains(fieldName))
+            st->props.put(keel::String::from(fieldName), Value{});
+        return *st->props.get(fieldName);
     }
     if (!parent.isStruct())
         parent = Value::structure();
@@ -974,7 +981,7 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
         Value &baseObj = resolveObjectSlot(lhs->children[0].get(), env);
         if (baseObj.isObject()) {
             const BuiltinClass *cls = engine_.findClass(baseObj.objectClassName());
-            if (cls && cls->methods.count("__brace_set")) {
+            if (const auto *m = cls ? cls->methods.get("__brace_set") : nullptr) {
                 const keel::usize nidx = lhs->children.size() - 1;
                 std::vector<Value> args;
                 args.reserve(nidx + 1);
@@ -986,8 +993,8 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
                 args.push_back(rhs);
                 Value outBuf[1];
                 CallContext ctx{&engine_, env};
-                cls->methods.at("__brace_set")(baseObj, keel::ArrayRef<Value>(args.data(), args.size()),
-                                               0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                (*m)(baseObj, keel::ArrayRef<Value>(args.data(), args.size()),
+                     0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
                 return;
             }
         }
@@ -999,7 +1006,7 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
         if (cellVar.isCell()) {
             IndexContextGuard guard(indexContextStack_, {&cellVar, 0, 1});
             Value sub = execNode(lhs->children[1].get(), env);
-            const bool isColonSub = sub.isChar() && sub.toString() == ":";
+            const bool isColonSub = sub.isChar() && sub.toString().as_ref() == ":";
             if (sub.isLogical() || isColonSub || !sub.isScalar()) {
                 keel::usize maxLen = cellVar.numel();
                 if (!sub.isLogical() && !isColonSub) {
@@ -1148,7 +1155,7 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
             if (objPtr && objPtr->isObject()) {
                 const std::string &mname = headNode->strValue;
                 const BuiltinClass *cls = engine_.findClass(objPtr->objectClassName());
-                if (cls && cls->methods.count(mname)) {
+                if (const auto *m = cls ? cls->methods.get(mname) : nullptr) {
                     std::vector<Value> margs;
                     margs.reserve(node->children.size() - 1);
                     for (keel::usize i = 1; i < node->children.size(); ++i) {
@@ -1162,8 +1169,8 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
                     Value self = *objPtr; // handle: shares state; value: own copy
                     std::vector<Value> outBuf(nout);
                     CallContext ctx{&engine_, env};
-                    cls->methods.at(mname)(self, keel::ArrayRef<Value>(margs.data(), margs.size()),
-                                           nout, keel::MutArrayRef<Value>(outBuf), ctx);
+                    (*m)(self, keel::ArrayRef<Value>(margs.data(), margs.size()),
+                         nout, keel::MutArrayRef<Value>(outBuf), ctx);
                     return outBuf;
                 }
                 Value prop = objectPropGet(*objPtr, mname, env);
@@ -1259,13 +1266,13 @@ std::vector<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
     // method on the dominant (first) object argument beats a path function.
     if (!args.empty() && args[0].isObject()) {
         const BuiltinClass *cls = engine_.findClass(args[0].objectClassName());
-        if (cls && cls->methods.count(funcName)) {
+        if (const auto *m = cls ? cls->methods.get(funcName) : nullptr) {
             Value self = args[0];
             std::vector<Value> rest(args.begin() + 1, args.end());
             std::vector<Value> outBuf(nout);
             CallContext ctx{&engine_, env};
-            cls->methods.at(funcName)(self, keel::ArrayRef<Value>(rest.data(), rest.size()),
-                                      nout, keel::MutArrayRef<Value>(outBuf), ctx);
+            (*m)(self, keel::ArrayRef<Value>(rest.data(), rest.size()),
+                 nout, keel::MutArrayRef<Value>(outBuf), ctx);
             return outBuf;
         }
     }
@@ -1332,7 +1339,7 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
         // ND delete: A(i_1, ..., i_n) = []. Resolve every dim's index
         // vector, then dispatch to the generic ND deleter (which checks
         // exactly-one-partial-axis itself).
-        std::vector<std::vector<keel::usize>> perDim(nargs);
+        std::vector<keel::Array<keel::usize>> perDim(nargs);
         std::vector<const keel::usize *> perDimPtrs(nargs);
         std::vector<keel::usize> perDimCount(nargs);
         for (keel::usize i = 0; i < nargs; ++i) {
@@ -1507,7 +1514,7 @@ std::vector<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
     Environment *e = env ? env : engine_.workspaceEnv_.get();
-    const std::string &name = handle.funcHandleName();
+    const std::string name(handle.funcHandleName().as_ref());
     if (auto *_uf = engine_.lookupUserFunction(name, e))
         return callUserFunctionMulti(*_uf, args, e, nout, callNode);
     if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
@@ -1670,7 +1677,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
             if (objPtr && objPtr->isObject()) {
                 const std::string &mname = funcNode->strValue;
                 const BuiltinClass *cls = engine_.findClass(objPtr->objectClassName());
-                if (cls && cls->methods.count(mname)) {
+                if (const auto *m = cls ? cls->methods.get(mname) : nullptr) {
                     std::vector<Value> args;
                     args.reserve(node->children.size() - 1);
                     for (keel::usize i = 1; i < node->children.size(); ++i)
@@ -1678,8 +1685,8 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
                     Value self = *objPtr; // handle: shares state; value: own copy
                     Value outBuf[1];
                     CallContext ctx{&engine_, env};
-                    cls->methods.at(mname)(self, keel::ArrayRef<Value>(args.data(), args.size()),
-                                           nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                    (*m)(self, keel::ArrayRef<Value>(args.data(), args.size()),
+                         nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
                     return outBuf[0];
                 }
                 // Not a method → property read, then CALL (a func-handle
@@ -1720,7 +1727,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
             const std::string &mname = funcNode->strValue;
             if (recv.isObject()) {
                 const BuiltinClass *cls = engine_.findClass(recv.objectClassName());
-                if (cls && cls->methods.count(mname)) {
+                if (const auto *m = cls ? cls->methods.get(mname) : nullptr) {
                     std::vector<Value> margs;
                     margs.reserve(node->children.size() - 1);
                     for (keel::usize i = 1; i < node->children.size(); ++i)
@@ -1728,8 +1735,8 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
                     Value self = recv;
                     Value outBuf[1];
                     CallContext ctx{&engine_, env};
-                    cls->methods.at(mname)(self, keel::ArrayRef<Value>(margs.data(), margs.size()),
-                                           nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                    (*m)(self, keel::ArrayRef<Value>(margs.data(), margs.size()),
+                         nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
                     return outBuf[0];
                 }
                 Value prop = objectPropGet(recv, mname, env);
@@ -1855,13 +1862,13 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
         // so the common builtin path stays on its fast cache.
         if (!args.empty() && args[0].isObject()) {
             const BuiltinClass *cls = engine_.findClass(args[0].objectClassName());
-            if (cls && cls->methods.count(name)) {
+            if (const auto *m = cls ? cls->methods.get(name) : nullptr) {
                 Value self = args[0];
                 std::vector<Value> rest(args.begin() + 1, args.end());
                 Value outBuf[1];
                 CallContext ctx{&engine_, env};
-                cls->methods.at(name)(self, keel::ArrayRef<Value>(rest.data(), rest.size()),
-                                      nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                (*m)(self, keel::ArrayRef<Value>(rest.data(), rest.size()),
+                     nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
                 return outBuf[0];
             }
         }
@@ -1896,7 +1903,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
 {
     keel::usize nargs = callNode->children.size() - 1;
 
-    auto checkBounds = [](const std::vector<keel::usize> &indices, keel::usize limit, const char *ctx) {
+    auto checkBounds = [](keel::ArrayRef<keel::usize> indices, keel::usize limit, const char *ctx) {
         for (auto idx : indices) {
             if (idx >= limit)
                 throw std::runtime_error(std::string("Index exceeds array dimensions (") + ctx
@@ -2008,7 +2015,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
     // ND read: nargs >= 4
     {
         const int nd = static_cast<int>(nargs);
-        std::vector<std::vector<keel::usize>> idxLists(nd);
+        std::vector<keel::Array<keel::usize>> idxLists(nd);
         std::vector<const keel::usize *> idxPtrs(nd);
         std::vector<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
@@ -2095,7 +2102,7 @@ std::vector<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
     Value obj = execNode(node->children[0].get(), env);
     if (obj.isObject()) {
         const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
-        if (cls && cls->methods.count("__brace_get")) {
+        if (const auto *m = cls ? cls->methods.get("__brace_get") : nullptr) {
             keel::usize nidx = node->children.size() - 1;
             std::vector<Value> args;
             args.reserve(nidx);
@@ -2106,8 +2113,8 @@ std::vector<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
             }
             Value outBuf[1];
             CallContext ctx{&engine_, env};
-            cls->methods.at("__brace_get")(obj, keel::ArrayRef<Value>(args.data(), args.size()),
-                                           1, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+            (*m)(obj, keel::ArrayRef<Value>(args.data(), args.size()),
+                 1, keel::MutArrayRef<Value>(outBuf, 1), ctx);
             return {std::move(outBuf[0])};
         }
     }
@@ -2185,10 +2192,10 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
         Value csl = Value::csl(n, engine_.mr_);
         for (keel::usize i = 0; i < n; ++i) {
             const auto &m = obj.structArrayElem(i);
-            auto it = m.find(node->strValue);
-            if (it == m.end())
+            const Value *vp = m.get(node->strValue);
+            if (!vp)
                 throw std::runtime_error("Reference to non-existent field '" + node->strValue + "'");
-            csl.cslAt(i) = it->second;
+            csl.cslAt(i) = *vp;
         }
         return csl;
     }
@@ -2206,7 +2213,8 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
 
 Value TreeWalker::objectPropGet(const Value &obj, const std::string &name, Environment *env)
 {
-    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+    const std::string clsName(obj.objectClassName().as_ref());
+    const BuiltinClass *cls = engine_.findClass(clsName);
     if (cls) {
         CallContext ctx{&engine_, env};
         if (cls->propGet) {
@@ -2215,29 +2223,29 @@ Value TreeWalker::objectPropGet(const Value &obj, const std::string &name, Envir
                 return out;
         }
         // Bare `obj.method` (no parens) invokes a no-arg method (MATLAB).
-        auto mit = cls->methods.find(name);
-        if (mit != cls->methods.end()) {
+        if (const auto *m = cls->methods.get(name)) {
             Value self = obj;
             Value outBuf[1];
-            mit->second(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+            (*m)(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(outBuf, 1), ctx);
             return outBuf[0];
         }
     }
     throw std::runtime_error("No appropriate property '" + name + "' for class '"
-                             + obj.objectClassName() + "'");
+                             + clsName + "'");
 }
 
 void TreeWalker::objectPropSet(Value &objSlot, const std::string &name,
                                const Value &rhs, Environment *env)
 {
-    const BuiltinClass *cls = engine_.findClass(objSlot.objectClassName());
+    const std::string clsName(objSlot.objectClassName().as_ref());
+    const BuiltinClass *cls = engine_.findClass(clsName);
     if (cls && cls->propSet) {
         CallContext ctx{&engine_, env};
         if (cls->propSet(objSlot, name, rhs, ctx))
             return;
     }
     throw std::runtime_error("Cannot set property '" + name + "' on class '"
-                             + objSlot.objectClassName() + "'");
+                             + clsName + "'");
 }
 
 // ============================================================
@@ -2286,18 +2294,18 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                         fname = elemNode->strValue;
                     } else {
                         // DYNAMIC_FIELD_ACCESS: child[1] is the name expr.
-                        fname = execNode(elemNode->children[1].get(), env).toString();
+                        fname = std::string(execNode(elemNode->children[1].get(), env).toString().as_ref());
                     }
                     if (base.numel() == 0 && !base.hasField(fname))
                         throw std::runtime_error(
                             "Reference to non-existent field '" + fname + "'");
                     for (keel::usize i = 0; i < base.numel(); ++i) {
                         const auto &m = base.structArrayElem(i);
-                        auto it = m.find(fname);
-                        if (it == m.end())
+                        const Value *vp = m.get(fname);
+                        if (!vp)
                             throw std::runtime_error(
                                 "Reference to non-existent field '" + fname + "'");
-                        pushElem(Value(it->second), rowElems);
+                        pushElem(Value(*vp), rowElems);
                     }
                     continue;
                 }
@@ -2305,18 +2313,20 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                 // element via propGet. A scalar object falls through to
                 // the generic path (keeps the property-or-method fallback).
                 if (base.isObject() && base.objectCount() > 1) {
-                    const BuiltinClass *cls = engine_.findClass(base.objectClassName());
+                    const std::string clsName(base.objectClassName().as_ref());
+                    const BuiltinClass *cls = engine_.findClass(clsName);
                     std::string fname = (elemNode->type == NodeType::FIELD_ACCESS)
                         ? elemNode->strValue
-                        : execNode(elemNode->children[1].get(), env).toString();
+                        : std::string(execNode(elemNode->children[1].get(), env).toString().as_ref());
                     CallContext ctx{&engine_, env};
                     for (keel::usize i = 0; i < base.objectCount(); ++i) {
-                        Value elem = base.objectSubArray({i}, engine_.mr_);
+                        keel::usize idx = i;
+                        Value elem = base.objectSubArray(keel::ArrayRef<keel::usize>(&idx, 1), engine_.mr_);
                         Value out;
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx))
                             throw std::runtime_error("No appropriate property '" + fname
                                                      + "' for class '"
-                                                     + base.objectClassName() + "'");
+                                                     + clsName + "'");
                         pushElem(std::move(out), rowElems);
                     }
                     continue;
@@ -2349,8 +2359,10 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
         keel::usize maxCols = 0;
         for (auto &rowElems : rows) {
             std::string s;
-            for (auto &v : rowElems)
-                s += v.toString();
+            for (auto &v : rowElems) {
+                keel::String vs = v.toString();
+                s.append(vs.data(), vs.size());
+            }
             maxCols = std::max(maxCols, s.size());
             strs.push_back(std::move(s));
         }
@@ -2377,12 +2389,12 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
         for (keel::usize i = 0; i < count; ++i) {
             if (elems[i].isObject()) {
                 const BuiltinClass *cls = engine_.findClass(elems[i].objectClassName());
-                if (cls && cls->ops.count(opName)) {
+                if (const auto *m = cls ? cls->ops.get(opName) : nullptr) {
                     Value self = elems[0];
                     Value outBuf[1];
                     CallContext ctx{&engine_, env};
-                    cls->ops.at(opName)(self, keel::ArrayRef<Value>(elems + 1, count - 1), 1,
-                                        keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                    (*m)(self, keel::ArrayRef<Value>(elems + 1, count - 1), 1,
+                         keel::MutArrayRef<Value>(outBuf, 1), ctx);
                     return outBuf[0];
                 }
                 break;
@@ -2484,12 +2496,12 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
         if (a.isObject() || b.isObject()) {
             const Value &dom = a.isObject() ? a : b;
             const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-            if (cls && cls->ops.count("colon")) {
+            if (const auto *m = cls ? cls->ops.get("colon") : nullptr) {
                 Value self = dom;
                 Value outBuf[1];
                 CallContext ctx{&engine_, env};
-                cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 2), 1,
-                                     keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                (*m)(self, keel::ArrayRef<Value>(ops, 2), 1,
+                     keel::MutArrayRef<Value>(outBuf, 1), ctx);
                 return outBuf[0];
             }
         }
@@ -2507,12 +2519,12 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
         if (a.isObject() || b.isObject() || c.isObject()) {
             const Value &dom = a.isObject() ? a : (c.isObject() ? c : b);
             const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
-            if (cls && cls->ops.count("colon")) {
+            if (const auto *m = cls ? cls->ops.get("colon") : nullptr) {
                 Value self = dom;
                 Value outBuf[1];
                 CallContext ctx{&engine_, env};
-                cls->ops.at("colon")(self, keel::ArrayRef<Value>(ops, 3), 1,
-                                     keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                (*m)(self, keel::ArrayRef<Value>(ops, 3), 1,
+                     keel::MutArrayRef<Value>(outBuf, 1), ctx);
                 return outBuf[0];
             }
         }
@@ -3056,7 +3068,7 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
             if (!node->strValue.empty()) {
                 auto err = Value::structure();
                 err.field("message") = Value::fromString(mle.what(), engine_.mr_);
-                std::string id = mle.identifier().empty() ? "numkit:error" : mle.identifier();
+                std::string id = mle.identifier().empty() ? "numkit:error" : std::string(mle.identifier().as_ref());
                 err.field("identifier") = Value::fromString(id, engine_.mr_);
                 env->set(node->strValue, err);
             }

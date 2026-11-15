@@ -48,7 +48,7 @@ Value getenv(const Value &name, keel::Allocator *mr)
 {
     if (!name.isChar() && !name.isString())
         throw std::runtime_error("getenv: argument must be a variable name");
-    return Value::fromString(getenv(name.toString()), mr);
+    return Value::fromString(sys::envGet(name.toString(), mr), mr);
 }
 
 } // namespace numkit::builtin

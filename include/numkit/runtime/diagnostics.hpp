@@ -6,6 +6,7 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <numkit/value/value.hpp>
+#include <string>
 
 namespace numkit {
 class Engine;

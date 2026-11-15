@@ -155,7 +155,7 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
 
     auto td = tempdir(fs, mr).toString();
     std::ostringstream os;
-    os << td << "tp"
+    os << td.c_str() << "tp"
        << std::hex << ns << "_" << r << "_" << n;
     return charValue(mr, os.str());
 }

@@ -40,11 +40,11 @@ void registerEvalFamily(Engine &engine)
                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isChar())
                 throw std::runtime_error("run requires a string filename");
-            std::string p = args[0].toString();
+            std::string p(args[0].toString().as_ref());
             auto rp = ctx.engine->resolvePath(p);
             if (!rp.fs || !rp.fs->exists(rp.path))
                 throw std::runtime_error("run: file not found: " + p);
-            std::string content = rp.fs->readFile(rp.path);
+            std::string content(rp.fs->readFile(rp.path).as_ref());
 
             // Push script origin for the duration of the run so that
             // sibling .m files in the same directory resolve without
@@ -55,11 +55,12 @@ void registerEvalFamily(Engine &engine)
             // resolver, so substr(0,0) won't do.
             std::string scriptDir;
             {
-                keel::usize slash = rp.path.find_last_of("/\\");
+                std::string rpPath(rp.path.as_ref());
+                keel::usize slash = rpPath.find_last_of("/\\");
                 if (slash == 0)
-                    scriptDir.assign(1, rp.path[0]);   // "/" or "\\"
+                    scriptDir.assign(1, rpPath[0]);   // "/" or "\\"
                 else if (slash != std::string::npos)
-                    scriptDir = rp.path.substr(0, slash);
+                    scriptDir = rpPath.substr(0, slash);
             }
             ctx.engine->pushScriptOrigin(rp.fs->name(), scriptDir, rp.path);
             // MATLAB run() semantics: a FUNCTION file executes its primary
@@ -105,14 +106,14 @@ void registerEvalFamily(Engine &engine)
             if (args.size() == 1) {
                 if (!args[0].isChar())
                     throw std::runtime_error("mfilename: argument must be 'fullpath'");
-                const std::string opt = args[0].toString();
+                const std::string opt(args[0].toString().as_ref());
                 if (opt != "fullpath")
                     throw std::runtime_error(
                         "mfilename: unrecognized option '" + opt
                         + "' (only 'fullpath' is supported)");
                 fullpath = true;
             }
-            const std::string *file = ctx.engine->currentScriptFile();
+            const keel::String *file = ctx.engine->currentScriptFile();
             if (!file || file->empty()) {
                 outs[0] = Value::stringScalar("", ctx.engine->allocator());
                 return;
@@ -121,7 +122,7 @@ void registerEvalFamily(Engine &engine)
             // both native-backslash and canonical-forward forms. A path
             // with no separator keeps just the extension-stripped base
             // for BOTH forms.
-            std::string p = *file;
+            std::string p(file->as_ref());
             keel::usize slash = p.find_last_of("/\\");
             std::string base = (slash == std::string::npos) ? p
                                                             : p.substr(slash + 1);
@@ -183,7 +184,7 @@ void registerEvalFamily(Engine &engine)
                 if (!args[1].isChar() && !args[1].isString())
                     throw std::runtime_error(
                         "input: format must be the character 's'");
-                const std::string fmt = args[1].toString();
+                const std::string fmt(args[1].toString().as_ref());
                 if (fmt != "s")
                     throw std::runtime_error(
                         "input: format must be the character 's'");
@@ -221,8 +222,8 @@ void registerEvalFamily(Engine &engine)
                 throw std::runtime_error("evalin: requires (workspace, code)");
             if (!args[0].isChar() || !args[1].isChar())
                 throw std::runtime_error("evalin: arguments must be strings");
-            std::string where = args[0].toString();
-            std::string code = args[1].toString();
+            std::string where(args[0].toString().as_ref());
+            std::string code(args[1].toString().as_ref());
             Environment *target = nullptr;
             if (where == "base") {
                 target = &ctx.engine->workspaceEnv();

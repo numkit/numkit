@@ -225,7 +225,7 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
         if (!args[i].isChar() && !args[i].isString())
             throw Error("integral: expected option name (string)",
                          0, 0, "integral", "", "numkit:integral:badFlag");
-        std::string key = args[i].toString();
+        std::string key(args[i].toString().as_ref());
         for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (key == "abstol") {
             absTol = args[i + 1].toScalar();
@@ -248,7 +248,7 @@ static double integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOpt)
 {
     double absTol = 1e-10;
     for (keel::usize i = firstOpt; i + 1 < args.size(); i += 2) {
-        std::string key = args[i].toString();
+        std::string key(args[i].toString().as_ref());
         for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (key == "abstol") absTol = args[i + 1].toScalar();
     }

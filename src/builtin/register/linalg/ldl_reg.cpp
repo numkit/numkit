@@ -31,13 +31,13 @@ void ldl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!args[i].isChar() && !args[i].isString())
             throw Error("ldl: optional args must be 'lower'/'upper'/'matrix'/'vector'",
                         0, 0, "ldl", "", "numkit:ldl:BadOpt");
-        std::string s = args[i].toString();
+        keel::String s = args[i].toString();
         if      (s == "lower")  upper = false;
         else if (s == "upper")  upper = true;
         else if (s == "matrix") vec_perm = false;
         else if (s == "vector") vec_perm = true;
         else
-            throw Error("ldl: unknown option '" + s + "'",
+            throw Error(keel::format("ldl: unknown option '{}'", s),
                         0, 0, "ldl", "", "numkit:ldl:BadOpt");
     }
 

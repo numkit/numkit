@@ -432,7 +432,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (mode != "fir" && mode != "iir" && mode != "allpole" &&
             mode != "allpass" && mode != "min" && mode != "max") {
-            throw Error("latc2tf: unknown option '" + args[1].toString() + "'",
+            throw Error(keel::format("latc2tf: unknown option '{}'", args[1].toString()),
                         0, 0, "latc2tf", "", "numkit:latc2tf:badOption");
         }
     }

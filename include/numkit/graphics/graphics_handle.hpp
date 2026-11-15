@@ -14,11 +14,10 @@
 
 #include <keel/core.h>
 #include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
 #include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
-
-#include <memory>
-#include <string>
 
 namespace numkit {
 
@@ -27,9 +26,10 @@ struct GraphicsHandlePayload : public NativePayload
 {
     int handleId = 0;
     int numericValue = 0;
-    std::shared_ptr<NativePayload> clone() const override
+    keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
-        auto p = std::make_shared<GraphicsHandlePayload>();
+        auto *res = alloc ? alloc : keel::default_allocator();
+        auto p = keel::make_arc_in<GraphicsHandlePayload>(res);
         p->handleId = handleId;
         p->numericValue = numericValue;
         return p;
@@ -54,26 +54,28 @@ inline int graphicsHandleIdOf(const Value &v)
 
 // Handle object Value wrapping registry id `id` with MATLAB class name
 // `className` (that string is what class()/isa() report).
-inline Value makeGraphicsHandleValue(const std::string &className, int id,
+inline Value makeGraphicsHandleValue(keel::StringRef className, int id,
                                      keel::Allocator *mr = nullptr)
 {
-    auto st = std::make_shared<ObjectState>(mr);
-    auto payload = std::make_shared<GraphicsHandlePayload>();
+    auto *res = mr ? mr : keel::default_allocator();
+    auto st = keel::make_arc_in<ObjectState>(res, res);
+    auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
     payload->handleId = id;
-    st->native = payload;
-    return Value::object(className, std::move(st), /*isHandle=*/true, mr);
+    st->native = keel::move(payload);
+    return Value::object(className, keel::move(st), /*isHandle=*/true, res);
 }
 
-inline Value makeGraphicsHandleValue(const std::string &className, int id,
+inline Value makeGraphicsHandleValue(keel::StringRef className, int id,
                                      int numericVal,
                                      keel::Allocator *mr = nullptr)
 {
-    auto st = std::make_shared<ObjectState>(mr);
-    auto payload = std::make_shared<GraphicsHandlePayload>();
+    auto *res = mr ? mr : keel::default_allocator();
+    auto st = keel::make_arc_in<ObjectState>(res, res);
+    auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
     payload->handleId = id;
     payload->numericValue = numericVal;
-    st->native = payload;
-    return Value::object(className, std::move(st), /*isHandle=*/true, mr);
+    st->native = keel::move(payload);
+    return Value::object(className, keel::move(st), /*isHandle=*/true, res);
 }
 
 } // namespace numkit

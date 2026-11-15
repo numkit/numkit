@@ -240,7 +240,7 @@ private:
                                int ndims,
                                Environment *env,
                                keel::usize &outIdx);
-    std::vector<keel::usize> resolveIndex(
+    keel::Array<keel::usize> resolveIndex(
         const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env);
     Value execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env);
     std::vector<Value> execCallMulti(const ASTNode *node, Environment *env, keel::usize nout);

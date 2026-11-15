@@ -216,7 +216,7 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
     if (args.empty() || !args[0].isChar())
         throw Error("csvread requires a filename as the first argument");
 
-    std::string filename = resolveCsvPath(args[0].toString());
+    std::string filename = resolveCsvPath(std::string(args[0].toString().as_ref()));
 
     keel::usize r1 = 0, c1 = 0, r2 = 0, c2 = 0;
     bool haveRange = false;
@@ -257,7 +257,7 @@ void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
     if (!args[0].isChar())
         throw Error("csvwrite: first argument must be a filename");
 
-    std::string filename = resolveCsvPath(args[0].toString());
+    std::string filename = resolveCsvPath(std::string(args[0].toString().as_ref()));
     const Value &M = args[1];
 
     keel::usize offR = 0, offC = 0;

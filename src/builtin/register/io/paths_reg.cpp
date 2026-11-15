@@ -34,7 +34,7 @@ void fullfile_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
         if (!a.isChar() && !a.isString())
             throw Error("fullfile: all arguments must be strings",
                          0, 0, "fullfile", "", "numkit:fullfile:badArg");
-        parts.push_back(a.toString());
+        parts.push_back(std::string(a.toString().as_ref()));
     }
     outs[0] = fullfile(keel::ArrayRef<std::string>(parts.data(), parts.size()), ctx.engine->allocator());
 }
@@ -45,7 +45,7 @@ void fileparts_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     if (!args[0].isChar() && !args[0].isString())
         throw Error("fileparts: requires a string path",
                      0, 0, "fileparts", "", "numkit:fileparts:nargin");
-    auto [folder, name, ext] = fileparts(args[0].toString(), ctx.engine->allocator());
+    auto [folder, name, ext] = fileparts(std::string(args[0].toString().as_ref()), ctx.engine->allocator());
     outs[0] = std::move(folder);
     if (nargout > 1) outs[1] = std::move(name);
     if (nargout > 2) outs[2] = std::move(ext);
@@ -81,7 +81,7 @@ void genpathCollect(Engine &eng, const std::string &dir, std::string &out)
             if (e.name[0] == '@' || e.name[0] == '+' || e.name[0] == '.'
                 || e.name == "private")
                 continue;
-            genpathCollect(eng, dir + "/" + e.name, out);
+            genpathCollect(eng, dir + "/" + std::string(e.name.as_ref()), out);
         }
     } catch (...) {
         // Path not listable — just include the root.
@@ -96,7 +96,7 @@ void genpath_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         throw Error("genpath: requires a string directory name",
                      0, 0, "genpath", "", "numkit:genpath:nargin");
     std::string result;
-    genpathCollect(*ctx.engine, args[0].toString(), result);
+    genpathCollect(*ctx.engine, std::string(args[0].toString().as_ref()), result);
     outs[0] = Value::fromString(result, ctx.engine->allocator());
 }
 

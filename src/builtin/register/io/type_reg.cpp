@@ -26,7 +26,7 @@ void type_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                      0, 0, "type", "", "numkit:type:nargin");
     type(ctx.engine->fsContext(),
          [&ctx](const std::string &s) { ctx.engine->outputText(s); },
-         args[0].toString());
+         std::string(args[0].toString().as_ref()));
     outs[0] = Value();
 }
 

@@ -24,7 +24,7 @@ namespace detail {
 namespace {
 
 bool isCharArg(const Value &v) { return v.isChar() || v.isString(); }
-std::string charArg(const Value &v) { return v.toString(); }
+keel::String charArg(const Value &v) { return v.toString(); }
 
 } // namespace
 
@@ -85,7 +85,7 @@ void runNative_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
                     "of the native numkit interpreter (e.g. "
                     "setenv('NUMKIT_INTERP','numkit')).",
                     0, 0, "runNative", "", "numkit:runNative:nointerp");
-    const std::string script = charArg(args[0]);
+    const std::string script(charArg(args[0]).as_ref());
     std::string cmd;
 #ifdef _WIN32
     cmd = "\"\"" + std::string(interp) + "\" \"" + script + "\"\"";

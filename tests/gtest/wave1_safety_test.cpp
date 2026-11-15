@@ -68,8 +68,8 @@ TEST_P(Wave1SafetyTest, StringElemNoAliasingAndTableSortrows)
     Value sa = Value::stringArray(1, 2);
     sa.stringElemSet(0, "first_element");
     sa.stringElemSet(1, "second_element");
-    std::string s0 = sa.stringElem(0);
-    std::string s1 = sa.stringElem(1);
+    std::string s0(sa.stringElem(0).as_ref());
+    std::string s1(sa.stringElem(1).as_ref());
     EXPECT_EQ(s0, "first_element");
     EXPECT_EQ(s1, "second_element");
 

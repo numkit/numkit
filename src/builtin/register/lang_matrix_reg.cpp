@@ -119,10 +119,12 @@ void colon_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     for (keel::usize i = 0; i < args.size(); ++i) {
         if (args[i].isObject()) {
             const BuiltinClass *cls = ctx.engine->findClass(args[i].objectClassName());
-            if (cls && cls->ops.count("colon")) {
-                Value self = args[i];
-                cls->ops.at("colon")(self, args, 1, outs, ctx);
-                return;
+            if (cls) {
+                if (const ObjectMethod *op = cls->ops.get("colon")) {
+                    Value self = args[i];
+                    (*op)(self, args, 1, outs, ctx);
+                    return;
+                }
             }
             break;
         }
@@ -597,12 +599,13 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                     0, 0, "topkrows", "", "numkit:topkrows:badK");
     auto *mr = ctx.engine->allocator();
 
-    auto toLower = [](std::string s) {
+    auto toLower = [](keel::StringRef sv) {
+        std::string s(sv);
         for (char &ch : s)
             ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         return s;
     };
-    auto parseDirStr = [&](const std::string &raw) -> keel::u8 {
+    auto parseDirStr = [&](keel::StringRef raw) -> keel::u8 {
         std::string s = toLower(raw);
         if (s == "descend") return 1u;
         if (s == "ascend")  return 0u;
@@ -666,7 +669,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             i += 2;
             continue;
         }
-        throw Error("topkrows: unexpected argument '" + args[i].toString() + "'",
+        throw Error(keel::format("topkrows: unexpected argument '{}'", args[i].toString()),
                     0, 0, "topkrows", "", "numkit:topkrows:badArg");
     }
 
@@ -987,7 +990,7 @@ void pagemtimes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
         if (!v.isChar() && !v.isString())
             throw Error("pagemtimes: transpose flag must be a string",
                          0, 0, "pagemtimes", "", "numkit:pagemtimes:flagType");
-        const std::string s = v.toString();
+        const std::string s(v.toString().as_ref());
         if (s == "none")       return TranspOp::None;
         if (s == "transpose")  return TranspOp::Transpose;
         if (s == "ctranspose") return TranspOp::CTranspose;
@@ -1028,7 +1031,8 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     int dim = -1;
     bool descend = false;
     NanPlace nanPlace = NanPlace::Auto;
-    auto lower = [](std::string s) {
+    auto lower = [](keel::StringRef sv) {
+        std::string s(sv);
         for (char &ch : s) if (ch >= 'A' && ch <= 'Z') ch = char(ch + 32);
         return s;
     };
@@ -1102,7 +1106,8 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto cols = keel::Array<int>(scratch.allocator());
 
     // 'ascend' (false) / 'descend' (true), case-insensitive.
-    auto dirDescend = [](std::string s) -> bool {
+    auto dirDescend = [](keel::StringRef sv) -> bool {
+        std::string s(sv);
         for (auto &ch : s)
             ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         if (s == "ascend") return false;
@@ -1221,7 +1226,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         if (!(args[2].isChar() || args[2].isString()))
             throw Error("find: third argument must be 'first' or 'last'",
                          0, 0, "find", "", "numkit:find:badDir");
-        std::string d = args[2].toString();
+        keel::String d = args[2].toString();
         for (char &ch : d)
             if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + 32);
         if (d == "last") fromLast = true;
@@ -1305,10 +1310,9 @@ void horzcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     if (!args.empty() && args[0].isObject()) {
         if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
-            auto it = bc->ops.find("horzcat");
-            if (it != bc->ops.end()) {
+            if (const ObjectMethod *op = bc->ops.get("horzcat")) {
                 Value lhs = args[0];
-                it->second(lhs, args.slice(1), nargout, outs, ctx);
+                (*op)(lhs, args.slice(1), nargout, outs, ctx);
                 return;
             }
         }
@@ -1320,10 +1324,9 @@ void vertcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     if (!args.empty() && args[0].isObject()) {
         if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
-            auto it = bc->ops.find("vertcat");
-            if (it != bc->ops.end()) {
+            if (const ObjectMethod *op = bc->ops.get("vertcat")) {
                 Value lhs = args[0];
-                it->second(lhs, args.slice(1), nargout, outs, ctx);
+                (*op)(lhs, args.slice(1), nargout, outs, ctx);
                 return;
             }
         }
@@ -1470,7 +1473,7 @@ void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *f
             throw Error("cummax/cummin: trailing positional must be a string flag",
                         0, 0, "cummax/cummin", "", "numkit:cum:badArg");
         }
-        std::string s = args[i].toString();
+        std::string s(args[i].toString().as_ref());
         for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;
@@ -1613,7 +1616,7 @@ Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
     }
     for (; i < args.size(); ++i) {
         if (!(args[i].isChar() || args[i].isString())) continue;
-        std::string s = args[i].toString();
+        std::string s(args[i].toString().as_ref());
         for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;

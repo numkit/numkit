@@ -62,7 +62,7 @@ void round_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         argcheck::expectedReal(args[1], 2, "digits", "round"), 2, "digits", "round");
     bool significant = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
-        std::string s = args[2].toString();
+        keel::String s = args[2].toString();
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if      (s == "significant") significant = true;
         else if (s == "decimals")    significant = false;

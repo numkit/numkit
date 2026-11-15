@@ -35,7 +35,7 @@ std::string slurpFile(FsContext &fs, const std::string &filename, const char *fn
         throw Error(std::string(fnName) + ": cannot resolve filesystem for '" + filename + "'",
                      0, 0, fnName, "", std::string("numkit:") + fnName + ":noFs");
     try {
-        return resolved.fs->readFile(resolved.path);
+        return std::string(resolved.fs->readFile(resolved.path).as_ref());
     } catch (const std::exception &e) {
         throw Error(std::string(fnName) + ": " + e.what(),
                      0, 0, fnName, "", std::string("numkit:") + fnName + ":readFailed");
@@ -240,8 +240,8 @@ Value readlines(FsContext &fs, const std::string &filename,
 void writelines(FsContext &fs, const Value &lines, const std::string &filename)
 {
     std::ostringstream os;
-    auto append = [&](const std::string &s) {
-        os << s;
+    auto append = [&](keel::StringRef s) {
+        os << std::string_view(s);
 #ifdef _WIN32
         os << "\r\n";
 #else

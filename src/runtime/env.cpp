@@ -30,7 +30,7 @@ void setenv(keel::ArrayRef<Value> args)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("setenv: first argument must be a variable name");
-    std::string name = args[0].toString();
+    std::string name(args[0].toString().as_ref());
     if (name.empty())
         throw Error("setenv: variable name cannot be empty");
     if (name.find('=') != std::string::npos)
@@ -67,7 +67,7 @@ void setenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     (void)outs;
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
         throw Error("setenv: first argument must be a variable name");
-    std::string name = args[0].toString();
+    std::string name(args[0].toString().as_ref());
     if (name.empty())
         throw Error("setenv: variable name cannot be empty");
     if (name.find('=') != std::string::npos)
@@ -94,7 +94,7 @@ void loadmodule_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
 {
     if (args.empty() || !args[0].isChar())
         throw Error("loadmodule: first argument must be a module path or library name");
-    std::string path = args[0].toString();
+    std::string path(args[0].toString().as_ref());
     std::string targetNs;
     if (args.size() >= 2) {
         if (!args[1].isChar())

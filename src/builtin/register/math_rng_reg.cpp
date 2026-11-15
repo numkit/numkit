@@ -33,8 +33,8 @@ namespace detail {
 
 struct RandStreamPayload : NativePayload {
     ops::RngContext rng;
-    std::shared_ptr<NativePayload> clone() const override {
-        return std::make_shared<RandStreamPayload>(*this);
+    keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override {
+        return keel::make_arc_in<RandStreamPayload>(alloc, *this);
     }
 };
 
@@ -87,7 +87,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         throw Error("rand: type must be 'double' or 'single'",
                     0, 0, "rand", "", "numkit:rand:badType");
     if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
-        const std::string flag = dimArgs[0].toString();
+        const keel::String flag = dimArgs[0].toString();
         if (flag == "seed") {
             outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandSeed()),
                                     ctx.engine->allocator());
@@ -117,7 +117,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     }
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && !dimArgs[1].isChar()) {
-        const std::string flag = dimArgs[0].toString();
+        const keel::String flag = dimArgs[0].toString();
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Rand(
                 static_cast<keel::u64>(dimArgs[1].toScalar()));
@@ -189,7 +189,7 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         throw Error("randn: type must be 'double' or 'single'",
                     0, 0, "randn", "", "numkit:randn:badType");
     if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
-        const std::string flag = dimArgs[0].toString();
+        const keel::String flag = dimArgs[0].toString();
         if (flag == "seed") {
             outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandnSeed()),
                                     ctx.engine->allocator());
@@ -205,7 +205,7 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     }
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && !dimArgs[1].isChar()) {
-        const std::string flag = dimArgs[0].toString();
+        const keel::String flag = dimArgs[0].toString();
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Randn(
                 static_cast<keel::u64>(dimArgs[1].toScalar()));
@@ -364,84 +364,86 @@ void randperm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
 
 void register_randstream(Engine &engine)
 {
+    auto *clsAlloc = engine.allocator();
     BuiltinClass rs;
-    rs.name = "RandStream";
+    rs.name = keel::String("RandStream", clsAlloc);
     rs.isHandle = true;
-    rs.propNames = {"Type", "Seed"};
+    rs.propNames.push_back(keel::String("Type", clsAlloc));
+    rs.propNames.push_back(keel::String("Seed", clsAlloc));
     rs.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
         auto *mr = ctx.engine->allocator();
-        auto st = std::make_shared<ObjectState>(mr);
-        auto payload = std::make_shared<RandStreamPayload>();
-        std::string genType = "mt19937ar";
+        auto st = keel::make_arc_in<ObjectState>(mr, mr);
+        auto payload = keel::make_arc_in<RandStreamPayload>(mr);
+        keel::String genType("mt19937ar", mr);
         keel::u64 seedVal = 0;
         if (!args.empty() && (args[0].isChar() || args[0].isString()))
             genType = args[0].toString();
         for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar() && !args[i].isString()) continue;
-            std::string k = args[i].toString();
+            keel::String k = args[i].toString();
             if (k == "Seed" || k == "seed")
                 seedVal = static_cast<keel::u64>(std::max(0.0, args[i + 1].toScalar()));
         }
         payload->rng.seed(seedVal);
-        st->props["Type"] = Value::fromString(genType, mr);
-        st->props["Seed"] = Value::scalar(static_cast<double>(seedVal), mr);
-        st->native = std::move(payload);
-        return Value::object("RandStream", std::move(st), true, mr);
+        st->props.put(keel::String("Type", mr), Value::fromString(genType, mr));
+        st->props.put(keel::String("Seed", mr), Value::scalar(static_cast<double>(seedVal), mr));
+        st->native = keel::move(payload);
+        return Value::object("RandStream", keel::move(st), true, mr);
     };
-    rs.propGet = [](const Value &self, const std::string &name, Value &out, CallContext &) -> bool {
+    rs.propGet = [](const Value &self, keel::StringRef name, Value &out, CallContext &) -> bool {
         const auto *st = self.objectStateConst();
         if (!st) return false;
-        auto it = st->props.find(name);
-        if (it == st->props.end()) return false;
-        out = it->second;
+        const Value *v = st->props.get(name);
+        if (!v) return false;
+        out = *v;
         return true;
     };
-    rs.propSet = [](Value &self, const std::string &name, const Value &val, CallContext &) -> bool {
+    rs.propSet = [](Value &self, keel::StringRef name, const Value &val, CallContext &ctx) -> bool {
         if (auto *st = self.objectStateMut()) {
-            st->props[name] = val;
+            st->props.put(keel::String(name, ctx.engine->allocator()), val);
             return true;
         }
         return false;
     };
-    rs.methods["reset"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &) {
+    rs.methods.put(keel::String("reset", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &) {
         if (auto *st = self.objectStateMut()) {
             keel::u64 sd = 0;
             if (!args.empty() && args[0].isNumeric())
                 sd = static_cast<keel::u64>(std::max(0.0, args[0].toScalar()));
-            else if (st->props.count("Seed"))
-                sd = static_cast<keel::u64>(std::max(0.0, st->props["Seed"].toScalar()));
+            else if (const Value *sv = st->props.get("Seed"))
+                sd = static_cast<keel::u64>(std::max(0.0, sv->toScalar()));
             if (auto *p = dynamic_cast<RandStreamPayload *>(st->native.get()))
                 p->rng.seed(sd);
         }
-    };
-    rs.methods["rand"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    });
+    rs.methods.put(keel::String("rand", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         rand_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
-    };
-    rs.methods["randn"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    });
+    rs.methods.put(keel::String("randn", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         randn_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
-    };
-    rs.methods["randi"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    });
+    rs.methods.put(keel::String("randi", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         randi_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
-    };
-    rs.methods["randperm"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    });
+    rs.methods.put(keel::String("randperm", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         randperm_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
-    };
+    });
     engine.registerClass(std::move(rs));
 }
 

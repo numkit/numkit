@@ -3,6 +3,7 @@
 #include <keel/fs.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/core/engine.hpp>
 
@@ -68,22 +69,30 @@ public:
         return engine_.allocator();
     }
 
-    void registerFunction(const std::string &ns, const std::string &name, ExternalFunc func) override {
+    void registerFunction(keel::StringRef ns, keel::StringRef name, ExternalFunc func) override {
+        auto makeSharedWrapper = [](const keel::Arc<ExternalFunc> &fn) -> ExternalFunc {
+            return [fn](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, CallContext &c) {
+                (*fn)(a, n, o, c);
+            };
+        };
         if (!prefixNs_.empty()) {
-            // Primary namespace registration: prefixNs_.name (e.g. custom_sig.butter)
-            try {
-                engine_.registerFunction(prefixNs_, name, func);
-            } catch (...) {}
-
-            // Sub-namespace registration: prefixNs_.sub.name (e.g. custom_sig.filter_design.butter)
-            std::string sub = ns;
+            std::string sub(ns.data(), ns.size());
             auto dot = sub.find('.');
             if (dot != std::string::npos) {
                 sub = sub.substr(dot + 1);
             }
             if (!sub.empty() && sub != prefixNs_) {
+                auto sharedFn = keel::make_arc<ExternalFunc>(keel::move(func));
                 try {
-                    engine_.registerFunction(prefixNs_ + "." + sub, name, func);
+                    engine_.registerFunction(prefixNs_, name, makeSharedWrapper(sharedFn));
+                } catch (...) {}
+                try {
+                    std::string fullSub = prefixNs_ + "." + sub;
+                    engine_.registerFunction(fullSub, name, makeSharedWrapper(sharedFn));
+                } catch (...) {}
+            } else {
+                try {
+                    engine_.registerFunction(prefixNs_, name, keel::move(func));
                 } catch (...) {}
             }
         } else if (ns.empty()) {
@@ -99,23 +108,29 @@ public:
                 } catch (const std::exception &) {}
             }
         } else {
-            auto dot = ns.find('.');
-            std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
+            std::string nsStr(ns.data(), ns.size());
+            auto dot = nsStr.find('.');
+            std::string topNs = (dot != std::string::npos) ? nsStr.substr(0, dot) : nsStr;
             engine_.markPluginNamespace(topNs, /*isolated=*/false);
-            try {
-                engine_.registerFunction(ns, name, func);
-            } catch (const std::exception &) {
-                // Ignore duplicate registration when replacing or already present
-            }
             if (dot != std::string::npos) {
+                auto sharedFn = keel::make_arc<ExternalFunc>(keel::move(func));
                 try {
-                    engine_.registerFunction(topNs, name, std::move(func));
+                    engine_.registerFunction(ns, name, makeSharedWrapper(sharedFn));
+                } catch (const std::exception &) {
+                    // Ignore duplicate registration when replacing or already present
+                }
+                try {
+                    engine_.registerFunction(topNs, name, makeSharedWrapper(sharedFn));
+                } catch (const std::exception &) {}
+            } else {
+                try {
+                    engine_.registerFunction(ns, name, std::move(func));
                 } catch (const std::exception &) {}
             }
         }
     }
 
-    void registerFunction(const std::string &name, ExternalFunc func) override {
+    void registerFunction(keel::StringRef name, ExternalFunc func) override {
         if (!prefixNs_.empty()) {
             try {
                 engine_.registerFunction(prefixNs_, name, std::move(func));
@@ -137,7 +152,7 @@ public:
         return engine_.callFunctionHandle(handle, args, env);
     }
 
-    std::vector<Value> callFunctionHandleMulti(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout, Environment *env = nullptr) override {
+    keel::Array<Value> callFunctionHandleMulti(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout, Environment *env = nullptr) override {
         return engine_.callFunctionHandleMulti(handle, args, nargout, env);
     }
 
@@ -145,7 +160,7 @@ public:
         return engine_.rng();
     }
 
-    FsContext::ResolvedPath resolvePath(const std::string &userPath) const override {
+    FsContext::ResolvedPath resolvePath(keel::StringRef userPath) const override {
         return engine_.resolvePath(userPath);
     }
 
@@ -153,11 +168,11 @@ public:
         return engine_.figureManager();
     }
 
-    void registerBuiltinMSource(const std::string &src) override {
+    void registerBuiltinMSource(keel::StringRef src) override {
         engine_.registerBuiltinMSource(src);
     }
 
-    const ExternalFunc *findExternal(const std::string &name, const Environment *env = nullptr) const override {
+    const ExternalFunc *findExternal(keel::StringRef name, const Environment *env = nullptr) const override {
         return engine_.findExternal(name, env);
     }
 
@@ -167,11 +182,11 @@ public:
         } catch (const std::exception &) {}
     }
 
-    const BuiltinClass *findClass(const std::string &name) const override {
+    const BuiltinClass *findClass(keel::StringRef name) const override {
         return engine_.findClass(name);
     }
 
-    void assignToCaller(int n, const std::string &name, Value val) override {
+    void assignToCaller(keel::i32 n, keel::StringRef name, Value val) override {
         engine_.assignToCaller(n, name, std::move(val));
     }
 

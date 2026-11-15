@@ -68,7 +68,7 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
     if (args.empty() || !args[0].isChar())
         throw Error("save: filename required");
     engine.syncFrameToEnv(&env);
-    std::string filename = args[0].toString();
+    std::string filename(args[0].toString().as_ref());
 
     // Three-way mode pick: explicit flag wins; otherwise extension hint;
     // otherwise MATLAB default (binary mat).
@@ -84,7 +84,7 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar())
             continue;
-        std::string s = args[i].toString();
+        std::string s(args[i].toString().as_ref());
         if (s == "-ascii") { mode = Mode::Ascii; continue; }
         if (s == "-mat") { mode = Mode::Mat; continue; }
         if (s == "-v4") { mode = Mode::Mat; matVersion = 4; continue; }
@@ -126,13 +126,13 @@ void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
 {
     if (args.empty() || !args[0].isChar())
         throw Error("load: filename required");
-    std::string filename = args[0].toString();
+    std::string filename(args[0].toString().as_ref());
 
     enum class Mode { Auto, Ascii, Mat };
     Mode mode = Mode::Auto;
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar()) continue;
-        std::string s = args[i].toString();
+        std::string s(args[i].toString().as_ref());
         if (s == "-ascii") { mode = Mode::Ascii; continue; }
         if (s == "-mat" || s == "-v4" || s == "-v6" || s == "-v7") {
             mode = Mode::Mat; continue;

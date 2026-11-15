@@ -126,7 +126,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         }
         for (keel::usize i = nvStart; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar()) continue;
-            std::string key = args[i].toString();
+            std::string key(args[i].toString().as_ref());
             for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (key == "displayrange")    rangeArg = &args[i + 1];
             else if (key == "xdata")      xDataArg = &args[i + 1];

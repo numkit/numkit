@@ -134,7 +134,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         if (!a.isChar() && !a.isString())
             throw Error("unique: extra arguments must be string flags",
                          0, 0, "unique", "", "numkit:unique:badArg");
-        std::string s = a.toString();
+        std::string s(a.toString().as_ref());
         std::transform(s.begin(), s.end(), s.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (s == "rows") useRows = true;
@@ -157,7 +157,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                 return std::string(in.stringElem(idx));
             const Value &el = in.cellAt(idx);
             if (el.isChar() || el.isString())
-                return el.toString();
+                return std::string(el.toString().as_ref());
             throw Error("unique: cell array elements must be character vectors",
                         0, 0, "unique", "", "numkit:unique:cellNotChar");
         };
@@ -284,7 +284,8 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     bool haveEdges = false;
     HistBinSpec spec;   // method = Auto by default
 
-    auto lower = [](std::string s) {
+    auto lower = [](keel::StringRef sv) {
+        std::string s(sv);
         std::transform(s.begin(), s.end(), s.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return s;
@@ -371,8 +372,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                              0, 0, "histcounts", "", "numkit:histcounts:badBinMethod");
             ++i;
         } else {
-            throw Error("histcounts: option '" + args[i].toString() +
-                            "' not supported",
+            throw Error(keel::format("histcounts: option '{}' not supported", args[i].toString()),
                          0, 0, "histcounts", "", "numkit:histcounts:badOption");
         }
     }
@@ -505,7 +505,7 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         bool rows = false;
         for (keel::usize i = 2; i < args.size(); ++i)
             if (args[i].isChar() || args[i].isString()) {
-                std::string s = args[i].toString();
+                keel::String s = args[i].toString();
                 for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (s == "rows") rows = true;
             }
@@ -551,7 +551,7 @@ bool wantsStable(keel::ArrayRef<Value> args, keel::usize start)
 {
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
-            std::string s = args[i].toString();
+            keel::String s = args[i].toString();
             for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (s == "stable") return true;
         }
@@ -649,7 +649,7 @@ bool wantsRows(keel::ArrayRef<Value> args, keel::usize start)
 {
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
-            std::string s = args[i].toString();
+            keel::String s = args[i].toString();
             for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (s == "rows") return true;
         }

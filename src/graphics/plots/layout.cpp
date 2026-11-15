@@ -255,7 +255,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 int mnp = 0;
                 if (args[0].isChar() || args[0].isString()) {
-                    try { mnp = std::stoi(args[0].toString()); } catch (...) {}
+                    try { mnp = std::stoi(std::string(args[0].toString().as_ref())); } catch (...) {}
                 } else {
                     mnp = static_cast<int>(args[0].elemAsDouble(0));
                 }
@@ -386,7 +386,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "annotation",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
-            std::string type = args[0].toString();
+            std::string type(args[0].toString().as_ref());
             for (auto &c : type) c = (char)std::tolower(c);
             static const std::array<const char *, 6> kTypes = {
                 "line", "arrow", "textarrow", "ellipse", "rectangle",
@@ -427,7 +427,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto colorToHex = [](const Value &cv, std::string &hexOut) -> bool {
                 char buf[8];
                 if (cv.isChar()) {
-                    std::string s = cv.toString();
+                    std::string s(cv.toString().as_ref());
                     for (auto &ch : s) ch = (char)std::tolower(ch);
                     static const std::pair<const char *, const char *> kMap[] = {
                         {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
@@ -460,7 +460,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 1; i + 1 < args.size(); ++i) {
                 if (!args[i].isChar())
                     continue;
-                std::string key = args[i].toString();
+                std::string key(args[i].toString().as_ref());
                 for (auto &c : key) c = (char)std::tolower(c);
                 if (key == "string" && args[i + 1].isChar()) {
                     an.text = args[i + 1].toString();
@@ -586,7 +586,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // Normalise a Location string ("NorthWest" → "northwest"). MATLAB
     // accepts mixed case; we always lowercase. Empty / unrecognised
     // strings clear the field so the renderer falls back to its default.
-    auto normLocation = [](const std::string &raw) -> std::string {
+    auto normLocation = [](keel::StringRef raw) -> std::string {
         std::string s;
         s.reserve(raw.size());
         for (char c : raw) s.push_back((char)std::tolower((unsigned char)c));
@@ -622,7 +622,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             bool visibilityOnly = !args.empty();
             for (keel::usize i = 0; i < args.size() && visibilityOnly; ++i) {
                 if (!args[i].isChar()) { visibilityOnly = false; break; }
-                std::string s = args[i].toString();
+                std::string s(args[i].toString().as_ref());
                 std::string sl;
                 for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
                 if (sl != "boxoff" && sl != "boxon" && sl != "show"
@@ -654,7 +654,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     ax.legendLabels.push_back(argStr(args[i]));
                     continue;
                 }
-                std::string s = args[i].toString();
+                std::string s(args[i].toString().as_ref());
                 std::string sLower;
                 sLower.reserve(s.size());
                 for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
@@ -680,7 +680,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 if (isLegendProp && i + 1 < args.size()) {
                     if (sLower == "box" && (args[i + 1].isChar() || args[i + 1].isString())) {
-                        std::string bv = args[i + 1].toString();
+                        std::string bv(args[i + 1].toString().as_ref());
                         for (char &c : bv) c = (char)std::tolower((unsigned char)c);
                         ax.legendBoxOn = (bv != "off");
                     }
@@ -729,7 +729,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 ax.colorbarLocation = "east";
             for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar()) continue;
-                std::string s = args[i].toString();
+                std::string s(args[i].toString().as_ref());
                 std::string sLower;
                 sLower.reserve(s.size());
                 for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
@@ -774,7 +774,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
-                std::string mode = args[0].toString();
+                std::string mode(args[0].toString().as_ref());
                 if (mode == "off") {
                     ax.axisVisible = false;
                 } else if (mode == "on") {
@@ -822,7 +822,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
-                std::string v = args[0].toString();
+                std::string v(args[0].toString().as_ref());
                 if (v == "reverse" || v == "normal") {
                     fm.currentAxes().xDir = v;
                     fm.current().modified = true;
@@ -835,7 +835,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
-                std::string v = args[0].toString();
+                std::string v(args[0].toString().as_ref());
                 if (v == "reverse" || v == "normal") {
                     fm.currentAxes().yDir = v;
                     fm.current().modified = true;
@@ -882,7 +882,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (args[0].isChar()) {
-                std::string name = args[0].toString();
+                std::string name(args[0].toString().as_ref());
                 for (auto &c : name) c = std::tolower(c);
                 ax.colormapName = name;
                 ax.customColormapJson.clear();
@@ -925,7 +925,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.empty()) {
                 fm.currentAxes().colorScale = "linear";
             } else if (args[0].isChar()) {
-                std::string mode = args[0].toString();
+                std::string mode(args[0].toString().as_ref());
                 for (auto &c : mode) c = std::tolower(c);
                 if (mode == "log" || mode == "linear") {
                     fm.currentAxes().colorScale = mode;
@@ -945,7 +945,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 auto &fm = gc.fm;
                 std::string mode = "linear";
                 if (!args.empty() && args[0].isChar()) {
-                    std::string m = args[0].toString();
+                    std::string m(args[0].toString().as_ref());
                     for (auto &c : m) c = std::tolower(c);
                     if (m == "log" || m == "linear") mode = m;
                 }
@@ -973,7 +973,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             std::string side = "left";
             if (!args.empty() && args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "left" || s == "right") side = s;
             }
@@ -1003,7 +1003,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             std::string mode = "xy";  // MATLAB default when no mode arg
             for (auto &a : args) {
                 if (a.isChar()) {
-                    std::string s = a.toString();
+                    std::string s(a.toString().as_ref());
                     std::string sl;
                     sl.reserve(s.size());
                     for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
@@ -1029,7 +1029,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                                 GraphicsContext &gc) {
         std::string mode = "on";
         if (!args.empty() && args[0].isChar()) {
-            std::string s = args[0].toString();
+            std::string s(args[0].toString().as_ref());
             for (auto &c : s) c = (char)std::tolower((unsigned char)c);
             if (s == "on" || s == "off") mode = s;
         }
@@ -1066,7 +1066,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 return;
             }
             if (args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "auto") {
                     (ax.*field).clear();
@@ -1107,7 +1107,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             if (args.empty()) { outs[0] = Value(); return; }
             if (args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 std::string sl;
                 for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
                 if (sl == "auto") {
@@ -1125,7 +1125,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 0; i < n; ++i) {
                 if (i) os << ',';
                 Value elem = args[0].elemAt(i, gc.mr);
-                std::string s = elem.isChar() ? elem.toString() : "";
+                keel::String s = elem.isChar() ? elem.toString() : keel::String{};
                 os << '"';
                 for (char c : s) {
                     if (c == '"' || c == '\\') os << '\\';
@@ -1155,7 +1155,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            std::string s = args[0].toString();
+            std::string s(args[0].toString().as_ref());
             std::string sl;
             for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
             if (sl == "auto") {
@@ -1196,7 +1196,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         if (args.empty()) { outs[0] = Value(); return; }
         if (args[0].isChar()) {
-            std::string s = args[0].toString();
+            std::string s(args[0].toString().as_ref());
             for (auto &c : s) c = (char)std::tolower((unsigned char)c);
             if (s == "auto") {
                 fm.currentAxes().axisMode.clear();
@@ -1231,7 +1231,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.empty()) {
                 ax.boxOn = !ax.boxOn;
             } else if (args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if      (s == "on")  ax.boxOn = true;
                 else if (s == "off") ax.boxOn = false;
@@ -1273,7 +1273,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             ax.animatedDatasetIdx = -1;
             // 'reset' arg: also clear axis config + scales.
             if (!args.empty() && args[0].isChar()) {
-                std::string s = args[0].toString();
+                std::string s(args[0].toString().as_ref());
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "reset") {
                     ax.title.clear(); ax.subtitle.clear();

@@ -52,12 +52,12 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     if (args.size() >= 5) {
         const Value &e = args[4];
         if (e.isChar() || e.isString()) {
-            std::string es = e.toString();
+            keel::String es = e.toString();
             for (char &c : es) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (es == "extrap")
                 mode = Interp1Extrap::Method;
             else
-                throw Error("interp1: unknown extrapolation option '" + e.toString() + "'",
+                throw Error(keel::format("interp1: unknown extrapolation option '{}'", e.toString()),
                              0, 0, "interp1", "", "numkit:interp1:badExtrap");
         } else {
             mode = Interp1Extrap::Const;

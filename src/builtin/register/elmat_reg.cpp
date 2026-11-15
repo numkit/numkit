@@ -230,7 +230,7 @@ void register_elmat(Engine &engine) {
             auto *mr = ctx.engine->allocator();
 
             if (fn.isFuncHandle()) {
-                const std::string name = fn.funcHandleName();
+                const keel::String name = fn.funcHandleName();
                 if (!name.empty() && name[0] != '@') {
                     try {
                         outs[0] = numkit::builtin::bsxfun(name, a, b, mr);
@@ -286,7 +286,7 @@ void register_elmat(Engine &engine) {
             }
             const Value &x = args[0];
             if (x.isChar() || x.isString()) {
-                std::string s = x.toString();
+                keel::String s = x.toString();
                 if (s == "single") {
                     Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
                     out.singleDataMut()[0] = std::numeric_limits<float>::epsilon();

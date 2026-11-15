@@ -89,12 +89,12 @@ void register_lang(Engine &engine) {
         long long nll = static_cast<long long>(args[0].toScalar());
         keel::usize n = (nll > 0) ? static_cast<keel::usize>(nll) : 1;
         keel::ArrayRef<Value> callArgs(args.data() + 2, args.size() - 2);
-        std::vector<Value> rs;
+        keel::Array<Value> rs(ctx.engine->allocator());
         bool done = false;
         if (args[1].isChar() || args[1].isString()) {
-            const std::string fname = args[1].toString();
+            const keel::String fname = args[1].toString();
             if (const ExternalFunc *ef = ctx.engine->findExternal(fname, ctx.env)) {
-                rs.assign(n, Value());
+                rs.resize(n);
                 (*ef)(callArgs, n, keel::MutArrayRef<Value>(rs.data(), n), ctx);
                 done = true;
             }

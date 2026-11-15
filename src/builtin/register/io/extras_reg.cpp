@@ -19,7 +19,7 @@ void fileread_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     if (!args[0].isChar() && !args[0].isString())
         throw Error("fileread: requires a filename string",
                      0, 0, "fileread", "", "numkit:fileread:nargin");
-    outs[0] = fileread(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
+    outs[0] = fileread(ctx.engine->fsContext(), std::string(args[0].toString().as_ref()), ctx.engine->allocator());
 }
 
 void readlines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -28,7 +28,7 @@ void readlines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
     if (!args[0].isChar() && !args[0].isString())
         throw Error("readlines: requires a filename string",
                      0, 0, "readlines", "", "numkit:readlines:nargin");
-    outs[0] = readlines(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
+    outs[0] = readlines(ctx.engine->fsContext(), std::string(args[0].toString().as_ref()), ctx.engine->allocator());
 }
 
 void writelines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -37,7 +37,7 @@ void writelines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
     if (!args[1].isChar() && !args[1].isString())
         throw Error("writelines: filename must be a string",
                      0, 0, "writelines", "", "numkit:writelines:badFilename");
-    writelines(ctx.engine->fsContext(), args[0], args[1].toString());
+    writelines(ctx.engine->fsContext(), args[0], std::string(args[1].toString().as_ref()));
     outs[0] = Value();
 }
 
@@ -47,7 +47,7 @@ void readmatrix_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
     if (!args[0].isChar() && !args[0].isString())
         throw Error("readmatrix: requires a filename string",
                      0, 0, "readmatrix", "", "numkit:readmatrix:nargin");
-    outs[0] = readmatrix(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
+    outs[0] = readmatrix(ctx.engine->fsContext(), std::string(args[0].toString().as_ref()), ctx.engine->allocator());
 }
 
 void writematrix_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -56,7 +56,7 @@ void writematrix_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
     if (!args[1].isChar() && !args[1].isString())
         throw Error("writematrix: filename must be a string",
                      0, 0, "writematrix", "", "numkit:writematrix:badFilename");
-    writematrix(ctx.engine->fsContext(), args[0], args[1].toString());
+    writematrix(ctx.engine->fsContext(), args[0], std::string(args[1].toString().as_ref()));
     outs[0] = Value();
 }
 

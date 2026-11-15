@@ -56,7 +56,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto isSpec = [](const Value &v) {
                 if (!v.isChar()) return false;
                 static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-                std::string s = v.toString();
+                std::string s(v.toString().as_ref());
                 if (s.empty()) return false;
                 for (char c : s)
                     if (alpha.find(c) == std::string::npos) return false;
@@ -91,7 +91,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 }
                 while (i + 1 < args.size() && args[i].isChar()
                        && !isSpec(args[i])) {
-                    std::string key = args[i].toString();
+                    std::string key(args[i].toString().as_ref());
                     for (auto &c : key)
                         c = (char)std::tolower((unsigned char)c);
                     if (key == "linewidth")
@@ -164,7 +164,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto isSpec = [](const Value &v) {
             if (!v.isChar()) return false;
             static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-            std::string s = v.toString();
+            std::string s(v.toString().as_ref());
             if (s.empty()) return false;
             for (char c : s)
                 if (alpha.find(c) == std::string::npos) return false;
@@ -193,7 +193,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             while (i + 1 < args.size() && args[i].isChar()
                    && !isSpec(args[i])) {
-                std::string key = args[i].toString();
+                std::string key(args[i].toString().as_ref());
                 for (auto &c : key)
                     c = (char)std::tolower((unsigned char)c);
                 if (key == "linewidth")
@@ -1035,7 +1035,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 auto isSpec = [](const Value &v) {
                     if (!v.isChar()) return false;
                     static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-                    std::string s = v.toString();
+                    std::string s(v.toString().as_ref());
                     if (s.empty()) return false;
                     for (char c : s)
                         if (alpha.find(c) == std::string::npos) return false;
@@ -1065,7 +1065,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     }
                     while (i + 1 < args.size() && args[i].isChar()
                            && !isSpec(args[i])) {
-                        std::string key = args[i].toString();
+                        std::string key(args[i].toString().as_ref());
                         for (auto &c : key)
                             c = (char)std::tolower((unsigned char)c);
                         if (key == "linewidth")
@@ -1482,7 +1482,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             for (; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                std::string key = args[i].toString();
+                std::string key(args[i].toString().as_ref());
                 for (auto &c : key) c = (char)std::tolower((unsigned char)c);
                 if (key == "xdata" && args[i + 1].isNumeric())
                     ds.xJson = vecToJson(args[i + 1]);

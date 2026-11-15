@@ -146,9 +146,9 @@ struct UpvaluePayload final : NativePayload
         value = std::move(v);
     }
 
-    std::shared_ptr<NativePayload> clone() const override
+    keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
-        auto cp = std::make_shared<UpvaluePayload>(value);
+        auto cp = keel::make_arc_in<UpvaluePayload>(alloc ? alloc : keel::default_allocator(), value);
         cp->globalEnv = globalEnv;
         cp->persistentBucket = persistentBucket;
         cp->backingName = backingName;
@@ -159,9 +159,9 @@ struct UpvaluePayload final : NativePayload
 inline Value makeUpvalueBox(Value init = Value(), keel::Allocator *mr = nullptr)
 {
     auto *res = mr ? mr : keel::default_allocator();
-    auto st = std::make_shared<ObjectState>(res);
-    st->native = std::make_shared<UpvaluePayload>(std::move(init));
-    return Value::object("__upvalue__", std::move(st), /*isHandle=*/true, res);
+    auto st = keel::make_arc_in<ObjectState>(res, res);
+    st->native = keel::make_arc_in<UpvaluePayload>(res, keel::move(init));
+    return Value::object("__upvalue__", keel::move(st), /*isHandle=*/true, res);
 }
 
 inline UpvaluePayload *asUpvalueBox(const Value &v) noexcept
