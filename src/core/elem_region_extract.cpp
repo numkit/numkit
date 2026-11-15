@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
 
@@ -35,13 +36,13 @@ AxisRange axisOf(const ASTNode *n)
     if (!n)
         return AxisRange{AxisRange::UNRESOLVED, 0, 0};
     if (n->type == NodeType::COLON_EXPR) {
-        const size_t nv = n->children.size();
+        const keel::usize nv = n->children.size();
         if (nv == 0)
             return AxisRange{AxisRange::FULL, 0, 0};       // ':'
         if (nv > 3)
             return AxisRange{AxisRange::UNRESOLVED, 0, 0};
         long long v[3] = {0, 0, 0};
-        for (size_t k = 0; k < nv; ++k)
+        for (keel::usize k = 0; k < nv; ++k)
             if (!literalInt(n->children[k].get(), v[k]))
                 return AxisRange{AxisRange::UNRESOLVED, 0, 0};
         long long lo = v[0], hi = (nv == 2) ? v[1] : v[2];
@@ -77,12 +78,12 @@ void recordAccess(ElemAccessMap &m, const std::string &base,
     if (rows.kind == AxisRange::FULL && cols.kind == AxisRange::FULL)
         { vr.setAll(); return; }              // C(:, :) — whole var
     ElemRegion r;
-    r.r0 = rows.kind == AxisRange::RANGE ? (size_t)rows.lo : (size_t)1;
-    r.r1 = rows.kind == AxisRange::RANGE ? (size_t)rows.hi
-                                         : (size_t)-1;
-    r.c0 = cols.kind == AxisRange::RANGE ? (size_t)cols.lo : (size_t)1;
-    r.c1 = cols.kind == AxisRange::RANGE ? (size_t)cols.hi
-                                         : (size_t)-1;
+    r.r0 = rows.kind == AxisRange::RANGE ? (keel::usize)rows.lo : (keel::usize)1;
+    r.r1 = rows.kind == AxisRange::RANGE ? (keel::usize)rows.hi
+                                         : (keel::usize)-1;
+    r.c0 = cols.kind == AxisRange::RANGE ? (keel::usize)cols.lo : (keel::usize)1;
+    r.c1 = cols.kind == AxisRange::RANGE ? (keel::usize)cols.hi
+                                         : (keel::usize)-1;
     if ((rows.kind == AxisRange::RANGE && rows.lo < 1)
         || (cols.kind == AxisRange::RANGE && cols.lo < 1))
         { vr.setAll(); return; }              // 0/negative index — ALL

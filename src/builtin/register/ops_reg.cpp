@@ -1,56 +1,59 @@
 // src/bundle/src/register/builtin/ops_reg.cpp
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include <numkit/builtin/ops.hpp>
 #include <numkit/builtin/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 // Each registered adapter in ops/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
-void all_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void and_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void any_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ctranspose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cummax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cummin_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cumprod_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cumsum_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void diag_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void diff_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void eq_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void find_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ge_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gt_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void horzcat_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ldivide_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void le_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void lt_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void meshgrid_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void minus_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mldivide_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mpower_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mrdivide_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mtimes_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ndgrid_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ne_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nnz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nonzeros_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void not_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void or_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pagemtimes_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void plus_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void power_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rdivide_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sort_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sortrows_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void times_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uminus_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uplus_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void vertcat_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void xor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void all_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void and_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void any_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ctranspose_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cummax_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cummin_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cumprod_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cumsum_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void diag_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void diff_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void eq_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void find_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ge_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gt_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void horzcat_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ldivide_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void le_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void lt_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void meshgrid_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void minus_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mldivide_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mpower_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mrdivide_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mtimes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ndgrid_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ne_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nnz_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nonzeros_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void not_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void or_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pagemtimes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void plus_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void power_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rdivide_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sort_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sortrows_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void times_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uminus_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uplus_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void vertcat_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void xor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
 namespace numkit {
@@ -78,9 +81,9 @@ bool toTfPoly(const Value &v, TfPoly &out) {
         if (!nv.isNumeric() || !dv.isNumeric() || nv.isComplex() || dv.isComplex())
             return false;
         out.num.resize(nv.numel());
-        for (size_t i = 0; i < nv.numel(); ++i) out.num[i] = nv.elemAsDouble(i);
+        for (keel::usize i = 0; i < nv.numel(); ++i) out.num[i] = nv.elemAsDouble(i);
         out.den.resize(dv.numel());
-        for (size_t i = 0; i < dv.numel(); ++i) out.den[i] = dv.elemAsDouble(i);
+        for (keel::usize i = 0; i < dv.numel(); ++i) out.den[i] = dv.elemAsDouble(i);
         out.Ts = v.hasField("Ts") ? v.field("Ts").toScalar() : 0.0;
         return true;
     }
@@ -94,7 +97,7 @@ bool toTfPoly(const Value &v, TfPoly &out) {
 }
 
 std::vector<double> polyStrip(const std::vector<double> &p) {
-    size_t i = 0;
+    keel::usize i = 0;
     while (i + 1 < p.size() && p[i] == 0.0) ++i;
     if (i >= p.size()) return {0.0};
     return std::vector<double>(p.begin() + i, p.end());
@@ -103,35 +106,35 @@ std::vector<double> polyStrip(const std::vector<double> &p) {
 std::vector<double> polyMul(const std::vector<double> &a, const std::vector<double> &b) {
     if (a.empty() || b.empty()) return {0.0};
     std::vector<double> c(a.size() + b.size() - 1, 0.0);
-    for (size_t i = 0; i < a.size(); ++i)
-        for (size_t j = 0; j < b.size(); ++j)
+    for (keel::usize i = 0; i < a.size(); ++i)
+        for (keel::usize j = 0; j < b.size(); ++j)
             c[i + j] += a[i] * b[j];
     return polyStrip(c);
 }
 
 std::vector<double> polyAdd(const std::vector<double> &a, const std::vector<double> &b, double sign) {
-    const size_t n = std::max(a.size(), b.size());
+    const keel::usize n = std::max(a.size(), b.size());
     std::vector<double> c(n, 0.0);
-    for (size_t i = 0; i < a.size(); ++i)
+    for (keel::usize i = 0; i < a.size(); ++i)
         c[n - a.size() + i] += a[i];
-    for (size_t i = 0; i < b.size(); ++i)
+    for (keel::usize i = 0; i < b.size(); ++i)
         c[n - b.size() + i] += sign * b[i];
     return polyStrip(c);
 }
 
 Value buildTfValue(const std::vector<double> &num, const std::vector<double> &den,
-                   double Ts, std::pmr::memory_resource *mr) {
+                   double Ts, keel::Allocator *mr) {
     std::vector<double> ns = polyStrip(num);
     std::vector<double> ds = polyStrip(den);
-    const size_t len = std::max(ns.size(), ds.size());
+    const keel::usize len = std::max(ns.size(), ds.size());
     Value nv = Value::matrix(1, len, ValueType::DOUBLE, mr);
     Value dv = Value::matrix(1, len, ValueType::DOUBLE, mr);
     double *nd = nv.doubleDataMut();
     double *dd = dv.doubleDataMut();
     std::fill(nd, nd + len, 0.0);
     std::fill(dd, dd + len, 0.0);
-    for (size_t i = 0; i < ns.size(); ++i) nd[len - ns.size() + i] = ns[i];
-    for (size_t i = 0; i < ds.size(); ++i) dd[len - ds.size() + i] = ds[i];
+    for (keel::usize i = 0; i < ns.size(); ++i) nd[len - ns.size() + i] = ns[i];
+    for (keel::usize i = 0; i < ds.size(); ++i) dd[len - ds.size() + i] = ds[i];
     Value s = Value::structure(mr);
     s.field("kind") = Value::fromString("tf", mr);
     s.field("Ts") = Value::scalar(Ts, mr);
@@ -141,7 +144,7 @@ Value buildTfValue(const std::vector<double> &num, const std::vector<double> &de
 }
 
 bool tryTfBinaryOp(char op, const Value &a, const Value &b,
-                   std::pmr::memory_resource *mr, Value &out) {
+                   keel::Allocator *mr, Value &out) {
     if (!isTfStruct(a) && !isTfStruct(b)) return false;
     TfPoly pa, pb;
     if (!toTfPoly(a, pa)) return false;
@@ -152,7 +155,7 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
         const int k = static_cast<int>(expVal);
         if (static_cast<double>(k) != expVal) return false;
         std::vector<double> num = {1.0}, den = {1.0};
-        const int ak = std::abs(k);
+        const int ak = keel::abs(k);
         const auto &baseN = (k >= 0) ? pa.num : pa.den;
         const auto &baseD = (k >= 0) ? pa.den : pa.num;
         for (int i = 0; i < ak; ++i) {
@@ -190,48 +193,48 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
 void BuiltinLibrary::registerBinaryOps(Engine &engine)
 {
     engine.registerBinaryOp("+",  [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('+', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::plus(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('+', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::plus(a, b, engine.allocator());
     });
     engine.registerBinaryOp("-",  [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('-', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::minus(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('-', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::minus(a, b, engine.allocator());
     });
     engine.registerBinaryOp(".*", [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('*', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::times(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('*', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::times(a, b, engine.allocator());
     });
     engine.registerBinaryOp("*",  [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('*', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::mtimes(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('*', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::mtimes(a, b, engine.allocator());
     });
     engine.registerBinaryOp("./", [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('/', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::rdivide(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('/', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::rdivide(a, b, engine.allocator());
     });
     engine.registerBinaryOp("/",  [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('/', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::mrdivide(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('/', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::mrdivide(a, b, engine.allocator());
     });
-    engine.registerBinaryOp("\\", [&engine](const Value &a, const Value &b) { return numkit::builtin::mldivide(a, b, engine.resource()); });
+    engine.registerBinaryOp("\\", [&engine](const Value &a, const Value &b) { return numkit::builtin::mldivide(a, b, engine.allocator()); });
     engine.registerBinaryOp("^",  [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('^', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::power(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('^', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::power(a, b, engine.allocator());
     });
     engine.registerBinaryOp(".^", [&engine](const Value &a, const Value &b) {
-        Value r; if (tryTfBinaryOp('^', a, b, engine.resource(), r)) return r;
-        return numkit::builtin::elementPower(a, b, engine.resource());
+        Value r; if (tryTfBinaryOp('^', a, b, engine.allocator(), r)) return r;
+        return numkit::builtin::elementPower(a, b, engine.allocator());
     });
 
-    engine.registerBinaryOp("==", [&engine](const Value &a, const Value &b) { return numkit::builtin::eq(a, b, engine.resource()); });
-    engine.registerBinaryOp("~=", [&engine](const Value &a, const Value &b) { return numkit::builtin::ne(a, b, engine.resource()); });
-    engine.registerBinaryOp("<",  [&engine](const Value &a, const Value &b) { return numkit::builtin::lt(a, b, engine.resource()); });
-    engine.registerBinaryOp(">",  [&engine](const Value &a, const Value &b) { return numkit::builtin::gt(a, b, engine.resource()); });
-    engine.registerBinaryOp("<=", [&engine](const Value &a, const Value &b) { return numkit::builtin::le(a, b, engine.resource()); });
-    engine.registerBinaryOp(">=", [&engine](const Value &a, const Value &b) { return numkit::builtin::ge(a, b, engine.resource()); });
+    engine.registerBinaryOp("==", [&engine](const Value &a, const Value &b) { return numkit::builtin::eq(a, b, engine.allocator()); });
+    engine.registerBinaryOp("~=", [&engine](const Value &a, const Value &b) { return numkit::builtin::ne(a, b, engine.allocator()); });
+    engine.registerBinaryOp("<",  [&engine](const Value &a, const Value &b) { return numkit::builtin::lt(a, b, engine.allocator()); });
+    engine.registerBinaryOp(">",  [&engine](const Value &a, const Value &b) { return numkit::builtin::gt(a, b, engine.allocator()); });
+    engine.registerBinaryOp("<=", [&engine](const Value &a, const Value &b) { return numkit::builtin::le(a, b, engine.allocator()); });
+    engine.registerBinaryOp(">=", [&engine](const Value &a, const Value &b) { return numkit::builtin::ge(a, b, engine.allocator()); });
 
-    engine.registerBinaryOp("&",  [&engine](const Value &a, const Value &b) { return numkit::builtin::logical_and(a, b, engine.resource()); });
-    engine.registerBinaryOp("|",  [&engine](const Value &a, const Value &b) { return numkit::builtin::logical_or(a, b, engine.resource()); });
+    engine.registerBinaryOp("&",  [&engine](const Value &a, const Value &b) { return numkit::builtin::logical_and(a, b, engine.allocator()); });
+    engine.registerBinaryOp("|",  [&engine](const Value &a, const Value &b) { return numkit::builtin::logical_or(a, b, engine.allocator()); });
 }
 
 void BuiltinLibrary::registerUnaryOps(Engine &engine)
@@ -241,18 +244,18 @@ void BuiltinLibrary::registerUnaryOps(Engine &engine)
             TfPoly pa;
             if (toTfPoly(a, pa)) {
                 for (double &c : pa.num) c = -c;
-                return buildTfValue(pa.num, pa.den, pa.Ts, engine.resource());
+                return buildTfValue(pa.num, pa.den, pa.Ts, engine.allocator());
             }
         }
-        return numkit::builtin::uminus(a, engine.resource());
+        return numkit::builtin::uminus(a, engine.allocator());
     });
     engine.registerUnaryOp("+",  [&engine](const Value &a) {
         if (isTfStruct(a)) return a;
-        return numkit::builtin::uplus(a, engine.resource());
+        return numkit::builtin::uplus(a, engine.allocator());
     });
-    engine.registerUnaryOp("~",  [&engine](const Value &a) { return numkit::builtin::logical_not(a, engine.resource()); });
-    engine.registerUnaryOp("'",  [&engine](const Value &a) { return numkit::builtin::ctranspose(a, engine.resource()); });
-    engine.registerUnaryOp(".'", [&engine](const Value &a) { return numkit::builtin::transposeNC(a, engine.resource()); });
+    engine.registerUnaryOp("~",  [&engine](const Value &a) { return numkit::builtin::logical_not(a, engine.allocator()); });
+    engine.registerUnaryOp("'",  [&engine](const Value &a) { return numkit::builtin::ctranspose(a, engine.allocator()); });
+    engine.registerUnaryOp(".'", [&engine](const Value &a) { return numkit::builtin::transposeNC(a, engine.allocator()); });
 }
 
 } // namespace numkit

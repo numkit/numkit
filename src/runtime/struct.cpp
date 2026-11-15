@@ -4,11 +4,15 @@
 // Shares function-handle dispatch helpers with cell.cpp via the inline
 // header below.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/runtime/struct.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/vm.hpp>
 
@@ -22,12 +26,12 @@ namespace hf = ::numkit::runtime::detail::handlefn;
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-Value structure(std::pmr::memory_resource *)
+Value structure(keel::Allocator *)
 {
     return Value::structure();
 }
 
-Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
+Value structure(keel::ArrayRef<Value> nameValuePairs, keel::Allocator *mr)
 {
     // First pass: validate names and determine array shape. If any value
     // is a CELL, struct() unwraps cells; non-scalar cells define the
@@ -35,11 +39,11 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
     // broadcast their single element across the struct array (or produce
     // a scalar struct when all cells are 1x1). Non-cell values are
     // broadcast to every element.
-    size_t arrRows = 1;
-    size_t arrCols = 1;
+    keel::usize arrRows = 1;
+    keel::usize arrCols = 1;
     bool hasCell = false;
     bool hasNonScalarCell = false;
-    for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2) {
+    for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
         const Value &name = nameValuePairs[i];
         if (!name.isChar() && !name.isString())
             throw Error("struct: field names must be char arrays", 0, 0, "struct", "",
@@ -47,8 +51,8 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
             hasCell = true;
-            const size_t r = v.dims().rows();
-            const size_t c = v.dims().cols();
+            const keel::usize r = v.dims().rows();
+            const keel::usize c = v.dims().cols();
             if (r != 1 || c != 1) {
                 if (!hasNonScalarCell) {
                     arrRows = r;
@@ -65,7 +69,7 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
     if (!hasNonScalarCell) {
         // Scalar struct path (either no cells, or only 1x1 scalar cells).
         auto s = Value::structure(mr);
-        for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2) {
+        for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
             const Value &v = nameValuePairs[i + 1];
             s.field(nameValuePairs[i].toString()) = (hasCell && v.isCell()) ? v.cellAt(0) : v;
         }
@@ -74,8 +78,8 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
 
     // Struct array.
     auto s = Value::structArray(arrRows, arrCols, mr);
-    const size_t numel = arrRows * arrCols;
-    for (size_t i = 0; i + 1 < nameValuePairs.size(); i += 2) {
+    const keel::usize numel = arrRows * arrCols;
+    for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
         std::string fname = nameValuePairs[i].toString();
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
@@ -83,7 +87,7 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
                 s.setFieldAll(fname, v.cellAt(0));
             } else {
                 // Per-element assignment from cell — use setField (preserves order)
-                for (size_t k = 0; k < numel; ++k)
+                for (keel::usize k = 0; k < numel; ++k)
                     s.setField(k, fname, v.cellAt(k));
             }
         } else {
@@ -93,7 +97,7 @@ Value structure(Span<const Value> nameValuePairs, std::pmr::memory_resource *mr)
     return s;
 }
 
-Value fieldnames(const Value &s, std::pmr::memory_resource *mr)
+Value fieldnames(const Value &s, keel::Allocator *mr)
 {
     if (!s.isStruct())
         throw Error("fieldnames requires a struct", 0, 0, "fieldnames", "",
@@ -103,12 +107,12 @@ Value fieldnames(const Value &s, std::pmr::memory_resource *mr)
     // to map iteration for legacy/cloned structs missing fieldOrder.
     const auto names = s.fieldNamesInOrder();
     auto c = Value::cell(names.size(), names.empty() ? 0 : 1, mr);
-    for (size_t i = 0; i < names.size(); ++i)
+    for (keel::usize i = 0; i < names.size(); ++i)
         c.cellAt(i) = Value::fromString(names[i], mr);
     return c;
 }
 
-Value isfield(const Value &s, const Value &name, std::pmr::memory_resource *mr)
+Value isfield(const Value &s, const Value &name, keel::Allocator *mr)
 {
     if (!s.isStruct())
         return Value::logicalScalar(false, mr);
@@ -122,7 +126,7 @@ Value isfield(const Value &s, const Value &name, std::pmr::memory_resource *mr)
     return Value::logicalScalar(s.hasField(name.toString()), mr);
 }
 
-Value rmfield(const Value &s, const Value &name, std::pmr::memory_resource *)
+Value rmfield(const Value &s, const Value &name, keel::Allocator *)
 {
     if (!s.isStruct())
         throw Error("rmfield requires a struct", 0, 0, "rmfield", "",
@@ -133,22 +137,22 @@ Value rmfield(const Value &s, const Value &name, std::pmr::memory_resource *)
 }
 
 Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
-                std::pmr::memory_resource *mr)
+                keel::Allocator *mr)
 {
     if (!s.isStruct())
         throw Error("structfun: second argument must be a scalar struct",
                      0, 0, "structfun", "", "numkit:structfun:notStruct");
 
     const auto &fields = s.structFields();
-    const size_t n = fields.size();
-    ScratchArena scratch(mr);
-    ScratchVec<Value> results(&scratch);
+    const keel::usize n = fields.size();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<Value> results(scratch.allocator());
     results.reserve(n);
     for (const auto &kv : fields) {
         Value arg = kv.second;
         Value out;
-        Span<const Value> ar(&arg, 1);
-        Span<Value>       ou(&out, 1);
+        keel::ArrayRef<Value> ar(&arg, 1);
+        keel::MutArrayRef<Value>       ou(&out, 1);
         fn(ar, ou, mr);
         results.push_back(std::move(out));
     }
@@ -159,7 +163,7 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
         const ValueType outT = (n > 0 && results[0].isLogical())
                                   ? ValueType::LOGICAL : ValueType::DOUBLE;
         auto out = Value::matrix(n, 1, outT, mr);
-        for (size_t i = 0; i < n; ++i) {
+        for (keel::usize i = 0; i < n; ++i) {
             const Value &v = results[i];
             if (!v.isScalar())
                 throw Error("structfun: fn returned a non-scalar; pass 'UniformOutput', false",
@@ -174,7 +178,7 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
 
     // Cell output, column vector (1 entry per field).
     auto out = Value::cell(n, 1);
-    for (size_t i = 0; i < n; ++i)
+    for (keel::usize i = 0; i < n; ++i)
         out.cellAt(i) = std::move(results[i]);
     return out;
 }
@@ -183,7 +187,7 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
 // Pack 14: getfield / setfield / orderfields / struct2cell / cell2struct
 // ════════════════════════════════════════════════════════════════════════
 
-Value getfield(const Value &s, const Value &name, std::pmr::memory_resource *)
+Value getfield(const Value &s, const Value &name, keel::Allocator *)
 {
     if (!s.isStruct())
         throw Error("getfield requires a struct", 0, 0, "getfield", "",
@@ -206,7 +210,7 @@ Value getfield(const Value &s, const Value &name, std::pmr::memory_resource *)
     return s.field(n);
 }
 
-Value setfield(const Value &s, const Value &name, const Value &value, std::pmr::memory_resource *mr)
+Value setfield(const Value &s, const Value &name, const Value &value, keel::Allocator *mr)
 {
     Value out;
     if (s.isStruct()) {
@@ -225,23 +229,23 @@ Value setfield(const Value &s, const Value &name, const Value &value, std::pmr::
     return out;
 }
 
-Value isfield(const Value &s, const std::string &field, std::pmr::memory_resource *mr) {
+Value isfield(const Value &s, const std::string &field, keel::Allocator *mr) {
     return isfield(s, Value::fromString(field, mr), mr);
 }
 
-Value getfield(const Value &s, const std::string &field, std::pmr::memory_resource *mr) {
+Value getfield(const Value &s, const std::string &field, keel::Allocator *mr) {
     return getfield(s, Value::fromString(field, mr), mr);
 }
 
-Value setfield(const Value &s, const std::string &field, const Value &val, std::pmr::memory_resource *mr) {
+Value setfield(const Value &s, const std::string &field, const Value &val, keel::Allocator *mr) {
     return setfield(s, Value::fromString(field, mr), val, mr);
 }
 
-Value rmfield(const Value &s, const std::string &field, std::pmr::memory_resource *mr) {
+Value rmfield(const Value &s, const std::string &field, keel::Allocator *mr) {
     return rmfield(s, Value::fromString(field, mr), mr);
 }
 
-Value orderfields(const Value &s, std::pmr::memory_resource *mr)
+Value orderfields(const Value &s, keel::Allocator *mr)
 {
     if (!s.isStruct())
         throw Error("orderfields requires a struct", 0, 0, "orderfields", "",
@@ -265,7 +269,7 @@ Value orderfields(const Value &s, std::pmr::memory_resource *mr)
         const auto cols = out.dims().cols();
         Value re = Value::structArray(rows, cols, mr);
         for (const auto &name : sorted) {
-            for (size_t i = 0; i < re.numel(); ++i) {
+            for (keel::usize i = 0; i < re.numel(); ++i) {
                 const auto &srcMap = out.structArrayElem(i);
                 auto it = srcMap.find(name);
                 if (it != srcMap.end()) re.setField(i, name, it->second);
@@ -282,7 +286,7 @@ Value orderfields(const Value &s, std::pmr::memory_resource *mr)
 // appended (never drop data). Used by the Variable Editor's rename to
 // keep a renamed field in its original slot.
 Value orderfieldsByNames(const Value &s, const Value &names,
-                         std::pmr::memory_resource *mr)
+                         keel::Allocator *mr)
 {
     using numkit::ValueType;
     if (!s.isStruct())
@@ -295,7 +299,7 @@ Value orderfieldsByNames(const Value &s, const Value &names,
 
     std::vector<std::string> order;
     if (names.isCell()) {
-        for (size_t i = 0; i < names.numel(); ++i)
+        for (keel::usize i = 0; i < names.numel(); ++i)
             order.push_back(names.cellAt(i).toString());
     } else if (names.type() == ValueType::CHAR) {
         order.push_back(names.toString());
@@ -327,7 +331,7 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     const auto cols = s.dims().cols();
     Value re = Value::structArray(rows, cols, mr);
     for (const auto &name : finalOrder)
-        for (size_t i = 0; i < re.numel(); ++i) {
+        for (keel::usize i = 0; i < re.numel(); ++i) {
             const auto &srcMap = s.structArrayElem(i);
             auto it = srcMap.find(name);
             if (it != srcMap.end()) re.setField(i, name, it->second);
@@ -335,29 +339,29 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     return re;
 }
 
-Value struct2cell(const Value &s, std::pmr::memory_resource *mr)
+Value struct2cell(const Value &s, keel::Allocator *mr)
 {
     if (!s.isStruct())
         throw Error("struct2cell requires a struct", 0, 0, "struct2cell", "",
                      "numkit:struct2cell:notStruct");
     const auto names = s.fieldNamesInOrder();
-    const size_t F = names.size();
+    const keel::usize F = names.size();
     if (!s.isStructArray()) {
         auto c = Value::cell(F, 1, mr);
         const auto &fields = s.structFields();
-        for (size_t f = 0; f < F; ++f) {
+        for (keel::usize f = 0; f < F; ++f) {
             auto it = fields.find(names[f]);
             c.cellAt(f) = (it != fields.end()) ? it->second : Value::Empty;
         }
         return c;
     }
-    const size_t M = s.dims().rows();
-    const size_t N = s.dims().cols();
+    const keel::usize M = s.dims().rows();
+    const keel::usize N = s.dims().cols();
     auto c = (N == 1) ? Value::cell(F, M, mr) : Value::cell3D(F, M, N, mr);
-    const size_t numel = s.numel();
-    for (size_t k = 0; k < numel; ++k) {
+    const keel::usize numel = s.numel();
+    for (keel::usize k = 0; k < numel; ++k) {
         const auto &elemMap = s.structArrayElem(k);
-        for (size_t f = 0; f < F; ++f) {
+        for (keel::usize f = 0; f < F; ++f) {
             auto it = elemMap.find(names[f]);
             c.cellAt(f + k * F) = (it != elemMap.end()) ? it->second : Value::Empty;
         }
@@ -365,7 +369,7 @@ Value struct2cell(const Value &s, std::pmr::memory_resource *mr)
     return c;
 }
 
-Value cell2struct(const Value &c, const Value &fields, std::pmr::memory_resource *mr)
+Value cell2struct(const Value &c, const Value &fields, keel::Allocator *mr)
 {
     if (!c.isCell())
         throw Error("cell2struct: first argument must be a cell array",
@@ -373,12 +377,12 @@ Value cell2struct(const Value &c, const Value &fields, std::pmr::memory_resource
     if (!fields.isCell() && !fields.isString())
         throw Error("cell2struct: fields must be a cell of strings",
                      0, 0, "cell2struct", "", "numkit:cell2struct:fieldsType");
-    const size_t nFields = fields.numel();
+    const keel::usize nFields = fields.numel();
     if (c.numel() != nFields)
         throw Error("cell2struct: cell size must equal number of fields",
                      0, 0, "cell2struct", "", "numkit:cell2struct:shape");
     auto out = Value::structure(mr);
-    for (size_t i = 0; i < nFields; ++i) {
+    for (keel::usize i = 0; i < nFields; ++i) {
         const std::string name = fields.cellAt(i).toString();
         out.field(name) = c.cellAt(i);
     }
@@ -391,33 +395,33 @@ Value cell2struct(const Value &c, const Value &fields, std::pmr::memory_resource
 
 namespace detail {
 
-void struct_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    outs[0] = structure(args, ctx.engine->resource());
+    outs[0] = structure(args, ctx.engine->allocator());
 }
 
-void fieldnames_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void fieldnames_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("fieldnames: requires 1 argument", 0, 0, "fieldnames", "",
                      "numkit:fieldnames:nargin");
-    outs[0] = fieldnames(args[0], ctx.engine->resource());
+    outs[0] = fieldnames(args[0], ctx.engine->allocator());
 }
 
-void isfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void isfield_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("isfield requires 2 arguments", 0, 0, "isfield", "",
                      "numkit:isfield:nargin");
-    outs[0] = isfield(args[0], args[1], ctx.engine->resource());
+    outs[0] = isfield(args[0], args[1], ctx.engine->allocator());
 }
 
-void rmfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void rmfield_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("rmfield requires 2 arguments", 0, 0, "rmfield", "",
                      "numkit:rmfield:nargin");
-    outs[0] = rmfield(args[0], args[1], ctx.engine->resource());
+    outs[0] = rmfield(args[0], args[1], ctx.engine->allocator());
 }
 
 // ── State-machine structfun (vm_callbacks_plan.md) ───────────────────────────
@@ -428,7 +432,7 @@ void rmfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
 // synchronous structfun.
 struct StructfunCallbackBuiltin : CallbackBuiltin
 {
-    std::shared_ptr<VmContinuation> tryStart(Span<const Value> args, std::size_t nargout,
+    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
                                              Value *dest, Engine &eng) override
     {
         if (args.size() < 2 || nargout > 1)
@@ -438,7 +442,7 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
         if (!args[1].isStruct() || args[1].isStructArray())
             return nullptr; // non-scalar-struct → synchronous path reports it
         const bool uniform = hf::parseUniformOutputFlag(args, 2, "structfun");
-        auto *mr = eng.resource();
+        auto *mr = eng.allocator();
         auto fieldVals = std::make_shared<std::vector<Value>>();
         for (const auto &kv : args[1].structFields())
             fieldVals->push_back(kv.second);
@@ -446,16 +450,16 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
         cont->handle = args[0];
         cont->n = fieldVals->size();
         cont->dest = dest;
-        cont->makeArgs = [fieldVals](std::size_t i) -> std::vector<Value> {
+        cont->makeArgs = [fieldVals](keel::usize i) -> std::vector<Value> {
             return {(*fieldVals)[i]};
         };
         cont->pack = [uniform, mr](std::vector<Value> &results) -> Value {
-            const std::size_t n = results.size();
+            const keel::usize n = results.size();
             if (uniform) {
                 const ValueType outT = (n > 0 && results[0].isLogical()) ? ValueType::LOGICAL
                                                                          : ValueType::DOUBLE;
                 Value out = Value::matrix(n, 1, outT, mr);
-                for (std::size_t k = 0; k < n; ++k) {
+                for (keel::usize k = 0; k < n; ++k) {
                     const Value &v = results[k];
                     if (!v.isScalar())
                         throw Error("structfun: fn returned a non-scalar; pass 'UniformOutput', "
@@ -469,7 +473,7 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
                 return out;
             }
             Value out = Value::cell(n, 1);
-            for (std::size_t k = 0; k < n; ++k)
+            for (keel::usize k = 0; k < n; ++k)
                 out.cellAt(k) = results[k];
             return out;
         };
@@ -478,14 +482,14 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
     }
 };
 
-void structfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void structfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("structfun: requires at least 2 arguments (fn, S)",
                      0, 0, "structfun", "", "numkit:structfun:nargin");
     bool uniform = hf::parseUniformOutputFlag(args, 2, "structfun");
 
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     hf::BuiltinFn f = hf::BuiltinFn::Numel;
     const bool isBuiltin = hf::tryParseBuiltinHandle(args[0], f, "structfun");
 
@@ -494,39 +498,39 @@ void structfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext
                      0, 0, "structfun", "", "numkit:structfun:nonUniform");
 
     if (isBuiltin) {
-        auto cb = [f](Span<const Value> ar, Span<Value> ou,
-                      std::pmr::memory_resource *mr_) {
+        auto cb = [f](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                      keel::Allocator *mr_) {
             ou[0] = hf::applyBuiltin(mr_, f, ar[0], "structfun");
         };
         outs[0] = structfun(cb, args[1], uniform, mr);
     } else {
         const auto &handle = args[0];
-        auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                                   std::pmr::memory_resource * /*mr*/) {
+        auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                                   keel::Allocator * /*mr*/) {
             auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-            for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+            for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
                 ou[i] = std::move(r[i]);
         };
         outs[0] = structfun(cb, args[1], uniform, mr);
     }
 }
 
-void getfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void getfield_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("getfield requires (S, name)",
                      0, 0, "getfield", "", "numkit:getfield:nargin");
     Value cur = args[0];
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].isCell()) {
-            size_t idx = args[i].numel() > 0
+            keel::usize idx = args[i].numel() > 0
                              ? Value::checkedScalarIndex(args[i].cellAt(0).toScalar())
                              : 0;
             if (cur.isStructArray()) {
                 if (idx >= cur.numel())
                     throw Error("Index exceeds array bounds.", 0, 0, "getfield", "",
                                 "numkit:getfield:indexOutOfBounds");
-                Value single = Value::structure(ctx.engine->resource());
+                Value single = Value::structure(ctx.engine->allocator());
                 const auto &m = cur.structArrayElem(idx);
                 for (const auto &fn : cur.fieldNamesInOrder()) {
                     auto it = m.find(fn);
@@ -535,46 +539,46 @@ void getfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
                 cur = std::move(single);
             }
         } else {
-            cur = getfield(cur, args[i], ctx.engine->resource());
+            cur = getfield(cur, args[i], ctx.engine->allocator());
         }
     }
     outs[0] = std::move(cur);
 }
 
-void setfield_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void setfield_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 3)
         throw Error("setfield requires (S, name, value)",
                      0, 0, "setfield", "", "numkit:setfield:nargin");
-    outs[0] = setfield(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = setfield(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
-void orderfields_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void orderfields_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("orderfields requires 1 argument",
                      0, 0, "orderfields", "", "numkit:orderfields:nargin");
     // 1-arg → alphabetical sort; 2-arg → reorder to the given name list.
     if (args.size() >= 2)
-        outs[0] = orderfieldsByNames(args[0], args[1], ctx.engine->resource());
+        outs[0] = orderfieldsByNames(args[0], args[1], ctx.engine->allocator());
     else
-        outs[0] = orderfields(args[0], ctx.engine->resource());
+        outs[0] = orderfields(args[0], ctx.engine->allocator());
 }
 
-void struct2cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void struct2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("struct2cell requires 1 argument",
                      0, 0, "struct2cell", "", "numkit:struct2cell:nargin");
-    outs[0] = struct2cell(args[0], ctx.engine->resource());
+    outs[0] = struct2cell(args[0], ctx.engine->allocator());
 }
 
-void cell2struct_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void cell2struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("cell2struct requires (C, fields)",
                      0, 0, "cell2struct", "", "numkit:cell2struct:nargin");
-    outs[0] = cell2struct(args[0], args[1], ctx.engine->resource());
+    outs[0] = cell2struct(args[0], args[1], ctx.engine->allocator());
 }
 
 } // namespace detail

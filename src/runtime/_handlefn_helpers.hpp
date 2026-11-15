@@ -9,6 +9,9 @@
 
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/builtin/datafun.hpp>   // sum / prod / mean
 #include <numkit/builtin/elmat.hpp>  // length / ndims
 #include <numkit/core/engine.hpp>
@@ -119,7 +122,7 @@ inline const char *classNameOf(const Value &v)
     return "unknown";
 }
 
-inline Value applyBuiltin(std::pmr::memory_resource *mr, BuiltinFn f, const Value &v,
+inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,
                            const char *fn)
 {
     switch (f) {
@@ -181,7 +184,7 @@ inline Value applyBuiltin(std::pmr::memory_resource *mr, BuiltinFn f, const Valu
                  0, 0, fn, "", std::string("numkit:") + fn + ":internal");
 }
 
-inline Value applyHandle(std::pmr::memory_resource *mr, const Value &handle,
+inline Value applyHandle(keel::Allocator *mr, const Value &handle,
                           BuiltinFn builtinTag, bool isBuiltin,
                           const Value &v, Engine *engine, const char *fn)
 {
@@ -192,12 +195,12 @@ inline Value applyHandle(std::pmr::memory_resource *mr, const Value &handle,
                      "Engine — use the engine-aware adapter (callback API).",
                      0, 0, fn, "", std::string("numkit:") + fn + ":fnUnsupported");
     Value arg = v;
-    Span<const Value> args(&arg, 1);
+    keel::ArrayRef<Value> args(&arg, 1);
     return engine->callFunctionHandle(handle, args);
 }
 
-inline Value packUniform(std::pmr::memory_resource *mr, BuiltinFn f,
-                          const Value *results, std::size_t n,
+inline Value packUniform(keel::Allocator *mr, BuiltinFn f,
+                          const Value *results, keel::usize n,
                           const Dims &outDims, const char *fn)
 {
     const bool wantLogical = builtinReturnsLogical(f);
@@ -206,13 +209,13 @@ inline Value packUniform(std::pmr::memory_resource *mr, BuiltinFn f,
                      0, 0, fn, "", std::string("numkit:") + fn + ":nonUniform");
 
     const ValueType outT = wantLogical ? ValueType::LOGICAL : ValueType::DOUBLE;
-    const size_t r = outDims.rows();
-    const size_t c = outDims.cols();
-    const size_t p = outDims.is3D() ? outDims.pages() : 0;
+    const keel::usize r = outDims.rows();
+    const keel::usize c = outDims.cols();
+    const keel::usize p = outDims.is3D() ? outDims.pages() : 0;
     auto out = (p > 0) ? Value::matrix3d(r, c, p, outT, mr)
                        : Value::matrix(r, c, outT, mr);
 
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         const Value &v = results[i];
         if (!v.isScalar())
             throw Error(std::string(fn) + ": fn returned a non-scalar; pass 'UniformOutput', false",
@@ -225,11 +228,11 @@ inline Value packUniform(std::pmr::memory_resource *mr, BuiltinFn f,
     return out;
 }
 
-inline bool parseUniformOutputFlag(Span<const Value> args, size_t dataArgCount,
+inline bool parseUniformOutputFlag(keel::ArrayRef<Value> args, keel::usize dataArgCount,
                                    const char *fn)
 {
     bool uniform = true;
-    for (size_t i = dataArgCount; i + 1 < args.size(); i += 2) {
+    for (keel::usize i = dataArgCount; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             throw Error(std::string(fn) + ": expected option name (string)",
                          0, 0, fn, "", std::string("numkit:") + fn + ":badFlag");

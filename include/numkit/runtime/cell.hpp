@@ -3,7 +3,8 @@
 // toolboxes/builtin/include/numkit/builtin/language/cells/cell.hpp
 #pragma once
 
-#include <memory_resource>
+#include <keel/core.h>
+#include <keel/memory.h>
 #include <numkit/value/fn_handle.hpp>
 #include <numkit/value/value.hpp>
 
@@ -28,7 +29,7 @@ void registerCellfunCallbackBuiltin(Engine &engine);
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    `n × n` empty cell array.
 /// @see cell(rows, cols, mr), cell(rows, cols, pages, mr)
-Value cell(size_t n, std::pmr::memory_resource *mr = nullptr);
+Value cell(keel::usize n, keel::Allocator *mr = nullptr);
 
 /// @brief Rectangular cell array (`c = cell(rows, cols)`).
 ///
@@ -36,7 +37,7 @@ Value cell(size_t n, std::pmr::memory_resource *mr = nullptr);
 /// @param cols  Number of columns.
 /// @param mr    Memory resource (nullptr → process default).
 /// @return      `rows × cols` empty cell array.
-Value cell(size_t rows, size_t cols, std::pmr::memory_resource *mr = nullptr);
+Value cell(keel::usize rows, keel::usize cols, keel::Allocator *mr = nullptr);
 
 /// @brief 3-D cell array (`c = cell(rows, cols, pages)`).
 ///
@@ -47,7 +48,7 @@ Value cell(size_t rows, size_t cols, std::pmr::memory_resource *mr = nullptr);
 /// @param pages  Number of pages (0 → 2-D).
 /// @param mr     Memory resource (nullptr → process default).
 /// @return       Empty cell array.
-Value cell(size_t rows, size_t cols, size_t pages, std::pmr::memory_resource *mr = nullptr);
+Value cell(keel::usize rows, keel::usize cols, keel::usize pages, keel::Allocator *mr = nullptr);
 
 /// @brief Apply a callback to each cell
 /// (`y = cellfun(fn, c, uniformOutput)`).
@@ -74,7 +75,7 @@ Value cell(size_t rows, size_t cols, size_t pages, std::pmr::memory_resource *mr
 /// @throws Error         Non-cell `c`, or non-scalar result in
 ///                       uniform mode.
 Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
-              std::pmr::memory_resource *mr = nullptr);
+              keel::Allocator *mr = nullptr);
 
 /// @brief Wrap each element in a scalar cell (`c = num2cell(A)`).
 ///
@@ -82,7 +83,7 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    Cell array of the same shape, each cell holding one element.
 /// @see cell2mat
-Value num2cell(const Value &x, std::pmr::memory_resource *mr = nullptr);
+Value num2cell(const Value &x, keel::Allocator *mr = nullptr);
 
 /// @brief Concatenate cells into a matrix (`A = cell2mat(c)`).
 ///
@@ -93,7 +94,7 @@ Value num2cell(const Value &x, std::pmr::memory_resource *mr = nullptr);
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    Concatenated matrix.
 /// @see num2cell, mat2cell
-Value cell2mat(const Value &c, std::pmr::memory_resource *mr = nullptr);
+Value cell2mat(const Value &c, keel::Allocator *mr = nullptr);
 
 /// @brief Test whether a cell array holds only char rows
 /// (`tf = iscellstr(c)`).
@@ -101,7 +102,7 @@ Value cell2mat(const Value &c, std::pmr::memory_resource *mr = nullptr);
 /// @param c   Input Value.
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    LOGICAL scalar.
-Value iscellstr(const Value &c, std::pmr::memory_resource *mr = nullptr);
+Value iscellstr(const Value &c, keel::Allocator *mr = nullptr);
 
 /// @brief Convert to cell-of-strings (`c = cellstr(x)`).
 ///
@@ -112,7 +113,7 @@ Value iscellstr(const Value &c, std::pmr::memory_resource *mr = nullptr);
 /// @param x   Input Value.
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    Cell-of-strings.
-Value cellstr(const Value &x, std::pmr::memory_resource *mr = nullptr);
+Value cellstr(const Value &x, keel::Allocator *mr = nullptr);
 
 /// @brief Split a matrix into a cell array of blocks
 /// (`c = mat2cell(A, R, C)`).
@@ -132,7 +133,7 @@ Value cellstr(const Value &x, std::pmr::memory_resource *mr = nullptr);
 /// @see cell2mat
 Value mat2cell(const Value &x, const Value &rowSizes,
                const Value &colSizes = Value::Empty,
-               std::pmr::memory_resource *mr = nullptr);
+               keel::Allocator *mr = nullptr);
 
 
 /// @}

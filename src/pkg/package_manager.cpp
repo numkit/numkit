@@ -2,6 +2,7 @@
 //
 // NumKit Package Manager implementation.
 
+#include <keel/core.h>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
@@ -214,7 +215,7 @@ std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const s
     std::string line;
     const std::string prefix = "refs/tags/";
     while (std::getline(iss, line)) {
-        size_t pos = line.find(prefix);
+        keel::usize pos = line.find(prefix);
         if (pos == std::string::npos) continue;
         std::string tag = trimString(line.substr(pos + prefix.size()));
         SemVerTag sv;
@@ -247,13 +248,13 @@ std::string queryRemoteRefCommit(const std::string &gitPath, const std::string &
 std::string extractJsonStringField(const std::string &json, const std::string &key)
 {
     std::string pattern = "\"" + key + "\"";
-    size_t kpos = json.find(pattern);
+    keel::usize kpos = json.find(pattern);
     if (kpos == std::string::npos) return {};
-    size_t colon = json.find(':', kpos + pattern.size());
+    keel::usize colon = json.find(':', kpos + pattern.size());
     if (colon == std::string::npos) return {};
-    size_t q1 = json.find('"', colon + 1);
+    keel::usize q1 = json.find('"', colon + 1);
     if (q1 == std::string::npos) return {};
-    size_t q2 = json.find('"', q1 + 1);
+    keel::usize q2 = json.find('"', q1 + 1);
     if (q2 == std::string::npos) return {};
     return json.substr(q1 + 1, q2 - q1 - 1);
 }
@@ -274,7 +275,7 @@ void writeManifestWithMetadata(const fs::path &srcManifest, const fs::path &dest
 
     if (!content.empty()) {
         // Strip existing injected metadata fields if re-generating from an already annotated manifest
-        size_t firstBrace = content.find('{');
+        keel::usize firstBrace = content.find('{');
         if (firstBrace != std::string::npos) {
             std::ostringstream meta;
             meta << "{\n"
@@ -377,7 +378,7 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
     std::string trimmed = trimString(input);
 
     // Check for branch or tag suffix (@tag or #branch)
-    size_t tagPos = std::string::npos;
+    keel::usize tagPos = std::string::npos;
     if (trimmed.rfind("git@", 0) == 0) {
         tagPos = trimmed.find('#');
     } else {
@@ -425,7 +426,7 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
         if (n.size() > 4 && n.rfind(".git") == n.size() - 4) {
             n = n.substr(0, n.size() - 4);
         }
-        size_t slash = n.find_last_of("/\\:");
+        keel::usize slash = n.find_last_of("/\\:");
         if (slash != std::string::npos) {
             target.name = n.substr(slash + 1);
         } else {
@@ -444,7 +445,7 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
     // 4. GitHub shorthand: owner/repo
     if (baseTarget.find('/') != std::string::npos) {
         target.gitUrl = "https://github.com/" + baseTarget + ".git";
-        size_t slash = baseTarget.rfind('/');
+        keel::usize slash = baseTarget.rfind('/');
         std::string owner = baseTarget.substr(0, slash);
         target.name = baseTarget.substr(slash + 1);
         if (target.name.size() > 4 && target.name.rfind(".git") == target.name.size() - 4) {
@@ -703,7 +704,7 @@ int PackageManager::installMany(const std::vector<std::string> &targets, bool in
     }
 
     int failures = 0;
-    for (size_t i = 0; i < listToInstall.size(); ++i) {
+    for (keel::usize i = 0; i < listToInstall.size(); ++i) {
         if (listToInstall.size() > 1 && verbose) {
             std::cout << "\n[" << (i + 1) << "/" << listToInstall.size() << "] ";
         }

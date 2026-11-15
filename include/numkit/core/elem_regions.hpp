@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <keel/core.h>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -37,7 +38,7 @@ namespace numkit {
 /// One rectangle, inclusive 1-based bounds. Empty (r1 < r0) = nothing.
 struct ElemRegion
 {
-    size_t r0 = 1, r1 = 0, c0 = 1, c1 = 0;
+    keel::usize r0 = 1, r1 = 0, c0 = 1, c1 = 0;
 
     bool empty() const { return r1 < r0 || c1 < c0; }
     bool intersects(const ElemRegion &o) const

@@ -3,6 +3,9 @@
 // graphics.contour.* builders (contour / contourf), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -42,8 +45,8 @@ void buildContourPlots(std::vector<PlotEntry> &table)
     // DatasetInfo with type='line' and an inline color (HSL→RGB ramp
     // through the z-extent), with NaN separators between segments so
     // the existing line renderer can draw them as one path.
-    auto contourImpl = [](Span<const Value> args, size_t nargout,
-                          Span<Value> outs, GraphicsContext &gc) {
+    auto contourImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                          keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -65,26 +68,26 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         }
         if (!Z_arg) { outs[0] = Value(); return; }
 
-        const size_t R = Z_arg->dims().rows();
-        const size_t C = Z_arg->dims().cols();
+        const keel::usize R = Z_arg->dims().rows();
+        const keel::usize C = Z_arg->dims().cols();
         if (R < 2 || C < 2) { outs[0] = Value(); return; }
 
-        const auto Zat = [&](size_t r, size_t c) {
+        const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);   // column-major
         };
 
         std::vector<double> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
-            for (size_t c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
-            for (size_t r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
         } else {
-            for (size_t c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
-            for (size_t r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
         }
 
         double zmn = std::numeric_limits<double>::infinity();
         double zmx = -std::numeric_limits<double>::infinity();
-        for (size_t i = 0; i < R * C; ++i) {
+        for (keel::usize i = 0; i < R * C; ++i) {
             const double v = Z_arg->elemAsDouble(i);
             if (std::isfinite(v)) {
                 if (v < zmn) zmn = v;
@@ -99,7 +102,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
                 n = (int)levels_arg->toScalar();
                 if (n < 1) n = 1;
             } else {
-                for (size_t i = 0; i < levels_arg->numel(); ++i)
+                for (keel::usize i = 0; i < levels_arg->numel(); ++i)
                     levels.push_back(levels_arg->elemAsDouble(i));
             }
         }
@@ -116,7 +119,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         }
 
         const auto interp = [](double a, double b, double va, double vb, double L) {
-            if (std::abs(vb - va) < 1e-15) return a;
+            if (keel::abs(vb - va) < 1e-15) return a;
             return a + (L - va) / (vb - va) * (b - a);
         };
 
@@ -126,7 +129,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const double Cr = 0.6;
             const double H = Hd / 60.0;
-            const double Xc = Cr * (1.0 - std::abs(std::fmod(H, 2.0) - 1.0));
+            const double Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
             double r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -150,8 +153,8 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             std::ostringstream xs, ys;
             xs << '['; ys << '[';
             bool first = true;
-            for (size_t r = 0; r + 1 < R; ++r) {
-                for (size_t c = 0; c + 1 < C; ++c) {
+            for (keel::usize r = 0; r + 1 < R; ++r) {
+                for (keel::usize c = 0; c + 1 < C; ++c) {
                     const double v_tl = Zat(r,     c);
                     const double v_tr = Zat(r,     c + 1);
                     const double v_bl = Zat(r + 1, c);
@@ -225,8 +228,8 @@ void buildContourPlots(std::vector<PlotEntry> &table)
     // disjoint triangles — visually equivalent to MATLAB's
     // disambiguation in our usage (the renderer fills the union).
     // ────────────────────────────────────────────────────────────────
-    auto contourfImpl = [](Span<const Value> args, size_t nargout,
-                           Span<Value> outs, GraphicsContext &gc) {
+    auto contourfImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         auto setOutputs = [&]() {
             outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
             if (nargout >= 2 && outs.size() >= 2) {
@@ -251,25 +254,25 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         }
         if (!Z_arg) { setOutputs(); return; }
 
-        const size_t R = Z_arg->dims().rows();
-        const size_t C = Z_arg->dims().cols();
+        const keel::usize R = Z_arg->dims().rows();
+        const keel::usize C = Z_arg->dims().cols();
         if (R < 2 || C < 2) { setOutputs(); return; }
 
-        const auto Zat = [&](size_t r, size_t c) {
+        const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);
         };
         std::vector<double> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
-            for (size_t c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
-            for (size_t r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
         } else {
-            for (size_t c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
-            for (size_t r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
         }
 
         double zmn = std::numeric_limits<double>::infinity();
         double zmx = -std::numeric_limits<double>::infinity();
-        for (size_t i = 0; i < R * C; ++i) {
+        for (keel::usize i = 0; i < R * C; ++i) {
             const double v = Z_arg->elemAsDouble(i);
             if (std::isfinite(v)) {
                 if (v < zmn) zmn = v;
@@ -284,7 +287,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
                 n = (int)levels_arg->toScalar();
                 if (n < 1) n = 1;
             } else {
-                for (size_t i = 0; i < levels_arg->numel(); ++i)
+                for (keel::usize i = 0; i < levels_arg->numel(); ++i)
                     levels.push_back(levels_arg->elemAsDouble(i));
             }
         }
@@ -302,7 +305,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         std::sort(levels.begin(), levels.end());
 
         const auto interp = [](double a, double b, double va, double vb, double L) {
-            if (std::abs(vb - va) < 1e-15) return a;
+            if (keel::abs(vb - va) < 1e-15) return a;
             return a + (L - va) / (vb - va) * (b - a);
         };
 
@@ -312,7 +315,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const double Cr = 0.6;
             const double H = Hd / 60.0;
-            const double Xc = Cr * (1.0 - std::abs(std::fmod(H, 2.0) - 1.0));
+            const double Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
             double r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -364,8 +367,8 @@ void buildContourPlots(std::vector<PlotEntry> &table)
                 first = true;   // next cell starts a fresh sub-path
             };
 
-            for (size_t r = 0; r + 1 < R; ++r) {
-                for (size_t c = 0; c + 1 < C; ++c) {
+            for (keel::usize r = 0; r + 1 < R; ++r) {
+                for (keel::usize c = 0; c + 1 < C; ++c) {
                     const double v_tl = Zat(r,     c);
                     const double v_tr = Zat(r,     c + 1);
                     const double v_br = Zat(r + 1, c + 1);

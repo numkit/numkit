@@ -4,12 +4,16 @@
 // + cellfun. Shares the function-handle dispatch helpers with
 // struct.cpp via the inline header below.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/runtime/cell.hpp>
 #include <numkit/builtin/elmat.hpp>  // horzcat / vertcat
 #include <numkit/core/engine.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/vm.hpp>
 
@@ -26,39 +30,39 @@ namespace hf = ::numkit::runtime::detail::handlefn;
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-Value cell(size_t n, std::pmr::memory_resource *)
+Value cell(keel::usize n, keel::Allocator *)
 {
     return Value::cell(n, n);
 }
 
-Value cell(size_t rows, size_t cols, std::pmr::memory_resource *)
+Value cell(keel::usize rows, keel::usize cols, keel::Allocator *)
 {
     return Value::cell(rows, cols);
 }
 
-Value cell(size_t rows, size_t cols, size_t pages, std::pmr::memory_resource *)
+Value cell(keel::usize rows, keel::usize cols, keel::usize pages, keel::Allocator *)
 {
     if (pages > 0)
         return Value::cell3D(rows, cols, pages);
     return Value::cell(rows, cols);
 }
 
-static Value allocMatrixShape(const Dims &d, ValueType t, std::pmr::memory_resource *mr)
+static Value allocMatrixShape(const Dims &d, ValueType t, keel::Allocator *mr)
 {
     if (d.ndim() <= 2)
         return Value::matrix(d.rows(), d.cols(), t, mr);
-    size_t buf[Dims::kMaxRank];
+    keel::usize buf[Dims::kMaxRank];
     const int nd = d.ndim();
     for (int i = 0; i < nd; ++i)
         buf[i] = d.dim(i);
     return Value::matrixND(buf, nd, t, mr);
 }
 
-static Value allocCellShape(const Dims &d, std::pmr::memory_resource *mr)
+static Value allocCellShape(const Dims &d, keel::Allocator *mr)
 {
     if (d.ndim() <= 2)
         return Value::cell(d.rows(), d.cols(), mr);
-    size_t buf[Dims::kMaxRank];
+    keel::usize buf[Dims::kMaxRank];
     const int nd = d.ndim();
     for (int i = 0; i < nd; ++i)
         buf[i] = d.dim(i);
@@ -66,21 +70,21 @@ static Value allocCellShape(const Dims &d, std::pmr::memory_resource *mr)
 }
 
 Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
-              std::pmr::memory_resource *mr)
+              keel::Allocator *mr)
 {
     if (!c.isCell())
         throw Error("cellfun: second argument must be a cell array",
                      0, 0, "cellfun", "", "numkit:cellfun:notCell");
 
-    const size_t n = c.numel();
-    ScratchArena scratch(mr);
-    ScratchVec<Value> results(&scratch);
+    const keel::usize n = c.numel();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<Value> results(scratch.allocator());
     results.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         Value arg = c.cellAt(i);
         Value out;
-        Span<const Value> ar(&arg, 1);
-        Span<Value>       ou(&out, 1);
+        keel::ArrayRef<Value> ar(&arg, 1);
+        keel::MutArrayRef<Value>       ou(&out, 1);
         fn(ar, ou, mr);
         results.push_back(std::move(out));
     }
@@ -90,7 +94,7 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
         const ValueType outT = (n > 0 && results[0].isLogical())
                            ? ValueType::LOGICAL : ValueType::DOUBLE;
         auto out = allocMatrixShape(c.dims(), outT, mr);
-        for (size_t i = 0; i < n; ++i) {
+        for (keel::usize i = 0; i < n; ++i) {
             const Value &v = results[i];
             if (!v.isScalar())
                 throw Error("cellfun: fn returned a non-scalar; pass 'UniformOutput', false",
@@ -105,7 +109,7 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
 
     // Cell output, same shape as C.
     Value out = allocCellShape(c.dims(), mr);
-    for (size_t i = 0; i < n; ++i)
+    for (keel::usize i = 0; i < n; ++i)
         out.cellAt(i) = std::move(results[i]);
     return out;
 }
@@ -114,88 +118,88 @@ Value cellfun(FnHandle fn, const Value &c, bool uniformOutput,
 // Pack 15: num2cell / cell2mat / iscellstr / cellstr
 // ════════════════════════════════════════════════════════════════════════
 
-Value num2cell(const Value &x, std::pmr::memory_resource *mr)
+Value num2cell(const Value &x, keel::Allocator *mr)
 {
     const auto &d = x.dims();
-    std::vector<size_t> shape(static_cast<size_t>(d.ndim()));
+    std::vector<keel::usize> shape(static_cast<keel::usize>(d.ndim()));
     for (int k = 0; k < d.ndim(); ++k)
-        shape[static_cast<size_t>(k)] = static_cast<size_t>(d.dim(k));
+        shape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(d.dim(k));
     auto c = Value::cellND(shape.data(), d.ndim(), mr);
-    const size_t n = x.numel();
+    const keel::usize n = x.numel();
     if (x.isComplex()) {
-        for (size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             c.cellAt(i) = Value::complexScalar(x.complexData()[i], mr);
     } else {
-        for (size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             c.cellAt(i) = Value::scalar(x.elemAsDouble(i), mr);
     }
     return c;
 }
 
 static Value num2cellDim(const Value &x, const std::vector<int> &dims,
-                         std::pmr::memory_resource *mr)
+                         keel::Allocator *mr)
 {
     const int nd = x.dims().ndim();
-    std::vector<bool> collapse(static_cast<size_t>(nd), false);
+    std::vector<bool> collapse(static_cast<keel::usize>(nd), false);
     bool anyCollapsed = false;
     for (int d : dims) {
         if (d < 1)
             throw Error("num2cell: dimension argument must be a positive integer",
                          0, 0, "num2cell", "", "numkit:num2cell:badDim");
         if (d <= nd) {
-            collapse[static_cast<size_t>(d - 1)] = true;
+            collapse[static_cast<keel::usize>(d - 1)] = true;
             anyCollapsed = true;
         }
     }
     if (!anyCollapsed) return num2cell(x, mr);
 
-    std::vector<size_t> inShape(static_cast<size_t>(nd));
-    std::vector<size_t> cellShape(static_cast<size_t>(nd));
-    std::vector<size_t> elemShape(static_cast<size_t>(nd));
-    std::vector<size_t> inStrides(static_cast<size_t>(nd), 1);
-    std::vector<size_t> cellStrides(static_cast<size_t>(nd), 1);
-    std::vector<size_t> elemStrides(static_cast<size_t>(nd), 1);
+    std::vector<keel::usize> inShape(static_cast<keel::usize>(nd));
+    std::vector<keel::usize> cellShape(static_cast<keel::usize>(nd));
+    std::vector<keel::usize> elemShape(static_cast<keel::usize>(nd));
+    std::vector<keel::usize> inStrides(static_cast<keel::usize>(nd), 1);
+    std::vector<keel::usize> cellStrides(static_cast<keel::usize>(nd), 1);
+    std::vector<keel::usize> elemStrides(static_cast<keel::usize>(nd), 1);
 
-    size_t inTotal = 1, cellTotal = 1, elemTotal = 1;
+    keel::usize inTotal = 1, cellTotal = 1, elemTotal = 1;
     for (int k = 0; k < nd; ++k) {
-        const size_t sk = static_cast<size_t>(x.dims().dim(k));
-        inShape[static_cast<size_t>(k)] = sk;
-        inStrides[static_cast<size_t>(k)] = inTotal;
+        const keel::usize sk = static_cast<keel::usize>(x.dims().dim(k));
+        inShape[static_cast<keel::usize>(k)] = sk;
+        inStrides[static_cast<keel::usize>(k)] = inTotal;
         inTotal *= sk;
-        if (collapse[static_cast<size_t>(k)]) {
-            cellShape[static_cast<size_t>(k)] = 1;
-            elemShape[static_cast<size_t>(k)] = sk;
+        if (collapse[static_cast<keel::usize>(k)]) {
+            cellShape[static_cast<keel::usize>(k)] = 1;
+            elemShape[static_cast<keel::usize>(k)] = sk;
         } else {
-            cellShape[static_cast<size_t>(k)] = sk;
-            elemShape[static_cast<size_t>(k)] = 1;
+            cellShape[static_cast<keel::usize>(k)] = sk;
+            elemShape[static_cast<keel::usize>(k)] = 1;
         }
-        cellStrides[static_cast<size_t>(k)] = cellTotal;
-        cellTotal *= cellShape[static_cast<size_t>(k)];
-        elemStrides[static_cast<size_t>(k)] = elemTotal;
-        elemTotal *= elemShape[static_cast<size_t>(k)];
+        cellStrides[static_cast<keel::usize>(k)] = cellTotal;
+        cellTotal *= cellShape[static_cast<keel::usize>(k)];
+        elemStrides[static_cast<keel::usize>(k)] = elemTotal;
+        elemTotal *= elemShape[static_cast<keel::usize>(k)];
     }
 
     int cellNd = nd;
-    while (cellNd > 2 && cellShape[static_cast<size_t>(cellNd - 1)] == 1) --cellNd;
+    while (cellNd > 2 && cellShape[static_cast<keel::usize>(cellNd - 1)] == 1) --cellNd;
     int elemNd = nd;
-    while (elemNd > 2 && elemShape[static_cast<size_t>(elemNd - 1)] == 1) --elemNd;
+    while (elemNd > 2 && elemShape[static_cast<keel::usize>(elemNd - 1)] == 1) --elemNd;
 
     auto out = Value::cellND(cellShape.data(), cellNd, mr);
     const bool cplx = x.isComplex();
     const ValueType elemType = cplx ? ValueType::COMPLEX : ValueType::DOUBLE;
-    for (size_t ci = 0; ci < cellTotal; ++ci)
+    for (keel::usize ci = 0; ci < cellTotal; ++ci)
         out.cellAt(ci) = Value::matrixND(elemShape.data(), elemNd, elemType, mr);
 
-    for (size_t lin = 0; lin < inTotal; ++lin) {
-        size_t rem = lin;
-        size_t ci = 0, ei = 0;
+    for (keel::usize lin = 0; lin < inTotal; ++lin) {
+        keel::usize rem = lin;
+        keel::usize ci = 0, ei = 0;
         for (int k = 0; k < nd; ++k) {
-            const size_t ik = rem % inShape[static_cast<size_t>(k)];
-            rem /= inShape[static_cast<size_t>(k)];
-            if (collapse[static_cast<size_t>(k)])
-                ei += ik * elemStrides[static_cast<size_t>(k)];
+            const keel::usize ik = rem % inShape[static_cast<keel::usize>(k)];
+            rem /= inShape[static_cast<keel::usize>(k)];
+            if (collapse[static_cast<keel::usize>(k)])
+                ei += ik * elemStrides[static_cast<keel::usize>(k)];
             else
-                ci += ik * cellStrides[static_cast<size_t>(k)];
+                ci += ik * cellStrides[static_cast<keel::usize>(k)];
         }
         Value &cellVal = out.cellAt(ci);
         if (cplx)
@@ -206,7 +210,7 @@ static Value num2cellDim(const Value &x, const std::vector<int> &dims,
     return out;
 }
 
-Value cell2mat(const Value &c, std::pmr::memory_resource *mr)
+Value cell2mat(const Value &c, keel::Allocator *mr)
 {
     if (!c.isCell())
         throw Error("cell2mat: input must be a cell array",
@@ -217,7 +221,7 @@ Value cell2mat(const Value &c, std::pmr::memory_resource *mr)
     // Fast path: every entry is a DOUBLE scalar → cell shape becomes
     // matrix/tensor shape.
     bool allDoubleScalar = true;
-    for (size_t i = 0; i < c.numel(); ++i) {
+    for (keel::usize i = 0; i < c.numel(); ++i) {
         const auto &e = c.cellAt(i);
         if (!e.isScalar() || e.type() != ValueType::DOUBLE) {
             allDoubleScalar = false;
@@ -226,11 +230,11 @@ Value cell2mat(const Value &c, std::pmr::memory_resource *mr)
     }
     if (allDoubleScalar) {
         const auto &cd = c.dims();
-        std::vector<size_t> shape(static_cast<size_t>(cd.ndim()));
+        std::vector<keel::usize> shape(static_cast<keel::usize>(cd.ndim()));
         for (int k = 0; k < cd.ndim(); ++k)
-            shape[static_cast<size_t>(k)] = static_cast<size_t>(cd.dim(k));
+            shape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(cd.dim(k));
         auto m = Value::matrixND(shape.data(), cd.ndim(), ValueType::DOUBLE, mr);
-        for (size_t i = 0; i < c.numel(); ++i)
+        for (keel::usize i = 0; i < c.numel(); ++i)
             m.doubleDataMut()[i] = c.cellAt(i).toScalar();
         return m;
     }
@@ -240,58 +244,58 @@ Value cell2mat(const Value &c, std::pmr::memory_resource *mr)
     const auto &cd = c.dims();
     if (cd.ndim() > 2) {
         const int nd = cd.ndim();
-        std::vector<size_t> curShape(static_cast<size_t>(nd));
-        size_t total = 1;
+        std::vector<keel::usize> curShape(static_cast<keel::usize>(nd));
+        keel::usize total = 1;
         for (int k = 0; k < nd; ++k) {
-            curShape[static_cast<size_t>(k)] = static_cast<size_t>(cd.dim(k));
-            total *= curShape[static_cast<size_t>(k)];
+            curShape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(cd.dim(k));
+            total *= curShape[static_cast<keel::usize>(k)];
         }
         std::vector<Value> cur(total);
-        for (size_t i = 0; i < total; ++i) cur[i] = c.cellAt(i);
+        for (keel::usize i = 0; i < total; ++i) cur[i] = c.cellAt(i);
         for (int d = nd; d >= 1; --d) {
-            const size_t dimLen = curShape[static_cast<size_t>(d - 1)];
-            const size_t nextTotal = cur.size() / dimLen;
+            const keel::usize dimLen = curShape[static_cast<keel::usize>(d - 1)];
+            const keel::usize nextTotal = cur.size() / dimLen;
             std::vector<Value> next(nextTotal);
             std::vector<Value> slice(dimLen);
-            for (size_t base = 0; base < nextTotal; ++base) {
-                for (size_t k = 0; k < dimLen; ++k)
+            for (keel::usize base = 0; base < nextTotal; ++base) {
+                for (keel::usize k = 0; k < dimLen; ++k)
                     slice[k] = cur[base + k * nextTotal];
-                next[base] = numkit::builtin::cat(static_cast<size_t>(d),
-                                                  Span<const Value>(slice.data(), dimLen), mr);
+                next[base] = numkit::builtin::cat(static_cast<keel::usize>(d),
+                                                  keel::ArrayRef<Value>(slice.data(), dimLen), mr);
             }
             cur = std::move(next);
         }
         return cur.empty() ? Value::matrix(0, 0, ValueType::DOUBLE, mr) : cur[0];
     }
-    const size_t R = cd.rows(), C = cd.cols();
+    const keel::usize R = cd.rows(), C = cd.cols();
     if (R == 1) {
-        ScratchArena scratch(mr);
-        ScratchVec<Value> row(C, &scratch);
-        for (size_t j = 0; j < C; ++j) row[j] = c.cellAt(j);
-        return horzcat(Span<const Value>(row.data(), C), mr);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        keel::Array<Value> row(C, scratch.allocator());
+        for (keel::usize j = 0; j < C; ++j) row[j] = c.cellAt(j);
+        return horzcat(keel::ArrayRef<Value>(row.data(), C), mr);
     }
     if (C == 1) {
-        ScratchArena scratch(mr);
-        ScratchVec<Value> col(R, &scratch);
-        for (size_t i = 0; i < R; ++i) col[i] = c.cellAt(i);
-        return vertcat(Span<const Value>(col.data(), R), mr);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        keel::Array<Value> col(R, scratch.allocator());
+        for (keel::usize i = 0; i < R; ++i) col[i] = c.cellAt(i);
+        return vertcat(keel::ArrayRef<Value>(col.data(), R), mr);
     }
     // Full 2-D: horzcat each row, then vertcat results.
-    ScratchArena scratch(mr);
-    ScratchVec<Value> rowBlocks(R, &scratch);
-    for (size_t i = 0; i < R; ++i) {
-        ScratchVec<Value> rowCells(C, &scratch);
-        for (size_t j = 0; j < C; ++j)
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<Value> rowBlocks(R, scratch.allocator());
+    for (keel::usize i = 0; i < R; ++i) {
+        keel::Array<Value> rowCells(C, scratch.allocator());
+        for (keel::usize j = 0; j < C; ++j)
             rowCells[j] = c.cellAt(j * R + i);  // column-major linear index
-        rowBlocks[i] = horzcat(Span<const Value>(rowCells.data(), C), mr);
+        rowBlocks[i] = horzcat(keel::ArrayRef<Value>(rowCells.data(), C), mr);
     }
-    return vertcat(Span<const Value>(rowBlocks.data(), R), mr);
+    return vertcat(keel::ArrayRef<Value>(rowBlocks.data(), R), mr);
 }
 
-Value iscellstr(const Value &c, std::pmr::memory_resource *mr)
+Value iscellstr(const Value &c, keel::Allocator *mr)
 {
     if (!c.isCell()) return Value::logicalScalar(false, mr);
-    for (size_t i = 0; i < c.numel(); ++i) {
+    for (keel::usize i = 0; i < c.numel(); ++i) {
         const auto &e = c.cellAt(i);
         // Each cell entry must be a char row (or empty char []).
         if (!(e.isChar() || (e.isEmpty() && e.type() == ValueType::CHAR)))
@@ -300,7 +304,7 @@ Value iscellstr(const Value &c, std::pmr::memory_resource *mr)
     return Value::logicalScalar(true, mr);
 }
 
-Value cellstr(const Value &x, std::pmr::memory_resource *mr)
+Value cellstr(const Value &x, keel::Allocator *mr)
 {
     // char row → 1×1 cell of that char row.
     // M-by-N char matrix → M-by-1 cell, each element a deblank'd row.
@@ -312,8 +316,8 @@ Value cellstr(const Value &x, std::pmr::memory_resource *mr)
         return x;
     }
     if (x.isChar()) {
-        const size_t nr = x.dims().rows();
-        const size_t nc = x.dims().cols();
+        const keel::usize nr = x.dims().rows();
+        const keel::usize nc = x.dims().cols();
         if (nr <= 1) {
             auto c = Value::cell(1, 1, mr);
             c.cellAt(0) = x;
@@ -326,9 +330,9 @@ Value cellstr(const Value &x, std::pmr::memory_resource *mr)
         auto out = Value::cell(nr, 1, mr);
         std::string row;
         row.reserve(nc);
-        for (size_t r = 0; r < nr; ++r) {
+        for (keel::usize r = 0; r < nr; ++r) {
             row.clear();
-            for (size_t c = 0; c < nc; ++c)
+            for (keel::usize c = 0; c < nc; ++c)
                 row.push_back(src[r + c * nr]);
             // deblank: strip trailing spaces (but not other whitespace,
             // matching MATLAB's deblank).
@@ -339,9 +343,9 @@ Value cellstr(const Value &x, std::pmr::memory_resource *mr)
         return out;
     }
     if (x.isString()) {
-        const size_t n = x.numel();
+        const keel::usize n = x.numel();
         auto c = Value::cell(n, 1, mr);
-        for (size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             c.cellAt(i) = Value::fromString(x.stringElem(i), mr);
         return c;
     }
@@ -349,7 +353,7 @@ Value cellstr(const Value &x, std::pmr::memory_resource *mr)
                  0, 0, "cellstr", "", "numkit:cellstr:type");
 }
 
-Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, std::pmr::memory_resource *mr)
+Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, keel::Allocator *mr)
 {
     if (x.dims().ndim() > 2)
         throw Error("mat2cell: only 2-D inputs are supported",
@@ -358,41 +362,41 @@ Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, s
         throw Error("mat2cell: only DOUBLE inputs are supported",
                      0, 0, "mat2cell", "", "numkit:mat2cell:type");
 
-    const size_t R = x.dims().rows(), C = x.dims().cols();
-    const size_t nRow = rowSizesV.numel();
-    const size_t nCol = colSizesV.numel();
+    const keel::usize R = x.dims().rows(), C = x.dims().cols();
+    const keel::usize nRow = rowSizesV.numel();
+    const keel::usize nCol = colSizesV.numel();
 
     // Vector form: mat2cell(v, sizes). Treat sizes as row-direction
     // when v is a column, column-direction when v is a row.
     const bool vectorForm = colSizesV.isEmpty();
-    ScratchArena scratch(mr);
-    auto rowS = ScratchVec<size_t>(&scratch);
-    auto colS = ScratchVec<size_t>(&scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto rowS = keel::Array<keel::usize>(scratch.allocator());
+    auto colS = keel::Array<keel::usize>(scratch.allocator());
 
     if (vectorForm) {
         if (R == 1) {
             rowS.assign({R});
             colS.reserve(nRow);
-            for (size_t i = 0; i < nRow; ++i)
-                colS.push_back(static_cast<size_t>(rowSizesV.elemAsDouble(i)));
+            for (keel::usize i = 0; i < nRow; ++i)
+                colS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
         } else {
             rowS.reserve(nRow);
-            for (size_t i = 0; i < nRow; ++i)
-                rowS.push_back(static_cast<size_t>(rowSizesV.elemAsDouble(i)));
+            for (keel::usize i = 0; i < nRow; ++i)
+                rowS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
             colS.assign({C});
         }
     } else {
         rowS.reserve(nRow);
-        for (size_t i = 0; i < nRow; ++i)
-            rowS.push_back(static_cast<size_t>(rowSizesV.elemAsDouble(i)));
+        for (keel::usize i = 0; i < nRow; ++i)
+            rowS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
         colS.reserve(nCol);
-        for (size_t j = 0; j < nCol; ++j)
-            colS.push_back(static_cast<size_t>(colSizesV.elemAsDouble(j)));
+        for (keel::usize j = 0; j < nCol; ++j)
+            colS.push_back(static_cast<keel::usize>(colSizesV.elemAsDouble(j)));
     }
 
-    size_t rsum = 0, csum = 0;
-    for (size_t s : rowS) rsum += s;
-    for (size_t s : colS) csum += s;
+    keel::usize rsum = 0, csum = 0;
+    for (keel::usize s : rowS) rsum += s;
+    for (keel::usize s : colS) csum += s;
     if (rsum != R)
         throw Error("mat2cell: row sizes must sum to size(A,1)",
                      0, 0, "mat2cell", "", "numkit:mat2cell:rowSum");
@@ -402,15 +406,15 @@ Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, s
 
     auto c = Value::cell(rowS.size(), colS.size(), mr);
     const double *src = x.doubleData();
-    size_t rowOff = 0;
-    for (size_t i = 0; i < rowS.size(); ++i) {
-        size_t colOff = 0;
-        for (size_t j = 0; j < colS.size(); ++j) {
-            const size_t br = rowS[i], bc = colS[j];
+    keel::usize rowOff = 0;
+    for (keel::usize i = 0; i < rowS.size(); ++i) {
+        keel::usize colOff = 0;
+        for (keel::usize j = 0; j < colS.size(); ++j) {
+            const keel::usize br = rowS[i], bc = colS[j];
             auto block = Value::matrix(br, bc, ValueType::DOUBLE, mr);
             double *dst = block.doubleDataMut();
-            for (size_t cc = 0; cc < bc; ++cc)
-                for (size_t rr = 0; rr < br; ++rr)
+            for (keel::usize cc = 0; cc < bc; ++cc)
+                for (keel::usize rr = 0; rr < br; ++rr)
                     dst[cc * br + rr] = src[(colOff + cc) * R + (rowOff + rr)];
             c.cellAt(j * rowS.size() + i) = std::move(block);
             colOff += bc;
@@ -434,7 +438,7 @@ namespace detail {
 // bad options) falls back to the synchronous cellfun_reg via tryStart → nullptr.
 struct CellfunCallbackBuiltin : CallbackBuiltin
 {
-    std::shared_ptr<VmContinuation> tryStart(Span<const Value> args, std::size_t nargout,
+    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
                                              Value *dest, Engine &eng) override
     {
         if (args.size() < 2 || nargout > 1)
@@ -451,24 +455,24 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
         // Parse 'UniformOutput' exactly as the synchronous path (throws on
         // unsupported options — same error the user would otherwise get).
         const bool uniform = hf::parseUniformOutputFlag(args, 2, "cellfun");
-        auto *mr = eng.resource();
+        auto *mr = eng.allocator();
         Value cellArg = args[1];
         Dims outDims = cellArg.dims();
         auto cont = std::make_shared<LoopContinuation>();
         cont->handle = args[0];
         cont->n = cellArg.numel();
         cont->dest = dest;
-        cont->makeArgs = [cellArg](std::size_t i) -> std::vector<Value> {
+        cont->makeArgs = [cellArg](keel::usize i) -> std::vector<Value> {
             return {cellArg.cellAt(i)};
         };
         // Mirror the synchronous cellfun() helper's output construction.
         cont->pack = [uniform, outDims, mr](std::vector<Value> &results) -> Value {
-            const std::size_t n = results.size();
+            const keel::usize n = results.size();
             if (uniform) {
                 const ValueType outT = (n > 0 && results[0].isLogical()) ? ValueType::LOGICAL
                                                                          : ValueType::DOUBLE;
                 Value out = allocMatrixShape(outDims, outT, mr);
-                for (std::size_t k = 0; k < n; ++k) {
+                for (keel::usize k = 0; k < n; ++k) {
                     const Value &v = results[k];
                     if (!v.isScalar())
                         throw Error("cellfun: fn returned a non-scalar; pass 'UniformOutput', "
@@ -482,7 +486,7 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
                 return out;
             }
             Value out = allocCellShape(outDims, mr);
-            for (std::size_t k = 0; k < n; ++k)
+            for (keel::usize k = 0; k < n; ++k)
                 out.cellAt(k) = results[k];
             return out;
         };
@@ -495,21 +499,21 @@ struct CellfunCallbackBuiltin : CallbackBuiltin
 // (apply receives {C1{i}, C2{i}, ...}). Packs a uniform (scalar) result or a
 // cell, with the shape of the first cell. Mirrors the single-cell cellfun().
 template <typename Apply>
-static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
-                      std::pmr::memory_resource *mr)
+static Value cellfunN(keel::ArrayRef<Value> cells, bool uniformOutput, Apply apply,
+                      keel::Allocator *mr)
 {
-    const size_t nc = cells.size();
+    const keel::usize nc = cells.size();
     const Value &C0 = cells[0];
-    const size_t n  = C0.numel();
-    ScratchArena scratch(mr);
-    ScratchVec<Value> results(&scratch);
+    const keel::usize n  = C0.numel();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<Value> results(scratch.allocator());
     results.reserve(n);
-    ScratchVec<Value> argbuf(nc, &scratch);
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t k = 0; k < nc; ++k) argbuf[k] = cells[k].cellAt(i);
+    keel::Array<Value> argbuf(nc, scratch.allocator());
+    for (keel::usize i = 0; i < n; ++i) {
+        for (keel::usize k = 0; k < nc; ++k) argbuf[k] = cells[k].cellAt(i);
         Value out;
-        Span<const Value> ar(argbuf.data(), nc);
-        Span<Value>       ou(&out, 1);
+        keel::ArrayRef<Value> ar(argbuf.data(), nc);
+        keel::MutArrayRef<Value>       ou(&out, 1);
         apply(ar, ou, mr);
         results.push_back(std::move(out));
     }
@@ -518,7 +522,7 @@ static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
         const ValueType outT = (n > 0 && results[0].isLogical())
                                ? ValueType::LOGICAL : ValueType::DOUBLE;
         Value out = allocMatrixShape(d, outT, mr);
-        for (size_t i = 0; i < n; ++i) {
+        for (keel::usize i = 0; i < n; ++i) {
             const Value &v = results[i];
             if (!v.isScalar())
                 throw Error("cellfun: fn returned a non-scalar; pass 'UniformOutput', false",
@@ -529,7 +533,7 @@ static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
         return out;
     }
     Value out = allocCellShape(d, mr);
-    for (size_t i = 0; i < n; ++i) out.cellAt(i) = std::move(results[i]);
+    for (keel::usize i = 0; i < n; ++i) out.cellAt(i) = std::move(results[i]);
     return out;
 }
 
@@ -538,14 +542,14 @@ static Value cellfunN(Span<const Value> cells, bool uniformOutput, Apply apply,
 //   length | ndims | prodofsize   → double per cell
 //   size, C, k                    → size(C{i}, k)
 //   isclass, C, 'classname'       → isa(C{i}, classname)
-static Value cellfunStringForm(Span<const Value> args, std::pmr::memory_resource *mr)
+static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     const std::string name = hf::lowerName(args[0].toString());
     if (args.size() < 2 || !args[1].isCell())
         throw Error("cellfun: the '" + name + "' form requires a cell array",
                      0, 0, "cellfun", "", "numkit:cellfun:notCell");
     const Value &C = args[1];
-    const size_t n = C.numel();
+    const keel::usize n = C.numel();
 
     int sizeDim = 0;
     std::string clsName;
@@ -577,7 +581,7 @@ static Value cellfunStringForm(Span<const Value> args, std::pmr::memory_resource
     const auto &d = C.dims();
     const ValueType outT = wantLogical ? ValueType::LOGICAL : ValueType::DOUBLE;
     Value out = allocMatrixShape(d, outT, mr);
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         const Value e = C.cellAt(i);
         double val = 0.0;
         if (name == "isempty")          val = (e.isEmpty() || e.numel() == 0) ? 1.0 : 0.0;
@@ -588,7 +592,7 @@ static Value cellfunStringForm(Span<const Value> args, std::pmr::memory_resource
         else if (name == "length") {
             if (e.numel() == 0) val = 0.0;
             else {
-                size_t mx = 0; const auto &ed = e.dims();
+                keel::usize mx = 0; const auto &ed = e.dims();
                 for (int k = 0; k < ed.ndim(); ++k)
                     if (ed.dim(k) > mx) mx = ed.dim(k);
                 val = static_cast<double>(mx);
@@ -602,12 +606,12 @@ static Value cellfunStringForm(Span<const Value> args, std::pmr::memory_resource
     return out;
 }
 
-void cellfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void cellfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("cellfun: requires at least 2 arguments (fn, C)",
                      0, 0, "cellfun", "", "numkit:cellfun:nargin");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // Legacy string-function-name form: cellfun('isempty', C), cellfun('size', C, k), …
     if (args[0].isChar() || args[0].isString()) {
@@ -616,7 +620,7 @@ void cellfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
     }
 
     // Collect the leading cell arrays (multi-cell zip); name/value options follow.
-    size_t nCells = 0;
+    keel::usize nCells = 0;
     while (1 + nCells < args.size() && args[1 + nCells].isCell()) ++nCells;
     if (nCells == 0)
         throw Error("cellfun: second argument must be a cell array",
@@ -631,17 +635,17 @@ void cellfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
             throw Error("cellfun: @class output must use UniformOutput=false",
                          0, 0, "cellfun", "", "numkit:cellfun:nonUniform");
         if (isBuiltin) {
-            auto cb = [f](Span<const Value> ar, Span<Value> ou,
-                          std::pmr::memory_resource *mr_) {
+            auto cb = [f](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                          keel::Allocator *mr_) {
                 ou[0] = hf::applyBuiltin(mr_, f, ar[0], "cellfun");
             };
             outs[0] = cellfun(cb, args[1], uniform, mr);
         } else {
             const auto &handle = args[0];
-            auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                                       std::pmr::memory_resource * /*mr*/) {
+            auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                                       keel::Allocator * /*mr*/) {
                 auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-                for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+                for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
                     ou[i] = std::move(r[i]);
             };
             outs[0] = cellfun(cb, args[1], uniform, mr);
@@ -652,72 +656,72 @@ void cellfun_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
     // Multiple cells: all must be the same size; apply fn(C1{i}, …, Cn{i})
     // through the engine handle (covers @(a,b)… and multi-arg builtins like
     // @plus; the unary built-in fast-path doesn't fit a multi-cell call).
-    const size_t n0 = args[1].numel();
-    for (size_t k = 1; k < nCells; ++k)
+    const keel::usize n0 = args[1].numel();
+    for (keel::usize k = 1; k < nCells; ++k)
         if (args[1 + k].numel() != n0)
             throw Error("cellfun: all of the input cell arrays must be the same size",
                          0, 0, "cellfun", "", "numkit:cellfun:size");
     const auto &handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = cellfunN(Span<const Value>(&args[1], nCells), uniform, cb, mr);
+    outs[0] = cellfunN(keel::ArrayRef<Value>(&args[1], nCells), uniform, cb, mr);
 }
 
-void cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.empty())
         throw Error("cell: requires 1 argument", 0, 0, "cell", "", "numkit:cell:nargin");
-    ScratchArena scratch(mr);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
     // Single vector arg: cell([m n p ...]).
     if (args.size() == 1 && !args[0].isScalar() && args[0].numel() >= 2) {
-        const size_t n = args[0].numel();
-        auto dims = ScratchVec<size_t>(n, &scratch);
-        for (size_t i = 0; i < n; ++i)
-            dims[i] = static_cast<size_t>(args[0].elemAsDouble(i));
+        const keel::usize n = args[0].numel();
+        auto dims = keel::Array<keel::usize>(n, scratch.allocator());
+        for (keel::usize i = 0; i < n; ++i)
+            dims[i] = static_cast<keel::usize>(args[0].elemAsDouble(i));
         outs[0] = Value::cellND(dims.data(), static_cast<int>(n));
         return;
     }
-    size_t r = static_cast<size_t>(args[0].toScalar());
+    keel::usize r = static_cast<keel::usize>(args[0].toScalar());
     if (args.size() == 1) {
         outs[0] = Value::cell(r, r);
         return;
     }
     if (args.size() == 2) {
-        size_t c = static_cast<size_t>(args[1].toScalar());
+        keel::usize c = static_cast<keel::usize>(args[1].toScalar());
         outs[0] = Value::cell(r, c);
         return;
     }
     if (args.size() == 3) {
-        size_t c = static_cast<size_t>(args[1].toScalar());
-        size_t p = static_cast<size_t>(args[2].toScalar());
+        keel::usize c = static_cast<keel::usize>(args[1].toScalar());
+        keel::usize p = static_cast<keel::usize>(args[2].toScalar());
         outs[0] = (p > 0) ? Value::cell3D(r, c, p) : Value::cell(r, c);
         return;
     }
     // 4+ scalar args: cell(m, n, p, q, ...).
-    auto dims = ScratchVec<size_t>(args.size(), &scratch);
-    for (size_t i = 0; i < args.size(); ++i)
-        dims[i] = static_cast<size_t>(args[i].toScalar());
+    auto dims = keel::Array<keel::usize>(args.size(), scratch.allocator());
+    for (keel::usize i = 0; i < args.size(); ++i)
+        dims[i] = static_cast<keel::usize>(args[i].toScalar());
     outs[0] = Value::cellND(dims.data(), static_cast<int>(args.size()));
 }
 
-void num2cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void num2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("num2cell requires 1 argument",
                      0, 0, "num2cell", "", "numkit:num2cell:nargin");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // num2cell(A, dims): the trailing arg(s) list the dimension(s) to
     // collapse into each cell.
     if (args.size() >= 2 && !args[1].isEmpty()) {
         std::vector<int> dims;
-        for (size_t i = 1; i < args.size(); ++i) {
+        for (keel::usize i = 1; i < args.size(); ++i) {
             const Value &dv = args[i];
-            for (size_t k = 0; k < dv.numel(); ++k)
+            for (keel::usize k = 0; k < dv.numel(); ++k)
                 dims.push_back(static_cast<int>(dv.elemAsDouble(k)));
         }
         outs[0] = num2cellDim(args[0], dims, mr);
@@ -726,36 +730,36 @@ void num2cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
     outs[0] = num2cell(args[0], mr);
 }
 
-void cell2mat_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void cell2mat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("cell2mat requires 1 argument",
                      0, 0, "cell2mat", "", "numkit:cell2mat:nargin");
-    outs[0] = cell2mat(args[0], ctx.engine->resource());
+    outs[0] = cell2mat(args[0], ctx.engine->allocator());
 }
 
-void iscellstr_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void iscellstr_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("iscellstr requires 1 argument",
                      0, 0, "iscellstr", "", "numkit:iscellstr:nargin");
-    outs[0] = iscellstr(args[0], ctx.engine->resource());
+    outs[0] = iscellstr(args[0], ctx.engine->allocator());
 }
 
-void cellstr_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void cellstr_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
         throw Error("cellstr requires 1 argument",
                      0, 0, "cellstr", "", "numkit:cellstr:nargin");
-    outs[0] = cellstr(args[0], ctx.engine->resource());
+    outs[0] = cellstr(args[0], ctx.engine->allocator());
 }
 
-void mat2cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void mat2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error("mat2cell: requires (A, R[, C])",
                      0, 0, "mat2cell", "", "numkit:mat2cell:nargin");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &rArg = args[1];
     if (args.size() == 2) {
         outs[0] = mat2cell(args[0], rArg, Value::Empty, mr);
@@ -766,7 +770,7 @@ void mat2cell_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
 
 struct ArrayfunCallbackBuiltin : CallbackBuiltin
 {
-    std::shared_ptr<VmContinuation> tryStart(Span<const Value> args, std::size_t nargout,
+    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
                                              Value *dest, Engine &eng) override
     {
         if (args.size() < 2 || nargout > 1)
@@ -775,7 +779,7 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
             return nullptr; // builtin handle -> fast synchronous path
         bool uniform = true;
         auto inputs = std::make_shared<std::vector<Value>>();
-        for (std::size_t k = 1; k < args.size(); ++k) {
+        for (keel::usize k = 1; k < args.size(); ++k) {
             if (args[k].isChar() && k + 1 < args.size()) {
                 std::string key = args[k].toString();
                 for (auto &ch : key)
@@ -794,32 +798,32 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
         }
         if (inputs->empty())
             return nullptr;
-        const std::size_t n = (*inputs)[0].numel();
+        const keel::usize n = (*inputs)[0].numel();
         for (const auto &p : *inputs)
             if (p.numel() != n)
                 return nullptr; // size mismatch -> sync path throws the error
-        auto *mr = eng.resource();
+        auto *mr = eng.allocator();
         Dims outDims = (*inputs)[0].dims();
         auto cont = std::make_shared<LoopContinuation>();
         cont->handle = args[0];
         cont->n = n;
         cont->dest = dest;
-        cont->makeArgs = [inputs, mr](std::size_t i) -> std::vector<Value> {
+        cont->makeArgs = [inputs, mr](keel::usize i) -> std::vector<Value> {
             std::vector<Value> callArgs(inputs->size());
-            for (std::size_t k = 0; k < inputs->size(); ++k)
+            for (keel::usize k = 0; k < inputs->size(); ++k)
                 callArgs[k] = Value::scalar((*inputs)[k].elemAsDouble(i), mr);
             return callArgs;
         };
         cont->pack = [uniform, outDims, mr](std::vector<Value> &results) -> Value {
-            const std::size_t n = results.size();
+            const keel::usize n = results.size();
             if (uniform) {
                 Value out = allocMatrixShape(outDims, ValueType::DOUBLE, mr);
-                for (std::size_t k = 0; k < n; ++k)
+                for (keel::usize k = 0; k < n; ++k)
                     out.doubleDataMut()[k] = results[k].toScalar();
                 return out;
             }
             Value out = allocCellShape(outDims, mr);
-            for (std::size_t k = 0; k < n; ++k)
+            for (keel::usize k = 0; k < n; ++k)
                 out.cellAt(k) = results[k];
             return out;
         };
@@ -847,22 +851,22 @@ void registerCellsRuntime(Engine &engine)
     engine.registerFunction("cellfun",  &detail::cellfun_reg);
 
     engine.registerFunction("deal",
-        [](Span<const Value> args, size_t nargout,
-           Span<Value> outs, CallContext &) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+           keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty())
                 throw std::runtime_error("deal requires at least 1 argument");
             if (args.size() == 1) {
-                for (size_t i = 0; i < nargout && i < outs.size(); ++i)
+                for (keel::usize i = 0; i < nargout && i < outs.size(); ++i)
                     outs[i] = args[0];
                 return;
             }
-            const size_t n = std::min(nargout, args.size());
-            for (size_t i = 0; i < n && i < outs.size(); ++i)
+            const keel::usize n = std::min(nargout, args.size());
+            for (keel::usize i = 0; i < n && i < outs.size(); ++i)
                 outs[i] = args[i];
         });
 
     engine.registerFunction("celldisp",
-        [](Span<const Value> args, size_t, Span<Value>, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("celldisp requires 1 argument");
             const Value &c = args[0];
@@ -871,16 +875,16 @@ void registerCellsRuntime(Engine &engine)
             const std::string name = (args.size() >= 2)
                                           ? args[1].toString()
                                           : std::string("ans");
-            for (size_t i = 0; i < c.numel(); ++i) {
+            for (keel::usize i = 0; i < c.numel(); ++i) {
                 ctx.engine->outputText(name + "{" + std::to_string(i + 1) + "} =\n");
                 ctx.engine->outputText(c.cellAt(i).formatDisplay("") + "\n");
             }
         });
 
     engine.registerFunction("arrayfun",
-        [](Span<const Value> args,
-           size_t nargout,
-           Span<Value> outs,
+        [](keel::ArrayRef<Value> args,
+           keel::usize nargout,
+           keel::MutArrayRef<Value> outs,
            CallContext &ctx) {
             (void)nargout;
             if (args.size() < 2)
@@ -892,7 +896,7 @@ void registerCellsRuntime(Engine &engine)
             bool uniformOutput = true;
             std::vector<const Value *> inputs;
             inputs.reserve(args.size() - 1);
-            for (size_t i = 1; i < args.size(); ++i) {
+            for (keel::usize i = 1; i < args.size(); ++i) {
                 if (args[i].isChar() && i + 1 < args.size()) {
                     std::string key = args[i].toString();
                     for (auto &c : key)
@@ -912,22 +916,22 @@ void registerCellsRuntime(Engine &engine)
             if (inputs.empty())
                 throw std::runtime_error("arrayfun: at least one input array required");
 
-            const size_t n = inputs[0]->numel();
+            const keel::usize n = inputs[0]->numel();
             for (const auto *p : inputs) {
                 if (p->numel() != n)
                     throw std::runtime_error("arrayfun: all input arrays must be the same size");
             }
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
 
             std::vector<Value> callArgs(inputs.size());
             if (uniformOutput) {
                 auto out = allocMatrixShape(inputs[0]->dims(), ValueType::DOUBLE, mr);
-                for (size_t i = 0; i < n; ++i) {
-                    for (size_t k = 0; k < inputs.size(); ++k)
+                for (keel::usize i = 0; i < n; ++i) {
+                    for (keel::usize k = 0; k < inputs.size(); ++k)
                         callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
                     Value r = ctx.engine->callFunctionHandle(
                         handle,
-                        Span<const Value>(callArgs.data(), callArgs.size()),
+                        keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
                         ctx.env);
                     out.doubleDataMut()[i] = r.toScalar();
                 }
@@ -935,12 +939,12 @@ void registerCellsRuntime(Engine &engine)
                     outs[0] = std::move(out);
             } else {
                 auto cell = allocCellShape(inputs[0]->dims(), mr);
-                for (size_t i = 0; i < n; ++i) {
-                    for (size_t k = 0; k < inputs.size(); ++k)
+                for (keel::usize i = 0; i < n; ++i) {
+                    for (keel::usize k = 0; k < inputs.size(); ++k)
                         callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
                     Value r = ctx.engine->callFunctionHandle(
                         handle,
-                        Span<const Value>(callArgs.data(), callArgs.size()),
+                        keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
                         ctx.env);
                     cell.cellAt(i) = std::move(r);
                 }

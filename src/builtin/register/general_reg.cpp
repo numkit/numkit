@@ -1,10 +1,10 @@
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/value/span.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/core/vm.hpp>
 #include <numkit/runtime/runtime.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
@@ -20,27 +20,27 @@
 #include <numkit/core/build_info.hpp>
 
 namespace numkit::builtin::detail {
-void addpath_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void clc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void delete_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void dir_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void format_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void formatteddisplaytext_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void freqspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void home_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void inmem_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ls_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mkdir_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void optimget_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void optimset_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void path_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pathsep_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pwd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rehash_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rmdir_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rmpath_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void which_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void addpath_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void clc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void delete_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void dir_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void format_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void formatteddisplaytext_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void freqspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void home_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void inmem_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ls_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mkdir_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void optimget_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void optimset_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void path_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pathsep_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pwd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rehash_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rmdir_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rmpath_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void which_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 }
 
 namespace numkit::builtin::detail {
@@ -51,14 +51,14 @@ void register_general(Engine &engine) {
     using namespace ::numkit::builtin::detail;
 // ── clc ────────────────────────────────────────────────────
     engine.registerFunction("clc",
-                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 ctx.engine->outputText("__CLEAR__\n");
                                 outs[0] = Value();
                             });
 
 // ── web: no-op with a warning (no browser in a CLI) ─────────
     engine.registerFunction("web",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (!args.empty() && !args[0].isChar() && !args[0].isString())
                 throw Error("web: requires a string URL", 0, 0, "web", "",
                              "numkit:web:nargin");
@@ -74,7 +74,7 @@ void register_general(Engine &engine) {
 
 // ── edit: headless CLI no-op (matches batch mode) ──────────
     engine.registerFunction("edit",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+        [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             outs[0] = Value();
         });
 
@@ -84,7 +84,7 @@ void register_general(Engine &engine) {
 
     // ── which ──────────────────────────────────────────────────
     engine.registerFunction("which",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("which requires a name argument");
                                 std::string qname = (args[0].isChar() || args[0].isString()) ? args[0].toString() : "";
@@ -145,7 +145,7 @@ void register_general(Engine &engine) {
                                     ctx.engine->outputText(res + "\n");
                                     outs[0] = Value();
                                 } else {
-                                    outs[0] = Value::fromString(isFound ? res : "", ctx.engine->resource());
+                                    outs[0] = Value::fromString(isFound ? res : "", ctx.engine->allocator());
                                 }
                             });
 
@@ -156,7 +156,7 @@ void register_general(Engine &engine) {
     
 // ── addpath / rmpath / path / rehash / run (Phase 9b) ──────
     engine.registerFunction("addpath",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 for (const auto &a : args) {
                                     if (a.isChar()) ctx.engine->addPath(a.toString());
                                 }
@@ -164,7 +164,7 @@ void register_general(Engine &engine) {
                             });
 
     engine.registerFunction("rmpath",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 for (const auto &a : args) {
                                     if (a.isChar()) ctx.engine->rmPath(a.toString());
                                 }
@@ -172,7 +172,7 @@ void register_general(Engine &engine) {
                             });
 
     engine.registerFunction("path",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 // path() with no args: print current path; with nargout, return as char string.
                                 // path('a:b:c') in MATLAB also sets the path — we treat single-arg as
                                 // a list of paths (string with pathsep) and replace.
@@ -186,11 +186,11 @@ void register_general(Engine &engine) {
                                     } else {
                                         // Return as a single newline-joined char vector
                                         std::ostringstream os;
-                                        for (size_t i = 0; i < paths.size(); ++i) {
+                                        for (keel::usize i = 0; i < paths.size(); ++i) {
                                             if (i) os << "\n";
                                             os << paths[i];
                                         }
-                                        outs[0] = Value::fromString(os.str(), ctx.engine->resource());
+                                        outs[0] = Value::fromString(os.str(), ctx.engine->allocator());
                                     }
                                     return;
                                 }
@@ -205,7 +205,7 @@ void register_general(Engine &engine) {
                             });
 
     engine.registerFunction("rehash",
-                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 ctx.engine->rehashMFiles();
                                 outs[0] = Value();
                             });
@@ -224,7 +224,7 @@ void register_general(Engine &engine) {
 
     // ── pwd / cd (Phase 9c) ────────────────────────────────────
     engine.registerFunction("pwd",
-                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 std::string c = ctx.engine->cwd();
                                 if (c.empty()) {
                                     // No engine-level cwd set — ask the active backend.
@@ -237,11 +237,11 @@ void register_general(Engine &engine) {
                                             c = fs->cwd();
                                     }
                                 }
-                                outs[0] = Value::fromString(c, ctx.engine->resource());
+                                outs[0] = Value::fromString(c, ctx.engine->allocator());
                             });
 
     engine.registerFunction("cd",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 // No args: behave like pwd (return / print current dir).
                                 auto getActualCwd = [&]() -> std::string {
                                     std::string c = ctx.engine->cwd();
@@ -263,7 +263,7 @@ void register_general(Engine &engine) {
                                         ctx.engine->outputText(c + "\n");
                                         outs[0] = Value();
                                     } else {
-                                        outs[0] = Value::fromString(c, ctx.engine->resource());
+                                        outs[0] = Value::fromString(c, ctx.engine->allocator());
                                     }
                                     return;
                                 }
@@ -280,7 +280,7 @@ void register_general(Engine &engine) {
                                 ctx.engine->setCwd(rp.path);
                                 // MATLAB: with output, return the PREVIOUS cwd.
                                 if (nargout > 0)
-                                    outs[0] = Value::fromString(prev, ctx.engine->resource());
+                                    outs[0] = Value::fromString(prev, ctx.engine->allocator());
                                 else
                                     outs[0] = Value();
                             });
@@ -296,14 +296,14 @@ void register_general(Engine &engine) {
     // build_info.hpp (alongside the NUMKIT_BUILD_TIMESTAMP macro).
     engine.registerFunction(
         "version",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             outs[0] = Value::fromString(std::string(numkit::buildTimestamp()),
-                                        ctx.engine->resource());
+                                        ctx.engine->allocator());
         });
 
     // ── mkdir / rmdir / delete ────────────────────────────────
     engine.registerFunction("mkdir",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty() || !args[0].isChar())
                                     throw std::runtime_error("mkdir requires a directory name");
                                 std::string p = args[0].toString();
@@ -328,17 +328,17 @@ void register_general(Engine &engine) {
                                 }
                                 // MATLAB returns [status, msg]; default suppresses errors.
                                 if (nargout > 0)
-                                    outs[0] = Value::logicalScalar(ok, ctx.engine->resource());
+                                    outs[0] = Value::logicalScalar(ok, ctx.engine->allocator());
                                 else if (!ok)
                                     throw std::runtime_error("mkdir: " + msg);
                                 else
                                     outs[0] = Value();
                                 if (nargout > 1)
-                                    outs[1] = Value::fromString(msg, ctx.engine->resource());
+                                    outs[1] = Value::fromString(msg, ctx.engine->allocator());
                             });
 
     engine.registerFunction("rmdir",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty() || !args[0].isChar())
                                     throw std::runtime_error("rmdir requires a directory name");
                                 std::string p = args[0].toString();
@@ -354,13 +354,13 @@ void register_general(Engine &engine) {
                                     msg = e.what();
                                 }
                                 if (nargout > 0)
-                                    outs[0] = Value::logicalScalar(ok, ctx.engine->resource());
+                                    outs[0] = Value::logicalScalar(ok, ctx.engine->allocator());
                                 else if (!ok)
                                     throw std::runtime_error("rmdir: " + msg);
                                 else
                                     outs[0] = Value();
                                 if (nargout > 1)
-                                    outs[1] = Value::fromString(msg, ctx.engine->resource());
+                                    outs[1] = Value::fromString(msg, ctx.engine->allocator());
                             });
 
     // delete — ONE name, dispatched by argument type (MATLAB semantics):
@@ -371,7 +371,7 @@ void register_general(Engine &engine) {
     // throws on duplicates — so the handle payload probe lives in the
     // shared graphics_handle.hpp header.
     engine.registerFunction("delete",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 auto &fm = ctx.engine->figureManager();
                                 bool anyFigureClosed = false;
                                 for (const auto &a : args) {
@@ -411,17 +411,17 @@ void register_general(Engine &engine) {
                             });
 
     engine.registerFunction("diary",
-                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+                            [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
                                 outs[0] = Value();
                             });
 
     // ── dir / ls ──────────────────────────────────────────────
     engine.registerFunction("dir",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 std::string target = args.empty() ? std::string(".")
                                                                    : args[0].toString();
                                 auto globMatch = [](const std::string &pat, const std::string &str) -> bool {
-                                    size_t p = 0, s = 0, starIdx = std::string::npos, matchIdx = 0;
+                                    keel::usize p = 0, s = 0, starIdx = std::string::npos, matchIdx = 0;
                                     while (s < str.size()) {
                                         if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
                                             ++p; ++s;
@@ -444,7 +444,7 @@ void register_general(Engine &engine) {
                                 const bool hasWild = target.find('*') != std::string::npos
                                                   || target.find('?') != std::string::npos;
                                 if (hasWild) {
-                                    size_t sep = target.find_last_of("/\\");
+                                    keel::usize sep = target.find_last_of("/\\");
                                     std::string dirPart = (sep == std::string::npos) ? std::string(".")
                                                         : (sep == 0 ? std::string("/") : target.substr(0, sep));
                                     std::string patPart = (sep == std::string::npos) ? target : target.substr(sep + 1);
@@ -467,7 +467,7 @@ void register_general(Engine &engine) {
                                     auto st = rp.fs->stat(rp.path);
                                     if (st && st->kind == FileStat::Kind::File) {
                                         DirEntry e;
-                                        size_t sep = rp.path.find_last_of("/\\");
+                                        keel::usize sep = rp.path.find_last_of("/\\");
                                         e.name = (sep == std::string::npos) ? rp.path : rp.path.substr(sep + 1);
                                         e.isDirectory = false;
                                         entries.push_back(e);
@@ -491,13 +491,13 @@ void register_general(Engine &engine) {
 
                                 // n×1 struct array — same fields per element so MATLAB-style
                                 // d(i).name / [d.bytes] usage works.
-                                auto *mr = ctx.engine->resource();
+                                auto *mr = ctx.engine->allocator();
                                 if (entries.empty()) {
                                     outs[0] = Value::structure(mr);
                                     return;
                                 }
                                 Value arr = Value::structArray(entries.size(), 1, mr);
-                                for (size_t i = 0; i < entries.size(); ++i) {
+                                for (keel::usize i = 0; i < entries.size(); ++i) {
                                     auto &fields = arr.structArrayElem(i);
                                     fields["name"]    = Value::fromString(entries[i].name, mr);
                                     fields["folder"]  = Value::fromString(rp.path, mr);
@@ -515,7 +515,7 @@ void register_general(Engine &engine) {
                             });
 
     engine.registerFunction("ls",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 std::string target = args.empty() ? std::string(".")
                                                                    : args[0].toString();
                                 auto rp = ctx.engine->resolvePath(target);
@@ -531,11 +531,11 @@ void register_general(Engine &engine) {
                                 } else {
                                     // Return as newline-joined char vector (MATLAB ls semantics).
                                     std::ostringstream os;
-                                    for (size_t i = 0; i < entries.size(); ++i) {
+                                    for (keel::usize i = 0; i < entries.size(); ++i) {
                                         if (i) os << "  ";
                                         os << entries[i].name;
                                     }
-                                    outs[0] = Value::fromString(os.str(), ctx.engine->resource());
+                                    outs[0] = Value::fromString(os.str(), ctx.engine->allocator());
                                 }
                             });
 
@@ -545,11 +545,11 @@ void register_general(Engine &engine) {
     //  io toolbox per the MATLAB taxonomy. pathsep stays here only
     //  because no io equivalent exists yet.)
     engine.registerFunction("pathsep",
-                            [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
 #ifdef _WIN32
-                                outs[0] = Value::fromString(";", ctx.engine->resource());
+                                outs[0] = Value::fromString(";", ctx.engine->allocator());
 #else
-                                outs[0] = Value::fromString(":", ctx.engine->resource());
+                                outs[0] = Value::fromString(":", ctx.engine->allocator());
 #endif
                             });
 
@@ -563,11 +563,11 @@ void register_general(Engine &engine) {
     // formatteddisplaytext(x) — return what disp(x) would print, but
     // as a string instead of writing it to the output stream.
     engine.registerFunction("formatteddisplaytext",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("formatteddisplaytext requires 1 argument");
             outs[0] = Value::fromString(args[0].formatDisplay(""),
-                                         ctx.engine->resource());
+                                         ctx.engine->allocator());
         });
 
     // format(spec) — accepted for compatibility, no-op (nk always
@@ -575,7 +575,7 @@ void register_general(Engine &engine) {
     // 'short', 'long', 'compact', 'loose', 'shortG', 'longG', 'shortE',
     // 'longE', 'rat', 'hex'; unknown specs throw.
     engine.registerFunction("format",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             if (!args.empty()) {
                 if (!args[0].isChar() && !args[0].isString())
                     throw std::runtime_error(
@@ -598,22 +598,22 @@ void register_general(Engine &engine) {
     
 // home — like clc; cursor to top + clear.
     engine.registerFunction("home",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             ctx.engine->outputText("__CLEAR__\n");
             outs[0] = Value();
         });
 
     // optimset / optimget — option struct utility
     engine.registerFunction("optimset",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            auto *mr = ctx.engine->resource();
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
             auto s = Value::structure(mr);
             s.field("Display")     = Value::fromString("notify", mr);
             s.field("MaxFunEvals") = Value::scalar(1000.0, mr);
             s.field("MaxIter")     = Value::scalar(500.0, mr);
             s.field("TolFun")      = Value::scalar(1e-6, mr);
             s.field("TolX")        = Value::scalar(1e-6, mr);
-            for (size_t i = 0; i + 1 < args.size(); i += 2) {
+            for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString())
                     throw std::runtime_error("optimset: option name must be a string");
                 s.field(args[i].toString()) = args[i + 1];
@@ -622,7 +622,7 @@ void register_general(Engine &engine) {
         });
 
     engine.registerFunction("optimget",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw std::runtime_error("optimget requires (options, name[, default])");
             const Value &opts = args[0];
@@ -637,11 +637,11 @@ void register_general(Engine &engine) {
 
     // freqspace(n) — frequency-spacing vector for FFT-style problems.
     engine.registerFunction("freqspace",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs,
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
            CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("freqspace requires (n[, 'whole'])");
-            size_t n_rows = 0, n_cols = 0;
+            keel::usize n_rows = 0, n_cols = 0;
             const Value &a0 = args[0];
             if (a0.numel() == 1) {
                 n_rows = n_cols = argcheck::arrayDim(a0, "freqspace");
@@ -659,32 +659,32 @@ void register_general(Engine &engine) {
                     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 whole = (s == "whole");
             }
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
 
-            auto whole_vec = [&](size_t n) {
+            auto whole_vec = [&](keel::usize n) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
                 double *d = v.doubleDataMut();
                 const double step = 2.0 / static_cast<double>(n);
-                for (size_t i = 0; i < n; ++i)
+                for (keel::usize i = 0; i < n; ++i)
                     d[i] = step * static_cast<double>(i);
                 return v;
             };
-            auto centered_vec = [&](size_t n) {
+            auto centered_vec = [&](keel::usize n) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
                 double *d = v.doubleDataMut();
                 const long start = (n % 2 == 0) ? -static_cast<long>(n)
                                                 : -static_cast<long>(n) + 1;
-                for (size_t i = 0; i < n; ++i)
+                for (keel::usize i = 0; i < n; ++i)
                     d[i] = static_cast<double>(start + 2 * static_cast<long>(i))
                          / static_cast<double>(n);
                 return v;
             };
-            auto half_vec = [&](size_t n) {
+            auto half_vec = [&](keel::usize n) {
                 if (n == 0)
                     return Value::matrix(1, 0, ValueType::DOUBLE, mr);
-                size_t m;
+                keel::usize m;
                 double last;
                 if (n % 2 == 0) { m = n / 2 + 1; last = 1.0; }
                 else            { m = (n + 1) / 2;
@@ -694,7 +694,7 @@ void register_general(Engine &engine) {
                 if (m == 1) d[0] = 0.0;
                 else {
                     const double step = last / static_cast<double>(m - 1);
-                    for (size_t i = 0; i < m; ++i)
+                    for (keel::usize i = 0; i < m; ++i)
                         d[i] = step * static_cast<double>(i);
                 }
                 return v;
@@ -714,9 +714,9 @@ void register_general(Engine &engine) {
 
     // isfile(path) / isfolder(path) — filesystem existence predicates.
     engine.registerFunction("isfile",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isfile");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             auto checkOne = [&](const std::string &p) -> bool {
                 try {
                     auto rp = ctx.engine->resolvePath(p);
@@ -731,12 +731,12 @@ void register_general(Engine &engine) {
                 outs[0] = Value::logicalScalar(checkOne(args[0].toString()), mr);
             } else if (args[0].isString()) {
                 Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
-                for (size_t i = 0; i < args[0].numel(); ++i)
+                for (keel::usize i = 0; i < args[0].numel(); ++i)
                     res.logicalDataMut()[i] = checkOne(args[0].stringElem(i)) ? 1 : 0;
                 outs[0] = std::move(res);
             } else if (args[0].isCell()) {
                 Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
-                for (size_t i = 0; i < args[0].numel(); ++i)
+                for (keel::usize i = 0; i < args[0].numel(); ++i)
                     res.logicalDataMut()[i] = checkOne(args[0].cellAt(i).toString()) ? 1 : 0;
                 outs[0] = std::move(res);
             } else {
@@ -745,9 +745,9 @@ void register_general(Engine &engine) {
         });
 
     engine.registerFunction("isfolder",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isfolder");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             auto checkOne = [&](const std::string &p) -> bool {
                 try {
                     auto rp = ctx.engine->resolvePath(p);
@@ -762,12 +762,12 @@ void register_general(Engine &engine) {
                 outs[0] = Value::logicalScalar(checkOne(args[0].toString()), mr);
             } else if (args[0].isString()) {
                 Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
-                for (size_t i = 0; i < args[0].numel(); ++i)
+                for (keel::usize i = 0; i < args[0].numel(); ++i)
                     res.logicalDataMut()[i] = checkOne(args[0].stringElem(i)) ? 1 : 0;
                 outs[0] = std::move(res);
             } else if (args[0].isCell()) {
                 Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
-                for (size_t i = 0; i < args[0].numel(); ++i)
+                for (keel::usize i = 0; i < args[0].numel(); ++i)
                     res.logicalDataMut()[i] = checkOne(args[0].cellAt(i).toString()) ? 1 : 0;
                 outs[0] = std::move(res);
             } else {
@@ -777,14 +777,14 @@ void register_general(Engine &engine) {
 
     // echo / profile / lsline — headless CLI compatibility builtins.
     engine.registerFunction("echo",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &) {
+        [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             outs[0] = Value();
         });
 
     engine.registerFunction("profile",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (nargout >= 1) {
-                auto *mr = ctx.engine->resource();
+                auto *mr = ctx.engine->allocator();
                 Value s = Value::structure(mr);
                 s.field("FunctionTable") = Value::structArray(0, 1, mr);
                 s.field("ProfilerStatus") = Value::fromString("off", mr);
@@ -796,12 +796,12 @@ void register_general(Engine &engine) {
         });
 
     engine.registerFunction("lsline",
-        [](Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (nargout >= 1) {
                 const int hid = ctx.engine->figureManager().createHandle(
                     "line", "matlab.graphics.chart.primitive.Line");
                 outs[0] = makeGraphicsHandleValue(
-                    "matlab.graphics.chart.primitive.Line", hid, ctx.engine->resource());
+                    "matlab.graphics.chart.primitive.Line", hid, ctx.engine->allocator());
             } else {
                 outs[0] = Value();
             }

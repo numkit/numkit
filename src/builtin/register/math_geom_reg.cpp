@@ -1,21 +1,19 @@
 // math/src/geom/geom_reg.cpp
 //
 // CallContext register half (Phase 2b multi-block split).
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -44,18 +42,18 @@ namespace detail {
 //
 // Polygon need not be explicitly closed (xv(end) == xv(1)); the
 // algorithm wraps from the last vertex back to the first.
-void inpolygon_reg(Span<const Value> args, size_t /*nargout*/,
-                   Span<Value> outs, CallContext &ctx)
+void inpolygon_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "inpolygon");
     argcheck::checkNargin(args.size(), 4, 4, "inpolygon");
-    outs[0] = inpolygon(args[0], args[1], args[2], args[3], ctx.engine->resource());
+    outs[0] = inpolygon(args[0], args[1], args[2], args[3], ctx.engine->allocator());
 }
 
 // Forward decl — convhull_reg defined later in this file, used by
 // boundary_reg below.
-void convhull_reg(Span<const Value> args, size_t nargout,
-                  Span<Value> outs, CallContext &ctx);
+void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx);
 
 // ── boundary ─────────────────────────────────────────────────────────
 //
@@ -76,14 +74,14 @@ void convhull_reg(Span<const Value> args, size_t nargout,
 // shrink == 1 → tightest concave (degenerate for sparse clouds).
 //
 // Returns indices of boundary vertices, with first repeated at end.
-void boundary_reg(Span<const Value> args, size_t nargout,
-                  Span<Value> outs, CallContext &ctx)
+void boundary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "boundary");
     argcheck::checkNargin(args.size(), 2, 4, "boundary");
     const auto &xv = args[0];
     const auto &yv = args[1];
-    const size_t n = xv.numel();
+    const keel::usize n = xv.numel();
     if (yv.numel() != n)
         throw Error("boundary: x and y must have the same numel",
                      0, 0, "boundary", "", "numkit:boundary:shape");
@@ -95,11 +93,11 @@ void boundary_reg(Span<const Value> args, size_t nargout,
     // shrink == 0 → convex hull (use existing impl).
     if (shrink == 0.0 || n < 4) {
         std::array<Value, 2> proxied{ args[0], args[1] };
-        convhull_reg(Span<const Value>(proxied.data(), 2), nargout, outs, ctx);
+        convhull_reg(keel::ArrayRef<Value>(proxied.data(), 2), nargout, outs, ctx);
         return;
     }
     // Main alpha-shape path lives in the public C++ API.
-    outs[0] = boundary(args[0], args[1], shrink, ctx.engine->resource());
+    outs[0] = boundary(args[0], args[1], shrink, ctx.engine->allocator());
 }
 
 // ── polyarea ─────────────────────────────────────────────────────────
@@ -111,12 +109,12 @@ void boundary_reg(Span<const Value> args, size_t nargout,
 //
 // Polygon may be unclosed (algorithm wraps the last vertex back to
 // the first). Returns 0 if fewer than 3 vertices.
-void polyarea_reg(Span<const Value> args, size_t /*nargout*/,
-                  Span<Value> outs, CallContext &ctx)
+void polyarea_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "polyarea");
     argcheck::checkNargin(args.size(), 2, 3, "polyarea");
-    outs[0] = polyarea(args[0], args[1], ctx.engine->resource());
+    outs[0] = polyarea(args[0], args[1], ctx.engine->allocator());
 }
 
 // ── convhull ─────────────────────────────────────────────────────────
@@ -130,11 +128,11 @@ void polyarea_reg(Span<const Value> args, size_t /*nargout*/,
 // hull polygon — `plot(x(k), y(k))`. We mirror that by pushing a line
 // dataset directly through the figure manager so users get the visual
 // without needing to wire up a plot() call.
-void convhull_reg(Span<const Value> args, size_t nargout,
-                  Span<Value> outs, CallContext &ctx)
+void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "convhull");
-    Value K = convhull(args[0], args[1], ctx.engine->resource());
+    Value K = convhull(args[0], args[1], ctx.engine->allocator());
     if (nargout != 0) {
         outs[0] = std::move(K);
         return;
@@ -144,12 +142,12 @@ void convhull_reg(Span<const Value> args, size_t nargout,
     auto &fm = ctx.engine->figureManager();
     fm.prepareForPlot();
     const double *k = K.doubleData();
-    const std::size_t m = K.numel();
+    const keel::usize m = K.numel();
     std::ostringstream xs, ys;
     xs << '['; ys << '[';
-    for (std::size_t i = 0; i < m; ++i) {
+    for (keel::usize i = 0; i < m; ++i) {
         if (i) { xs << ','; ys << ','; }
-        const std::size_t kk = static_cast<std::size_t>(k[i]) - 1;
+        const keel::usize kk = static_cast<keel::usize>(k[i]) - 1;
         xs << args[0].elemAsDouble(kk);
         ys << args[1].elemAsDouble(kk);
     }
@@ -173,14 +171,14 @@ void convhull_reg(Span<const Value> args, size_t nargout,
 //   N = histcounts2(x, y, n)         — n×n
 //   N = histcounts2(x, y, [nx ny])   — explicit grid
 //   N = histcounts2(x, y, xedges, yedges)  — explicit edges
-void histcounts2_reg(Span<const Value> args, size_t /*nargout*/,
-                     Span<Value> outs, CallContext &ctx)
+void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "histcounts2");
     const auto &xv = args[0];
     const auto &yv = args[1];
-    const std::size_t n = std::min(xv.numel(), yv.numel());
-    auto *mr = ctx.engine->resource();
+    const keel::usize n = std::min(xv.numel(), yv.numel());
+    auto *mr = ctx.engine->allocator();
     if (n == 0) {
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
         return;
@@ -201,7 +199,7 @@ void histcounts2_reg(Span<const Value> args, size_t /*nargout*/,
                 ny = (int)args[2].elemAsDouble(1);
             } else {
                 xedges.resize(args[2].numel());
-                for (std::size_t i = 0; i < xedges.size(); ++i)
+                for (keel::usize i = 0; i < xedges.size(); ++i)
                     xedges[i] = args[2].elemAsDouble(i);
                 yedges = xedges;
             }
@@ -209,9 +207,9 @@ void histcounts2_reg(Span<const Value> args, size_t /*nargout*/,
     } else if (args.size() >= 4) {
         xedges.resize(args[2].numel());
         yedges.resize(args[3].numel());
-        for (std::size_t i = 0; i < xedges.size(); ++i)
+        for (keel::usize i = 0; i < xedges.size(); ++i)
             xedges[i] = args[2].elemAsDouble(i);
-        for (std::size_t i = 0; i < yedges.size(); ++i)
+        for (keel::usize i = 0; i < yedges.size(); ++i)
             yedges[i] = args[3].elemAsDouble(i);
     }
     if (nx < 1) nx = 1;
@@ -221,7 +219,7 @@ void histcounts2_reg(Span<const Value> args, size_t /*nargout*/,
     if (xedges.empty() || yedges.empty()) {
         double xmn = xv.elemAsDouble(0), xmx = xmn;
         double ymn = yv.elemAsDouble(0), ymx = ymn;
-        for (std::size_t i = 1; i < n; ++i) {
+        for (keel::usize i = 1; i < n; ++i) {
             const double X = xv.elemAsDouble(i);
             const double Y = yv.elemAsDouble(i);
             if (std::isfinite(X)) {
@@ -275,11 +273,11 @@ void histcounts2_reg(Span<const Value> args, size_t /*nargout*/,
 //
 // Triangles are emitted with CCW orientation (negative signed-area
 // triples are reordered).
-void delaunay_reg(Span<const Value> args, size_t /*nargout*/,
-                  Span<Value> outs, CallContext &ctx)
+void delaunay_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "delaunay");
-    outs[0] = delaunay(args[0], args[1], ctx.engine->resource());
+    outs[0] = delaunay(args[0], args[1], ctx.engine->allocator());
 }
 
 // ── griddata ─────────────────────────────────────────────────────────
@@ -294,11 +292,11 @@ void delaunay_reg(Span<const Value> args, size_t /*nargout*/,
 //   vq = griddata(x, y, v, xq, yq, 'linear')   — only mode for v1
 //
 // 'nearest', 'natural', 'cubic', 'v4' modes are BACKLOG.
-void griddata_reg(Span<const Value> args, size_t nargout,
-                  Span<Value> outs, CallContext &ctx)
+void griddata_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 5, 7, "griddata");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     std::string method = "linear";
     if (args.size() >= 6 && (args[5].isChar() || args[5].isString()))
         method = args[5].toString();
@@ -309,15 +307,15 @@ void griddata_reg(Span<const Value> args, size_t nargout,
     const bool bothVectors = xqIn.dims().isVector() && yqIn.dims().isVector();
     const bool diffOrient  = (xqIn.dims().rows() == 1) != (yqIn.dims().rows() == 1);
     if (bothVectors && (xqIn.numel() != yqIn.numel() || (diffOrient && xqIn.numel() > 1) || nargout >= 3)) {
-        const std::size_t rows = yqIn.numel();
-        const std::size_t cols = xqIn.numel();
+        const keel::usize rows = yqIn.numel();
+        const keel::usize cols = xqIn.numel();
         xqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
         yqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
         double *xd = xqExpanded.doubleDataMut();
         double *yd = yqExpanded.doubleDataMut();
-        for (std::size_t c = 0; c < cols; ++c) {
+        for (keel::usize c = 0; c < cols; ++c) {
             const double xv = xqIn.elemAsDouble(c);
-            for (std::size_t r = 0; r < rows; ++r) {
+            for (keel::usize r = 0; r < rows; ++r) {
                 xd[c * rows + r] = xv;
                 yd[c * rows + r] = yqIn.elemAsDouble(r);
             }
@@ -340,8 +338,8 @@ void griddata_reg(Span<const Value> args, size_t nargout,
 
 namespace detail {
 
-void griddatan_reg(Span<const Value> args, size_t /*nargout*/,
-                   Span<Value> outs, CallContext &ctx)
+void griddatan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 5, "griddatan");
     argcheck::checkNargin(args.size(), 3, 5, "griddatan");
@@ -349,15 +347,15 @@ void griddatan_reg(Span<const Value> args, size_t /*nargout*/,
     if (args.size() >= 4 && args[3].isChar())
         method = args[3].toString();
     outs[0] = griddatan(args[0], args[1], args[2], method,
-                        ctx.engine->resource());
+                        ctx.engine->allocator());
 }
 
 } // namespace detail
 
 namespace detail {
 
-void matchpairs_reg(Span<const Value> args, size_t nargout,
-                    Span<Value> outs, CallContext &ctx)
+void matchpairs_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "matchpairs");
     argcheck::checkNargin(args.size(), 2, 3, "matchpairs");
@@ -365,17 +363,17 @@ void matchpairs_reg(Span<const Value> args, size_t nargout,
     std::string mode = "min";
     if (args.size() >= 3 && args[2].isChar())
         mode = args[2].toString();
-    auto r = matchpairs(args[0], cU, mode, ctx.engine->resource());
+    auto r = matchpairs(args[0], cU, mode, ctx.engine->allocator());
     outs[0] = std::move(r.M);
     if (nargout > 1) outs[1] = std::move(r.uR);
     if (nargout > 2) outs[2] = std::move(r.uC);
 }
 
-void dsearchn_reg(Span<const Value> args, size_t nargout,
-                  Span<Value> outs, CallContext &ctx)
+void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 4, "dsearchn");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &P = args[0];
     // Forms:
     //   dsearchn(P, PQ)
@@ -385,17 +383,17 @@ void dsearchn_reg(Span<const Value> args, size_t nargout,
     const Value &PQ = (args.size() >= 3 && args[1].dims().cols() != P.dims().cols())
                           ? args[2]
                           : args[1];
-    const size_t nPts = P.dims().rows();
-    const size_t nDim = P.dims().cols();
-    const size_t nQ   = PQ.dims().rows();
+    const keel::usize nPts = P.dims().rows();
+    const keel::usize nDim = P.dims().cols();
+    const keel::usize nQ   = PQ.dims().rows();
     Value K = Value::matrix(nQ, 1, ValueType::DOUBLE, mr);
     Value D = (nargout >= 2) ? Value::matrix(nQ, 1, ValueType::DOUBLE, mr) : Value();
-    for (size_t q = 0; q < nQ; ++q) {
+    for (keel::usize q = 0; q < nQ; ++q) {
         double bestDistSq = std::numeric_limits<double>::infinity();
-        size_t bestIdx = 1;
-        for (size_t p = 0; p < nPts; ++p) {
+        keel::usize bestIdx = 1;
+        for (keel::usize p = 0; p < nPts; ++p) {
             double dsq = 0.0;
-            for (size_t d = 0; d < nDim; ++d) {
+            for (keel::usize d = 0; d < nDim; ++d) {
                 const double diff = PQ.elemAsDouble(q + d * nQ) - P.elemAsDouble(p + d * nPts);
                 dsq += diff * diff;
             }

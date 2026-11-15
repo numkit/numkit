@@ -8,9 +8,10 @@
 // bodies share, and (2) the per-family build*Plots(table) entry points that
 // buildPlotTable() dispatches to.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/graphics/graphics_context.hpp>  // GraphicsContext, PlotEntry, GraphicsFn
 #include <numkit/core/figure_manager.hpp>      // DatasetInfo
-#include <numkit/value/span.hpp>                 // Span
 #include <numkit/value/value.hpp>                // Value
 
 #include <cstddef>
@@ -27,28 +28,28 @@ namespace detail {
 std::string vecToJson(const Value &v);
 
 // "[1,2,...,n]" — the 1-based implicit-X axis for a plot given only Y.
-std::string makeIndexJson(std::size_t n);
+std::string makeIndexJson(keel::usize n);
 
 // A char Value as its raw string (title / label text).
 std::string argStr(const Value &v);
 
 // Parse trailing 'LineWidth' / 'MarkerSize' N-V pairs from args[startIdx..].
-void parsePlotArgs(Span<const Value> args, std::size_t startIdx, DatasetInfo &ds);
+void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo &ds);
 
 // Parse the leading (x,y[,style]) / (y[,style]) of a plot call into ds and
 // return the index where trailing N-V pairs begin.
-std::size_t parsePlotXYStyle(Span<const Value> args, DatasetInfo &ds);
+keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds);
 
 // Append a double to os as JSON (NaN -> null; +/-Inf -> +/-1e308).
 void doubleToJson(std::ostringstream &os, double val);
 
 
 // Plot bodies shared by >1 family (defined in plots/shared.cpp).
-void heatmapImpl(const char *typeName, bool axisIj, Span<const Value> args,
-                 std::size_t nargout, Span<Value> outs, GraphicsContext &gc);
-void geoForward(const char *target, Span<const Value> args, Span<Value> outs,
+void heatmapImpl(const char *typeName, bool axisIj, keel::ArrayRef<Value> args,
+                 keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc);
+void geoForward(const char *target, keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
                 GraphicsContext &gc);
-void delegateTo(const char *target, Span<const Value> args, Span<Value> outs,
+void delegateTo(const char *target, keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
                 GraphicsContext &gc);
 
 }  // namespace detail

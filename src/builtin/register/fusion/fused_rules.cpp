@@ -40,6 +40,9 @@
 // each rule's match closure stays a few lines; the execute closures share the
 // runtime type/shape guard via bindAffineProduct.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/complex.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/fusion_rule.hpp>
 #include <numkit/core/ast.hpp>
@@ -58,7 +61,7 @@ namespace {
 
 // Below this many elements the per-op path is fine and the dispatch isn't
 // worth it — decline (fall back). Correctness is unaffected either way.
-constexpr std::size_t kFusionMinElems = 1024;
+constexpr keel::usize kFusionMinElems = 1024;
 
 // A leaf whose re-evaluation is free and side-effect-free, so that a declined
 // kernel can fall back to the normal per-op path without re-running effects.
@@ -144,16 +147,16 @@ bool isFusibleComplexArray(const Value &v) {
 
 // A scalar coefficient → Complex (real-double scalar → (v,0); complex scalar →
 // its value). false if not a scalar real-double/complex value.
-bool asComplexScalar(const Value &v, Complex &out) {
+bool asComplexScalar(const Value &v, keel::c64 &out) {
     if (!v.isScalar()) return false;
     if (v.isComplex()) { out = v.toComplex(); return true; }
-    if (v.type() == ValueType::DOUBLE) { out = Complex(v.toScalar(), 0.0); return true; }
+    if (v.type() == ValueType::DOUBLE) { out = keel::c64(v.toScalar(), 0.0); return true; }
     return false;
 }
 
 // product's two operands → (Complex coeff, complex array x): exactly one scalar
 // coefficient (real/complex) and one complex array. Resolves `a.*z` vs `z.*a`.
-bool bindAffineProductCx(const Value &c0, const Value &c1, Complex &scale,
+bool bindAffineProductCx(const Value &c0, const Value &c1, keel::c64 &scale,
                          const Value *&x) {
     if (isFusibleComplexArray(c1) && asComplexScalar(c0, scale)) { x = &c1; return true; }
     if (isFusibleComplexArray(c0) && asComplexScalar(c1, scale)) { x = &c0; return true; }
@@ -197,12 +200,12 @@ std::optional<std::vector<const ASTNode *>> matchClamp(const ASTNode *node,
 
 // Fast path for a real-double array x and real-double scalar lo/hi. Bit-
 // identical to the matched clamp spelling; declines (false → fall back) else.
-bool execClamp(const Value *ops, std::size_t n, Value &out,
-               std::pmr::memory_resource *mr, bool minOuter) {
+bool execClamp(const Value *ops, keel::usize n, Value &out,
+               keel::Allocator *mr, bool minOuter) {
     if (n != 3) return false;
     const Value &x = ops[0], &lo = ops[1], &hi = ops[2];
     if (x.type() != ValueType::DOUBLE || x.isComplex()) return false;
-    const std::size_t N = x.numel();
+    const keel::usize N = x.numel();
     if (N < kFusionMinElems) return false;
     if (!isRealDoubleScalar(lo) || !isRealDoubleScalar(hi)) return false;
 
@@ -247,8 +250,8 @@ std::optional<std::vector<const ASTNode *>> matchAffineSub(const ASTNode *node) 
 // bSign*leaf and the y-coefficient bSign*1.0 are both exact (×±1 does not
 // round), so each path is bit-identical to its per-op spelling (negation and
 // add/sub are the same exact IEEE op, both rounding twice overall).
-bool execAffine(const Value *ops, std::size_t n, Value &out,
-                std::pmr::memory_resource *mr, double bSign) {
+bool execAffine(const Value *ops, keel::usize n, Value &out,
+                keel::Allocator *mr, double bSign) {
     if (n != 3) return false;
     double scale = 0.0;
     const Value *x = nullptr;
@@ -268,11 +271,11 @@ bool execAffine(const Value *ops, std::size_t n, Value &out,
         }
     }
     // complex array → complex affine (a.*z ± b) / axpby (a.*z ± w).
-    Complex cscale;
+    keel::c64 cscale;
     const Value *cz = nullptr;
     if (bindAffineProductCx(ops[0], ops[1], cscale, cz)) {
         const Value &leaf = ops[2];
-        Complex coff;
+        keel::c64 coff;
         if (asComplexScalar(leaf, coff)) {
             out = ops::createLike(*cz, ValueType::COMPLEX, mr);
             ops::fusedAffineCx(cz->complexData(), cscale, bSign < 0 ? -coff : coff,
@@ -282,7 +285,7 @@ bool execAffine(const Value *ops, std::size_t n, Value &out,
         if (isFusibleComplexArray(leaf) && leaf.dims() == cz->dims()) {
             out = ops::createLike(*cz, ValueType::COMPLEX, mr);
             ops::fusedAxpbyCx(cz->complexData(), cscale, leaf.complexData(),
-                              Complex(bSign, 0.0), out.complexDataMut(), cz->numel());
+                              keel::c64(bSign, 0.0), out.complexDataMut(), cz->numel());
             return true;
         }
     }
@@ -309,8 +312,8 @@ std::optional<std::vector<const ASTNode *>> matchAxpby(const ASTNode *node,
 // operands = [pc0, pc1, qc0, qc1]; expr = (pc0⊗pc1) ⊕ (qc0⊗qc1). `bSign` carries
 // the additive operator: out = a*x + (bSign*b)*y, bit-identical to a.*x ± b.*y
 // ((-b)*y = -(b*y) exactly, so the sign fold does not change any rounding).
-bool execAxpby(const Value *ops, std::size_t n, Value &out,
-               std::pmr::memory_resource *mr, double bSign) {
+bool execAxpby(const Value *ops, keel::usize n, Value &out,
+               keel::Allocator *mr, double bSign) {
     if (n != 4) return false;
     double a = 0.0, b = 0.0;
     const Value *x = nullptr, *y = nullptr;
@@ -323,7 +326,7 @@ bool execAxpby(const Value *ops, std::size_t n, Value &out,
         return true;
     }
     // complex: a.*z ± b.*w (both products bind to complex arrays).
-    Complex ca, cb;
+    keel::c64 ca, cb;
     const Value *cz = nullptr, *cw = nullptr;
     if (bindAffineProductCx(ops[0], ops[1], ca, cz) &&
         bindAffineProductCx(ops[2], ops[3], cb, cw) &&
@@ -357,8 +360,8 @@ std::optional<std::vector<const ASTNode *>> matchNegProd(const ASTNode *node) {
 // (coef, p). leaf scalar → `c - a.*x` = fusedAffine(p, -coef, c); leaf same-
 // shape array → `x - b.*y` = fusedAxpby(leaf, 1, p, -coef). Both exact: (-a)*x
 // == -(a*x), and c + (-(a*x)) == c - a*x (IEEE add commutes bit-for-bit).
-bool execNegProd(const Value *ops, std::size_t n, Value &out,
-                 std::pmr::memory_resource *mr) {
+bool execNegProd(const Value *ops, keel::usize n, Value &out,
+                 keel::Allocator *mr) {
     if (n != 3) return false;
     double coef = 0.0;
     const Value *p = nullptr;
@@ -378,11 +381,11 @@ bool execNegProd(const Value *ops, std::size_t n, Value &out,
         }
     }
     // complex: c - a.*z (scalar leaf) / w - b.*z (array leaf).
-    Complex ccoef;
+    keel::c64 ccoef;
     const Value *cp = nullptr;
     if (bindAffineProductCx(ops[1], ops[2], ccoef, cp)) {
         const Value &leaf = ops[0];
-        Complex cleaf;
+        keel::c64 cleaf;
         if (asComplexScalar(leaf, cleaf)) {              // c - a.*z = -a.*z + c
             out = ops::createLike(*cp, ValueType::COMPLEX, mr);
             ops::fusedAffineCx(cp->complexData(), -ccoef, cleaf,
@@ -391,7 +394,7 @@ bool execNegProd(const Value *ops, std::size_t n, Value &out,
         }
         if (isFusibleComplexArray(leaf) && leaf.dims() == cp->dims()) {  // w - b.*z
             out = ops::createLike(leaf, ValueType::COMPLEX, mr);
-            ops::fusedAxpbyCx(leaf.complexData(), Complex(1.0, 0.0),
+            ops::fusedAxpbyCx(leaf.complexData(), keel::c64(1.0, 0.0),
                               cp->complexData(), -ccoef, out.complexDataMut(),
                               leaf.numel());
             return true;
@@ -445,8 +448,8 @@ matchShiftScaleDiv(const ASTNode *node) {
 // operands = [A, B, s]; expr = (A - B) ⊗ s, ⊗ = `*` (isDiv=false) or `/`. The
 // subtract must be array-minus-scalar — A the real-double array, B a real
 // scalar; `c - x` (A scalar) declines on size and falls back. s/d real scalar.
-bool execShiftScale(const Value *ops, std::size_t n, Value &out,
-                    std::pmr::memory_resource *mr, bool isDiv) {
+bool execShiftScale(const Value *ops, keel::usize n, Value &out,
+                    keel::Allocator *mr, bool isDiv) {
     if (n != 3) return false;
     const Value &A = ops[0], &B = ops[1], &s = ops[2];
     // real path: A a real-double array, B/s real scalars.
@@ -463,7 +466,7 @@ bool execShiftScale(const Value *ops, std::size_t n, Value &out,
         return true;
     }
     // complex: (z - c) .* s / (z - c) ./ d, z complex array, c/s/d real or complex.
-    Complex cB, cs;
+    keel::c64 cB, cs;
     if (isFusibleComplexArray(A) && asComplexScalar(B, cB) && asComplexScalar(s, cs)) {
         out = ops::createLike(A, ValueType::COMPLEX, mr);
         if (isDiv)
@@ -485,10 +488,10 @@ bool execShiftScale(const Value *ops, std::size_t n, Value &out,
 enum class InnerKind;
 std::optional<std::vector<const ASTNode *>> matchInner(const ASTNode *node,
                                                        InnerKind kind);
-bool bindInner(const Value *ops, std::size_t n, InnerKind kind, double &scale,
+bool bindInner(const Value *ops, keel::usize n, InnerKind kind, double &scale,
                double &offset, const Value *&x);
-bool bindInnerCx(const Value *ops, std::size_t n, InnerKind kind, Complex &scale,
-                 Complex &offset, bool &affine, const Value *&x);
+bool bindInnerCx(const Value *ops, keel::usize n, InnerKind kind, keel::c64 &scale,
+                 keel::c64 &offset, bool &affine, const Value *&x);
 
 // ---- affine-clamp:  max(lo, min(hi, <inner>)) --------------------------
 // Normalize-then-saturate in one pass — reuses fusedAffineClamp with bound
@@ -510,8 +513,8 @@ matchAffineClamp(const ASTNode *node, InnerKind kind, bool minOuter) {
 
 // Same bit-exactness as affine (the inner) composed with the clamp kernel's
 // fmin/fmax (validated against per-op min/max by the plain-clamp rule).
-bool execAffineClamp(const Value *ops, std::size_t n, Value &out,
-                     std::pmr::memory_resource *mr, InnerKind kind, bool minOuter) {
+bool execAffineClamp(const Value *ops, keel::usize n, Value &out,
+                     keel::Allocator *mr, InnerKind kind, bool minOuter) {
     if (n < 3) return false;                  // lo, hi, + >=1 inner operand
     const Value &lo = ops[0], &hi = ops[1];
     if (!isRealDoubleScalar(lo) || !isRealDoubleScalar(hi)) return false;
@@ -554,8 +557,8 @@ std::optional<std::vector<const ASTNode *>> matchAbsDiff(const ASTNode *node) {
 }
 
 // abs(<inner>) → |scale*x + offset|, inner decoded by bindInner.
-bool execAbsAffine(const Value *ops, std::size_t n, Value &out,
-                   std::pmr::memory_resource *mr, InnerKind kind) {
+bool execAbsAffine(const Value *ops, keel::usize n, Value &out,
+                   keel::Allocator *mr, InnerKind kind) {
     double scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
@@ -564,7 +567,7 @@ bool execAbsAffine(const Value *ops, std::size_t n, Value &out,
                             x->numel());
         return true;
     }
-    Complex cscale, coffset;
+    keel::c64 cscale, coffset;
     bool affine = false;
     const Value *cx = nullptr;
     if (bindInnerCx(ops, n, kind, cscale, coffset, affine, cx)) {  // |<inner>| → real
@@ -579,8 +582,8 @@ bool execAbsAffine(const Value *ops, std::size_t n, Value &out,
 // operands = [A, B]; expr = abs(A - B). Two same-shape arrays → fusedAbsDiff;
 // array-minus-scalar (either side) → fusedAbsAffine (|x-c| == |1*x + (-c)|,
 // and |c-x| == |x-c|). Anything else (broadcast, both scalar) declines.
-bool execAbsDiff(const Value *ops, std::size_t n, Value &out,
-                 std::pmr::memory_resource *mr) {
+bool execAbsDiff(const Value *ops, keel::usize n, Value &out,
+                 keel::Allocator *mr) {
     if (n != 2) return false;
     const Value &A = ops[0], &B = ops[1];
     auto isArr = [](const Value &v) {
@@ -615,7 +618,7 @@ bool execAbsDiff(const Value *ops, std::size_t n, Value &out,
                             A.numel());
         return true;
     }
-    Complex csc;
+    keel::c64 csc;
     if (isFusibleComplexArray(A) && asComplexScalar(B, csc)) {   // |z - c|
         out = ops::createLike(A, ValueType::DOUBLE, mr);
         ops::fusedAbsDiffScalarCx(A.complexData(), csc, out.doubleDataMut(), A.numel());
@@ -676,7 +679,7 @@ std::optional<std::vector<const ASTNode *>> matchInner(const ASTNode *node,
 // Decode evaluated operands for `kind` into (scale, offset, x). Every mapping is
 // bit-exact with the per-op spelling: ×1/+0 are exact, ±c is exact negation,
 // and `c-x` → scale -1 reproduces `c - x` exactly (negation + commute).
-bool bindInner(const Value *ops, std::size_t n, InnerKind kind, double &scale,
+bool bindInner(const Value *ops, keel::usize n, InnerKind kind, double &scale,
                double &offset, const Value *&x) {
     switch (kind) {
         case InnerKind::ProductAdd:
@@ -721,13 +724,13 @@ bool bindInner(const Value *ops, std::size_t n, InnerKind kind, double &scale,
 // the kernel does an add/negate — NOT a complex mul by (±1+0i), whose 0*Inf=NaN
 // would diverge from the per-op bare add/sub. offset add/sub is bit-exact
 // (t-b == t+(-b)); ±1 negate is exact; a Product +0 only flips a -0 (isequaln-eq).
-bool bindInnerCx(const Value *ops, std::size_t n, InnerKind kind, Complex &scale,
-                 Complex &offset, bool &affine, const Value *&x) {
+bool bindInnerCx(const Value *ops, keel::usize n, InnerKind kind, keel::c64 &scale,
+                 keel::c64 &offset, bool &affine, const Value *&x) {
     switch (kind) {
         case InnerKind::ProductAdd:
         case InnerKind::ProductSub: {
             if (n != 3) return false;
-            Complex off;
+            keel::c64 off;
             if (!asComplexScalar(ops[2], off)) return false;
             if (!bindAffineProductCx(ops[0], ops[1], scale, x)) return false;
             offset = (kind == InnerKind::ProductSub) ? -off : off;
@@ -736,29 +739,29 @@ bool bindInnerCx(const Value *ops, std::size_t n, InnerKind kind, Complex &scale
         }
         case InnerKind::Product: {
             if (n != 2 || !bindAffineProductCx(ops[0], ops[1], scale, x)) return false;
-            offset = Complex(0.0, 0.0);
+            offset = keel::c64(0.0, 0.0);
             affine = true;
             return true;
         }
         case InnerKind::ShiftAdd: {                                  // z+c / c+z
             if (n != 2) return false;
             const Value &u = ops[0], &v = ops[1];
-            Complex c;
-            if (isFusibleComplexArray(u) && asComplexScalar(v, c)) { x = &u; scale = Complex(1.0, 0.0); offset = c; affine = false; return true; }
-            if (isFusibleComplexArray(v) && asComplexScalar(u, c)) { x = &v; scale = Complex(1.0, 0.0); offset = c; affine = false; return true; }
+            keel::c64 c;
+            if (isFusibleComplexArray(u) && asComplexScalar(v, c)) { x = &u; scale = keel::c64(1.0, 0.0); offset = c; affine = false; return true; }
+            if (isFusibleComplexArray(v) && asComplexScalar(u, c)) { x = &v; scale = keel::c64(1.0, 0.0); offset = c; affine = false; return true; }
             return false;
         }
         case InnerKind::ShiftSub: {                                  // z-c / c-z
             if (n != 2) return false;
             const Value &u = ops[0], &v = ops[1];  // expr = u - v
-            Complex c;
-            if (isFusibleComplexArray(u) && asComplexScalar(v, c)) { x = &u; scale = Complex(1.0, 0.0);  offset = -c; affine = false; return true; }
-            if (isFusibleComplexArray(v) && asComplexScalar(u, c)) { x = &v; scale = Complex(-1.0, 0.0); offset = c;  affine = false; return true; }
+            keel::c64 c;
+            if (isFusibleComplexArray(u) && asComplexScalar(v, c)) { x = &u; scale = keel::c64(1.0, 0.0);  offset = -c; affine = false; return true; }
+            if (isFusibleComplexArray(v) && asComplexScalar(u, c)) { x = &v; scale = keel::c64(-1.0, 0.0); offset = c;  affine = false; return true; }
             return false;
         }
         case InnerKind::NegLeaf: {                                   // -z
             if (n != 1 || !isFusibleComplexArray(ops[0])) return false;
-            x = &ops[0]; scale = Complex(-1.0, 0.0); offset = Complex(0.0, 0.0); affine = false;
+            x = &ops[0]; scale = keel::c64(-1.0, 0.0); offset = keel::c64(0.0, 0.0); affine = false;
             return true;
         }
     }
@@ -801,7 +804,7 @@ std::optional<std::vector<const ASTNode *>> matchDivArg(const ASTNode *node) {
 
 // Decode → (sub, div, x) for the (x-sub)/div kernel. `(c-x)/d` → (x-c)/(-d)
 // (exact: sign moves through the division).
-bool bindDivInner(const Value *ops, std::size_t n, double &sub, double &div,
+bool bindDivInner(const Value *ops, keel::usize n, double &sub, double &div,
                   const Value *&x) {
     if (n == 3) {
         const Value &A = ops[0], &B = ops[1], &d = ops[2];
@@ -821,11 +824,11 @@ bool bindDivInner(const Value *ops, std::size_t n, double &sub, double &div,
 // Complex counterpart of bindDivInner. (z-c)./d → (sub=c, div=d); the reversed
 // (c-z)./d → (z-c)./(-d) (sub=c, div=-d), mirroring the real bindDivInner fold.
 // The subtract and divide are genuine (no spurious mul-by-1).
-bool bindDivInnerCx(const Value *ops, std::size_t n, Complex &sub, Complex &div,
+bool bindDivInnerCx(const Value *ops, keel::usize n, keel::c64 &sub, keel::c64 &div,
                     const Value *&x) {
     if (n == 3) {
         const Value &A = ops[0], &B = ops[1], &d = ops[2];
-        Complex cs, cd;
+        keel::c64 cs, cd;
         if (!asComplexScalar(d, cd)) return false;
         if (isFusibleComplexArray(A) && asComplexScalar(B, cs)) {  // (z-c)/d
             x = &A; sub = cs; div = cd; return true;
@@ -837,9 +840,9 @@ bool bindDivInnerCx(const Value *ops, std::size_t n, Complex &sub, Complex &div,
     }
     if (n == 2) {
         const Value &X = ops[0], &d = ops[1];
-        Complex cd;
+        keel::c64 cd;
         if (isFusibleComplexArray(X) && asComplexScalar(d, cd)) {
-            x = &X; sub = Complex(0.0, 0.0); div = cd; return true;
+            x = &X; sub = keel::c64(0.0, 0.0); div = cd; return true;
         }
         return false;
     }
@@ -847,8 +850,8 @@ bool bindDivInnerCx(const Value *ops, std::size_t n, Complex &sub, Complex &div,
 }
 
 // Any (x[i]-sub)/div < 0 — the decline predicate for sqrt/log of a div-inner.
-bool shiftDivAnyNegative(const double *x, double sub, double div, std::size_t n) {
-    for (std::size_t i = 0; i < n; ++i)
+bool shiftDivAnyNegative(const double *x, double sub, double div, keel::usize n) {
+    for (keel::usize i = 0; i < n; ++i)
         if ((x[i] - sub) / div < 0.0) return true;
     return false;
 }
@@ -868,8 +871,8 @@ matchAffineClampDiv(const ASTNode *node, bool minOuter) {
     return ops;                                // [lo, hi, <div-arg-ops>]
 }
 
-bool execAffineClampDiv(const Value *ops, std::size_t n, Value &out,
-                        std::pmr::memory_resource *mr, bool minOuter) {
+bool execAffineClampDiv(const Value *ops, keel::usize n, Value &out,
+                        keel::Allocator *mr, bool minOuter) {
     if (n < 3) return false;                   // lo, hi, + >=1 div-arg operand
     const Value &lo = ops[0], &hi = ops[1];
     if (!isRealDoubleScalar(lo) || !isRealDoubleScalar(hi)) return false;
@@ -900,19 +903,19 @@ const ASTNode *unaryCallArg(const ASTNode *node, const char *fname) {
 // Used to decline sqrt of an affine that goes negative — MATLAB promotes the
 // whole array to complex there, which the per-op fallback reproduces.
 bool affineAnyNegative(const double *x, double scale, double offset,
-                       std::size_t n) {
-    for (std::size_t i = 0; i < n; ++i)
+                       keel::usize n) {
+    for (keel::usize i = 0; i < n; ++i)
         if (scale * x[i] + offset < 0.0) return true;
     return false;
 }
 
-bool execUnaryAffine(const Value *ops, std::size_t n, Value &out,
-                     std::pmr::memory_resource *mr, InnerKind kind,
+bool execUnaryAffine(const Value *ops, keel::usize n, Value &out,
+                     keel::Allocator *mr, InnerKind kind,
                      numkit::ops::UnaryAffineFn fn) {
     double scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
-        const std::size_t N = x->numel();
+        const keel::usize N = x->numel();
         if (fn == numkit::ops::UnaryAffineFn::Sqrt &&
             affineAnyNegative(x->doubleData(), scale, offset, N))
             return false;  // negative real → complex per-op path
@@ -924,7 +927,7 @@ bool execUnaryAffine(const Value *ops, std::size_t n, Value &out,
     // complex array: sqrt → whole-complex std::sqrt (total, no domain decline);
     // floor/ceil/fix/round → component-wise (nk's per-op complex rounding).
     {
-        Complex cscale, coffset;
+        keel::c64 cscale, coffset;
         bool affine = false;
         const Value *cx = nullptr;
         if (bindInnerCx(ops, n, kind, cscale, coffset, affine, cx)) {
@@ -943,12 +946,12 @@ bool execUnaryAffine(const Value *ops, std::size_t n, Value &out,
 }
 
 // f((x-sub)/div) for f ∈ {sqrt, floor, ceil}. sqrt declines on a negative inner.
-bool execUnaryDiv(const Value *ops, std::size_t n, Value &out,
-                  std::pmr::memory_resource *mr, numkit::ops::UnaryAffineFn fn) {
+bool execUnaryDiv(const Value *ops, keel::usize n, Value &out,
+                  keel::Allocator *mr, numkit::ops::UnaryAffineFn fn) {
     double sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
-        const std::size_t N = x->numel();
+        const keel::usize N = x->numel();
         if (fn == numkit::ops::UnaryAffineFn::Sqrt &&
             shiftDivAnyNegative(x->doubleData(), sub, div, N))
             return false;
@@ -958,7 +961,7 @@ bool execUnaryDiv(const Value *ops, std::size_t n, Value &out,
         return true;
     }
     {     // complex sqrt(z./d) (whole-complex) / floor/ceil/fix/round (component-wise)
-        Complex csub, cdiv;
+        keel::c64 csub, cdiv;
         const Value *cx = nullptr;
         if (bindDivInnerCx(ops, n, csub, cdiv, cx)) {
             out = ops::createLike(*cx, ValueType::COMPLEX, mr);
@@ -1018,8 +1021,8 @@ std::optional<std::vector<const ASTNode *>> matchSqrtSumSq(const ASTNode *node) 
     return std::vector<const ASTNode *>{bx, by};
 }
 
-bool execSqAffine(const Value *ops, std::size_t n, Value &out,
-                  std::pmr::memory_resource *mr, InnerKind kind) {
+bool execSqAffine(const Value *ops, keel::usize n, Value &out,
+                  keel::Allocator *mr, InnerKind kind) {
     double scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
@@ -1028,7 +1031,7 @@ bool execSqAffine(const Value *ops, std::size_t n, Value &out,
                            x->numel());
         return true;
     }
-    Complex cscale, coffset;
+    keel::c64 cscale, coffset;
     bool affine = false;
     const Value *cx = nullptr;
     if (bindInnerCx(ops, n, kind, cscale, coffset, affine, cx)) {  // (<inner>).^2
@@ -1042,8 +1045,8 @@ bool execSqAffine(const Value *ops, std::size_t n, Value &out,
 
 // (A - B).^2: two same-shape arrays → fusedSqDiff; array-minus-scalar either
 // way → fusedSqAffine(arr, 1, -c) (squaring makes (x-c)^2 == (c-x)^2).
-bool execSqDiff(const Value *ops, std::size_t n, Value &out,
-                std::pmr::memory_resource *mr) {
+bool execSqDiff(const Value *ops, keel::usize n, Value &out,
+                keel::Allocator *mr) {
     if (n != 2) return false;
     const Value &A = ops[0], &B = ops[1];
     auto isArr = [](const Value &v) {
@@ -1078,7 +1081,7 @@ bool execSqDiff(const Value *ops, std::size_t n, Value &out,
                            A.numel());
         return true;
     }
-    Complex csc;
+    keel::c64 csc;
     if (isFusibleComplexArray(A) && asComplexScalar(B, csc)) {   // (z - c).^2
         out = ops::createLike(A, ValueType::COMPLEX, mr);
         ops::fusedSqDiffScalarCx(A.complexData(), csc, /*rev=*/false,
@@ -1097,8 +1100,8 @@ bool execSqDiff(const Value *ops, std::size_t n, Value &out,
 // (x./d).^2 / ((x-c)./d).^2 — square of a divide-inner (squared z-score). The
 // div-arg (matchDivArg) is structurally disjoint from matchInner (asPureProduct
 // rejects `./`), so sq_div never collides with sq_affine/sq_diff.
-bool execSqDivInner(const Value *ops, std::size_t n, Value &out,
-                    std::pmr::memory_resource *mr) {
+bool execSqDivInner(const Value *ops, keel::usize n, Value &out,
+                    keel::Allocator *mr) {
     double sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
@@ -1107,7 +1110,7 @@ bool execSqDivInner(const Value *ops, std::size_t n, Value &out,
                              x->numel());
         return true;
     }
-    Complex csub, cdiv;
+    keel::c64 csub, cdiv;
     const Value *cx = nullptr;
     if (bindDivInnerCx(ops, n, csub, cdiv, cx)) {   // ((z-c)./d).^2 complex
         out = ops::createLike(*cx, ValueType::COMPLEX, mr);
@@ -1122,8 +1125,8 @@ bool execSqDivInner(const Value *ops, std::size_t n, Value &out,
 // execSqDivInner; defined here, next to it, because both need bindDivInner from
 // the div-inner facility above). matchDivArg is disjoint from matchInner /
 // asPureSub, so abs_div never collides with abs_affine / abs_diff.
-bool execAbsDivInner(const Value *ops, std::size_t n, Value &out,
-                     std::pmr::memory_resource *mr) {
+bool execAbsDivInner(const Value *ops, keel::usize n, Value &out,
+                     keel::Allocator *mr) {
     double sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
@@ -1132,7 +1135,7 @@ bool execAbsDivInner(const Value *ops, std::size_t n, Value &out,
                               x->numel());
         return true;
     }
-    Complex csub, cdiv;
+    keel::c64 csub, cdiv;
     const Value *cx = nullptr;
     if (bindDivInnerCx(ops, n, csub, cdiv, cx)) {   // |z./d| → real out
         out = ops::createLike(*cx, ValueType::DOUBLE, mr);
@@ -1143,8 +1146,8 @@ bool execAbsDivInner(const Value *ops, std::size_t n, Value &out,
     return false;
 }
 
-bool execSqrtSumSq(const Value *ops, std::size_t n, Value &out,
-                   std::pmr::memory_resource *mr) {
+bool execSqrtSumSq(const Value *ops, keel::usize n, Value &out,
+                   keel::Allocator *mr) {
     if (n != 2) return false;
     const Value &x = ops[0], &y = ops[1];
     auto isArr = [](const Value &v) {
@@ -1204,8 +1207,8 @@ std::optional<std::vector<const ASTNode *>> matchSoftThreshold(const ASTNode *no
     return std::vector<const ASTNode *>{signX, t};     // [x, t]
 }
 
-bool execSoftThreshold(const Value *ops, std::size_t n, Value &out,
-                       std::pmr::memory_resource *mr) {
+bool execSoftThreshold(const Value *ops, keel::usize n, Value &out,
+                       keel::Allocator *mr) {
     if (n != 2) return false;
     const Value &x = ops[0], &t = ops[1];
     if (!isRealDoubleScalar(t)) return false;        // threshold is real
@@ -1260,22 +1263,22 @@ bool transDomainRestricted(numkit::ops::TransAffineFn fn) {
 
 // Any scale*x[i]+offset outside f's real domain (the affine the kernel computes).
 bool affineAnyOutsideDomain(numkit::ops::TransAffineFn fn, double scale,
-                            double offset, const double *x, std::size_t n) {
-    for (std::size_t i = 0; i < n; ++i)
+                            double offset, const double *x, keel::usize n) {
+    for (keel::usize i = 0; i < n; ++i)
         if (transOutsideRealDomain(fn, scale * x[i] + offset)) return true;
     return false;
 }
 
 // Any (x[i]-sub)/div outside f's real domain.
 bool shiftDivAnyOutsideDomain(numkit::ops::TransAffineFn fn, double sub,
-                              double div, const double *x, std::size_t n) {
-    for (std::size_t i = 0; i < n; ++i)
+                              double div, const double *x, keel::usize n) {
+    for (keel::usize i = 0; i < n; ++i)
         if (transOutsideRealDomain(fn, (x[i] - sub) / div)) return true;
     return false;
 }
 
-bool execTransAffine(const Value *ops, std::size_t n, Value &out,
-                     std::pmr::memory_resource *mr, InnerKind kind,
+bool execTransAffine(const Value *ops, keel::usize n, Value &out,
+                     keel::Allocator *mr, InnerKind kind,
                      numkit::ops::TransAffineFn fn) {
     double scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
@@ -1291,7 +1294,7 @@ bool execTransAffine(const Value *ops, std::size_t n, Value &out,
     // complex array: f(a.*z ± b). Complex is total (no domain decline); expm1
     // (= exp(z)-1) is now supported per-op, so it fuses like the rest.
     {
-        Complex cscale, coffset;
+        keel::c64 cscale, coffset;
         bool affine = false;
         const Value *cx = nullptr;
         if (bindInnerCx(ops, n, kind, cscale, coffset, affine, cx)) {
@@ -1306,8 +1309,8 @@ bool execTransAffine(const Value *ops, std::size_t n, Value &out,
 
 // f((x-sub)/div) for a transcendental f. log/log2/log10 decline on a negative
 // inner (MATLAB complex). Mirrors fusedTransAffine's bit-exactness.
-bool execTransDiv(const Value *ops, std::size_t n, Value &out,
-                  std::pmr::memory_resource *mr, numkit::ops::TransAffineFn fn) {
+bool execTransDiv(const Value *ops, keel::usize n, Value &out,
+                  keel::Allocator *mr, numkit::ops::TransAffineFn fn) {
     double sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
@@ -1320,7 +1323,7 @@ bool execTransDiv(const Value *ops, std::size_t n, Value &out,
         return true;
     }
     {     // complex f(z./d) / f((z-c)./d) — total, incl. expm1 = exp(z)-1
-        Complex csub, cdiv;
+        keel::c64 csub, cdiv;
         const Value *cx = nullptr;
         if (bindDivInnerCx(ops, n, csub, cdiv, cx)) {
             out = ops::createLike(*cx, ValueType::COMPLEX, mr);
@@ -1339,8 +1342,8 @@ bool execTransDiv(const Value *ops, std::size_t n, Value &out,
 void addNarrowing(Engine &engine, FusionRule rule)
 {
     auto inner = std::move(rule.execute);
-    rule.execute = [inner](const Value *ops, std::size_t n, Value &out,
-                           std::pmr::memory_resource *mr) -> bool {
+    rule.execute = [inner](const Value *ops, keel::usize n, Value &out,
+                           keel::Allocator *mr) -> bool {
         if (!inner(ops, n, out, mr)) return false;
         out = numkit::narrowComplex(std::move(out), mr);
         return true;
@@ -1358,8 +1361,8 @@ void registerFusionRules(Engine &engine) {
         clamp.match   = [minOuter](const ASTNode *node) {
             return matchClamp(node, minOuter);
         };
-        clamp.execute = [minOuter](const Value *ops, std::size_t n, Value &out,
-                                   std::pmr::memory_resource *mr) {
+        clamp.execute = [minOuter](const Value *ops, keel::usize n, Value &out,
+                                   keel::Allocator *mr) {
             return execClamp(ops, n, out, mr, minOuter);
         };
         addNarrowing(engine, std::move(clamp));
@@ -1368,8 +1371,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule affineAdd;
     affineAdd.name  = "affine_add";
     affineAdd.match = matchAffineAdd;
-    affineAdd.execute = [](const Value *ops, std::size_t n, Value &out,
-                           std::pmr::memory_resource *mr) {
+    affineAdd.execute = [](const Value *ops, keel::usize n, Value &out,
+                           keel::Allocator *mr) {
         return execAffine(ops, n, out, mr, +1.0);
     };
     addNarrowing(engine, std::move(affineAdd));
@@ -1377,8 +1380,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule affineSub;
     affineSub.name  = "affine_sub";
     affineSub.match = matchAffineSub;
-    affineSub.execute = [](const Value *ops, std::size_t n, Value &out,
-                           std::pmr::memory_resource *mr) {
+    affineSub.execute = [](const Value *ops, keel::usize n, Value &out,
+                           keel::Allocator *mr) {
         return execAffine(ops, n, out, mr, -1.0);
     };
     addNarrowing(engine, std::move(affineSub));
@@ -1386,8 +1389,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule axpbyAdd;
     axpbyAdd.name  = "axpby_add";
     axpbyAdd.match = [](const ASTNode *node) { return matchAxpby(node, "+"); };
-    axpbyAdd.execute = [](const Value *ops, std::size_t n, Value &out,
-                          std::pmr::memory_resource *mr) {
+    axpbyAdd.execute = [](const Value *ops, keel::usize n, Value &out,
+                          keel::Allocator *mr) {
         return execAxpby(ops, n, out, mr, +1.0);
     };
     addNarrowing(engine, std::move(axpbyAdd));
@@ -1395,8 +1398,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule axpbySub;
     axpbySub.name  = "axpby_sub";
     axpbySub.match = [](const ASTNode *node) { return matchAxpby(node, "-"); };
-    axpbySub.execute = [](const Value *ops, std::size_t n, Value &out,
-                          std::pmr::memory_resource *mr) {
+    axpbySub.execute = [](const Value *ops, keel::usize n, Value &out,
+                          keel::Allocator *mr) {
         return execAxpby(ops, n, out, mr, -1.0);
     };
     addNarrowing(engine, std::move(axpbySub));
@@ -1411,8 +1414,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule shiftScaleMul;
     shiftScaleMul.name  = "shift_scale_mul";
     shiftScaleMul.match = matchShiftScaleMul;
-    shiftScaleMul.execute = [](const Value *ops, std::size_t n, Value &out,
-                               std::pmr::memory_resource *mr) {
+    shiftScaleMul.execute = [](const Value *ops, keel::usize n, Value &out,
+                               keel::Allocator *mr) {
         return execShiftScale(ops, n, out, mr, /*isDiv=*/false);
     };
     addNarrowing(engine, std::move(shiftScaleMul));
@@ -1420,8 +1423,8 @@ void registerFusionRules(Engine &engine) {
     FusionRule shiftScaleDiv;
     shiftScaleDiv.name  = "shift_scale_div";
     shiftScaleDiv.match = matchShiftScaleDiv;
-    shiftScaleDiv.execute = [](const Value *ops, std::size_t n, Value &out,
-                               std::pmr::memory_resource *mr) {
+    shiftScaleDiv.execute = [](const Value *ops, keel::usize n, Value &out,
+                               keel::Allocator *mr) {
         return execShiftScale(ops, n, out, mr, /*isDiv=*/true);
     };
     addNarrowing(engine, std::move(shiftScaleDiv));
@@ -1435,8 +1438,8 @@ void registerFusionRules(Engine &engine) {
             r.match = [kind, minOuter](const ASTNode *node) {
                 return matchAffineClamp(node, kind, minOuter);
             };
-            r.execute = [kind, minOuter](const Value *ops, std::size_t n, Value &out,
-                                         std::pmr::memory_resource *mr) {
+            r.execute = [kind, minOuter](const Value *ops, keel::usize n, Value &out,
+                                         keel::Allocator *mr) {
                 return execAffineClamp(ops, n, out, mr, kind, minOuter);
             };
             addNarrowing(engine, std::move(r));
@@ -1451,8 +1454,8 @@ void registerFusionRules(Engine &engine) {
         r.match = [minOuter](const ASTNode *node) {
             return matchAffineClampDiv(node, minOuter);
         };
-        r.execute = [minOuter](const Value *ops, std::size_t n, Value &out,
-                               std::pmr::memory_resource *mr) {
+        r.execute = [minOuter](const Value *ops, keel::usize n, Value &out,
+                               keel::Allocator *mr) {
             return execAffineClampDiv(ops, n, out, mr, minOuter);
         };
         addNarrowing(engine, std::move(r));
@@ -1463,8 +1466,8 @@ void registerFusionRules(Engine &engine) {
         FusionRule r;
         r.name  = "abs_affine";
         r.match = [kind](const ASTNode *node) { return matchAbsAffine(node, kind); };
-        r.execute = [kind](const Value *ops, std::size_t n, Value &out,
-                           std::pmr::memory_resource *mr) {
+        r.execute = [kind](const Value *ops, keel::usize n, Value &out,
+                           keel::Allocator *mr) {
             return execAbsAffine(ops, n, out, mr, kind);
         };
         addNarrowing(engine, std::move(r));
@@ -1502,8 +1505,8 @@ void registerFusionRules(Engine &engine) {
                 if (!arg) return std::nullopt;
                 return matchInner(arg, kind);
             };
-            r.execute = [kind, fn](const Value *ops, std::size_t n, Value &out,
-                                   std::pmr::memory_resource *mr) {
+            r.execute = [kind, fn](const Value *ops, keel::usize n, Value &out,
+                                   keel::Allocator *mr) {
                 return execUnaryAffine(ops, n, out, mr, kind, fn);
             };
             addNarrowing(engine, std::move(r));
@@ -1525,8 +1528,8 @@ void registerFusionRules(Engine &engine) {
             if (!arg) return std::nullopt;
             return matchDivArg(arg);
         };
-        r.execute = [fn](const Value *ops, std::size_t n, Value &out,
-                         std::pmr::memory_resource *mr) {
+        r.execute = [fn](const Value *ops, keel::usize n, Value &out,
+                         keel::Allocator *mr) {
             return execUnaryDiv(ops, n, out, mr, fn);
         };
         addNarrowing(engine, std::move(r));
@@ -1542,8 +1545,8 @@ void registerFusionRules(Engine &engine) {
         FusionRule r;
         r.name  = "sq_affine";
         r.match = [kind](const ASTNode *node) { return matchSqAffine(node, kind); };
-        r.execute = [kind](const Value *ops, std::size_t n, Value &out,
-                           std::pmr::memory_resource *mr) {
+        r.execute = [kind](const Value *ops, keel::usize n, Value &out,
+                           keel::Allocator *mr) {
             return execSqAffine(ops, n, out, mr, kind);
         };
         addNarrowing(engine, std::move(r));
@@ -1591,8 +1594,8 @@ void registerFusionRules(Engine &engine) {
                 if (!arg) return std::nullopt;
                 return matchInner(arg, kind);
             };
-            r.execute = [kind, fn](const Value *ops, std::size_t n, Value &out,
-                                   std::pmr::memory_resource *mr) {
+            r.execute = [kind, fn](const Value *ops, keel::usize n, Value &out,
+                                   keel::Allocator *mr) {
                 return execTransAffine(ops, n, out, mr, kind, fn);
             };
             addNarrowing(engine, std::move(r));
@@ -1627,8 +1630,8 @@ void registerFusionRules(Engine &engine) {
             if (!arg) return std::nullopt;
             return matchDivArg(arg);
         };
-        r.execute = [fn](const Value *ops, std::size_t n, Value &out,
-                         std::pmr::memory_resource *mr) {
+        r.execute = [fn](const Value *ops, keel::usize n, Value &out,
+                         keel::Allocator *mr) {
             return execTransDiv(ops, n, out, mr, fn);
         };
         addNarrowing(engine, std::move(r));

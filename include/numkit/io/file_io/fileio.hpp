@@ -1,10 +1,11 @@
 // toolboxes/io/include/numkit/io/file_io/fileio.hpp
 #pragma once
 
-#include <numkit/value/span.hpp>
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
-#include <memory_resource>
 
 #include <numkit/sys/fs_context.hpp>
 
@@ -37,7 +38,7 @@ namespace numkit::io {
 ///                 `[fid, errmsg]`).
 /// @param outs     Output slot(s).
 /// @see fclose, fread, fwrite
-void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Close a file (`status = fclose(fid)` or `fclose('all')`).
 ///
@@ -48,7 +49,7 @@ void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the status code.
 /// @see fopen
-void fclose(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fclose(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Read one line, **without** the trailing newline
 /// (`line = fgetl(fid)`).
@@ -58,7 +59,7 @@ void fclose(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> o
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the line string (or -1 on EOF).
 /// @see fgets, feof
-void fgetl(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fgetl(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Read one line, **including** the trailing newline
 /// (`line = fgets(fid [, nchar])`).
@@ -70,7 +71,7 @@ void fgetl(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the line string (or -1 on EOF).
 /// @see fgetl, feof
-void fgets(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief End-of-file test (`tf = feof(fid)`).
 ///
@@ -79,7 +80,7 @@ void fgets(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the boolean status.
 /// @see fgetl, fgets
-void feof(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void feof(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Last I/O error for a fid (`[msg, code] = ferror(fid [, 'clear'])`).
 ///
@@ -87,7 +88,7 @@ void feof(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> out
 /// @param args     `(fid [, 'clear'])`.
 /// @param nargout  Number of requested outputs (1 = msg, 2 = `[msg, code]`).
 /// @param outs     Output slots.
-void ferror(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Current byte position in a file (`pos = ftell(fid)`).
 ///
@@ -96,7 +97,7 @@ void ferror(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> o
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the byte offset.
 /// @see fseek, frewind
-void ftell(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Reposition a file pointer (`status = fseek(fid, offset, origin)`).
 ///
@@ -108,7 +109,7 @@ void ftell(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the status code.
 /// @see ftell, frewind
-void fseek(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Rewind a file pointer to the beginning (`frewind(fid)`).
 ///
@@ -119,7 +120,7 @@ void fseek(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs (always 0).
 /// @param outs     Unused output slot.
 /// @see fseek
-void frewind(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void frewind(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 // ── Binary I/O ───────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ void frewind(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> 
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the read array.
 /// @see fwrite
-void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 /// @brief Write raw binary data
 /// (`count = fwrite(fid, array, precision, machineformat)`).
@@ -147,6 +148,6 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
 /// @param nargout  Number of requested outputs.
 /// @param outs     Output slot for the count of items written.
 /// @see fread
-void fwrite(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr = nullptr);
+void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr = nullptr);
 
 } // namespace numkit::io

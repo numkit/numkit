@@ -8,6 +8,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/predicates.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -32,60 +34,60 @@ static bool parseSkewOpt(const Value &v, const char *who)
                 0, 0, who, "", std::string("numkit:") + who + ":BadOpt");
 }
 
-void issymmetric_reg(Span<const Value> args, size_t /*nargout*/,
-                     Span<Value> outs, CallContext &ctx)
+void issymmetric_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "issymmetric");
     bool skew = (args.size() >= 2) && parseSkewOpt(args[1], "issymmetric");
-    outs[0] = issymmetric(args[0], skew, ctx.engine->resource());
+    outs[0] = issymmetric(args[0], skew, ctx.engine->allocator());
 }
 
-void ishermitian_reg(Span<const Value> args, size_t /*nargout*/,
-                     Span<Value> outs, CallContext &ctx)
+void ishermitian_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ishermitian");
     bool skew = (args.size() >= 2) && parseSkewOpt(args[1], "ishermitian");
-    outs[0] = ishermitian(args[0], skew, ctx.engine->resource());
+    outs[0] = ishermitian(args[0], skew, ctx.engine->allocator());
 }
 
-void isbanded_reg(Span<const Value> args, size_t /*nargout*/,
-                  Span<Value> outs, CallContext &ctx)
+void isbanded_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 3, "isbanded");
     long lower = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "lower", "isbanded"), 2, "lower", "isbanded");
     long upper = argcheck::expectedInteger(
         argcheck::expectedReal(args[2], 3, "upper", "isbanded"), 3, "upper", "isbanded");
-    outs[0] = isbanded(args[0], lower, upper, ctx.engine->resource());
+    outs[0] = isbanded(args[0], lower, upper, ctx.engine->allocator());
 }
 
-void isdiag_reg(Span<const Value> args, size_t /*nargout*/,
-                Span<Value> outs, CallContext &ctx)
+void isdiag_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "isdiag");
-    outs[0] = isdiag(args[0], ctx.engine->resource());
+    outs[0] = isdiag(args[0], ctx.engine->allocator());
 }
 
-void istril_reg(Span<const Value> args, size_t /*nargout*/,
-                Span<Value> outs, CallContext &ctx)
+void istril_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "istril");
-    outs[0] = istril(args[0], ctx.engine->resource());
+    outs[0] = istril(args[0], ctx.engine->allocator());
 }
 
-void istriu_reg(Span<const Value> args, size_t /*nargout*/,
-                Span<Value> outs, CallContext &ctx)
+void istriu_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "istriu");
-    outs[0] = istriu(args[0], ctx.engine->resource());
+    outs[0] = istriu(args[0], ctx.engine->allocator());
 }
 
-void bandwidth_reg(Span<const Value> args, size_t nargout,
-                   Span<Value> outs, CallContext &ctx)
+void bandwidth_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "bandwidth");
     if (args.size() == 1) {
-        auto [lo, up] = bandwidth(args[0], ctx.engine->resource());
+        auto [lo, up] = bandwidth(args[0], ctx.engine->allocator());
         outs[0] = lo;
         if (nargout >= 2 && outs.size() >= 2) outs[1] = up;
         return;
@@ -93,7 +95,7 @@ void bandwidth_reg(Span<const Value> args, size_t nargout,
     if (!args[1].isChar() && !args[1].isString())
         throw Error("bandwidth: option must be 'lower' or 'upper'",
                     0, 0, "bandwidth", "", "numkit:bandwidth:BadOpt");
-    outs[0] = bandwidthOpt(args[0], args[1].toString(), ctx.engine->resource());
+    outs[0] = bandwidthOpt(args[0], args[1].toString(), ctx.engine->allocator());
 }
 
 } // namespace detail

@@ -1,21 +1,23 @@
 // src/bundle/src/register/builtin/iofun_reg.cpp
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/builtin/iofun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 // Each registered adapter in iofun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
-void disp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void display_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void fprintf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void fscanf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sprintf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sscanf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void textscan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void disp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void display_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void fprintf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void fscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sprintf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
 #include <cctype>
@@ -49,7 +51,7 @@ static std::string jsonEncodeVal(const Value &v) {
     }
     if (v.isCell()) {
         std::string out = "[";
-        for (size_t i = 0; i < v.numel(); ++i) {
+        for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i > 0) out += ",";
             out += jsonEncodeVal(v.cellAt(i));
         }
@@ -59,7 +61,7 @@ static std::string jsonEncodeVal(const Value &v) {
     if (v.isStruct() && v.numel() == 1) {
         std::string out = "{";
         const auto &fields = v.fieldNamesInOrder();
-        for (size_t i = 0; i < fields.size(); ++i) {
+        for (keel::usize i = 0; i < fields.size(); ++i) {
             if (i > 0) out += ",";
             out += jsonEscape(fields[i]) + ":" + jsonEncodeVal(v.field(fields[i]));
         }
@@ -75,11 +77,11 @@ static std::string jsonEncodeVal(const Value &v) {
             std::snprintf(buf, sizeof(buf), "%.15g", d);
             return buf;
         }
-        size_t R = v.dims().rows();
-        size_t C = v.dims().cols();
+        keel::usize R = v.dims().rows();
+        keel::usize C = v.dims().cols();
         if (R == 1 || C == 1) {
             std::string out = "[";
-            for (size_t i = 0; i < v.numel(); ++i) {
+            for (keel::usize i = 0; i < v.numel(); ++i) {
                 if (i > 0) out += ",";
                 double d = v.elemAsDouble(i);
                 if (!std::isfinite(d)) out += "null";
@@ -93,10 +95,10 @@ static std::string jsonEncodeVal(const Value &v) {
             return out;
         }
         std::string out = "[";
-        for (size_t r = 0; r < R; ++r) {
+        for (keel::usize r = 0; r < R; ++r) {
             if (r > 0) out += ",";
             out += "[";
-            for (size_t c = 0; c < C; ++c) {
+            for (keel::usize c = 0; c < C; ++c) {
                 if (c > 0) out += ",";
                 double d = v.elemAsDouble(r + c * R);
                 if (!std::isfinite(d)) out += "null";
@@ -116,8 +118,8 @@ static std::string jsonEncodeVal(const Value &v) {
 
 struct JsonParser {
     const std::string &s;
-    size_t pos = 0;
-    std::pmr::memory_resource *mr;
+    keel::usize pos = 0;
+    keel::Allocator *mr;
 
     void skipWs() {
         while (pos < s.size() && std::isspace((unsigned char)s[pos])) ++pos;
@@ -156,7 +158,7 @@ struct JsonParser {
     }
 
     Value parseNumber() {
-        size_t start = pos;
+        keel::usize start = pos;
         while (pos < s.size() && (std::isdigit((unsigned char)s[pos]) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
             ++pos;
         }
@@ -186,11 +188,11 @@ struct JsonParser {
         }
         if (allScalarNum) {
             Value v = Value::matrix(elems.size(), 1, ValueType::DOUBLE, mr);
-            for (size_t i = 0; i < elems.size(); ++i) v.doubleDataMut()[i] = elems[i].toScalar();
+            for (keel::usize i = 0; i < elems.size(); ++i) v.doubleDataMut()[i] = elems[i].toScalar();
             return v;
         }
         bool allVecNumSameLen = !elems.empty() && elems[0].isNumeric() && elems[0].numel() >= 1 && (elems[0].dims().rows() == 1 || elems[0].dims().cols() == 1);
-        size_t C = allVecNumSameLen ? elems[0].numel() : 0;
+        keel::usize C = allVecNumSameLen ? elems[0].numel() : 0;
         for (const auto &e : elems) {
             if (!(e.isNumeric() && e.numel() == C && (e.dims().rows() == 1 || e.dims().cols() == 1))) {
                 allVecNumSameLen = false;
@@ -198,15 +200,15 @@ struct JsonParser {
             }
         }
         if (allVecNumSameLen && C > 0) {
-            size_t R = elems.size();
+            keel::usize R = elems.size();
             Value v = Value::matrix(R, C, ValueType::DOUBLE, mr);
-            for (size_t r = 0; r < R; ++r)
-                for (size_t c = 0; c < C; ++c)
+            for (keel::usize r = 0; r < R; ++r)
+                for (keel::usize c = 0; c < C; ++c)
                     v.doubleDataMut()[r + c * R] = elems[r].elemAsDouble(c);
             return v;
         }
         Value cell = Value::cell(elems.size(), 1, mr);
-        for (size_t i = 0; i < elems.size(); ++i) cell.cellAt(i) = std::move(elems[i]);
+        for (keel::usize i = 0; i < elems.size(); ++i) cell.cellAt(i) = std::move(elems[i]);
         return cell;
     }
 
@@ -233,20 +235,20 @@ struct JsonParser {
             break;
         }
         Value st = Value::structure(mr);
-        for (size_t i = 0; i < fields.size(); ++i) st.setField(0, fields[i], std::move(vals[i]));
+        for (keel::usize i = 0; i < fields.size(); ++i) st.setField(0, fields[i], std::move(vals[i]));
         return st;
     }
 };
 
-static void jsonencode_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+static void jsonencode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     argcheck::checkNargin(args.size(), 1, 3, "jsonencode");
-    outs[0] = Value::fromString(jsonEncodeVal(args[0]), ctx.engine->resource());
+    outs[0] = Value::fromString(jsonEncodeVal(args[0]), ctx.engine->allocator());
 }
 
-static void jsondecode_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+static void jsondecode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     argcheck::checkNargin(args.size(), 1, 3, "jsondecode");
     std::string s = args[0].toString();
-    JsonParser jp{s, 0, ctx.engine->resource()};
+    JsonParser jp{s, 0, ctx.engine->allocator()};
     outs[0] = jp.parseValue();
 }
 

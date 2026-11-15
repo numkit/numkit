@@ -7,6 +7,8 @@
 // adapters bridge the registration ABI, supplying engine.fsContext() +
 // engine.resource(). IoLibrary::install (toolboxes/io/src/library.cpp)
 // forward-declares + registers these by name; the definitions resolve at link.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/file_io/fileio.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -16,10 +18,10 @@
 namespace numkit::io::detail {
 
 #define NUMKIT_FILEIO_REG(FN, MIN_A, MAX_A)                                                        \
-    void FN##_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)      \
+    void FN##_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)      \
     {                                                                                              \
         argcheck::checkNargin(args.size(), MIN_A, MAX_A, #FN);                                     \
-        FN(ctx.engine->fsContext(), args, nargout, outs, ctx.engine->resource());                  \
+        FN(ctx.engine->fsContext(), args, nargout, outs, ctx.engine->allocator());                  \
     }
 
 NUMKIT_FILEIO_REG(fopen,   1, 4)

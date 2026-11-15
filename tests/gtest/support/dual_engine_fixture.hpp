@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/standard_engine.hpp>
 #include <cmath>
@@ -78,7 +79,7 @@ public:
 
     Value *getVarPtr(const std::string &name) { return engine.getVariable(name); }
 
-    void expectElem(const Value &val, size_t i, double expected)
+    void expectElem(const Value &val, keel::usize i, double expected)
     {
         if (val.isLogical())
             EXPECT_DOUBLE_EQ(static_cast<double>(val.logicalData()[i]), expected) << "at index " << i;
@@ -86,7 +87,7 @@ public:
             EXPECT_DOUBLE_EQ(val(i), expected) << "at index " << i;
     }
 
-    void expectElem2D(const Value &val, size_t r, size_t c, double expected)
+    void expectElem2D(const Value &val, keel::usize r, keel::usize c, double expected)
     {
         if (val.isLogical())
             EXPECT_DOUBLE_EQ(
@@ -96,8 +97,8 @@ public:
             EXPECT_DOUBLE_EQ(val(r, c), expected) << "at (" << r << "," << c << ")";
     }
 
-    size_t rows(const Value &v) { return v.dims().rows(); }
-    size_t cols(const Value &v) { return v.dims().cols(); }
+    keel::usize rows(const Value &v) { return v.dims().rows(); }
+    keel::usize cols(const Value &v) { return v.dims().cols(); }
 
     FigureManager &fm() { return engine.figureManager(); }
     AxesState &ax() { return fm().currentAxes(); }

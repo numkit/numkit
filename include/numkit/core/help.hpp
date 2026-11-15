@@ -2,11 +2,11 @@
 /// @ingroup group_lang
 #pragma once
 
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/help/help_catalog.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
-#include <memory_resource>
 #include <string>
 #include <vector>
 
@@ -46,7 +46,7 @@ std::string help(const std::string &query = "");
 /// @param args Command-line arguments.
 /// @param mr Memory resource for output allocation.
 /// @return Help string value.
-Value help(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value help(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all functions in specified category (`what category`).
 /// @param category Category name (e.g. `"elmat"`, `"signal"`, `"stats"`).
@@ -58,7 +58,7 @@ std::vector<std::string> what(const std::string &category = "elmat");
 /// @param args Category argument.
 /// @param mr Memory resource for output allocation.
 /// @return Cell array of strings.
-Value what(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value what(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all built-in functions registered in the system or specified category (`builtins`).
 /// @param category Category name (or empty string for all built-ins).
@@ -70,7 +70,7 @@ std::vector<std::string> builtins(const std::string &category = "");
 /// @param args Category argument.
 /// @param mr Memory resource for output allocation.
 /// @return Cell array of strings.
-Value builtins(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all registered documentation categories (`categories`).
 /// @return Vector of category identifiers (e.g. `"elmat"`, `"elfun"`, `"signal"`, ...).
@@ -80,7 +80,7 @@ std::vector<std::string> categories();
 /// @brief Returns all registered categories as a cell array of strings.
 /// @param mr Memory resource for output allocation.
 /// @return Cell array of category name strings.
-Value categories(std::pmr::memory_resource *mr);
+Value categories(keel::Allocator *mr);
 
 
 /// @}

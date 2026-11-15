@@ -2,6 +2,8 @@
 // CallContext adapters for io.text csvread/csvwrite. Compute is Engine-free
 // in toolboxes/io/src/text/csv.cpp (FsContext& + mr); these bridge via
 // engine.fsContext()/resource(). IoLibrary::install registers them by name.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/text/csv.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -10,14 +12,14 @@
 
 namespace numkit::io::detail {
 
-void csvread_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void csvread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     argcheck::checkNargin(args.size(), 1, 4, "csvread");
-    outs[0] = csvread(ctx.engine->fsContext(), args, ctx.engine->resource());
+    outs[0] = csvread(ctx.engine->fsContext(), args, ctx.engine->allocator());
 }
 
-void csvwrite_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void csvwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     (void)outs;
@@ -25,12 +27,12 @@ void csvwrite_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     csvwrite(ctx.engine->fsContext(), args);
 }
 
-void dlmwrite_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void dlmwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     (void)outs;
     argcheck::checkNargin(args.size(), 2, 10, "dlmwrite");
-    csvwrite(ctx.engine->fsContext(), Span<const Value>(args.data(), 2));
+    csvwrite(ctx.engine->fsContext(), keel::ArrayRef<Value>(args.data(), 2));
 }
 
 

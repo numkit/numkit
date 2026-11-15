@@ -1,6 +1,7 @@
 // tests/test_builtins.cpp — Built-in functions (math, array creation, strings)
 // Parameterized: runs on both TreeWalker and VM backends
 
+#include <keel/core.h>
 #include "dual_engine_fixture.hpp"
 
 using namespace m_test;
@@ -15,7 +16,7 @@ TEST_P(BuiltinTest, Zeros)
     auto *A = getVarPtr("A");
     EXPECT_EQ(rows(*A), 2u);
     EXPECT_EQ(cols(*A), 3u);
-    for (size_t i = 0; i < A->numel(); ++i)
+    for (keel::usize i = 0; i < A->numel(); ++i)
         EXPECT_DOUBLE_EQ(A->doubleData()[i], 0.0);
 }
 
@@ -23,7 +24,7 @@ TEST_P(BuiltinTest, Ones)
 {
     eval("A = ones(2, 2);");
     auto *A = getVarPtr("A");
-    for (size_t i = 0; i < A->numel(); ++i)
+    for (keel::usize i = 0; i < A->numel(); ++i)
         EXPECT_DOUBLE_EQ(A->doubleData()[i], 1.0);
 }
 
@@ -2444,7 +2445,7 @@ TEST_P(BuiltinTest, CartPolarRoundtripVector)
     auto *xb = getVarPtr("xb");
     auto *yb = getVarPtr("yb");
     ASSERT_EQ(xb->numel(), 4u);
-    for (size_t i = 0; i < 4u; ++i) {
+    for (keel::usize i = 0; i < 4u; ++i) {
         EXPECT_NEAR(xb->doubleData()[i],
                     (i == 0 ? 3.0 : i == 1 ? -1.0 : i == 2 ? 0.0 : 5.0),
                     1e-12);

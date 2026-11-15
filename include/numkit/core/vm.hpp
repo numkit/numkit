@@ -1,6 +1,8 @@
 // include/vm.hpp
 #pragma once
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/debugger.hpp>
@@ -25,7 +27,7 @@ public:
     explicit VM(Engine &engine);
 
     // Legacy API: runs to completion, throws DebugStopException on pause
-    Value execute(const BytecodeChunk &chunk, const Value *args = nullptr, size_t nargs = 0);
+    Value execute(const BytecodeChunk &chunk, const Value *args = nullptr, keel::usize nargs = 0);
 
     // Debug-aware API: can return Paused (state preserved for resume)
     // initialAction controls the debugger's step mode at entry:
@@ -33,26 +35,26 @@ public:
     //   Continue           — run until a breakpoint is hit
     ExecStatus startExecution(const BytecodeChunk &chunk,
                               const Value *args = nullptr,
-                              size_t nargs = 0,
+                              keel::usize nargs = 0,
                               DebugAction initialAction = DebugAction::StepInto);
     ExecStatus resumeExecution();
     bool isPaused() const { return !frames_.empty(); }
     Value takeResult() { return std::move(lastResult_); }
 
     // Re-entrant call from C++ INTO a compiled chunk, returning all outputs.
-    std::vector<Value> callReentrant(const BytecodeChunk &chunk, Span<const Value> args,
-                                     size_t nargout,
+    std::vector<Value> callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<Value> args,
+                                     keel::usize nargout,
                                      const std::string &ownerClass = std::string(),
                                      bool isCtor = false, const Value *ctorSeed = nullptr);
 
     // Schedule a user-code function-handle callback as a pausable VM frame on
     // behalf of a native continuation.
-    bool pushCallbackFrame(const Value &handle, Span<const Value> args, size_t nargout,
+    bool pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout,
                            std::shared_ptr<VmContinuation> cont);
 
     // Write a Value into regStack_ at an absolute offset (used by heap-boxed
     // continuation adapters so regStack_ growth never dangles a raw Value*).
-    void writeRegAtOffset(size_t regOffset, Value val)
+    void writeRegAtOffset(keel::usize regOffset, Value val)
     {
         ensureRegStackCapacity(regOffset + 1);
         regStack_[regOffset] = std::move(val);
@@ -109,9 +111,9 @@ public:
         return { f.chunk, f.R };
     }
 
-    size_t frameCount() const { return frames_.size(); }
+    keel::usize frameCount() const { return frames_.size(); }
 
-    FrameView frameViewAt(size_t depthFromTop)
+    FrameView frameViewAt(keel::usize depthFromTop)
     {
         if (depthFromTop >= frames_.size())
             return {};
@@ -181,11 +183,11 @@ private:
     const std::unordered_map<std::string, BytecodeChunk> *scriptLocalFuncs_ = nullptr;
 
     // Register stack — grows dynamically via ensureRegStackCapacity
-    static constexpr size_t kInitialRegStackSize = 256 * 50;
+    static constexpr keel::usize kInitialRegStackSize = 256 * 50;
     std::vector<Value> regStack_;
-    size_t regStackTop_ = 0;
+    keel::usize regStackTop_ = 0;
     Value *R_ = nullptr;
-    void ensureRegStackCapacity(size_t needed);
+    void ensureRegStackCapacity(keel::usize needed);
 
     // ── Explicit call frame stack (non-recursive VM) ────────
     struct CallFrame
@@ -193,15 +195,15 @@ private:
         const BytecodeChunk *chunk = nullptr;
         const Instruction *ip = nullptr; // saved instruction pointer
         Value *R = nullptr;             // register base for this frame
-        size_t regBase = 0;              // offset in regStack_
-        uint32_t nregs = 0;              // register count
-        size_t forStackBase = 0;         // forStack_.size() at frame entry
-        size_t tryStackBase = 0;         // tryStack_.size() at frame entry
-        uint16_t destReg = 0;            // caller register for return value
+        keel::usize regBase = 0;              // offset in regStack_
+        keel::u32 nregs = 0;              // register count
+        keel::usize forStackBase = 0;         // forStack_.size() at frame entry
+        keel::usize tryStackBase = 0;         // tryStack_.size() at frame entry
+        keel::u16 destReg = 0;            // caller register for return value
         bool isMultiReturn = false;      // CALL_MULTI?
-        uint16_t outBase = 0;            // multi-return: output base register
-        uint16_t nout = 0;               // multi-return: output count
-        size_t nargout = 1;
+        keel::u16 outBase = 0;            // multi-return: output base register
+        keel::u16 nout = 0;               // multi-return: output count
+        keel::usize nargout = 1;
         std::string ownerClass;
         bool isCtor = false;
         bool isScriptFrame = false;
@@ -209,7 +211,7 @@ private:
         std::unordered_map<std::string, Value> *dynVars = nullptr;
         std::unique_ptr<Environment> env;
         std::vector<std::string> callerArgNames;
-        size_t originDepth = 0;
+        keel::usize originDepth = 0;
         std::shared_ptr<VmContinuation> cont;
     };
     std::vector<CallFrame> frames_;
@@ -219,15 +221,15 @@ private:
     struct ForState
     {
         Value range;
-        const double *data = nullptr;
+        const keel::f64 *data = nullptr;
         const void *rawData = nullptr; // for char/logical
         ValueType rangeType = ValueType::DOUBLE;
-        size_t index = 0;
-        size_t count = 0;
-        size_t rows = 0;
+        keel::usize index = 0;
+        keel::usize count = 0;
+        keel::usize rows = 0;
         bool   lazy = false;
-        double lazyStart = 0.0;
-        double lazyStep  = 1.0;
+        keel::f64 lazyStart = 0.0;
+        keel::f64 lazyStep  = 1.0;
     };
     std::vector<ForState> forStack_;
 
@@ -235,9 +237,9 @@ private:
     struct TryHandler
     {
         const Instruction *catchIp; // where to jump on exception
-        uint16_t exReg;             // register for exception struct
-        size_t forStackSize;        // forStack_ size at TRY_BEGIN (restore on catch)
-        size_t frameIndex;          // index in frames_ that owns this handler
+        keel::u16 exReg;             // register for exception struct
+        keel::usize forStackSize;        // forStack_ size at TRY_BEGIN (restore on catch)
+        keel::usize frameIndex;          // index in frames_ that owns this handler
     };
     std::vector<TryHandler> tryStack_;
 
@@ -245,17 +247,17 @@ private:
     {
         const BytecodeChunk *userChunk = nullptr;
         const ExternalFunc *extFunc = nullptr;
-        uint64_t epoch = 0;
+        keel::u64 epoch = 0;
     };
 
     struct LvalDetach
     {
-        enum class Kind : uint8_t { Field, Cell };
-        size_t containerRegAbs = 0;
-        size_t valRegAbs = 0;
+        enum class Kind : keel::u8 { Field, Cell };
+        keel::usize containerRegAbs = 0;
+        keel::usize valRegAbs = 0;
         Kind kind = Kind::Field;
         std::string fieldName;
-        size_t cellLinearIdx = 0;
+        keel::usize cellLinearIdx = 0;
     };
 
 public:
@@ -266,7 +268,7 @@ public:
         std::vector<TryHandler> tryStack;
         std::vector<LvalDetach> lvalDetaches;
         std::vector<Value> regSnapshot;
-        size_t regStackTop = 0;
+        keel::usize regStackTop = 0;
         Value lastResult;
         std::unordered_map<const BytecodeChunk *,
                            std::vector<CallCacheEntry>>
@@ -297,9 +299,9 @@ private:
     // ── Core dispatch loop (non-recursive) ──────────────────
     ExecStatus dispatchLoop();
 
-    void pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, size_t nargs,
-                       uint16_t destReg, size_t nargout,
-                       bool isMulti = false, uint16_t outBase = 0, uint16_t nout = 0,
+    void pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::usize nargs,
+                       keel::u16 destReg, keel::usize nargout,
+                       bool isMulti = false, keel::u16 outBase = 0, keel::u16 nout = 0,
                        const std::string &ownerClass = std::string(), bool isCtor = false,
                        const Value *ctorSeed = nullptr);
     void popCallFrame(Value retVal);
@@ -318,31 +320,31 @@ private:
 
     Value binarySlowPath(OpCode op, const Value &lhs, const Value &rhs);
     Value unarySlowPath(OpCode op, const Value &operand);
-    bool tryBinaryOpFrame(uint16_t dst, OpCode op, uint16_t lhsReg, uint16_t rhsReg,
+    bool tryBinaryOpFrame(keel::u16 dst, OpCode op, keel::u16 lhsReg, keel::u16 rhsReg,
                           CallFrame &frame, const Instruction *ip);
-    bool tryUnaryOpFrame(uint16_t dst, OpCode op, uint16_t operandReg,
+    bool tryUnaryOpFrame(keel::u16 dst, OpCode op, keel::u16 operandReg,
                          CallFrame &frame, const Instruction *ip);
-    bool tryObjectSubsrefFrame(uint16_t dst, uint16_t selfReg, Span<const Value> idx,
+    bool tryObjectSubsrefFrame(keel::u16 dst, keel::u16 selfReg, keel::ArrayRef<Value> idx,
                                CallFrame &frame, const Instruction *ip);
-    bool tryObjectSubsrefFrameObj(const Value &self, uint16_t dst, Span<const Value> idx,
+    bool tryObjectSubsrefFrameObj(const Value &self, keel::u16 dst, keel::ArrayRef<Value> idx,
                                   CallFrame &frame, const Instruction *ip);
-    bool tryObjectSubsasgnFrame(uint16_t objReg, Span<const Value> idxAndVal,
+    bool tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVal,
                                 CallFrame &frame, const Instruction *ip);
     void execCallBuiltin(const Instruction &I, Value *R);
     bool execCallIndirect(const Instruction &I, Value *R,
                           CallFrame &frame, const Instruction *ip);
-    bool execCallIndirectTarget(const Value &target, uint16_t dstReg, uint16_t argBase, uint16_t na,
+    bool execCallIndirectTarget(const Value &target, keel::u16 dstReg, keel::u16 argBase, keel::u16 na,
                                 Value *R, CallFrame &frame, const Instruction *ip);
-    bool execCallIndirectSpan(const Value &target, uint16_t dstReg,
-                              const Value *AB, size_t na, Value *R, CallFrame &frame,
+    bool execCallIndirectSpan(const Value &target, keel::u16 dstReg,
+                              const Value *AB, keel::usize na, Value *R, CallFrame &frame,
                               const Instruction *ip);
     bool execCallIndirectMulti(const Instruction &I, Value *R,
                                CallFrame &frame, const Instruction *ip);
     void execIndirectIndex(const Instruction &I, Value *R);
-    void execIndirectIndexTarget(const Value &target, uint16_t dstReg, uint16_t argBase, uint16_t na,
+    void execIndirectIndexTarget(const Value &target, keel::u16 dstReg, keel::u16 argBase, keel::u16 na,
                                  Value *R);
-    void execIndirectIndexSpan(const Value &mv, uint16_t dstReg, const Value *AB,
-                               size_t na, Value *R);
+    void execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *AB,
+                               keel::usize na, Value *R);
     void execDisplay(const Instruction &I, Value *R, const BytecodeChunk &chunk);
     void execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk);
     void execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk);

@@ -10,14 +10,16 @@
 // register here too. Toolbox-grade entries may live under namespaced
 // `optim.*` instead — that decision is made per function as they land.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/optim/library.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <numkit/core/types.hpp>
 
 namespace numkit::optim::detail {
-void fminbnd_reg   (Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx);
-void fminsearch_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx);
+void fminbnd_reg   (keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx);
+void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx);
 } // namespace numkit::optim::detail
 
 namespace numkit::optim {
@@ -65,15 +67,15 @@ void OptimLibrary::install(Engine &engine)
     // objective + nonlcon). Solution-parity with MATLAB.
     optim::registerFminconM(engine);
     engine.registerFunction("optimoptions",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw Error("optimoptions requires at least 1 input argument",
                             0, 0, "optimoptions", "", "numkit:optimoptions:minrhs");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             Value st = Value::structure(mr);
             if (args[0].isChar() || args[0].isString())
                 st.field("SolverName") = Value::fromString(args[0].toString(), mr);
-            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+            for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (args[i].isChar() || args[i].isString())
                     st.field(args[i].toString()) = args[i + 1];
             }

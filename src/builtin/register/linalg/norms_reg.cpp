@@ -7,6 +7,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/norms.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -19,10 +21,10 @@
 namespace numkit::linalg {
 namespace detail {
 
-void norm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void norm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "norm");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = norm_value(args[0], 2.0, mr);
         return;
@@ -60,15 +62,15 @@ void norm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     outs[0] = norm_value(args[0], pv, mr);
 }
 
-void vecnorm_reg(Span<const Value> args, size_t /*nargout*/,
-                 Span<Value> outs, CallContext &ctx)
+void vecnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "vecnorm");
     double p = 2.0;
     int dim = 0;
     if (args.size() >= 2) p = args[1].toScalar();
     if (args.size() >= 3) dim = argcheck::dimArg(args[2], "vecnorm");
-    outs[0] = vecnorm(args[0], p, dim, ctx.engine->resource());
+    outs[0] = vecnorm(args[0], p, dim, ctx.engine->allocator());
 }
 
 } // namespace detail

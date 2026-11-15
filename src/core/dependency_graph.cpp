@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/dependency_graph.hpp>
 
 #include <algorithm>
@@ -20,11 +21,11 @@ namespace {
 // values: mark [0..w] dirty. Worst case this degrades to a full
 // prefix re-run — the documented wildcard contract (correct over
 // fast); scripts without wildcards keep their precise skipping.
-std::vector<size_t> closeDirtySet(const std::vector<StatementFacts> &facts,
+std::vector<keel::usize> closeDirtySet(const std::vector<StatementFacts> &facts,
                                   const std::vector<char> &marked)
 {
     std::vector<char> dirty(marked);
-    std::vector<size_t> work;
+    std::vector<keel::usize> work;
     // Rebuild downstream edges lazily? No — the caller passes the
     // graph's own closure; here only the wildcard-prefix rule runs.
     (void)facts;
@@ -92,7 +93,7 @@ struct ReadCollector {
             if (!n->children.empty()
                 && n->children[0]->type == NodeType::IDENTIFIER) {
                 bool endArg = false, colonArg = false;
-                for (size_t k = 1; k < n->children.size(); ++k) {
+                for (keel::usize k = 1; k < n->children.size(); ++k) {
                     NodeType t = n->children[k]->type;
                     if (t == NodeType::END_VAL)
                         endArg = true;
@@ -309,9 +310,9 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
     //     merge-write, so a WHOLE-VARIABLE reader depends on EVERY
     //     earlier writer of that variable; a REGION reader depends on
     //     the nearest earlier writer whose write region intersects.
-    for (size_t j = 0; j < facts_.size(); ++j) {
+    for (keel::usize j = 0; j < facts_.size(); ++j) {
         if (facts_[j].wildcardReads) {
-            for (size_t i = 0; i < j; ++i)
+            for (keel::usize i = 0; i < j; ++i)
                 downstream_[i].push_back(j);
             continue;
         }
@@ -331,7 +332,7 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
                 rj == facts_[j].elemReads.end() || rj->second.all;
             if (wholeReader) {
                 // Accumulate: every earlier writer contributes.
-                for (size_t i = j; i-- > 0;) {
+                for (keel::usize i = j; i-- > 0;) {
                     if (facts_[i].writes.count(x)
                         || facts_[i].wildcardReads)
                         downstream_[i].push_back(j);
@@ -340,7 +341,7 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
             }
             // Region reader: nearest intersecting writer per region.
             for (const auto &reg : rj->second.rects) {
-                for (size_t i = j; i-- > 0;) {
+                for (keel::usize i = j; i-- > 0;) {
                     if (facts_[i].wildcardReads) {
                         downstream_[i].push_back(j);
                         break;
@@ -366,20 +367,20 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
     }
 }
 
-std::vector<size_t> DependencyGraph::dirtySetForElement(
-    const std::string &var, size_t r, size_t c) const
+std::vector<keel::usize> DependencyGraph::dirtySetForElement(
+    const std::string &var, keel::usize r, keel::usize c) const
 {
     return dirtySetForElement(var, r, c, {});
 }
 
-std::vector<size_t> DependencyGraph::dirtySetForElement(
-    const std::string &var, size_t r, size_t c,
+std::vector<keel::usize> DependencyGraph::dirtySetForElement(
+    const std::string &var, keel::usize r, keel::usize c,
     const std::set<std::string> &externalDefs) const
 {
     const ElemRegion cell{r, r, c, c};
     std::vector<char> dirty(facts_.size(), 0);
-    std::vector<size_t> work;
-    for (size_t i = 0; i < facts_.size(); ++i) {
+    std::vector<keel::usize> work;
+    for (keel::usize i = 0; i < facts_.size(); ++i) {
         bool affected = false;
         if (facts_[i].wildcardReads) {
             affected = true;
@@ -419,9 +420,9 @@ std::vector<size_t> DependencyGraph::dirtySetForElement(
         bool again = true;
         while (again) {
             again = false;
-            for (size_t i = 0; i < facts_.size(); ++i)
+            for (keel::usize i = 0; i < facts_.size(); ++i)
                 if (dirty[i] && facts_[i].wildcardReads)
-                    for (size_t k = 0; k < i; ++k) {
+                    for (keel::usize k = 0; k < i; ++k) {
                         // The param's own pure definition stays
                         // skipped — re-running it would clobber the
                         // setParam write with the script default.
@@ -440,34 +441,34 @@ std::vector<size_t> DependencyGraph::dirtySetForElement(
     };
     applyWildcardPrefix();
     while (!work.empty()) {
-        size_t i = work.back();
+        keel::usize i = work.back();
         work.pop_back();
-        for (size_t j : downstream_[i])
+        for (keel::usize j : downstream_[i])
             if (!dirty[j]) {
                 dirty[j] = 1;
                 work.push_back(j);
             }
     }
     applyWildcardPrefix();
-    std::vector<size_t> out;
-    for (size_t i = 0; i < facts_.size(); ++i)
+    std::vector<keel::usize> out;
+    for (keel::usize i = 0; i < facts_.size(); ++i)
         if (dirty[i])
             out.push_back(i);
     return out;
 }
 
-std::vector<size_t> DependencyGraph::dirtySetFor(const std::string &var) const
+std::vector<keel::usize> DependencyGraph::dirtySetFor(const std::string &var) const
 {
     return dirtySetFor(var, {});
 }
 
-std::vector<size_t> DependencyGraph::dirtySetFor(
+std::vector<keel::usize> DependencyGraph::dirtySetFor(
     const std::string &var,
     const std::set<std::string> &externalDefs) const
 {
     std::vector<char> dirty(facts_.size(), 0);
-    std::vector<size_t> work;
-    for (size_t i = 0; i < facts_.size(); ++i) {
+    std::vector<keel::usize> work;
+    for (keel::usize i = 0; i < facts_.size(); ++i) {
         // A PURE DEFINITION of the parameter (writes var, never reads
         // it) is REPLACED by the setParam write — re-running it would
         // clobber the slider value back to the script default. Only
@@ -482,7 +483,7 @@ std::vector<size_t> DependencyGraph::dirtySetFor(
         // A wildcard statement before ANY writer of var may itself
         // write var — conservatively treat wildcards as affected.
         if (!affected && facts_[i].wildcardReads) {
-            for (size_t k = 0; k <= i; ++k)
+            for (keel::usize k = 0; k <= i; ++k)
                 if (facts_[k].writes.count(var)) {
                     affected = true;
                     break;
@@ -503,9 +504,9 @@ std::vector<size_t> DependencyGraph::dirtySetFor(
         bool again = true;
         while (again) {
             again = false;
-            for (size_t i = 0; i < facts_.size(); ++i)
+            for (keel::usize i = 0; i < facts_.size(); ++i)
                 if (dirty[i] && facts_[i].wildcardReads)
-                    for (size_t k = 0; k < i; ++k) {
+                    for (keel::usize k = 0; k < i; ++k) {
                         // Pure defs of the changed var AND of every
                         // externally-set param stay skipped —
                         // re-running them would clobber param values
@@ -538,17 +539,17 @@ std::vector<size_t> DependencyGraph::dirtySetFor(
     };
     applyWildcardPrefix();
     while (!work.empty()) {
-        size_t i = work.back();
+        keel::usize i = work.back();
         work.pop_back();
-        for (size_t j : downstream_[i])
+        for (keel::usize j : downstream_[i])
             if (!dirty[j]) {
                 dirty[j] = 1;
                 work.push_back(j);
             }
     }
     applyWildcardPrefix();   // closure may reach new wildcards
-    std::vector<size_t> out;
-    for (size_t i = 0; i < facts_.size(); ++i)
+    std::vector<keel::usize> out;
+    for (keel::usize i = 0; i < facts_.size(); ++i)
         if (dirty[i])
             out.push_back(i);
     return out;

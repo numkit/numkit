@@ -1,6 +1,7 @@
 // include/bytecode.hpp
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
 #include <memory>
@@ -11,7 +12,7 @@
 
 namespace numkit {
 
-enum class OpCode : uint8_t {
+enum class OpCode : keel::u8 {
     // ── Data movement ────────────────────────────────────────
     LOAD_CONST,   // dst, constIdx          R[dst] = constants[constIdx]
     LOAD_EMPTY,   // dst                    R[dst] = empty
@@ -276,7 +277,7 @@ enum class OpCode : uint8_t {
     HALT, //                        stop execution
 };
 
-inline constexpr uint16_t kInvalidReg = 0xFFFF;
+inline constexpr keel::u16 kInvalidReg = 0xFFFF;
 
 // ============================================================
 // Instruction: fixed 16-byte wide encoding
@@ -291,17 +292,17 @@ inline constexpr uint16_t kInvalidReg = 0xFFFF;
 struct Instruction
 {
     OpCode op = OpCode::HALT;
-    uint8_t pad = 0;
-    uint16_t a = 0; // dst / reg
-    uint16_t b = 0; // src1 / base
-    uint16_t c = 0; // src2 / nargs
-    uint16_t e = 0; // 5th operand (nout for CALL_MULTI, etc.)
-    uint16_t pad2 = 0;
-    int32_t d = 0;  // offset / constIdx / funcIdx / nameIdx
+    keel::u8 pad = 0;
+    keel::u16 a = 0; // dst / reg
+    keel::u16 b = 0; // src1 / base
+    keel::u16 c = 0; // src2 / nargs
+    keel::u16 e = 0; // 5th operand (nout for CALL_MULTI, etc.)
+    keel::u16 pad2 = 0;
+    keel::i32 d = 0;  // offset / constIdx / funcIdx / nameIdx
 
     Instruction() = default;
 
-    static Instruction make_abcde(OpCode op, uint16_t a, uint16_t b, uint16_t c, int32_t d, uint16_t e)
+    static Instruction make_abcde(OpCode op, keel::u16 a, keel::u16 b, keel::u16 c, keel::i32 d, keel::u16 e)
     {
         Instruction i;
         i.op = op;
@@ -312,7 +313,7 @@ struct Instruction
         i.e = e;
         return i;
     }
-    static Instruction make_abc(OpCode op, uint16_t a, uint16_t b, uint16_t c)
+    static Instruction make_abc(OpCode op, keel::u16 a, keel::u16 b, keel::u16 c)
     {
         Instruction i;
         i.op = op;
@@ -321,7 +322,7 @@ struct Instruction
         i.c = c;
         return i;
     }
-    static Instruction make_abd(OpCode op, uint16_t a, uint16_t b, int32_t d)
+    static Instruction make_abd(OpCode op, keel::u16 a, keel::u16 b, keel::i32 d)
     {
         Instruction i;
         i.op = op;
@@ -330,7 +331,7 @@ struct Instruction
         i.d = d;
         return i;
     }
-    static Instruction make_ad(OpCode op, uint16_t a, int32_t d)
+    static Instruction make_ad(OpCode op, keel::u16 a, keel::i32 d)
     {
         Instruction i;
         i.op = op;
@@ -338,14 +339,14 @@ struct Instruction
         i.d = d;
         return i;
     }
-    static Instruction make_a(OpCode op, uint16_t a)
+    static Instruction make_a(OpCode op, keel::u16 a)
     {
         Instruction i;
         i.op = op;
         i.a = a;
         return i;
     }
-    static Instruction make_d(OpCode op, int32_t d)
+    static Instruction make_d(OpCode op, keel::i32 d)
     {
         Instruction i;
         i.op = op;
@@ -367,8 +368,8 @@ static_assert(sizeof(Instruction) == 16, "Instruction must be 16 bytes");
 // ============================================================
 struct SourceLoc
 {
-    uint16_t line = 0;
-    uint16_t col = 0;
+    keel::u16 line = 0;
+    keel::u16 col = 0;
 };
 
 // ============================================================
@@ -385,17 +386,17 @@ struct BytecodeChunk
     // Metadata
     std::string name;         // function name or "<script>"
     std::string parentFuncName; // enclosing function name for nested functions
-    uint32_t numRegisters = 0; // total registers needed (0..65535)
-    uint16_t numParams = 0;
-    uint16_t numReturns = 0;
+    keel::u32 numRegisters = 0; // total registers needed (0..65535)
+    keel::u16 numParams = 0;
+    keel::u16 numReturns = 0;
     std::vector<std::string> paramNames;
     std::vector<std::string> returnNames;
 
     // Closure support: indices of captured variables from parent scope
-    std::vector<uint16_t> capturedRegisters;
+    std::vector<keel::u16> capturedRegisters;
 
     // Variable name → register mapping (for exporting to environment after execution)
-    std::vector<std::pair<std::string, uint16_t>> varMap;
+    std::vector<std::pair<std::string, keel::u16>> varMap;
 
     // Names of variables the compiler emits a write for (STORE, param intro,
     // for-loop var, catch var, global/persistent decl, etc). Reads alone do
@@ -422,9 +423,9 @@ struct BytecodeChunk
     std::vector<std::string> persistentNames;
 
     // Hidden trailing upvalue-box parameter registers for nested functions.
-    std::vector<uint16_t> upvalueParamRegs;
+    std::vector<keel::u16> upvalueParamRegs;
     // Map of variable name -> register holding its shared UpvaluePayload box.
-    std::unordered_map<std::string, uint16_t> upvalueBoxRegs;
+    std::unordered_map<std::string, keel::u16> upvalueBoxRegs;
 
     // Per-CALL-site arg names — populated by the compiler for each
     // CALL / CALL_MULTI it emits. Key = index into `code` of the CALL
@@ -433,7 +434,7 @@ struct BytecodeChunk
     // empty string otherwise. Used by `inputname(k)` to introspect
     // the caller's call site. Sparse on purpose — only populated for
     // calls that have at least one bare-identifier arg.
-    std::unordered_map<uint32_t, std::vector<std::string>> callSiteArgNames;
+    std::unordered_map<keel::u32, std::vector<std::string>> callSiteArgNames;
 
     // Source mapping (parallel to code, same size — one entry per instruction)
     std::vector<SourceLoc> sourceMap;
@@ -442,10 +443,10 @@ struct BytecodeChunk
     std::shared_ptr<const std::string> sourceCode;
 
     // Precomputed special register slots for O(1) pushCallFrame setup
-    uint16_t narginReg = kInvalidReg;
-    uint16_t nargoutReg = kInvalidReg;
-    uint16_t vararginReg = kInvalidReg;
-    uint16_t firstReturnReg = kInvalidReg;
+    keel::u16 narginReg = kInvalidReg;
+    keel::u16 nargoutReg = kInvalidReg;
+    keel::u16 vararginReg = kInvalidReg;
+    keel::u16 firstReturnReg = kInvalidReg;
     bool mayUseInputname = false;
 
     // m-file provenance — stamped by the engine's m-file resolver (file

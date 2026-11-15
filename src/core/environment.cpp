@@ -1,4 +1,5 @@
 // src/environment.cpp
+#include <keel/core.h>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
 
@@ -9,7 +10,7 @@ namespace numkit {
 // ============================================================
 Value *Environment::sboFind(const std::string &name)
 {
-    for (size_t i = 0; i < sboCount_; ++i)
+    for (keel::usize i = 0; i < sboCount_; ++i)
         if (sbo_[i].name == name)
             return &sbo_[i].value;
     return nullptr;
@@ -17,7 +18,7 @@ Value *Environment::sboFind(const std::string &name)
 
 const Value *Environment::sboFind(const std::string &name) const
 {
-    for (size_t i = 0; i < sboCount_; ++i)
+    for (keel::usize i = 0; i < sboCount_; ++i)
         if (sbo_[i].name == name)
             return &sbo_[i].value;
     return nullptr;
@@ -31,7 +32,7 @@ void Environment::sboSet(const std::string &name, Value val)
         return;
     }
     // Try to update existing slot
-    for (size_t i = 0; i < sboCount_; ++i) {
+    for (keel::usize i = 0; i < sboCount_; ++i) {
         if (sbo_[i].name == name) {
             sbo_[i].value = std::move(val);
             return;
@@ -45,7 +46,7 @@ void Environment::sboSet(const std::string &name, Value val)
         return;
     }
     // Overflow: migrate all SBO slots to map, then add new entry
-    for (size_t i = 0; i < sboCount_; ++i) {
+    for (keel::usize i = 0; i < sboCount_; ++i) {
         vars_[std::move(sbo_[i].name)] = std::move(sbo_[i].value);
     }
     sboCount_ = 0;
@@ -217,7 +218,7 @@ const UserFunction *Environment::findNestedFunc(const std::string &name) const
 void Environment::forEachLocal(
     const std::function<void(const std::string &, const Value &)> &fn) const
 {
-    for (size_t i = 0; i < sboCount_; ++i)
+    for (keel::usize i = 0; i < sboCount_; ++i)
         fn(sbo_[i].name, sbo_[i].value);
     for (auto &[k, v] : vars_)
         fn(k, v);
@@ -235,7 +236,7 @@ std::shared_ptr<Environment> Environment::snapshot(std::shared_ptr<Environment> 
 
     auto snap = std::make_shared<Environment>(std::move(snappedParent), gs);
 
-    for (size_t i = 0; i < sboCount_; ++i) {
+    for (keel::usize i = 0; i < sboCount_; ++i) {
         snap->sbo_[snap->sboCount_].name = sbo_[i].name;
         snap->sbo_[snap->sboCount_].value = sbo_[i].value;
         snap->sboCount_++;
@@ -268,7 +269,7 @@ void Environment::remove(const std::string &name)
         persistentBucket_->erase(name);
     }
 
-    for (size_t i = 0; i < sboCount_; ++i) {
+    for (keel::usize i = 0; i < sboCount_; ++i) {
         if (sbo_[i].name == name) {
             if (i < sboCount_ - 1)
                 std::swap(sbo_[i], sbo_[sboCount_ - 1]);
@@ -310,7 +311,7 @@ void Environment::clearAll(bool keepImports)
 
 void Environment::reset(Environment *parent, Environment *gs)
 {
-    for (size_t i = 0; i < sboCount_; ++i) {
+    for (keel::usize i = 0; i < sboCount_; ++i) {
         sbo_[i].name.clear();
         sbo_[i].value = Value();
     }
@@ -334,7 +335,7 @@ std::vector<std::string> Environment::localNames() const
 {
     std::vector<std::string> names;
     names.reserve(sboCount_ + vars_.size());
-    for (size_t i = 0; i < sboCount_; ++i)
+    for (keel::usize i = 0; i < sboCount_; ++i)
         names.push_back(sbo_[i].name);
     for (auto &[k, v] : vars_)
         names.push_back(k);

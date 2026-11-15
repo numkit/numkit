@@ -1,6 +1,9 @@
 // include/engine.hpp
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/core/types.hpp>
@@ -11,7 +14,6 @@
 
 #include <atomic>
 #include <memory>
-#include <memory_resource>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,12 +39,11 @@ enum class NamespaceMode
 class Engine : public PluginContext
 {
 public:
-    // Default ctor: uses std::pmr::get_default_resource() for all allocations.
+    // Default ctor: uses defaultCachedAllocator() for all allocations.
     Engine();
-    // Custom heap: caller-supplied memory_resource. Must outlive the Engine
-    // and every Value/DataBuffer it produces. Pass a subclass of
-    // std::pmr::memory_resource (or one of std::pmr's built-in resources).
-    explicit Engine(std::pmr::memory_resource *mr);
+    // Custom heap: caller-supplied keel::Allocator. Must outlive the Engine
+    // and every Value/DataBuffer it produces.
+    explicit Engine(keel::Allocator *mr);
     ~Engine() override;
 
     Engine(const Engine &) = delete;
@@ -50,9 +51,9 @@ public:
     Engine(Engine &&) = delete;
     Engine &operator=(Engine &&) = delete;
 
-    // The memory_resource used for persistent (output-Value) allocations.
-    // Internal helpers and ScratchArena upstream-spill flow through here.
-    std::pmr::memory_resource *resource() const noexcept override { return mr_; }
+    // The keel::Allocator used for persistent (output-Value) allocations.
+    // Internal helpers and keel::ArenaTemp upstream-spill flow through here.
+    keel::Allocator *allocator() const noexcept override { return mr_; }
 
     void registerBinaryOp(const std::string &op, BinaryOpFunc func);
     void registerUnaryOp(const std::string &op, UnaryOpFunc func);
@@ -136,10 +137,10 @@ public:
     // Run a classdef method body (args already include `self` first) /
     // constructor body (with `obj` seeded to the default instance) on the
     // TreeWalker, regardless of the active backend.
-    std::vector<Value> invokeClassMethod(const UserFunction &uf, Span<const Value> args,
-                                         size_t nout);
+    std::vector<Value> invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+                                         keel::usize nout);
     Value invokeClassCtor(const UserFunction &ctor, const Value &seed,
-                          Span<const Value> args);
+                          keel::ArrayRef<Value> args);
     // Compile a classdef method/constructor body into the VM's global compiled
     // table (idempotent), returning its chunk — so the VM can run the body as
     // a native frame. See vm_callbacks_plan.md.
@@ -180,10 +181,10 @@ public:
     // last). Returns nullptr — caller uses the C++ slow path / builtin
     // indexing — when the class has no such overload or the body can't compile.
     // On success sets ownerClassOut to the object's class. P4, vm_callbacks_plan.md.
-    const BytecodeChunk *resolveSubsrefChunk(const Value &self, Span<const Value> idx,
+    const BytecodeChunk *resolveSubsrefChunk(const Value &self, keel::ArrayRef<Value> idx,
                                              std::string &ownerClassOut,
                                              std::vector<Value> &argsOut);
-    const BytecodeChunk *resolveSubsasgnChunk(const Value &self, Span<const Value> idxAndVal,
+    const BytecodeChunk *resolveSubsasgnChunk(const Value &self, keel::ArrayRef<Value> idxAndVal,
                                               std::string &ownerClassOut,
                                               std::vector<Value> &argsOut);
     // Superclass-qualified calls from inside a classdef body
@@ -194,9 +195,9 @@ public:
     // a registered classdef. When Base defines no constructor, superConstruct
     // returns `seed` unchanged (a base with only default property init).
     Value superConstruct(const std::string &base, const Value &seed,
-                         Span<const Value> args);
+                         keel::ArrayRef<Value> args);
     std::vector<Value> superMethod(const std::string &base, const std::string &method,
-                                   Span<const Value> args, size_t nout);
+                                   keel::ArrayRef<Value> args, keel::usize nout);
     // classdef member-access context (private/protected/immutable). Push the
     // running method's/constructor's class on entry, pop on exit (RAII at the
     // call sites). `classCtxAllows` answers "may code in the current context
@@ -214,7 +215,7 @@ public:
     // call sites; internal default-fill calls `cls->construct` directly so
     // object-array growth is never blocked. A public ctor (or a non-classdef
     // BuiltinClass) passes straight through.
-    Value constructChecked(const BuiltinClass *cls, Span<const Value> args, CallContext &ctx);
+    Value constructChecked(const BuiltinClass *cls, keel::ArrayRef<Value> args, CallContext &ctx);
     // Build a default-initialised instance of a classdef (abstract-class check
     // + every property at its declared default), WITHOUT running the user
     // constructor. This is the "seed" the constructor body receives bound to
@@ -273,13 +274,13 @@ public:
     // count. Callers first verify dst is a valid target (empty/unset, or a
     // same-class object array). Centralises the store boilerplate shared by
     // TreeWalker and every VM INDEX_SET* opcode.
-    void objectStoreSlice(Value &dst, const std::vector<std::vector<size_t>> &perDim,
+    void objectStoreSlice(Value &dst, const std::vector<std::vector<keel::usize>> &perDim,
                           const Value &val, Environment *env);
     // Read counterpart: if `self`'s class defines a custom subsref, dispatch
     // it with `args` and return true (result in `out`); otherwise return
     // false so the caller runs the builtin object-array indexing path.
     // Centralises the subsref check + call shared by the VM index opcodes.
-    bool tryObjectSubsref(Value &self, Span<const Value> args, std::size_t nargout,
+    bool tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           Value &out, Environment *env);
 
     // ── Namespace introspection (used by resolver — Phase 6) ──────
@@ -397,7 +398,7 @@ public:
     // execute() returns true. Lets tests PROVE a kernel actually fires (a parity
     // test alone can't — a silent decline gives the same fused==unfused result).
     void noteFusionHit() { ++fusionHits_; }
-    size_t fusionHits() const { return fusionHits_; }
+    keel::usize fusionHits() const { return fusionHits_; }
     void resetFusionHits() { fusionHits_ = 0; }
 
     using OutputFunc = std::function<void(const std::string &)>;
@@ -448,11 +449,11 @@ public:
     // returns whatever the handle produces (truncated/extended to
     // `nout` slots).
     Value callFunctionHandle(const Value &handle,
-                             Span<const Value> args,
+                             keel::ArrayRef<Value> args,
                              Environment *env = nullptr) override;
     std::vector<Value> callFunctionHandleMulti(const Value &handle,
-                                               Span<const Value> args,
-                                               size_t nout,
+                                               keel::ArrayRef<Value> args,
+                                               keel::usize nout,
                                                Environment *env = nullptr) override;
 
     // Unified lookup — script-scope first, then workspace-scope, then
@@ -704,8 +705,8 @@ public:
     const std::string *currentScriptFile() const;     // full path, may be null/empty
     // Unwind-safe origin bookkeeping (see FsContext): the VM truncates to
     // a depth captured at frame entry on every frame-removal path.
-    size_t scriptOriginDepth() const { return fsCtx_.scriptOriginDepth(); }
-    void truncateScriptOrigins(size_t depth) { fsCtx_.truncateScriptOrigins(depth); }
+    keel::usize scriptOriginDepth() const { return fsCtx_.scriptOriginDepth(); }
+    void truncateScriptOrigins(keel::usize depth) { fsCtx_.truncateScriptOrigins(depth); }
     // Capture the currently executing file as a function's provenance —
     // the reference engine's rule for anonymous functions and classdef
     // methods: the origin is fixed at CREATION, and a function born with
@@ -766,7 +767,7 @@ public:
     const std::string &lastFopenError() const { return fsCtx_.lastFopenError(); }
 
 private:
-    std::pmr::memory_resource *mr_;  // not owned; caller-supplied or get_default_resource()
+    keel::Allocator *mr_;  // not owned; caller-supplied or get_default_resource()
     std::shared_ptr<Environment> globalsEnv_;     // shared across functions & closures
     std::unique_ptr<Environment> constantsEnv_;  // pi, eps, inf, etc. — parent for all scopes
     std::unique_ptr<Environment> workspaceEnv_;  // top-level workspace (base workspace)
@@ -898,9 +899,9 @@ private:
     struct MFileCacheEntry
     {
         std::string fullPath;       // VFS-prefixed, the resolved location
-        int64_t mtime = 0;          // 0 if backend can't supply mtime
-        int64_t mtimeNs = 0;        // nanosecond mtime when available
-        int64_t fileSize = -1;      // file size from stat (-1 if unknown)
+        keel::i64 mtime = 0;          // 0 if backend can't supply mtime
+        keel::i64 mtimeNs = 0;        // nanosecond mtime when available
+        keel::i64 fileSize = -1;      // file size from stat (-1 if unknown)
         std::string contentHash;    // fallback when mtime is unavailable
         std::shared_ptr<const std::string> sourceCode;  // keeps AST live
         bool hasExternal = false;   // true when resolveMFile_ registered externalFuncs_[name]
@@ -933,11 +934,11 @@ private:
 
 public:
     void markClearAll() { clearAllCalled_ = true; }
-    uint64_t callCacheEpoch() const noexcept { return callCacheEpoch_; }
+    keel::u64 callCacheEpoch() const noexcept { return callCacheEpoch_; }
     void bumpCallCacheEpoch() noexcept { ++callCacheEpoch_; }
 
 private:
-    uint64_t callCacheEpoch_ = 1;
+    keel::u64 callCacheEpoch_ = 1;
     std::unique_ptr<TreeWalker> treeWalker_;
         // Engine-wide anonymous-function name counter. The VM compiler and
     // the TreeWalker fallback mint __anon_<N> names from this ONE source
@@ -963,7 +964,7 @@ private:
     // until the standard library installs rules, so a bare Engine is unaffected.
     std::vector<FusionRule> fusionRules_;
     bool fusionEnabled_ = true;
-    size_t fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
+    keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
 
     // Sync VM's exported variables to workspaceEnv (called after execute, even on error)
     void syncVMToWorkspace();

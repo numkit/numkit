@@ -1,23 +1,26 @@
 // toolboxes/builtin/src/math/poly/polynomials_reg.cpp
 //
 // CallContext register half (Phase 2b multi-block split).
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/complex.h>
+#include <keel/math.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>  // poly_of_matrix
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/poly_helpers.hpp>
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -33,16 +36,16 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-void roots_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void roots_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "roots");
-    outs[0] = roots(args[0], ctx.engine->resource());
+    outs[0] = roots(args[0], ctx.engine->allocator());
 }
 
-void polyder_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void polyder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "polyder");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = polyder(args[0], mr);
         return;
@@ -54,11 +57,11 @@ void polyder_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     // (conv(a',b)-conv(a,b')) instead of the product derivative
     // (conv(a',b)+conv(a,b')). bugs/builtin/polyder-product.md.
     if (nargout <= 1) {
-        ScratchArena scratch(mr);
-        auto av = readPolyAsDouble(args[0], "polyder", &scratch);
-        auto bv = readPolyAsDouble(args[1], "polyder", &scratch);
-        auto prod = polyConv(av.data(), av.size(), bv.data(), bv.size(), &scratch);
-        auto deriv = polyderRaw(prod.data(), prod.size(), &scratch);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        auto av = readPolyAsDouble(args[0], "polyder", scratch.allocator());
+        auto bv = readPolyAsDouble(args[1], "polyder", scratch.allocator());
+        auto prod = polyConv(av.data(), av.size(), bv.data(), bv.size(), scratch.allocator());
+        auto deriv = polyderRaw(prod.data(), prod.size(), scratch.allocator());
         trimLeadingZeros(deriv);
         outs[0] = rowFromVec(deriv.data(), deriv.size(), mr);
         return;
@@ -68,30 +71,30 @@ void polyder_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     if (nargout > 1) outs[1] = std::move(den);
 }
 
-void polyint_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void polyint_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "polyint");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     double k = 0.0;
     if (args.size() >= 2) k = args[1].toScalar();
     outs[0] = polyint(args[0], k, mr);
 }
 
-void tf2zp_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void tf2zp_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "tf2zp");
     argcheck::checkNargin(args.size(), 2, 2, "tf2zp");
-    auto [zr, pr, kr] = tf2zp(args[0], args[1], ctx.engine->resource());
+    auto [zr, pr, kr] = tf2zp(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(zr);
     if (nargout > 1) outs[1] = std::move(pr);
     if (nargout > 2) outs[2] = std::move(kr);
 }
 
-void zp2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void zp2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "zp2tf");
     argcheck::checkNargin(args.size(), 3, 3, "zp2tf");
-    auto [bv, av] = zp2tf(args[0], args[1], args[2].toScalar(), ctx.engine->resource());
+    auto [bv, av] = zp2tf(args[0], args[1], args[2].toScalar(), ctx.engine->allocator());
     outs[0] = std::move(bv);
     if (nargout > 1) outs[1] = std::move(av);
 }
@@ -103,15 +106,15 @@ namespace {
 // (np = deg+1, highest power first) into pOut, the upper-triangular
 // Cholesky factor R of V'V (np×np, col-major R[row + col*np]) into Rout,
 // the residual norm into normr, and the degrees of freedom into df.
-void polyfitCore(const double *xx, const double *yd, size_t m, int deg,
+void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
                  double *pOut, double *Rout, double &normr, double &df,
-                 ScratchArena &scratch)
+                 const keel::ArenaTemp &scratch)
 {
     const int np = deg + 1;
-    if (static_cast<size_t>(np) > m && m > 0) {
+    if (static_cast<keel::usize>(np) > m && m > 0) {
         const int subNp = static_cast<int>(m);
-        auto subP = ScratchVec<double>(m, &scratch);
-        auto subR = ScratchVec<double>(m * m, &scratch);
+        auto subP = keel::Array<double>(m, scratch.allocator());
+        auto subR = keel::Array<double>(m * m, scratch.allocator());
         polyfitCore(xx, yd, m, subNp - 1, subP.data(), subR.data(), normr, df, scratch);
         const int offset = np - subNp;
         for (int j = 0; j < offset; ++j) pOut[j] = 0.0;
@@ -122,44 +125,44 @@ void polyfitCore(const double *xx, const double *yd, size_t m, int deg,
                 Rout[(offset + r) + (offset + c) * np] = subR[r + c * subNp];
         return;
     }
-    auto V = ScratchVec<double>(m * static_cast<size_t>(np), &scratch);
-    for (size_t i = 0; i < m; ++i)
+    auto V = keel::Array<double>(m * static_cast<keel::usize>(np), scratch.allocator());
+    for (keel::usize i = 0; i < m; ++i)
         for (int j = 0; j < np; ++j)
-            V[static_cast<size_t>(j) * m + i] = std::pow(xx[i], deg - j);
+            V[static_cast<keel::usize>(j) * m + i] = std::pow(xx[i], deg - j);
 
-    auto VtV = ScratchVec<double>(static_cast<size_t>(np) * np, &scratch);  // col-major
+    auto VtV = keel::Array<double>(static_cast<keel::usize>(np) * np, scratch.allocator());  // col-major
     for (int r = 0; r < np; ++r)
         for (int c = 0; c < np; ++c) {
             double s = 0.0;
-            for (size_t i = 0; i < m; ++i)
-                s += V[static_cast<size_t>(r) * m + i] * V[static_cast<size_t>(c) * m + i];
-            VtV[static_cast<size_t>(c) * np + r] = s;
+            for (keel::usize i = 0; i < m; ++i)
+                s += V[static_cast<keel::usize>(r) * m + i] * V[static_cast<keel::usize>(c) * m + i];
+            VtV[static_cast<keel::usize>(c) * np + r] = s;
         }
-    auto Vty = ScratchVec<double>(static_cast<size_t>(np), &scratch);
+    auto Vty = keel::Array<double>(static_cast<keel::usize>(np), scratch.allocator());
     for (int r = 0; r < np; ++r) {
         double s = 0.0;
-        for (size_t i = 0; i < m; ++i) s += V[static_cast<size_t>(r) * m + i] * yd[i];
+        for (keel::usize i = 0; i < m; ++i) s += V[static_cast<keel::usize>(r) * m + i] * yd[i];
         Vty[r] = s;
     }
 
     // Solve VtV p = Vty (Gaussian elimination with partial pivoting).
-    auto aug = ScratchVec<double>(static_cast<size_t>(np) * (np + 1), &scratch);
+    auto aug = keel::Array<double>(static_cast<keel::usize>(np) * (np + 1), scratch.allocator());
     for (int r = 0; r < np; ++r) {
-        for (int c = 0; c < np; ++c) aug[r * (np + 1) + c] = VtV[static_cast<size_t>(c) * np + r];
+        for (int c = 0; c < np; ++c) aug[r * (np + 1) + c] = VtV[static_cast<keel::usize>(c) * np + r];
         aug[r * (np + 1) + np] = Vty[r];
     }
     for (int k = 0; k < np; ++k) {
         int maxRow = k;
-        double maxVal = std::abs(aug[k * (np + 1) + k]);
+        double maxVal = keel::abs(aug[k * (np + 1) + k]);
         for (int r = k + 1; r < np; ++r) {
-            const double v = std::abs(aug[r * (np + 1) + k]);
+            const double v = keel::abs(aug[r * (np + 1) + k]);
             if (v > maxVal) { maxVal = v; maxRow = r; }
         }
         if (maxRow != k)
             for (int c = 0; c <= np; ++c)
                 std::swap(aug[k * (np + 1) + c], aug[maxRow * (np + 1) + c]);
         const double pivot = aug[k * (np + 1) + k];
-        if (std::abs(pivot) < 1e-15)
+        if (keel::abs(pivot) < 1e-15)
             throw Error("polyfit: singular matrix",
                          0, 0, "polyfit", "", "numkit:polyfit:singular");
         for (int c = k; c <= np; ++c) aug[k * (np + 1) + c] /= pivot;
@@ -177,13 +180,13 @@ void polyfitCore(const double *xx, const double *yd, size_t m, int deg,
     // matches MATLAB bit-for-bit.
     for (int i = 0; i < np * np; ++i) Rout[i] = 0.0;
     for (int j = 0; j < np; ++j) {
-        double d = VtV[static_cast<size_t>(j) * np + j];
+        double d = VtV[static_cast<keel::usize>(j) * np + j];
         for (int k = 0; k < j; ++k)
             d -= Rout[k + j * np] * Rout[k + j * np];
         d = (d > 0.0) ? std::sqrt(d) : 0.0;
         Rout[j + j * np] = d;
         for (int i = j + 1; i < np; ++i) {
-            double s = VtV[static_cast<size_t>(i) * np + j];  // symmetric
+            double s = VtV[static_cast<keel::usize>(i) * np + j];  // symmetric
             for (int k = 0; k < j; ++k)
                 s -= Rout[k + j * np] * Rout[k + i * np];
             Rout[j + i * np] = (d != 0.0) ? s / d : 0.0;
@@ -192,23 +195,23 @@ void polyfitCore(const double *xx, const double *yd, size_t m, int deg,
 
     // Residual norm and degrees of freedom.
     double ss = 0.0;
-    for (size_t i = 0; i < m; ++i) {
+    for (keel::usize i = 0; i < m; ++i) {
         double yi = 0.0;
-        for (int j = 0; j < np; ++j) yi += V[static_cast<size_t>(j) * m + i] * pOut[j];
+        for (int j = 0; j < np; ++j) yi += V[static_cast<keel::usize>(j) * m + i] * pOut[j];
         const double e = yd[i] - yi;
         ss += e * e;
     }
     normr = std::sqrt(ss);
-    df = (m > static_cast<size_t>(np)) ? static_cast<double>(m - np) : 0.0;
+    df = (m > static_cast<keel::usize>(np)) ? static_cast<double>(m - np) : 0.0;
 }
 
 } // namespace
 
-void polyfit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "polyfit");
     argcheck::checkNargin(args.size(), 3, 3, "polyfit");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &x = args[0], &y = args[1];
     const double dv = argcheck::expectedReal(args[2], 3, "degree", "polyfit");
     argcheck::expectedInteger(dv, 3, "degree", "polyfit");
@@ -220,33 +223,33 @@ void polyfit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         return;
     }
 
-    const size_t m = x.numel();
+    const keel::usize m = x.numel();
     const int np = deg + 1;
     if (m == 0)
         throw Error("polyfit: not enough data points",
                      0, 0, "polyfit", "", "numkit:polyfit:tooFewPoints");
 
-    ScratchArena scratch(mr);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
     const bool center = (nargout >= 3);       // centering is gated on mu (3rd output)
     const double *xraw = x.doubleData();
     const double *yd = y.doubleData();
     double mu0 = 0.0, mu1 = 1.0;
-    auto xx = ScratchVec<double>(m, &scratch);
+    auto xx = keel::Array<double>(m, scratch.allocator());
     if (center) {
         double s = 0.0;
-        for (size_t i = 0; i < m; ++i) s += xraw[i];
+        for (keel::usize i = 0; i < m; ++i) s += xraw[i];
         mu0 = s / static_cast<double>(m);
         double v = 0.0;
-        for (size_t i = 0; i < m; ++i) { const double d = xraw[i] - mu0; v += d * d; }
+        for (keel::usize i = 0; i < m; ++i) { const double d = xraw[i] - mu0; v += d * d; }
         mu1 = (m > 1) ? std::sqrt(v / static_cast<double>(m - 1)) : 0.0;
         if (mu1 == 0.0) mu1 = 1.0;            // constant x → avoid /0
-        for (size_t i = 0; i < m; ++i) xx[i] = (xraw[i] - mu0) / mu1;
+        for (keel::usize i = 0; i < m; ++i) xx[i] = (xraw[i] - mu0) / mu1;
     } else {
-        for (size_t i = 0; i < m; ++i) xx[i] = xraw[i];
+        for (keel::usize i = 0; i < m; ++i) xx[i] = xraw[i];
     }
 
-    auto pbuf = ScratchVec<double>(static_cast<size_t>(np), &scratch);
-    auto Rbuf = ScratchVec<double>(static_cast<size_t>(np) * np, &scratch);
+    auto pbuf = keel::Array<double>(static_cast<keel::usize>(np), scratch.allocator());
+    auto Rbuf = keel::Array<double>(static_cast<keel::usize>(np) * np, scratch.allocator());
     double normr = 0.0, df = 0.0;
     polyfitCore(xx.data(), yd, m, deg, pbuf.data(), Rbuf.data(), normr, df, scratch);
 
@@ -257,17 +260,17 @@ void polyfit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     Value S = Value::structure(mr);
     auto Rmat = Value::matrix(np, np, ValueType::DOUBLE, mr);
     std::memcpy(Rmat.doubleDataMut(), Rbuf.data(),
-                static_cast<size_t>(np) * np * sizeof(double));
+                static_cast<keel::usize>(np) * np * sizeof(double));
     S.setFieldAll("R", Rmat);
     S.setFieldAll("df", Value::scalar(df, mr));
     S.setFieldAll("normr", Value::scalar(normr, mr));
     // S.rsquared = 1 - (normr / norm(y - mean(y)))^2  (MATLAB R2025b's 4th
     // S field; the data is already to hand, it was just never exposed).
     double yMean = 0.0;
-    for (size_t i = 0; i < m; ++i) yMean += yd[i];
+    for (keel::usize i = 0; i < m; ++i) yMean += yd[i];
     yMean /= static_cast<double>(m);
     double sstot = 0.0;
-    for (size_t i = 0; i < m; ++i) { const double d = yd[i] - yMean; sstot += d * d; }
+    for (keel::usize i = 0; i < m; ++i) { const double d = yd[i] - yMean; sstot += d * d; }
     S.setFieldAll("rsquared", Value::scalar(1.0 - (normr * normr) / sstot, mr));
     outs[1] = std::move(S);
 
@@ -279,11 +282,11 @@ void polyfit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     }
 }
 
-void polyval_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "polyval");
     argcheck::checkNargin(args.size(), 2, 4, "polyval");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &p = args[0];
     const Value &x = args[1];
 
@@ -299,7 +302,7 @@ void polyval_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         xUsed = createLike(x, ValueType::DOUBLE, mr);
         const double *xd = x.doubleData();
         double *xc = xUsed.doubleDataMut();
-        for (size_t i = 0; i < x.numel(); ++i) xc[i] = (xd[i] - mu0) / mu1;
+        for (keel::usize i = 0; i < x.numel(); ++i) xc[i] = (xd[i] - mu0) / mu1;
     }
 
     outs[0] = polyval(p, xUsed, mr);
@@ -315,43 +318,43 @@ void polyval_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     const double df    = S.field("df").toScalar();
     const Value &Rm    = S.field("R");
     const double *R    = Rm.doubleData();
-    const size_t np    = p.numel();
+    const keel::usize np    = p.numel();
     const int    deg   = static_cast<int>(np) - 1;
 
     auto delta = createLike(xUsed, ValueType::DOUBLE, mr);
     double *dd = delta.doubleDataMut();
     const double *xd = xUsed.doubleData();
-    const size_t nx = xUsed.numel();
+    const keel::usize nx = xUsed.numel();
     const double scale = (df > 0.0) ? normr / std::sqrt(df) : 0.0;
 
-    ScratchArena scratch(mr);
-    auto vrow = ScratchVec<double>(np, &scratch);
-    auto erow = ScratchVec<double>(np, &scratch);
-    for (size_t i = 0; i < nx; ++i) {
-        for (size_t j = 0; j < np; ++j)
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto vrow = keel::Array<double>(np, scratch.allocator());
+    auto erow = keel::Array<double>(np, scratch.allocator());
+    for (keel::usize i = 0; i < nx; ++i) {
+        for (keel::usize j = 0; j < np; ++j)
             vrow[j] = std::pow(xd[i], static_cast<double>(deg - static_cast<int>(j)));
         // Solve e·R = v with R upper-triangular: e[c] = (v[c] - Σ_{k<c} e[k]·R[k][c]) / R[c][c].
-        for (size_t c = 0; c < np; ++c) {
+        for (keel::usize c = 0; c < np; ++c) {
             double s = vrow[c];
-            for (size_t k = 0; k < c; ++k) s -= erow[k] * R[k + c * np];
+            for (keel::usize k = 0; k < c; ++k) s -= erow[k] * R[k + c * np];
             const double rcc = R[c + c * np];
             erow[c] = (rcc != 0.0) ? s / rcc : 0.0;
         }
         double ss = 0.0;
-        for (size_t j = 0; j < np; ++j) ss += erow[j] * erow[j];
+        for (keel::usize j = 0; j < np; ++j) ss += erow[j] * erow[j];
         dd[i] = scale * std::sqrt(1.0 + ss);
     }
     outs[1] = std::move(delta);
 }
 
-void poly_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void poly_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "poly");
     // Dispatch (matches MATLAB behavior):
     //   square matrix (n×n, n>1) -> characteristic polynomial via Souriau-Faddeev
     //   anything else (vector of roots) -> expand (λ - r_1)(λ - r_2)...
     const auto &A = args[0];
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (A.dims().ndim() == 2
         && A.dims().dim(0) == A.dims().dim(1)
         && A.dims().dim(0) > 1) {
@@ -361,30 +364,30 @@ void poly_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     }
 }
 
-void polyvalm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void polyvalm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "polyvalm");
     argcheck::checkNargin(args.size(), 2, 2, "polyvalm");
-    outs[0] = polyvalm(args[0], args[1], ctx.engine->resource());
+    outs[0] = polyvalm(args[0], args[1], ctx.engine->allocator());
 }
 
-void padecoef_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void padecoef_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                   CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "padecoef");
     argcheck::checkNargin(args.size(), 2, 2, "padecoef");
     const double T = args[0].toScalar();
     const int    N = static_cast<int>(argcheck::roundLength(args[1], 2, "N", "padecoef"));
-    auto p = padecoef(T, N, ctx.engine->resource());
+    auto p = padecoef(T, N, ctx.engine->allocator());
     outs[0] = std::move(p.num);
     if (nargout > 1) outs[1] = std::move(p.den);
 }
 
-void polydiv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void polydiv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "polydiv");
     argcheck::checkNargin(args.size(), 2, 2, "polydiv");
-    auto res = polydiv(args[0], args[1], ctx.engine->resource());
+    auto res = polydiv(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(res.q);
     if (nargout > 1) outs[1] = std::move(res.r);
 }
@@ -393,30 +396,30 @@ void polydiv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
 
 namespace detail {
 
-void residue_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void residue_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "residue");
     argcheck::checkNargin(args.size(), 2, 3, "residue");
-    auto res = residue(args[0], args[1], ctx.engine->resource());
+    auto res = residue(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(res.r);
     if (nargout > 1) outs[1] = std::move(res.p);
     if (nargout > 2) outs[2] = std::move(res.k);
 }
 
-void residuez_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void residuez_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "residuez");
     argcheck::checkNargin(args.size(), 2, 3, "residuez");
-    auto res = residuez(args[0], args[1], ctx.engine->resource());
+    auto res = residuez(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(res.r);
     if (nargout > 1) outs[1] = std::move(res.p);
     if (nargout > 2) outs[2] = std::move(res.k);
 }
 
-void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "latc2tf");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &K = args[0];
     const bool hasSecond = (args.size() >= 2);
     const bool secondIsStr = hasSecond && (args[1].isChar() || args[1].isString());
@@ -434,20 +437,20 @@ void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         }
     }
 
-    const size_t nK_in = K.numel();
-    const size_t nV_in = hasLadder ? args[1].numel() : 0;
+    const keel::usize nK_in = K.numel();
+    const keel::usize nV_in = hasLadder ? args[1].numel() : 0;
     if (nK_in == 0 && (!hasLadder || nV_in == 0)) {
         outs[0] = Value::Empty;
         if (nargout > 1) outs[1] = Value::Empty;
         return;
     }
 
-    const size_t M = hasLadder ? std::max(nK_in, (nV_in > 0 ? nV_in - 1 : size_t(0))) : nK_in;
+    const keel::usize M = hasLadder ? std::max(nK_in, (nV_in > 0 ? nV_in - 1 : keel::usize(0))) : nK_in;
     const bool isCx = K.isComplex() || (hasLadder && args[1].isComplex());
 
-    auto readCx = [](const Value &v, size_t idx) -> std::complex<double> {
+    auto readCx = [](const Value &v, keel::usize idx) -> keel::c64 {
         return v.isComplex() ? v.complexData()[idx]
-                             : std::complex<double>(v.elemAsDouble(idx), 0.0);
+                             : keel::c64(v.elemAsDouble(idx), 0.0);
     };
 
     // Step-up Levinson recursion:
@@ -455,33 +458,33 @@ void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     //   B^{(m-1)} = conj(flip(J^{(m-1)}))
     //   J^{(m)}   = [J^{(m-1)}, 0] + K_m * [0, B^{(m-1)}]
     // For ladder V, row m (0..M) of the lower-triangular reverse matrix is B^{(m)}.
-    std::vector<std::complex<double>> J(1, std::complex<double>(1.0, 0.0));
-    std::vector<std::vector<std::complex<double>>> Brows;
+    std::vector<keel::c64> J(1, keel::c64(1.0, 0.0));
+    std::vector<std::vector<keel::c64>> Brows;
     if (hasLadder) {
         Brows.reserve(M + 1);
         Brows.push_back(J); // B^{(0)} = [1]
     }
 
-    for (size_t m = 1; m <= M; ++m) {
-        const std::complex<double> km = (m - 1 < nK_in) ? readCx(K, m - 1) : std::complex<double>(0.0, 0.0);
-        std::vector<std::complex<double>> Bprev(m);
-        for (size_t j = 0; j < m; ++j)
-            Bprev[j] = std::conj(J[m - 1 - j]);
-        std::vector<std::complex<double>> Jnext(m + 1, std::complex<double>(0.0, 0.0));
-        for (size_t j = 0; j < m; ++j)
+    for (keel::usize m = 1; m <= M; ++m) {
+        const keel::c64 km = (m - 1 < nK_in) ? readCx(K, m - 1) : keel::c64(0.0, 0.0);
+        std::vector<keel::c64> Bprev(m);
+        for (keel::usize j = 0; j < m; ++j)
+            Bprev[j] = keel::conj(J[m - 1 - j]);
+        std::vector<keel::c64> Jnext(m + 1, keel::c64(0.0, 0.0));
+        for (keel::usize j = 0; j < m; ++j)
             Jnext[j] += J[j];
-        for (size_t j = 0; j < m; ++j)
+        for (keel::usize j = 0; j < m; ++j)
             Jnext[j + 1] += km * Bprev[j];
         J = std::move(Jnext);
         if (hasLadder) {
-            std::vector<std::complex<double>> Bm(m + 1);
-            for (size_t j = 0; j <= m; ++j)
-                Bm[j] = std::conj(J[m - j]);
+            std::vector<keel::c64> Bm(m + 1);
+            for (keel::usize j = 0; j <= m; ++j)
+                Bm[j] = keel::conj(J[m - j]);
             Brows.push_back(std::move(Bm));
         }
     }
 
-    auto makeRow = [&](const std::vector<std::complex<double>> &vec) -> Value {
+    auto makeRow = [&](const std::vector<keel::c64> &vec) -> Value {
         if (isCx) {
             Value out = Value::matrix(1, vec.size(), ValueType::COMPLEX, mr);
             std::copy(vec.begin(), vec.end(), out.complexDataMut());
@@ -489,17 +492,17 @@ void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         }
         Value out = Value::matrix(1, vec.size(), ValueType::DOUBLE, mr);
         double *d = out.doubleDataMut();
-        for (size_t i = 0; i < vec.size(); ++i) d[i] = vec[i].real();
+        for (keel::usize i = 0; i < vec.size(); ++i) d[i] = vec[i].real();
         return out;
     };
 
     if (hasLadder) {
         const Value &V = args[1];
-        std::vector<std::complex<double>> numVec(M + 1, std::complex<double>(0.0, 0.0));
-        for (size_t m = 0; m <= M; ++m) {
-            const std::complex<double> vm = (m < nV_in) ? readCx(V, m) : std::complex<double>(0.0, 0.0);
+        std::vector<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0));
+        for (keel::usize m = 0; m <= M; ++m) {
+            const keel::c64 vm = (m < nV_in) ? readCx(V, m) : keel::c64(0.0, 0.0);
             const auto &row = Brows[m];
-            for (size_t j = 0; j < row.size(); ++j)
+            for (keel::usize j = 0; j < row.size(); ++j)
                 numVec[j] += vm * row[j];
         }
         outs[0] = makeRow(numVec);
@@ -507,13 +510,13 @@ void latc2tf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         return;
     }
 
-    std::vector<std::complex<double>> Jrev(M + 1);
-    for (size_t j = 0; j <= M; ++j)
-        Jrev[j] = std::conj(J[M - j]);
+    std::vector<keel::c64> Jrev(M + 1);
+    for (keel::usize j = 0; j <= M; ++j)
+        Jrev[j] = keel::conj(J[M - j]);
 
     if (mode == "allpole" || mode == "iir") {
-        std::vector<std::complex<double>> numVec(M + 1, std::complex<double>(0.0, 0.0));
-        numVec[0] = std::complex<double>(1.0, 0.0);
+        std::vector<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0));
+        numVec[0] = keel::c64(1.0, 0.0);
         outs[0] = makeRow(numVec);
         if (nargout > 1) outs[1] = makeRow(J);
     } else if (mode == "allpass") {

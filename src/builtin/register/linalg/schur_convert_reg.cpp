@@ -6,6 +6,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/schur_convert.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -18,18 +20,18 @@
 namespace numkit::linalg {
 namespace detail {
 
-void cdf2rdf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void cdf2rdf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "cdf2rdf");
-    auto [VR, DR] = cdf2rdf(args[0], args[1], ctx.engine->resource());
+    auto [VR, DR] = cdf2rdf(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(VR);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(DR);
 }
 
-void rsf2csf_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void rsf2csf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "rsf2csf");
-    auto [U, T] = rsf2csf(args[0], args[1], ctx.engine->resource());
+    auto [U, T] = rsf2csf(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(U);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(T);
 }

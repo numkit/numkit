@@ -7,6 +7,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/balance.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 
@@ -22,8 +24,8 @@
 namespace numkit::linalg {
 namespace detail {
 
-void balance_reg(Span<const Value> args, size_t nargout,
-                 Span<Value> outs, CallContext &ctx)
+void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "balance");
     bool noperm = false;
@@ -38,9 +40,9 @@ void balance_reg(Span<const Value> args, size_t nargout,
                         0, 0, "balance", "", "numkit:balance:BadOpt");
     }
 
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     auto R = balance_impl(args[0], noperm, mr);
-    const size_t n = R.B.dims().rows();
+    const keel::usize n = R.B.dims().rows();
 
     if (nargout <= 1) {
         outs[0] = std::move(R.B);
@@ -52,7 +54,7 @@ void balance_reg(Span<const Value> args, size_t nargout,
         Value T = Value::matrix(n, n, ValueType::DOUBLE, mr);
         double *td = T.doubleDataMut();
         std::fill(td, td + n * n, 0.0);
-        for (size_t i = 0; i < n; ++i) td[i + i * n] = R.d_col.elemAsDouble(i);
+        for (keel::usize i = 0; i < n; ++i) td[i + i * n] = R.d_col.elemAsDouble(i);
         outs[0] = detail::narrowDoubleToSingleIf(T, R.d_col.type() == ValueType::SINGLE, mr);
         outs[1] = std::move(R.B);
         return;

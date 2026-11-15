@@ -24,9 +24,10 @@
 
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
 #include <cstddef>
 #include <functional>
-#include <memory_resource>
 #include <optional>
 #include <vector>
 
@@ -44,8 +45,8 @@ struct FusionRule {
 
     // Evaluated operands → fused result. true = fused (out filled);
     // false = guard failed, caller must fall back to the per-op path.
-    std::function<bool(const Value *operands, std::size_t nOperands, Value &out,
-                       std::pmr::memory_resource *mr)>
+    std::function<bool(const Value *operands, keel::usize nOperands, Value &out,
+                       keel::Allocator *mr)>
         execute;
 };
 

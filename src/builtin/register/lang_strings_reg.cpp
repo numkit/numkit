@@ -1,23 +1,24 @@
 // toolboxes/builtin/src/language/strings/strings_reg.cpp
 //
 // CallContext register half (Phase 2b multi-block split).
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/strfun/strings_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -32,10 +33,10 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-void num2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void num2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "num2str");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() < 2) {
         outs[0] = num2str(args[0], mr);
         return;
@@ -48,23 +49,23 @@ void num2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
         argcheck::expectedReal(spec, 1, "precision", "num2str"), 1, "precision", "num2str"), mr);
 }
 
-void int2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void int2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "int2str");
-    outs[0] = int2str(args[0], ctx.engine->resource());
+    outs[0] = int2str(args[0], ctx.engine->allocator());
 }
 
-void validatestring_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void validatestring_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 5, "validatestring");
     // validatestring(str, validStrings [, funcName, varName, position]).
     // The trailing args only customise the error text; they don't change the
     // match, so we accept and ignore them.
     argcheck::checkNargin(args.size(), 2, 5, "validatestring");
-    outs[0] = validatestring(args[0], args[1], ctx.engine->resource());
+    outs[0] = validatestring(args[0], args[1], ctx.engine->allocator());
 }
 
-void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "str2num");
     // MATLAB str2num evaluates the (bracket-wrapped) string as an expression,
@@ -75,15 +76,15 @@ void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     // 2nd output is a logical success flag: [X, tf] = str2num(s).
     bool ok = false;
     Value result = Value::Empty;
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args[0].isChar() || args[0].isString()) {
         const Value &s = args[0];
-        const size_t rows = s.dims().rows();
-        const size_t cols = s.dims().cols();
+        const keel::usize rows = s.dims().rows();
+        const keel::usize cols = s.dims().cols();
         if (s.isChar() && !s.dims().is3D() && rows > 1 && cols == 1) {
             const char *cd = s.charData();
             bool allDigits = true;
-            for (size_t r = 0; r < rows; ++r) {
+            for (keel::usize r = 0; r < rows; ++r) {
                 if (cd[r] < '0' || cd[r] > '9') {
                     allDigits = false;
                     break;
@@ -92,7 +93,7 @@ void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
             if (allDigits) {
                 result = Value::matrix(rows, 1, ValueType::DOUBLE, mr);
                 double *dd = result.doubleDataMut();
-                for (size_t r = 0; r < rows; ++r)
+                for (keel::usize r = 0; r < rows; ++r)
                     dd[r] = static_cast<double>(cd[r] - '0');
                 ok = true;
             }
@@ -103,9 +104,9 @@ void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
                 if (s.isChar() && !s.dims().is3D() && rows > 1) {
                     const char *cd = s.charData();
                     expr.reserve(rows * (cols + 1) + 2);
-                    for (size_t r = 0; r < rows; ++r) {
+                    for (keel::usize r = 0; r < rows; ++r) {
                         if (r > 0) expr.push_back(';');
-                        for (size_t c = 0; c < cols; ++c)
+                        for (keel::usize c = 0; c < cols; ++c)
                             expr.push_back(cd[r + c * rows]);
                     }
                 } else {
@@ -127,15 +128,15 @@ void str2num_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         outs[1] = Value::logicalScalar(ok, mr);
 }
 
-void str2double_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void str2double_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "str2double");
-    outs[0] = str2double(args[0], ctx.engine->resource());
+    outs[0] = str2double(args[0], ctx.engine->allocator());
 }
 
-void string_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void string_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.empty()) {
         outs[0] = Value::stringScalar("", mr);
         return;
@@ -143,61 +144,61 @@ void string_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &c
     outs[0] = toString(args[0], mr);
 }
 
-void char_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void char_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "char");
-    outs[0] = toChar(args[0], ctx.engine->resource());
+    outs[0] = toChar(args[0], ctx.engine->allocator());
 }
 
-void strcmp_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strcmp_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strcmp");
     argcheck::checkNargin(args.size(), 2, 2, "strcmp");
-    outs[0] = strcmp(args[0], args[1], ctx.engine->resource());
+    outs[0] = strcmp(args[0], args[1], ctx.engine->allocator());
 }
 
-void strcmpi_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strcmpi_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strcmpi");
     argcheck::checkNargin(args.size(), 2, 2, "strcmpi");
-    outs[0] = strcmpi(args[0], args[1], ctx.engine->resource());
+    outs[0] = strcmpi(args[0], args[1], ctx.engine->allocator());
 }
 
-void upper_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void upper_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "upper");
-    outs[0] = upper(args[0], ctx.engine->resource());
+    outs[0] = upper(args[0], ctx.engine->allocator());
 }
 
-void lower_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void lower_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "lower");
-    outs[0] = lower(args[0], ctx.engine->resource());
+    outs[0] = lower(args[0], ctx.engine->allocator());
 }
 
-void strtrim_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strtrim_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "strtrim");
-    outs[0] = strtrim(args[0], ctx.engine->resource());
+    outs[0] = strtrim(args[0], ctx.engine->allocator());
 }
 
-void strsplit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "strsplit");
-    auto *mr = ctx.engine->resource();
-    ScratchArena scratch(mr);
-    ScratchVec<std::string> delims(&scratch);
+    auto *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<std::string> delims(scratch.allocator());
     bool collapse = true;
     // arg 1 (optional) is the delimiter: a string or cell array of strings.
     // Name-Value pairs (CollapseDelimiters) follow at arg 2+.
-    size_t optStart = 1;
+    keel::usize optStart = 1;
     if (args.size() >= 2) {
         appendDelims(args[1], delims);
         optStart = 2;
     } else {
         appendDefaultWhitespace(delims);
     }
-    for (size_t k = optStart; k + 1 < args.size(); k += 2) {
+    for (keel::usize k = optStart; k + 1 < args.size(); k += 2) {
         std::string name = args[k].toString();
         std::transform(name.begin(), name.end(), name.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
@@ -208,10 +209,10 @@ void strsplit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     if (nargout >= 2) {
         // [tokens, matches] = strsplit(...): also return the matched
         // delimiters (1×(numel(tokens)-1) cell of strings).
-        ScratchVec<std::string> matched(&scratch);
+        keel::Array<std::string> matched(scratch.allocator());
         outs[0] = strsplitImpl(args[0].toString(), delims, collapse, mr, &matched);
         auto mc = Value::cell(1, matched.size());
-        for (size_t k = 0; k < matched.size(); ++k)
+        for (keel::usize k = 0; k < matched.size(); ++k)
             mc.cellAt(k) = Value::fromString(matched[k], mr);
         outs[1] = mc;
     } else {
@@ -219,30 +220,30 @@ void strsplit_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     }
 }
 
-void strcat_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strcat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    outs[0] = strcat(args, ctx.engine->resource());
+    outs[0] = strcat(args, ctx.engine->allocator());
 }
 
-void strlength_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strlength_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "strlength");
-    outs[0] = strlength(args[0], ctx.engine->resource());
+    outs[0] = strlength(args[0], ctx.engine->allocator());
 }
 
-void strrep_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strrep_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "strrep");
     argcheck::checkNargin(args.size(), 3, 3, "strrep");
-    outs[0] = strrep(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = strrep(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
 // Parse a trailing 'IgnoreCase', <logical> name-value pair (MATLAB option
 // shared by contains/startsWith/endsWith). Other name-value pairs are left
 // alone. Returns the flag; absent → false.
-static bool parseIgnoreCaseOption(Span<const Value> args, size_t optStart)
+static bool parseIgnoreCaseOption(keel::ArrayRef<Value> args, keel::usize optStart)
 {
-    for (size_t i = optStart; i + 1 < args.size(); ++i) {
+    for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString()) continue;
         std::string k = args[i].toString();
         for (char &c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -252,73 +253,73 @@ static bool parseIgnoreCaseOption(Span<const Value> args, size_t optStart)
     return false;
 }
 
-void contains_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void contains_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "contains");
     outs[0] = contains(args[0], args[1], parseIgnoreCaseOption(args, 2),
-                       ctx.engine->resource());
+                       ctx.engine->allocator());
 }
 
-void startsWith_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void startsWith_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "startsWith");
     outs[0] = startsWith(args[0], args[1], parseIgnoreCaseOption(args, 2),
-                         ctx.engine->resource());
+                         ctx.engine->allocator());
 }
 
-void endsWith_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void endsWith_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "endsWith");
     outs[0] = endsWith(args[0], args[1], parseIgnoreCaseOption(args, 2),
-                       ctx.engine->resource());
+                       ctx.engine->allocator());
 }
 
-void strncmp_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strncmp_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "strncmp");
     argcheck::checkNargin(args.size(), 3, 3, "strncmp");
-    const size_t n = argcheck::roundLength(args[2], 3, "n", "strncmp");
-    outs[0] = strncmp(args[0], args[1], n, ctx.engine->resource());
+    const keel::usize n = argcheck::roundLength(args[2], 3, "n", "strncmp");
+    outs[0] = strncmp(args[0], args[1], n, ctx.engine->allocator());
 }
 
-void strncmpi_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strncmpi_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "strncmpi");
     argcheck::checkNargin(args.size(), 3, 3, "strncmpi");
-    const size_t n = argcheck::roundLength(args[2], 3, "n", "strncmpi");
-    outs[0] = strncmpi(args[0], args[1], n, ctx.engine->resource());
+    const keel::usize n = argcheck::roundLength(args[2], 3, "n", "strncmpi");
+    outs[0] = strncmpi(args[0], args[1], n, ctx.engine->allocator());
 }
 
-void strfind_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strfind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strfind");
     argcheck::checkNargin(args.size(), 2, 2, "strfind");
-    outs[0] = strfind(args[0], args[1], ctx.engine->resource());
+    outs[0] = strfind(args[0], args[1], ctx.engine->allocator());
 }
 
-void blanks_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void blanks_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "blanks");
-    const size_t n = argcheck::arrayDim(args[0], "blanks");
-    outs[0] = blanks(n, ctx.engine->resource());
+    const keel::usize n = argcheck::arrayDim(args[0], "blanks");
+    outs[0] = blanks(n, ctx.engine->allocator());
 }
 
-void deblank_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void deblank_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "deblank");
-    outs[0] = deblank(args[0], ctx.engine->resource());
+    outs[0] = deblank(args[0], ctx.engine->allocator());
 }
 
-void mat2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "mat2str");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     int prec = 15;
     bool withClass = false;
     // Trailing args (in any order): a numeric precision, and/or the literal
     // 'class' flag which wraps the output with the class name
     // (mat2str(int8([1 2]),'class') -> "int8([1 2])").
-    for (size_t k = 1; k < args.size(); ++k) {
+    for (keel::usize k = 1; k < args.size(); ++k) {
         const Value &a = args[k];
         if (a.type() == ValueType::CHAR || a.isString()) {
             std::string s = a.toString();
@@ -339,75 +340,75 @@ void mat2str_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
     outs[0] = r;
 }
 
-void strjoin_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strjoin_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strjoin");
     const Value &delim = (args.size() >= 2) ? args[1] : Value::Empty;
-    outs[0] = strjoin(args[0], delim, ctx.engine->resource());
+    outs[0] = strjoin(args[0], delim, ctx.engine->allocator());
 }
 
-void append_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void append_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    outs[0] = append(args, ctx.engine->resource());
+    outs[0] = append(args, ctx.engine->allocator());
 }
 
-void count_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void count_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "count");
-    outs[0] = count(args[0], args[1], ctx.engine->resource());
+    outs[0] = count(args[0], args[1], ctx.engine->allocator());
 }
 
-void erase_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void erase_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "erase");
     argcheck::checkNargin(args.size(), 2, 2, "erase");
-    outs[0] = erase(args[0], args[1], ctx.engine->resource());
+    outs[0] = erase(args[0], args[1], ctx.engine->allocator());
 }
 
-void replace_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void replace_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "replace");
     argcheck::checkNargin(args.size(), 3, 3, "replace");
-    outs[0] = replace(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = replace(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
-void reverse_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void reverse_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "reverse");
-    outs[0] = reverse(args[0], ctx.engine->resource());
+    outs[0] = reverse(args[0], ctx.engine->allocator());
 }
 
-void splitlines_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void splitlines_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "splitlines");
-    outs[0] = splitlines(args[0], ctx.engine->resource());
+    outs[0] = splitlines(args[0], ctx.engine->allocator());
 }
 
 // Default pad width: the longest element of a cell str, or the length of a
 // char/string scalar (so pad(s) with no width is a no-op for a scalar but
 // right-pads every cell element to the longest, matching MATLAB).
-static size_t defaultPadWidth(const Value &s)
+static keel::usize defaultPadWidth(const Value &s)
 {
     if (s.isCell()) {
-        size_t mx = 0;
-        const size_t nn = s.numel();
-        for (size_t i = 0; i < nn; ++i)
+        keel::usize mx = 0;
+        const keel::usize nn = s.numel();
+        for (keel::usize i = 0; i < nn; ++i)
             mx = std::max(mx, s.cellAt(i).toString().size());
         return mx;
     }
     if (s.isString()) {
         // A string array defaults to the longest element (s.toString() would
         // collapse the array to its first element).
-        size_t mx = 0;
-        const size_t nn = s.numel();
-        for (size_t i = 0; i < nn; ++i)
+        keel::usize mx = 0;
+        const keel::usize nn = s.numel();
+        for (keel::usize i = 0; i < nn; ++i)
             mx = std::max(mx, s.stringElem(i).size());
         return mx;
     }
     return s.toString().size();
 }
 
-void pad_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void pad_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "pad");
     // The 2nd arg is the width n when numeric; a string there is the side
@@ -415,7 +416,7 @@ void pad_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
     // 2nd arg also uses the default width.
     const bool haveN = args.size() >= 2 && !args[1].isEmpty()
                        && !args[1].isChar() && !args[1].isString();
-    size_t n, sideIdx, chIdx;
+    keel::usize n, sideIdx, chIdx;
     if (haveN) {
         n = argcheck::arrayDim(args[1], "pad");
         sideIdx = 2;
@@ -427,66 +428,66 @@ void pad_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
     }
     const Value &side = (args.size() > sideIdx && !args[sideIdx].isEmpty()) ? args[sideIdx] : Value::Empty;
     const Value &ch   = (args.size() > chIdx   && !args[chIdx].isEmpty())   ? args[chIdx]   : Value::Empty;
-    outs[0] = pad(args[0], n, side, ch, ctx.engine->resource());
+    outs[0] = pad(args[0], n, side, ch, ctx.engine->allocator());
 }
 
-void strip_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void strip_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "strip");
     const Value &side = (args.size() >= 2 && !args[1].isEmpty()) ? args[1] : Value::Empty;
     const Value &ch   = (args.size() >= 3 && !args[2].isEmpty()) ? args[2] : Value::Empty;
-    outs[0] = strip(args[0], side, ch, ctx.engine->resource());
+    outs[0] = strip(args[0], side, ch, ctx.engine->allocator());
 }
 
-void matches_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void matches_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "matches");
-    outs[0] = matches(args[0], args[1], ctx.engine->resource());
+    outs[0] = matches(args[0], args[1], ctx.engine->allocator());
 }
 
-void convertCharsToStrings_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void convertCharsToStrings_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "convertCharsToStrings");
-    outs[0] = convertCharsToStrings(args[0], ctx.engine->resource());
+    outs[0] = convertCharsToStrings(args[0], ctx.engine->allocator());
 }
 
-void convertStringsToChars_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void convertStringsToChars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "convertStringsToChars");
-    outs[0] = convertStringsToChars(args[0], ctx.engine->resource());
+    outs[0] = convertStringsToChars(args[0], ctx.engine->allocator());
 }
 
-void isstringscalar_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void isstringscalar_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "isstringscalar");
-    outs[0] = isstringscalar(args[0], ctx.engine->resource());
+    outs[0] = isstringscalar(args[0], ctx.engine->allocator());
 }
 
-void isstrprop_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void isstrprop_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "isstrprop");
     argcheck::checkNargin(args.size(), 2, 2, "isstrprop");
-    outs[0] = isstrprop(args[0], args[1], ctx.engine->resource());
+    outs[0] = isstrprop(args[0], args[1], ctx.engine->allocator());
 }
 
-void isletter_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void isletter_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "isletter");
-    outs[0] = isletter(args[0], ctx.engine->resource());
+    outs[0] = isletter(args[0], ctx.engine->allocator());
 }
 
-void isspace_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void isspace_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "isspace");
-    outs[0] = isspaceFn(args[0], ctx.engine->resource());
+    outs[0] = isspaceFn(args[0], ctx.engine->allocator());
 }
 
 #define NUMKIT_STR_BIN_REG(FN)                                                       \
-    void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,             \
+    void FN##_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,             \
                   CallContext &ctx)                                              \
     {                                                                             \
         argcheck::checkNargin(args.size(), 2, 2, #FN); \
-        outs[0] = FN(args[0], args[1], ctx.engine->resource());                  \
+        outs[0] = FN(args[0], args[1], ctx.engine->allocator());                  \
     }
 
 NUMKIT_STR_BIN_REG(extractAfter)
@@ -494,7 +495,7 @@ NUMKIT_STR_BIN_REG(extractBefore)
 
 #undef NUMKIT_STR_BIN_REG
 
-bool parseBetweenBoundaries(Span<const Value> args, size_t startIdx, const char *fn)
+bool parseBetweenBoundaries(keel::ArrayRef<Value> args, keel::usize startIdx, const char *fn)
 {
     if (args.size() <= startIdx) return false;
     if ((args.size() - startIdx) != 2) {
@@ -502,25 +503,25 @@ bool parseBetweenBoundaries(Span<const Value> args, size_t startIdx, const char 
     }
     argcheck::expectedChoice(args[startIdx], {"boundaries"},
                              static_cast<int>(startIdx + 1), "Name", fn);
-    const size_t b = argcheck::expectedChoice(
+    const keel::usize b = argcheck::expectedChoice(
         args[startIdx + 1], {"inclusive", "exclusive"},
         static_cast<int>(startIdx + 2), "Boundaries", fn);
     return b == 0;
 }
 
-void extractBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void extractBetween_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 5, "extractBetween");
     const bool inc = parseBetweenBoundaries(args, 3, "extractBetween");
-    outs[0] = extractBetween(args[0], args[1], args[2], inc, ctx.engine->resource());
+    outs[0] = extractBetween(args[0], args[1], args[2], inc, ctx.engine->allocator());
 }
 
 #define NUMKIT_STR_TRI_REG(FN)                                                       \
-    void FN##_reg(Span<const Value> args, size_t, Span<Value> outs,             \
+    void FN##_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,             \
                   CallContext &ctx)                                              \
     {                                                                             \
         argcheck::checkNargin(args.size(), 3, 3, #FN); \
-        outs[0] = FN(args[0], args[1], args[2], ctx.engine->resource());         \
+        outs[0] = FN(args[0], args[1], args[2], ctx.engine->allocator());         \
     }
 
 NUMKIT_STR_TRI_REG(insertAfter)
@@ -528,63 +529,63 @@ NUMKIT_STR_TRI_REG(insertBefore)
 
 #undef NUMKIT_STR_TRI_REG
 
-void eraseBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void eraseBetween_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 5, "eraseBetween");
     const bool inc = parseBetweenBoundaries(args, 3, "eraseBetween");
-    outs[0] = eraseBetween(args[0], args[1], args[2], inc, ctx.engine->resource());
+    outs[0] = eraseBetween(args[0], args[1], args[2], inc, ctx.engine->allocator());
 }
 
-void replaceBetween_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void replaceBetween_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 4, 6, "replaceBetween");
     const bool inc = parseBetweenBoundaries(args, 4, "replaceBetween");
-    outs[0] = replaceBetween(args[0], args[1], args[2], args[3], inc, ctx.engine->resource());
+    outs[0] = replaceBetween(args[0], args[1], args[2], args[3], inc, ctx.engine->allocator());
 }
 
-void dec2bin_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void dec2bin_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "dec2bin");
     int n = (args.size() >= 2 && !args[1].isEmpty())
               ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "n", "dec2bin"), 2, "n", "dec2bin") : 0;
-    outs[0] = dec2bin(args[0], n, ctx.engine->resource());
+    outs[0] = dec2bin(args[0], n, ctx.engine->allocator());
 }
 
-void dec2hex_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void dec2hex_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "dec2hex");
     int n = (args.size() >= 2 && !args[1].isEmpty())
               ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "n", "dec2hex"), 2, "n", "dec2hex") : 0;
-    outs[0] = dec2hex(args[0], n, ctx.engine->resource());
+    outs[0] = dec2hex(args[0], n, ctx.engine->allocator());
 }
 
-void bin2dec_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void bin2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "bin2dec");
-    outs[0] = bin2dec(args[0], ctx.engine->resource());
+    outs[0] = bin2dec(args[0], ctx.engine->allocator());
 }
 
-void hex2dec_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void hex2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "hex2dec");
-    outs[0] = hex2dec(args[0], ctx.engine->resource());
+    outs[0] = hex2dec(args[0], ctx.engine->allocator());
 }
 
-void hex2num_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void hex2num_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "hex2num");
-    outs[0] = hex2num(args[0], ctx.engine->resource());
+    outs[0] = hex2num(args[0], ctx.engine->allocator());
 }
 
-void num2hex_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void num2hex_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "num2hex");
-    outs[0] = num2hex(args[0], ctx.engine->resource());
+    outs[0] = num2hex(args[0], ctx.engine->allocator());
 }
 
-void dec2base_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void dec2base_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "dec2base");
     argcheck::checkNargin(args.size(), 2, 3, "dec2base");
@@ -595,10 +596,10 @@ void dec2base_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
     const int len  = (args.size() >= 3 && !args[2].isEmpty())
                        ? argcheck::expectedInteger(
         argcheck::expectedReal(args[2], 3, "len", "dec2base"), 3, "len", "dec2base") : 0;
-    outs[0] = dec2base(args[0], base, len, ctx.engine->resource());
+    outs[0] = dec2base(args[0], base, len, ctx.engine->allocator());
 }
 
-void base2dec_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void base2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "base2dec");
     argcheck::checkNargin(args.size(), 2, 2, "base2dec");
@@ -606,13 +607,13 @@ void base2dec_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext 
     argcheck::expectedInteger(bv, 2, "base", "base2dec");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "base2dec");
     const int base = static_cast<int>(bv);
-    outs[0] = base2dec(args[0], base, ctx.engine->resource());
+    outs[0] = base2dec(args[0], base, ctx.engine->allocator());
 }
 
-void rat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rat");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &x = args[0];
     const double user_tol = (args.size() >= 2 && !args[1].isEmpty())
                             ? args[1].toScalar() : -1.0;  // -1 ⇒ defaultRatTol per element
@@ -628,7 +629,7 @@ void rat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
 
     // 2-output form: [N, D] = rat(x[, tol]) — numeric, vectorised.
     const auto &dims = x.dims();
-    const size_t n = x.numel();
+    const keel::usize n = x.numel();
     Value N = dims.is3D()
         ? Value::matrix3d(dims.rows(), dims.cols(), dims.pages(), ValueType::DOUBLE, mr)
         : Value::matrix(dims.rows(), dims.cols(), ValueType::DOUBLE, mr);
@@ -637,7 +638,7 @@ void rat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         : Value::matrix(dims.rows(), dims.cols(), ValueType::DOUBLE, mr);
     double *Nd = N.doubleDataMut();
     double *Dd = D.doubleDataMut();
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         const double v = x.elemAsDouble(i);
         if (!std::isfinite(v)) {
             // MATLAB returns NaN/NaN for NaN input, ±Inf/0 for ±Inf? Empirically
@@ -660,53 +661,53 @@ void rat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
     outs[1] = std::move(D);
 }
 
-void rats_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void rats_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rats");
     int len = (args.size() >= 2 && !args[1].isEmpty())
                   ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "len", "rats"), 2, "len", "rats") : 13;
-    outs[0] = rats(args[0], len, ctx.engine->resource());
+    outs[0] = rats(args[0], len, ctx.engine->allocator());
 }
 
 // strtok(s, delim?) — split at first delim char. Returns [token, rem].
 // Default delim is ASCII whitespace.
-void strtok_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void strtok_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strtok");
     const std::string delim = (args.size() >= 2)
                                   ? args[1].toString()
                                   : std::string(" \t\r\n\f\v");
     auto [tok, rem] = numkit::builtin::strtok(args[0], delim,
-                                              ctx.engine->resource());
+                                              ctx.engine->allocator());
     outs[0] = std::move(tok);
     if (nargout > 1) outs[1] = std::move(rem);
 }
 
 // ── Pack 36 adapters ─────────────────────────────────────────────────
-void newline_reg(Span<const Value> /*args*/, size_t, Span<Value> outs,
+void newline_reg(keel::ArrayRef<Value> /*args*/, keel::usize, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
-    outs[0] = newlineFn(ctx.engine->resource());
+    outs[0] = newlineFn(ctx.engine->allocator());
 }
 
-void strings_reg(Span<const Value> args, size_t, Span<Value> outs,
+void strings_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(args, "strings", &scratch);
-    outs[0] = stringsND(Span<const size_t>(d.data(), d.size()), mr);
+    auto *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(args, "strings", scratch.allocator());
+    outs[0] = stringsND(keel::ArrayRef<keel::usize>(d.data(), d.size()), mr);
 }
 
-void compose_reg(Span<const Value> args, size_t, Span<Value> outs,
+void compose_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "compose");
-    outs[0] = compose(args[0], args[1], ctx.engine->resource());
+    outs[0] = compose(args[0], args[1], ctx.engine->allocator());
 }
 
-void strjust_reg(Span<const Value> args, size_t, Span<Value> outs,
+void strjust_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strjust");
@@ -717,22 +718,22 @@ void strjust_reg(Span<const Value> args, size_t, Span<Value> outs,
                          0, 0, "strjust", "", "numkit:strjust:badSide");
         side = args[1].toString();
     }
-    outs[0] = strjust(args[0], side, ctx.engine->resource());
+    outs[0] = strjust(args[0], side, ctx.engine->allocator());
 }
 
-void extract_reg(Span<const Value> args, size_t, Span<Value> outs,
+void extract_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "extract");
     argcheck::checkNargin(args.size(), 2, 2, "extract");
-    outs[0] = extract(args[0], args[1], ctx.engine->resource());
+    outs[0] = extract(args[0], args[1], ctx.engine->allocator());
 }
 
-void split_reg(Span<const Value> args, size_t, Span<Value> outs,
+void split_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "split");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         // Default delimiter is whitespace per MATLAB; we use ' '.
         Value sp = Value::fromString(" ", mr);
@@ -742,12 +743,12 @@ void split_reg(Span<const Value> args, size_t, Span<Value> outs,
     outs[0] = split(args[0], args[1], mr);
 }
 
-void join_reg(Span<const Value> args, size_t, Span<Value> outs,
+void join_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
               CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "join");
     const Value &delim = (args.size() >= 2) ? args[1] : Value::Empty;
-    outs[0] = join(args[0], delim, ctx.engine->resource());
+    outs[0] = join(args[0], delim, ctx.engine->allocator());
 }
 
 } // namespace detail

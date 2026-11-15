@@ -4,6 +4,7 @@
 /// Software figure renderer declarations (SVG / EPS / PDF / RGB raster).
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/figure_manager.hpp>
 
 #include <cstddef>
@@ -15,23 +16,23 @@
 namespace numkit {
 namespace figrender {
 
-const std::uint8_t *namedPalette(const std::string &name, int &n);
+const keel::u8 *namedPalette(const std::string &name, int &n);
 
-void parseNestedDoubles(const std::string &j, std::vector<double> &out,
-                        size_t &rows, size_t &cols);
+void parseNestedDoubles(const std::string &j, std::vector<keel::f64> &out,
+                        keel::usize &rows, keel::usize &cols);
 
-std::vector<double> niceTicks(double mn, double mx, int target = 10);
-std::vector<double> logTicks(double mn, double mx);
-std::string tickLabel(double v);
+std::vector<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target = 10);
+std::vector<keel::f64> logTicks(keel::f64 mn, keel::f64 mx);
+std::string tickLabel(keel::f64 v);
 
 using SvgImageEmbedder =
-    std::function<std::string(const std::vector<std::uint8_t> &, int, int)>;
+    std::function<std::string(const std::vector<keel::u8> &, int, int)>;
 
 std::string renderFigureSvg(const FigureState &fig, int W, int H,
                             const SvgImageEmbedder &embed = {});
 std::string renderFigureEps(const FigureState &fig, int W, int H);
 std::string renderFigurePdf(const FigureState &fig, int W, int H);
-std::vector<std::uint8_t> renderFigureRgb(const FigureState &fig, int W, int H);
+std::vector<keel::u8> renderFigureRgb(const FigureState &fig, int W, int H);
 
 } // namespace figrender
 } // namespace numkit

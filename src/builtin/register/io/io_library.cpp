@@ -10,6 +10,8 @@
 // Each function is also aliased into `compat.<fn>` so MATLAB-style
 // scripts call them flat via the bare-name resolver.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/library.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -17,38 +19,38 @@
 
 namespace numkit::io::detail {
 // text/csv.cpp
-void csvread_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void csvwrite_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void dlmwrite_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
+void csvread_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void csvwrite_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void dlmwrite_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 
 // file_io/fileio.cpp
-void fopen_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fclose_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fgetl_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fgets_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void feof_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ferror_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ftell_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fseek_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void frewind_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fread_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fwrite_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
+void fopen_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fclose_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fgetl_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fgets_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void feof_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ferror_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ftell_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fseek_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void frewind_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fread_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fwrite_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 
 // text/extras.cpp (C1 — modern text helpers)
-void fileread_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void readlines_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void writelines_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void readmatrix_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void writematrix_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void type_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
+void fileread_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void readlines_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void writelines_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void readmatrix_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void writematrix_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void type_reg        (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 
 // paths/paths.cpp (C2 — file-name construction)
-void filesep_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fullfile_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void fileparts_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void tempdir_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void tempname_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void genpath_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
+void filesep_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fullfile_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void fileparts_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void tempdir_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void tempname_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void genpath_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 } // namespace numkit::io::detail
 
 namespace numkit {

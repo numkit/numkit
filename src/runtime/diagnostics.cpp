@@ -1,5 +1,8 @@
 // toolboxes/builtin/src/programming/errors/diagnostics.cpp
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/runtime/diagnostics.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/core/engine.hpp>
@@ -16,7 +19,7 @@ using numkit::builtin::formatOnce;
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-void error(Span<const Value> args)
+void error(keel::ArrayRef<Value> args)
 {
     if (args.empty())
         throw Error("Error");
@@ -55,7 +58,7 @@ thread_local std::string gLastWarnMsg;
 thread_local std::string gLastWarnId;
 }
 
-void warning(Engine &engine, Span<const Value> args)
+void warning(Engine &engine, keel::ArrayRef<Value> args)
 {
     if (args.empty())
         return;
@@ -89,7 +92,7 @@ void lastwarnSet(const std::string &msg, const std::string &id)
     gLastWarnId  = id;
 }
 
-Value mexception(Span<const Value> args, std::pmr::memory_resource *mr)
+Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     if (args.size() < 2)
         throw Error("MException requires identifier and message", 0, 0,
@@ -114,7 +117,7 @@ void rethrowStruct(const Value &me)
     throw Error(msg, 0, 0, "", "", id);
 }
 
-void assertCond(Span<const Value> args)
+void assertCond(keel::ArrayRef<Value> args)
 {
     if (args.empty())
         throw Error("assert requires at least one argument", 0, 0, "assert", "",
@@ -157,20 +160,20 @@ void assertCond(Span<const Value> args)
 
 namespace detail {
 
-void error_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
+void error_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
 {
     error(args);
 }
 
-void warning_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
+void warning_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     warning(*ctx.engine, args);
 }
 
-void lastwarn_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                   CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // Two-output read form: [msg, id] = lastwarn();
     if (args.empty()) {
         outs[0] = Value::fromString(ctx.engine->lastWarnMsg(), mr);
@@ -194,12 +197,12 @@ void lastwarn_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     if (nargout > 0) outs[0] = Value::fromString("", mr);
 }
 
-void MException_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void MException_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    outs[0] = mexception(args, ctx.engine->resource());
+    outs[0] = mexception(args, ctx.engine->allocator());
 }
 
-void rethrow_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
+void rethrow_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
 {
     if (args.empty())
         throw Error("rethrow requires an MException struct", 0, 0, "rethrow", "",
@@ -207,7 +210,7 @@ void rethrow_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
     rethrowStruct(args[0]);
 }
 
-void throw_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
+void throw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
 {
     if (args.empty())
         throw Error("throw requires an MException struct", 0, 0, "throw", "",
@@ -215,7 +218,7 @@ void throw_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
     rethrowStruct(args[0]);
 }
 
-void assert_reg(Span<const Value> args, size_t, Span<Value>, CallContext &)
+void assert_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
 {
     assertCond(args);
 }

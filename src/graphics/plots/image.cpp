@@ -3,6 +3,8 @@
 // graphics.image.* builders (imagesc / pcolor / imshow), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -64,8 +66,8 @@ void buildImagePlots(std::vector<PlotEntry> &table)
     // Deferred: filename input,
     // 'XData','YData','InitialMagnification','Border','Reduce',
     // 'Colormap' name-value pairs.
-    auto imshowImpl = [](Span<const Value> args, size_t nargout,
-                         Span<Value> outs, GraphicsContext &gc) {
+    auto imshowImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -83,17 +85,17 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         if (args[0].isChar() || args[0].isString()) {
             Value imreadFn = Value::funcHandle("imread", gc.mr);
             decoded = gc.callHandle(imreadFn,
-                                                     Span<const Value>(&args[0], 1));
+                                                     keel::ArrayRef<Value>(&args[0], 1));
             img0 = &decoded;
         }
         const Value &I = *img0;
         const auto &dims = I.dims();
         const int nd = dims.ndims();
-        const size_t R = dims.rows();
-        const size_t C = dims.cols();
+        const keel::usize R = dims.rows();
+        const keel::usize C = dims.cols();
 
         // Detect RGB / RGBA: 3-D with 3 or 4 pages.
-        const size_t pages = (nd == 3) ? dims.pages() : 0;
+        const keel::usize pages = (nd == 3) ? dims.pages() : 0;
         const bool isRGB  = (pages == 3 || pages == 4);
         const bool hasAlpha = (pages == 4);
         if (!isRGB && (nd != 2 || R == 0 || C == 0)) {
@@ -117,12 +119,12 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         const Value *xDataArg = nullptr;
         const Value *yDataArg = nullptr;
         std::string colormapArg;               // 'Colormap', 'gray' / 'jet' / ...
-        size_t nvStart = 1;
+        keel::usize nvStart = 1;
         if (args.size() >= 2 && !args[1].isChar()) {
             rangeArg = &args[1];
             nvStart = 2;
         }
-        for (size_t i = nvStart; i + 1 < args.size(); i += 2) {
+        for (keel::usize i = nvStart; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar()) continue;
             std::string key = args[i].toString();
             for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -145,8 +147,8 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         // Helper: emit "[v1,v2,...,vN]" JSON from a Value (numeric vec).
         auto vecJson = [](const Value &v) -> std::string {
             std::ostringstream os; os << "[";
-            const size_t n = v.numel();
-            for (size_t i = 0; i < n; ++i) {
+            const keel::usize n = v.numel();
+            for (keel::usize i = 0; i < n; ++i) {
                 if (i) os << ",";
                 os << v.elemAsDouble(i);
             }
@@ -180,19 +182,19 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             // RGB input we synthesize alpha=255. Renderer treats a
             // missing alpha as opaque, so RGB-only callers see no
             // change.
-            const size_t bytesPerPixel = 4;
+            const keel::usize bytesPerPixel = 4;
             ds.rgbBytes.resize(R * C * bytesPerPixel);
-            const size_t numChannels = hasAlpha ? 4 : 3;
-            for (size_t r = 0; r < R; ++r) {
-                for (size_t c = 0; c < C; ++c) {
-                    const size_t outIdx = (r * C + c) * bytesPerPixel;
-                    for (size_t k = 0; k < numChannels; ++k) {
+            const keel::usize numChannels = hasAlpha ? 4 : 3;
+            for (keel::usize r = 0; r < R; ++r) {
+                for (keel::usize c = 0; c < C; ++c) {
+                    const keel::usize outIdx = (r * C + c) * bytesPerPixel;
+                    for (keel::usize k = 0; k < numChannels; ++k) {
                         // column-major linear index: page * R*C + col * R + row
-                        const size_t srcIdx = k * R * C + c * R + r;
+                        const keel::usize srcIdx = k * R * C + c * R + r;
                         double v = I.elemAsDouble(srcIdx) * scale;
                         if (v < 0) v = 0;
                         else if (v > 255) v = 255;
-                        ds.rgbBytes[outIdx + k] = static_cast<uint8_t>(v + 0.5);
+                        ds.rgbBytes[outIdx + k] = static_cast<keel::u8>(v + 0.5);
                     }
                     // Synthesize opaque alpha when input is plain RGB.
                     if (!hasAlpha) ds.rgbBytes[outIdx + 3] = 255;
@@ -201,17 +203,17 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             // Inline JSON preview — same 2M-pixel cap as imagesc; mean-pool
             // each channel independently when over the cap. Wire shape:
             // [[[r,g,b,a],...],...]  (always 4-tuple, alpha=255 for RGB).
-            constexpr size_t MAX_INLINE_PIXELS = 2'000'000;
-            const size_t totalPixels = R * C;
+            constexpr keel::usize MAX_INLINE_PIXELS = 2'000'000;
+            const keel::usize totalPixels = R * C;
             std::ostringstream zs;
             zs << "[";
             if (totalPixels <= MAX_INLINE_PIXELS) {
-                for (size_t r = 0; r < R; ++r) {
+                for (keel::usize r = 0; r < R; ++r) {
                     if (r) zs << ",";
                     zs << "[";
-                    for (size_t c = 0; c < C; ++c) {
+                    for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
-                        const size_t off = (r * C + c) * bytesPerPixel;
+                        const keel::usize off = (r * C + c) * bytesPerPixel;
                         zs << "[" << static_cast<int>(ds.rgbBytes[off])
                            << "," << static_cast<int>(ds.rgbBytes[off + 1])
                            << "," << static_cast<int>(ds.rgbBytes[off + 2])
@@ -220,25 +222,25 @@ void buildImagePlots(std::vector<PlotEntry> &table)
                     zs << "]";
                 }
             } else {
-                size_t step = 1;
+                keel::usize step = 1;
                 while ((R + step - 1) / step * ((C + step - 1) / step) > MAX_INLINE_PIXELS)
                     ++step;
-                const size_t outR = (R + step - 1) / step;
-                const size_t outC = (C + step - 1) / step;
-                for (size_t orow = 0; orow < outR; ++orow) {
+                const keel::usize outR = (R + step - 1) / step;
+                const keel::usize outC = (C + step - 1) / step;
+                for (keel::usize orow = 0; orow < outR; ++orow) {
                     if (orow) zs << ",";
                     zs << "[";
-                    const size_t r0 = orow * step;
-                    const size_t r1 = std::min(R, r0 + step);
-                    for (size_t ocol = 0; ocol < outC; ++ocol) {
+                    const keel::usize r0 = orow * step;
+                    const keel::usize r1 = std::min(R, r0 + step);
+                    for (keel::usize ocol = 0; ocol < outC; ++ocol) {
                         if (ocol) zs << ",";
-                        const size_t c0 = ocol * step;
-                        const size_t c1 = std::min(C, c0 + step);
+                        const keel::usize c0 = ocol * step;
+                        const keel::usize c1 = std::min(C, c0 + step);
                         int sumR = 0, sumG = 0, sumB = 0, sumA = 0;
                         int n = 0;
-                        for (size_t rr = r0; rr < r1; ++rr) {
-                            for (size_t cc = c0; cc < c1; ++cc) {
-                                const size_t off = (rr * C + cc) * bytesPerPixel;
+                        for (keel::usize rr = r0; rr < r1; ++rr) {
+                            for (keel::usize cc = c0; cc < c1; ++cc) {
+                                const keel::usize off = (rr * C + cc) * bytesPerPixel;
                                 sumR += ds.rgbBytes[off];
                                 sumG += ds.rgbBytes[off + 1];
                                 sumB += ds.rgbBytes[off + 2];
@@ -279,7 +281,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             if (autoRange) {
                 double mn = std::numeric_limits<double>::infinity();
                 double mx = -std::numeric_limits<double>::infinity();
-                for (size_t i = 0; i < R * C; ++i) {
+                for (keel::usize i = 0; i < R * C; ++i) {
                     double v = I.elemAsDouble(i);
                     if (std::isfinite(v)) {
                         if (v < mn) mn = v;
@@ -300,7 +302,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             const double range = cmax - cmin;
             const double qScale = (range > 0) ? 254.0 / range : 0.0;
             ds.zQuantized.resize(R * C);
-            for (size_t i = 0; i < R * C; ++i) {
+            for (keel::usize i = 0; i < R * C; ++i) {
                 const double v = I.elemAsDouble(i);
                 if (!std::isfinite(v)) {
                     ds.zQuantized[i] = 255;
@@ -308,42 +310,42 @@ void buildImagePlots(std::vector<PlotEntry> &table)
                     double t = (v - cmin) * qScale;
                     if (t < 0) t = 0;
                     else if (t > 254) t = 254;
-                    ds.zQuantized[i] = static_cast<uint8_t>(t + 0.5);
+                    ds.zQuantized[i] = static_cast<keel::u8>(t + 0.5);
                 }
             }
-            constexpr size_t MAX_INLINE_CELLS = 2'000'000;
-            const size_t totalCells = R * C;
+            constexpr keel::usize MAX_INLINE_CELLS = 2'000'000;
+            const keel::usize totalCells = R * C;
             std::ostringstream zs;
             zs << "[";
             if (totalCells <= MAX_INLINE_CELLS) {
-                for (size_t r = 0; r < R; ++r) {
+                for (keel::usize r = 0; r < R; ++r) {
                     if (r) zs << ",";
                     zs << "[";
-                    for (size_t c = 0; c < C; ++c) {
+                    for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
                         zs << static_cast<int>(ds.zQuantized[c * R + r]);
                     }
                     zs << "]";
                 }
             } else {
-                size_t step = 1;
+                keel::usize step = 1;
                 while ((R + step - 1) / step * ((C + step - 1) / step) > MAX_INLINE_CELLS)
                     ++step;
-                const size_t outR = (R + step - 1) / step;
-                const size_t outC = (C + step - 1) / step;
-                for (size_t orow = 0; orow < outR; ++orow) {
+                const keel::usize outR = (R + step - 1) / step;
+                const keel::usize outC = (C + step - 1) / step;
+                for (keel::usize orow = 0; orow < outR; ++orow) {
                     if (orow) zs << ",";
                     zs << "[";
-                    const size_t r0 = orow * step;
-                    const size_t r1 = std::min(R, r0 + step);
-                    for (size_t ocol = 0; ocol < outC; ++ocol) {
+                    const keel::usize r0 = orow * step;
+                    const keel::usize r1 = std::min(R, r0 + step);
+                    for (keel::usize ocol = 0; ocol < outC; ++ocol) {
                         if (ocol) zs << ",";
-                        const size_t c0 = ocol * step;
-                        const size_t c1 = std::min(C, c0 + step);
+                        const keel::usize c0 = ocol * step;
+                        const keel::usize c1 = std::min(C, c0 + step);
                         int sum = 0, n = 0;
-                        for (size_t cc = c0; cc < c1; ++cc) {
-                            for (size_t rr = r0; rr < r1; ++rr) {
-                                const uint8_t q = ds.zQuantized[cc * R + rr];
+                        for (keel::usize cc = c0; cc < c1; ++cc) {
+                            for (keel::usize rr = r0; rr < r1; ++rr) {
+                                const keel::u8 q = ds.zQuantized[cc * R + rr];
                                 if (q != 255) { sum += q; ++n; }
                             }
                         }

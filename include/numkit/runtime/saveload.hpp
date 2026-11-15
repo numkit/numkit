@@ -1,7 +1,8 @@
 // runtime/include/numkit/runtime/saveload.hpp
 #pragma once
 
-#include <numkit/value/span.hpp>
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
 namespace numkit {
@@ -43,7 +44,7 @@ namespace numkit::runtime {
 ///                names.
 /// @throws Error  On VFS failure or unknown variable name.
 /// @see load
-void save(Engine &engine, Environment &env, Span<const Value> args);
+void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args);
 
 /// @brief Load workspace variables from an ASCII file
 /// (`load filename` / `S = load(filename)`).
@@ -62,8 +63,8 @@ void save(Engine &engine, Environment &env, Span<const Value> args);
 /// @param outs     Output slot for the struct form.
 /// @throws Error   On VFS failure, parse failure, or unknown variable.
 /// @see save
-void load(Engine &engine, Environment &env, Span<const Value> args,
-          size_t nargout, Span<Value> outs);
+void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
+          keel::usize nargout, keel::MutArrayRef<Value> outs);
 
 
 /// @}

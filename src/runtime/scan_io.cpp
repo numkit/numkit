@@ -9,6 +9,11 @@
 // language-namespaced builtins). textscan + its format parser are textscan-
 // only, so they ride along here whole.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/runtime/io.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/scan_core.hpp>     // detail::scanfEmit + ScanfOut
@@ -16,8 +21,6 @@
 
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 #include <numkit/ops/io_helpers.hpp>       // SizeSpec / parseReadSize (numkit::builtin::detail)
 
 #include <algorithm>
@@ -27,7 +30,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <memory_resource>
 #include <string>
 #include <utility>
 
@@ -36,9 +38,9 @@ namespace numkit::runtime {
 using numkit::builtin::detail::scanfEmit;
 using numkit::builtin::detail::ScanfOut;
 
-void fscanf(Engine &engine, Span<const Value> args, size_t nargout, Span<Value> outs)
+void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
-    std::pmr::memory_resource *mr = engine.resource();
+    keel::Allocator *mr = engine.allocator();
     if (args.size() < 2 || !args[0].isScalar() || !args[1].isChar())
         throw Error("fscanf: requires (fid, format [, size])");
     int fid = static_cast<int>(args[0].toScalar());
@@ -69,7 +71,7 @@ namespace {
 
 struct TextscanOptions
 {
-    explicit TextscanOptions(std::pmr::memory_resource *mr) : treatAsEmpty(mr) {}
+    explicit TextscanOptions(keel::Allocator *mr) : treatAsEmpty(mr) {}
 
     // Empty → whitespace-default mode (runs of space/tab/\f/\v + EOL
     // count as a single field boundary). Non-empty → explicit-delim
@@ -78,7 +80,7 @@ struct TextscanOptions
     // collapse.
     std::string delimiters;
     std::string endOfLine = "\n";
-    size_t headerLines = 0;
+    keel::usize headerLines = 0;
     // Line-comment marker. When non-empty, anything from its first
     // occurrence up to the next EndOfLine char is ignored.
     std::string commentStyle;
@@ -86,7 +88,7 @@ struct TextscanOptions
     // "empty" (numeric → EmptyValue, %s → ''). Vector body lives on
     // the per-call arena; the std::string elements stay on the
     // default heap (typically short enough for SSO anyway).
-    ScratchVec<std::string> treatAsEmpty;
+    keel::Array<std::string> treatAsEmpty;
     // In explicit-delim mode only: when true, runs of delim chars
     // collapse to one boundary (no empty fields emitted). Default
     // false, matching MATLAB; whitespace-default mode always
@@ -100,10 +102,10 @@ struct TextscanConv { char spec; bool suppress; int width; };
 
 // Parse formatSpec into an ordered conversion list. Unrecognised
 // % codes throw before any scanning happens.
-ScratchVec<TextscanConv> parseTextscanFormat(const std::string &fmt, std::pmr::memory_resource *mr)
+keel::Array<TextscanConv> parseTextscanFormat(const std::string &fmt, keel::Allocator *mr)
 {
-    ScratchVec<TextscanConv> out(mr);
-    for (size_t i = 0; i < fmt.size(); ++i) {
+    keel::Array<TextscanConv> out(mr);
+    for (keel::usize i = 0; i < fmt.size(); ++i) {
         if (fmt[i] != '%')
             continue;                     // literal chars between specs are ignored
         ++i;
@@ -137,10 +139,10 @@ ScratchVec<TextscanConv> parseTextscanFormat(const std::string &fmt, std::pmr::m
 
 } // namespace
 
-void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value> outs)
+void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
     (void)nargout;
-    std::pmr::memory_resource *mr = engine.resource();
+    keel::Allocator *mr = engine.allocator();
     if (args.size() < 2 || !args[1].isChar())
         throw Error("textscan: requires (source, format [, N] [, opt, value …])");
 
@@ -161,24 +163,24 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     }
 
     std::string fmt = args[1].toString();
-    ScratchArena scratch(mr);
-    auto convs = parseTextscanFormat(fmt, &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto convs = parseTextscanFormat(fmt, scratch.allocator());
 
     // Optional positional N, then name-value pairs.
-    size_t argIdx = 2;
-    size_t cycleCap = SIZE_MAX;
+    keel::usize argIdx = 2;
+    keel::usize cycleCap = SIZE_MAX;
     if (argIdx < args.size() && args[argIdx].isScalar() && !args[argIdx].isChar()) {
         double d = args[argIdx].toScalar();
         if (!std::isinf(d)) {
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: N must be Inf or a non-negative integer");
-            cycleCap = static_cast<size_t>(d);
+            cycleCap = static_cast<keel::usize>(d);
         }
         ++argIdx;
     }
 
     // Parse name/value options into a TextscanOptions struct.
-    TextscanOptions opts{&scratch};
+    TextscanOptions opts{scratch.allocator()};
     auto lower = [](std::string s) {
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
@@ -194,7 +196,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
             } else if (val.isCell()) {
                 // Concatenate every char in the cells into one delimiter set.
                 opts.delimiters.clear();
-                for (size_t i = 0; i < val.numel(); ++i) {
+                for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &d = val.cellAt(i);
                     if (d.isChar()) opts.delimiters += d.toString();
                 }
@@ -209,7 +211,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
             double d = val.toScalar();
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: 'HeaderLines' must be a non-negative integer");
-            opts.headerLines = static_cast<size_t>(d);
+            opts.headerLines = static_cast<keel::usize>(d);
         } else if (name == "commentstyle") {
             if (!val.isChar())
                 throw Error("textscan: 'CommentStyle' must be a char array");
@@ -218,7 +220,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
             if (val.isChar()) {
                 opts.treatAsEmpty.push_back(val.toString());
             } else if (val.isCell()) {
-                for (size_t i = 0; i < val.numel(); ++i) {
+                for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &e = val.cellAt(i);
                     if (e.isChar()) opts.treatAsEmpty.push_back(e.toString());
                 }
@@ -245,7 +247,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     // field separator; explicit-delim mode reserves whitespace
     // for trimming around fields instead.
     const bool useWsDefault = opts.delimiters.empty();
-    size_t pos = 0;
+    keel::usize pos = 0;
 
     auto isEol = [&opts](char c) {
         return opts.endOfLine.find(c) != std::string::npos;
@@ -268,7 +270,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     };
 
     // Skip header lines using the configured EndOfLine chars.
-    for (size_t h = 0; h < opts.headerLines && pos < input.size(); ++h) {
+    for (keel::usize h = 0; h < opts.headerLines && pos < input.size(); ++h) {
         while (pos < input.size() && !isEol(input[pos])) ++pos;
         if (pos < input.size()) ++pos;  // consume the EOL char itself
     }
@@ -302,7 +304,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     // explicit delim back together).
     auto consumeBoundary = [&]() -> bool {
         if (useWsDefault) {
-            size_t before = pos;
+            keel::usize before = pos;
             while (pos < input.size()) {
                 if (atComment()) {
                     while (pos < input.size() && !isEol(input[pos])) ++pos;
@@ -346,7 +348,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     // field is trimmed (so "1 , 2" with delim ',' yields "1"
     // and "2", not "1 " and " 2").
     auto readField = [&]() -> std::string {
-        size_t start = pos;
+        keel::usize start = pos;
         while (pos < input.size()) {
             char c = input[pos];
             if (atComment()) break;
@@ -358,26 +360,30 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
             }
             ++pos;
         }
-        size_t end = pos;
+        keel::usize end = pos;
         if (!useWsDefault) {
             while (end > start && isWs(input[end - 1])) --end;
         }
         return input.substr(start, end - start);
     };
 
-    // Per-column accumulators. Outer is on the arena; inner pmr-vectors
-    // pick up the arena via uses-allocator construction, so every
-    // push_back below allocates from the arena.
-    ScratchVec<ScratchVec<double>> numCols(convs.size(), &scratch);
-    ScratchVec<ScratchVec<std::string>> strCols(convs.size(), &scratch);
+    // Per-column accumulators. Both outer and inner arrays allocate from the arena.
+    keel::Array<keel::Array<double>> numCols(scratch.allocator());
+    keel::Array<keel::Array<std::string>> strCols(scratch.allocator());
+    numCols.reserve(convs.size());
+    strCols.reserve(convs.size());
+    for (keel::usize ci = 0; ci < convs.size(); ++ci) {
+        numCols.emplace_back(scratch.allocator());
+        strCols.emplace_back(scratch.allocator());
+    }
     // Staging buffers are HOISTED out of the cycle loop and clear()-ed
     // each iteration: re-creating them inside the loop would bump-leak
     // under the monotonic resource (footgun #c in scratch.hpp).
     // After a few iterations the capacity stabilises and clear() reuses
     // it — total arena footprint stays bounded.
-    ScratchVec<std::pair<size_t, double>>      stageNum(&scratch);
-    ScratchVec<std::pair<size_t, std::string>> stageStr(&scratch);
-    size_t cycles = 0;
+    keel::Array<std::pair<keel::usize, double>>      stageNum(scratch.allocator());
+    keel::Array<std::pair<keel::usize, std::string>> stageStr(scratch.allocator());
+    keel::usize cycles = 0;
 
     skipLeading();                         // past leading ws/EOL/comments once
     bool atFirstField = true;              // no boundary-consume before the very first field
@@ -385,13 +391,13 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
     while (cycles < cycleCap) {
         if (pos >= input.size()) break;
 
-        size_t savedPos = pos;
+        keel::usize savedPos = pos;
         bool savedFirst = atFirstField;
         stageNum.clear();
         stageStr.clear();
         bool fullCycle = true;
 
-        for (size_t i = 0; i < convs.size(); ++i) {
+        for (keel::usize i = 0; i < convs.size(); ++i) {
             if (!atFirstField) {
                 if (!consumeBoundary()) { fullCycle = false; break; }
             }
@@ -436,7 +442,7 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
             }
 
             if (c.width > 0 && static_cast<int>(tok.size()) > c.width)
-                tok.resize(static_cast<size_t>(c.width));
+                tok.resize(static_cast<keel::usize>(c.width));
 
             if (c.spec == 's') {
                 if (!c.suppress) stageStr.push_back({i, std::move(tok)});
@@ -490,20 +496,20 @@ void textscan(Engine &engine, Span<const Value> args, size_t nargout, Span<Value
 
     // Build the outer cell array — one slot per non-suppressed
     // conversion. Suppressed conversions contribute no column.
-    size_t nonSup = 0;
+    keel::usize nonSup = 0;
     for (auto &c : convs) if (!c.suppress) ++nonSup;
     Value result = Value::cell(1, nonSup);
-    size_t slot = 0;
-    for (size_t i = 0; i < convs.size(); ++i) {
+    keel::usize slot = 0;
+    for (keel::usize i = 0; i < convs.size(); ++i) {
         if (convs[i].suppress) continue;
         if (convs[i].spec == 's') {
-            size_t k = strCols[i].size();
+            keel::usize k = strCols[i].size();
             Value inner = Value::cell(k, 1);
-            for (size_t j = 0; j < k; ++j)
+            for (keel::usize j = 0; j < k; ++j)
                 inner.cellAt(j) = Value::fromString(strCols[i][j], mr);
             result.cellAt(slot++) = std::move(inner);
         } else {
-            size_t k = numCols[i].size();
+            keel::usize k = numCols[i].size();
             Value col = (k == 0)
                              ? Value::matrix(0, 0, ValueType::DOUBLE, mr)
                              : Value::matrix(k, 1, ValueType::DOUBLE, mr);

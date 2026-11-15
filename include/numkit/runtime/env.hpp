@@ -1,8 +1,8 @@
 // src/runtime/include/numkit/runtime/language/commands/env.hpp
 #pragma once
 
-#include <memory_resource>
-#include <numkit/value/span.hpp>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
 namespace numkit {
@@ -33,7 +33,7 @@ void registerEnvRuntime(Engine &engine);
 /// @param args  `(name, value)` — both CHAR / STRING.
 /// @throws Error  Bad argument types or count
 ///                (`m:setenv:nargin` / `m:setenv:badArg`).
-void setenv(Span<const Value> args);
+void setenv(keel::ArrayRef<Value> args);
 
 /// @brief Read an environment variable (`val = getenv(name)`).
 ///
@@ -43,7 +43,7 @@ void setenv(Span<const Value> args);
 ///              the variable is unset.
 /// @throws Error  Bad argument type or count
 ///                (`m:getenv:nargin` / `m:getenv:badArg`).
-Value getenv(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value getenv(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 
 /// @}

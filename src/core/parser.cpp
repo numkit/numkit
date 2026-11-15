@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/parser.hpp>
 #include <algorithm>
 #include <cctype>
@@ -67,7 +68,7 @@ const Token &Parser::peekToken(int off) const
     long long p = static_cast<long long>(pos_);
     if (off == 0) {
         if (p < 0 || p >= static_cast<long long>(tokens_.size())) return tokens_.back();
-        return tokens_[static_cast<size_t>(p)];
+        return tokens_[static_cast<keel::usize>(p)];
     }
     const int dir   = (off > 0) ? 1 : -1;
     const int steps = (off > 0) ? off : -off;
@@ -76,9 +77,9 @@ const Token &Parser::peekToken(int off) const
             p += dir;
             if (p < 0 || p >= static_cast<long long>(tokens_.size()))
                 return tokens_.back();
-        } while (tokens_[static_cast<size_t>(p)].type == TokenType::COMMENT);
+        } while (tokens_[static_cast<keel::usize>(p)].type == TokenType::COMMENT);
     }
-    return tokens_[static_cast<size_t>(p)];
+    return tokens_[static_cast<keel::usize>(p)];
 }
 
 bool Parser::isAtEnd() const
@@ -516,7 +517,7 @@ ASTNodePtr Parser::parseExpressionStatement()
 
     // Попытка multi-assign: [a, b] = expr  или  [~, b] = expr
     if (check(TokenType::LBRACKET)) {
-        size_t save = pos_;
+        keel::usize save = pos_;
         auto ma = tryMultiAssign();
         if (ma)
             return ma;
@@ -858,7 +859,7 @@ ASTNodePtr Parser::parseGlobalPersistent()
 bool Parser::probeHasOutputSignature() const
 {
     if (current().type == TokenType::LBRACKET) {
-        size_t probe = pos_ + 1;
+        keel::usize probe = pos_ + 1;
         int depth = 1;
         while (probe < tokens_.size() && depth > 0) {
             if (tokens_[probe].type == TokenType::END_OF_INPUT)
@@ -1127,7 +1128,7 @@ ASTNodePtr Parser::parseBlock(std::initializer_list<TokenType> terminators)
     while (!isAtEnd()) {
         if (isTerminator(terminators))
             return block;
-        size_t before = pos_;
+        keel::usize before = pos_;
         auto stmt = parseStatement();
         if (stmt)
             block->children.push_back(std::move(stmt));
@@ -1346,7 +1347,7 @@ ASTNodePtr Parser::parsePostfix()
 {
     auto node = parsePrimary();
     while (true) {
-        size_t before = pos_;
+        keel::usize before = pos_;
 
         if (check(TokenType::LPAREN)) {
             // В MATLAB f(args) может быть как вызовом функции, так и
@@ -1531,7 +1532,7 @@ ASTNodePtr Parser::parsePrimary()
 ASTNodePtr Parser::parseAnonFunc()
 {
     auto [ln, cl] = loc();
-    const size_t atPos = pos_;   // index of '@' — start of the source span
+    const keel::usize atPos = pos_;   // index of '@' — start of the source span
     consume(TokenType::AT, "@");
 
     // @funcName — хэндл на существующую функцию
@@ -1570,10 +1571,10 @@ ASTNodePtr Parser::parseAnonFunc()
 // char/string literals re-quoted (internal quotes doubled). This reproduces
 // MATLAB's func2str normalization (`@(x) x + 1` -> `@(x)x+1`, while
 // `' world'` keeps its interior space).
-std::string Parser::reconstructAnonSource(size_t from, size_t to) const
+std::string Parser::reconstructAnonSource(keel::usize from, keel::usize to) const
 {
     std::string s;
-    for (size_t i = from; i < to && i < tokens_.size(); ++i) {
+    for (keel::usize i = from; i < to && i < tokens_.size(); ++i) {
         const Token &t = tokens_[i];
         switch (t.type) {
         case TokenType::STRING:           // 'char literal'
@@ -1619,7 +1620,7 @@ ASTNodePtr Parser::parseArrayLiteral(TokenType open, TokenType close, NodeType n
     row->children.push_back(parseExpression());
 
     while (!check(close) && !isAtEnd()) {
-        size_t beforeIteration = pos_;
+        keel::usize beforeIteration = pos_;
 
         if (check(TokenType::SEMICOLON) || check(TokenType::NEWLINE)) {
             node->children.push_back(std::move(row));

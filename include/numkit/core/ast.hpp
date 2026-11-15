@@ -1,5 +1,6 @@
 // include/ast.hpp
 #pragma once
+#include <keel/core.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -77,7 +78,7 @@ struct ASTNode
     int endCol  = 0;
 
     std::string strValue;
-    double numValue = 0;
+    keel::f64 numValue = 0;
     bool boolValue = false;
     bool suppressOutput = false;
 

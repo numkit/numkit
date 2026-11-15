@@ -1,6 +1,8 @@
 // toolboxes/builtin/src/language/operators/binary_ops_reg.cpp
 //
 // CallContext register half (Phase 2b multi-block split).
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/ops.hpp>
@@ -9,17 +11,13 @@
 #include <numkit/ops/compare.hpp>
 #include <numkit/ops/la_solve.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/builtin/detail/ops/binary_ops_detail.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -35,11 +33,11 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 namespace detail {
 
 #define NUMKIT_BINOP_REG(OP_NAME, CXX_FN)                                            \
-    void OP_NAME##_reg(Span<const Value> args, size_t /*nargout*/,              \
-                           Span<Value> outs, CallContext &ctx)                       \
+    void OP_NAME##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,              \
+                           keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                                 \
         argcheck::checkNargin(args.size(), 2, 2, #OP_NAME); \
-        outs[0] = CXX_FN(args[0], args[1], ctx.engine->resource());                  \
+        outs[0] = CXX_FN(args[0], args[1], ctx.engine->allocator());                  \
     }
 
 NUMKIT_BINOP_REG(plus,     plus)
@@ -61,29 +59,29 @@ NUMKIT_BINOP_REG(ge,       ge)
 #undef NUMKIT_BINOP_REG
 
 // ldivide(a, b) = b ./ a (MATLAB convention).
-void ldivide_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void ldivide_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ldivide");
     argcheck::checkNargin(args.size(), 2, 2, "ldivide");
-    outs[0] = rdivide(args[1], args[0], ctx.engine->resource());
+    outs[0] = rdivide(args[1], args[0], ctx.engine->allocator());
 }
 
 // `and` / `or` builtins map to logicalAnd / logicalOr.
-void and_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void and_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
              CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "and");
     argcheck::checkNargin(args.size(), 2, 2, "and");
-    outs[0] = logicalAnd(args[0], args[1], ctx.engine->resource());
+    outs[0] = logicalAnd(args[0], args[1], ctx.engine->allocator());
 }
 
-void or_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void or_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
             CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "or");
     argcheck::checkNargin(args.size(), 2, 2, "or");
-    outs[0] = logicalOr(args[0], args[1], ctx.engine->resource());
+    outs[0] = logicalOr(args[0], args[1], ctx.engine->allocator());
 }
 
 } // namespace detail

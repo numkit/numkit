@@ -25,6 +25,7 @@
 //
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/value/value.hpp>
 
 #include <string>
@@ -54,7 +55,7 @@ public:
     // live register base. depthFromTop selects which frame to bind: 0 = the
     // current (deepest) frame, increasing toward the base — the dbup/dbdown
     // axis. An out-of-range depth leaves the workspace unbound.
-    void bindVMFrame(VM &vm, Engine &engine, size_t depthFromTop = 0);
+    void bindVMFrame(VM &vm, Engine &engine, keel::usize depthFromTop = 0);
 
     // Drop framePtrs. Overlay is preserved across (re)binds.
     void unbindFrame();

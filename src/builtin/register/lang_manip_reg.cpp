@@ -3,23 +3,23 @@
 // CallContext register half of language/arrays/manip.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/shape_ops.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/elmat/manip_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -31,11 +31,11 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "repmat");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // Forms:
     //   repmat(A, n)            → m=n=arg
@@ -43,11 +43,11 @@ void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     //   repmat(A, [m n p ...])  → vector (any length ≥ 1)
     //   repmat(A, m, n)         → two scalars
     //   repmat(A, m, n, p, ...) → ≥ 2 scalars
-    ScratchArena scratch(mr);
-    auto tiles = ScratchVec<size_t>(&scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto tiles = keel::Array<keel::usize>(scratch.allocator());
     if (args.size() == 2) {
         const Value &v = args[1];
-        const size_t k = v.numel();
+        const keel::usize k = v.numel();
         if (k == 0) {
             throw Error("repmat: tile vector must not be empty",
                          0, 0, "repmat", "", "numkit:repmat:badTileVec");
@@ -55,24 +55,24 @@ void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         auto tileOf = [&](double d) {
             argcheck::expectedNonNegative(
                 argcheck::expectedInteger(d, 1, "tile", "repmat"), 1, "tile", "repmat");
-            return static_cast<size_t>(d);
+            return static_cast<keel::usize>(d);
         };
         if (k == 1) {
-            const size_t s = tileOf(v.toScalar());
+            const keel::usize s = tileOf(v.toScalar());
             tiles.assign({s, s});
         } else {
             argcheck::arrayDimReal(v, "repmat");
             tiles.reserve(k);
-            for (size_t i = 0; i < k; ++i)
+            for (keel::usize i = 0; i < k; ++i)
                 tiles.push_back(tileOf(v.doubleData()[i]));
         }
     } else {
         tiles.reserve(args.size() - 1);
-        for (size_t i = 1; i < args.size(); ++i) {
+        for (keel::usize i = 1; i < args.size(); ++i) {
             const double d = argcheck::expectedReal(args[i], int(i) + 1, "tile", "repmat");
             argcheck::expectedInteger(d, int(i) + 1, "tile", "repmat");
             argcheck::expectedNonNegative(d, int(i) + 1, "tile", "repmat");
-            tiles.push_back(static_cast<size_t>(d));
+            tiles.push_back(static_cast<keel::usize>(d));
         }
     }
 
@@ -82,21 +82,21 @@ void repmat_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     const auto &inDims = args[0].dims();
     const int outNdim = std::max(inDims.ndim(), static_cast<int>(tiles.size()));
     if (outNdim <= 3 && tiles.size() <= 3 && args[0].type() == ValueType::DOUBLE) {
-        const size_t m = tiles[0];
-        const size_t n = tiles.size() >= 2 ? tiles[1] : 1;
-        const size_t p = tiles.size() >= 3 ? tiles[2] : 1;
-        outs[0] = numkit::narrowComplex(repmat(args[0], m, n, p, mr), ctx.engine->resource());
+        const keel::usize m = tiles[0];
+        const keel::usize n = tiles.size() >= 2 ? tiles[1] : 1;
+        const keel::usize p = tiles.size() >= 3 ? tiles[2] : 1;
+        outs[0] = numkit::narrowComplex(repmat(args[0], m, n, p, mr), ctx.engine->allocator());
     } else {
-        outs[0] = numkit::narrowComplex(repmatND(args[0], Span<const size_t>(tiles.data(), tiles.size()), mr), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(repmatND(args[0], keel::ArrayRef<keel::usize>(tiles.data(), tiles.size()), mr), ctx.engine->allocator());
     }
 }
 
 #define NUMKIT_FLIP_REG(name)                                                      \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
-                    Span<Value> outs, CallContext &ctx)                       \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 1, 1, #name); \
-        outs[0] = numkit::narrowComplex(name(args[0], ctx.engine->resource()), ctx.engine->resource());                      \
+        outs[0] = numkit::narrowComplex(name(args[0], ctx.engine->allocator()), ctx.engine->allocator());                      \
     }
 
 NUMKIT_FLIP_REG(fliplr)
@@ -104,7 +104,7 @@ NUMKIT_FLIP_REG(flipud)
 
 #undef NUMKIT_FLIP_REG
 
-void rot90_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void rot90_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rot90");
@@ -112,23 +112,23 @@ void rot90_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
                 ? argcheck::expectedInteger(
                       argcheck::expectedReal(args[1], 2, "k", "rot90"), 2, "k", "rot90")
                 : 1;
-    outs[0] = numkit::narrowComplex(rot90(args[0], k, ctx.engine->resource()), ctx.engine->resource());
+    outs[0] = numkit::narrowComplex(rot90(args[0], k, ctx.engine->allocator()), ctx.engine->allocator());
 }
 
-void circshift_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void circshift_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                    CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "circshift");
     argcheck::checkNargin(args.size(), 2, 3, "circshift");
     const Value &k = args[1];
-    auto *mr = ctx.engine->resource();
-    const size_t nk = k.numel();
+    auto *mr = ctx.engine->allocator();
+    const keel::usize nk = k.numel();
     if (nk == 0)
         throw Error("circshift: shift vector must not be empty",
                      0, 0, "circshift", "", "numkit:circshift:badShift");
 
     if (nk == 1) {
-        const int64_t kk = static_cast<int64_t>(k.toScalar());
+        const keel::i64 kk = static_cast<keel::i64>(k.toScalar());
         // circshift(X, K, dim): shift by K ONLY along dimension `dim`. The
         // previous code ignored args[2] and always shifted dim 1.
         if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -136,32 +136,32 @@ void circshift_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             if (dim < 1)
                 throw Error("circshift: dim must be a positive integer",
                              0, 0, "circshift", "", "numkit:circshift:badDim");
-            ScratchArena scratch(mr);
-            auto shifts = ScratchVec<int64_t>(static_cast<size_t>(dim), &scratch);
+            keel::ArenaTemp scratch = keel::get_scratch(mr);
+            auto shifts = keel::Array<keel::i64>(static_cast<keel::usize>(dim), scratch.allocator());
             for (int i = 0; i < dim; ++i) shifts[i] = 0;
             shifts[dim - 1] = kk;
             outs[0] = numkit::narrowComplex(circshiftND(args[0],
-                                  Span<const int64_t>(shifts.data(), dim), mr), ctx.engine->resource());
+                                  keel::ArrayRef<keel::i64>(shifts.data(), dim), mr), ctx.engine->allocator());
             return;
         }
-        outs[0] = numkit::narrowComplex(circshift(args[0], kk, mr), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(circshift(args[0], kk, mr), ctx.engine->allocator());
         return;
     }
     if (nk == 2 && args[0].dims().ndim() <= 3) {
-        outs[0] = numkit::narrowComplex(circshift(args[0], static_cast<int64_t>(k.doubleData()[0]), static_cast<int64_t>(k.doubleData()[1]), mr), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(circshift(args[0], static_cast<keel::i64>(k.doubleData()[0]), static_cast<keel::i64>(k.doubleData()[1]), mr), ctx.engine->allocator());
         return;
     }
     // ND path: shift vector ≥ 3 entries OR input rank ≥ 4.
-    ScratchArena scratch(mr);
-    auto shifts = ScratchVec<int64_t>(nk, &scratch);
-    for (size_t i = 0; i < nk; ++i)
-        shifts[i] = static_cast<int64_t>(k.doubleData()[i]);
-    outs[0] = numkit::narrowComplex(circshiftND(args[0], Span<const int64_t>(shifts.data(), nk), mr), ctx.engine->resource());
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto shifts = keel::Array<keel::i64>(nk, scratch.allocator());
+    for (keel::usize i = 0; i < nk; ++i)
+        shifts[i] = static_cast<keel::i64>(k.doubleData()[i]);
+    outs[0] = numkit::narrowComplex(circshiftND(args[0], keel::ArrayRef<keel::i64>(shifts.data(), nk), mr), ctx.engine->allocator());
 }
 
 #define NUMKIT_TRI_REG(name)                                                       \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
-                    Span<Value> outs, CallContext &ctx)                       \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 1, 2, #name);                      \
         int k = (args.size() >= 2 && !args[1].isEmpty())                       \
@@ -169,7 +169,7 @@ void circshift_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
                           argcheck::expectedReal(args[1], 2, "k", #name),      \
                           2, "k", #name)                                       \
                     : 0;                                                        \
-        outs[0] = numkit::narrowComplex(name(args[0], k, ctx.engine->resource()), ctx.engine->resource());                   \
+        outs[0] = numkit::narrowComplex(name(args[0], k, ctx.engine->allocator()), ctx.engine->allocator());                   \
     }
 
 NUMKIT_TRI_REG(tril)
@@ -177,37 +177,37 @@ NUMKIT_TRI_REG(triu)
 
 #undef NUMKIT_TRI_REG
 
-void flip_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void flip_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
               CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "flip");
     int dim = (args.size() >= 2 && !args[1].isEmpty())
                   ? argcheck::dimArg(args[1], "flip")
                   : 0;
-    outs[0] = numkit::narrowComplex(flip(args[0], dim, ctx.engine->resource()), ctx.engine->resource());
+    outs[0] = numkit::narrowComplex(flip(args[0], dim, ctx.engine->allocator()), ctx.engine->allocator());
 }
 
-void repelem_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void repelem_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "repelem");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // counts may be a scalar or a per-element vector — the Value
         // overload dispatches internally.
-        outs[0] = numkit::narrowComplex(repelem(args[0], args[1], mr), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(repelem(args[0], args[1], mr), ctx.engine->allocator());
         return;
     }
     // r / c may each be a scalar or a per-row / per-column vector.
-    outs[0] = numkit::narrowComplex(repelem(args[0], args[1], args[2], mr), ctx.engine->resource());
+    outs[0] = numkit::narrowComplex(repelem(args[0], args[1], args[2], mr), ctx.engine->allocator());
 }
 
 // sub2ind(siz, i1, i2, ...) → linear index. Column-major, 1-based.
-void sub2ind_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void sub2ind_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "sub2ind");
-    outs[0] = sub2ind(args[0], args.subspan(1), ctx.engine->resource());
+    outs[0] = sub2ind(args[0], args.slice(1), ctx.engine->allocator());
 }
 
 // paddata / trimdata / resize adapters.
@@ -217,7 +217,7 @@ struct ResizeOpts {
     double fillValue = 0.0;
 };
 
-ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *fn)
+ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const char *fn)
 {
     ResizeOpts opts;
     if (args.size() <= 2) return opts;
@@ -227,7 +227,7 @@ ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *f
         opts.dim = argcheck::dimArg(args[2], fn);
         if (args.size() >= 4) {
             static const char *const kSides[] = {"trailing", "leading", "both", "right", "left"};
-            const size_t sideIdx = argcheck::expectedChoice(
+            const keel::usize sideIdx = argcheck::expectedChoice(
                 args[3], {"trailing", "leading", "both", "right", "left"},
                 4, "Side", fn);
             opts.side = kSides[sideIdx];
@@ -238,8 +238,8 @@ ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *f
         throw Error(std::string(fn) + ": Name-Value arguments must occur in pairs",
                     0, 0, fn, "", std::string("numkit:") + fn + ":unpairedNameValue");
     }
-    for (size_t i = 2; i < args.size(); i += 2) {
-        const size_t keyIdx = allowFill
+    for (keel::usize i = 2; i < args.size(); i += 2) {
+        const keel::usize keyIdx = allowFill
             ? argcheck::expectedChoice(args[i], {"dimension", "side", "fillvalue"},
                                        static_cast<int>(i + 1), "Name", fn)
             : argcheck::expectedChoice(args[i], {"dimension", "side"},
@@ -257,7 +257,7 @@ ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *f
             }
         } else if (keyIdx == 1) {
             static const char *const kSides[] = {"trailing", "leading", "both", "right", "left"};
-            const size_t sideIdx = argcheck::expectedChoice(
+            const keel::usize sideIdx = argcheck::expectedChoice(
                 val, {"trailing", "leading", "both", "right", "left"},
                 static_cast<int>(i + 2), "Side", fn);
             opts.side = kSides[sideIdx];
@@ -268,63 +268,63 @@ ResizeOpts parseResizeOpts(Span<const Value> args, bool allowFill, const char *f
     return opts;
 }
 
-void paddata_reg(Span<const Value> args, size_t /*nargout*/,
-                 Span<Value> outs, CallContext &ctx)
+void paddata_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "paddata");
-    const size_t n = argcheck::arrayDim(args[1], "paddata");
+    const keel::usize n = argcheck::arrayDim(args[1], "paddata");
     if (args.size() == 2) {
-        outs[0] = numkit::narrowComplex(paddata(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(paddata(args[0], n, ctx.engine->allocator()), ctx.engine->allocator());
         return;
     }
     const auto opts = parseResizeOpts(args, true, "paddata");
     outs[0] = numkit::narrowComplex(
-        paddata(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->resource()),
-        ctx.engine->resource());
+        paddata(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
-void trimdata_reg(Span<const Value> args, size_t /*nargout*/,
-                  Span<Value> outs, CallContext &ctx)
+void trimdata_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "trimdata");
-    const size_t n = argcheck::arrayDim(args[1], "trimdata");
+    const keel::usize n = argcheck::arrayDim(args[1], "trimdata");
     if (args.size() == 2) {
-        outs[0] = numkit::narrowComplex(trimdata(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(trimdata(args[0], n, ctx.engine->allocator()), ctx.engine->allocator());
         return;
     }
     const auto opts = parseResizeOpts(args, false, "trimdata");
     outs[0] = numkit::narrowComplex(
-        trimdata(args[0], n, opts.dim, opts.side, ctx.engine->resource()),
-        ctx.engine->resource());
+        trimdata(args[0], n, opts.dim, opts.side, ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
-void resize_reg(Span<const Value> args, size_t /*nargout*/,
-                Span<Value> outs, CallContext &ctx)
+void resize_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "resize");
-    const size_t n = argcheck::arrayDim(args[1], "resize");
+    const keel::usize n = argcheck::arrayDim(args[1], "resize");
     if (args.size() == 2) {
-        outs[0] = numkit::narrowComplex(resize(args[0], n, ctx.engine->resource()), ctx.engine->resource());
+        outs[0] = numkit::narrowComplex(resize(args[0], n, ctx.engine->allocator()), ctx.engine->allocator());
         return;
     }
     const auto opts = parseResizeOpts(args, true, "resize");
     outs[0] = numkit::narrowComplex(
-        resize(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->resource()),
-        ctx.engine->resource());
+        resize(args[0], n, opts.dim, opts.side, opts.fillValue, ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
 // ind2sub(siz, ind) → multiple outputs (one per dim of siz). When the
 // caller requests fewer outputs than siz has dims, the last output
 // absorbs trailing dims (column-major linear index of the remainder).
-void ind2sub_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void ind2sub_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ind2sub");
     argcheck::checkNargin(args.size(), 2, 2, "ind2sub");
     std::vector<Value> rs = ind2sub(args[0], args[1],
-                                    std::max<size_t>(nargout, 1),
-                                    ctx.engine->resource());
-    for (size_t i = 0; i < rs.size() && i < outs.size(); ++i)
+                                    std::max<keel::usize>(nargout, 1),
+                                    ctx.engine->allocator());
+    for (keel::usize i = 0; i < rs.size() && i < outs.size(); ++i)
         outs[i] = std::move(rs[i]);
 }
 

@@ -3,6 +3,8 @@
 // CallContext register half of math/permutations.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
@@ -10,13 +12,10 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -32,11 +31,11 @@ namespace detail {
 // by ascending count of nonzero entries. Stable: ties broken by
 // original column index. Returns a row vector of doubles in MATLAB
 // (1-indexed).
-void colperm_reg(Span<const Value> args, size_t /*nargout*/,
-                 Span<Value> outs, CallContext &ctx)
+void colperm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "colperm");
-    outs[0] = colperm(args[0], ctx.engine->resource());
+    outs[0] = colperm(args[0], ctx.engine->allocator());
 }
 
 // p = symrcm(S) — symmetric reverse Cuthill-McKee ordering.
@@ -62,11 +61,11 @@ void colperm_reg(Span<const Value> args, size_t /*nargout*/,
 //     sparse symmetric matrices." Proc. 24th Nat. Conf. ACM, 157-172.
 //   - George, A. (1971). "Computer implementation of the finite
 //     element method." Tech. Rep. STAN-CS-71-208, Stanford Univ.
-void symrcm_reg(Span<const Value> args, size_t /*nargout*/,
-                Span<Value> outs, CallContext &ctx)
+void symrcm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "symrcm");
-    outs[0] = symrcm(args[0], ctx.engine->resource());
+    outs[0] = symrcm(args[0], ctx.engine->allocator());
 }
 
 } // namespace detail

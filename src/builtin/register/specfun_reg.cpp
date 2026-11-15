@@ -1,49 +1,52 @@
 // src/bundle/src/register/builtin/specfun_reg.cpp
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/complex.h>
+#include <keel/math.h>
 #include <numkit/builtin/specfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 #include <cmath>
-#include <complex>
 #include <limits>
 
 // Each registered adapter in specfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
 
-void airy_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void besselh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void besseli_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void besselj_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void besselk_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bessely_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void beta_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void betainc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void betaincinv_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void betaln_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ellipj_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ellipke_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void erf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void erfc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void erfcinv_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void erfcx_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void erfinv_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void expint_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void factor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void factorial_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gamma_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gammainc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gammaincinv_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gammaln_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gcd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isprime_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void lcm_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void legendre_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nchoosek_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void perms_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void primes_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void psi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void airy_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void besselh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void besseli_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void besselj_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void besselk_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bessely_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void beta_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void betainc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void betaincinv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void betaln_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ellipj_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ellipke_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void erf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void erfc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void erfcinv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void erfcx_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void erfinv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void expint_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void factor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void factorial_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gamma_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gammainc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gammaincinv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gammaln_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gcd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isprime_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void lcm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void legendre_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nchoosek_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void perms_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void primes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void psi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 
@@ -83,14 +86,14 @@ void register_specfun(Engine &engine) {
     engine.registerFunction("primes",      &::numkit::builtin::detail::primes_reg);
     engine.registerFunction("psi",         &::numkit::builtin::detail::psi_reg);
     engine.registerFunction("heaviside",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "heaviside");
-            std::pmr::memory_resource *mr = ctx.engine->resource();
+            keel::Allocator *mr = ctx.engine->allocator();
             const Value &x = args[0];
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
             double *dst = out.doubleDataMut();
-            const size_t n = x.numel();
-            for (size_t i = 0; i < n; ++i) {
+            const keel::usize n = x.numel();
+            for (keel::usize i = 0; i < n; ++i) {
                 double v = x.elemAsDouble(i);
                 if (std::isnan(v)) dst[i] = v;
                 else if (v < 0.0)  dst[i] = 0.0;
@@ -100,21 +103,21 @@ void register_specfun(Engine &engine) {
             outs[0] = std::move(out);
         });
     engine.registerFunction("sinint",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "sinint");
-            std::pmr::memory_resource *mr = ctx.engine->resource();
+            keel::Allocator *mr = ctx.engine->allocator();
             const Value &x = args[0];
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
             double *dst = out.doubleDataMut();
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             constexpr double kPi2 = 1.57079632679489661923;
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 double v = x.elemAsDouble(i);
                 if (std::isnan(v)) { dst[i] = v; continue; }
                 if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
                 if (v == 0.0) { dst[i] = 0.0; continue; }
                 double sgn = (v < 0.0) ? -1.0 : 1.0;
-                double ax = std::abs(v);
+                double ax = keel::abs(v);
                 double si = 0.0;
                 if (ax <= 4.0) {
                     si = ax;
@@ -123,16 +126,16 @@ void register_specfun(Engine &engine) {
                         p *= -ax * ax / (static_cast<double>(2 * k) * static_cast<double>(2 * k + 1));
                         double term = p / static_cast<double>(2 * k + 1);
                         si += term;
-                        if (std::abs(term) < 1e-16 * std::abs(si)) break;
+                        if (keel::abs(term) < 1e-16 * keel::abs(si)) break;
                     }
                 } else {
-                    std::complex<double> z(0.0, ax);
-                    std::complex<double> cf(0.0, 0.0);
+                    keel::c64 z(0.0, ax);
+                    keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
                         double kk = static_cast<double>(k);
-                        cf = std::complex<double>(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
                     }
-                    std::complex<double> h = 1.0 / (z + 1.0 + cf);
+                    keel::c64 h = 1.0 / (z + 1.0 + cf);
                     double f = -h.imag();
                     double g = h.real();
                     si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
@@ -142,13 +145,13 @@ void register_specfun(Engine &engine) {
             outs[0] = std::move(out);
         });
     engine.registerFunction("cosint",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "cosint");
-            std::pmr::memory_resource *mr = ctx.engine->resource();
+            keel::Allocator *mr = ctx.engine->allocator();
             const Value &x = args[0];
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             bool hasNeg = false;
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
             }
             constexpr double kGamma = 0.57721566490153286060651209;
@@ -161,17 +164,17 @@ void register_specfun(Engine &engine) {
                         p *= -ax * ax / (static_cast<double>(2 * k - 1) * static_cast<double>(2 * k));
                         double term = p / static_cast<double>(2 * k);
                         ci += term;
-                        if (std::abs(term) < 1e-16 * std::abs(ci)) break;
+                        if (keel::abs(term) < 1e-16 * keel::abs(ci)) break;
                     }
                     return ci;
                 } else {
-                    std::complex<double> z(0.0, ax);
-                    std::complex<double> cf(0.0, 0.0);
+                    keel::c64 z(0.0, ax);
+                    keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
                         double kk = static_cast<double>(k);
-                        cf = std::complex<double>(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
                     }
-                    std::complex<double> h = 1.0 / (z + 1.0 + cf);
+                    keel::c64 h = 1.0 / (z + 1.0 + cf);
                     double f = -h.imag();
                     double g = h.real();
                     return f * std::sin(ax) - g * std::cos(ax);
@@ -180,7 +183,7 @@ void register_specfun(Engine &engine) {
             if (!hasNeg) {
                 Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
                 double *dst = out.doubleDataMut();
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     double v = x.elemAsDouble(i);
                     if (std::isnan(v)) dst[i] = v;
                     else if (v == 0.0) dst[i] = -std::numeric_limits<double>::infinity();
@@ -191,20 +194,20 @@ void register_specfun(Engine &engine) {
             } else {
                 Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
                 auto *dst = out.complexDataMut();
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     double v = x.elemAsDouble(i);
                     if (std::isnan(v)) dst[i] = {v, v};
                     else if (v == 0.0) dst[i] = {-std::numeric_limits<double>::infinity(), 0.0};
                     else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
-                    else dst[i] = {evalPosCi(std::abs(v)), (v < 0.0) ? kPi : 0.0};
+                    else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
                 }
                 outs[0] = std::move(out);
             }
         });
     engine.registerFunction("lambertw",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "lambertw");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             int branch = 0;
             const Value &x = (args.size() == 2) ? args[1] : args[0];
             if (args.size() == 2)
@@ -217,7 +220,7 @@ void register_specfun(Engine &engine) {
                     if (z == 0.0) return 0.0;
                     if (std::isinf(z) && z > 0.0) return z;
                     if (z < negInvE) return std::numeric_limits<double>::quiet_NaN();
-                    if (std::abs(z - negInvE) <= 1e-15) return -1.0;
+                    if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
                     double w;
                     if (z < -0.3) {
                         double p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
@@ -232,47 +235,47 @@ void register_specfun(Engine &engine) {
                         double ew = std::exp(w);
                         double wew = w * ew;
                         double f = wew - z;
-                        if (std::abs(f) <= 1e-15 * (std::abs(z) + 1.0)) break;
+                        if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
                         double wp1 = w + 1.0;
                         double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
                         if (denom == 0.0) break;
                         double dw = f / denom;
                         w -= dw;
-                        if (std::abs(dw) <= 1e-15 * std::abs(w)) break;
+                        if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
                     }
                     return w;
                 } else if (k == -1) {
                     if (z < negInvE || z >= 0.0) return std::numeric_limits<double>::quiet_NaN();
-                    if (std::abs(z - negInvE) <= 1e-15) return -1.0;
+                    if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
                     double w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
                                           : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
                     for (int it = 0; it < 50; ++it) {
                         double ew = std::exp(w);
                         double f = w * ew - z;
-                        if (std::abs(f) <= 1e-15 * (std::abs(z) + 1.0)) break;
+                        if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
                         double wp1 = w + 1.0;
                         double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
                         if (denom == 0.0) break;
                         double dw = f / denom;
                         w -= dw;
-                        if (std::abs(dw) <= 1e-15 * std::abs(w)) break;
+                        if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
                     }
                     return w;
                 }
                 return std::numeric_limits<double>::quiet_NaN();
             };
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             if (n == 1) {
                 outs[0] = Value::scalar(evalLambertW(branch, x.elemAsDouble(0)), mr);
                 return;
             }
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
             double *dst = out.doubleDataMut();
-            for (size_t i = 0; i < n; ++i)
+            for (keel::usize i = 0; i < n; ++i)
                 dst[i] = evalLambertW(branch, x.elemAsDouble(i));
             outs[0] = std::move(out);
         });
-    auto noopFn = [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, CallContext &/*ctx*/) {
+    auto noopFn = [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &/*ctx*/) {
         outs[0] = Value();
     };
     engine.registerFunction("dbstop",   noopFn);

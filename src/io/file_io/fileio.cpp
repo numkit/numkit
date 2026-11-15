@@ -5,18 +5,21 @@
 // (6c.8.4b / 6c.8.5) because they need the shared precision / size
 // helpers.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/io/file_io/fileio.hpp>
 
 #include <numkit/sys/fs_context.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 
 #include <numkit/ops/io_helpers.hpp>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <memory_resource>
 #include <string>
 
 namespace numkit::io {
@@ -28,7 +31,7 @@ using namespace ::numkit::ops;
 
 namespace {
 
-FsContext::OpenFile *requireReadFid(FsContext &fs, Span<const Value> args, const char *fn)
+FsContext::OpenFile *requireReadFid(FsContext &fs, keel::ArrayRef<Value> args, const char *fn)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error(std::string(fn) + ": file identifier required");
@@ -45,7 +48,7 @@ FsContext::OpenFile *requireReadFid(FsContext &fs, Span<const Value> args, const
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr)
+void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("fopen: filename must be a char array");
@@ -60,7 +63,7 @@ void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         } else {
             auto row = Value::matrix(1, ids.size(), ValueType::DOUBLE, mr);
             double *d = row.doubleDataMut();
-            for (size_t i = 0; i < ids.size(); ++i)
+            for (keel::usize i = 0; i < ids.size(); ++i)
                 d[i] = static_cast<double>(ids[i]);
             outs[0] = std::move(row);
         }
@@ -84,7 +87,7 @@ void fopen(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError() : std::string(), mr);
 }
 
-void fclose(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void fclose(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty())
         throw Error("fclose: requires a file identifier or 'all'");
@@ -102,7 +105,7 @@ void fclose(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     outs[0] = Value::scalar(ok ? 0.0 : -1.0, mr);
 }
 
-void fgetl(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void fgetl(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     auto *f = requireReadFid(fs, args, "fgetl");
 
@@ -111,12 +114,12 @@ void fgetl(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
         outs[0] = Value::scalar(-1.0, mr);
         return;
     }
-    size_t start = f->cursor;
-    size_t nl = f->buffer.find('\n', start);
-    size_t end = (nl == std::string::npos) ? f->buffer.size() : nl;
+    keel::usize start = f->cursor;
+    keel::usize nl = f->buffer.find('\n', start);
+    keel::usize end = (nl == std::string::npos) ? f->buffer.size() : nl;
     // Strip trailing \r so CRLF files don't leak the carriage return —
     // MATLAB does the same.
-    size_t trimEnd = end;
+    keel::usize trimEnd = end;
     if (trimEnd > start && f->buffer[trimEnd - 1] == '\r')
         --trimEnd;
     std::string line = f->buffer.substr(start, trimEnd - start);
@@ -124,7 +127,7 @@ void fgetl(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
     outs[0] = Value::fromString(line, mr);
 }
 
-void fgets(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     auto *f = requireReadFid(fs, args, "fgets");
 
@@ -133,13 +136,13 @@ void fgets(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
         outs[0] = Value::scalar(-1.0, mr);
         return;
     }
-    size_t start = f->cursor;
-    size_t remaining = f->buffer.size() - start;
-    size_t nchar = (args.size() >= 2 && args[1].isScalar())
-                       ? static_cast<size_t>(args[1].toScalar())
+    keel::usize start = f->cursor;
+    keel::usize remaining = f->buffer.size() - start;
+    keel::usize nchar = (args.size() >= 2 && args[1].isScalar())
+                       ? static_cast<keel::usize>(args[1].toScalar())
                        : remaining;
-    size_t nlPos = f->buffer.find('\n', start);
-    size_t end;
+    keel::usize nlPos = f->buffer.find('\n', start);
+    keel::usize end;
     if (nlPos != std::string::npos && nlPos < start + nchar)
         end = nlPos + 1; // include newline
     else
@@ -149,7 +152,7 @@ void fgets(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
     outs[0] = Value::fromString(line, mr);
 }
 
-void feof(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void feof(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("feof: file identifier required");
@@ -160,7 +163,7 @@ void feof(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::
     outs[0] = Value::logicalScalar(f->cursor >= f->buffer.size(), mr);
 }
 
-void ferror(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr)
+void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ferror: file identifier required");
@@ -179,7 +182,7 @@ void ferror(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> o
         outs[1] = Value::scalar(msg.empty() ? 0.0 : -1.0, mr);
 }
 
-void ftell(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ftell: file identifier required");
@@ -190,11 +193,11 @@ void ftell(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
         return;
     }
     // Write-mode: report end-of-buffer (where next append lands).
-    size_t pos = f->forWrite ? f->buffer.size() : f->cursor;
+    keel::usize pos = f->forWrite ? f->buffer.size() : f->cursor;
     outs[0] = Value::scalar(static_cast<double>(pos), mr);
 }
 
-void fseek(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     auto fail = [&]() { outs[0] = Value::scalar(-1.0, mr); };
 
@@ -236,14 +239,14 @@ void fseek(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std:
     else base = static_cast<long long>(f->buffer.size());
 
     long long target = base + offset;
-    if (target < 0 || static_cast<size_t>(target) > f->buffer.size())
+    if (target < 0 || static_cast<keel::usize>(target) > f->buffer.size())
         return fail();
 
-    f->cursor = static_cast<size_t>(target);
+    f->cursor = static_cast<keel::usize>(target);
     outs[0] = Value::scalar(0.0, mr);
 }
 
-void frewind(FsContext &fs, Span<const Value> args, size_t, Span<Value>, std::pmr::memory_resource *mr)
+void frewind(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("frewind: file identifier required");
@@ -256,7 +259,7 @@ void frewind(FsContext &fs, Span<const Value> args, size_t, Span<Value>, std::pm
 
 // ── Binary I/O ──────────────────────────────────────────────────────────
 
-void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> outs, std::pmr::memory_resource *mr)
+void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("fread: file identifier required");
@@ -279,16 +282,16 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
     if (!precOpt)
         throw Error("fread: unsupported precision '" + precStr + "'");
     int kind = precOpt->first;
-    size_t bsize = precOpt->second;
+    keel::usize bsize = precOpt->second;
 
-    size_t skip = 0;
+    keel::usize skip = 0;
     bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
         if (args[3].isChar() || args[3].isString()) {
             be = numkit::ops::parseEndian(args[3].toString(), "fread");
         } else if (args[3].isScalar() || args[3].isEmpty()) {
             if (args[3].isScalar())
-                skip = static_cast<size_t>(std::max(0.0, args[3].toScalar()));
+                skip = static_cast<keel::usize>(std::max(0.0, args[3].toScalar()));
         } else {
             throw Error("fread: machine format must be a char array");
         }
@@ -299,16 +302,16 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         be = numkit::ops::parseEndian(args[4].toString(), "fread");
     }
 
-    size_t available = f->buffer.size() - f->cursor;
-    size_t stride = bsize + skip;
-    size_t maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
-    size_t n = std::min(sz.limit, maxElems);
+    keel::usize available = f->buffer.size() - f->cursor;
+    keel::usize stride = bsize + skip;
+    keel::usize maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
+    keel::usize n = std::min(sz.limit, maxElems);
     if (sz.limit != SIZE_MAX && n < sz.limit)
         f->lastError = "End of file reached.";
 
-    ScratchArena scratch(mr);
-    auto values = ScratchVec<double>(n, &scratch);
-    for (size_t i = 0; i < n; ++i) {
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto values = keel::Array<double>(n, scratch.allocator());
+    for (keel::usize i = 0; i < n; ++i) {
         // Local copy lets us byte-swap safely without mutating f->buffer.
         char tmp[8];
         std::memcpy(tmp, f->buffer.data() + f->cursor + i * stride, bsize);
@@ -317,17 +320,17 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         double v = 0.0;
         if (kind == 0) {
             switch (bsize) {
-            case 1: { uint8_t  x; std::memcpy(&x, tmp, 1); v = x; break; }
-            case 2: { uint16_t x; std::memcpy(&x, tmp, 2); v = x; break; }
-            case 4: { uint32_t x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { uint64_t x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
+            case 1: { keel::u8  x; std::memcpy(&x, tmp, 1); v = x; break; }
+            case 2: { keel::u16 x; std::memcpy(&x, tmp, 2); v = x; break; }
+            case 4: { keel::u32 x; std::memcpy(&x, tmp, 4); v = x; break; }
+            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
-            case 1: { int8_t  x; std::memcpy(&x, tmp, 1); v = x; break; }
-            case 2: { int16_t x; std::memcpy(&x, tmp, 2); v = x; break; }
-            case 4: { int32_t x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { int64_t x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
+            case 1: { keel::i8  x; std::memcpy(&x, tmp, 1); v = x; break; }
+            case 2: { keel::i16 x; std::memcpy(&x, tmp, 2); v = x; break; }
+            case 4: { keel::i32 x; std::memcpy(&x, tmp, 4); v = x; break; }
+            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
             }
         } else {
             if (bsize == 4) { float x; std::memcpy(&x, tmp, 4); v = x; }
@@ -336,7 +339,7 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         values[i] = v;
     }
     if (n > 0) {
-        size_t adv = (n - 1) * stride + bsize;
+        keel::usize adv = (n - 1) * stride + bsize;
         f->cursor = std::min(f->buffer.size(), f->cursor + adv);
     }
     outs[0] = numkit::ops::shapeFreadOutput(values.data(), values.size(), sz, mr);
@@ -344,7 +347,7 @@ void fread(FsContext &fs, Span<const Value> args, size_t nargout, Span<Value> ou
         outs[1] = Value::scalar(static_cast<double>(n), mr);
 }
 
-void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std::pmr::memory_resource *mr)
+void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.size() < 2 || !args[0].isScalar())
         throw Error("fwrite: requires (fid, array [, precision [, machineformat]])");
@@ -363,7 +366,7 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     if (!precOpt)
         throw Error("fwrite: unsupported precision '" + precStr + "'");
     int kind = precOpt->first;
-    size_t bsize = precOpt->second;
+    keel::usize bsize = precOpt->second;
 
     bool be = (f->mode.find(";be") != std::string::npos);
     if (args.size() >= 4) {
@@ -376,7 +379,7 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     if (A.isObject() || A.isStruct() || A.isCell() || A.isFuncHandle())
         throw Error("fwrite: cannot write value of unsupported class",
                     0, 0, "fwrite", "", "numkit:fwrite:unsupportedClass");
-    size_t numel = A.numel();
+    keel::usize numel = A.numel();
 
     // Accept any numeric element type — `Value::elemAsDouble` handles
     // DOUBLE/SINGLE/LOGICAL/CHAR/INT*/UINT* uniformly. The on-disk
@@ -384,21 +387,21 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
     // MATLAB-style `fwrite(fid, uint8([...]), 'uint8')` works.
     std::string bytes(numel * bsize, '\0');
     char *dst = bytes.data();
-    for (size_t i = 0; i < numel; ++i) {
+    for (keel::usize i = 0; i < numel; ++i) {
         double v = A.elemAsDouble(i);
         if (kind == 0) {
             switch (bsize) {
-            case 1: { uint8_t  x = static_cast<uint8_t >(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { uint16_t x = static_cast<uint16_t>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { uint32_t x = static_cast<uint32_t>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { uint64_t x = static_cast<uint64_t>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::u8  x = static_cast<keel::u8 >(v); std::memcpy(dst, &x, 1); break; }
+            case 2: { keel::u16 x = static_cast<keel::u16>(v); std::memcpy(dst, &x, 2); break; }
+            case 4: { keel::u32 x = static_cast<keel::u32>(v); std::memcpy(dst, &x, 4); break; }
+            case 8: { keel::u64 x = static_cast<keel::u64>(v); std::memcpy(dst, &x, 8); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
-            case 1: { int8_t  x = static_cast<int8_t >(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { int16_t x = static_cast<int16_t>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { int32_t x = static_cast<int32_t>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { int64_t x = static_cast<int64_t>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::i8  x = static_cast<keel::i8 >(v); std::memcpy(dst, &x, 1); break; }
+            case 2: { keel::i16 x = static_cast<keel::i16>(v); std::memcpy(dst, &x, 2); break; }
+            case 4: { keel::i32 x = static_cast<keel::i32>(v); std::memcpy(dst, &x, 4); break; }
+            case 8: { keel::i64 x = static_cast<keel::i64>(v); std::memcpy(dst, &x, 8); break; }
             }
         } else {
             if (bsize == 4) { float x = static_cast<float>(v); std::memcpy(dst, &x, 4); }
@@ -411,7 +414,7 @@ void fwrite(FsContext &fs, Span<const Value> args, size_t, Span<Value> outs, std
 
     // Same cursor-based write contract as fprintf — appendOnly snaps to
     // the end regardless of any prior seek.
-    size_t writePos = f->appendOnly ? f->buffer.size() : f->cursor;
+    keel::usize writePos = f->appendOnly ? f->buffer.size() : f->cursor;
     if (writePos + bytes.size() > f->buffer.size())
         f->buffer.resize(writePos + bytes.size());
     std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());

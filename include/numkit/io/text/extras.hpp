@@ -4,8 +4,8 @@
 
 #pragma once
 
+#include <keel/memory.h>
 #include <functional>
-#include <memory_resource>
 #include <numkit/value/value.hpp>
 
 #include <string>
@@ -40,7 +40,7 @@ std::string slurpFile(FsContext &fs, const std::string &filename,
 /// @param mr       Memory resource (nullptr → process default).
 /// @return         DOUBLE matrix.
 Value readmatrixFromString(const std::string &content,
-                           std::pmr::memory_resource *mr = nullptr);
+                           keel::Allocator *mr = nullptr);
 
 /// @brief Serialize a numeric matrix to CSV text — **Engine-free**.
 ///
@@ -61,7 +61,7 @@ std::string writematrixToString(const Value &m);
 /// @throws Error    File not found / read error.
 /// @see readlines, readmatrix
 Value fileread(FsContext &fs, const std::string &filename,
-               std::pmr::memory_resource *mr = nullptr);
+               keel::Allocator *mr = nullptr);
 
 /// @brief Read file as STRING array (`L = readlines(filename)`).
 ///
@@ -73,7 +73,7 @@ Value fileread(FsContext &fs, const std::string &filename,
 /// @return          STRING column array.
 /// @see fileread, writelines
 Value readlines(FsContext &fs, const std::string &filename,
-                std::pmr::memory_resource *mr = nullptr);
+                keel::Allocator *mr = nullptr);
 
 /// @brief Write a STRING array as text lines (`writelines(lines, filename)`).
 ///
@@ -99,7 +99,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename);
 /// @throws Error    File not found / parse failure.
 /// @see writematrix, fileread
 Value readmatrix(FsContext &fs, const std::string &filename,
-                 std::pmr::memory_resource *mr = nullptr);
+                 keel::Allocator *mr = nullptr);
 
 /// @brief Write numeric matrix as CSV (`writematrix(M, filename)`).
 ///

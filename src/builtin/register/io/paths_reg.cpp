@@ -2,6 +2,8 @@
 // CallContext adapters for io.paths filesep/fullfile/fileparts/tempdir/tempname.
 // Compute is Engine-free in toolboxes/io/src/paths/paths.cpp; these bridge via
 // engine.fsContext()/resource(). IoLibrary::install registers them by name.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/paths/paths.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -14,16 +16,16 @@
 
 namespace numkit::io::detail {
 
-void filesep_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void filesep_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 0, "filesep");
-    outs[0] = filesep(ctx.engine->resource());
+    outs[0] = filesep(ctx.engine->allocator());
 }
 
-void fullfile_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void fullfile_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty()) {
-        outs[0] = Value::matrix(1, 0, ValueType::CHAR, ctx.engine->resource());
+        outs[0] = Value::matrix(1, 0, ValueType::CHAR, ctx.engine->allocator());
         return;
     }
     std::vector<std::string> parts;
@@ -34,31 +36,31 @@ void fullfile_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
                          0, 0, "fullfile", "", "numkit:fullfile:badArg");
         parts.push_back(a.toString());
     }
-    outs[0] = fullfile(Span<const std::string>(parts.data(), parts.size()), ctx.engine->resource());
+    outs[0] = fullfile(keel::ArrayRef<std::string>(parts.data(), parts.size()), ctx.engine->allocator());
 }
 
-void fileparts_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void fileparts_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "fileparts");
     if (!args[0].isChar() && !args[0].isString())
         throw Error("fileparts: requires a string path",
                      0, 0, "fileparts", "", "numkit:fileparts:nargin");
-    auto [folder, name, ext] = fileparts(args[0].toString(), ctx.engine->resource());
+    auto [folder, name, ext] = fileparts(args[0].toString(), ctx.engine->allocator());
     outs[0] = std::move(folder);
     if (nargout > 1) outs[1] = std::move(name);
     if (nargout > 2) outs[2] = std::move(ext);
 }
 
-void tempdir_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void tempdir_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 0, "tempdir");
-    outs[0] = tempdir(ctx.engine->fsContext(), ctx.engine->resource());
+    outs[0] = tempdir(ctx.engine->fsContext(), ctx.engine->allocator());
 }
 
-void tempname_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void tempname_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 1, "tempname");
-    outs[0] = tempname(ctx.engine->fsContext(), ctx.engine->resource());
+    outs[0] = tempname(ctx.engine->fsContext(), ctx.engine->allocator());
 }
 
 // ── genpath: recursive path string from a directory tree ────────────
@@ -87,7 +89,7 @@ void genpathCollect(Engine &eng, const std::string &dir, std::string &out)
 }
 } // namespace
 
-void genpath_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void genpath_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "genpath");
     if (!args[0].isChar())
@@ -95,7 +97,7 @@ void genpath_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &
                      0, 0, "genpath", "", "numkit:genpath:nargin");
     std::string result;
     genpathCollect(*ctx.engine, args[0].toString(), result);
-    outs[0] = Value::fromString(result, ctx.engine->resource());
+    outs[0] = Value::fromString(result, ctx.engine->allocator());
 }
 
 } // namespace numkit::io::detail

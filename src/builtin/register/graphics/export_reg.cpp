@@ -11,6 +11,9 @@
 // formats (.pdf/.eps/.fig/.emf) throw a clear "not supported" — filed
 // in bugs/opened/graphics/figure-export-gaps.md, never silent.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -30,7 +33,7 @@ namespace {
 
 std::string lowerExtOf(const std::string &path)
 {
-    size_t dot = path.find_last_of('.');
+    keel::usize dot = path.find_last_of('.');
     if (dot == std::string::npos)
         return "";
     std::string e = path.substr(dot + 1);
@@ -46,36 +49,36 @@ std::string lowerExtOf(const std::string &path)
 const char kBase64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 figrender::SvgImageEmbedder svgPngEmbedder(
-    std::pmr::memory_resource *mr)
+    keel::Allocator *mr)
 {
-    return [mr](const std::vector<std::uint8_t> &rgb, int w, int h) {
-        const size_t Hp = (size_t)h, Wp = (size_t)w;
+    return [mr](const std::vector<keel::u8> &rgb, int w, int h) {
+        const keel::usize Hp = (keel::usize)h, Wp = (keel::usize)w;
         Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
-        std::uint8_t *d = A.uint8DataMut();
-        for (size_t r = 0; r < Hp; ++r)
-            for (size_t c = 0; c < Wp; ++c)
-                for (size_t ch = 0; ch < 3; ++ch)
+        keel::u8 *d = A.uint8DataMut();
+        for (keel::usize r = 0; r < Hp; ++r)
+            for (keel::usize c = 0; c < Wp; ++c)
+                for (keel::usize ch = 0; ch < 3; ++ch)
                     d[r + c * Hp + ch * Hp * Wp] =
                         rgb[(r * Wp + c) * 3 + ch];
         std::string png = image::imwriteToBytes(A, "png", mr);
         std::string b64 = "data:image/png;base64,";
         b64.reserve(b64.size() + (png.size() / 3 + 1) * 4);
-        size_t i = 0;
+        keel::usize i = 0;
         for (; i + 2 < png.size(); i += 3) {
             // Cast through uint8_t FIRST: png[i] is signed char, so
             // (char)0xFF << 16 sign-extends and corrupts every byte
             // >= 0x80 (most of any PNG).
-            std::uint32_t v = ((std::uint32_t)(std::uint8_t)png[i] << 16)
-                            | ((std::uint32_t)(std::uint8_t)png[i + 1] << 8)
-                            | (std::uint8_t)png[i + 2];
+            keel::u32 v = ((keel::u32)(keel::u8)png[i] << 16)
+                            | ((keel::u32)(keel::u8)png[i + 1] << 8)
+                            | (keel::u8)png[i + 2];
             b64 += kBase64[(v >> 18) & 63];
             b64 += kBase64[(v >> 12) & 63];
             b64 += kBase64[(v >> 6) & 63];
             b64 += kBase64[v & 63];
         }
-        size_t rem = png.size() - i;
-        std::uint8_t b0 = rem >= 1 ? (std::uint8_t)png[i] : 0;
-        std::uint8_t b1 = rem >= 2 ? (std::uint8_t)png[i + 1] : 0;
+        keel::usize rem = png.size() - i;
+        keel::u8 b0 = rem >= 1 ? (keel::u8)png[i] : 0;
+        keel::u8 b1 = rem >= 2 ? (keel::u8)png[i + 1] : 0;
         if (rem == 1) {
             b64 += kBase64[b0 >> 2];
             b64 += kBase64[(b0 & 3) << 4];
@@ -119,12 +122,12 @@ struct ExportArgs {
 // Shared argument walk for all three entry points: a handle/number
 // target, one filename, format flags ('-dpng', 'png'), '-r###'
 // resolution, and (ignored, accepted) Name-Value pairs.
-ExportArgs parseExportArgs(Engine &engine, Span<const Value> args,
+ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
                             const char *who, bool needTarget)
 {
     ExportArgs out;
     bool havePath = false, haveTarget = false;
-    for (size_t i = 0; i < args.size(); ++i) {
+    for (keel::usize i = 0; i < args.size(); ++i) {
         const Value &a = args[i];
         if (a.isObject() || (a.isScalar() && !a.isChar())) {
             if (!haveTarget) {
@@ -202,7 +205,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
         rp.fs->writeFile(rp.path,
                          figrender::renderFigureSvg(*ea.fig, W, H,
                                                      svgPngEmbedder(
-                                                         engine.resource())));
+                                                         engine.allocator())));
         return;
     }
     if (ea.ext == "pdf") {
@@ -222,22 +225,22 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
               "figure-export-gaps.md");
     }
     // Raster formats → RGB buffer → image toolbox encoder.
-    std::vector<std::uint8_t> rgb =
+    std::vector<keel::u8> rgb =
         figrender::renderFigureRgb(*ea.fig, W, H);
-    const size_t Hp = (size_t)H, Wp = (size_t)W;
+    const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
     Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8,
-                              engine.resource());
-    std::uint8_t *d = A.uint8DataMut();
+                              engine.allocator());
+    keel::u8 *d = A.uint8DataMut();
     // Value is COLUMN-MAJOR (MATLAB layout): d[r + c*H + ch*H*W]. The
     // raster buffer is row-major top-down RGB — transpose into place
     // (filling it linearly scrambles the image into crisscrossing
     // diagonal noise).
-    for (size_t r = 0; r < Hp; ++r)
-        for (size_t c = 0; c < Wp; ++c)
-            for (size_t ch = 0; ch < 3; ++ch)
+    for (keel::usize r = 0; r < Hp; ++r)
+        for (keel::usize c = 0; c < Wp; ++c)
+            for (keel::usize ch = 0; ch < 3; ++ch)
                 d[r + c * Hp + ch * Hp * Wp] =
                     rgb[(r * Wp + c) * 3 + ch];
-    std::string bytes = image::imwriteToBytes(A, ea.ext, engine.resource());
+    std::string bytes = image::imwriteToBytes(A, ea.ext, engine.allocator());
     rp.fs->writeFileBytes(rp.path, bytes);
 }
 
@@ -247,8 +250,8 @@ void registerFigureExport(Engine &engine)
 {
     // saveas(h, filename [, fmt])
     {
-        ExternalFunc fn = [&engine](Span<const Value> args, size_t,
-                                    Span<Value> outs, CallContext &ctx) {
+        ExternalFunc fn = [&engine](keel::ArrayRef<Value> args, keel::usize,
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "saveas");
             // saveas(filename) targets the current figure.
             bool firstIsTarget = args[0].isObject()
@@ -262,8 +265,8 @@ void registerFigureExport(Engine &engine)
     }
     // exportgraphics(obj, filename [, Name,Value])
     {
-        ExternalFunc fn = [](Span<const Value> args, size_t,
-                             Span<Value> outs, CallContext &ctx) {
+        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
+                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, "exportgraphics");
             ExportArgs ea = parseExportArgs(*ctx.engine, args,
                                             "exportgraphics",
@@ -276,8 +279,8 @@ void registerFigureExport(Engine &engine)
     // print(fig, filename, '-dpng' [, '-r###' …]) and the command form
     // `print -dpng file.png` (glue args arrive the same way).
     {
-        ExternalFunc fn = [&engine](Span<const Value> args, size_t,
-                                    Span<Value> outs, CallContext &ctx) {
+        ExternalFunc fn = [&engine](keel::ArrayRef<Value> args, keel::usize,
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             (void)engine;
             argcheck::checkNargin(args.size(), 1, "print");
             ExportArgs ea = parseExportArgs(*ctx.engine, args, "print",
@@ -289,8 +292,8 @@ void registerFigureExport(Engine &engine)
     }
     // shading('interp'|'flat'|'faceted') / lighting / material / movie
     {
-        ExternalFunc fn = [](Span<const Value>, size_t,
-                             Span<Value> outs, CallContext &) {
+        ExternalFunc fn = [](keel::ArrayRef<Value>, keel::usize,
+                             keel::MutArrayRef<Value> outs, CallContext &) {
             if (!outs.empty()) outs[0] = Value();
         };
         engine.registerFunction("", "shading", fn);
@@ -300,29 +303,29 @@ void registerFigureExport(Engine &engine)
     }
     // light(...) -> returns handle or scalar
     {
-        ExternalFunc fn = [](Span<const Value>, size_t,
-                             Span<Value> outs, CallContext &ctx) {
-            if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->resource());
+        ExternalFunc fn = [](keel::ArrayRef<Value>, keel::usize,
+                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->allocator());
         };
         engine.registerFunction("", "light", std::move(fn));
     }
     // getframe([h]) -> returns struct('cdata', HxWx3 uint8, 'colormap', [])
     {
-        ExternalFunc fn = [](Span<const Value> args, size_t,
-                             Span<Value> outs, CallContext &ctx) {
+        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
+                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 0, 2, "getframe");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             const FigureState *fig = nullptr;
             if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
             if (!fig) fig = &ctx.engine->figureManager().current();
             const int W = 560, H = 420;
-            std::vector<std::uint8_t> rgb = figrender::renderFigureRgb(*fig, W, H);
-            const size_t Hp = (size_t)H, Wp = (size_t)W;
+            std::vector<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
+            const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
             Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
-            std::uint8_t *d = A.uint8DataMut();
-            for (size_t r = 0; r < Hp; ++r)
-                for (size_t c = 0; c < Wp; ++c)
-                    for (size_t ch = 0; ch < 3; ++ch)
+            keel::u8 *d = A.uint8DataMut();
+            for (keel::usize r = 0; r < Hp; ++r)
+                for (keel::usize c = 0; c < Wp; ++c)
+                    for (keel::usize ch = 0; ch < 3; ++ch)
                         d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
             Value s = Value::structure(mr);
             s.field("cdata") = std::move(A);
@@ -333,10 +336,10 @@ void registerFigureExport(Engine &engine)
     }
     // frame2im(F) -> [X, Map] and im2frame(X [, map]) -> F
     {
-        ExternalFunc f2i = [](Span<const Value> args, size_t nargout,
-                              Span<Value> outs, CallContext &ctx) {
+        ExternalFunc f2i = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "frame2im");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             const Value &f = args[0];
             Value cdata = Value::matrix3d(1, 1, 3, ValueType::UINT8, mr);
             Value cmap = Value::Empty;
@@ -351,10 +354,10 @@ void registerFigureExport(Engine &engine)
         };
         engine.registerFunction("", "frame2im", std::move(f2i));
 
-        ExternalFunc i2f = [](Span<const Value> args, size_t,
-                              Span<Value> outs, CallContext &ctx) {
+        ExternalFunc i2f = [](keel::ArrayRef<Value> args, keel::usize,
+                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "im2frame");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             Value s = Value::structure(mr);
             s.field("cdata") = args[0];
             s.field("colormap") = (args.size() >= 2) ? args[1] : Value::Empty;
@@ -364,11 +367,11 @@ void registerFigureExport(Engine &engine)
     }
     // High-level chart & viewer helpers: imtool, implay, boxchart, heatmap, probplot, dendrogram
     {
-        ExternalFunc chartNoop = [](Span<const Value>, size_t nargout,
-                                    Span<Value> outs, CallContext &ctx) {
+        ExternalFunc chartNoop = [](keel::ArrayRef<Value>, keel::usize nargout,
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             ctx.engine->figureManager().current();
             if (!outs.empty())
-                outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->resource()) : Value();
+                outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->allocator()) : Value();
         };
         engine.registerFunction("", "imtool", chartNoop);
         engine.registerFunction("", "implay", chartNoop);
@@ -380,26 +383,26 @@ void registerFigureExport(Engine &engine)
         engine.registerFunction("", "pan", chartNoop);
         engine.registerFunction("", "rotate3d", chartNoop);
 
-        ExternalFunc dendroFn = [](Span<const Value> args, size_t nargout,
-                                   Span<Value> outs, CallContext &ctx) {
+        ExternalFunc dendroFn = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
             ctx.engine->figureManager().current();
-            auto *mr = ctx.engine->resource();
-            size_t m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
+            auto *mr = ctx.engine->allocator();
+            keel::usize m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
             if (nargout == 0) {
                 if (!outs.empty()) outs[0] = Value();
                 return;
             }
             Value H = Value::matrix(m, 1, ValueType::DOUBLE, mr);
-            for (size_t i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
+            for (keel::usize i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
             outs[0] = std::move(H);
             if (nargout >= 2 && outs.size() >= 2) {
                 Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
-                for (size_t i = 0; i <= m; ++i) T.doubleDataMut()[i] = static_cast<double>(i + 1);
+                for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = static_cast<double>(i + 1);
                 outs[1] = std::move(T);
             }
             if (nargout >= 3 && outs.size() >= 3) {
                 Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
-                for (size_t i = 0; i <= m; ++i) P.doubleDataMut()[i] = static_cast<double>(i + 1);
+                for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = static_cast<double>(i + 1);
                 outs[2] = std::move(P);
             }
         };
@@ -414,14 +417,14 @@ void registerFigureExport(Engine &engine)
         };
         for (const char *cname : kCmapFns) {
             std::string paletteName = cname;
-            ExternalFunc fn = [paletteName](Span<const Value> args, size_t,
-                                            Span<Value> outs, CallContext &ctx) {
+            ExternalFunc fn = [paletteName](keel::ArrayRef<Value> args, keel::usize,
+                                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 argcheck::checkNargin(args.size(), 0, 1, paletteName.c_str());
-                auto *mr = ctx.engine->resource();
-                size_t m = 256;
+                auto *mr = ctx.engine->allocator();
+                keel::usize m = 256;
                 if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {
                     double mv = args[0].toScalar();
-                    m = (mv >= 0.0) ? static_cast<size_t>(mv) : 0;
+                    m = (mv >= 0.0) ? static_cast<keel::usize>(mv) : 0;
                 }
                 Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
                 if (m > 0) {
@@ -444,11 +447,11 @@ void registerFigureExport(Engine &engine)
                             const int b = g - n;
                             if (r >= 1 && r <= mi) {
                                 ++rcount;
-                                d[0 * m + static_cast<size_t>(r - 1)] = u_at(rcount);
+                                d[0 * m + static_cast<keel::usize>(r - 1)] = u_at(rcount);
                             }
                             if (g >= 1 && g <= mi) {
                                 ++gcount;
-                                d[1 * m + static_cast<size_t>(g - 1)] = u_at(gcount);
+                                d[1 * m + static_cast<keel::usize>(g - 1)] = u_at(gcount);
                             }
                             if (b >= 1 && b <= mi) ++bcount;
                         }
@@ -458,16 +461,16 @@ void registerFigureExport(Engine &engine)
                             const int b = g - n;
                             if (b >= 1 && b <= mi) {
                                 ++bsofar;
-                                d[2 * m + static_cast<size_t>(b - 1)] = u_at(ulen - bcount + bsofar);
+                                d[2 * m + static_cast<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
                             }
                         }
                     } else if (paletteName == "gray") {
-                        for (size_t i = 0; i < m; ++i) {
+                        for (keel::usize i = 0; i < m; ++i) {
                             double g = (m == 1) ? 0.0 : double(i) / double(m - 1);
                             d[i] = d[i + m] = d[i + 2 * m] = g;
                         }
                     } else if (paletteName == "cool") {
-                        for (size_t i = 0; i < m; ++i) {
+                        for (keel::usize i = 0; i < m; ++i) {
                             double r = (m == 1) ? 0.0 : double(i) / double(m - 1);
                             d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
                         }
@@ -481,8 +484,8 @@ void registerFigureExport(Engine &engine)
                         }
                     } else {
                         int tableN = 256;
-                        const std::uint8_t *tbl = figrender::namedPalette(paletteName, tableN);
-                        for (size_t i = 0; i < m; ++i) {
+                        const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
+                        for (keel::usize i = 0; i < m; ++i) {
                             double t = (m == 1) ? 0.0 : static_cast<double>(i) / static_cast<double>(m - 1);
                             int idx = std::min(tableN - 1, std::max(0, static_cast<int>(std::lround(t * (tableN - 1)))));
                             d[i]         = tbl[idx * 3 + 0] / 255.0;

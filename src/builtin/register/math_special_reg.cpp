@@ -3,6 +3,8 @@
 // CallContext register half of math/special/special.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/specfun.hpp>
@@ -11,13 +13,10 @@
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -30,13 +29,13 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 namespace detail {
 
 #define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
-                    Span<Value> outs, CallContext &ctx)                        \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                        \
     {                                                                            \
         if (args.empty())                                                        \
             throw Error(#name ": requires 1 argument",                          \
                          0, 0, #name, "", "numkit:" #name ":nargin");                 \
-        outs[0] = fn(args[0], ctx.engine->resource());                          \
+        outs[0] = fn(args[0], ctx.engine->allocator());                          \
     }
 
 NUMKIT_UNARY_ADAPTER(gamma,   gamma)
@@ -93,10 +92,10 @@ double polygammaScalar(int k, double x)
 
 } // namespace
 
-void psi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "psi");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = psi(args[0], mr);
         return;
@@ -112,12 +111,12 @@ void psi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     const Value &X = args[1];
     Value out = ops::createLike(X, ValueType::DOUBLE, mr);
     double *od = out.doubleDataMut();
-    for (size_t i = 0; i < X.numel(); ++i)
+    for (keel::usize i = 0; i < X.numel(); ++i)
         od[i] = polygammaScalar(k, X.elemAsDouble(i));
     if (X.type() == ValueType::SINGLE) {
         Value sOut = ops::createLike(X, ValueType::SINGLE, mr);
         float *sd = sOut.singleDataMut();
-        for (size_t i = 0; i < X.numel(); ++i)
+        for (keel::usize i = 0; i < X.numel(); ++i)
             sd[i] = static_cast<float>(od[i]);
         outs[0] = std::move(sOut);
     } else {
@@ -125,37 +124,37 @@ void psi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     }
 }
 
-void beta_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void beta_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
               CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "beta");
     argcheck::checkNargin(args.size(), 2, 2, "beta");
-    outs[0] = beta(args[0], args[1], ctx.engine->resource());
+    outs[0] = beta(args[0], args[1], ctx.engine->allocator());
 }
 
-void betaln_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void betaln_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "betaln");
     argcheck::checkNargin(args.size(), 2, 2, "betaln");
-    outs[0] = betaln(args[0], args[1], ctx.engine->resource());
+    outs[0] = betaln(args[0], args[1], ctx.engine->allocator());
 }
 
-void gammainc_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void gammainc_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "gammainc");
     argcheck::checkNargin(args.size(), 2, 3, "gammainc");
-    outs[0] = gammainc(args[0], args[1], ctx.engine->resource());
+    outs[0] = gammainc(args[0], args[1], ctx.engine->allocator());
 }
 
-void betainc_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void betainc_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "betainc");
     argcheck::checkNargin(args.size(), 3, 4, "betainc");
-    outs[0] = betainc(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = betainc(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
-void legendre_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void legendre_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "legendre");
     argcheck::checkNargin(args.size(), 2, 3, "legendre");
@@ -163,17 +162,17 @@ void legendre_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     argcheck::expectedInteger(nv, 1, "n", "legendre");
     argcheck::expectedNonNegative(nv, 1, "n", "legendre");
     const int n = static_cast<int>(nv);
-    outs[0] = legendre(n, args[1], ctx.engine->resource());
+    outs[0] = legendre(n, args[1], ctx.engine->allocator());
 }
 
 #define NUMKIT_BESSEL_REG(name)                                                       \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                  \
-                    Span<Value> outs, CallContext &ctx)                          \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                  \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                          \
     {                                                                              \
         if (args.size() < 2)                                                       \
             throw Error(#name ": requires (nu, x)",                              \
                          0, 0, #name, "", "numkit:" #name ":nargin");                  \
-        outs[0] = name(args[0], args[1], ctx.engine->resource());                \
+        outs[0] = name(args[0], args[1], ctx.engine->allocator());                \
     }
 
 NUMKIT_BESSEL_REG(besselj)
@@ -183,11 +182,11 @@ NUMKIT_BESSEL_REG(besselk)
 
 #undef NUMKIT_BESSEL_REG
 
-void besselh_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void besselh_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "besselh");
     argcheck::checkNargin(args.size(), 2, 4, "besselh");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // 2-arg form defaults to k = 1.
         outs[0] = besselh(args[0], 1, args[1], mr);
@@ -198,19 +197,19 @@ void besselh_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
     outs[0] = besselh(args[0], k, args[2], mr);
 }
 
-void ellipke_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void ellipke_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ellipke");
-    auto res = ellipke(args[0], ctx.engine->resource());
+    auto res = ellipke(args[0], ctx.engine->allocator());
     outs[0] = std::move(res.K);
     if (nargout > 1) outs[1] = std::move(res.E);
 }
 
-void airy_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void airy_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
               CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "airy");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = airy(0, args[0], mr);  // default Ai
         return;
@@ -220,28 +219,28 @@ void airy_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     outs[0] = airy(k, args[1], mr);
 }
 
-void gammaincinv_reg(Span<const Value> args, size_t, Span<Value> outs,
+void gammaincinv_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                      CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "gammaincinv");
     argcheck::checkNargin(args.size(), 2, 3, "gammaincinv");
-    outs[0] = gammaincinv(args[0], args[1], ctx.engine->resource());
+    outs[0] = gammaincinv(args[0], args[1], ctx.engine->allocator());
 }
 
-void betaincinv_reg(Span<const Value> args, size_t, Span<Value> outs,
+void betaincinv_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                     CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "betaincinv");
     argcheck::checkNargin(args.size(), 3, 4, "betaincinv");
-    outs[0] = betaincinv(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = betaincinv(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
-void ellipj_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void ellipj_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "ellipj");
     argcheck::checkNargin(args.size(), 2, 3, "ellipj");
-    auto r = ellipj(args[0], args[1], ctx.engine->resource());
+    auto r = ellipj(args[0], args[1], ctx.engine->allocator());
     outs[0] = std::move(r.sn);
     if (nargout > 1) outs[1] = std::move(r.cn);
     if (nargout > 2) outs[2] = std::move(r.dn);

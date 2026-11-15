@@ -2,10 +2,12 @@
 //
 // Help system C++ API and Engine registration adapters for NK bundle.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/help.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <iomanip>
@@ -36,7 +38,7 @@ std::string help(const std::string &query)
     return "'" + query + "' not found. Type 'help' for a list of topics.\n";
 }
 
-Value help(Span<const Value> args, std::pmr::memory_resource *mr)
+Value help(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     std::string query = args.empty() ? "" : args[0].toString();
     return Value::fromString(help(query), mr);
@@ -52,7 +54,7 @@ std::vector<std::string> what(const std::string &category)
     return catalog.getCategoryFunctions(category);
 }
 
-Value what(Span<const Value> args, std::pmr::memory_resource *mr)
+Value what(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     const auto &catalog = HelpCatalog::instance();
     std::string topic = args.empty() ? "elmat" : args[0].toString();
@@ -60,7 +62,7 @@ Value what(Span<const Value> args, std::pmr::memory_resource *mr)
     std::vector<std::string> funcs = what(topic);
 
     Value cellM = Value::cell(funcs.size(), 1, mr);
-    for (size_t i = 0; i < funcs.size(); ++i) {
+    for (keel::usize i = 0; i < funcs.size(); ++i) {
         cellM.cellAt(i) = Value::fromString(funcs[i], mr);
     }
     Value st = Value::structure(mr);
@@ -80,12 +82,12 @@ std::vector<std::string> builtins(const std::string &category)
     return catalog.getCategoryFunctions(category);
 }
 
-Value builtins(Span<const Value> args, std::pmr::memory_resource *mr)
+Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     std::string topic = args.empty() ? "" : args[0].toString();
     std::vector<std::string> funcs = builtins(topic);
     Value cellOut = Value::cell(funcs.size(), 1, mr);
-    for (size_t i = 0; i < funcs.size(); ++i) {
+    for (keel::usize i = 0; i < funcs.size(); ++i) {
         cellOut.cellAt(i) = Value::fromString(funcs[i], mr);
     }
     return cellOut;
@@ -102,11 +104,11 @@ std::vector<std::string> categories()
     return cats;
 }
 
-Value categories(std::pmr::memory_resource *mr)
+Value categories(keel::Allocator *mr)
 {
     const auto &catalog = HelpCatalog::instance();
     Value cellOut = Value::cell(catalog.categories().size(), 1, mr);
-    for (size_t i = 0; i < catalog.categories().size(); ++i) {
+    for (keel::usize i = 0; i < catalog.categories().size(); ++i) {
         cellOut.cellAt(i) = Value::fromString(catalog.categories()[i].name, mr);
     }
     return cellOut;
@@ -118,7 +120,7 @@ Value categories(std::pmr::memory_resource *mr)
 
 namespace detail {
 
-static void help_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     const auto &catalog = HelpCatalog::instance();
     std::string text;
 
@@ -146,16 +148,16 @@ static void help_reg(Span<const Value> args, size_t nargout, Span<Value> outs, C
     }
 
     if (nargout > 0) {
-        outs[0] = Value::fromString(text, ctx.engine->resource());
+        outs[0] = Value::fromString(text, ctx.engine->allocator());
     } else {
         ctx.engine->outputText(text);
         outs[0] = Value();
     }
 }
 
-static void what_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+static void what_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     if (nargout > 0) {
-        outs[0] = what(args, ctx.engine->resource());
+        outs[0] = what(args, ctx.engine->allocator());
     } else {
         std::string topic = args.empty() ? "elmat" : (args[0].isChar() ? args[0].toString() : "");
         const auto &catalog = HelpCatalog::instance();
@@ -165,7 +167,7 @@ static void what_reg(Span<const Value> args, size_t nargout, Span<Value> outs, C
 
         std::ostringstream os;
         os << "Functions in " << topic << " (" << title << "):\n\n";
-        for (size_t i = 0; i < funcs.size(); ++i) {
+        for (keel::usize i = 0; i < funcs.size(); ++i) {
             os << std::left << std::setw(16) << funcs[i];
             if ((i + 1) % 4 == 0 || i + 1 == funcs.size()) os << "\n";
         }
@@ -175,15 +177,15 @@ static void what_reg(Span<const Value> args, size_t nargout, Span<Value> outs, C
     }
 }
 
-static void builtins_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-    outs[0] = builtins(args, ctx.engine->resource());
+static void builtins_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    outs[0] = builtins(args, ctx.engine->allocator());
 }
 
-static void categories_reg(Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
-    outs[0] = categories(ctx.engine->resource());
+static void categories_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    outs[0] = categories(ctx.engine->allocator());
 }
 
-static void inmem_reg(Span<const Value>, size_t nargout, Span<Value> outs, CallContext &ctx) {
+static void inmem_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     std::vector<std::string> userFuncs;
     std::vector<std::string> classes;
 
@@ -191,19 +193,19 @@ static void inmem_reg(Span<const Value>, size_t nargout, Span<Value> outs, CallC
         classes.push_back(name);
     }
 
-    Value mCell = Value::cell(userFuncs.size(), 1, ctx.engine->resource());
-    for (size_t i = 0; i < userFuncs.size(); ++i) {
-        mCell.cellAt(i) = Value::fromString(userFuncs[i], ctx.engine->resource());
+    Value mCell = Value::cell(userFuncs.size(), 1, ctx.engine->allocator());
+    for (keel::usize i = 0; i < userFuncs.size(); ++i) {
+        mCell.cellAt(i) = Value::fromString(userFuncs[i], ctx.engine->allocator());
     }
     outs[0] = std::move(mCell);
 
     if (nargout > 1) {
-        outs[1] = Value::cell(0, 1, ctx.engine->resource()); // MEX
+        outs[1] = Value::cell(0, 1, ctx.engine->allocator()); // MEX
     }
     if (nargout > 2) {
-        Value cCell = Value::cell(classes.size(), 1, ctx.engine->resource());
-        for (size_t i = 0; i < classes.size(); ++i) {
-            cCell.cellAt(i) = Value::fromString(classes[i], ctx.engine->resource());
+        Value cCell = Value::cell(classes.size(), 1, ctx.engine->allocator());
+        for (keel::usize i = 0; i < classes.size(); ++i) {
+            cCell.cellAt(i) = Value::fromString(classes[i], ctx.engine->allocator());
         }
         outs[2] = std::move(cCell);
     }

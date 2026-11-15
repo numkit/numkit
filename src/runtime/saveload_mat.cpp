@@ -4,6 +4,10 @@
 // Supports uncompressed Level 5 (-v6), compressed Level 5 (-v7 via in-tree zlib),
 // and Level 4 (-v4). Zero external libraries (matio and zlib eliminated).
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/complex.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
@@ -13,10 +17,8 @@
 #include <numkit/ops/deflate.hpp>
 
 #include <algorithm>
-#include <complex>
 #include <cstdint>
 #include <cstring>
-#include <memory_resource>
 #include <string>
 #include <vector>
 
@@ -28,7 +30,7 @@ namespace {
 // MAT5 Constants & Tags
 // ============================================================================
 
-enum Mat5DataType : std::uint32_t {
+enum Mat5DataType : keel::u32 {
     miINT8       = 1,
     miUINT8      = 2,
     miINT16      = 3,
@@ -46,7 +48,7 @@ enum Mat5DataType : std::uint32_t {
     miUTF32      = 18
 };
 
-enum Mat5ArrayClass : std::uint8_t {
+enum Mat5ArrayClass : keel::u8 {
     mxCELL_CLASS    = 1,
     mxSTRUCT_CLASS  = 2,
     mxOBJECT_CLASS  = 3,
@@ -64,24 +66,24 @@ enum Mat5ArrayClass : std::uint8_t {
     mxUINT64_CLASS  = 15
 };
 
-constexpr std::uint8_t MAT5_FLAG_LOGICAL = 0x02;
-constexpr std::uint8_t MAT5_FLAG_GLOBAL  = 0x04;
-constexpr std::uint8_t MAT5_FLAG_COMPLEX = 0x08;
+constexpr keel::u8 MAT5_FLAG_LOGICAL = 0x02;
+constexpr keel::u8 MAT5_FLAG_GLOBAL  = 0x04;
+constexpr keel::u8 MAT5_FLAG_COMPLEX = 0x08;
 
 // Helper: Factory for matrix of arbitrary shape
-Value createMatrix(const Dims &dims, ValueType vt, std::pmr::memory_resource *mr) {
+Value createMatrix(const Dims &dims, ValueType vt, keel::Allocator *mr) {
     if (dims.ndims() <= 2) {
         return Value::matrix(dims.rows(), dims.cols(), vt, mr);
     } else if (dims.ndims() == 3) {
         return Value::matrix3d(dims.dim(0), dims.dim(1), dims.dim(2), vt, mr);
     } else {
-        std::vector<size_t> d(dims.ndims());
+        std::vector<keel::usize> d(dims.ndims());
         for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
         return Value::matrixND(d.data(), dims.ndims(), vt, mr);
     }
 }
 
-Value createComplexMatrix(const Dims &dims, std::pmr::memory_resource *mr) {
+Value createComplexMatrix(const Dims &dims, keel::Allocator *mr) {
     if (dims.ndims() <= 2) {
         return Value::complexMatrix(dims.rows(), dims.cols(), mr);
     } else {
@@ -91,13 +93,13 @@ Value createComplexMatrix(const Dims &dims, std::pmr::memory_resource *mr) {
     }
 }
 
-Value createCell(const Dims &dims, std::pmr::memory_resource *mr) {
+Value createCell(const Dims &dims, keel::Allocator *mr) {
     if (dims.ndims() <= 2) {
         return Value::cell(dims.rows(), dims.cols(), mr);
     } else if (dims.ndims() == 3) {
         return Value::cell3D(dims.dim(0), dims.dim(1), dims.dim(2), mr);
     } else {
-        std::vector<size_t> d(dims.ndims());
+        std::vector<keel::usize> d(dims.ndims());
         for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
         return Value::cellND(d.data(), dims.ndims(), mr);
     }
@@ -106,34 +108,34 @@ Value createCell(const Dims &dims, std::pmr::memory_resource *mr) {
 // Helper: Byte stream writer
 class MatWriter {
 public:
-    std::vector<std::uint8_t> bytes;
+    std::vector<keel::u8> bytes;
 
-    void writeU8(std::uint8_t v) { bytes.push_back(v); }
+    void writeU8(keel::u8 v) { bytes.push_back(v); }
 
-    void writeU16(std::uint16_t v) {
-        bytes.push_back(static_cast<std::uint8_t>(v & 0xFF));
-        bytes.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
+    void writeU16(keel::u16 v) {
+        bytes.push_back(static_cast<keel::u8>(v & 0xFF));
+        bytes.push_back(static_cast<keel::u8>((v >> 8) & 0xFF));
     }
 
-    void writeU32(std::uint32_t v) {
-        bytes.push_back(static_cast<std::uint8_t>(v & 0xFF));
-        bytes.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
-        bytes.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFF));
-        bytes.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFF));
+    void writeU32(keel::u32 v) {
+        bytes.push_back(static_cast<keel::u8>(v & 0xFF));
+        bytes.push_back(static_cast<keel::u8>((v >> 8) & 0xFF));
+        bytes.push_back(static_cast<keel::u8>((v >> 16) & 0xFF));
+        bytes.push_back(static_cast<keel::u8>((v >> 24) & 0xFF));
     }
 
-    void writeBytes(const void *data, std::size_t count) {
+    void writeBytes(const void *data, keel::usize count) {
         if (count == 0 || !data) return;
-        const auto *p = reinterpret_cast<const std::uint8_t*>(data);
+        const auto *p = reinterpret_cast<const keel::u8*>(data);
         bytes.insert(bytes.end(), p, p + count);
     }
 
-    void writeTag(std::uint32_t type, const void *data, std::uint32_t byteCount) {
+    void writeTag(keel::u32 type, const void *data, keel::u32 byteCount) {
         if (byteCount <= 4 && byteCount > 0) {
             // Small Data Element Format (SDEF): [byteCount:16, type:16], [data:32]
-            std::uint32_t tag = ((byteCount & 0xFFFF) << 16) | (type & 0xFFFF);
+            keel::u32 tag = ((byteCount & 0xFFFF) << 16) | (type & 0xFFFF);
             writeU32(tag);
-            std::uint32_t val = 0;
+            keel::u32 val = 0;
             if (data) {
                 std::memcpy(&val, data, byteCount);
             }
@@ -145,8 +147,8 @@ public:
                 writeBytes(data, byteCount);
             }
             if (type != miCOMPRESSED) {
-                std::size_t pad = ((byteCount + 7) & ~7) - byteCount;
-                for (std::size_t i = 0; i < pad; ++i) writeU8(0);
+                keel::usize pad = ((byteCount + 7) & ~7) - byteCount;
+                for (keel::usize i = 0; i < pad; ++i) writeU8(0);
             }
         }
     }
@@ -155,68 +157,68 @@ public:
 // Helper: Byte stream reader
 class MatReader {
 public:
-    const std::uint8_t *data;
-    std::size_t len;
-    std::size_t pos = 0;
+    const keel::u8 *data;
+    keel::usize len;
+    keel::usize pos = 0;
     bool bigEndian = false;
 
-    MatReader(const std::uint8_t *d, std::size_t l, bool be = false)
+    MatReader(const keel::u8 *d, keel::usize l, bool be = false)
         : data(d), len(l), pos(0), bigEndian(be) {}
 
     bool eof() const { return pos >= len; }
-    std::size_t remaining() const { return (pos <= len) ? (len - pos) : 0; }
+    keel::usize remaining() const { return (pos <= len) ? (len - pos) : 0; }
 
-    std::uint16_t peekU16At(const std::uint8_t *p) const {
+    keel::u16 peekU16At(const keel::u8 *p) const {
         if (bigEndian) {
-            return (static_cast<std::uint16_t>(p[0]) << 8) |
-                   static_cast<std::uint16_t>(p[1]);
+            return (static_cast<keel::u16>(p[0]) << 8) |
+                   static_cast<keel::u16>(p[1]);
         }
-        return static_cast<std::uint16_t>(p[0]) |
-               (static_cast<std::uint16_t>(p[1]) << 8);
+        return static_cast<keel::u16>(p[0]) |
+               (static_cast<keel::u16>(p[1]) << 8);
     }
 
-    std::uint32_t peekU32At(const std::uint8_t *p) const {
+    keel::u32 peekU32At(const keel::u8 *p) const {
         if (bigEndian) {
-            return (static_cast<std::uint32_t>(p[0]) << 24) |
-                   (static_cast<std::uint32_t>(p[1]) << 16) |
-                   (static_cast<std::uint32_t>(p[2]) << 8) |
-                   static_cast<std::uint32_t>(p[3]);
+            return (static_cast<keel::u32>(p[0]) << 24) |
+                   (static_cast<keel::u32>(p[1]) << 16) |
+                   (static_cast<keel::u32>(p[2]) << 8) |
+                   static_cast<keel::u32>(p[3]);
         }
-        return static_cast<std::uint32_t>(p[0]) |
-               (static_cast<std::uint32_t>(p[1]) << 8) |
-               (static_cast<std::uint32_t>(p[2]) << 16) |
-               (static_cast<std::uint32_t>(p[3]) << 24);
+        return static_cast<keel::u32>(p[0]) |
+               (static_cast<keel::u32>(p[1]) << 8) |
+               (static_cast<keel::u32>(p[2]) << 16) |
+               (static_cast<keel::u32>(p[3]) << 24);
     }
 
-    std::uint8_t readU8() {
+    keel::u8 readU8() {
         if (pos + 1 > len) throw Error("load: truncated MAT file");
         return data[pos++];
     }
 
-    std::uint16_t readU16() {
+    keel::u16 readU16() {
         if (pos + 2 > len) throw Error("load: truncated MAT file");
-        std::uint16_t v = peekU16At(data + pos);
+        keel::u16 v = peekU16At(data + pos);
         pos += 2;
         return v;
     }
 
-    std::uint32_t readU32() {
+    keel::u32 readU32() {
         if (pos + 4 > len) throw Error("load: truncated MAT file");
-        std::uint32_t v = peekU32At(data + pos);
+        keel::u32 v = peekU32At(data + pos);
         pos += 4;
         return v;
     }
 
     struct Tag {
-        std::uint32_t type;
-        std::uint32_t byteCount;
-        const std::uint8_t *payload;
-        std::size_t totalAdvance;
+        keel::u32 type;
+        keel::u32 byteCount;
+        const keel::u8 *payload;
+        keel::usize totalAdvance;
     };
 
     Tag readTag() {
         if (pos > len || len - pos < 8) throw Error("load: truncated MAT tag");
-        std::uint32_t tag0 = peekU32At(data + pos);
+        keel::u32 tag0 = peekU32At(data + pos);
         
         Tag t;
         if ((tag0 >> 16) != 0) {
@@ -232,18 +234,18 @@ public:
             // Standard format
             t.type = tag0;
             t.byteCount = peekU32At(data + pos + 4);
-            const std::size_t bc = static_cast<std::size_t>(t.byteCount);
-            const std::size_t availAfterHdr = len - pos - 8;
+            const keel::usize bc = static_cast<keel::usize>(t.byteCount);
+            const keel::usize availAfterHdr = len - pos - 8;
             if (bc > availAfterHdr)
                 throw Error("load: corrupted MAT element length");
             t.payload = data + pos + 8;
-            std::size_t padded = (bc + 7u) & ~std::size_t(7u);
+            keel::usize padded = (bc + 7u) & ~keel::usize(7u);
             if (t.type == miCOMPRESSED) {
-                std::size_t unpaddedEnd = pos + 8 + bc;
+                keel::usize unpaddedEnd = pos + 8 + bc;
                 if (unpaddedEnd == len) {
                     padded = bc;
                 } else if (len - unpaddedEnd >= 8) {
-                    std::uint32_t nextType = peekU32At(data + unpaddedEnd);
+                    keel::u32 nextType = peekU32At(data + unpaddedEnd);
                     if (nextType == miCOMPRESSED || nextType == miMATRIX) {
                         padded = bc;
                     }
@@ -261,7 +263,7 @@ public:
 
 // Forward declarations for recursive encoding / decoding
 void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v);
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem, int depth = 0);
+std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth = 0);
 
 // ============================================================================
 // MAT5 Serialization (Value -> Bytes)
@@ -274,7 +276,7 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
             return;
         }
         Value c = createCell(v.dims(), nullptr);
-        for (std::size_t i = 0; i < v.numel(); ++i)
+        for (keel::usize i = 0; i < v.numel(); ++i)
             c.cellAt(i) = Value::fromString(v.stringElem(i));
         encodeMat5Matrix(mw, name, c);
         return;
@@ -282,8 +284,8 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     MatWriter inner;
 
     // 1. Array Flags
-    std::uint8_t arrayClass = mxDOUBLE_CLASS;
-    std::uint8_t flags = 0;
+    keel::u8 arrayClass = mxDOUBLE_CLASS;
+    keel::u8 flags = 0;
 
     switch (v.type()) {
         case ValueType::DOUBLE:  arrayClass = mxDOUBLE_CLASS; break;
@@ -306,8 +308,8 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
         default:                 arrayClass = mxDOUBLE_CLASS; break;
     }
 
-    std::uint32_t flagsBuf[2] = {
-        static_cast<std::uint32_t>(arrayClass | (flags << 8)),
+    keel::u32 flagsBuf[2] = {
+        static_cast<keel::u32>(arrayClass | (flags << 8)),
         0
     };
     inner.writeTag(miUINT32, flagsBuf, 8);
@@ -317,25 +319,25 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     int nd = d.ndims();
     while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
-    std::vector<std::int32_t> dimsVec(nd, 1);
+    std::vector<keel::i32> dimsVec(nd, 1);
     for (int i = 0; i < nd; ++i) {
-        dimsVec[i] = static_cast<std::int32_t>(d.dim(i));
+        dimsVec[i] = static_cast<keel::i32>(d.dim(i));
     }
     if (v.isFuncHandle()) {
         // v5 .mat emits 0x0 double placeholder for function handle
         dimsVec = {0, 0};
     }
-    inner.writeTag(miINT32, dimsVec.data(), static_cast<std::uint32_t>(dimsVec.size() * sizeof(std::int32_t)));
+    inner.writeTag(miINT32, dimsVec.data(), static_cast<keel::u32>(dimsVec.size() * sizeof(keel::i32)));
 
     // 3. Array Name
-    inner.writeTag(miINT8, name.data(), static_cast<std::uint32_t>(name.size()));
+    inner.writeTag(miINT8, name.data(), static_cast<keel::u32>(name.size()));
 
     // 4. Data Sub-elements
-    std::size_t numElems = v.isFuncHandle() ? 0 : d.numel();
+    keel::usize numElems = v.isFuncHandle() ? 0 : d.numel();
 
     if (v.type() == ValueType::CELL) {
         // Cell elements written as full child miMATRIX elements (column-major)
-        for (std::size_t i = 0; i < numElems; ++i) {
+        for (keel::usize i = 0; i < numElems; ++i) {
             const Value &elem = v.cellAt(i);
             encodeMat5Matrix(inner, "", elem);
         }
@@ -343,7 +345,7 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
         std::vector<std::string> fnames;
         if (v.type() == ValueType::OBJECT) {
             std::string className = v.objectClassName();
-            inner.writeTag(miINT8, className.data(), static_cast<std::uint32_t>(className.size()));
+            inner.writeTag(miINT8, className.data(), static_cast<keel::u32>(className.size()));
             if (const auto *st = v.objectStateConst()) {
                 for (const auto &[k, _] : st->props) {
                     fnames.push_back(k);
@@ -353,18 +355,18 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
             fnames = v.fieldNamesInOrder();
         }
 
-        std::int32_t maxLen = 32;
-        inner.writeTag(miINT32, &maxLen, sizeof(std::int32_t));
+        keel::i32 maxLen = 32;
+        inner.writeTag(miINT32, &maxLen, sizeof(keel::i32));
 
         std::vector<char> nameTable(fnames.size() * 32, 0);
-        for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+        for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
             std::strncpy(nameTable.data() + fi * 32, fnames[fi].c_str(), 31);
         }
-        inner.writeTag(miINT8, nameTable.data(), static_cast<std::uint32_t>(nameTable.size()));
+        inner.writeTag(miINT8, nameTable.data(), static_cast<keel::u32>(nameTable.size()));
 
         // Field values: MAT5 stores all fields of element 0, then element 1, etc.
-        for (std::size_t ei = 0; ei < numElems; ++ei) {
-            for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+        for (keel::usize ei = 0; ei < numElems; ++ei) {
+            for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                 Value fval;
                 if (v.type() == ValueType::OBJECT) {
                     const auto *st = v.objectStateAt(ei);
@@ -387,28 +389,28 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     } else if (v.type() == ValueType::CHAR) {
         // UTF-16 character codes
         const char *src = v.charData();
-        std::vector<std::uint16_t> utf16(numElems);
-        for (std::size_t i = 0; i < numElems; ++i) {
-            utf16[i] = static_cast<std::uint8_t>(src[i]);
+        std::vector<keel::u16> utf16(numElems);
+        for (keel::usize i = 0; i < numElems; ++i) {
+            utf16[i] = static_cast<keel::u8>(src[i]);
         }
-        inner.writeTag(miUTF16, utf16.data(), static_cast<std::uint32_t>(numElems * sizeof(std::uint16_t)));
+        inner.writeTag(miUTF16, utf16.data(), static_cast<keel::u32>(numElems * sizeof(keel::u16)));
     } else if (v.type() == ValueType::COMPLEX) {
         // Split complex into real and imaginary arrays
         std::vector<double> realPart(numElems);
         std::vector<double> imagPart(numElems);
         const auto *cdata = v.complexData();
-        for (std::size_t i = 0; i < numElems; ++i) {
+        for (keel::usize i = 0; i < numElems; ++i) {
             realPart[i] = cdata[i].real();
             imagPart[i] = cdata[i].imag();
         }
-        inner.writeTag(miDOUBLE, realPart.data(), static_cast<std::uint32_t>(numElems * sizeof(double)));
-        inner.writeTag(miDOUBLE, imagPart.data(), static_cast<std::uint32_t>(numElems * sizeof(double)));
+        inner.writeTag(miDOUBLE, realPart.data(), static_cast<keel::u32>(numElems * sizeof(double)));
+        inner.writeTag(miDOUBLE, imagPart.data(), static_cast<keel::u32>(numElems * sizeof(double)));
     } else if (v.isFuncHandle() || numElems == 0) {
         inner.writeTag(miDOUBLE, nullptr, 0);
     } else {
         // Numeric and Logical arrays
         Mat5DataType dt = miDOUBLE;
-        std::size_t elemSize = sizeof(double);
+        keel::usize elemSize = sizeof(double);
 
         switch (v.type()) {
             case ValueType::DOUBLE:  dt = miDOUBLE; elemSize = 8; break;
@@ -426,18 +428,18 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
         }
 
         const void *srcData = (v.type() == ValueType::LOGICAL) ? v.logicalData() : v.rawData();
-        inner.writeTag(dt, srcData, static_cast<std::uint32_t>(numElems * elemSize));
+        inner.writeTag(dt, srcData, static_cast<keel::u32>(numElems * elemSize));
     }
 
     // Write miMATRIX tag wrapping inner buffer
-    mw.writeTag(miMATRIX, inner.bytes.data(), static_cast<std::uint32_t>(inner.bytes.size()));
+    mw.writeTag(miMATRIX, inner.bytes.data(), static_cast<keel::u32>(inner.bytes.size()));
 }
 
 // ============================================================================
 // MAT5 Deserialization (Bytes -> Value)
 // ============================================================================
 
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_resource *mem, int depth) {
+std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth) {
     if (depth > 64) {
         throw Error("load: MAT5 nesting depth exceeds limit");
     }
@@ -451,26 +453,26 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
     // 1. Array Flags
     auto flagsTag = ir.readTag();
     if (flagsTag.byteCount < 4) throw Error("load: malformed array flags");
-    std::uint32_t flagsWord = ir.peekU32At(flagsTag.payload);
-    std::uint8_t arrayClass = static_cast<std::uint8_t>(flagsWord & 0xFF);
-    std::uint8_t flags = static_cast<std::uint8_t>((flagsWord >> 8) & 0xFF);
+    keel::u32 flagsWord = ir.peekU32At(flagsTag.payload);
+    keel::u8 arrayClass = static_cast<keel::u8>(flagsWord & 0xFF);
+    keel::u8 flags = static_cast<keel::u8>((flagsWord >> 8) & 0xFF);
     bool isLogical = (flags & MAT5_FLAG_LOGICAL) != 0;
     bool isComplex = (flags & MAT5_FLAG_COMPLEX) != 0;
 
     // 2. Dimensions Array
     auto dimsTag = ir.readTag();
-    const int rawNd = static_cast<int>(dimsTag.byteCount / sizeof(std::int32_t));
+    const int rawNd = static_cast<int>(dimsTag.byteCount / sizeof(keel::i32));
     if (rawNd > Dims::kMaxRank)
         throw Error("load: MAT5 array rank exceeds maximum supported rank");
     int nd = rawNd < 2 ? 2 : rawNd;
-    std::vector<size_t> d(nd, 1);
-    std::size_t numElems = 1;
+    std::vector<keel::usize> d(nd, 1);
+    keel::usize numElems = 1;
     for (int i = 0; i < nd; ++i) {
         if (i < rawNd) {
-            std::int32_t rawDim = static_cast<std::int32_t>(ir.peekU32At(dimsTag.payload + i * 4));
+            keel::i32 rawDim = static_cast<keel::i32>(ir.peekU32At(dimsTag.payload + i * 4));
             if (rawDim < 0)
                 throw Error("load: negative dimension in MAT5 file");
-            d[i] = static_cast<size_t>(rawDim);
+            d[i] = static_cast<keel::usize>(rawDim);
         } else {
             d[i] = 1;
         }
@@ -493,7 +495,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 
     if (arrayClass == mxCELL_CLASS) {
         result = createCell(shape, mem);
-        for (std::size_t i = 0; i < numElems; ++i) {
+        for (keel::usize i = 0; i < numElems; ++i) {
             auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
             result.cellAt(i) = childVal;
         }
@@ -509,19 +511,19 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         }
 
         auto fnamelenTag = ir.readTag();
-        std::uint32_t fnLen = 32;
+        keel::u32 fnLen = 32;
         if (fnamelenTag.byteCount >= 4) {
             fnLen = ir.peekU32At(fnamelenTag.payload);
         }
         if (fnLen == 0) fnLen = 32;
 
         auto fnamesTag = ir.readTag();
-        std::size_t numFields = fnamesTag.byteCount / fnLen;
+        keel::usize numFields = fnamesTag.byteCount / fnLen;
         std::vector<std::string> fnames;
         fnames.reserve(numFields);
-        for (std::size_t fi = 0; fi < numFields; ++fi) {
+        for (keel::usize fi = 0; fi < numFields; ++fi) {
             const char *fnPtr = reinterpret_cast<const char*>(fnamesTag.payload + fi * fnLen);
-            std::size_t curLen = 0;
+            keel::usize curLen = 0;
             while (curLen < fnLen && fnPtr[curLen] != '\0') ++curLen;
             fnames.emplace_back(fnPtr, curLen);
         }
@@ -530,8 +532,8 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             throw Error("load: MAT5 struct field table overflows address space");
 
         std::vector<std::vector<Value>> fieldVals(fnames.size(), std::vector<Value>(numElems));
-        for (std::size_t ei = 0; ei < numElems; ++ei) {
-            for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+        for (keel::usize ei = 0; ei < numElems; ++ei) {
+            for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                 auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
                 fieldVals[fi][ei] = std::move(childVal);
             }
@@ -546,11 +548,11 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
                 result = Value::structArray(0, 0, mem);
                 result.resizeND(d.data(), nd, mem);
             }
-            for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+            for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                 if (numElems == 0) {
                     result.setFieldAll(fnames[fi], Value{});
                 } else {
-                    for (std::size_t ei = 0; ei < numElems; ++ei) {
+                    for (keel::usize ei = 0; ei < numElems; ++ei) {
                         result.setField(ei, fnames[fi], fieldVals[fi][ei]);
                     }
                 }
@@ -561,16 +563,16 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
                 result = Value::objectArray(objClassName, shape, {}, false, mem);
             } else if (numElems == 1 && shape.ndims() <= 2) {
                 auto st = std::make_shared<ObjectState>(mem);
-                for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+                for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                     st->props[fnames[fi]] = std::move(fieldVals[fi][0]);
                 }
                 result = Value::object(objClassName, std::move(st), false, mem);
             } else {
                 std::vector<std::shared_ptr<ObjectState>> states;
                 states.reserve(numElems);
-                for (std::size_t ei = 0; ei < numElems; ++ei) {
+                for (keel::usize ei = 0; ei < numElems; ++ei) {
                     auto st = std::make_shared<ObjectState>(mem);
-                    for (std::size_t fi = 0; fi < fnames.size(); ++fi) {
+                    for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                         st->props[fnames[fi]] = std::move(fieldVals[fi][ei]);
                     }
                     states.push_back(std::move(st));
@@ -583,14 +585,14 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
         result = createMatrix(shape, ValueType::CHAR, mem);
         char *out = result.charDataMut();
         if (dataTag.type == miUINT16 || dataTag.type == miUTF16) {
-            std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount / 2));
+            keel::usize charCount = std::min(numElems, static_cast<keel::usize>(dataTag.byteCount / 2));
             if (charCount > 0 && dataTag.payload) {
-                for (std::size_t i = 0; i < charCount; ++i) {
+                for (keel::usize i = 0; i < charCount; ++i) {
                     out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
                 }
             }
         } else if (dataTag.type == miUTF8 || dataTag.type == miUINT8 || dataTag.type == miINT8) {
-            std::size_t charCount = std::min(numElems, static_cast<std::size_t>(dataTag.byteCount));
+            keel::usize charCount = std::min(numElems, static_cast<keel::usize>(dataTag.byteCount));
             if (charCount > 0 && dataTag.payload) {
                 std::memcpy(out, dataTag.payload, charCount);
             }
@@ -620,17 +622,17 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
 
         auto realTag = ir.readTag();
 
-        auto readTagElemAsDouble = [&ir](const MatReader::Tag &tag, std::size_t idx) -> double {
+        auto readTagElemAsDouble = [&ir](const MatReader::Tag &tag, keel::usize idx) -> double {
             if (!tag.payload) throw Error("load: truncated MAT5 numeric payload");
-            const std::size_t avail = static_cast<std::size_t>(tag.byteCount);
-            auto checkBounds = [avail](std::size_t idx0, std::size_t sz) {
+            const keel::usize avail = static_cast<keel::usize>(tag.byteCount);
+            auto checkBounds = [avail](keel::usize idx0, keel::usize sz) {
                 if (idx0 > avail / sz || avail - idx0 * sz < sz)
                     throw Error("load: truncated MAT5 numeric payload");
             };
-            auto readVal = [&ir](const std::uint8_t *p, std::size_t sz, void *dst) {
+            auto readVal = [&ir](const keel::u8 *p, keel::usize sz, void *dst) {
                 if (ir.bigEndian) {
-                    auto *d = static_cast<std::uint8_t *>(dst);
-                    for (std::size_t k = 0; k < sz; ++k) d[k] = p[sz - 1 - k];
+                    auto *d = static_cast<keel::u8 *>(dst);
+                    for (keel::usize k = 0; k < sz; ++k) d[k] = p[sz - 1 - k];
                 } else {
                     std::memcpy(dst, p, sz);
                 }
@@ -650,43 +652,43 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
                 }
                 case miINT8:
                     checkBounds(idx, 1);
-                    return static_cast<double>(reinterpret_cast<const std::int8_t*>(tag.payload)[idx]);
+                    return static_cast<double>(reinterpret_cast<const keel::i8*>(tag.payload)[idx]);
                 case miUINT8:
                     checkBounds(idx, 1);
-                    return static_cast<double>(reinterpret_cast<const std::uint8_t*>(tag.payload)[idx]);
+                    return static_cast<double>(reinterpret_cast<const keel::u8*>(tag.payload)[idx]);
                 case miINT16: {
                     checkBounds(idx, 2);
-                    std::int16_t v = 0;
+                    keel::i16 v = 0;
                     readVal(tag.payload + idx * 2, 2, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT16: {
                     checkBounds(idx, 2);
-                    std::uint16_t v = 0;
+                    keel::u16 v = 0;
                     readVal(tag.payload + idx * 2, 2, &v);
                     return static_cast<double>(v);
                 }
                 case miINT32: {
                     checkBounds(idx, 4);
-                    std::int32_t v = 0;
+                    keel::i32 v = 0;
                     readVal(tag.payload + idx * 4, 4, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT32: {
                     checkBounds(idx, 4);
-                    std::uint32_t v = 0;
+                    keel::u32 v = 0;
                     readVal(tag.payload + idx * 4, 4, &v);
                     return static_cast<double>(v);
                 }
                 case miINT64: {
                     checkBounds(idx, 8);
-                    std::int64_t v = 0;
+                    keel::i64 v = 0;
                     readVal(tag.payload + idx * 8, 8, &v);
                     return static_cast<double>(v);
                 }
                 case miUINT64: {
                     checkBounds(idx, 8);
-                    std::uint64_t v = 0;
+                    keel::u64 v = 0;
                     readVal(tag.payload + idx * 8, 8, &v);
                     return static_cast<double>(v);
                 }
@@ -698,8 +700,8 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
             auto imagTag = ir.readTag();
             result = createComplexMatrix(shape, mem);
             auto *cdata = result.complexDataMut();
-            for (std::size_t i = 0; i < numElems; ++i) {
-                cdata[i] = std::complex<double>(readTagElemAsDouble(realTag, i),
+            for (keel::usize i = 0; i < numElems; ++i) {
+                cdata[i] = keel::c64(readTagElemAsDouble(realTag, i),
                                                 readTagElemAsDouble(imagTag, i));
             }
         } else {
@@ -725,57 +727,57 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, std::pmr::memory_r
                     switch (vt) {
                         case ValueType::DOUBLE: {
                             double *dst = result.doubleDataMut();
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = readTagElemAsDouble(realTag, i);
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = readTagElemAsDouble(realTag, i);
                             break;
                         }
                         case ValueType::SINGLE: {
                             float *dst = result.singleDataMut();
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<float>(readTagElemAsDouble(realTag, i));
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<float>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::LOGICAL: {
-                            std::uint8_t *dst = result.logicalDataMut();
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = (readTagElemAsDouble(realTag, i) != 0.0) ? 1 : 0;
+                            keel::u8 *dst = result.logicalDataMut();
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = (readTagElemAsDouble(realTag, i) != 0.0) ? 1 : 0;
                             break;
                         }
                         case ValueType::INT8: {
-                            auto *dst = reinterpret_cast<std::int8_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int8_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::i8*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::i8>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::UINT8: {
-                            auto *dst = reinterpret_cast<std::uint8_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint8_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::u8*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::u8>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::INT16: {
-                            auto *dst = reinterpret_cast<std::int16_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int16_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::i16*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::i16>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::UINT16: {
-                            auto *dst = reinterpret_cast<std::uint16_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint16_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::u16*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::u16>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::INT32: {
-                            auto *dst = reinterpret_cast<std::int32_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int32_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::i32*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::i32>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::UINT32: {
-                            auto *dst = reinterpret_cast<std::uint32_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint32_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::u32*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::u32>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::INT64: {
-                            auto *dst = reinterpret_cast<std::int64_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::int64_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::i64*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::i64>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         case ValueType::UINT64: {
-                            auto *dst = reinterpret_cast<std::uint64_t*>(result.rawDataMut());
-                            for (std::size_t i = 0; i < numElems; ++i) dst[i] = static_cast<std::uint64_t>(readTagElemAsDouble(realTag, i));
+                            auto *dst = reinterpret_cast<keel::u64*>(result.rawDataMut());
+                            for (keel::usize i = 0; i < numElems; ++i) dst[i] = static_cast<keel::u64>(readTagElemAsDouble(realTag, i));
                             break;
                         }
                         default:
@@ -801,33 +803,33 @@ void saveMat4(const std::string &osPath,
     for (const auto &[name, v] : vars) {
         if (!v.isNumeric() && !v.isChar() && !v.isComplex()) continue;
         const Dims &d = v.dims();
-        std::int32_t rows = static_cast<std::int32_t>(d.rows());
-        std::int32_t cols = static_cast<std::int32_t>(d.cols());
-        std::int32_t imagf = v.isComplex() ? 1 : 0;
-        std::int32_t pType = 0; // double
+        keel::i32 rows = static_cast<keel::i32>(d.rows());
+        keel::i32 cols = static_cast<keel::i32>(d.cols());
+        keel::i32 imagf = v.isComplex() ? 1 : 0;
+        keel::i32 pType = 0; // double
         if (v.type() == ValueType::SINGLE) pType = 1;
         else if (v.type() == ValueType::INT32) pType = 2;
         else if (v.type() == ValueType::INT16) pType = 3;
         else if (v.type() == ValueType::UINT16) pType = 4;
         else if (v.type() == ValueType::UINT8) pType = 5;
-        std::int32_t tType = v.isChar() ? 1 : 0;
-        std::int32_t mType = pType * 10 + tType;
+        keel::i32 tType = v.isChar() ? 1 : 0;
+        keel::i32 mType = pType * 10 + tType;
 
-        std::int32_t namlen = static_cast<std::int32_t>(name.size() + 1);
+        keel::i32 namlen = static_cast<keel::i32>(name.size() + 1);
 
-        mw.writeU32(static_cast<std::uint32_t>(mType));
-        mw.writeU32(static_cast<std::uint32_t>(rows));
-        mw.writeU32(static_cast<std::uint32_t>(cols));
-        mw.writeU32(static_cast<std::uint32_t>(imagf));
-        mw.writeU32(static_cast<std::uint32_t>(namlen));
+        mw.writeU32(static_cast<keel::u32>(mType));
+        mw.writeU32(static_cast<keel::u32>(rows));
+        mw.writeU32(static_cast<keel::u32>(cols));
+        mw.writeU32(static_cast<keel::u32>(imagf));
+        mw.writeU32(static_cast<keel::u32>(namlen));
         mw.writeBytes(name.c_str(), namlen);
 
-        std::size_t numElems = static_cast<std::size_t>(rows * cols);
+        keel::usize numElems = static_cast<keel::usize>(rows * cols);
         if (v.isComplex()) {
             std::vector<double> realPart(numElems);
             std::vector<double> imagPart(numElems);
             const auto *cdata = v.complexData();
-            for (std::size_t i = 0; i < numElems; ++i) {
+            for (keel::usize i = 0; i < numElems; ++i) {
                 realPart[i] = cdata[i].real();
                 imagPart[i] = cdata[i].imag();
             }
@@ -846,33 +848,33 @@ void loadMat4(Engine &engine,
               const std::string &osPath,
               VirtualFS &fs,
               Environment &env,
-              size_t nargout,
-              Span<Value> outs,
-              std::pmr::memory_resource *mr)
+              keel::usize nargout,
+              keel::MutArrayRef<Value> outs,
+              keel::Allocator *mr)
 {
     std::string bytes = fs.readFileBytes(osPath);
-    const auto *p = reinterpret_cast<const std::uint8_t*>(bytes.data());
-    std::size_t len = bytes.size();
-    std::size_t pos = 0;
+    const auto *p = reinterpret_cast<const keel::u8*>(bytes.data());
+    keel::usize len = bytes.size();
+    keel::usize pos = 0;
 
     Value asStruct;
     if (nargout > 0) asStruct = Value::structure(mr);
-    std::size_t loadedCount = 0;
+    keel::usize loadedCount = 0;
 
-    auto readI32LE = [](const std::uint8_t *src) -> std::int32_t {
-        std::uint32_t u = static_cast<std::uint32_t>(src[0]) |
-                          (static_cast<std::uint32_t>(src[1]) << 8) |
-                          (static_cast<std::uint32_t>(src[2]) << 16) |
-                          (static_cast<std::uint32_t>(src[3]) << 24);
-        return static_cast<std::int32_t>(u);
+    auto readI32LE = [](const keel::u8 *src) -> keel::i32 {
+        keel::u32 u = static_cast<keel::u32>(src[0]) |
+                          (static_cast<keel::u32>(src[1]) << 8) |
+                          (static_cast<keel::u32>(src[2]) << 16) |
+                          (static_cast<keel::u32>(src[3]) << 24);
+        return static_cast<keel::i32>(u);
     };
 
     while (len - pos >= 20) {
-        std::int32_t mType  = readI32LE(p + pos);
-        std::int32_t rows   = readI32LE(p + pos + 4);
-        std::int32_t cols   = readI32LE(p + pos + 8);
-        std::int32_t imagf  = readI32LE(p + pos + 12);
-        std::int32_t namlen = readI32LE(p + pos + 16);
+        keel::i32 mType  = readI32LE(p + pos);
+        keel::i32 rows   = readI32LE(p + pos + 4);
+        keel::i32 cols   = readI32LE(p + pos + 8);
+        keel::i32 imagf  = readI32LE(p + pos + 12);
+        keel::i32 namlen = readI32LE(p + pos + 16);
         pos += 20;
 
         // Validation for MAT4 header
@@ -888,21 +890,21 @@ void loadMat4(Engine &engine,
             throw Error("load: invalid or corrupted .mat file");
         }
 
-        const std::size_t nameBytes = static_cast<std::size_t>(namlen);
+        const keel::usize nameBytes = static_cast<keel::usize>(namlen);
         if (nameBytes > len - pos) throw Error("load: truncated MAT4 file");
         const void *nulPtr = std::memchr(p + pos, '\0', nameBytes);
         if (!nulPtr) throw Error("load: invalid or corrupted .mat file");
-        const std::size_t actualNameLen =
-            static_cast<const std::uint8_t *>(nulPtr) - (p + pos);
+        const keel::usize actualNameLen =
+            static_cast<const keel::u8 *>(nulPtr) - (p + pos);
         std::string name(reinterpret_cast<const char *>(p + pos), actualNameLen);
         pos += nameBytes;
 
-        const std::size_t rSz = static_cast<std::size_t>(rows);
-        const std::size_t cSz = static_cast<std::size_t>(cols);
+        const keel::usize rSz = static_cast<keel::usize>(rows);
+        const keel::usize cSz = static_cast<keel::usize>(cols);
         if (cSz > 0 && rSz > SIZE_MAX / cSz)
             throw Error("load: MAT4 matrix dimensions overflow address space");
-        std::size_t numElems = rSz * cSz;
-        std::size_t elemSize = sizeof(double);
+        keel::usize numElems = rSz * cSz;
+        keel::usize elemSize = sizeof(double);
         ValueType vt = ValueType::DOUBLE;
         if (pType == 1) { vt = ValueType::SINGLE; elemSize = 4; }
         else if (pType == 2) { vt = ValueType::INT32; elemSize = 4; }
@@ -916,21 +918,21 @@ void loadMat4(Engine &engine,
         if (imagf == 1) {
             if (numElems > SIZE_MAX / (2 * sizeof(double)))
                 throw Error("load: MAT4 complex data size overflow");
-            std::size_t realBytes = numElems * sizeof(double);
+            keel::usize realBytes = numElems * sizeof(double);
             if (realBytes * 2 > len - pos) throw Error("load: truncated MAT4 complex data");
             v = Value::complexMatrix(rSz, cSz, mr);
             auto *cdata = v.complexDataMut();
-            for (std::size_t i = 0; i < numElems; ++i) {
+            for (keel::usize i = 0; i < numElems; ++i) {
                 double rv = 0.0, iv = 0.0;
                 std::memcpy(&rv, p + pos + i * sizeof(double), sizeof(double));
                 std::memcpy(&iv, p + pos + realBytes + i * sizeof(double), sizeof(double));
-                cdata[i] = std::complex<double>(rv, iv);
+                cdata[i] = keel::c64(rv, iv);
             }
             pos += realBytes * 2;
         } else {
             if (elemSize > 0 && numElems > SIZE_MAX / elemSize)
                 throw Error("load: MAT4 data size overflow");
-            std::size_t dataBytes = numElems * elemSize;
+            keel::usize dataBytes = numElems * elemSize;
             if (dataBytes > len - pos) throw Error("load: truncated MAT4 data");
             v = Value::matrix(rSz, cSz, vt, mr);
             if (dataBytes > 0) {
@@ -994,7 +996,7 @@ void saveMat(Engine &engine, Environment &env,
     std::string hdrText = "MATLAB 5.0 MAT-file, Platform: NumKit Autonomous Engine, Created by NumKit";
     hdrText.resize(116, ' ');
     mw.writeBytes(hdrText.data(), 116);
-    std::uint8_t zeroSubsystem[8] = {0};
+    keel::u8 zeroSubsystem[8] = {0};
     mw.writeBytes(zeroSubsystem, 8);
     mw.writeU16(0x0100); // Version 1.0
     mw.writeU8('I');     // Little-endian
@@ -1007,9 +1009,9 @@ void saveMat(Engine &engine, Environment &env,
 
         if (matVersion == 7) {
             // -v7: Compressed miMATRIX via zlib
-            std::vector<std::uint8_t> comp = ops::zlibCompress(
+            std::vector<keel::u8> comp = ops::zlibCompress(
                 itemWriter.bytes.data(), itemWriter.bytes.size(), 6);
-            mw.writeTag(miCOMPRESSED, comp.data(), static_cast<std::uint32_t>(comp.size()));
+            mw.writeTag(miCOMPRESSED, comp.data(), static_cast<keel::u32>(comp.size()));
         } else {
             // -v6 / -v5: Uncompressed miMATRIX
             mw.writeBytes(itemWriter.bytes.data(), itemWriter.bytes.size());
@@ -1022,9 +1024,9 @@ void saveMat(Engine &engine, Environment &env,
 
 void loadMat(Engine &engine, Environment &env,
              const std::string &filename,
-             size_t nargout, Span<Value> outs)
+             keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
-    std::pmr::memory_resource *mr = engine.resource();
+    keel::Allocator *mr = engine.allocator();
     auto resolved = engine.resolvePath(filename);
     if (!resolved.fs)
         throw Error("load: cannot resolve '" + filename + "'");
@@ -1045,11 +1047,11 @@ void loadMat(Engine &engine, Environment &env,
                                (bytes[126] == 'M' && bytes[127] == 'I'))) {
         // MAT5
         const bool isBigEndian = (bytes[126] == 'M' && bytes[127] == 'I');
-        MatReader mrReader(reinterpret_cast<const std::uint8_t*>(bytes.data() + 128), bytes.size() - 128, isBigEndian);
+        MatReader mrReader(reinterpret_cast<const keel::u8*>(bytes.data() + 128), bytes.size() - 128, isBigEndian);
 
         Value asStruct;
         if (nargout > 0) asStruct = Value::structure(mr);
-        std::size_t loadedCount = 0;
+        keel::usize loadedCount = 0;
 
         while (!mrReader.eof()) {
             if (mrReader.remaining() < 8) break;
@@ -1057,7 +1059,7 @@ void loadMat(Engine &engine, Environment &env,
 
             if (tag.type == miCOMPRESSED) {
                 // Decompress zlib stream
-                std::vector<std::uint8_t> uncompressed = ops::zlibDecompress(
+                std::vector<keel::u8> uncompressed = ops::zlibDecompress(
                     tag.payload, tag.byteCount);
                 MatReader decompReader(uncompressed.data(), uncompressed.size(), isBigEndian);
                 while (!decompReader.eof()) {

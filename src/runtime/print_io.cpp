@@ -10,6 +10,9 @@
 // numkit::lang, matching the cell/struct precedent: runtime-located,
 // language-namespaced builtins.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/runtime/io.hpp>
 #include <numkit/builtin/strfun.hpp>  // formatCyclic, dispFormat
 #include <numkit/core/engine.hpp>     // Engine, findFile, OpenFile
@@ -26,23 +29,23 @@ namespace numkit::runtime {
 using numkit::builtin::dispFormat;
 using numkit::builtin::formatCyclic;
 
-void disp(Engine &engine, Span<const Value> args)
+void disp(Engine &engine, keel::ArrayRef<Value> args)
 {
     for (const auto &a : args)
         engine.outputText(dispFormat(a));
 }
 
-std::size_t fprintf(Engine &engine, Span<const Value> args)
+keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
 {
     if (args.empty())
         return 0;
-    std::pmr::memory_resource *mr = engine.resource();
+    keel::Allocator *mr = engine.allocator();
 
     // First-arg-is-fid disambiguation: MATLAB allows both
     //   fprintf(format, …)  and  fprintf(fid, format, …)
     // We detect the latter via "leading numeric scalar followed by char".
     int fid = 1;
-    size_t fmtIdx = 0;
+    keel::usize fmtIdx = 0;
     if (args.size() >= 2 && args[0].isScalar() && args[1].isChar()) {
         fid = static_cast<int>(args[0].toScalar());
         fmtIdx = 1;
@@ -60,7 +63,7 @@ std::size_t fprintf(Engine &engine, Span<const Value> args)
             throw Error("fprintf: invalid file identifier");
         // For 'a'/'a+' (appendOnly) snap to end first — MATLAB's
         // contract regardless of prior seek.
-        size_t writePos = f->appendOnly ? f->buffer.size() : f->cursor;
+        keel::usize writePos = f->appendOnly ? f->buffer.size() : f->cursor;
         if (writePos + result.size() > f->buffer.size())
             f->buffer.resize(writePos + result.size());
         std::memcpy(f->buffer.data() + writePos, result.data(), result.size());

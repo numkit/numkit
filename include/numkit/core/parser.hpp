@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/stack_guard.hpp>
@@ -18,15 +19,15 @@ public:
 
 private:
     std::vector<Token> tokens_;
-    size_t pos_ = 0;
-    size_t nestingDepth_ = 0;
-    static constexpr size_t MAX_NESTING_DEPTH = 200;
+    keel::usize pos_ = 0;
+    keel::usize nestingDepth_ = 0;
+    static constexpr keel::usize MAX_NESTING_DEPTH = 200;
     // Statement ordinal within this unit (increments at every
     // parseStatement entry, nested blocks included). classdef is only
     // legal as the very first statement — MATLAB rejects it anywhere
     // else with "Illegal use of reserved keyword" (parser_test:
     // ClassdefMidScriptRejected).
-    size_t stmtOrdinal_ = 0;
+    keel::usize stmtOrdinal_ = 0;
 
     struct NestingGuard
     {
@@ -87,7 +88,7 @@ private:
     bool isTerminator(std::initializer_list<TokenType> terminators) const;
 
     // — Безопасный парсинг числа —
-    static double parseDouble(const std::string &text, int line, int col);
+    static keel::f64 parseDouble(const std::string &text, int line, int col);
 
     // — Command-style calls (clear all, grid on, cd dir, etc.) —
     bool isCommandStyleCall() const;
@@ -129,7 +130,7 @@ private:
     ASTNodePtr parseAnonFunc();
     // Reconstruct anonymous-function source from the token span [from, to)
     // (for func2str). MATLAB-style: no inter-token whitespace, literals re-quoted.
-    std::string reconstructAnonSource(size_t from, size_t to) const;
+    std::string reconstructAnonSource(keel::usize from, keel::usize to) const;
 
     // — Lookahead для function def —
     bool probeHasOutputSignature() const;

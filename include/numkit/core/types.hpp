@@ -1,11 +1,12 @@
 // include/types.hpp
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
 #include <numkit/sys/plugin.hpp>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/value/error.hpp>   // numkit::Error (L0) — re-exported here for existing users
-#include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 
 #include <chrono>
@@ -40,7 +41,7 @@ struct ContinueSignal
 struct ReturnSignal
 {};
 
-enum class FlowSignal : uint8_t { NONE = 0, BREAK, CONTINUE, RETURN };
+enum class FlowSignal : keel::u8 { NONE = 0, BREAK, CONTINUE, RETURN };
 
 // ============================================================
 // Reserved names — classified for precise use at call sites.
@@ -79,7 +80,7 @@ struct UserFunction
     std::shared_ptr<const ASTNode> body;
     std::shared_ptr<Environment> closureEnv;
     std::weak_ptr<Environment> weakClosureEnv;
-    mutable int8_t usesNarginNargout = -1;
+    mutable keel::i8 usesNarginNargout = -1;
     // classdef methods/constructors only: the class that declares this body.
     // Drives the member-access execution context (pushed while the body runs).
     // Empty for ordinary functions.
@@ -97,7 +98,7 @@ struct UserFunction
     std::string sourceFs;
     std::string sourceDir;
     std::string sourceFile;
-    size_t numUpvalueCaptures = 0;
+    keel::usize numUpvalueCaptures = 0;
 };
 
 // Shared mutable box for nested-function lexical variables (Upvalues).
@@ -155,9 +156,9 @@ struct UpvaluePayload final : NativePayload
     }
 };
 
-inline Value makeUpvalueBox(Value init = Value(), std::pmr::memory_resource *mr = nullptr)
+inline Value makeUpvalueBox(Value init = Value(), keel::Allocator *mr = nullptr)
 {
-    auto *res = mr ? mr : std::pmr::get_default_resource();
+    auto *res = mr ? mr : keel::default_allocator();
     auto st = std::make_shared<ObjectState>(res);
     st->native = std::make_shared<UpvaluePayload>(std::move(init));
     return Value::object("__upvalue__", std::move(st), /*isHandle=*/true, res);

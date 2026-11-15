@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/stack_guard.hpp>
 #include <stdexcept>
 #include <cstdint>
@@ -51,7 +52,7 @@ void StackGuard::check(const char *stage)
 {
     pthread_t self = pthread_self();
     void *stackAddr = pthread_get_stackaddr_np(self);
-    size_t stackSize = pthread_get_stacksize_np(self);
+    keel::usize stackSize = pthread_get_stacksize_np(self);
     uintptr_t lowLimit = reinterpret_cast<uintptr_t>(stackAddr) - stackSize;
     volatile char dummy = 0;
     uintptr_t currentStack = reinterpret_cast<uintptr_t>(&dummy);
@@ -79,7 +80,7 @@ void StackGuard::check(const char *stage)
         pthread_attr_t attr;
         if (pthread_getattr_np(pthread_self(), &attr) == 0) {
             void *stackAddr = nullptr;
-            size_t stackSize = 0;
+            keel::usize stackSize = 0;
             pthread_attr_getstack(&attr, &stackAddr, &stackSize);
             pthread_attr_destroy(&attr);
             cachedLow = stackAddr ? reinterpret_cast<uintptr_t>(stackAddr) : 0;

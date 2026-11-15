@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <keel/core.h>
 #include <cctype>
 #include <string>
 
@@ -25,10 +26,10 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
 {
     std::string line;
     bool haveFirst = false;
-    size_t i = 0;
-    const size_t n = src.size();
+    keel::usize i = 0;
+    const keel::usize n = src.size();
     auto trim = [](std::string &s) {
-        size_t a = 0, b = s.size();
+        keel::usize a = 0, b = s.size();
         while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
         while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
         s = s.substr(a, b - a);
@@ -41,7 +42,7 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
         while (!line.empty() && (line.back() == '\r')) line.pop_back();
         // strip a trailing comment (naive: first '%' — function signature
         // lines do not carry literal % in strings in practice)
-        size_t pct = line.find('%');
+        keel::usize pct = line.find('%');
         if (pct != std::string::npos) line.resize(pct);
         trim(line);
         if (line.empty()) continue;
@@ -54,7 +55,7 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
                 std::string more;
                 while (i < n && src[i] != '\n') more += src[i++];
                 if (i < n) ++i;
-                size_t p = more.find('%');
+                keel::usize p = more.find('%');
                 if (p != std::string::npos) more.resize(p);
                 trim(more);
                 line += more;
@@ -67,11 +68,11 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
         return false;
 
     // Parse the signature:  function [out] = name(args)   |   function name(args)
-    size_t eq = line.find('=');
-    size_t namePos = std::string::npos;
+    keel::usize eq = line.find('=');
+    keel::usize namePos = std::string::npos;
     if (eq != std::string::npos) {
         // ensure the '=' is before any '(' (output-list form)
-        size_t lp = line.find('(');
+        keel::usize lp = line.find('(');
         if (lp != std::string::npos && lp < eq) eq = std::string::npos;
     }
     if (eq != std::string::npos) {
@@ -84,7 +85,7 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
     if (namePos >= line.size()) return false;
     if (!std::isalpha(static_cast<unsigned char>(line[namePos])) && line[namePos] != '_')
         return false;
-    size_t end = namePos;
+    keel::usize end = namePos;
     while (end < line.size()
            && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
         ++end;

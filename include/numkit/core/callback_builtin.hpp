@@ -1,6 +1,8 @@
 // include/callback_builtin.hpp
 #pragma once
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
 #include <cstddef>
@@ -59,7 +61,7 @@ struct VmContinuation
 struct CallbackBuiltin
 {
     virtual ~CallbackBuiltin() = default;
-    virtual std::shared_ptr<VmContinuation> tryStart(Span<const Value> args, std::size_t nargout,
+    virtual std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
                                                      Value *dest, Engine &eng) = 0;
 };
 
@@ -77,10 +79,10 @@ struct CallbackBuiltin
 struct LoopContinuation : VmContinuation
 {
     Value handle;
-    std::size_t n = 0;
-    std::size_t i = 0;
+    keel::usize n = 0;
+    keel::usize i = 0;
     Value *dest = nullptr;
-    std::function<std::vector<Value>(std::size_t)> makeArgs;
+    std::function<std::vector<Value>(keel::usize)> makeArgs;
     std::function<Value(std::vector<Value> &)> pack;
     std::vector<Value> results;
 

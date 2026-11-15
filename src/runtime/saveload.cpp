@@ -5,11 +5,14 @@
 // (saveload_mat.cpp) based on flags and the filename's extension —
 // matching MATLAB's defaults (binary .mat unless `-ascii` is given).
 
+#include <keel/arena.h>
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/array.h>
 #include <numkit/runtime/saveload.hpp>
 
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/sys/vfs.hpp>
 
@@ -28,7 +31,7 @@ void saveAscii(Engine &engine, Environment &env,
 
 void loadAscii(Engine &engine, Environment &env,
                const std::string &filename,
-               size_t nargout, Span<Value> outs);
+               keel::usize nargout, keel::MutArrayRef<Value> outs);
 
 void saveMat(Engine &engine, Environment &env,
              const std::string &filename,
@@ -37,14 +40,14 @@ void saveMat(Engine &engine, Environment &env,
 
 void loadMat(Engine &engine, Environment &env,
              const std::string &filename,
-             size_t nargout, Span<Value> outs);
+             keel::usize nargout, keel::MutArrayRef<Value> outs);
 
 namespace {
 
 bool endsWithIgnoreCase(const std::string &s, const std::string &suffix)
 {
     if (s.size() < suffix.size()) return false;
-    for (size_t i = 0; i < suffix.size(); ++i) {
+    for (keel::usize i = 0; i < suffix.size(); ++i) {
         char a = s[s.size() - suffix.size() + i];
         char b = suffix[i];
         if (std::tolower(static_cast<unsigned char>(a))
@@ -60,7 +63,7 @@ bool endsWithIgnoreCase(const std::string &s, const std::string &suffix)
 // save / load Entry Points
 // ════════════════════════════════════════════════════════════════════════
 
-void save(Engine &engine, Environment &env, Span<const Value> args)
+void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("save: filename required");
@@ -76,9 +79,9 @@ void save(Engine &engine, Environment &env, Span<const Value> args)
     // Whichever `-vN` appears last wins (mirrors MATLAB).
     int matVersion = 5;
 
-    ScratchArena scratch(engine.resource());
-    ScratchVec<std::string> varnames(&scratch);
-    for (size_t i = 1; i < args.size(); ++i) {
+    keel::ArenaTemp scratch = keel::get_scratch(engine.allocator());
+    keel::Array<std::string> varnames(scratch.allocator());
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar())
             continue;
         std::string s = args[i].toString();
@@ -118,8 +121,8 @@ void save(Engine &engine, Environment &env, Span<const Value> args)
     }
 }
 
-void load(Engine &engine, Environment &env, Span<const Value> args,
-          size_t nargout, Span<Value> outs)
+void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
+          keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("load: filename required");
@@ -127,7 +130,7 @@ void load(Engine &engine, Environment &env, Span<const Value> args,
 
     enum class Mode { Auto, Ascii, Mat };
     Mode mode = Mode::Auto;
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar()) continue;
         std::string s = args[i].toString();
         if (s == "-ascii") { mode = Mode::Ascii; continue; }
@@ -190,14 +193,14 @@ void load(Engine &engine, Environment &env, Span<const Value> args,
 
 namespace detail {
 
-void save_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void save_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     (void)outs;
     save(*ctx.engine, *ctx.env, args);
 }
 
-void load_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void load_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     load(*ctx.engine, *ctx.env, args, nargout, outs);
 }

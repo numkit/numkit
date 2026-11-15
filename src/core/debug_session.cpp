@@ -16,6 +16,7 @@
 //   x = <expr>   — writes through to the frame register if x is a frame
 //                  var, otherwise lands in the overlay.
 //
+#include <keel/core.h>
 #include <numkit/core/debug_session.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
@@ -37,7 +38,7 @@ DebugSession::~DebugSession()
     stop();
 }
 
-void DebugSession::setBreakpoints(const std::vector<uint16_t> &lines)
+void DebugSession::setBreakpoints(const std::vector<keel::u16> &lines)
 {
     auto &bpm = engine_.debug().breakpoints();
     bpm.clearAll();
@@ -175,7 +176,7 @@ void DebugSession::stop()
     ws_.reset();
 }
 
-size_t DebugSession::frameCount() const
+keel::usize DebugSession::frameCount() const
 {
     return (active_ && engine_.vm_) ? engine_.vm_->frameCount() : 0;
 }
@@ -225,7 +226,7 @@ std::string DebugSession::frameFocusLine() const
     if (!ctl || ctl->callStack().empty())
         return "";
     auto &stack = ctl->callStack();
-    size_t depth = selectedDepth_ < stack.size() ? selectedDepth_ : stack.size() - 1;
+    keel::usize depth = selectedDepth_ < stack.size() ? selectedDepth_ : stack.size() - 1;
     const auto &sf = stack[stack.size() - 1 - depth];
     std::string fn = sf.functionName.empty() ? "<script>" : sf.functionName;
     return "In " + fn + " (line " + std::to_string(sf.line) + ")";
@@ -239,7 +240,7 @@ std::string DebugSession::formatDbStack() const
     auto &stack = ctl->callStack();
     std::string out;
     // Deepest frame first (MATLAB order); '>' marks the dbup/dbdown focus.
-    for (size_t i = 0; i < stack.size(); ++i) {
+    for (keel::usize i = 0; i < stack.size(); ++i) {
         const auto &sf = stack[stack.size() - 1 - i];
         out += (i == selectedDepth_) ? "> " : "  ";
         std::string fn = sf.functionName.empty() ? "<script>" : sf.functionName;
@@ -255,10 +256,10 @@ void DebugSession::addWatch(const std::string &expr)
     watches_.push_back(expr);
 }
 
-void DebugSession::removeWatch(size_t index)
+void DebugSession::removeWatch(keel::usize index)
 {
     if (index < watches_.size())
-        watches_.erase(watches_.begin() + static_cast<std::ptrdiff_t>(index));
+        watches_.erase(watches_.begin() + static_cast<keel::isize>(index));
 }
 
 void DebugSession::clearWatches()
@@ -291,7 +292,7 @@ ExecStatus DebugSession::skipFalseConditionalBreakpoints(ExecStatus status, bool
         auto *ctl = engine_.debug().controller();
         if (!ctl || ctl->callStack().empty())
             break;
-        uint16_t line = ctl->currentFrame()->line;
+        keel::u16 line = ctl->currentFrame()->line;
         std::string cond = engine_.debug().breakpoints().conditionForLine(line);
         if (cond.empty())
             break; // unconditional breakpoint → genuine stop
@@ -347,7 +348,7 @@ DebugSession::Snapshot DebugSession::snapshot() const
 
     // Report the dbup/dbdown-selected frame (0 = deepest). ws_ is already bound
     // to this frame, so its variables match line/functionName below.
-    size_t depth = selectedDepth_;
+    keel::usize depth = selectedDepth_;
     if (depth >= stack.size())
         depth = stack.size() - 1;
     auto &frame = stack[stack.size() - 1 - depth];
@@ -385,8 +386,8 @@ std::string DebugSession::eval(const std::string &code)
     // focus or report the call stack — they are NOT workspace evaluations, so
     // intercept them here (MATLAB handles them the same way at K>>).
     {
-        size_t b = code.find_first_not_of(" \t\r\n");
-        size_t e = code.find_last_not_of(" \t\r\n;");
+        keel::usize b = code.find_first_not_of(" \t\r\n");
+        keel::usize e = code.find_last_not_of(" \t\r\n;");
         std::string cmd = (b == std::string::npos) ? "" : code.substr(b, e - b + 1);
         if (cmd == "dbup")
             return frameUp() ? frameFocusLine() : "Already at the top of the stack.";
@@ -406,7 +407,7 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
     //    runs a full VM pass and stomps both.
     auto *ctl = engine_.debug().controller();
     std::vector<StackFrame> savedCallStack;
-    uint16_t savedLine = 0;
+    keel::u16 savedLine = 0;
     if (ctl) {
         savedCallStack = ctl->callStack();
         if (ctl->currentFrame())

@@ -5,10 +5,11 @@
 // Public C++ API for the key–value container objects (`containers.Map`, `dictionary`).
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
 #include <numkit/value/value.hpp>
 
 #include <cstddef>
-#include <memory_resource>
 
 namespace numkit {
 
@@ -32,13 +33,13 @@ namespace containers {
 /// @param mr Memory resource for container state.
 /// @return Container Value object.
 /// @see dictionary
-Value map(std::pmr::memory_resource *mr = nullptr);
+Value map(keel::Allocator *mr = nullptr);
 
 /// @brief Creates an empty `dictionary` (value semantics: copies are independent).
 /// @param mr Memory resource for container state.
 /// @return Dictionary Value object.
 /// @see map
-Value dictionary(std::pmr::memory_resource *mr = nullptr);
+Value dictionary(keel::Allocator *mr = nullptr);
 
 // ── Operations (work on either container) ────────────────────
 
@@ -70,21 +71,21 @@ void remove(Value &m, const Value &key);
 /// @brief Returns the number of key-value pairs in container.
 /// @param m Container Value object.
 /// @return Number of entries.
-std::size_t count(const Value &m);
+keel::usize count(const Value &m);
 
 /// @brief Extracts all keys from container as a column array.
 /// @param m Container Value object.
 /// @param mr Memory resource for output allocation.
 /// @return Keys array (string, numeric, or cell).
 /// @see values
-Value keys(const Value &m, std::pmr::memory_resource *mr = nullptr);
+Value keys(const Value &m, keel::Allocator *mr = nullptr);
 
 /// @brief Extracts all values from container as an array or cell array.
 /// @param m Container Value object.
 /// @param mr Memory resource for output allocation.
 /// @return Values array (homogeneous array or cell).
 /// @see keys
-Value values(const Value &m, std::pmr::memory_resource *mr = nullptr);
+Value values(const Value &m, keel::Allocator *mr = nullptr);
 
 } // namespace containers
 } // namespace numkit::runtime

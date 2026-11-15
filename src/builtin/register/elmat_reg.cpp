@@ -1,11 +1,13 @@
 // src/bundle/src/register/builtin/elmat_reg.cpp
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -14,92 +16,92 @@
 
 namespace numkit::builtin::detail {
 
-void blkdiag_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cat_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void circshift_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void colon_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void compan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cylinder_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void diag_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ellipsoid_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void eye_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void false_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void find_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void flip_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void fliplr_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void flipud_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void freqspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gallery_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void hadamard_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void hankel_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void hilb_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ichol_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ind2sub_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void inf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void invhilb_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ipermute_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void iscolumn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isempty_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isequal_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isequaln_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isequalwithequalnans_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ismatrix_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isrow_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isscalar_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issorted_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issortedrows_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issparse_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isvector_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void kron_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void length_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void linspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void logspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void magic_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void meshgrid_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ndgrid_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ndims_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nnz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nonzeros_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void numel_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nzmax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ones_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void paddata_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pagectranspose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pagetranspose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pascal_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void peaks_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void permute_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void repelem_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void repmat_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void reshape_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void resize_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rosser_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rot90_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void shiftdim_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void size_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sparse_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void spdiags_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sphere_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void squeeze_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sub2ind_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void toeplitz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void topkrows_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void transpose_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void tril_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void trimdata_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void triu_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void true_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void vander_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void wilkinson_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void zeros_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void blkdiag_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cat_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void circshift_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void colon_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void compan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cylinder_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void diag_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ellipsoid_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void eye_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void false_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void find_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void flip_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void fliplr_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void flipud_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void freqspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gallery_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void hadamard_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void hankel_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void hilb_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ichol_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ind2sub_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void inf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void invhilb_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ipermute_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void iscolumn_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isempty_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isequal_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isequaln_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isequalwithequalnans_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ismatrix_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isrow_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isscalar_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issorted_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issortedrows_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issparse_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isvector_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void kron_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void length_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void linspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void logspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void magic_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void meshgrid_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ndgrid_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ndims_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nnz_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nonzeros_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void numel_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nzmax_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ones_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void paddata_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pagectranspose_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pagetranspose_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pascal_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void peaks_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void permute_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void repelem_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void repmat_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void reshape_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void resize_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rosser_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rot90_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void shiftdim_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void size_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sparse_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void spdiags_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sphere_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void squeeze_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sub2ind_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void toeplitz_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void topkrows_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void transpose_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void tril_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void trimdata_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void triu_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void true_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void vander_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void wilkinson_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void zeros_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 
 struct BsxfunCallbackBuiltin : CallbackBuiltin
 {
     // Single-shot: bsxfun forwards the WHOLE arrays to the handle in one
     // call (the pinned contract, debug_session_test BreakInsideBsxfunCallback
     // — one pausable frame). Lost when e95e6054 rewrote this per-element.
-    std::shared_ptr<VmContinuation> tryStart(Span<const Value> args, std::size_t nargout,
+    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
                                              Value *dest, Engine &eng) override
     {
         if (args.size() < 3 || nargout > 1)
@@ -111,7 +113,7 @@ struct BsxfunCallbackBuiltin : CallbackBuiltin
         cont->handle = args[0];
         cont->n = 1;
         cont->dest = dest;
-        cont->makeArgs = [callArgs](std::size_t) -> std::vector<Value> { return callArgs; };
+        cont->makeArgs = [callArgs](keel::usize) -> std::vector<Value> { return callArgs; };
         cont->pack = [](std::vector<Value> &results) -> Value {
             return results.empty() ? Value() : std::move(results[0]);
         };
@@ -181,9 +183,9 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("vander",     &::numkit::builtin::detail::vander_reg);
     engine.registerFunction("wilkinson",  &::numkit::builtin::detail::wilkinson_reg);
     engine.registerFunction("rands",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            auto *mr = ctx.engine->resource();
-            size_t m = 1, n = 1;
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
+            keel::usize m = 1, n = 1;
             if (args.size() >= 2) {
                 m = argcheck::arrayDim(args[0], "rands");
                 n = argcheck::arrayDim(args[1], "rands");
@@ -196,7 +198,7 @@ void register_elmat(Engine &engine) {
             double *p = out.doubleDataMut();
             auto &rng = ctx.engine->rng();
             std::uniform_real_distribution<double> dist(-1.0, 1.0);
-            for (size_t i = 0; i < m * n; ++i) p[i] = dist(rng);
+            for (keel::usize i = 0; i < m * n; ++i) p[i] = dist(rng);
             outs[0] = std::move(out);
         });
 
@@ -205,27 +207,27 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("trimdata",   &::numkit::builtin::detail::trimdata_reg);
 
     engine.registerFunction("head",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty()) throw std::runtime_error("head requires at least 1 argument");
-            size_t k = (args.size() > 1) ? argcheck::arrayDim(args[1], "head") : 8;
-            outs[0] = numkit::builtin::head(args[0], k, ctx.engine->resource());
+            keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "head") : 8;
+            outs[0] = numkit::builtin::head(args[0], k, ctx.engine->allocator());
         });
 
     engine.registerFunction("tail",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty()) throw std::runtime_error("tail requires at least 1 argument");
-            size_t k = (args.size() > 1) ? argcheck::arrayDim(args[1], "tail") : 8;
-            outs[0] = numkit::builtin::tail(args[0], k, ctx.engine->resource());
+            keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "tail") : 8;
+            outs[0] = numkit::builtin::tail(args[0], k, ctx.engine->allocator());
         });
 
     engine.registerFunction("bsxfun",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 3)
                 throw std::runtime_error("bsxfun requires at least 3 arguments (fun, A, B)");
             const auto &fn = args[0];
             const auto &a = args[1];
             const auto &b = args[2];
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
 
             if (fn.isFuncHandle()) {
                 const std::string name = fn.funcHandleName();
@@ -248,25 +250,25 @@ void register_elmat(Engine &engine) {
                 outs[0] = Value::Empty;
                 return;
             }
-            size_t ar = a.dims().rows(), ac = a.dims().cols();
-            size_t br = b.dims().rows(), bc = b.dims().cols();
+            keel::usize ar = a.dims().rows(), ac = a.dims().cols();
+            keel::usize br = b.dims().rows(), bc = b.dims().cols();
             if ((ar != br && ar != 1 && br != 1) || (ac != bc && ac != 1 && bc != 1)) {
                 throw std::runtime_error("bsxfun: non-singleton dimensions must match");
             }
-            size_t outR = std::max(ar, br);
-            size_t outC = std::max(ac, bc);
+            keel::usize outR = std::max(ar, br);
+            keel::usize outC = std::max(ac, bc);
             auto res = Value::matrix(outR, outC, ValueType::DOUBLE, mr);
             double *outData = res.doubleDataMut();
-            for (size_t c = 0; c < outC; ++c) {
-                size_t acIdx = (ac == 1) ? 0 : c;
-                size_t bcIdx = (bc == 1) ? 0 : c;
-                for (size_t r = 0; r < outR; ++r) {
-                    size_t arIdx = (ar == 1) ? 0 : r;
-                    size_t brIdx = (br == 1) ? 0 : r;
+            for (keel::usize c = 0; c < outC; ++c) {
+                keel::usize acIdx = (ac == 1) ? 0 : c;
+                keel::usize bcIdx = (bc == 1) ? 0 : c;
+                for (keel::usize r = 0; r < outR; ++r) {
+                    keel::usize arIdx = (ar == 1) ? 0 : r;
+                    keel::usize brIdx = (br == 1) ? 0 : r;
                     Value elemA = Value::scalar(a.elemAsDouble(acIdx * ar + arIdx));
                     Value elemB = Value::scalar(b.elemAsDouble(bcIdx * br + brIdx));
                     Value argsArr[2] = {elemA, elemB};
-                    Value callOut = ctx.engine->callFunctionHandle(fn, Span<const Value>(argsArr, 2));
+                    Value callOut = ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>(argsArr, 2));
                     outData[c * outR + r] = callOut.toScalar();
                 }
             }
@@ -276,8 +278,8 @@ void register_elmat(Engine &engine) {
     engine.registerCallbackBuiltin("bsxfun", std::make_shared<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
 
     engine.registerFunction("eps",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
-            auto *mr = ctx.engine->resource();
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
             if (args.empty()) {
                 outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
                 return;
@@ -299,23 +301,23 @@ void register_elmat(Engine &engine) {
             }
             const ValueType outType = (x.type() == ValueType::SINGLE) ? ValueType::SINGLE : ValueType::DOUBLE;
             if (x.isEmpty()) {
-                size_t dArr[Dims::kMaxRank];
+                keel::usize dArr[Dims::kMaxRank];
                 int nd = x.dims().ndims();
                 for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
                 outs[0] = Value::matrixND(dArr, nd, outType, mr);
                 return;
             }
-            size_t dArr[Dims::kMaxRank];
+            keel::usize dArr[Dims::kMaxRank];
             int nd = x.dims().ndims();
             for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
             Value out = Value::matrixND(dArr, nd, outType, mr);
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             if (outType == ValueType::SINGLE) {
                 float *dst = out.singleDataMut();
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     float v = x.isComplex()
-                        ? static_cast<float>(std::abs(x.complexData()[i]))
-                        : std::abs(static_cast<float>(x.elemAsDouble(i)));
+                        ? static_cast<float>(keel::abs(x.complexData()[i]))
+                        : keel::abs(static_cast<float>(x.elemAsDouble(i)));
                     if (std::isnan(v) || std::isinf(v)) {
                         dst[i] = std::numeric_limits<float>::quiet_NaN();
                     } else if (v <= std::numeric_limits<float>::min()) {
@@ -326,10 +328,10 @@ void register_elmat(Engine &engine) {
                 }
             } else {
                 double *dst = out.doubleDataMut();
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     double v = x.isComplex()
-                        ? std::abs(x.complexData()[i])
-                        : std::abs(x.elemAsDouble(i));
+                        ? keel::abs(x.complexData()[i])
+                        : keel::abs(x.elemAsDouble(i));
                     if (std::isnan(v) || std::isinf(v)) {
                         dst[i] = std::numeric_limits<double>::quiet_NaN();
                     } else if (v <= std::numeric_limits<double>::min()) {

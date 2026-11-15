@@ -3,6 +3,9 @@
 // CallContext register half of language/bitwise/int_math.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/ops.hpp>
 #include <numkit/builtin/datatypes.hpp>
@@ -14,13 +17,10 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/ops/int_math_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -75,7 +75,7 @@ ValueType pickBitwiseResultType(const Value &a, const Value &b, const char *fn)
 // possibly-int inputs. Casts both inputs to DOUBLE; restores the
 // integer class on the result if MATLAB would.
 template <typename Fn>
-Value runBitwiseBinary(const Value &a, const Value &b, const char *fnName, Fn fn, std::pmr::memory_resource *mr)
+Value runBitwiseBinary(const Value &a, const Value &b, const char *fnName, Fn fn, keel::Allocator *mr)
 {
     const ValueType rt = pickBitwiseResultType(a, b, fnName);
     Value ad = (a.type() == ValueType::DOUBLE) ? a : toDouble(a, mr);
@@ -93,20 +93,20 @@ Value runBitwiseBinary(const Value &a, const Value &b, const char *fnName, Fn fn
 // [g,u,v]=gcd(a,b) convention: standard iterative algorithm with C++
 // truncating division, then normalize g >= 0 (negate u,v with it); the
 // special case gcd(0,0) returns [0,0,0].
-inline int64_t extGcd(int64_t a, int64_t b, int64_t &u, int64_t &v)
+inline keel::i64 extGcd(keel::i64 a, keel::i64 b, keel::i64 &u, keel::i64 &v)
 {
     if (a == 0 && b == 0) { u = 0; v = 0; return 0; }
-    int64_t old_r = a, r = b;
-    int64_t old_s = 1, s = 0;
-    int64_t old_t = 0, t = 1;
+    keel::i64 old_r = a, r = b;
+    keel::i64 old_s = 1, s = 0;
+    keel::i64 old_t = 0, t = 1;
     while (r != 0) {
-        const int64_t q = old_r / r;
-        int64_t tmp;
+        const keel::i64 q = old_r / r;
+        keel::i64 tmp;
         tmp = old_r - q * r; old_r = r; r = tmp;
         tmp = old_s - q * s; old_s = s; s = tmp;
         tmp = old_t - q * t; old_t = t; t = tmp;
     }
-    int64_t g = old_r;
+    keel::i64 g = old_r;
     u = old_s;
     v = old_t;
     if (g < 0) { g = -g; u = -u; v = -v; }
@@ -114,20 +114,20 @@ inline int64_t extGcd(int64_t a, int64_t b, int64_t &u, int64_t &v)
 }
 
 #define NUMKIT_BIN_REG_BIT(name, fn)                                                       \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                       \
-                    Span<Value> outs, CallContext &ctx)                               \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                       \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                               \
     {                                                                                  \
         argcheck::checkNargin(args.size(), 2, 3, #name); \
         outs[0] = runBitwiseBinary(args[0], args[1], \
-                                   #name, fn, ctx.engine->resource());                                         \
+                                   #name, fn, ctx.engine->allocator());                                         \
     }
 
 #define NUMKIT_BIN_REG(name, fn)                                                   \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
-                    Span<Value> outs, CallContext &ctx)                       \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 2, 2, #name); \
-        outs[0] = fn(args[0], args[1], ctx.engine->resource());               \
+        outs[0] = fn(args[0], args[1], ctx.engine->allocator());               \
     }
 
 NUMKIT_BIN_REG(lcm,      lcm)
@@ -141,31 +141,31 @@ NUMKIT_BIN_REG_BIT(bitshift, bitshift)
 
 // gcd: 1-output is the gcd; [g,u,v]=gcd(a,b) also returns the Bezout
 // coefficients (extended Euclid), elementwise. lcm is unaffected.
-void gcd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void gcd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "gcd");
     argcheck::checkNargin(args.size(), 2, 2, "gcd");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     outs[0] = gcd(args[0], args[1], mr);
     if (nargout >= 2)
         outs[1] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
-            int64_t u, v;
+            keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
             return static_cast<double>(u);
         }, mr);
     if (nargout >= 3)
         outs[2] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
-            int64_t u, v;
+            keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
             return static_cast<double>(v);
         }, mr);
 }
 
-void bitcmp_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "bitcmp");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     int width = 0;
     std::string explicitType;       // empty = inferred or default
@@ -214,22 +214,22 @@ void bitcmp_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     outs[0] = std::move(r);
 }
 
-void bitset_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void bitset_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "bitset");
     argcheck::checkNargin(args.size(), 2, 4, "bitset");
     outs[0] = bitset(args[0], args[1],
                      (args.size() >= 3) ? args[2] : Value::Empty,
-                     ctx.engine->resource());
+                     ctx.engine->allocator());
 }
 
-void bitget_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void bitget_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "bitget");
     argcheck::checkNargin(args.size(), 2, 3, "bitget");
-    outs[0] = bitget(args[0], args[1], ctx.engine->resource());
+    outs[0] = bitget(args[0], args[1], ctx.engine->allocator());
 }
 
 } // namespace detail

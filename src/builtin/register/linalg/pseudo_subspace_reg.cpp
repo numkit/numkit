@@ -7,6 +7,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/pseudo_subspace.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -17,31 +19,31 @@
 namespace numkit::linalg {
 namespace detail {
 
-void pinv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pinv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pinv");
     const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
-    outs[0] = pinv(args[0], tol, ctx.engine->resource());
+    outs[0] = pinv(args[0], tol, ctx.engine->allocator());
 }
 
-void orth_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void orth_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "orth");
     const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
-    outs[0] = orth(args[0], tol, ctx.engine->resource());
+    outs[0] = orth(args[0], tol, ctx.engine->allocator());
 }
 
-void null_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void null_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "null");
     const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
-    outs[0] = null_basis(args[0], tol, ctx.engine->resource());
+    outs[0] = null_basis(args[0], tol, ctx.engine->allocator());
 }
 
-void subspace_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void subspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "subspace");
-    outs[0] = subspace(args[0], args[1], ctx.engine->resource());
+    outs[0] = subspace(args[0], args[1], ctx.engine->allocator());
 }
 
 } // namespace detail

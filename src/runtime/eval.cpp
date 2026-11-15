@@ -6,12 +6,13 @@
 // resolveEvalScope helper moved with them. Behaviour is unchanged; only the
 // owning translation unit / layer differs. registerEvalFamily is composed by
 // installRuntimeLibrary (runtime.cpp), which bundle/installStandardLibrary calls.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/runtime/function_file.hpp>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 
 #include <cstdlib>
@@ -35,8 +36,8 @@ void registerEvalFamily(Engine &engine)
     };
 
     engine.registerFunction(
-        "run", [resolveEvalScope](Span<const Value> args, size_t,
-                                   Span<Value> outs, CallContext &ctx) {
+        "run", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize,
+                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isChar())
                 throw std::runtime_error("run requires a string filename");
             std::string p = args[0].toString();
@@ -54,7 +55,7 @@ void registerEvalFamily(Engine &engine)
             // resolver, so substr(0,0) won't do.
             std::string scriptDir;
             {
-                size_t slash = rp.path.find_last_of("/\\");
+                keel::usize slash = rp.path.find_last_of("/\\");
                 if (slash == 0)
                     scriptDir.assign(1, rp.path[0]);   // "/" or "\\"
                 else if (slash != std::string::npos)
@@ -95,8 +96,8 @@ void registerEvalFamily(Engine &engine)
     // script — and one born at the command window keeps '' (a known but
     // empty origin that masks the caller's file).
     engine.registerFunction(
-        "mfilename", [](Span<const Value> args, size_t,
-                        Span<Value> outs, CallContext &ctx) {
+        "mfilename", [](keel::ArrayRef<Value> args, keel::usize,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx) {
             bool fullpath = false;
             if (args.size() > 1)
                 throw std::runtime_error(
@@ -113,7 +114,7 @@ void registerEvalFamily(Engine &engine)
             }
             const std::string *file = ctx.engine->currentScriptFile();
             if (!file || file->empty()) {
-                outs[0] = Value::stringScalar("", ctx.engine->resource());
+                outs[0] = Value::stringScalar("", ctx.engine->allocator());
                 return;
             }
             // Normalize separators so the base/fullpath split works for
@@ -121,17 +122,17 @@ void registerEvalFamily(Engine &engine)
             // with no separator keeps just the extension-stripped base
             // for BOTH forms.
             std::string p = *file;
-            size_t slash = p.find_last_of("/\\");
+            keel::usize slash = p.find_last_of("/\\");
             std::string base = (slash == std::string::npos) ? p
                                                             : p.substr(slash + 1);
-            size_t dot = base.find_last_of('.');
+            keel::usize dot = base.find_last_of('.');
             if (dot != std::string::npos && dot > 0)
                 base.resize(dot);
             std::string out =
                 fullpath && slash != std::string::npos
                     ? p.substr(0, slash + 1) + base
                     : base;
-            outs[0] = Value::stringScalar(out, ctx.engine->resource());
+            outs[0] = Value::stringScalar(out, ctx.engine->allocator());
         });
 
     // ── eval ─────────────────────────────────────────────────
@@ -146,8 +147,8 @@ void registerEvalFamily(Engine &engine)
     // engine, which flips suppressOutput on top-level statements before
     // executing.
     engine.registerFunction(
-        "eval", [resolveEvalScope](Span<const Value> args, size_t nargout,
-                                    Span<Value> outs, CallContext &ctx) {
+        "eval", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isChar())
                 throw std::runtime_error("eval requires a string");
             const bool suppress = (nargout >= 1);
@@ -172,8 +173,8 @@ void registerEvalFamily(Engine &engine)
     // script variables live in VM registers, not yet in the
     // Environment — input is at parity with eval(), guarded there.
     engine.registerFunction(
-        "input", [resolveEvalScope](Span<const Value> args, size_t nargout,
-                                     Span<Value> outs, CallContext &ctx) {
+        "input", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
+                                     keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || (!args[0].isChar() && !args[0].isString()))
                 throw std::runtime_error(
                     "input: prompt must be a character vector or string scalar");
@@ -201,7 +202,7 @@ void registerEvalFamily(Engine &engine)
                     line.clear();
             }
             if (asText)
-                outs[0] = Value::fromString(line, ctx.engine->resource());
+                outs[0] = Value::fromString(line, ctx.engine->allocator());
             else if (line.empty())
                 outs[0] = Value::Empty;
             else
@@ -215,7 +216,7 @@ void registerEvalFamily(Engine &engine)
     // containing this evalin call ('caller'). The latter matches
     // MATLAB's two-frames-up rule.
     engine.registerFunction(
-        "evalin", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        "evalin", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw std::runtime_error("evalin: requires (workspace, code)");
             if (!args[0].isChar() || !args[1].isChar())

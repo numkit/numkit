@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <memory_resource>
-#include <numkit/value/span.hpp>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
 #include <string>
@@ -32,7 +32,7 @@ using ::numkit::FsContext;
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    `1 × 1` CHAR.
 /// @see fullfile
-Value filesep(std::pmr::memory_resource *mr = nullptr);
+Value filesep(keel::Allocator *mr = nullptr);
 
 /// @brief Concatenate path segments (`p = fullfile(parts)`).
 ///
@@ -44,8 +44,8 @@ Value filesep(std::pmr::memory_resource *mr = nullptr);
 /// @param mr     Memory resource (nullptr → process default).
 /// @return       CHAR path.
 /// @see filesep, fileparts
-Value fullfile(Span<const std::string> parts,
-               std::pmr::memory_resource *mr = nullptr);
+Value fullfile(keel::ArrayRef<std::string> parts,
+               keel::Allocator *mr = nullptr);
 
 /// @brief Split a path into folder / name / ext
 /// (`[folder, name, ext] = fileparts(path)`).
@@ -58,7 +58,7 @@ Value fullfile(Span<const std::string> parts,
 /// @see fullfile
 std::tuple<Value, Value, Value>
 fileparts(const std::string &path,
-          std::pmr::memory_resource *mr = nullptr);
+          keel::Allocator *mr = nullptr);
 
 /// @brief Host temp directory (`d = tempdir()`).
 ///
@@ -68,7 +68,7 @@ fileparts(const std::string &path,
 /// @param mr      Memory resource (nullptr → process default).
 /// @return        CHAR path.
 /// @see tempname
-Value tempdir(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
+Value tempdir(FsContext &fs, keel::Allocator *mr = nullptr);
 
 /// @brief Unique temp file path (`p = tempname()`).
 ///
@@ -80,6 +80,6 @@ Value tempdir(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
 /// @param mr      Memory resource (nullptr → process default).
 /// @return        CHAR path.
 /// @see tempdir
-Value tempname(FsContext &fs, std::pmr::memory_resource *mr = nullptr);
+Value tempname(FsContext &fs, keel::Allocator *mr = nullptr);
 
 } // namespace numkit::io

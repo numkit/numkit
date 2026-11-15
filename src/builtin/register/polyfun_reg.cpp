@@ -1,10 +1,11 @@
 // src/bundle/src/register/builtin/polyfun_reg.cpp
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 // Each registered adapter in polyfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin {
@@ -15,37 +16,37 @@ void registerInterpolantClasses(Engine &engine);
 
 namespace numkit::builtin::detail {
 
-void cumtrapz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gk15_nodes_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void integral2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void integral3_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void interp1_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void interp2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void interp3_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void interpn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void makima_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mkpp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void padecoef_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pchip_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void poly_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyder_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polydiv_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyfit_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyint_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyval_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyvalm_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ppval_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void quad2d_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void quadgk_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void residue_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void residuez_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void roots_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void spline_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void tf2zp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void trapz_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void unmkpp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void zp2tf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void latc2tf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void cumtrapz_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gk15_nodes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void integral2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void integral3_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void interp1_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void interp2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void interp3_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void interpn_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void makima_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mkpp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void padecoef_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pchip_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void poly_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyder_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polydiv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyfit_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyint_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyval_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyvalm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ppval_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void quad2d_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void quadgk_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void residue_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void residuez_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void roots_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void spline_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void tf2zp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void trapz_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void unmkpp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void zp2tf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void latc2tf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 
 } // namespace numkit::builtin::detail
 

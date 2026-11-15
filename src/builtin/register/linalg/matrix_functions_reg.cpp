@@ -7,6 +7,9 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/complex.h>
 #include <numkit/linalg/matrix_functions.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -17,35 +20,35 @@
 namespace numkit::linalg {
 namespace detail {
 
-void expm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void expm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "expm");
-    outs[0] = expm(args[0], ctx.engine->resource());
+    outs[0] = expm(args[0], ctx.engine->allocator());
 }
 
-void logm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void logm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "logm");
-    outs[0] = logm(args[0], ctx.engine->resource());
+    outs[0] = logm(args[0], ctx.engine->allocator());
 }
 
-void sqrtm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void sqrtm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "sqrtm");
-    outs[0] = sqrtm(args[0], ctx.engine->resource());
+    outs[0] = sqrtm(args[0], ctx.engine->allocator());
 }
 
-void expmv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void expmv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 3, "expmv");
     const double t = args[0].toScalar();
-    outs[0] = expmv(t, args[1], args[2], ctx.engine->resource());
+    outs[0] = expmv(t, args[1], args[2], ctx.engine->allocator());
 }
 
-void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void funm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "funm");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &A = args[0];
     const Value &fnArg = args[1];
 
@@ -70,12 +73,12 @@ void funm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
                     0, 0, "funm", "", "numkit:funm:badFun");
     }
 
-    auto evalScalarFn = [&](std::complex<double> z) -> std::complex<double> {
+    auto evalScalarFn = [&](keel::c64 z) -> keel::c64 {
         Value x = (z.imag() == 0.0) ? Value::scalar(z.real(), mr)
                                     : Value::complexScalar(z.real(), z.imag(), mr);
-        Value y = ctx.engine->callFunctionHandle(handle, Span<const Value>(&x, 1), ctx.env);
+        Value y = ctx.engine->callFunctionHandle(handle, keel::ArrayRef<Value>(&x, 1), ctx.env);
         if (y.isComplex()) return y.toComplex();
-        return std::complex<double>(y.toScalar(), 0.0);
+        return keel::c64(y.toScalar(), 0.0);
     };
     outs[0] = funm(A, evalScalarFn, mr);
 }

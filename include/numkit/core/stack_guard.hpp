@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keel/core.h>
 #include <cstddef>
 #include <string>
 
@@ -8,7 +9,7 @@ namespace numkit {
 class StackGuard
 {
 public:
-    static constexpr size_t SAFETY_MARGIN_BYTES = 64 * 1024; // 64 KB
+    static constexpr keel::usize SAFETY_MARGIN_BYTES = 64 * 1024; // 64 KB
 
     static void check(const char *stage = nullptr);
 

@@ -2,12 +2,16 @@
 //
 // fileread / readlines / writelines / readmatrix / writematrix / type.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/math.h>
 #include <numkit/io/text/extras.hpp>
 
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
-#include <numkit/value/scratch.hpp>
 
 #include <cmath>
 #include <cstring>
@@ -60,10 +64,10 @@ void spitFile(FsContext &fs, const std::string &filename, const std::string &con
     }
 }
 
-Value charRow(std::pmr::memory_resource *mr, const std::string &s)
+Value charRow(keel::Allocator *mr, const std::string &s)
 {
     auto v = Value::matrix(1, s.size(), ValueType::CHAR, mr);
-    for (size_t i = 0; i < s.size(); ++i)
+    for (keel::usize i = 0; i < s.size(); ++i)
         v.charDataMut()[i] = s[i];
     return v;
 }
@@ -73,10 +77,10 @@ Value charRow(std::pmr::memory_resource *mr, const std::string &s)
 std::vector<std::string> splitLines(const std::string &content)
 {
     std::vector<std::string> out;
-    size_t pos = 0;
+    keel::usize pos = 0;
     while (pos <= content.size()) {
-        size_t nl = content.find('\n', pos);
-        size_t end = (nl == std::string::npos) ? content.size() : nl;
+        keel::usize nl = content.find('\n', pos);
+        keel::usize end = (nl == std::string::npos) ? content.size() : nl;
         std::string line = content.substr(pos, end - pos);
         if (!line.empty() && line.back() == '\r') line.pop_back();
         out.push_back(std::move(line));
@@ -92,7 +96,7 @@ bool tryParseDouble(const std::string &tok, double &out)
 {
     if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
     try {
-        size_t pos = 0;
+        keel::usize pos = 0;
         out = std::stod(tok, &pos);
         // Trailing junk → not a clean number.
         while (pos < tok.size() && std::isspace(static_cast<unsigned char>(tok[pos]))) ++pos;
@@ -121,7 +125,7 @@ std::vector<std::string> splitRow(const std::string &line)
 
 std::string trimWs(const std::string &s)
 {
-    size_t a = 0, b = s.size();
+    keel::usize a = 0, b = s.size();
     while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
     while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
     return s.substr(a, b - a);
@@ -137,14 +141,14 @@ std::string trimWs(const std::string &s)
 // MATLAB-facing readmatrix / writematrix add VFS read/write on top.
 // ════════════════════════════════════════════════════════════════════════
 
-Value readmatrixFromString(const std::string &content, std::pmr::memory_resource *mr)
+Value readmatrixFromString(const std::string &content, keel::Allocator *mr)
 {
     auto lines = splitLines(content);
 
     // Skip leading non-numeric (header) rows: a row whose tokens are
     // all non-numeric (or which has any unparseable token) is considered
     // a header. Common case: header on row 1, numeric on row 2+.
-    size_t skip = 0;
+    keel::usize skip = 0;
     for (; skip < lines.size(); ++skip) {
         if (trimWs(lines[skip]).empty()) continue;
         auto toks = splitRow(lines[skip]);
@@ -156,13 +160,13 @@ Value readmatrixFromString(const std::string &content, std::pmr::memory_resource
         if (anyNum) break;
     }
 
-    ScratchArena scratch(mr);
-    ScratchVec<ScratchVec<double>> rows(&scratch);
-    size_t maxCols = 0;
-    for (size_t i = skip; i < lines.size(); ++i) {
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<keel::Array<double>> rows(scratch.allocator());
+    keel::usize maxCols = 0;
+    for (keel::usize i = skip; i < lines.size(); ++i) {
         if (trimWs(lines[i]).empty()) continue;
         auto toks = splitRow(lines[i]);
-        ScratchVec<double> row(&scratch);
+        keel::Array<double> row(scratch.allocator());
         row.reserve(toks.size());
         for (auto &t : toks) {
             double v = 0.0;
@@ -173,11 +177,11 @@ Value readmatrixFromString(const std::string &content, std::pmr::memory_resource
         rows.push_back(std::move(row));
     }
 
-    const size_t R = rows.size();
+    const keel::usize R = rows.size();
     auto out = Value::matrix(R, maxCols, ValueType::DOUBLE, mr);
     double *dst = out.doubleDataMut();
-    for (size_t r = 0; r < R; ++r) {
-        for (size_t c = 0; c < maxCols; ++c) {
+    for (keel::usize r = 0; r < R; ++r) {
+        for (keel::usize c = 0; c < maxCols; ++c) {
             const double v = (c < rows[r].size()) ? rows[r][c] : 0.0;
             dst[c * R + r] = v;     // column-major
         }
@@ -194,15 +198,15 @@ std::string writematrixToString(const Value &m)
     if (d.is3D())
         throw Error("writematrix: 3-D arrays are not supported",
                      0, 0, "writematrix", "", "numkit:writematrix:nd");
-    const size_t R = d.rows(), C = d.cols();
+    const keel::usize R = d.rows(), C = d.cols();
 
     std::ostringstream os;
     os.precision(15);
-    for (size_t r = 0; r < R; ++r) {
-        for (size_t c = 0; c < C; ++c) {
+    for (keel::usize r = 0; r < R; ++r) {
+        for (keel::usize c = 0; c < C; ++c) {
             if (c) os << ',';
             const double v = m.elemAsDouble(c * R + r);
-            if (std::isfinite(v) && std::floor(v) == v && std::abs(v) < 1e16) {
+            if (std::isfinite(v) && std::floor(v) == v && keel::abs(v) < 1e16) {
                 os << static_cast<long long>(v);
             } else {
                 os << v;
@@ -215,7 +219,7 @@ std::string writematrixToString(const Value &m)
 
 // ── fileread ──────────────────────────────────────────────────────────
 Value fileread(FsContext &fs, const std::string &filename,
-               std::pmr::memory_resource *mr)
+               keel::Allocator *mr)
 {
     return charRow(mr, slurpFile(fs, filename, "fileread"));
 }
@@ -223,11 +227,11 @@ Value fileread(FsContext &fs, const std::string &filename,
 // ── readlines ─────────────────────────────────────────────────────────
 // Returns a STRING array (column vector), N×1.
 Value readlines(FsContext &fs, const std::string &filename,
-                std::pmr::memory_resource *mr)
+                keel::Allocator *mr)
 {
     auto lines = splitLines(slurpFile(fs, filename, "readlines"));
     auto out = Value::stringArray(lines.size(), 1, mr);
-    for (size_t i = 0; i < lines.size(); ++i)
+    for (keel::usize i = 0; i < lines.size(); ++i)
         out.stringElemSet(i, lines[i]);
     return out;
 }
@@ -250,15 +254,15 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
         // Must precede the scalar branch: Value::toString() on a string array
         // returns only element [0], so the old (isChar||isString) catch-all
         // silently wrote just the first line. See bugs/io/writelines.md.
-        const size_t n = lines.numel();
-        for (size_t i = 0; i < n; ++i)
+        const keel::usize n = lines.numel();
+        for (keel::usize i = 0; i < n; ++i)
             append(lines.stringElem(i));
     } else if (lines.isChar() || lines.isString()) {
         // Single char row / scalar string → one line.
         append(lines.toString());
     } else if (lines.isCell()) {
-        const size_t n = lines.numel();
-        for (size_t i = 0; i < n; ++i) {
+        const keel::usize n = lines.numel();
+        for (keel::usize i = 0; i < n; ++i) {
             const Value &cell = lines.cellAt(i);
             if (!cell.isChar() && !cell.isString())
                 throw Error("writelines: each cell element must be a string",
@@ -274,7 +278,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
 
 // ── readmatrix ────────────────────────────────────────────────────────
 Value readmatrix(FsContext &fs, const std::string &filename,
-                 std::pmr::memory_resource *mr)
+                 keel::Allocator *mr)
 {
     return readmatrixFromString(slurpFile(fs, filename, "readmatrix"), mr);
 }

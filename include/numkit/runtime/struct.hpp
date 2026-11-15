@@ -3,9 +3,9 @@
 // toolboxes/builtin/include/numkit/builtin/language/structures/struct.hpp
 #pragma once
 
-#include <memory_resource>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/fn_handle.hpp>
-#include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 
 namespace numkit {
@@ -30,7 +30,7 @@ void registerStructfunCallbackBuiltin(Engine &engine);
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    Empty scalar struct.
 /// @see structure(nameValuePairs, mr)
-Value structure(std::pmr::memory_resource *mr = nullptr);
+Value structure(keel::Allocator *mr = nullptr);
 
 /// @brief Struct from `{name, value, …}` pairs
 /// (`s = struct(name1, val1, name2, val2, …)`).
@@ -43,8 +43,8 @@ Value structure(std::pmr::memory_resource *mr = nullptr);
 /// @return                Scalar struct with the requested fields.
 /// @throws Error  Non-char name in the pair list
 ///                (`m:struct:badName`).
-Value structure(Span<const Value> nameValuePairs,
-                std::pmr::memory_resource *mr = nullptr);
+Value structure(keel::ArrayRef<Value> nameValuePairs,
+                keel::Allocator *mr = nullptr);
 
 /// @brief Field names of a struct (`fn = fieldnames(s)`).
 ///
@@ -52,7 +52,7 @@ Value structure(Span<const Value> nameValuePairs,
 /// @param mr  Memory resource (nullptr → process default).
 /// @return    1-column cell array of field names in insertion order.
 /// @throws Error  `s` is not a struct (`m:fieldnames:notStruct`).
-Value fieldnames(const Value &s, std::pmr::memory_resource *mr = nullptr);
+Value fieldnames(const Value &s, keel::Allocator *mr = nullptr);
 
 /// @brief Test for field existence (`tf = isfield(s, name)`).
 ///
@@ -64,7 +64,7 @@ Value fieldnames(const Value &s, std::pmr::memory_resource *mr = nullptr);
 /// @param mr    Memory resource (nullptr → process default).
 /// @return      LOGICAL result: scalar (single name) or array (cell name).
 Value isfield(const Value &s, const Value &name,
-              std::pmr::memory_resource *mr = nullptr);
+              keel::Allocator *mr = nullptr);
 
 /// @brief Remove a field from a struct (`s2 = rmfield(s, name)`).
 ///
@@ -76,7 +76,7 @@ Value isfield(const Value &s, const Value &name,
 /// @return      Copy of `s` with the requested fields removed.
 /// @throws Error  `s` is not a struct (`m:rmfield:notStruct`).
 Value rmfield(const Value &s, const Value &name,
-              std::pmr::memory_resource *mr = nullptr);
+              keel::Allocator *mr = nullptr);
 
 /// @brief Apply a function handle to every field of a struct
 /// (`y = structfun(fn, s, uniformOutput)`).
@@ -96,7 +96,7 @@ Value rmfield(const Value &s, const Value &name,
 ///                       `uniformOutput`).
 /// @throws Error         Non-struct `s`, or non-scalar result in
 Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
-                std::pmr::memory_resource *mr = nullptr);
+                keel::Allocator *mr = nullptr);
 
 /// @brief Gets the value of specified field in structure (`v = getfield(s, 'field')`).
 /// @param s Structure array.
@@ -104,7 +104,7 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
 /// @param mr Memory resource for output allocation.
 /// @return Field value.
 /// @see setfield, rmfield, isfield
-Value getfield(const Value &s, const Value &name, std::pmr::memory_resource *mr = nullptr);
+Value getfield(const Value &s, const Value &name, keel::Allocator *mr = nullptr);
 
 /// @brief Sets the value of specified field in structure (`s = setfield(s, 'field', val)`).
 /// @param s Structure array.
@@ -113,21 +113,21 @@ Value getfield(const Value &s, const Value &name, std::pmr::memory_resource *mr 
 /// @param mr Memory resource for output allocation.
 /// @return Updated structure array.
 /// @see getfield, rmfield, isfield
-Value setfield(const Value &s, const Value &name, const Value &value, std::pmr::memory_resource *mr = nullptr);
+Value setfield(const Value &s, const Value &name, const Value &value, keel::Allocator *mr = nullptr);
 
 /// @brief Orders fields of structure array alphabetically (`s = orderfields(s)`).
 /// @param s Structure array.
 /// @param mr Memory resource for output allocation.
 /// @return Structure array with sorted field names.
 /// @see fieldnames, isfield
-Value orderfields(const Value &s, std::pmr::memory_resource *mr = nullptr);
+Value orderfields(const Value &s, keel::Allocator *mr = nullptr);
 
 /// @brief Converts structure array to cell array of field values (`c = struct2cell(s)`).
 /// @param s Structure array.
 /// @param mr Memory resource for output allocation.
 /// @return Cell array containing all field contents.
 /// @see cell2struct, structfun
-Value struct2cell(const Value &s, std::pmr::memory_resource *mr = nullptr);
+Value struct2cell(const Value &s, keel::Allocator *mr = nullptr);
 
 
 /// @}

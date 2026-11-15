@@ -1,3 +1,5 @@
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/runtime/io.hpp>
@@ -6,13 +8,10 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/shape_ops.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -24,7 +23,7 @@ using namespace numkit::builtin;
 
 namespace detail {
 
-void disp_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
+void disp_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "disp");
     if (args[0].isObject()) {
@@ -34,7 +33,7 @@ void disp_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
     ctx.engine->outputText(dispFormat(args[0]));
 }
 
-void display_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
+void display_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "display");
     std::string name = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
@@ -47,13 +46,13 @@ void display_reg(Span<const Value> args, size_t, Span<Value>, CallContext &ctx)
     ctx.engine->outputText(args[0].formatDisplay(name));
 }
 
-void fprintf_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void fprintf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "fprintf");
-    size_t count = ::numkit::runtime::fprintf(*ctx.engine, args);
+    keel::usize count = ::numkit::runtime::fprintf(*ctx.engine, args);
     if (nargout >= 1 && !outs.empty())
-        outs[0] = Value::scalar(static_cast<double>(count), ctx.engine->resource());
+        outs[0] = Value::scalar(static_cast<double>(count), ctx.engine->allocator());
 }
 
 } // namespace detail

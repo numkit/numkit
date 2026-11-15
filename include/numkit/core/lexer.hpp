@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keel/core.h>
 #include <string>
 #include <vector>
 
@@ -96,7 +97,7 @@ public:
 
 private:
     std::string src_;
-    size_t pos_ = 0;
+    keel::usize pos_ = 0;
     int line_ = 1;
     int col_ = 1;
     std::vector<Token> tokens_;
@@ -112,7 +113,7 @@ private:
     void popBracket(char expected);
 
     bool isAtLineStart() const;
-    bool isAtLineStart(size_t position) const;
+    bool isAtLineStart(keel::usize position) const;
 
     void skipSpacesAndComments();
     void skipBlockComment();
@@ -121,7 +122,7 @@ private:
     bool isTransposeContext() const;
 
     void readNumber();
-    void validateUnderscores(size_t start, size_t end, int startLine, int startCol);
+    void validateUnderscores(keel::usize start, keel::usize end, int startLine, int startCol);
     void readString(int startLine, int startCol);
     void readDoubleQuotedString(int startLine, int startCol);
     void readIdentifier();

@@ -1,6 +1,7 @@
 // include/compiler.hpp
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <algorithm>
@@ -120,16 +121,16 @@ public:
 private:
     struct RegBitset
     {
-        std::vector<uint64_t> words;
+        std::vector<keel::u64> words;
 
-        bool test(size_t pos) const
+        bool test(keel::usize pos) const
         {
-            size_t w = pos >> 6;
+            keel::usize w = pos >> 6;
             return w < words.size() && ((words[w] >> (pos & 63)) & 1ULL) != 0;
         }
-        void set(size_t pos)
+        void set(keel::usize pos)
         {
-            size_t w = pos >> 6;
+            keel::usize w = pos >> 6;
             if (w >= words.size())
                 words.resize(w + 1, 0ULL);
             words[w] |= (1ULL << (pos & 63));
@@ -138,9 +139,9 @@ private:
         {
             std::fill(words.begin(), words.end(), 0ULL);
         }
-        void reset(size_t pos)
+        void reset(keel::usize pos)
         {
-            size_t w = pos >> 6;
+            keel::usize w = pos >> 6;
             if (w < words.size())
                 words[w] &= ~(1ULL << (pos & 63));
         }
@@ -152,7 +153,7 @@ private:
     BytecodeChunk chunk_;
 
     // Register allocation: variable name → register index
-    std::unordered_map<std::string, uint16_t> varRegisters_;
+    std::unordered_map<std::string, keel::u16> varRegisters_;
     // nextReg_ is `int` so we can detect overflow (>= kInvalidReg = 65535)
     // before it wraps.
     int nextReg_ = 0;
@@ -171,8 +172,8 @@ private:
     bool inFusionFallback_ = false;
     // Maps pre-evaluated fusion operand AST nodes to their registers while
     // emitting the fallback path of FUSE_EWISE so operands never evaluate twice.
-    std::unordered_map<const ASTNode *, uint16_t> fusedOperandRegs_;
-    uint16_t nargoutContext_ = 1; // expected number of outputs (0=statement, 1=expression)
+    std::unordered_map<const ASTNode *, keel::u16> fusedOperandRegs_;
+    keel::u16 nargoutContext_ = 1; // expected number of outputs (0=statement, 1=expression)
     int activeTryDepth_ = 0;      // active enclosing TRY_BEGIN depth in current chunk
 
     // Provenance context for anonymous functions compiled as part of a
@@ -201,9 +202,9 @@ private:
                                   const ASTNode *funcDef);
 
     // Index context for END_VAL compilation (kInvalidReg when outside indexing)
-    uint16_t indexContextArr_ = kInvalidReg;
-    uint16_t indexContextDim_ = 0;
-    uint16_t indexContextNdims_ = 1;
+    keel::u16 indexContextArr_ = kInvalidReg;
+    keel::u16 indexContextDim_ = 0;
+    keel::u16 indexContextNdims_ = 1;
 
     // Current source location (updated before compiling each node)
     SourceLoc currentLoc_{};
@@ -217,105 +218,105 @@ private:
     std::vector<std::unordered_map<std::string, BytecodeChunk>> savedScriptLocalCompiledFuncs_;
     int scriptDepth_ = 0;
 
-    uint16_t varRegWrite(const std::string &name);
-    uint16_t varRegRead(const std::string &name);
-    uint16_t varRegLookup(const std::string &name, bool preloadReserved = true);
-    uint16_t allocPinnedReg();
+    keel::u16 varRegWrite(const std::string &name);
+    keel::u16 varRegRead(const std::string &name);
+    keel::u16 varRegLookup(const std::string &name, bool preloadReserved = true);
+    keel::u16 allocPinnedReg();
     void markAssigned(const std::string &name) { chunk_.assignedVars.insert(name); }
     void preImportGlobals(const ASTNode *ast);
     void collectAllIdentifiers(const ASTNode *node, std::unordered_set<std::string> &out);
     void collectAssignedNames(const ASTNode *node, std::vector<std::string> &out);
     void preallocateAssignedVars(const ASTNode *body);
     void preallocatePinnedConstants(const ASTNode *body);
-    uint16_t tempReg();
+    keel::u16 tempReg();
 
     // Emit instructions
     void emit(Instruction instr);
-    void emitABC(OpCode op, uint16_t a, uint16_t b, uint16_t c);
-    void emitAB(OpCode op, uint16_t a, uint16_t b);
-    void emitAD(OpCode op, uint16_t a, int32_t d);
-    void emitA(OpCode op, uint16_t a);
-    void emitD(OpCode op, int32_t d);
+    void emitABC(OpCode op, keel::u16 a, keel::u16 b, keel::u16 c);
+    void emitAB(OpCode op, keel::u16 a, keel::u16 b);
+    void emitAD(OpCode op, keel::u16 a, keel::i32 d);
+    void emitA(OpCode op, keel::u16 a);
+    void emitD(OpCode op, keel::i32 d);
     void emitNone(OpCode op);
 
-    size_t currentPos() const;
-    void patchJump(size_t instrPos, int32_t offset);
+    keel::usize currentPos() const;
+    void patchJump(keel::usize instrPos, keel::i32 offset);
 
-    int32_t addConstant(double value);
-    int32_t addStringConstant(const std::string &s);
-    int32_t appendConstant(Value v);
-    int32_t appendString(const std::string &s);
+    keel::i32 addConstant(keel::f64 value);
+    keel::i32 addStringConstant(const std::string &s);
+    keel::i32 appendConstant(Value v);
+    keel::i32 appendString(const std::string &s);
 
-    uint16_t reserveRegs(size_t n);
+    keel::u16 reserveRegs(keel::usize n);
 
-    uint16_t compileNode(const ASTNode *node);
-    uint16_t compileNodeExpand(const ASTNode *node);
-    uint16_t compileBlock(const ASTNode *node);
-    uint16_t compileNumber(const ASTNode *node);
-    uint16_t compileString(const ASTNode *node);
-    uint16_t compileBool(const ASTNode *node);
-    uint16_t compileIdentifier(const ASTNode *node);
-    uint16_t compileAssign(const ASTNode *node);
-    uint16_t compileMultiAssign(const ASTNode *node);
-    uint16_t compileBinaryOp(const ASTNode *node);
-    uint16_t emitPlainBinary(const std::string &op, uint16_t left, uint16_t right);
-    uint16_t emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint16_t acc);
-    uint16_t compileUnaryOp(const ASTNode *node);
-    uint16_t compileExprStmt(const ASTNode *node);
+    keel::u16 compileNode(const ASTNode *node);
+    keel::u16 compileNodeExpand(const ASTNode *node);
+    keel::u16 compileBlock(const ASTNode *node);
+    keel::u16 compileNumber(const ASTNode *node);
+    keel::u16 compileString(const ASTNode *node);
+    keel::u16 compileBool(const ASTNode *node);
+    keel::u16 compileIdentifier(const ASTNode *node);
+    keel::u16 compileAssign(const ASTNode *node);
+    keel::u16 compileMultiAssign(const ASTNode *node);
+    keel::u16 compileBinaryOp(const ASTNode *node);
+    keel::u16 emitPlainBinary(const std::string &op, keel::u16 left, keel::u16 right);
+    keel::u16 emitFusedMulAdd(bool isPlus, const ASTNode *rhs, keel::u16 acc);
+    keel::u16 compileUnaryOp(const ASTNode *node);
+    keel::u16 compileExprStmt(const ASTNode *node);
 
-    uint16_t compileIf(const ASTNode *node);
-    uint16_t compileSwitch(const ASTNode *node);
-    uint16_t compileTryCatch(const ASTNode *node);
-    uint16_t compileGlobalPersistent(const ASTNode *node);
-    uint16_t compileFieldAccess(const ASTNode *node);
-    uint16_t compileFieldAssign(const ASTNode *node);
-    uint16_t compileCellLiteral(const ASTNode *node);
-    uint16_t compileCellIndex(const ASTNode *node);
-    uint16_t compileCellAssign(const ASTNode *node);
+    keel::u16 compileIf(const ASTNode *node);
+    keel::u16 compileSwitch(const ASTNode *node);
+    keel::u16 compileTryCatch(const ASTNode *node);
+    keel::u16 compileGlobalPersistent(const ASTNode *node);
+    keel::u16 compileFieldAccess(const ASTNode *node);
+    keel::u16 compileFieldAssign(const ASTNode *node);
+    keel::u16 compileCellLiteral(const ASTNode *node);
+    keel::u16 compileCellIndex(const ASTNode *node);
+    keel::u16 compileCellAssign(const ASTNode *node);
 
-    uint16_t compileFieldStore(const ASTNode *lhs, const ASTNode *rhsNode,
+    keel::u16 compileFieldStore(const ASTNode *lhs, const ASTNode *rhsNode,
                                int inValReg, bool suppress);
-    uint16_t compileCellStore(const ASTNode *lhs, const ASTNode *rhsNode,
+    keel::u16 compileCellStore(const ASTNode *lhs, const ASTNode *rhsNode,
                               int inValReg, bool suppress);
-    uint16_t compileIndexStore(const ASTNode *lhs, const ASTNode *rhsNode,
+    keel::u16 compileIndexStore(const ASTNode *lhs, const ASTNode *rhsNode,
                                int inValReg, bool suppress);
-    void compileStoreLValue(const ASTNode *target, uint16_t valReg, bool suppress);
+    void compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool suppress);
 
     bool needsGeneralLValuePath(const ASTNode *lhs) const;
-    uint16_t compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
+    keel::u16 compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
                                 int inValReg, bool suppress);
-    uint16_t compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
-                              int explicitOutBase, uint16_t nout);
-    uint16_t compileAnonFunc(const ASTNode *node);
+    keel::u16 compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
+                              int explicitOutBase, keel::u16 nout);
+    keel::u16 compileAnonFunc(const ASTNode *node);
     void collectFreeVars(const ASTNode *node,
                          const std::vector<std::string> &params,
                          std::vector<std::string> &freeVars);
-    uint16_t compileWhile(const ASTNode *node);
-    uint16_t compileBreak(const ASTNode *node);
-    uint16_t compileContinue(const ASTNode *node);
+    keel::u16 compileWhile(const ASTNode *node);
+    keel::u16 compileBreak(const ASTNode *node);
+    keel::u16 compileContinue(const ASTNode *node);
 
-    uint16_t compileFor(const ASTNode *node);
-    uint16_t compileColonExpr(const ASTNode *node);
-    uint16_t compileMatrixLiteral(const ASTNode *node);
-    uint16_t compileIndexExpr(const ASTNode *node);
-    uint16_t compileIndexAssign(const ASTNode *node);
+    keel::u16 compileFor(const ASTNode *node);
+    keel::u16 compileColonExpr(const ASTNode *node);
+    keel::u16 compileMatrixLiteral(const ASTNode *node);
+    keel::u16 compileIndexExpr(const ASTNode *node);
+    keel::u16 compileIndexAssign(const ASTNode *node);
 
-    uint16_t compileCall(const ASTNode *node);
+    keel::u16 compileCall(const ASTNode *node);
     int tryCompileFused(const ASTNode *node);
-    uint16_t compileFused(const ASTNode *node, size_t ruleIdx,
+    keel::u16 compileFused(const ASTNode *node, keel::usize ruleIdx,
                           const std::vector<const ASTNode *> &operands);
-    uint16_t compileCommandCall(const ASTNode *node);
-    void recordCallArgNames(const ASTNode *callNode, size_t callInstrIdx);
-    uint16_t compileFunctionDef(const ASTNode *node);
-    uint16_t compileReturn(const ASTNode *node);
+    keel::u16 compileCommandCall(const ASTNode *node);
+    void recordCallArgNames(const ASTNode *callNode, keel::usize callInstrIdx);
+    keel::u16 compileFunctionDef(const ASTNode *node);
+    keel::u16 compileReturn(const ASTNode *node);
     void emitVarargoutReturn();
-    uint16_t compileDeleteAssign(const ASTNode *node);
-    static int8_t resolveBuiltinId(const std::string &name, size_t nargs);
+    keel::u16 compileDeleteAssign(const ASTNode *node);
+    static keel::i8 resolveBuiltinId(const std::string &name, keel::usize nargs);
 
     // Constant register cache: maps constant pool index → register that holds it
-    std::unordered_map<int32_t, uint16_t> constRegCache_;
+    std::unordered_map<keel::i32, keel::u16> constRegCache_;
     // Pinned constant registers allocated at chunk entry (< maxVarReg_)
-    std::unordered_map<int32_t, uint16_t> pinnedConstRegs_;
+    std::unordered_map<keel::i32, keel::u16> pinnedConstRegs_;
 
     // Scalar register tracking (dynamic bitset across 16-bit register space)
     RegBitset scalarRegs_;
@@ -338,21 +339,21 @@ private:
         std::unordered_map<std::string, NestedFuncInfo> siblingNestedFuncs;
     };
 
-    std::unordered_map<std::string, uint16_t> upvalueRegs_;
-    std::unordered_map<std::string, uint16_t> allScopeUpvalueBoxRegs_;
+    std::unordered_map<std::string, keel::u16> upvalueRegs_;
+    std::unordered_map<std::string, keel::u16> allScopeUpvalueBoxRegs_;
     std::unordered_map<std::string, NestedFuncInfo> nestedFuncInfo_;
     const EnclosingLexicalContext *pendingLexicalCtx_ = nullptr;
 
-    void emitUpvalLoadRawIfShared(const std::string &name, uint16_t reg);
-    void emitUpvalStoreIfShared(const std::string &name, uint16_t reg);
-    uint16_t emitNestedFuncHandle(const NestedFuncInfo &info);
+    void emitUpvalLoadRawIfShared(const std::string &name, keel::u16 reg);
+    void emitUpvalStoreIfShared(const std::string &name, keel::u16 reg);
+    keel::u16 emitNestedFuncHandle(const NestedFuncInfo &info);
 
     void peepholeOptimize();
 
     struct LoopContext
     {
-        std::vector<size_t> breakPatches;
-        std::vector<size_t> continuePatches;
+        std::vector<keel::usize> breakPatches;
+        std::vector<keel::usize> continuePatches;
         bool isForLoop = false;
         int tryDepthAtEntry = 0;
     };

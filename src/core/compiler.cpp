@@ -1,4 +1,5 @@
 // src/compiler.cpp
+#include <keel/core.h>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
@@ -16,7 +17,7 @@ namespace numkit {
 class IndexContextGuard
 {
 public:
-    IndexContextGuard(Compiler &c, uint16_t arr, uint16_t ndims)
+    IndexContextGuard(Compiler &c, keel::u16 arr, keel::u16 ndims)
         : comp_(c)
         , savedArr_(c.indexContextArr_)
         , savedDim_(c.indexContextDim_)
@@ -32,14 +33,14 @@ public:
         comp_.indexContextDim_ = savedDim_;
         comp_.indexContextNdims_ = savedNdims_;
     }
-    void setDim(uint16_t d) { comp_.indexContextDim_ = d; }
+    void setDim(keel::u16 d) { comp_.indexContextDim_ = d; }
 
     IndexContextGuard(const IndexContextGuard &) = delete;
     IndexContextGuard &operator=(const IndexContextGuard &) = delete;
 
 private:
     Compiler &comp_;
-    uint16_t savedArr_, savedDim_, savedNdims_;
+    keel::u16 savedArr_, savedDim_, savedNdims_;
 };
 
 
@@ -89,7 +90,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     // This prevents imports inside loops from resetting each iteration.
     preImportGlobals(ast);
 
-    uint16_t lastReg = compileNode(ast);
+    keel::u16 lastReg = compileNode(ast);
     emitA(OpCode::RET, lastReg);
 
     peepholeOptimize();
@@ -97,7 +98,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     // Use the peak nextReg_ over the chunk — nextReg_ shrinks at
     // statement boundaries (compileBlock releases temps), but the
     // runtime needs to size R[] for the highest slot ever written.
-    chunk_.numRegisters = static_cast<uint32_t>(peakReg_);
+    chunk_.numRegisters = static_cast<keel::u32>(peakReg_);
 
     // Save variable→register mapping for environment export
     for (auto &[name, reg] : varRegisters_)
@@ -147,11 +148,11 @@ void Compiler::preImportGlobals(const ASTNode *ast)
             if (nextReg_ >= static_cast<int>(kInvalidReg))
                 throw std::runtime_error(
                     "Compiler: register limit exceeded (>65534 registers in chunk)");
-            uint16_t r = static_cast<uint16_t>(nextReg_++);
+            keel::u16 r = static_cast<keel::u16>(nextReg_++);
             if (nextReg_ > peakReg_) peakReg_ = nextReg_;
             if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
             varRegisters_[name] = r;
-            int32_t idx = appendConstant(*existing);
+            keel::i32 idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
             definedRegs_.set(r);
         }
@@ -183,7 +184,7 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
         if (nextReg_ >= static_cast<int>(kInvalidReg))
             throw std::runtime_error(
                 "Compiler: register limit exceeded (>65534 registers in chunk)");
-        uint16_t r = static_cast<uint16_t>(nextReg_++);
+        keel::u16 r = static_cast<keel::u16>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         varRegisters_[name] = r;
@@ -247,10 +248,10 @@ void Compiler::preallocatePinnedConstants(const ASTNode *body)
     for (double v : loopNums) {
         if (nextReg_ >= 65000 || pinnedConstRegs_.size() >= 16)
             break;
-        int32_t idx = addConstant(v);
+        keel::i32 idx = addConstant(v);
         if (pinnedConstRegs_.count(idx))
             continue;
-        uint16_t r = static_cast<uint16_t>(nextReg_++);
+        keel::u16 r = static_cast<keel::u16>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         emitAD(OpCode::LOAD_CONST, r, idx);
@@ -319,7 +320,7 @@ void Compiler::collectAssignedNames(const ASTNode *node, std::vector<std::string
         static const std::unordered_set<std::string> kSymsFlags = {
             "real", "positive", "negative", "nonnegative", "integer", "clear"
         };
-        for (size_t i = 1; i < node->children.size(); ++i) {
+        for (keel::usize i = 1; i < node->children.size(); ++i) {
             const auto *ch = node->children[i].get();
             if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty()
                 && !kSymsFlags.count(ch->strValue))
@@ -368,7 +369,7 @@ void Compiler::collectAllIdentifiers(const ASTNode *node, std::unordered_set<std
         out.insert(node->strValue);
 }
 
-uint16_t Compiler::varRegWrite(const std::string &name)
+keel::u16 Compiler::varRegWrite(const std::string &name)
 {
     chunk_.assignedVars.insert(name);
     // A write target (param / assignment) gets its value from the call or the
@@ -377,7 +378,7 @@ uint16_t Compiler::varRegWrite(const std::string &name)
     return varRegLookup(name, /*preloadReserved=*/false);
 }
 
-uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
+keel::u16 Compiler::varRegLookup(const std::string &name, bool preloadReserved)
 {
     auto it = varRegisters_.find(name);
     if (it != varRegisters_.end())
@@ -386,7 +387,7 @@ uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     if (allocReg >= static_cast<int>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
-    uint16_t r = static_cast<uint16_t>(allocReg);
+    keel::u16 r = static_cast<keel::u16>(allocReg);
     peakReg_ = allocReg + 1;
     nextReg_ = allocReg + 1;
     if (nextReg_ > maxVarReg_)
@@ -404,7 +405,7 @@ uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
         if (!existing)
             existing = engine_.getVariable(name);
         if (existing && !existing->isEmpty()) {
-            int32_t idx = appendConstant(*existing);
+            keel::i32 idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
             if (!mayClear_)
                 definedRegs_.set(r);
@@ -414,13 +415,13 @@ uint16_t Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     return r;
 }
 
-uint16_t Compiler::allocPinnedReg()
+keel::u16 Compiler::allocPinnedReg()
 {
     int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
     if (allocReg >= static_cast<int>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
-    uint16_t r = static_cast<uint16_t>(allocReg);
+    keel::u16 r = static_cast<keel::u16>(allocReg);
     peakReg_ = allocReg + 1;
     nextReg_ = allocReg + 1;
     if (nextReg_ > maxVarReg_)
@@ -428,7 +429,7 @@ uint16_t Compiler::allocPinnedReg()
     return r;
 }
 
-void Compiler::emitUpvalLoadRawIfShared(const std::string &name, uint16_t reg)
+void Compiler::emitUpvalLoadRawIfShared(const std::string &name, keel::u16 reg)
 {
     auto it = upvalueRegs_.find(name);
     if (it == upvalueRegs_.end())
@@ -436,7 +437,7 @@ void Compiler::emitUpvalLoadRawIfShared(const std::string &name, uint16_t reg)
     emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, it->second, 1, 0, 0));
 }
 
-void Compiler::emitUpvalStoreIfShared(const std::string &name, uint16_t reg)
+void Compiler::emitUpvalStoreIfShared(const std::string &name, keel::u16 reg)
 {
     auto it = upvalueRegs_.find(name);
     if (it == upvalueRegs_.end())
@@ -444,48 +445,48 @@ void Compiler::emitUpvalStoreIfShared(const std::string &name, uint16_t reg)
     emitAB(OpCode::UPVAL_STORE, it->second, reg);
 }
 
-uint16_t Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
+keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
 {
     if (info.upvalueNames.empty()) {
-        uint16_t dst = tempReg();
-        Value fh = Value::funcHandle(info.compiledName, engine_.resource());
+        keel::u16 dst = tempReg();
+        Value fh = Value::funcHandle(info.compiledName, engine_.allocator());
         fh.setFuncHandleSource(info.displaySource);
-        int32_t constIdx = appendConstant(std::move(fh));
+        keel::i32 constIdx = appendConstant(std::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
 
-    size_t totalSlots = 1 + info.upvalueNames.size();
-    uint16_t fhReg = tempReg();
-    Value fh = Value::funcHandle(info.compiledName, engine_.resource());
+    keel::usize totalSlots = 1 + info.upvalueNames.size();
+    keel::u16 fhReg = tempReg();
+    Value fh = Value::funcHandle(info.compiledName, engine_.allocator());
     fh.setFuncHandleSource(info.displaySource);
-    int32_t constIdx = appendConstant(std::move(fh));
+    keel::i32 constIdx = appendConstant(std::move(fh));
     emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
 
-    uint16_t base = static_cast<uint16_t>(nextReg_);
+    keel::u16 base = static_cast<keel::u16>(nextReg_);
     {
-        uint16_t slot0 = tempReg();
+        keel::u16 slot0 = tempReg();
         if (fhReg != slot0)
             emitAB(OpCode::MOVE, slot0, fhReg);
     }
     for (const auto &uvName : info.upvalueNames) {
-        uint16_t slot = tempReg();
-        uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+        keel::u16 slot = tempReg();
+        keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
         if (boxReg != slot)
             emitAB(OpCode::MOVE, slot, boxReg);
     }
-    uint16_t dst = tempReg();
-    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint16_t>(totalSlots));
+    keel::u16 dst = tempReg();
+    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<keel::u16>(totalSlots));
     return dst;
 }
 
-uint16_t Compiler::varRegRead(const std::string &name)
+keel::u16 Compiler::varRegRead(const std::string &name)
 {
     // Shared lexical upvalue read (outer <-> nested function)
     auto uvIt = upvalueRegs_.find(name);
     if (uvIt != upvalueRegs_.end()) {
-        uint16_t reg = varRegLookup(name, /*preloadReserved=*/false);
-        int32_t nameIdx = addStringConstant(name);
+        keel::u16 reg = varRegLookup(name, /*preloadReserved=*/false);
+        keel::i32 nameIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, uvIt->second, 0, nameIdx, 0));
         scalarRegs_.reset(reg);
         return reg;
@@ -496,7 +497,7 @@ uint16_t Compiler::varRegRead(const std::string &name)
     if (it != varRegisters_.end()) {
         if (!engine_.isReservedName(name)) {
             if (mayClear_ || !definedRegs_.test(it->second)) {
-                int32_t nameIdx = addStringConstant(name);
+                keel::i32 nameIdx = addStringConstant(name);
                 emitAD(OpCode::ASSERT_DEF, it->second, nameIdx);
                 if (!mayClear_ && it->second < chunk_.numParams)
                     definedRegs_.set(it->second);
@@ -508,17 +509,17 @@ uint16_t Compiler::varRegRead(const std::string &name)
     // Zero-arg nested function call in expression context (`y = inner`)
     auto nit = nestedFuncInfo_.find(name);
     if (nit != nestedFuncInfo_.end()) {
-        uint16_t argBase = static_cast<uint16_t>(nextReg_);
+        keel::u16 argBase = static_cast<keel::u16>(nextReg_);
         for (const auto &uvName : nit->second.upvalueNames) {
-            uint16_t slot = tempReg();
-            uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+            keel::u16 slot = tempReg();
+            keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
             if (boxReg != slot)
                 emitAB(OpCode::MOVE, slot, boxReg);
         }
-        uint16_t dst = tempReg();
-        int32_t funcIdx = addStringConstant(nit->second.compiledName);
+        keel::u16 dst = tempReg();
+        keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
         emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                     static_cast<uint16_t>(nit->second.upvalueNames.size()),
+                                     static_cast<keel::u16>(nit->second.upvalueNames.size()),
                                      funcIdx, nargoutContext_));
         return dst;
     }
@@ -543,21 +544,21 @@ uint16_t Compiler::varRegRead(const std::string &name)
     if (!mayInjectVars_
         && (engine_.hasFunction(name) || engine_.isKnownLeafName(name)
             || (kls && kls->construct))) {
-        uint16_t argBase = nextReg_;
-        uint16_t dst = tempReg();
-        int32_t funcIdx = addStringConstant(name);
+        keel::u16 argBase = nextReg_;
+        keel::u16 dst = tempReg();
+        keel::i32 funcIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, nargoutContext_));
         return dst;
     }
 
     // Unknown variable — allocate register and emit runtime check.
-    uint16_t reg = varRegLookup(name);
-    int32_t nameIdx = addStringConstant(name);
+    keel::u16 reg = varRegLookup(name);
+    keel::i32 nameIdx = addStringConstant(name);
     emitAD(OpCode::ASSERT_DEF, reg, nameIdx);
     return reg;
 }
 
-uint16_t Compiler::tempReg()
+keel::u16 Compiler::tempReg()
 {
     // Bytecode reg fields are uint16_t — max 256 distinct slots (0..255).
     // numRegisters is uint16_t, so its count must fit too: cap at 255.
@@ -565,16 +566,16 @@ uint16_t Compiler::tempReg()
     if (nextReg_ >= static_cast<int>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
-    uint16_t r = static_cast<uint16_t>(nextReg_++);
+    keel::u16 r = static_cast<keel::u16>(nextReg_++);
     if (nextReg_ > peakReg_)
         peakReg_ = nextReg_;
     return r;
 }
 
-uint16_t Compiler::reserveRegs(size_t n)
+keel::u16 Compiler::reserveRegs(keel::usize n)
 {
-    uint16_t base = nextReg_;
-    for (size_t i = 0; i < n; ++i)
+    keel::u16 base = nextReg_;
+    for (keel::usize i = 0; i < n; ++i)
         tempReg();
     return base;
 }
@@ -604,27 +605,27 @@ void Compiler::emit(Instruction instr)
     chunk_.sourceMap.push_back(currentLoc_);
 }
 
-void Compiler::emitABC(OpCode op, uint16_t a, uint16_t b, uint16_t c)
+void Compiler::emitABC(OpCode op, keel::u16 a, keel::u16 b, keel::u16 c)
 {
     emit(Instruction::make_abc(op, a, b, c));
 }
 
-void Compiler::emitAB(OpCode op, uint16_t a, uint16_t b)
+void Compiler::emitAB(OpCode op, keel::u16 a, keel::u16 b)
 {
     emit(Instruction::make_abc(op, a, b, 0));
 }
 
-void Compiler::emitAD(OpCode op, uint16_t a, int32_t d)
+void Compiler::emitAD(OpCode op, keel::u16 a, keel::i32 d)
 {
     emit(Instruction::make_ad(op, a, d));
 }
 
-void Compiler::emitA(OpCode op, uint16_t a)
+void Compiler::emitA(OpCode op, keel::u16 a)
 {
     emit(Instruction::make_a(op, a));
 }
 
-void Compiler::emitD(OpCode op, int32_t d)
+void Compiler::emitD(OpCode op, keel::i32 d)
 {
     emit(Instruction::make_d(op, d));
 }
@@ -634,12 +635,12 @@ void Compiler::emitNone(OpCode op)
     emit(Instruction::make_none(op));
 }
 
-size_t Compiler::currentPos() const
+keel::usize Compiler::currentPos() const
 {
     return chunk_.code.size();
 }
 
-void Compiler::patchJump(size_t instrPos, int32_t offset)
+void Compiler::patchJump(keel::usize instrPos, keel::i32 offset)
 {
     chunk_.code[instrPos].d = offset;
 }
@@ -650,44 +651,44 @@ void Compiler::patchJump(size_t instrPos, int32_t offset)
 
 // The single choke point for pool growth: the int32 index space is checked
 // here so no caller can wrap it silently (PVS V1029 family).
-int32_t Compiler::appendConstant(Value v)
+keel::i32 Compiler::appendConstant(Value v)
 {
-    if (chunk_.constants.size() >= static_cast<size_t>(INT32_MAX))
+    if (chunk_.constants.size() >= static_cast<keel::usize>(INT32_MAX))
         throw std::runtime_error(
             "Compiler: constant pool limit exceeded (>2^31-1 entries in one chunk)");
-    int32_t idx = static_cast<int32_t>(chunk_.constants.size());
+    keel::i32 idx = static_cast<keel::i32>(chunk_.constants.size());
     chunk_.constants.push_back(std::move(v));
     return idx;
 }
 
-int32_t Compiler::appendString(const std::string &s)
+keel::i32 Compiler::appendString(const std::string &s)
 {
-    if (chunk_.strings.size() >= static_cast<size_t>(INT32_MAX))
+    if (chunk_.strings.size() >= static_cast<keel::usize>(INT32_MAX))
         throw std::runtime_error(
             "Compiler: string pool limit exceeded (>2^31-1 entries in one chunk)");
-    int32_t idx = static_cast<int32_t>(chunk_.strings.size());
+    keel::i32 idx = static_cast<keel::i32>(chunk_.strings.size());
     chunk_.strings.push_back(s);
     return idx;
 }
 
-int32_t Compiler::addConstant(double value)
+keel::i32 Compiler::addConstant(double value)
 {
     // Check if constant already exists (preserve -0.0 vs +0.0 signbit)
-    for (size_t i = 0; i < chunk_.constants.size(); ++i) {
+    for (keel::usize i = 0; i < chunk_.constants.size(); ++i) {
         if (chunk_.constants[i].isScalar() && chunk_.constants[i].type() == ValueType::DOUBLE) {
             double cv = chunk_.constants[i].toScalar();
             if (cv == value && std::signbit(cv) == std::signbit(value))
-                return static_cast<int32_t>(i);
+                return static_cast<keel::i32>(i);
         }
     }
-    return appendConstant(Value::scalar(value, engine_.resource()));
+    return appendConstant(Value::scalar(value, engine_.allocator()));
 }
 
-int32_t Compiler::addStringConstant(const std::string &s)
+keel::i32 Compiler::addStringConstant(const std::string &s)
 {
-    for (size_t i = 0; i < chunk_.strings.size(); ++i) {
+    for (keel::usize i = 0; i < chunk_.strings.size(); ++i) {
         if (chunk_.strings[i] == s)
-            return static_cast<int32_t>(i);
+            return static_cast<keel::i32>(i);
     }
     return appendString(s);
 }
@@ -696,7 +697,7 @@ int32_t Compiler::addStringConstant(const std::string &s)
 // AST compilation
 // ============================================================
 
-uint16_t Compiler::compileNode(const ASTNode *node)
+keel::u16 Compiler::compileNode(const ASTNode *node)
 {
     if (node && !fusedOperandRegs_.empty()) {
         auto it = fusedOperandRegs_.find(node);
@@ -708,7 +709,7 @@ uint16_t Compiler::compileNode(const ASTNode *node)
     // see a CSL. COLLAPSE is a runtime no-op on a non-CSL, so this is inert until the
     // CELL_GET producer is flipped (brick 5b). Splice contexts call compileNodeExpand
     // directly and skip this. See dev-docs/memory/csl_first_class.md.
-    uint16_t reg = compileNodeExpand(node);
+    keel::u16 reg = compileNodeExpand(node);
     if (node && (node->type == NodeType::CELL_INDEX
                  || node->type == NodeType::FIELD_ACCESS
                  || node->type == NodeType::DYNAMIC_FIELD_ACCESS))
@@ -716,7 +717,7 @@ uint16_t Compiler::compileNode(const ASTNode *node)
     return reg;
 }
 
-uint16_t Compiler::compileNodeExpand(const ASTNode *node)
+keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
 {
     if (!node)
         return 0;
@@ -730,8 +731,8 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
 
     // Update current source location from AST node (if it has valid line info)
     if (node->line > 0) {
-        currentLoc_.line = static_cast<uint16_t>(node->line);
-        currentLoc_.col = static_cast<uint16_t>(node->col);
+        currentLoc_.line = static_cast<keel::u16>(node->line);
+        currentLoc_.col = static_cast<keel::u16>(node->col);
     }
 
     switch (node->type) {
@@ -741,8 +742,8 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
         return compileNumber(node);
     case NodeType::IMAG_LITERAL: {
         // 3i → complexScalar(0, 3)
-        uint16_t dst = tempReg();
-        int32_t idx = appendConstant(
+        keel::u16 dst = tempReg();
+        keel::i32 idx = appendConstant(
             Value::complexScalar(0.0, node->numValue, nullptr));
         emitAD(OpCode::LOAD_CONST, dst, idx);
         return dst;
@@ -750,8 +751,8 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
     case NodeType::STRING_LITERAL:
         return compileString(node);
     case NodeType::DQSTRING_LITERAL: {
-        uint16_t dst = tempReg();
-        int32_t idx = appendConstant(Value::stringScalar(node->strValue, nullptr));
+        keel::u16 dst = tempReg();
+        keel::i32 idx = appendConstant(Value::stringScalar(node->strValue, nullptr));
         emitAD(OpCode::LOAD_CONST, dst, idx);
         return dst;
     }
@@ -782,9 +783,9 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
         return compileFieldAccess(node);
     case NodeType::DYNAMIC_FIELD_ACCESS: {
         // s.(expr) — child[0]=obj, child[1]=field name expr
-        uint16_t obj = compileNode(node->children[0].get());
-        uint16_t nameReg = compileNode(node->children[1].get());
-        uint16_t dst = tempReg();
+        keel::u16 obj = compileNode(node->children[0].get());
+        keel::u16 nameReg = compileNode(node->children[1].get());
+        keel::u16 dst = tempReg();
         emitABC(OpCode::FIELD_GET_DYN, dst, obj, nameReg);
         return dst;
     }
@@ -820,8 +821,8 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
     case NodeType::RETURN_STMT:
         return compileReturn(node);
     case NodeType::SUPERCLASS_REF: {
-        uint16_t msgReg = tempReg();
-        int32_t msgIdx = addStringConstant(
+        keel::u16 msgReg = tempReg();
+        keel::i32 msgIdx = addStringConstant(
             "superclass reference '" + node->strValue
             + "' must be called: use lhs@" + node->strValue + "(...)");
         emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
@@ -830,18 +831,18 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
     }
     case NodeType::END_VAL: {
         if (indexContextArr_ == kInvalidReg) {
-            uint16_t msgReg = tempReg();
-            int32_t msgIdx = addStringConstant("'end' used outside of indexing context");
+            keel::u16 msgReg = tempReg();
+            keel::i32 msgIdx = addStringConstant("'end' used outside of indexing context");
             emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
             emitA(OpCode::THROW, msgReg);
             return msgReg;
         }
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emit(Instruction::make_abcde(OpCode::LOAD_END,
                                      dst,
                                      indexContextArr_,
                                      indexContextDim_,
-                                     static_cast<int32_t>(indexContextNdims_),
+                                     static_cast<keel::i32>(indexContextNdims_),
                                      0));
         return dst;
     }
@@ -853,7 +854,7 @@ uint16_t Compiler::compileNodeExpand(const ASTNode *node)
     }
 }
 
-uint16_t Compiler::compileBlock(const ASTNode *node)
+keel::u16 Compiler::compileBlock(const ASTNode *node)
 {
     // Release transient temps allocated during each statement so
     // subsequent statements can reuse those slots. Without this, a
@@ -882,7 +883,7 @@ uint16_t Compiler::compileBlock(const ASTNode *node)
     // saw R[S]=1 and never threw — turning the expected outer-catch
     // into a silent computation of `r + 1`.)
     const int entryNext = nextReg_;
-    uint16_t last = 0;
+    keel::u16 last = 0;
     for (auto &child : node->children) {
         last = compileNode(child.get());
         const int floor = entryNext > maxVarReg_ ? entryNext : maxVarReg_;
@@ -895,9 +896,9 @@ uint16_t Compiler::compileBlock(const ASTNode *node)
     return last;
 }
 
-uint16_t Compiler::compileNumber(const ASTNode *node)
+keel::u16 Compiler::compileNumber(const ASTNode *node)
 {
-    int32_t idx = addConstant(node->numValue);
+    keel::i32 idx = addConstant(node->numValue);
     auto pit = pinnedConstRegs_.find(idx);
     if (pit != pinnedConstRegs_.end()) {
         scalarRegs_.set(pit->second);
@@ -909,36 +910,36 @@ uint16_t Compiler::compileNumber(const ASTNode *node)
         scalarRegs_.set(it->second);
         return it->second;
     }
-    uint16_t dst = tempReg();
+    keel::u16 dst = tempReg();
     emitAD(OpCode::LOAD_CONST, dst, idx);
     constRegCache_[idx] = dst;
     scalarRegs_.set(dst);
     return dst;
 }
 
-uint16_t Compiler::compileString(const ASTNode *node)
+keel::u16 Compiler::compileString(const ASTNode *node)
 {
-    uint16_t dst = tempReg();
-    int32_t idx = addStringConstant(node->strValue);
+    keel::u16 dst = tempReg();
+    keel::i32 idx = addStringConstant(node->strValue);
     emitAD(OpCode::LOAD_STRING, dst, idx);
     return dst;
 }
 
-uint16_t Compiler::compileBool(const ASTNode *node)
+keel::u16 Compiler::compileBool(const ASTNode *node)
 {
-    uint16_t dst = tempReg();
+    keel::u16 dst = tempReg();
     // Store as logical (tag-based, no heap allocation) for islogical() correctness
-    int32_t idx = appendConstant(Value::logicalScalar(node->boolValue, nullptr));
+    keel::i32 idx = appendConstant(Value::logicalScalar(node->boolValue, nullptr));
     emitAD(OpCode::LOAD_CONST, dst, idx);
     return dst;
 }
 
-uint16_t Compiler::compileIdentifier(const ASTNode *node)
+keel::u16 Compiler::compileIdentifier(const ASTNode *node)
 {
     return varRegRead(node->strValue);
 }
 
-uint16_t Compiler::compileAssign(const ASTNode *node)
+keel::u16 Compiler::compileAssign(const ASTNode *node)
 {
     auto *lhs = node->children[0].get();
     auto *rhs = node->children[1].get();
@@ -959,8 +960,8 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
             && rhs->children[0]->children[0]->type == NodeType::IDENTIFIER
             && rhs->children[0]->children[0]->strValue == lhs->strValue
             && varRegisters_.find(lhs->strValue) != varRegisters_.end()) {
-            uint16_t valReg = compileNode(rhs->children[0]->children[1].get());
-            uint16_t dst = varRegLookup(lhs->strValue);
+            keel::u16 valReg = compileNode(rhs->children[0]->children[1].get());
+            keel::u16 dst = varRegLookup(lhs->strValue);
             markAssigned(lhs->strValue);
             emitUpvalLoadRawIfShared(lhs->strValue, dst);
             emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
@@ -969,13 +970,13 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
             if (!mayClear_)
                 definedRegs_.set(dst);
             if (!node->suppressOutput) {
-                int32_t nameIdx = addStringConstant(lhs->strValue);
+                keel::i32 nameIdx = addStringConstant(lhs->strValue);
                 emitAD(OpCode::DISPLAY, dst, nameIdx);
             }
             return dst;
         }
 
-        uint16_t src = compileNode(rhs);
+        keel::u16 src = compileNode(rhs);
 
         // MOVE elimination: redirect last instruction to write directly to var register
         auto varIt = varRegisters_.find(lhs->strValue);
@@ -995,7 +996,7 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
         // regardless of which codegen path we take below.
         markAssigned(lhs->strValue);
 
-        uint16_t dst;
+        keel::u16 dst;
         if (canEliminate && varIt == varRegisters_.end()) {
             // First assignment: adopt temp register as the variable.
             // We MUST pin this slot in maxVarReg_ so the compileBlock
@@ -1030,7 +1031,7 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
 
         // Display if no semicolon
         if (!node->suppressOutput) {
-            int32_t nameIdx = addStringConstant(lhs->strValue);
+            keel::i32 nameIdx = addStringConstant(lhs->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         return dst;
@@ -1054,16 +1055,16 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
         auto *objNode = lhs->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
-        uint16_t obj = varRegWrite(objNode->strValue);
+        keel::u16 obj = varRegWrite(objNode->strValue);
         emitUpvalLoadRawIfShared(objNode->strValue, obj);
-        uint16_t val = compileNode(node->children[1].get());
-        uint16_t nameReg = compileNode(lhs->children[1].get());
+        keel::u16 val = compileNode(node->children[1].get());
+        keel::u16 nameReg = compileNode(lhs->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, val);
         emitUpvalStoreIfShared(objNode->strValue, obj);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!node->suppressOutput) {
-            int32_t dispIdx = addStringConstant(objNode->strValue);
+            keel::i32 dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
         }
         return obj;
@@ -1076,7 +1077,7 @@ uint16_t Compiler::compileAssign(const ASTNode *node)
     throw std::runtime_error("Compiler: unsupported assignment target");
 }
 
-uint16_t Compiler::compileMultiAssign(const ASTNode *node)
+keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
 {
     // [a, b, c] = func(args)  OR  [a, b] = c{idx}
     // node->returnNames = ["a", "b", "c"]  (~ means ignore)
@@ -1086,7 +1087,7 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     // lhsTargets entry per output (nullptr = `~`); outputs are routed
     // through compileStoreLValue instead of a bare var-register write.
     auto *rhsNode = node->children[0].get();
-    size_t nout = node->returnNames.size();
+    keel::usize nout = node->returnNames.size();
     const bool complex = !node->lhsTargets.empty();
 
     // Superclass multi-output call `[a,b] = method@Base(obj)` is handled below
@@ -1094,7 +1095,7 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
 
     // Allocate destination registers for outputs (simple path only; the
     // complex path materialises outputs at outBase then stores them).
-    std::vector<uint16_t> outRegs;
+    std::vector<keel::u16> outRegs;
     if (!complex) {
         for (auto &name : node->returnNames) {
             if (name == "~")
@@ -1117,7 +1118,7 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             throw std::runtime_error(
                 "Compiler: too many output arguments for single-valued "
                 "right-hand side");
-        uint16_t src = compileNode(rhsNode);
+        keel::u16 src = compileNode(rhsNode);
         // Complex single target (`[s.f] = 5`, `[a(i)] = x`): route the
         // value through the general lvalue store.
         if (complex) {
@@ -1126,7 +1127,7 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
                                    node->suppressOutput);
             return src;
         }
-        uint16_t dst = outRegs.empty() ? src : outRegs[0];
+        keel::u16 dst = outRegs.empty() ? src : outRegs[0];
         if (!outRegs.empty() && dst != src)
             emitAB(OpCode::MOVE, dst, src);
         if (scalarRegs_.test(src)) scalarRegs_.set(dst);
@@ -1137,7 +1138,7 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             emitUpvalStoreIfShared(node->returnNames[0], dst);
         if (!node->suppressOutput && !node->returnNames.empty()
             && node->returnNames[0] != "~") {
-            int32_t nameIdx = addStringConstant(node->returnNames[0]);
+            keel::i32 nameIdx = addStringConstant(node->returnNames[0]);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         return dst;
@@ -1145,19 +1146,19 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
 
     // Distribute the nout outputs sitting at [outBase, outBase+nout) into
     // their destinations and emit displays. Shared by both RHS shapes.
-    auto distribute = [&](uint16_t outBase) {
+    auto distribute = [&](keel::u16 outBase) {
         if (complex) {
-            for (size_t i = 0; i < nout; ++i) {
+            for (keel::usize i = 0; i < nout; ++i) {
                 const ASTNode *t = node->lhsTargets[i].get();
                 if (t)
-                    compileStoreLValue(t, outBase + static_cast<uint16_t>(i),
+                    compileStoreLValue(t, outBase + static_cast<keel::u16>(i),
                                        node->suppressOutput);
             }
             return;
         }
-        for (size_t i = 0; i < nout; ++i) {
+        for (keel::usize i = 0; i < nout; ++i) {
             if (outRegs[i] != outBase + i)
-                emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<uint16_t>(i));
+                emitAB(OpCode::MOVE, outRegs[i], outBase + static_cast<keel::u16>(i));
             if (i < node->returnNames.size() && node->returnNames[i] != "~") {
                 if (!mayClear_)
                     definedRegs_.set(outRegs[i]);
@@ -1165,9 +1166,9 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             }
         }
         if (!node->suppressOutput) {
-            for (size_t i = 0; i < node->returnNames.size(); ++i)
+            for (keel::usize i = 0; i < node->returnNames.size(); ++i)
                 if (node->returnNames[i] != "~") {
-                    int32_t nameIdx = addStringConstant(node->returnNames[i]);
+                    keel::i32 nameIdx = addStringConstant(node->returnNames[i]);
                     emitAD(OpCode::DISPLAY, outRegs[i], nameIdx);
                 }
         }
@@ -1175,20 +1176,20 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
 
     // Cell CSL: [a, b] = c{idx}  (1-D)  or  [a, b] = c{r, cols}  (2-D).
     if (rhsNode->type == NodeType::CELL_INDEX) {
-        size_t  nidx    = rhsNode->children.size() - 1;
-        uint16_t cellReg = compileNode(rhsNode->children[0].get());
+        keel::usize  nidx    = rhsNode->children.size() - 1;
+        keel::u16 cellReg = compileNode(rhsNode->children[0].get());
 
         if (nidx == 2) {
             // 2-D subscript [a,b]=c{r,:} / c{:,j}: resolveIndices per dim + sub2ind.
             // Guard so `end` binds to the cell rows (dim 0) / cols (dim 1).
             IndexContextGuard guard(*this, cellReg, 2);
-            uint16_t rowReg = compileNode(rhsNode->children[1].get());
+            keel::u16 rowReg = compileNode(rhsNode->children[1].get());
             guard.setDim(1);
-            uint16_t colReg = compileNode(rhsNode->children[2].get());
-            uint16_t outBase = reserveRegs(nout);
+            keel::u16 colReg = compileNode(rhsNode->children[2].get());
+            keel::u16 outBase = reserveRegs(nout);
             emit(Instruction::make_abcde(OpCode::CELL_GET_MULTI_2D,
                                          outBase, cellReg, rowReg, colReg,
-                                         static_cast<uint16_t>(nout)));
+                                         static_cast<keel::u16>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
@@ -1200,13 +1201,13 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
 
         // 1-D subscript [a,b]=c{:} / c{vec}. Guard so `end` binds to the cell numel.
         IndexContextGuard guard(*this, cellReg, 1);
-        uint16_t idxReg = compileNode(rhsNode->children[1].get());
+        keel::u16 idxReg = compileNode(rhsNode->children[1].get());
 
-        uint16_t outBase = reserveRegs(nout);
+        keel::u16 outBase = reserveRegs(nout);
 
         emit(Instruction::make_abcde(OpCode::CELL_GET_MULTI,
                                      outBase, cellReg, idxReg, 0,
-                                     static_cast<uint16_t>(nout)));
+                                     static_cast<keel::u16>(nout)));
 
         distribute(outBase);
         if (complex)
@@ -1219,9 +1220,9 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     // Superclass multi-output method call: [a,b] = method@Base(obj, …).
     // Compiled into the method/ctor chunk so the body runs on the VM (P2).
     if (callNode->children[0]->type == NodeType::SUPERCLASS_REF) {
-        uint16_t outBase = reserveRegs(nout);
+        keel::u16 outBase = reserveRegs(nout);
         compileSuperCall(callNode, callNode->children[0].get(),
-                         static_cast<int>(outBase), static_cast<uint16_t>(nout));
+                         static_cast<int>(outBase), static_cast<keel::u16>(nout));
         distribute(outBase);
         if (complex)
             return nout ? outBase : 0;
@@ -1246,27 +1247,27 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
                         || upvalueRegs_.find(root) != upvalueRegs_.end()
                         || (isTopLevel_ && engine_.workspaceEnv().getLocal(root) != nullptr);
         }
-        auto compileArgsBlock = [&](uint16_t &argBaseOut, bool splatCsl) {
+        auto compileArgsBlock = [&](keel::u16 &argBaseOut, bool splatCsl) {
             // splatCsl: a brace-index arg (obj.method(c{:})) stays an
             // uncollapsed CSL so the VM handler flattens it at runtime —
             // same split as the single-output CALL_METHOD compile
             // (bugs/closed/core/call-method-multi-no-csl-splat).
             bool anyBrace = false;
             if (splatCsl)
-                for (size_t i = 1; i < callNode->children.size(); ++i)
+                for (keel::usize i = 1; i < callNode->children.size(); ++i)
                     if (callNode->children[i]->type == NodeType::CELL_INDEX) {
                         anyBrace = true;
                         break;
                     }
-            std::vector<uint16_t> ar;
+            std::vector<keel::u16> ar;
             ar.reserve(callNode->children.size() - 1);
-            for (size_t i = 1; i < callNode->children.size(); ++i)
+            for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 ar.push_back(anyBrace
                                  ? compileNodeExpand(callNode->children[i].get())
                                  : compileNode(callNode->children[i].get()));
             argBaseOut = nextReg_;
-            for (size_t i = 0; i < ar.size(); ++i) {
-                uint16_t slot = tempReg();
+            for (keel::usize i = 0; i < ar.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (ar[i] != slot)
                     emitAB(OpCode::MOVE, slot, ar[i]);
             }
@@ -1282,13 +1283,13 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
                  && !engine_.findClass(rootIdent->strValue)
                  && !engine_.classCtor(rootIdent->strValue)
                  && !engine_.hasExternalFunction(qualified))) {
-            uint16_t argBase = 0;
-            size_t nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
-            uint16_t outBase = reserveRegs(nout);
-            int32_t funcIdx = addStringConstant(qualified);
+            keel::u16 argBase = 0;
+            keel::usize nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
+            keel::u16 outBase = reserveRegs(nout);
+            keel::i32 funcIdx = addStringConstant(qualified);
             emit(Instruction::make_abcde(OpCode::CALL_MULTI, outBase, argBase,
-                                         static_cast<uint16_t>(nargs), funcIdx,
-                                         static_cast<uint16_t>(nout)));
+                                         static_cast<keel::u16>(nargs), funcIdx,
+                                         static_cast<keel::u16>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
@@ -1300,12 +1301,12 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         // CALL_METHOD_MULTI dispatches on the value in objReg either way (a
         // handle's shared state still propagates through the register copy).
         if (nout <= 255 && (callNode->children.size() - 1) <= 255) {
-            uint16_t objReg = compileNode(fa->children[0].get());
-            uint16_t argBase = 0;
-            size_t nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
-            uint16_t outBase = reserveRegs(nout);
-            int32_t nameIdx = addStringConstant(fa->strValue);
-            uint16_t packed = static_cast<uint16_t>((nargs << 8) | (nout & 0xFF));
+            keel::u16 objReg = compileNode(fa->children[0].get());
+            keel::u16 argBase = 0;
+            keel::usize nargs = compileArgsBlock(argBase, /*splatCsl=*/true);
+            keel::u16 outBase = reserveRegs(nout);
+            keel::i32 nameIdx = addStringConstant(fa->strValue);
+            keel::u16 packed = static_cast<keel::u16>((nargs << 8) | (nout & 0xFF));
             emit(Instruction::make_abcde(OpCode::CALL_METHOD_MULTI, outBase, objReg,
                                          argBase, nameIdx, packed));
             distribute(outBase);
@@ -1316,44 +1317,44 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     }
 
     if (callNode->children[0]->type != NodeType::IDENTIFIER) {
-        uint16_t fhReg = compileNode(callNode->children[0].get());
+        keel::u16 fhReg = compileNode(callNode->children[0].get());
         bool anyBraceArg = false;
-        for (size_t i = 1; i < callNode->children.size(); ++i)
+        for (keel::usize i = 1; i < callNode->children.size(); ++i)
             if (callNode->children[i]->type == NodeType::CELL_INDEX) {
                 anyBraceArg = true;
                 break;
             }
-        std::vector<uint16_t> argRegs;
+        std::vector<keel::u16> argRegs;
         argRegs.reserve(callNode->children.size() - 1);
-        for (size_t i = 1; i < callNode->children.size(); ++i) {
+        for (keel::usize i = 1; i < callNode->children.size(); ++i) {
             argRegs.push_back(anyBraceArg
                                   ? compileNodeExpand(callNode->children[i].get())
                                   : compileNode(callNode->children[i].get()));
         }
-        uint16_t argBase = nextReg_;
-        for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 argBase = nextReg_;
+        for (keel::usize i = 0; i < argRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
         if (anyBraceArg) {
-            const uint16_t noutF = static_cast<uint16_t>(std::max<size_t>(nout, 1));
-            uint16_t outBase = reserveRegs(noutF);
+            const keel::u16 noutF = static_cast<keel::u16>(std::max<keel::usize>(nout, 1));
+            keel::u16 outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          outBase, fhReg, argBase,
-                                         static_cast<int32_t>(argRegs.size()),
+                                         static_cast<keel::i32>(argRegs.size()),
                                          noutF));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
             return outRegs.empty() ? 0 : outRegs[0];
         }
-        uint16_t outBase = reserveRegs(nout);
-        size_t callIdx = chunk_.code.size();
+        keel::u16 outBase = reserveRegs(nout);
+        keel::usize callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_MULTI,
                                      outBase, fhReg, argBase,
-                                     static_cast<int32_t>(argRegs.size()),
-                                     static_cast<uint16_t>(nout)));
+                                     static_cast<keel::i32>(argRegs.size()),
+                                     static_cast<keel::u16>(nout)));
         recordCallArgNames(callNode, callIdx);
         distribute(outBase);
         if (complex)
@@ -1369,60 +1370,60 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     // handle/variable callee falls through to the normal path. See csl_first_class.md.
     if (callNode->children[0]->type == NodeType::IDENTIFIER) {
         bool anyBraceArg = false;
-        for (size_t i = 1; i < callNode->children.size(); ++i)
+        for (keel::usize i = 1; i < callNode->children.size(); ++i)
             if (callNode->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
         const std::string &fname = callNode->children[0]->strValue;
         const bool calleeIsVar = varRegisters_.find(fname) != varRegisters_.end()
                                  || upvalueRegs_.find(fname) != upvalueRegs_.end()
                                  || (isTopLevel_ && engine_.workspaceEnv().getLocal(fname) != nullptr);
         if (anyBraceArg && !calleeIsVar) {
-            std::vector<uint16_t> argRegs;
-            for (size_t i = 1; i < callNode->children.size(); ++i)
+            std::vector<keel::u16> argRegs;
+            for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(callNode->children[i].get()));
             auto nit = nestedFuncInfo_.find(fname);
             if (nit != nestedFuncInfo_.end()) {
                 for (const auto &uvName : nit->second.upvalueNames)
                     argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
             }
-            uint16_t argBase = nextReg_;
-            for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 argBase = nextReg_;
+            for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint16_t outBase = reserveRegs(nout);
-            int32_t funcIdx = addStringConstant(
+            keel::u16 outBase = reserveRegs(nout);
+            keel::i32 funcIdx = addStringConstant(
                 nit != nestedFuncInfo_.end() ? nit->second.compiledName : fname);
             emit(Instruction::make_abcde(OpCode::CALL_FLATTEN_MULTI, outBase, argBase,
-                                         static_cast<uint16_t>(argRegs.size()), funcIdx,
-                                         static_cast<uint16_t>(nout)));
+                                         static_cast<keel::u16>(argRegs.size()), funcIdx,
+                                         static_cast<keel::u16>(nout)));
             distribute(outBase);
             if (complex)
                 return nout ? outBase : 0;
             return outRegs.empty() ? 0 : outRegs[0];
         }
         if (anyBraceArg && calleeIsVar) {
-            std::vector<uint16_t> flatRegs;
-            for (size_t i = 1; i < callNode->children.size(); ++i)
+            std::vector<keel::u16> flatRegs;
+            for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 flatRegs.push_back(compileNodeExpand(callNode->children[i].get()));
-            uint16_t flatBase = nextReg_;
-            for (size_t i = 0; i < flatRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 flatBase = nextReg_;
+            for (keel::usize i = 0; i < flatRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (flatRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, flatRegs[i]);
             }
-            uint16_t fhReg = varRegLookup(fname);
-            int32_t nameIdx = addStringConstant(fname);
+            keel::u16 fhReg = varRegLookup(fname);
+            keel::i32 nameIdx = addStringConstant(fname);
             auto uvIt = upvalueRegs_.find(fname);
             if (uvIt != upvalueRegs_.end())
                 emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
             else
                 emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
-            const uint16_t noutF = static_cast<uint16_t>(std::max<size_t>(nout, 1));
-            uint16_t outBase = reserveRegs(noutF);
+            const keel::u16 noutF = static_cast<keel::u16>(std::max<keel::usize>(nout, 1));
+            keel::u16 outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          outBase, fhReg, flatBase,
-                                         static_cast<uint16_t>(flatRegs.size()),
+                                         static_cast<keel::u16>(flatRegs.size()),
                                          noutF));
             distribute(outBase);
             if (complex)
@@ -1446,8 +1447,8 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     }
 
     // Compile call arguments
-    std::vector<uint16_t> argRegs;
-    for (size_t i = 1; i < callNode->children.size(); ++i)
+    std::vector<keel::u16> argRegs;
+    for (keel::usize i = 1; i < callNode->children.size(); ++i)
         argRegs.push_back(compileNode(callNode->children[i].get()));
 
     auto nestedIt = (!calleeIsVar) ? nestedFuncInfo_.find(funcName) : nestedFuncInfo_.end();
@@ -1456,29 +1457,29 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
             argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
     }
 
-    uint16_t argBase = nextReg_;
-    for (size_t i = 0; i < argRegs.size(); ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 argBase = nextReg_;
+    for (keel::usize i = 0; i < argRegs.size(); ++i) {
+        keel::u16 slot = tempReg();
         if (argRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, argRegs[i]);
     }
 
     // Allocate consecutive registers for output
-    uint16_t outBase = reserveRegs(nout);
+    keel::u16 outBase = reserveRegs(nout);
 
     if (calleeIsVar) {
-        uint16_t fhReg = varRegLookup(funcName);
+        keel::u16 fhReg = varRegLookup(funcName);
         auto uvIt = upvalueRegs_.find(funcName);
         if (uvIt != upvalueRegs_.end()) {
-            int32_t nameIdx = addStringConstant(funcName);
+            keel::i32 nameIdx = addStringConstant(funcName);
             emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
         }
-        size_t callIdx = chunk_.code.size();
+        keel::usize callIdx = chunk_.code.size();
         // CALL_INDIRECT_MULTI: a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_MULTI,
                                      outBase, fhReg, argBase,
-                                     static_cast<int32_t>(argRegs.size()),
-                                     static_cast<uint16_t>(nout)));
+                                     static_cast<keel::i32>(argRegs.size()),
+                                     static_cast<keel::u16>(nout)));
         recordCallArgNames(callNode, callIdx);
         distribute(outBase);
         if (complex)
@@ -1486,17 +1487,17 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
         return outRegs.empty() ? 0 : outRegs[0];
     }
 
-    int32_t funcIdx = addStringConstant(
+    keel::i32 funcIdx = addStringConstant(
         nestedIt != nestedFuncInfo_.end() ? nestedIt->second.compiledName : funcName);
 
     // CALL_MULTI: a=outBase, d=funcIdx, b=argBase, c=nargs, e=nout
-    size_t callMultiIdx = chunk_.code.size();
+    keel::usize callMultiIdx = chunk_.code.size();
     emit(Instruction::make_abcde(OpCode::CALL_MULTI,
                                  outBase,
                                  argBase,
-                                 static_cast<uint16_t>(argRegs.size()),
+                                 static_cast<keel::u16>(argRegs.size()),
                                  funcIdx,
-                                 static_cast<uint16_t>(nout)));
+                                 static_cast<keel::u16>(nout)));
     recordCallArgNames(callNode, callMultiIdx);
 
     distribute(outBase);
@@ -1506,17 +1507,17 @@ uint16_t Compiler::compileMultiAssign(const ASTNode *node)
     return outRegs.empty() ? 0 : outRegs[0];
 }
 
-uint16_t Compiler::compileBinaryOp(const ASTNode *node)
+keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
 {
     const std::string &op = node->strValue;
 
     // Short-circuit: && and || need special handling
     // (right operand should not be evaluated if left decides result)
     if (op == "&&" || op == "||") {
-        uint16_t dst = tempReg();
-        uint16_t left = compileNode(node->children[0].get());
+        keel::u16 dst = tempReg();
+        keel::u16 left = compileNode(node->children[0].get());
         emitAB(OpCode::TO_LOGICAL_SCALAR, dst, left);
-        size_t jumpPos = currentPos();
+        keel::usize jumpPos = currentPos();
         emitAD(op == "&&" ? OpCode::JMP_FALSE : OpCode::JMP_TRUE, dst, 0); // placeholder
         // The right operand is conditionally executed: whatever it
         // loads into the const cache is only valid when the jump was
@@ -1529,9 +1530,9 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
         savedConsts.swap(constRegCache_);
         auto savedScalars = scalarRegs_;
         auto savedDefined = definedRegs_;
-        uint16_t right = compileNode(node->children[1].get());
+        keel::u16 right = compileNode(node->children[1].get());
         emitAB(OpCode::TO_LOGICAL_SCALAR, dst, right);
-        patchJump(jumpPos, static_cast<int32_t>(currentPos()) - static_cast<int32_t>(jumpPos));
+        patchJump(jumpPos, static_cast<keel::i32>(currentPos()) - static_cast<keel::i32>(jumpPos));
         constRegCache_.swap(savedConsts);
         scalarRegs_ = savedScalars;
         scalarRegs_.reset(dst);
@@ -1543,7 +1544,7 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
     // emits FUSE_EWISE + the normally compiled op as fallback. After the
     // short-circuit ops (never fusable); a matched node has an array operand so
     // it can't constant-fold, so checking here vs. below is equivalent.
-    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint16_t>(r);
+    if (int r = tryCompileFused(node); r >= 0) return static_cast<keel::u16>(r);
 
     // Constant folding: both operands are number literals → compute at compile time
     if (node->children[0]->type == NodeType::NUMBER_LITERAL
@@ -1564,7 +1565,7 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
         else if (op == ".^") { if (lv < 0.0 && rv != std::floor(rv)) folded = false; else result = std::pow(lv, rv); }
         else folded = false;
         if (folded) {
-            int32_t idx = addConstant(result);
+            keel::i32 idx = addConstant(result);
             auto pit = pinnedConstRegs_.find(idx);
             if (pit != pinnedConstRegs_.end()) {
                 scalarRegs_.set(pit->second);
@@ -1575,7 +1576,7 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
                 scalarRegs_.set(it->second);
                 return it->second;
             }
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitAD(OpCode::LOAD_CONST, dst, idx);
             constRegCache_[idx] = dst;
             scalarRegs_.set(dst);
@@ -1605,7 +1606,7 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
             levels.push_back(n);
             n = n->children[0].get();
         }
-        uint16_t acc = compileNode(n);
+        keel::u16 acc = compileNode(n);
         for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
             const ASTNode *lv = *it;
             const std::string &lOp = lv->strValue;
@@ -1616,7 +1617,7 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
                 acc = emitFusedMulAdd(lOp == "+", rhs, acc);
                 continue;
             }
-            uint16_t right = compileNode(rhs);
+            keel::u16 right = compileNode(rhs);
             acc = emitPlainBinary(lOp, acc, right);
         }
         return acc;
@@ -1636,18 +1637,18 @@ uint16_t Compiler::compileBinaryOp(const ASTNode *node)
             return emitFusedMulAdd(op == "+", rhs, compileNode(node->children[0].get()));
     }
 
-    uint16_t left = compileNode(node->children[0].get());
-    uint16_t right = compileNode(node->children[1].get());
+    keel::u16 left = compileNode(node->children[0].get());
+    keel::u16 right = compileNode(node->children[1].get());
     return emitPlainBinary(op, left, right);
 }
 
 // Fused multiply-add/sub helper: `acc ± a*b` where `rhs` is the product
 // node — compiles its operands and emits one MULADD/MULSUB opcode.
-uint16_t Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint16_t acc)
+keel::u16 Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, keel::u16 acc)
 {
-    uint16_t mulA = compileNode(rhs->children[0].get());
-    uint16_t mulB = compileNode(rhs->children[1].get());
-    uint16_t dst  = tempReg();
+    keel::u16 mulA = compileNode(rhs->children[0].get());
+    keel::u16 mulB = compileNode(rhs->children[1].get());
+    keel::u16 dst  = tempReg();
     const bool ewise = (rhs->strValue == ".*");
     OpCode fop = isPlus ? (ewise ? OpCode::EMULADD : OpCode::MULADD)
                         : (ewise ? OpCode::EMULSUB : OpCode::MULSUB);
@@ -1659,9 +1660,9 @@ uint16_t Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, uint16_t acc
 
 // The plain (unfused, unfolded) binary-op tail: opcode selection over
 // already-compiled operand registers, emit, scalar-result tracking.
-uint16_t Compiler::emitPlainBinary(const std::string &op, uint16_t left, uint16_t right)
+keel::u16 Compiler::emitPlainBinary(const std::string &op, keel::u16 left, keel::u16 right)
 {
-    uint16_t dst = tempReg();
+    keel::u16 dst = tempReg();
     bool bothScalar = scalarRegs_.test(left) && scalarRegs_.test(right);
 
     OpCode opcode;
@@ -1713,27 +1714,27 @@ uint16_t Compiler::emitPlainBinary(const std::string &op, uint16_t left, uint16_
     return dst;
 }
 
-uint16_t Compiler::compileUnaryOp(const ASTNode *node)
+keel::u16 Compiler::compileUnaryOp(const ASTNode *node)
 {
     const std::string &op = node->strValue;
 
     // Constant folding: -<number> → load negated constant directly
     if (op == "-" && node->children[0]->type == NodeType::NUMBER_LITERAL) {
-        int32_t idx = addConstant(-node->children[0]->numValue);
+        keel::i32 idx = addConstant(-node->children[0]->numValue);
         auto it = constRegCache_.find(idx);
         if (it != constRegCache_.end()) {
             scalarRegs_.set(it->second);
             return it->second;
         }
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitAD(OpCode::LOAD_CONST, dst, idx);
         constRegCache_[idx] = dst;
         scalarRegs_.set(dst);
         return dst;
     }
 
-    uint16_t src = compileNode(node->children[0].get());
-    uint16_t dst = tempReg();
+    keel::u16 src = compileNode(node->children[0].get());
+    keel::u16 dst = tempReg();
 
     if (op == "-") {
         if (scalarRegs_.test(src)) {
@@ -1756,7 +1757,7 @@ uint16_t Compiler::compileUnaryOp(const ASTNode *node)
     return dst;
 }
 
-uint16_t Compiler::compileExprStmt(const ASTNode *node)
+keel::u16 Compiler::compileExprStmt(const ASTNode *node)
 {
     auto *child = node->children[0].get();
 
@@ -1764,13 +1765,13 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
     // functions should not produce output values (tic, figure, fprintf, etc.).
     // Non-call expressions (e.g. `1 + numel(dir(p))`) evaluate operands in
     // value context (nargout=1).
-    const uint16_t stmtNargout =
+    const keel::u16 stmtNargout =
         (child->type == NodeType::CALL || child->type == NodeType::COMMAND_CALL) ? 0 : 1;
     struct NargoutGuard
     {
-        uint16_t &ref;
-        uint16_t saved;
-        NargoutGuard(uint16_t &r, uint16_t v)
+        keel::u16 &ref;
+        keel::u16 saved;
+        NargoutGuard(keel::u16 &r, keel::u16 v)
             : ref(r)
             , saved(r)
         {
@@ -1828,24 +1829,24 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
         if (!isKnownVar) {
             auto nit = nestedFuncInfo_.find(name);
             if (nit != nestedFuncInfo_.end()) {
-                uint16_t argBase = static_cast<uint16_t>(nextReg_);
+                keel::u16 argBase = static_cast<keel::u16>(nextReg_);
                 for (const auto &uvName : nit->second.upvalueNames) {
-                    uint16_t slot = tempReg();
-                    uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+                    keel::u16 slot = tempReg();
+                    keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
                     if (boxReg != slot)
                         emitAB(OpCode::MOVE, slot, boxReg);
                 }
-                uint16_t dst = tempReg();
-                int32_t funcIdx = addStringConstant(nit->second.compiledName);
+                keel::u16 dst = tempReg();
+                keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                             static_cast<uint16_t>(nit->second.upvalueNames.size()),
+                                             static_cast<keel::u16>(nit->second.upvalueNames.size()),
                                              funcIdx, 0));
-                uint16_t ansReg = varRegWrite("ans");
+                keel::u16 ansReg = varRegWrite("ans");
                 if (ansReg != dst)
                     emitAB(OpCode::MOVE, ansReg, dst);
                 emitUpvalStoreIfShared("ans", ansReg);
                 if (!node->suppressOutput) {
-                    int32_t nameIdx = addStringConstant("ans");
+                    keel::i32 nameIdx = addStringConstant("ans");
                     emitAD(OpCode::DISPLAY, ansReg, nameIdx);
                 }
                 return ansReg;
@@ -1888,39 +1889,39 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
             }
 
             // Compile as zero-arg CALL (nargout=0 for statement context).
-            uint16_t argBase = nextReg_;
-            uint16_t dst = tempReg();
-            int32_t funcIdx = addStringConstant(name);
+            keel::u16 argBase = nextReg_;
+            keel::u16 dst = tempReg();
+            keel::i32 funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
 
             // Anonymous call result -> bind to `ans`.
-            uint16_t ansReg = varRegWrite("ans");
+            keel::u16 ansReg = varRegWrite("ans");
             if (ansReg != dst)
                 emitAB(OpCode::MOVE, ansReg, dst);
             emitUpvalStoreIfShared("ans", ansReg);
             if (!node->suppressOutput) {
-                int32_t nameIdx = addStringConstant("ans");
+                keel::i32 nameIdx = addStringConstant("ans");
                 emitAD(OpCode::DISPLAY, ansReg, nameIdx);
             }
             return ansReg;
         }
     }
 
-    uint16_t reg = compileNodeExpand(child);
+    keel::u16 reg = compileNodeExpand(child);
 
     if (bareUserVar) {
         if (!node->suppressOutput) {
-            int32_t nameIdx = addStringConstant(displayName);
+            keel::i32 nameIdx = addStringConstant(displayName);
             emitAD(OpCode::DISPLAY, reg, nameIdx);
         }
         return reg;
     }
 
     if (!node->suppressOutput) {
-        int32_t nameIdx = addStringConstant("ans");
+        keel::i32 nameIdx = addStringConstant("ans");
         emitAD(OpCode::DISPLAY, reg, nameIdx);
     }
-    uint16_t ansReg = varRegWrite("ans");
+    keel::u16 ansReg = varRegWrite("ans");
     emitABC(OpCode::COLLAPSE, ansReg, reg, 1);
     emitUpvalStoreIfShared("ans", ansReg);
     return ansReg;
@@ -1930,7 +1931,7 @@ uint16_t Compiler::compileExprStmt(const ASTNode *node)
 // Phase 2: Control flow
 // ============================================================
 
-uint16_t Compiler::compileIf(const ASTNode *node)
+keel::u16 Compiler::compileIf(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset(); // branches may skip LOAD_CONST
     // branches: vector<pair<condition, body>>
@@ -1950,20 +1951,20 @@ uint16_t Compiler::compileIf(const ASTNode *node)
     //   else body
     // L_end:
 
-    std::vector<size_t> endJumps; // positions of JMP → L_end
+    std::vector<keel::usize> endJumps; // positions of JMP → L_end
     auto savedDefined = definedRegs_;
 
-    for (size_t i = 0; i < node->branches.size(); ++i) {
+    for (keel::usize i = 0; i < node->branches.size(); ++i) {
         auto &[cond, body] = node->branches[i];
 
         // Clear cache: previous branch body may have been skipped
         constRegCache_.clear(); scalarRegs_.reset();
         definedRegs_ = savedDefined;
         // Compile condition
-        uint16_t condReg = compileNode(cond.get());
+        keel::u16 condReg = compileNode(cond.get());
 
         // JMP_FALSE to next branch (placeholder)
-        size_t skipPos = currentPos();
+        keel::usize skipPos = currentPos();
         emitAD(OpCode::JMP_FALSE, condReg, 0);
 
         // Compile body
@@ -1987,14 +1988,14 @@ uint16_t Compiler::compileIf(const ASTNode *node)
     }
 
     // Emit NOP for the 'end' keyword so breakpoints on it fire
-    size_t endNopPos = currentPos();
+    keel::usize endNopPos = currentPos();
     if (node->endLine > 0) {
-        currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(node->endLine), 1};
         emitNone(OpCode::NOP);
     }
 
     // Patch all end jumps to the NOP (all branches converge here)
-    for (size_t pos : endJumps) {
+    for (keel::usize pos : endJumps) {
         patchJump(pos, endNopPos - pos);
     }
 
@@ -2006,7 +2007,7 @@ uint16_t Compiler::compileIf(const ASTNode *node)
 // ============================================================
 // Switch/case
 // ============================================================
-uint16_t Compiler::compileSwitch(const ASTNode *node)
+keel::u16 Compiler::compileSwitch(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // AST: children[0] = switch expression
@@ -2031,15 +2032,15 @@ uint16_t Compiler::compileSwitch(const ASTNode *node)
     // L_end:
 
     // Compile switch expression
-    uint16_t switchReg = compileNode(node->children[0].get());
+    keel::u16 switchReg = compileNode(node->children[0].get());
 
     // Temp register for comparison result
-    uint16_t cmpReg = tempReg();
+    keel::u16 cmpReg = tempReg();
 
-    std::vector<size_t> endJumps;
+    std::vector<keel::usize> endJumps;
     auto savedDefined = definedRegs_;
 
-    for (size_t i = 0; i < node->branches.size(); ++i) {
+    for (keel::usize i = 0; i < node->branches.size(); ++i) {
         auto &[caseExpr, caseBody] = node->branches[i];
         definedRegs_ = savedDefined;
 
@@ -2052,24 +2053,24 @@ uint16_t Compiler::compileSwitch(const ASTNode *node)
             }
 
             // Compile: cmpReg = (sv==el1) | (sv==el2) | ...
-            uint16_t tmpCmp = tempReg();
+            keel::u16 tmpCmp = tempReg();
             // Start with false
-            int32_t zeroIdx = addConstant(0.0);
+            keel::i32 zeroIdx = addConstant(0.0);
             emitAD(OpCode::LOAD_CONST, cmpReg, zeroIdx);
 
-            for (size_t ei = 0; ei < elements->size(); ++ei) {
-                uint16_t elReg = compileNode((*elements)[ei].get());
+            for (keel::usize ei = 0; ei < elements->size(); ++ei) {
+                keel::u16 elReg = compileNode((*elements)[ei].get());
                 emitABC(OpCode::EQ, tmpCmp, switchReg, elReg);
                 emitABC(OpCode::OR, cmpReg, cmpReg, tmpCmp);
             }
         } else {
             // Simple case: scalar comparison
-            uint16_t caseReg = compileNode(caseExpr.get());
+            keel::u16 caseReg = compileNode(caseExpr.get());
             emitABC(OpCode::EQ, cmpReg, switchReg, caseReg);
         }
 
         // JMP_FALSE to next case
-        size_t skipPos = currentPos();
+        keel::usize skipPos = currentPos();
         emitAD(OpCode::JMP_FALSE, cmpReg, 0);
 
         // Compile case body
@@ -2092,14 +2093,14 @@ uint16_t Compiler::compileSwitch(const ASTNode *node)
     }
 
     // Emit NOP for the 'end' keyword so breakpoints on it fire
-    size_t endNopPos = currentPos();
+    keel::usize endNopPos = currentPos();
     if (node->endLine > 0) {
-        currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(node->endLine), 1};
         emitNone(OpCode::NOP);
     }
 
     // Patch end jumps
-    for (size_t pos : endJumps) {
+    for (keel::usize pos : endJumps) {
         patchJump(pos, endNopPos - pos);
     }
 
@@ -2110,12 +2111,12 @@ uint16_t Compiler::compileSwitch(const ASTNode *node)
 // ============================================================
 // Global / Persistent
 // ============================================================
-uint16_t Compiler::compileGlobalPersistent(const ASTNode *node)
+keel::u16 Compiler::compileGlobalPersistent(const ASTNode *node)
 {
     const bool isGlobal = (node->type == NodeType::GLOBAL_STMT);
     if (!isGlobal && isTopLevel_) {
-        uint16_t msgReg = tempReg();
-        int32_t msgIdx = addStringConstant(
+        keel::u16 msgReg = tempReg();
+        keel::i32 msgIdx = addStringConstant(
             "persistent declarations are only allowed inside functions");
         emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
         emitA(OpCode::THROW, msgReg);
@@ -2142,7 +2143,7 @@ uint16_t Compiler::compileGlobalPersistent(const ASTNode *node)
 // ============================================================
 // Try/catch
 // ============================================================
-uint16_t Compiler::compileTryCatch(const ASTNode *node)
+keel::u16 Compiler::compileTryCatch(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // AST: children[0] = try body
@@ -2161,7 +2162,7 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
     auto savedDefined = definedRegs_;
 
     // Register for exception variable (if named)
-    uint16_t exReg = 0;
+    keel::u16 exReg = 0;
     if (!node->strValue.empty()) {
         exReg = varRegWrite(node->strValue);
     } else {
@@ -2169,7 +2170,7 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
     }
 
     // TRY_BEGIN: d = catchOffset (placeholder), a = exReg
-    size_t tryBeginPos = currentPos();
+    keel::usize tryBeginPos = currentPos();
     emitAD(OpCode::TRY_BEGIN, exReg, 0);
 
     // Compile try body (track activeTryDepth_ so break/continue inside try pop TRY_END)
@@ -2186,7 +2187,7 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
     emitA(OpCode::TRY_END, 0);
 
     // JMP past catch body
-    size_t endJmpPos = currentPos();
+    keel::usize endJmpPos = currentPos();
     emitD(OpCode::JMP, 0);
 
     // Patch TRY_BEGIN to jump here on exception
@@ -2205,9 +2206,9 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
     definedRegs_ = savedDefined;
 
     // Emit NOP for the 'end' keyword so breakpoints on it fire
-    size_t endNopPos = currentPos();
+    keel::usize endNopPos = currentPos();
     if (node->endLine > 0) {
-        currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(node->endLine), 1};
         emitNone(OpCode::NOP);
     }
 
@@ -2217,7 +2218,7 @@ uint16_t Compiler::compileTryCatch(const ASTNode *node)
     return 0;
 }
 
-uint16_t Compiler::compileWhile(const ASTNode *node)
+keel::u16 Compiler::compileWhile(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // children[0] = condition, children[1] = body
@@ -2231,14 +2232,14 @@ uint16_t Compiler::compileWhile(const ASTNode *node)
 
     loopStack_.push_back(LoopContext{{}, {}, false, activeTryDepth_});
 
-    size_t loopStart = currentPos();
+    keel::usize loopStart = currentPos();
 
     // Compile condition
     const int condMark = nextReg_;
-    uint16_t condReg = compileNode(node->children[0].get());
+    keel::u16 condReg = compileNode(node->children[0].get());
 
     // JMP_FALSE to end (placeholder)
-    size_t exitPos = currentPos();
+    keel::usize exitPos = currentPos();
     emitAD(OpCode::JMP_FALSE, condReg, 0);
 
     const int condFloor = condMark > maxVarReg_ ? condMark : maxVarReg_;
@@ -2251,22 +2252,22 @@ uint16_t Compiler::compileWhile(const ASTNode *node)
     definedRegs_ = savedDefined;
 
     // Patch continue targets → jump to loopStart (re-evaluate condition)
-    for (size_t pos : loopStack_.back().continuePatches) {
+    for (keel::usize pos : loopStack_.back().continuePatches) {
         patchJump(pos, loopStart - pos);
     }
 
     // Emit source location for the 'end' keyword so breakpoints on it fire
     if (node->endLine > 0)
-        currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(node->endLine), 1};
 
     // JMP back to start
-    emitD(OpCode::JMP, static_cast<int32_t>(loopStart) - static_cast<int32_t>(currentPos()));
+    emitD(OpCode::JMP, static_cast<keel::i32>(loopStart) - static_cast<keel::i32>(currentPos()));
 
     // Patch JMP_FALSE exit
     patchJump(exitPos, currentPos() - exitPos);
 
     // Patch break targets → jump to here (after loop)
-    for (size_t pos : loopStack_.back().breakPatches) {
+    for (keel::usize pos : loopStack_.back().breakPatches) {
         patchJump(pos, currentPos() - pos);
     }
 
@@ -2275,7 +2276,7 @@ uint16_t Compiler::compileWhile(const ASTNode *node)
     return 0;
 }
 
-uint16_t Compiler::compileBreak(const ASTNode * /*node*/)
+keel::u16 Compiler::compileBreak(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: break outside of loop");
@@ -2293,7 +2294,7 @@ uint16_t Compiler::compileBreak(const ASTNode * /*node*/)
     return 0;
 }
 
-uint16_t Compiler::compileContinue(const ASTNode * /*node*/)
+keel::u16 Compiler::compileContinue(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: continue outside of loop");
@@ -2309,7 +2310,7 @@ uint16_t Compiler::compileContinue(const ASTNode * /*node*/)
 // Phase 3: For-loop, colon, arrays, indexing
 // ============================================================
 
-uint16_t Compiler::compileFor(const ASTNode *node)
+keel::u16 Compiler::compileFor(const ASTNode *node)
 {
     // node->strValue = loop variable name
     // children[0] = range expression
@@ -2338,7 +2339,7 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     // Then capture forInitPos so the patchJump after the body targets
     // the FOR_INIT[_RANGE] instruction itself, not whatever range
     // emission ended up first in the bytecode.
-    uint16_t startReg = 0, stopReg = 0, stepReg = kInvalidReg, rangeReg = 0;
+    keel::u16 startReg = 0, stopReg = 0, stepReg = kInvalidReg, rangeReg = 0;
     if (isColonRange) {
         startReg = compileNode(rangeNode->children[0].get());
         if (rangeNode->children.size() == 2) {
@@ -2351,10 +2352,10 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     } else {
         rangeReg = compileNode(rangeNode);
     }
-    uint16_t vReg = varRegWrite(node->strValue);
+    keel::u16 vReg = varRegWrite(node->strValue);
     loopStack_.push_back(LoopContext{{}, {}, true, activeTryDepth_});
 
-    size_t forInitPos = currentPos();
+    keel::usize forInitPos = currentPos();
     if (isColonRange) {
         // FOR_INIT_RANGE: a=vReg, b=start, c=stop, d=endOffset, e=step (or 0xFF)
         emit(Instruction::make_abcde(OpCode::FOR_INIT_RANGE,
@@ -2367,7 +2368,7 @@ uint16_t Compiler::compileFor(const ASTNode *node)
             scalarRegs_.set(vReg);
     }
 
-    size_t bodyStart = currentPos();
+    keel::usize bodyStart = currentPos();
     emitUpvalStoreIfShared(node->strValue, vReg);
 
     // Compile body
@@ -2378,25 +2379,25 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     definedRegs_ = savedDefined;
 
     // Patch continue targets -> jump to FOR_NEXT
-    size_t forNextPos = currentPos();
-    for (size_t pos : loopStack_.back().continuePatches) {
+    keel::usize forNextPos = currentPos();
+    for (keel::usize pos : loopStack_.back().continuePatches) {
         patchJump(pos, forNextPos - pos);
     }
 
     // Emit source location for the 'end' keyword so breakpoints on it fire
     if (node->endLine > 0)
-        currentLoc_ = {static_cast<uint16_t>(node->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(node->endLine), 1};
 
     emitAD(OpCode::FOR_NEXT, vReg, 0);
     chunk_.code.back().d =
-        static_cast<int32_t>(bodyStart) - static_cast<int32_t>(currentPos() - 1);
+        static_cast<keel::i32>(bodyStart) - static_cast<keel::i32>(currentPos() - 1);
 
     // Patch FOR_INIT endOffset -> jump past FOR_NEXT
     patchJump(forInitPos, currentPos() - forInitPos);
     emitUpvalStoreIfShared(node->strValue, vReg);
 
     // Patch break targets → jump to here (after loop)
-    for (size_t pos : loopStack_.back().breakPatches) {
+    for (keel::usize pos : loopStack_.back().breakPatches) {
         patchJump(pos, currentPos() - pos);
     }
 
@@ -2405,30 +2406,30 @@ uint16_t Compiler::compileFor(const ASTNode *node)
     return 0;
 }
 
-uint16_t Compiler::compileColonExpr(const ASTNode *node)
+keel::u16 Compiler::compileColonExpr(const ASTNode *node)
 {
     // No children = bare ":" (colon-all marker)
     if (node->children.empty()) {
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitA(OpCode::COLON_ALL, dst);
         return dst;
     }
 
     // 2 children: start:stop
     if (node->children.size() == 2) {
-        uint16_t start = compileNode(node->children[0].get());
-        uint16_t stop = compileNode(node->children[1].get());
-        uint16_t dst = tempReg();
+        keel::u16 start = compileNode(node->children[0].get());
+        keel::u16 stop = compileNode(node->children[1].get());
+        keel::u16 dst = tempReg();
         emitABC(OpCode::COLON, dst, start, stop);
         return dst;
     }
 
     // 3 children: start:step:stop
     if (node->children.size() == 3) {
-        uint16_t start = compileNode(node->children[0].get());
-        uint16_t step = compileNode(node->children[1].get());
-        uint16_t stop = compileNode(node->children[2].get());
-        uint16_t dst = tempReg();
+        keel::u16 start = compileNode(node->children[0].get());
+        keel::u16 step = compileNode(node->children[1].get());
+        keel::u16 stop = compileNode(node->children[2].get());
+        keel::u16 dst = tempReg();
         // COLON3: dst, start, step, stop — need 4 regs
         // Use: a=dst, b=start, c=step, d is not suitable (int16), e=stop
         emit(Instruction::make_abcde(OpCode::COLON3, dst, start, step, 0, stop));
@@ -2438,13 +2439,13 @@ uint16_t Compiler::compileColonExpr(const ASTNode *node)
     throw std::runtime_error("Compiler: invalid colon expression");
 }
 
-uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
+keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
 {
     // node->children = rows
     // Each row's children = elements
 
     if (node->children.empty()) {
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitA(OpCode::LOAD_EMPTY, dst);
         return dst;
     }
@@ -2468,10 +2469,10 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // Row compiler: compiles one row (a semicolon-separated line of the
     // literal) into a single register. Shared by the vertical
     // strategies below so both produce identical row semantics.
-    constexpr size_t kLiteralBlockMax = 16;
-    auto compileRow = [&](const ASTNode *row) -> uint16_t {
+    constexpr keel::usize kLiteralBlockMax = 16;
+    auto compileRow = [&](const ASTNode *row) -> keel::u16 {
         if (row->children.empty()) {
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             return dst;
         }
@@ -2491,23 +2492,23 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
 
         if (hasCsl) {
             // Build dst incrementally. Seed as empty, then append each element.
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             for (auto &elem : row->children) {
                 if (elem->type == NodeType::CELL_INDEX || elem->type == NodeType::DYNAMIC_FIELD_ACCESS) {
                     // cell CSL c{:} / c{vec} / c{idx} / c{r,:} or s.(f): compileNodeExpand
                     // preserves a CSL; HORZCAT_APPEND_FLATTEN appends all of a CSL or one
                     // of a non-CSL at runtime. See csl_first_class.md.
-                    uint16_t v = compileNodeExpand(elem.get());
+                    keel::u16 v = compileNodeExpand(elem.get());
                     emitAB(OpCode::HORZCAT_APPEND_FLATTEN, dst, v);
                 } else if (elem->type == NodeType::FIELD_ACCESS && !elem->children.empty()) {
                     // struct-array field [s.field] or chained [s.sub.field]
-                    uint16_t baseReg = compileNode(elem->children[0].get());
-                    int32_t nameIdx = addStringConstant(elem->strValue);
+                    keel::u16 baseReg = compileNode(elem->children[0].get());
+                    keel::i32 nameIdx = addStringConstant(elem->strValue);
                     emit(Instruction::make_abcde(
                         OpCode::HORZCAT_APPEND_CSL, dst, baseReg, 0, nameIdx, 0));
                 } else {
-                    uint16_t valReg = compileNode(elem.get());
+                    keel::u16 valReg = compileNode(elem.get());
                     emitAB(OpCode::HORZCAT_APPEND, dst, valReg);
                 }
             }
@@ -2532,11 +2533,11 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
         // two-element horzcat (O(N²) total for exotic all-matrix
         // literals — documented, rare).
         if (row->children.size() > kLiteralBlockMax) {
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
             const int mark = nextReg_;
             for (auto &elem : row->children) {
-                uint16_t v = compileNode(elem.get());
+                keel::u16 v = compileNode(elem.get());
                 emitAB(OpCode::HORZCAT_APPEND, dst, v);
                 const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
                 if (nextReg_ > floor) {
@@ -2549,25 +2550,25 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
         }
 
         // Multi-element row: compile each, move into consecutive block, HORZCAT
-        std::vector<uint16_t> elemRegs;
+        std::vector<keel::u16> elemRegs;
         for (auto &elem : row->children) {
             elemRegs.push_back(compileNode(elem.get()));
         }
 
-        uint16_t hBase = nextReg_;
-        for (size_t i = 0; i < elemRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 hBase = nextReg_;
+        for (keel::usize i = 0; i < elemRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (elemRegs[i] != slot) {
                 emitAB(OpCode::MOVE, slot, elemRegs[i]);
             }
         }
 
-        uint16_t dst = tempReg();
-        emitABC(OpCode::HORZCAT, dst, hBase, static_cast<uint16_t>(elemRegs.size()));
+        keel::u16 dst = tempReg();
+        emitABC(OpCode::HORZCAT, dst, hBase, static_cast<keel::u16>(elemRegs.size()));
         return dst;
     };
 
-    const size_t rowCount = node->children.size();
+    const keel::usize rowCount = node->children.size();
     if (rowCount == 1)
         return compileRow(node->children[0].get());
 
@@ -2576,11 +2577,11 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
     // a 1000-row column literal `[1;2;3;…]` compiles in O(1)
     // registers (the block path burned one per row).
     if (rowCount > kLiteralBlockMax) {
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitA(OpCode::LOAD_EMPTY, dst);
         const int mark = nextReg_;
         for (auto &row : node->children) {
-            uint16_t rr = compileRow(row.get());
+            keel::u16 rr = compileRow(row.get());
             emitAB(OpCode::VERTCAT_APPEND, dst, rr);
             const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
             if (nextReg_ > floor) {
@@ -2593,31 +2594,31 @@ uint16_t Compiler::compileMatrixLiteral(const ASTNode *node)
     }
 
     // Few rows: compile each, move into consecutive block, VERTCAT
-    std::vector<uint16_t> rowRegs;
+    std::vector<keel::u16> rowRegs;
     for (auto &row : node->children)
         rowRegs.push_back(compileRow(row.get()));
 
-    uint16_t vBase = nextReg_;
-    for (size_t i = 0; i < rowRegs.size(); ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 vBase = nextReg_;
+    for (keel::usize i = 0; i < rowRegs.size(); ++i) {
+        keel::u16 slot = tempReg();
         if (rowRegs[i] != slot) {
             emitAB(OpCode::MOVE, slot, rowRegs[i]);
         }
     }
 
-    uint16_t dst = tempReg();
-    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint16_t>(rowRegs.size()));
+    keel::u16 dst = tempReg();
+    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<keel::u16>(rowRegs.size()));
     return dst;
 }
 
-uint16_t Compiler::compileIndexExpr(const ASTNode *node)
+keel::u16 Compiler::compileIndexExpr(const ASTNode *node)
 {
     // For CALL nodes: children[0] = base identifier, children[1..] = index args
     // For INDEX nodes: strValue = name, children = index args
 
     std::string name;
-    size_t nargs;
-    size_t argOffset; // first index arg in children[]
+    keel::usize nargs;
+    keel::usize argOffset; // first index arg in children[]
 
     if (node->type == NodeType::CALL) {
         name = node->children[0]->strValue;
@@ -2629,59 +2630,59 @@ uint16_t Compiler::compileIndexExpr(const ASTNode *node)
         argOffset = 0;
     }
 
-    uint16_t arr = varRegRead(name);
+    keel::u16 arr = varRegRead(name);
 
     if (nargs == 1) {
         IndexContextGuard guard(*this, arr, 1);
-        uint16_t idx = compileNode(node->children[argOffset].get());
-        uint16_t dst = tempReg();
+        keel::u16 idx = compileNode(node->children[argOffset].get());
+        keel::u16 dst = tempReg();
         emitABC(OpCode::INDEX_GET, dst, arr, idx);
         return dst;
     }
 
     if (nargs == 2) {
         IndexContextGuard guard(*this, arr, 2);
-        uint16_t row = compileNode(node->children[argOffset].get());
+        keel::u16 row = compileNode(node->children[argOffset].get());
         guard.setDim(1);
-        uint16_t col = compileNode(node->children[argOffset + 1].get());
-        uint16_t dst = tempReg();
+        keel::u16 col = compileNode(node->children[argOffset + 1].get());
+        keel::u16 dst = tempReg();
         emit(Instruction::make_abcde(OpCode::INDEX_GET_2D, dst, arr, row, 0, col));
         return dst;
     }
 
     // ND indexing (3D+): compile indices into consecutive registers
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
-        std::vector<uint16_t> idxRegs;
-        for (size_t i = 0; i < nargs; ++i) {
+        IndexContextGuard guard(*this, arr, static_cast<keel::u16>(nargs));
+        std::vector<keel::u16> idxRegs;
+        for (keel::usize i = 0; i < nargs; ++i) {
             idxRegs.push_back(compileNode(node->children[argOffset + i].get()));
             if (i + 1 < nargs)
-                guard.setDim(static_cast<uint16_t>(i + 1));
+                guard.setDim(static_cast<keel::u16>(i + 1));
         }
-        uint16_t base = nextReg_;
-        for (size_t i = 0; i < nargs; ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 base = nextReg_;
+        for (keel::usize i = 0; i < nargs; ++i) {
+            keel::u16 slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emit(Instruction::make_abcde(OpCode::INDEX_GET_ND,
                                      dst,
                                      arr,
                                      base,
                                      0,
-                                     static_cast<uint16_t>(nargs)));
+                                     static_cast<keel::u16>(nargs)));
         return dst;
     }
 }
 
-uint16_t Compiler::compileIndexAssign(const ASTNode *node)
+keel::u16 Compiler::compileIndexAssign(const ASTNode *node)
 {
     return compileIndexStore(node->children[0].get(), node->children[1].get(),
                              -1, node->suppressOutput);
 }
 
-uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
+keel::u16 Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
                                     int inValReg, bool suppress)
 {
     // lhs = CALL or INDEX node; rhs = RHS expr (used only when valReg < 0)
@@ -2689,8 +2690,8 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
     // For CALL: children[0] = IDENTIFIER, children[1..] = indices
     // For INDEX: strValue = name, children = indices
     std::string name;
-    size_t nargs;
-    size_t argOffset;
+    keel::usize nargs;
+    keel::usize argOffset;
 
     if (lhs->type == NodeType::CALL) {
         name = lhs->children[0]->strValue;
@@ -2702,42 +2703,42 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
         argOffset = 0;
     }
 
-    uint16_t arr = varRegWrite(name);
+    keel::u16 arr = varRegWrite(name);
     emitUpvalLoadRawIfShared(name, arr);
-    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
+    keel::u16 val = (inValReg >= 0) ? static_cast<keel::u16>(inValReg) : compileNode(rhs);
 
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
+        IndexContextGuard guard(*this, arr, static_cast<keel::u16>(nargs));
 
         if (nargs == 1) {
-            uint16_t idx = compileNode(lhs->children[argOffset].get());
+            keel::u16 idx = compileNode(lhs->children[argOffset].get());
             emitABC(OpCode::INDEX_SET, arr, idx, val);
         } else if (nargs == 2) {
-            uint16_t row = compileNode(lhs->children[argOffset].get());
+            keel::u16 row = compileNode(lhs->children[argOffset].get());
             guard.setDim(1);
-            uint16_t col = compileNode(lhs->children[argOffset + 1].get());
+            keel::u16 col = compileNode(lhs->children[argOffset + 1].get());
             emit(Instruction::make_abcde(OpCode::INDEX_SET_2D, arr, row, col, 0, val));
         } else {
             // ND indexed assign (3D+)
-            std::vector<uint16_t> idxRegs;
-            for (size_t i = 0; i < nargs; ++i) {
+            std::vector<keel::u16> idxRegs;
+            for (keel::usize i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[argOffset + i].get()));
                 if (i + 1 < nargs)
-                    guard.setDim(static_cast<uint16_t>(i + 1));
+                    guard.setDim(static_cast<keel::u16>(i + 1));
             }
-            uint16_t base = nextReg_;
-            for (size_t i = 0; i < nargs; ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 base = nextReg_;
+            for (keel::usize i = 0; i < nargs; ++i) {
+                keel::u16 slot = tempReg();
                 if (idxRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, idxRegs[i]);
             }
-            uint16_t safeVal = tempReg();
+            keel::u16 safeVal = tempReg();
             if (val != safeVal)
                 emitAB(OpCode::MOVE, safeVal, val);
             emit(Instruction::make_abcde(OpCode::INDEX_SET_ND,
                                          arr,
                                          base,
-                                         static_cast<uint16_t>(nargs),
+                                         static_cast<keel::u16>(nargs),
                                          0,
                                          safeVal));
         }
@@ -2747,7 +2748,7 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(arr);
     if (!suppress) {
-        int32_t nameIdx = addStringConstant(name);
+        keel::i32 nameIdx = addStringConstant(name);
         emitAD(OpCode::DISPLAY, arr, nameIdx);
     }
 
@@ -2758,7 +2759,7 @@ uint16_t Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
 // Struct field access and assignment
 // ============================================================
 
-uint16_t Compiler::compileFieldAccess(const ASTNode *node)
+keel::u16 Compiler::compileFieldAccess(const ASTNode *node)
 {
     // Bare qualified access `Pkg.member` / `ClassName.Const`: when the root
     // identifier is not a known variable, resolve as a 0-arg qualified call
@@ -2782,21 +2783,21 @@ uint16_t Compiler::compileFieldAccess(const ASTNode *node)
                 // registered, keep the single CALL — the runtime resolves it
                 // (an m-file qualified name loaded lazily).
                 std::vector<std::string> segs;
-                for (size_t s = 0, e; s < qualified.size(); s = e + 1) {
+                for (keel::usize s = 0, e; s < qualified.size(); s = e + 1) {
                     e = qualified.find('.', s);
                     if (e == std::string::npos)
                         e = qualified.size();
                     segs.push_back(qualified.substr(s, e - s));
                 }
-                auto join = [&](size_t n) {
+                auto join = [&](keel::usize n) {
                     std::string r = segs[0];
-                    for (size_t i = 1; i < n; ++i)
+                    for (keel::usize i = 1; i < n; ++i)
                         r += "." + segs[i];
                     return r;
                 };
-                size_t prefixLen = segs.size(); // default: the whole name
+                keel::usize prefixLen = segs.size(); // default: the whole name
                 if (segs.size() >= 3 && !engine_.hasExternalFunction(qualified))
-                    for (size_t k = segs.size() - 1; k >= 2; --k)
+                    for (keel::usize k = segs.size() - 1; k >= 2; --k)
                         if (engine_.hasExternalFunction(join(k))) {
                             prefixLen = k;
                             break;
@@ -2817,28 +2818,28 @@ uint16_t Compiler::compileFieldAccess(const ASTNode *node)
                     && !engine_.findClass(segs[0])
                     && !engine_.classCtor(segs[0])
                     && engine_.hasCallableName(segs[0])) {
-                    uint16_t hd = tempReg();
-                    uint16_t argBase = nextReg_;
-                    int32_t funcIdx = addStringConstant(segs[0]);
+                    keel::u16 hd = tempReg();
+                    keel::u16 argBase = nextReg_;
+                    keel::i32 funcIdx = addStringConstant(segs[0]);
                     emit(Instruction::make_abcde(OpCode::CALL, hd, argBase, 0,
                                                  funcIdx, 0));
-                    for (size_t i = 1; i < segs.size(); ++i) {
-                        uint16_t nd = tempReg();
-                        int32_t nameIdx = addStringConstant(segs[i]);
+                    for (keel::usize i = 1; i < segs.size(); ++i) {
+                        keel::u16 nd = tempReg();
+                        keel::i32 nameIdx = addStringConstant(segs[i]);
                         emitABC(OpCode::FIELD_GET, nd, hd, 0);
                         chunk_.code.back().d = nameIdx;
                         hd = nd;
                     }
                     return hd;
                 }
-                uint16_t dst = tempReg();
-                uint16_t argBase = nextReg_;
-                int32_t funcIdx = addStringConstant(join(prefixLen));
+                keel::u16 dst = tempReg();
+                keel::u16 argBase = nextReg_;
+                keel::i32 funcIdx = addStringConstant(join(prefixLen));
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
                 // Trailing segments (if the prefix was a value) → field reads.
-                for (size_t i = prefixLen; i < segs.size(); ++i) {
-                    uint16_t nd = tempReg();
-                    int32_t nameIdx = addStringConstant(segs[i]);
+                for (keel::usize i = prefixLen; i < segs.size(); ++i) {
+                    keel::u16 nd = tempReg();
+                    keel::i32 nameIdx = addStringConstant(segs[i]);
                     emitABC(OpCode::FIELD_GET, nd, dst, 0);
                     chunk_.code.back().d = nameIdx;
                     dst = nd;
@@ -2849,22 +2850,22 @@ uint16_t Compiler::compileFieldAccess(const ASTNode *node)
     }
     // node->children[0] = object expression
     // node->strValue = field name
-    uint16_t obj = compileNode(node->children[0].get());
-    uint16_t dst = tempReg();
-    int32_t nameIdx = addStringConstant(node->strValue);
+    keel::u16 obj = compileNode(node->children[0].get());
+    keel::u16 dst = tempReg();
+    keel::i32 nameIdx = addStringConstant(node->strValue);
     emitABC(OpCode::FIELD_GET, dst, obj, 0);
     // Store nameIdx in d field
     chunk_.code.back().d = nameIdx;
     return dst;
 }
 
-uint16_t Compiler::compileFieldAssign(const ASTNode *node)
+keel::u16 Compiler::compileFieldAssign(const ASTNode *node)
 {
     return compileFieldStore(node->children[0].get(), node->children[1].get(),
                              -1, node->suppressOutput);
 }
 
-uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
+keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
                                     int inValReg, bool suppress)
 {
     // lhs = FIELD_ACCESS node; rhs = RHS expr (used only when valReg < 0)
@@ -2888,23 +2889,23 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         && cur->children.size() == 2
         && cur->children[0]->type == NodeType::IDENTIFIER) {
         const std::string &rootName = cur->children[0]->strValue;
-        uint16_t rootReg = varRegWrite(rootName);
+        keel::u16 rootReg = varRegWrite(rootName);
         emitUpvalLoadRawIfShared(rootName, rootReg);
-        uint16_t idxReg;
+        keel::u16 idxReg;
         {
             IndexContextGuard guard(*this, rootReg, 1);
             idxReg = compileNode(cur->children[1].get());
         }
-        uint16_t valReg = (inValReg >= 0) ? static_cast<uint16_t>(inValReg)
+        keel::u16 valReg = (inValReg >= 0) ? static_cast<keel::u16>(inValReg)
                                           : compileNode(rhs);
-        int32_t nameIdx = addStringConstant(fieldChain[0]);
+        keel::i32 nameIdx = addStringConstant(fieldChain[0]);
         emit(Instruction::make_abcde(OpCode::STRUCT_ELEM_FIELD_SET,
                                      rootReg, idxReg, valReg, nameIdx, 0));
         emitUpvalStoreIfShared(rootName, rootReg);
         if (!mayClear_)
             definedRegs_.set(rootReg);
         if (!suppress) {
-            int32_t dispIdx = addStringConstant(rootName);
+            keel::i32 dispIdx = addStringConstant(rootName);
             emitAD(OpCode::DISPLAY, rootReg, dispIdx);
         }
         return rootReg;
@@ -2915,13 +2916,13 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 
     // fieldChain is in reverse: ["b", "a"] for s.a.b
     // Root variable
-    uint16_t rootReg = varRegWrite(cur->strValue);
+    keel::u16 rootReg = varRegWrite(cur->strValue);
     emitUpvalLoadRawIfShared(cur->strValue, rootReg);
-    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
+    keel::u16 val = (inValReg >= 0) ? static_cast<keel::u16>(inValReg) : compileNode(rhs);
 
     if (fieldChain.size() == 1) {
         // Simple: s.x = val
-        int32_t nameIdx = addStringConstant(fieldChain[0]);
+        keel::i32 nameIdx = addStringConstant(fieldChain[0]);
         emitABC(OpCode::FIELD_SET, rootReg, val, 0);
         chunk_.code.back().d = nameIdx;
     } else {
@@ -2930,14 +2931,14 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         //   intermediates[0] = s (rootReg)
         //   intermediates[1] = FIELD_GET s."a" → t1
         //   For s.a.b.c: intermediates[2] = FIELD_GET t1."b" → t2
-        std::vector<uint16_t> intermediates;
+        std::vector<keel::u16> intermediates;
         intermediates.push_back(rootReg);
 
         // Walk from deepest to shallowest: fieldChain reversed = ["a", "b"]
-        for (size_t i = fieldChain.size() - 1; i >= 1; --i) {
-            uint16_t src = intermediates.back();
-            uint16_t dst = tempReg();
-            int32_t nameIdx = addStringConstant(fieldChain[i]);
+        for (keel::usize i = fieldChain.size() - 1; i >= 1; --i) {
+            keel::u16 src = intermediates.back();
+            keel::u16 dst = tempReg();
+            keel::i32 nameIdx = addStringConstant(fieldChain[i]);
             emitABC(OpCode::FIELD_GET_OR_CREATE, dst, src, 0);
             chunk_.code.back().d = nameIdx;
             intermediates.push_back(dst);
@@ -2945,26 +2946,26 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 
         // Unshare non-aliased parent containers before mutating the deepest
         // struct so nested field updates do not trigger O(N) COW clones.
-        for (size_t idx = 0; idx + 1 < intermediates.size(); ++idx) {
-            size_t fi = fieldChain.size() - 1 - idx;
-            int32_t nameIdx = addStringConstant(fieldChain[fi]);
+        for (keel::usize idx = 0; idx + 1 < intermediates.size(); ++idx) {
+            keel::usize fi = fieldChain.size() - 1 - idx;
+            keel::i32 nameIdx = addStringConstant(fieldChain[fi]);
             emitABC(OpCode::LVAL_UNSHARE_FIELD, intermediates[idx + 1], intermediates[idx], 0);
             chunk_.code.back().d = nameIdx;
         }
 
         // Step 2: FIELD_SET on the deepest intermediate
-        uint16_t deepest = intermediates.back();
-        int32_t leafIdx = addStringConstant(fieldChain[0]);
+        keel::u16 deepest = intermediates.back();
+        keel::i32 leafIdx = addStringConstant(fieldChain[0]);
         emitABC(OpCode::FIELD_SET, deepest, val, 0);
         chunk_.code.back().d = leafIdx;
 
         // Step 3: Write back chain (reverse order)
-        for (size_t i = intermediates.size() - 1; i >= 1; --i) {
-            uint16_t child = intermediates[i];
-            uint16_t parent = intermediates[i - 1];
+        for (keel::usize i = intermediates.size() - 1; i >= 1; --i) {
+            keel::u16 child = intermediates[i];
+            keel::u16 parent = intermediates[i - 1];
             // fieldChain index: fieldChain[intermediates.size() - i]
-            size_t fi = fieldChain.size() - i;
-            int32_t nameIdx = addStringConstant(fieldChain[fi]);
+            keel::usize fi = fieldChain.size() - i;
+            keel::i32 nameIdx = addStringConstant(fieldChain[fi]);
             emitABC(OpCode::FIELD_SET, parent, child, 0);
             chunk_.code.back().d = nameIdx;
         }
@@ -2974,7 +2975,7 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
-        int32_t dispIdx = addStringConstant(cur->strValue);
+        keel::i32 dispIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, dispIdx);
     }
 
@@ -2985,10 +2986,10 @@ uint16_t Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 // Cell operations
 // ============================================================
 
-uint16_t Compiler::compileCellLiteral(const ASTNode *node)
+keel::u16 Compiler::compileCellLiteral(const ASTNode *node)
 {
     if (node->children.empty()) {
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitABC(OpCode::CELL_LITERAL, dst, 0, 0);
         return dst;
     }
@@ -2998,10 +2999,10 @@ uint16_t Compiler::compileCellLiteral(const ASTNode *node)
     // {a, b, c}    → 1 BLOCK child: BLOCK(a,b,c) → 1x3 cell
 
     // Compile each row into a cell row
-    std::vector<uint16_t> rowRegs;
+    std::vector<keel::u16> rowRegs;
     for (auto &row : node->children) {
         if (row->children.empty()) {
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitABC(OpCode::CELL_LITERAL, dst, 0, 0);
             rowRegs.push_back(dst);
             continue;
@@ -3024,10 +3025,10 @@ uint16_t Compiler::compileCellLiteral(const ASTNode *node)
                 break;
             }
         if (hasBraceIndex) {
-            uint16_t acc = tempReg();
+            keel::u16 acc = tempReg();
             emitABC(OpCode::CELL_LITERAL, acc, 0, 0);  // seed an empty 1x0 cell
             for (auto &elem : row->children) {
-                uint16_t v = compileNodeExpand(elem.get());  // preserve a CSL
+                keel::u16 v = compileNodeExpand(elem.get());  // preserve a CSL
                 emitAB(OpCode::CELL_APPEND_FLATTEN, acc, v);
             }
             rowRegs.push_back(acc);
@@ -3035,19 +3036,19 @@ uint16_t Compiler::compileCellLiteral(const ASTNode *node)
         }
 
         // Compile row elements into consecutive registers → CELL_LITERAL
-        std::vector<uint16_t> elemRegs;
+        std::vector<keel::u16> elemRegs;
         for (auto &elem : row->children)
             elemRegs.push_back(compileNode(elem.get()));
 
-        uint16_t base = nextReg_;
-        for (size_t i = 0; i < elemRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 base = nextReg_;
+        for (keel::usize i = 0; i < elemRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (elemRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, elemRegs[i]);
         }
 
-        uint16_t dst = tempReg();
-        emitABC(OpCode::CELL_LITERAL, dst, base, static_cast<uint16_t>(elemRegs.size()));
+        keel::u16 dst = tempReg();
+        emitABC(OpCode::CELL_LITERAL, dst, base, static_cast<keel::u16>(elemRegs.size()));
         rowRegs.push_back(dst);
     }
 
@@ -3055,74 +3056,74 @@ uint16_t Compiler::compileCellLiteral(const ASTNode *node)
         return rowRegs[0];
 
     // Multiple rows: vertcat the cell rows
-    uint16_t vBase = nextReg_;
-    for (size_t i = 0; i < rowRegs.size(); ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 vBase = nextReg_;
+    for (keel::usize i = 0; i < rowRegs.size(); ++i) {
+        keel::u16 slot = tempReg();
         if (rowRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, rowRegs[i]);
     }
 
-    uint16_t dst = tempReg();
-    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<uint16_t>(rowRegs.size()));
+    keel::u16 dst = tempReg();
+    emitABC(OpCode::VERTCAT, dst, vBase, static_cast<keel::u16>(rowRegs.size()));
     return dst;
 }
 
-uint16_t Compiler::compileCellIndex(const ASTNode *node)
+keel::u16 Compiler::compileCellIndex(const ASTNode *node)
 {
     // node->children[0] = cell variable
     // node->children[1..] = indices
-    uint16_t cell = compileNode(node->children[0].get());
-    size_t nidx = node->children.size() - 1;
+    keel::u16 cell = compileNode(node->children[0].get());
+    keel::usize nidx = node->children.size() - 1;
 
     if (nidx == 1) {
         IndexContextGuard guard(*this, cell, 1);
-        uint16_t idx = compileNode(node->children[1].get());
-        uint16_t dst = tempReg();
+        keel::u16 idx = compileNode(node->children[1].get());
+        keel::u16 dst = tempReg();
         emitABC(OpCode::CELL_GET, dst, cell, idx);
         return dst;
     }
     if (nidx == 2) {
         IndexContextGuard guard(*this, cell, 2);
-        uint16_t row = compileNode(node->children[1].get());
+        keel::u16 row = compileNode(node->children[1].get());
         guard.setDim(1);
-        uint16_t col = compileNode(node->children[2].get());
-        uint16_t dst = tempReg();
+        keel::u16 col = compileNode(node->children[2].get());
+        keel::u16 dst = tempReg();
         emit(Instruction::make_abcde(OpCode::CELL_GET_2D, dst, cell, row, 0, col));
         return dst;
     }
     // ND cell indexing (3D+): use CELL_GET_ND — returns content, not sub-cell
     {
-        IndexContextGuard guard(*this, cell, static_cast<uint16_t>(nidx));
-        std::vector<uint16_t> idxRegs;
-        for (size_t i = 0; i < nidx; ++i) {
+        IndexContextGuard guard(*this, cell, static_cast<keel::u16>(nidx));
+        std::vector<keel::u16> idxRegs;
+        for (keel::usize i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(node->children[1 + i].get()));
             if (i + 1 < nidx)
-                guard.setDim(static_cast<uint16_t>(i + 1));
+                guard.setDim(static_cast<keel::u16>(i + 1));
         }
-        uint16_t base = nextReg_;
-        for (size_t i = 0; i < nidx; ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 base = nextReg_;
+        for (keel::usize i = 0; i < nidx; ++i) {
+            keel::u16 slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emit(Instruction::make_abcde(OpCode::CELL_GET_ND,
                                      dst,
                                      cell,
                                      base,
                                      0,
-                                     static_cast<uint16_t>(nidx)));
+                                     static_cast<keel::u16>(nidx)));
         return dst;
     }
 }
 
-uint16_t Compiler::compileCellAssign(const ASTNode *node)
+keel::u16 Compiler::compileCellAssign(const ASTNode *node)
 {
     return compileCellStore(node->children[0].get(), node->children[1].get(),
                             -1, node->suppressOutput);
 }
 
-uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
+keel::u16 Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
                                    int inValReg, bool suppress)
 {
     // lhs = CELL_INDEX node; rhs = RHS expr (used only when inValReg < 0)
@@ -3130,43 +3131,43 @@ uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     if (target->type != NodeType::IDENTIFIER)
         throw std::runtime_error("Compiler: invalid cell assignment target");
 
-    uint16_t cell = varRegWrite(target->strValue);
+    keel::u16 cell = varRegWrite(target->strValue);
     emitUpvalLoadRawIfShared(target->strValue, cell);
-    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhs);
+    keel::u16 val = (inValReg >= 0) ? static_cast<keel::u16>(inValReg) : compileNode(rhs);
 
-    size_t nidx = lhs->children.size() - 1;
+    keel::usize nidx = lhs->children.size() - 1;
     if (nidx == 1) {
         IndexContextGuard guard(*this, cell, 1);
-        uint16_t idx = compileNode(lhs->children[1].get());
+        keel::u16 idx = compileNode(lhs->children[1].get());
         emitABC(OpCode::CELL_SET, cell, idx, val);
     } else if (nidx == 2) {
         IndexContextGuard guard(*this, cell, 2);
-        uint16_t row = compileNode(lhs->children[1].get());
+        keel::u16 row = compileNode(lhs->children[1].get());
         guard.setDim(1);
-        uint16_t col = compileNode(lhs->children[2].get());
+        keel::u16 col = compileNode(lhs->children[2].get());
         emit(Instruction::make_abcde(OpCode::CELL_SET_2D, cell, row, col, 0, val));
     } else {
         // ND cell assign
-        IndexContextGuard guard(*this, cell, static_cast<uint16_t>(nidx));
-        std::vector<uint16_t> idxRegs;
-        for (size_t i = 0; i < nidx; ++i) {
+        IndexContextGuard guard(*this, cell, static_cast<keel::u16>(nidx));
+        std::vector<keel::u16> idxRegs;
+        for (keel::usize i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
             if (i + 1 < nidx)
-                guard.setDim(static_cast<uint16_t>(i + 1));
+                guard.setDim(static_cast<keel::u16>(i + 1));
         }
-        uint16_t base = nextReg_;
-        for (size_t i = 0; i < nidx; ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 base = nextReg_;
+        for (keel::usize i = 0; i < nidx; ++i) {
+            keel::u16 slot = tempReg();
             if (idxRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, idxRegs[i]);
         }
-        uint16_t safeVal = tempReg();
+        keel::u16 safeVal = tempReg();
         if (val != safeVal)
             emitAB(OpCode::MOVE, safeVal, val);
         emit(Instruction::make_abcde(OpCode::CELL_SET_ND,
                                      cell,
                                      base,
-                                     static_cast<uint16_t>(nidx),
+                                     static_cast<keel::u16>(nidx),
                                      0,
                                      safeVal));
     }
@@ -3175,7 +3176,7 @@ uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     if (!mayClear_)
         definedRegs_.set(cell);
     if (!suppress) {
-        int32_t nameIdx = addStringConstant(target->strValue);
+        keel::i32 nameIdx = addStringConstant(target->strValue);
         emitAD(OpCode::DISPLAY, cell, nameIdx);
     }
 
@@ -3184,7 +3185,7 @@ uint16_t Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
 
 // Dispatch an already-materialised value register into any lvalue target.
 // Used by compileMultiAssign for complex outputs (`[s.f, a(i)] = ...`).
-void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool suppress)
+void Compiler::compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool suppress)
 {
     if (target->type != NodeType::IDENTIFIER && needsGeneralLValuePath(target)) {
         compileLValueStore(target, nullptr, static_cast<int>(valReg), suppress);
@@ -3192,7 +3193,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool s
     }
     switch (target->type) {
     case NodeType::IDENTIFIER: {
-        uint16_t dst = varRegWrite(target->strValue);
+        keel::u16 dst = varRegWrite(target->strValue);
         if (dst != valReg)
             emitAB(OpCode::MOVE, dst, valReg);
         if (scalarRegs_.test(valReg))
@@ -3203,7 +3204,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool s
             definedRegs_.set(dst);
         emitUpvalStoreIfShared(target->strValue, dst);
         if (!suppress) {
-            int32_t nameIdx = addStringConstant(target->strValue);
+            keel::i32 nameIdx = addStringConstant(target->strValue);
             emitAD(OpCode::DISPLAY, dst, nameIdx);
         }
         break;
@@ -3223,15 +3224,15 @@ void Compiler::compileStoreLValue(const ASTNode *target, uint16_t valReg, bool s
         auto *objNode = target->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
             throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
-        uint16_t obj = varRegWrite(objNode->strValue);
+        keel::u16 obj = varRegWrite(objNode->strValue);
         emitUpvalLoadRawIfShared(objNode->strValue, obj);
-        uint16_t nameReg = compileNode(target->children[1].get());
+        keel::u16 nameReg = compileNode(target->children[1].get());
         emitABC(OpCode::FIELD_SET_DYN, obj, nameReg, valReg);
         emitUpvalStoreIfShared(objNode->strValue, obj);
         if (!mayClear_)
             definedRegs_.set(obj);
         if (!suppress) {
-            int32_t dispIdx = addStringConstant(objNode->strValue);
+            keel::i32 dispIdx = addStringConstant(objNode->strValue);
             emitAD(OpCode::DISPLAY, obj, dispIdx);
         }
         break;
@@ -3301,7 +3302,7 @@ struct LvAcc
 };
 } // namespace
 
-uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
+keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
                                      int inValReg, bool suppress)
 {
     // ── Flatten the accessor chain (root → outermost) ──
@@ -3323,49 +3324,49 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     if (cur->type != NodeType::IDENTIFIER)
         throw std::runtime_error("Compiler: unsupported lvalue root");
     std::reverse(acc.begin(), acc.end());
-    const size_t n = acc.size();
+    const keel::usize n = acc.size();
     // A paren-index that is NOT the final accessor indexes into a
     // struct array to reach an element used as a container for the rest
     // of the chain (`d(i).a.b`).
-    for (size_t k = 0; k + 1 < n; ++k)
+    for (keel::usize k = 0; k + 1 < n; ++k)
         if (acc[k].kind == LvAcc::Index)
             acc[k].structElem = true;
 
     // Value to store (multi-assign output register, or compile the RHS).
-    uint16_t val = (inValReg >= 0) ? static_cast<uint16_t>(inValReg) : compileNode(rhsNode);
+    keel::u16 val = (inValReg >= 0) ? static_cast<keel::u16>(inValReg) : compileNode(rhsNode);
 
-    uint16_t rootReg = varRegWrite(cur->strValue);
+    keel::u16 rootReg = varRegWrite(cur->strValue);
     emitUpvalLoadRawIfShared(cur->strValue, rootReg);
 
     // regs[k] = container that accessor k applies to (regs[0] = root).
-    std::vector<uint16_t> regs(n + 1, 0);
+    std::vector<keel::u16> regs(n + 1, 0);
     regs[0] = rootReg;
     // Per-accessor subscripts packed into a consecutive register block
     // [idxBase, idxBase+idxN) (for the (base, nargs) opcodes), or a
     // dynamic-field-name register. Computed once in the forward pass and
     // reused for write-back so `end` / side-effecting subscripts evaluate
     // exactly once.
-    std::vector<uint16_t> idxBase(n, 0), idxN(n, 0), nameReg(n, 0);
+    std::vector<keel::u16> idxBase(n, 0), idxN(n, 0), nameReg(n, 0);
 
-    auto compileIdxArgs = [&](size_t k) {
+    auto compileIdxArgs = [&](keel::usize k) {
         const ASTNode *node = acc[k].node;
-        size_t nargs = node->children.size() - 1; // children[0] is the object
-        std::vector<uint16_t> tmp;
+        keel::usize nargs = node->children.size() - 1; // children[0] is the object
+        std::vector<keel::u16> tmp;
         {
-            IndexContextGuard guard(*this, regs[k], static_cast<uint16_t>(nargs));
-            for (size_t a = 0; a < nargs; ++a) {
+            IndexContextGuard guard(*this, regs[k], static_cast<keel::u16>(nargs));
+            for (keel::usize a = 0; a < nargs; ++a) {
                 if (a > 0)
-                    guard.setDim(static_cast<uint16_t>(a));
+                    guard.setDim(static_cast<keel::u16>(a));
                 tmp.push_back(compileNode(node->children[a + 1].get()));
             }
         }
-        idxN[k] = static_cast<uint16_t>(nargs);
+        idxN[k] = static_cast<keel::u16>(nargs);
         if (nargs == 1) {
             idxBase[k] = tmp[0]; // single subscript is trivially "consecutive"
         } else {
-            uint16_t base = nextReg_;
-            for (size_t a = 0; a < nargs; ++a) {
-                uint16_t slot = tempReg();
+            keel::u16 base = nextReg_;
+            for (keel::usize a = 0; a < nargs; ++a) {
+                keel::u16 slot = tempReg();
                 if (tmp[a] != slot)
                     emitAB(OpCode::MOVE, slot, tmp[a]);
             }
@@ -3374,17 +3375,17 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     };
 
     // ── Forward pass: compute subscripts and load intermediate containers ──
-    for (size_t k = 0; k < n; ++k) {
+    for (keel::usize k = 0; k < n; ++k) {
         if (acc[k].kind == LvAcc::DynField)
             nameReg[k] = compileNode(acc[k].node->children[1].get());
         else if (acc[k].kind != LvAcc::Field)
             compileIdxArgs(k);
 
         if (k + 1 < n) {
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             switch (acc[k].kind) {
             case LvAcc::Field: {
-                int32_t nameIdx = addStringConstant(acc[k].node->strValue);
+                keel::i32 nameIdx = addStringConstant(acc[k].node->strValue);
                 emitABC(OpCode::FIELD_GET_OR_CREATE, dst, regs[k], 0);
                 chunk_.code.back().d = nameIdx;
                 break;
@@ -3406,11 +3407,11 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     }
 
     // emitSet: apply accessor k as a SET on regs[k] with `value`.
-    auto emitSet = [&](size_t k, uint16_t value) {
-        const uint16_t b = idxBase[k], na = idxN[k];
+    auto emitSet = [&](keel::usize k, keel::u16 value) {
+        const keel::u16 b = idxBase[k], na = idxN[k];
         switch (acc[k].kind) {
         case LvAcc::Field: {
-            int32_t nameIdx = addStringConstant(acc[k].node->strValue);
+            keel::i32 nameIdx = addStringConstant(acc[k].node->strValue);
             emitABC(OpCode::FIELD_SET, regs[k], value, 0);
             chunk_.code.back().d = nameIdx;
             break;
@@ -3446,10 +3447,10 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
     };
 
     // ── Unshare non-aliased intermediate containers before mutating regs[n-1] ──
-    for (size_t k = 0; k + 1 < n; ++k) {
+    for (keel::usize k = 0; k + 1 < n; ++k) {
         switch (acc[k].kind) {
         case LvAcc::Field: {
-            int32_t nameIdx = addStringConstant(acc[k].node->strValue);
+            keel::i32 nameIdx = addStringConstant(acc[k].node->strValue);
             emitABC(OpCode::LVAL_UNSHARE_FIELD, regs[k + 1], regs[k], 0);
             chunk_.code.back().d = nameIdx;
             break;
@@ -3469,14 +3470,14 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
 
     // ── Final write on the deepest container, then write-back up. ──
     emitSet(n - 1, val);
-    for (size_t k = n - 1; k-- > 0;)
+    for (keel::usize k = n - 1; k-- > 0;)
         emitSet(k, regs[k + 1]);
 
     emitUpvalStoreIfShared(cur->strValue, rootReg);
     if (!mayClear_)
         definedRegs_.set(rootReg);
     if (!suppress) {
-        int32_t nameIdx = addStringConstant(cur->strValue);
+        keel::i32 nameIdx = addStringConstant(cur->strValue);
         emitAD(OpCode::DISPLAY, rootReg, nameIdx);
     }
     return rootReg;
@@ -3493,14 +3494,14 @@ uint16_t Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode
 // Skips the side-table write entirely if every arg is non-identifier
 // (the common case for arithmetic / literal args) to keep the table
 // sparse.
-void Compiler::recordCallArgNames(const ASTNode *callNode, size_t callInstrIdx)
+void Compiler::recordCallArgNames(const ASTNode *callNode, keel::usize callInstrIdx)
 {
     if (!callNode || callNode->children.size() < 2)
         return;
     std::vector<std::string> names;
     names.reserve(callNode->children.size() - 1);
     bool anyIdent = false;
-    for (size_t i = 1; i < callNode->children.size(); ++i) {
+    for (keel::usize i = 1; i < callNode->children.size(); ++i) {
         const auto &child = callNode->children[i];
         if (child && child->type == NodeType::IDENTIFIER
             && !engine_.isReservedName(child->strValue)) {
@@ -3511,43 +3512,43 @@ void Compiler::recordCallArgNames(const ASTNode *callNode, size_t callInstrIdx)
         }
     }
     if (anyIdent) {
-        chunk_.callSiteArgNames[static_cast<uint32_t>(callInstrIdx)]
+        chunk_.callSiteArgNames[static_cast<keel::u32>(callInstrIdx)]
             = std::move(names);
     }
 }
 
-uint16_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
+keel::u16 Compiler::compileFused(const ASTNode *node, keel::usize ruleIdx,
                                const std::vector<const ASTNode *> &operands)
 {
     // 1. Compile the operand sub-exprs into a contiguous register block
     //    (same shape as call args) so the VM can read R[base..base+n).
-    std::vector<uint16_t> opRegs;
+    std::vector<keel::u16> opRegs;
     opRegs.reserve(operands.size());
     for (const ASTNode *op : operands)
         opRegs.push_back(compileNode(op));
-    const uint16_t opBase = static_cast<uint16_t>(nextReg_);
-    for (uint16_t r : opRegs) {
-        uint16_t slot = tempReg();
+    const keel::u16 opBase = static_cast<keel::u16>(nextReg_);
+    for (keel::u16 r : opRegs) {
+        keel::u16 slot = tempReg();
         if (r != slot) emitAB(OpCode::MOVE, slot, r);
     }
     // 2. FUSE_EWISE with placeholder dst (a) and skip (e) — patched in step 4.
     emit(Instruction::make_abcde(OpCode::FUSE_EWISE, /*dst*/ 0, opBase,
-                                 static_cast<uint16_t>(operands.size()),
-                                 static_cast<int32_t>(ruleIdx), /*skip*/ 0));
-    const size_t fusePos = chunk_.code.size() - 1;
-    const size_t spanStart = chunk_.code.size();
+                                 static_cast<keel::u16>(operands.size()),
+                                 static_cast<keel::i32>(ruleIdx), /*skip*/ 0));
+    const keel::usize fusePos = chunk_.code.size() - 1;
+    const keel::usize spanStart = chunk_.code.size();
     // 3. Fallback = the normally compiled idiom (exact per-op semantics). The
     //    flag stops the nested compileCall from re-attempting fusion; reset is
     //    exception-safe (compileNode may throw RegisterExhaustionError).
-    uint16_t fbDst;
+    keel::u16 fbDst;
     {
         auto savedConstCache = constRegCache_;
         auto savedScalars = scalarRegs_;
         struct Guard {
             bool &f;
-            std::unordered_map<const ASTNode *, uint16_t> &opMap;
-            std::unordered_map<const ASTNode *, uint16_t> savedOpMap;
-            Guard(bool &x, std::unordered_map<const ASTNode *, uint16_t> &m)
+            std::unordered_map<const ASTNode *, keel::u16> &opMap;
+            std::unordered_map<const ASTNode *, keel::u16> savedOpMap;
+            Guard(bool &x, std::unordered_map<const ASTNode *, keel::u16> &m)
                 : f(x), opMap(m), savedOpMap(m)
             {
                 f = true;
@@ -3559,8 +3560,8 @@ uint16_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
             }
         } guard(inFusionFallback_, fusedOperandRegs_);
         fusedOperandRegs_.clear();
-        for (size_t i = 0; i < operands.size(); ++i)
-            fusedOperandRegs_[operands[i]] = static_cast<uint16_t>(opBase + i);
+        for (keel::usize i = 0; i < operands.size(); ++i)
+            fusedOperandRegs_[operands[i]] = static_cast<keel::u16>(opBase + i);
         // Fall back to the node's OWN normal compile (the guard stops it from
         // re-attempting fusion, and fusedOperandRegs_ reuses the pre-evaluated
         // operand registers so side-effecting operands never evaluate twice).
@@ -3573,20 +3574,20 @@ uint16_t Compiler::compileFused(const ASTNode *node, size_t ruleIdx,
         scalarRegs_ = savedScalars;
     }
     // 4. Both paths write fbDst; on success FUSE_EWISE skips the fallback span.
-    const size_t span = chunk_.code.size() - spanStart;
+    const keel::usize span = chunk_.code.size() - spanStart;
     if (span > 65534) {
         chunk_.code[fusePos] = Instruction::make_abc(OpCode::MOVE, fbDst, fbDst, 0);
         return fbDst;
     }
     chunk_.code[fusePos].a = fbDst;
-    chunk_.code[fusePos].e = static_cast<uint16_t>(span);
+    chunk_.code[fusePos].e = static_cast<keel::u16>(span);
     // Both paths write fbDst — FUSE_EWISE on success (then skips the span),
     // the fallback's last op on decline. Funnel through one explicit MOVE
     // (placed AFTER the skipped span, so it runs on both paths) into a fresh
     // result register. Without this, an enclosing assignment's MOVE-elimination
     // keys off the fallback's last instruction and never receives the
     // FUSE-success write, so the target variable is left unset.
-    const uint16_t res = tempReg();
+    const keel::u16 res = tempReg();
     emitAB(OpCode::MOVE, res, fbDst);
     return res;
 }
@@ -3611,7 +3612,7 @@ int Compiler::tryCompileFused(const ASTNode *node)
         return false;
     };
     const auto &rules = engine_.fusionRules();
-    for (size_t ri = 0; ri < rules.size(); ++ri) {
+    for (keel::usize ri = 0; ri < rules.size(); ++ri) {
         auto operands = rules[ri].match(node);
         if (!operands)
             continue;
@@ -3629,20 +3630,20 @@ int Compiler::tryCompileFused(const ASTNode *node)
     return -1;
 }
 
-uint16_t Compiler::compileCall(const ASTNode *node)
+keel::u16 Compiler::compileCall(const ASTNode *node)
 {
-    const uint16_t callNargout = nargoutContext_;
+    const keel::u16 callNargout = nargoutContext_;
     struct NargoutRestore
     {
-        uint16_t &ref;
-        uint16_t saved;
+        keel::u16 &ref;
+        keel::u16 saved;
         ~NargoutRestore() { ref = saved; }
     } nargoutGuard{nargoutContext_, callNargout};
     nargoutContext_ = 1;
 
     // Element-wise fusion fast path: if `node` matches a registered idiom, emit
     // FUSE_EWISE + the normally compiled idiom as fallback.
-    if (int r = tryCompileFused(node); r >= 0) return static_cast<uint16_t>(r);
+    if (int r = tryCompileFused(node); r >= 0) return static_cast<keel::u16>(r);
 
     auto *funcNode = node->children[0].get();
 
@@ -3666,7 +3667,7 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // assignments. If split-mode is ever removed, this check needs to
     // be runtime-driven via a new opcode.
     bool argHasEnd = false;
-    for (size_t i = 1; i < node->children.size(); ++i)
+    for (keel::usize i = 1; i < node->children.size(); ++i)
         if (refsTopLevelEnd(node->children[i].get())) {
             argHasEnd = true;
             break;
@@ -3700,32 +3701,32 @@ uint16_t Compiler::compileCall(const ASTNode *node)
                 // CALL_FLATTEN instead — same full dispatch, plus the
                 // runtime CSL splat — exactly like plain-name calls
                 // (bugs/closed/core/qualified-call-no-csl-splat).
-                size_t nargs = node->children.size() - 1;
+                keel::usize nargs = node->children.size() - 1;
                 bool anyBraceArg = false;
-                for (size_t i = 1; i < node->children.size(); ++i)
+                for (keel::usize i = 1; i < node->children.size(); ++i)
                     if (node->children[i]->type == NodeType::CELL_INDEX) {
                         anyBraceArg = true;
                         break;
                     }
-                std::vector<uint16_t> argRegs;
+                std::vector<keel::u16> argRegs;
                 argRegs.reserve(nargs);
-                for (size_t i = 1; i < node->children.size(); ++i)
+                for (keel::usize i = 1; i < node->children.size(); ++i)
                     argRegs.push_back(anyBraceArg
                                           ? compileNodeExpand(node->children[i].get())
                                           : compileNode(node->children[i].get()));
-                uint16_t argBase = nextReg_;
-                for (size_t i = 0; i < argRegs.size(); ++i) {
-                    uint16_t slot = tempReg();
+                keel::u16 argBase = nextReg_;
+                for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                    keel::u16 slot = tempReg();
                     if (argRegs[i] != slot)
                         emitAB(OpCode::MOVE, slot, argRegs[i]);
                 }
-                uint16_t dst = tempReg();
-                int32_t funcIdx = addStringConstant(qualified);
+                keel::u16 dst = tempReg();
+                keel::i32 funcIdx = addStringConstant(qualified);
                 emit(Instruction::make_abcde(anyBraceArg ? OpCode::CALL_FLATTEN
                                                          : OpCode::CALL,
                                              dst,
                                              argBase,
-                                             static_cast<uint16_t>(nargs),
+                                             static_cast<keel::u16>(nargs),
                                              funcIdx,
                                              anyBraceArg ? callNargout : 0));
                 return dst;
@@ -3746,39 +3747,39 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // `end` to the materialised field value. `end` in a method arg is
     // not meaningful, so objects lose nothing.
     if (funcNode->type == NodeType::FIELD_ACCESS && !argHasEnd) {
-        uint16_t objReg = compileNode(funcNode->children[0].get());
-        const size_t nargs = node->children.size() - 1;
+        keel::u16 objReg = compileNode(funcNode->children[0].get());
+        const keel::usize nargs = node->children.size() - 1;
         // Brace-index args with a dotted callee (obj.fh(c{:}),
         // obj.method(c{:})): expansion compile — the CALL_METHOD handler
         // flattens the CSL at runtime
         // (bugs/closed/lang/handle-call-csl-splat).
         bool mAnyBrace = false;
-        for (size_t i = 1; i < node->children.size(); ++i)
+        for (keel::usize i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { mAnyBrace = true; break; }
-        std::vector<uint16_t> argRegs;
+        std::vector<keel::u16> argRegs;
         argRegs.reserve(nargs);
         if (mAnyBrace) {
-            for (size_t i = 1; i < node->children.size(); ++i)
+            for (keel::usize i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
         } else {
-            IndexContextGuard guard(*this, objReg, static_cast<uint16_t>(nargs));
-            for (size_t i = 1; i < node->children.size(); ++i) {
-                guard.setDim(static_cast<uint16_t>(i - 1));
+            IndexContextGuard guard(*this, objReg, static_cast<keel::u16>(nargs));
+            for (keel::usize i = 1; i < node->children.size(); ++i) {
+                guard.setDim(static_cast<keel::u16>(i - 1));
                 argRegs.push_back(compileNode(node->children[i].get()));
             }
         }
-        uint16_t argBase = nextReg_;
-        for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 argBase = nextReg_;
+        for (keel::usize i = 0; i < argRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint16_t dst = tempReg();
-        int32_t nameIdx = addStringConstant(funcNode->strValue);
-        size_t callIdx = chunk_.code.size();
+        keel::u16 dst = tempReg();
+        keel::i32 nameIdx = addStringConstant(funcNode->strValue);
+        keel::usize callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_METHOD, dst, objReg, argBase,
-                                     nameIdx, static_cast<uint16_t>(argRegs.size())));
+                                     nameIdx, static_cast<keel::u16>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
@@ -3791,73 +3792,73 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // For function-handle invocation `end` isn't legal in MATLAB anyway, so
     // binding the guard to fhReg is harmless there.
     if (funcNode->type != NodeType::IDENTIFIER) {
-        uint16_t fhReg = compileNode(funcNode);
-        const size_t nargs = node->children.size() - 1;
+        keel::u16 fhReg = compileNode(funcNode);
+        const keel::usize nargs = node->children.size() - 1;
         // Brace-index args with a computed callee (obj.fh(c{:}),
         // s.f(x, c{:})): expansion compile + CALL_INDIRECT_FLATTEN —
         // the same CSL splat the identifier-callee gate provides
         // (bugs/closed/lang/handle-call-csl-splat).
         bool faAnyBrace = false;
-        for (size_t i = 1; i < node->children.size(); ++i)
+        for (keel::usize i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { faAnyBrace = true; break; }
         if (faAnyBrace) {
-            std::vector<uint16_t> argRegs;
-            for (size_t i = 1; i < node->children.size(); ++i)
+            std::vector<keel::u16> argRegs;
+            for (keel::usize i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
-            uint16_t argBase = nextReg_;
-            for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 argBase = nextReg_;
+            for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
-                                         static_cast<uint16_t>(argRegs.size()),
-                                         std::max<size_t>(nargoutContext_, 1)));
+                                         static_cast<keel::u16>(argRegs.size()),
+                                         std::max<keel::usize>(nargoutContext_, 1)));
             return dst;
         }
-        std::vector<uint16_t> argRegs;
+        std::vector<keel::u16> argRegs;
         argRegs.reserve(nargs);
         {
-            IndexContextGuard guard(*this, fhReg, static_cast<uint16_t>(nargs));
-            for (size_t i = 1; i < node->children.size(); ++i) {
-                guard.setDim(static_cast<uint16_t>(i - 1));
+            IndexContextGuard guard(*this, fhReg, static_cast<keel::u16>(nargs));
+            for (keel::usize i = 1; i < node->children.size(); ++i) {
+                guard.setDim(static_cast<keel::u16>(i - 1));
                 argRegs.push_back(compileNode(node->children[i].get()));
             }
         }
-        uint16_t argBase = nextReg_;
-        for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 argBase = nextReg_;
+        for (keel::usize i = 0; i < argRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint16_t dst = tempReg();
-        size_t callIdx = chunk_.code.size();
+        keel::u16 dst = tempReg();
+        keel::usize callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT,
                                      dst,
                                      fhReg,
                                      argBase,
                                      0,
-                                     static_cast<uint16_t>(argRegs.size())));
+                                     static_cast<keel::u16>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
 
     const std::string &name = funcNode->strValue;
-    size_t nargs = node->children.size() - 1;
+    keel::usize nargs = node->children.size() - 1;
 
     if (name == "syms") {
         static const std::unordered_set<std::string> kSymsFlags = {
             "real", "positive", "negative", "nonnegative", "integer", "clear"
         };
-        for (size_t i = 1; i <= nargs; ++i) {
+        for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
                 const std::string &tok = argNode->strValue;
                 if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
-                    uint16_t reg = varRegWrite(tok);
+                    keel::u16 reg = varRegWrite(tok);
                     if (!mayClear_)
                         definedRegs_.set(reg);
                 }
@@ -3869,12 +3870,12 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     if (!isTopLevel_) {
         // exist(expr) or exist(expr, filter) → EXIST_VAR dst, nameReg, filterReg
         if (name == "exist" && (nargs == 1 || nargs == 2)) {
-            uint16_t nameReg = compileNode(node->children[1].get());
-            uint16_t filterReg = 0;
+            keel::u16 nameReg = compileNode(node->children[1].get());
+            keel::u16 filterReg = 0;
             if (nargs == 2) {
                 filterReg = compileNode(node->children[2].get());
             }
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emitABC(OpCode::EXIST_VAR, dst, nameReg, filterReg);
             return dst;
         }
@@ -3883,9 +3884,9 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // clear(expr) works both inside functions and at top-level
     if (name == "clear") {
         bool anyBrace = false;
-        std::vector<uint16_t> argRegs;
+        std::vector<keel::u16> argRegs;
         argRegs.reserve(nargs);
-        for (size_t i = 1; i <= nargs; ++i) {
+        for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
                 auto it = varRegisters_.find(argNode->strValue);
@@ -3899,8 +3900,8 @@ uint16_t Compiler::compileCall(const ASTNode *node)
                 const bool isBrace = (argNode->type == NodeType::CELL_INDEX);
                 if (isBrace)
                     anyBrace = true;
-                uint16_t nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
-                emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<uint16_t>(nargs));
+                keel::u16 nameReg = isBrace ? compileNodeExpand(argNode) : compileNode(argNode);
+                emitAB(OpCode::CLEAR_DYN, nameReg, static_cast<keel::u16>(nargs));
                 if (isTopLevel_ || mayInjectVars_)
                     argRegs.push_back(nameReg);
             }
@@ -3915,18 +3916,18 @@ uint16_t Compiler::compileCall(const ASTNode *node)
         }
         // On top-level (or when dynamic injection may exist), also call externalFunc.
         if (isTopLevel_ || mayInjectVars_) {
-            uint16_t argBase = nextReg_;
-            for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 argBase = nextReg_;
+            for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint16_t dst = tempReg();
-            int32_t funcIdx = addStringConstant(name);
+            keel::u16 dst = tempReg();
+            keel::i32 funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(anyBrace ? OpCode::CALL_FLATTEN : OpCode::CALL,
                                          dst,
                                          argBase,
-                                         static_cast<uint16_t>(nargs),
+                                         static_cast<keel::u16>(nargs),
                                          funcIdx,
                                          0));
             return dst;
@@ -3942,16 +3943,16 @@ uint16_t Compiler::compileCall(const ASTNode *node)
             if (nargs == 0) {
                 emitAB(op, 0, 0);
             } else {
-                std::vector<uint16_t> argRegs;
-                for (size_t i = 1; i <= nargs; ++i)
+                std::vector<keel::u16> argRegs;
+                for (keel::usize i = 1; i <= nargs; ++i)
                     argRegs.push_back(compileNode(node->children[i].get()));
-                uint16_t base = nextReg_;
-                for (size_t i = 0; i < argRegs.size(); ++i) {
-                    uint16_t slot = tempReg();
+                keel::u16 base = nextReg_;
+                for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                    keel::u16 slot = tempReg();
                     if (argRegs[i] != slot)
                         emitAB(OpCode::MOVE, slot, argRegs[i]);
                 }
-                emitAB(op, base, static_cast<uint16_t>(argRegs.size()));
+                emitAB(op, base, static_cast<keel::u16>(argRegs.size()));
             }
             return tempReg();
         }
@@ -3987,57 +3988,57 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     }
 
     if (isKnownVar) {
-        uint16_t fhReg = varRegLookup(name);
+        keel::u16 fhReg = varRegLookup(name);
         auto uvIt = upvalueRegs_.find(name);
         if (uvIt != upvalueRegs_.end()) {
-            int32_t nameIdx = addStringConstant(name);
+            keel::i32 nameIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
         }
 
         bool varAnyBrace = false;
-        for (size_t i = 1; i < node->children.size(); ++i)
+        for (keel::usize i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { varAnyBrace = true; break; }
         if (varAnyBrace) {
-            std::vector<uint16_t> argRegs;
-            for (size_t i = 1; i < node->children.size(); ++i)
+            std::vector<keel::u16> argRegs;
+            for (keel::usize i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
-            uint16_t argBase = nextReg_;
-            for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 argBase = nextReg_;
+            for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint16_t dst = tempReg();
+            keel::u16 dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
-                                         static_cast<uint16_t>(argRegs.size()),
-                                         std::max<size_t>(nargoutContext_, 1)));
+                                         static_cast<keel::u16>(argRegs.size()),
+                                         std::max<keel::usize>(nargoutContext_, 1)));
             return dst;
         }
 
-        IndexContextGuard guard(*this, fhReg, static_cast<uint16_t>(nargs));
+        IndexContextGuard guard(*this, fhReg, static_cast<keel::u16>(nargs));
 
-        std::vector<uint16_t> argRegs;
-        for (size_t i = 1; i < node->children.size(); ++i) {
-            guard.setDim(static_cast<uint16_t>(i - 1));
+        std::vector<keel::u16> argRegs;
+        for (keel::usize i = 1; i < node->children.size(); ++i) {
+            guard.setDim(static_cast<keel::u16>(i - 1));
             argRegs.push_back(compileNode(node->children[i].get()));
         }
 
-        uint16_t argBase = static_cast<uint16_t>(nextReg_);
-        for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 argBase = static_cast<keel::u16>(nextReg_);
+        for (keel::usize i = 0; i < argRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint16_t dst = tempReg();
-        size_t callIdx = chunk_.code.size();
+        keel::u16 dst = tempReg();
+        keel::usize callIdx = chunk_.code.size();
         emit(Instruction::make_abcde(OpCode::CALL_INDIRECT,
                                      dst,
                                      fhReg,
                                      argBase,
                                      0,
-                                     static_cast<uint16_t>(argRegs.size())));
+                                     static_cast<keel::u16>(argRegs.size())));
         recordCallArgNames(node, callIdx);
         return dst;
     }
@@ -4047,30 +4048,30 @@ uint16_t Compiler::compileCall(const ASTNode *node)
         auto nit = nestedFuncInfo_.find(name);
         if (nit != nestedFuncInfo_.end()) {
             bool anyBraceArg = false;
-            for (size_t i = 1; i < node->children.size(); ++i)
+            for (keel::usize i = 1; i < node->children.size(); ++i)
                 if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
-            std::vector<uint16_t> argRegs;
+            std::vector<keel::u16> argRegs;
             argRegs.reserve(nargs + nit->second.upvalueNames.size());
-            for (size_t i = 1; i < node->children.size(); ++i) {
+            for (keel::usize i = 1; i < node->children.size(); ++i) {
                 argRegs.push_back(anyBraceArg
                                       ? compileNodeExpand(node->children[i].get())
                                       : compileNode(node->children[i].get()));
             }
             for (const auto &uvName : nit->second.upvalueNames)
                 argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
-            uint16_t argBase = static_cast<uint16_t>(nextReg_);
-            for (size_t i = 0; i < argRegs.size(); ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 argBase = static_cast<keel::u16>(nextReg_);
+            for (keel::usize i = 0; i < argRegs.size(); ++i) {
+                keel::u16 slot = tempReg();
                 if (argRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
-            uint16_t dst = tempReg();
-            int32_t funcIdx = addStringConstant(nit->second.compiledName);
-            size_t callIdx = chunk_.code.size();
+            keel::u16 dst = tempReg();
+            keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
+            keel::usize callIdx = chunk_.code.size();
             emit(Instruction::make_abcde(anyBraceArg ? OpCode::CALL_FLATTEN : OpCode::CALL,
                                          dst,
                                          argBase,
-                                         static_cast<uint16_t>(argRegs.size()),
+                                         static_cast<keel::u16>(argRegs.size()),
                                          funcIdx,
                                          callNargout));
             if (!anyBraceArg)
@@ -4081,14 +4082,14 @@ uint16_t Compiler::compileCall(const ASTNode *node)
 
     // Fast path: 1-arg inline builtins — skip MOVE, pass arg register directly
     if (!mayInjectVars_) {
-        int8_t builtinId = resolveBuiltinId(name, nargs);
+        keel::i8 builtinId = resolveBuiltinId(name, nargs);
         if (builtinId >= 0 && nargs == 1) {
-            uint16_t arg = compileNode(node->children[1].get());
-            uint16_t dst = tempReg();
+            keel::u16 arg = compileNode(node->children[1].get());
+            keel::u16 dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                          dst, arg, 1,
-                                         static_cast<int32_t>(builtinId), 0));
-            constexpr int8_t kMaxUnaryInlineBuiltinId = 15;
+                                         static_cast<keel::i32>(builtinId), 0));
+            constexpr keel::i8 kMaxUnaryInlineBuiltinId = 15;
             if (scalarRegs_.test(arg) && builtinId <= kMaxUnaryInlineBuiltinId)
                 scalarRegs_.set(dst);
             return dst;
@@ -4111,61 +4112,61 @@ uint16_t Compiler::compileCall(const ASTNode *node)
     // hot normal CALL below, untouched. Single output here; multi-output is in
     // compileCallMulti. See dev-docs/memory/csl_first_class.md.
     bool anyBraceArg = false;
-    for (size_t i = 1; i < node->children.size(); ++i)
+    for (keel::usize i = 1; i < node->children.size(); ++i)
         if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
     if (anyBraceArg) {
-        std::vector<uint16_t> argRegs;
-        for (size_t i = 1; i < node->children.size(); ++i)
+        std::vector<keel::u16> argRegs;
+        for (keel::usize i = 1; i < node->children.size(); ++i)
             argRegs.push_back(compileNodeExpand(node->children[i].get()));
-        uint16_t argBase = nextReg_;
-        for (size_t i = 0; i < argRegs.size(); ++i) {
-            uint16_t slot = tempReg();
+        keel::u16 argBase = nextReg_;
+        for (keel::usize i = 0; i < argRegs.size(); ++i) {
+            keel::u16 slot = tempReg();
             if (argRegs[i] != slot)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
-        uint16_t dst     = tempReg();
-        int32_t funcIdx = addStringConstant(name);
+        keel::u16 dst     = tempReg();
+        keel::i32 funcIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::CALL_FLATTEN, dst, argBase,
-                                     static_cast<uint16_t>(argRegs.size()), funcIdx,
+                                     static_cast<keel::u16>(argRegs.size()), funcIdx,
                                      callNargout));
         return dst;
     }
 
     // Compile arguments into consecutive registers
-    std::vector<uint16_t> argRegs;
-    for (size_t i = 1; i < node->children.size(); ++i) {
+    std::vector<keel::u16> argRegs;
+    for (keel::usize i = 1; i < node->children.size(); ++i) {
         argRegs.push_back(compileNode(node->children[i].get()));
     }
 
-    uint16_t argBase = nextReg_;
-    for (size_t i = 0; i < argRegs.size(); ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 argBase = nextReg_;
+    for (keel::usize i = 0; i < argRegs.size(); ++i) {
+        keel::u16 slot = tempReg();
         if (argRegs[i] != slot) {
             emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
     }
 
-    uint16_t dst = tempReg();
+    keel::u16 dst = tempReg();
 
     // Try to resolve as inline scalar builtin (numeric ID)
-    int8_t builtinId = mayInjectVars_ ? -1 : resolveBuiltinId(name, nargs);
+    keel::i8 builtinId = mayInjectVars_ ? -1 : resolveBuiltinId(name, nargs);
     if (builtinId >= 0) {
         emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                      dst,
                                      argBase,
-                                     static_cast<uint16_t>(nargs),
-                                     static_cast<int32_t>(builtinId),
+                                     static_cast<keel::u16>(nargs),
+                                     static_cast<keel::i32>(builtinId),
                                      0));
         return dst;
     }
 
     // General CALL
-    int32_t funcIdx = addStringConstant(name);
-    size_t callIdx = chunk_.code.size();
+    keel::i32 funcIdx = addStringConstant(name);
+    keel::usize callIdx = chunk_.code.size();
     emit(Instruction::make_abcde(OpCode::CALL,
                                  dst,
                                  argBase,
-                                 static_cast<uint16_t>(nargs),
+                                 static_cast<keel::u16>(nargs),
                                  funcIdx,
                                  callNargout));
     recordCallArgNames(node, callIdx);
@@ -4183,10 +4184,10 @@ uint16_t Compiler::compileCall(const ASTNode *node)
 // which the VM dispatches through externalFuncs_ like any other call.
 // ============================================================
 
-uint16_t Compiler::compileCommandCall(const ASTNode *node)
+keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 {
     const std::string &name = node->strValue;
-    size_t nargs = node->children.size();
+    keel::usize nargs = node->children.size();
 
     // Variable-headed command-syntax misparse inside functions: `x -1`, `x /2`, `x -y`
     if (!isTopLevel_ && nargs == 1
@@ -4206,7 +4207,7 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
                 unsigned char c0 = static_cast<unsigned char>(s[0]);
                 if (!std::isalpha(c0) && c0 != '_')
                     return false;
-                for (size_t k = 1; k < s.size(); ++k) {
+                for (keel::usize k = 1; k < s.size(); ++k) {
                     unsigned char ck = static_cast<unsigned char>(s[k]);
                     if (!std::isalnum(ck) && ck != '_')
                         return false;
@@ -4214,23 +4215,23 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
                 return true;
             };
             if (isNum || isIdent(rest)) {
-                uint16_t lhsReg = varRegRead(name);
-                uint16_t rhsReg = 0;
+                keel::u16 lhsReg = varRegRead(name);
+                keel::u16 rhsReg = 0;
                 if (isNum) {
-                    int32_t cIdx = addConstant(numVal);
+                    keel::i32 cIdx = addConstant(numVal);
                     rhsReg = tempReg();
                     emitAD(OpCode::LOAD_CONST, rhsReg, cIdx);
                     scalarRegs_.set(rhsReg);
                 } else {
                     rhsReg = varRegRead(rest);
                 }
-                uint16_t resReg = emitPlainBinary(std::string(1, arg[0]), lhsReg, rhsReg);
-                uint16_t ansReg = varRegWrite("ans");
+                keel::u16 resReg = emitPlainBinary(std::string(1, arg[0]), lhsReg, rhsReg);
+                keel::u16 ansReg = varRegWrite("ans");
                 if (ansReg != resReg)
                     emitAB(OpCode::MOVE, ansReg, resReg);
                 emitUpvalStoreIfShared("ans", ansReg);
                 if (!node->suppressOutput) {
-                    int32_t nameIdx = addStringConstant("ans");
+                    keel::i32 nameIdx = addStringConstant("ans");
                     emitAD(OpCode::DISPLAY, ansReg, nameIdx);
                 }
                 return ansReg;
@@ -4258,7 +4259,7 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
                 }
             }
         } else if (!isFlag) {
-            for (size_t i = 0; i < nargs; ++i) {
+            for (keel::usize i = 0; i < nargs; ++i) {
                 const std::string &varName = node->children[i]->strValue;
                 if (engine_.isReservedName(varName) == 0) {
                     auto it = varRegisters_.find(varName);
@@ -4274,18 +4275,18 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
         // Step 2: call externalFunc for side effects on top level,
         // or for flags / dynamic frames that need runtime handling.
         if (isTopLevel_ || isFlag || mayInjectVars_) {
-            uint16_t argBase = nextReg_;
-            for (size_t i = 0; i < nargs; ++i) {
-                uint16_t slot = tempReg();
-                int32_t strIdx = addStringConstant(node->children[i]->strValue);
+            keel::u16 argBase = nextReg_;
+            for (keel::usize i = 0; i < nargs; ++i) {
+                keel::u16 slot = tempReg();
+                keel::i32 strIdx = addStringConstant(node->children[i]->strValue);
                 emitAD(OpCode::LOAD_STRING, slot, strIdx);
             }
-            uint16_t dst = tempReg();
-            int32_t funcIdx = addStringConstant(name);
+            keel::u16 dst = tempReg();
+            keel::i32 funcIdx = addStringConstant(name);
             emit(Instruction::make_abcde(OpCode::CALL,
                                          dst,
                                          argBase,
-                                         static_cast<uint16_t>(nargs),
+                                         static_cast<keel::u16>(nargs),
                                          funcIdx,
                                          0));
             return dst;
@@ -4304,13 +4305,13 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
             if (nargs == 0) {
                 emitAB(op, 0, 0);
             } else {
-                uint16_t base = nextReg_;
-                for (size_t i = 0; i < nargs; ++i) {
-                    uint16_t slot = tempReg();
-                    int32_t strIdx = addStringConstant(node->children[i]->strValue);
+                keel::u16 base = nextReg_;
+                for (keel::usize i = 0; i < nargs; ++i) {
+                    keel::u16 slot = tempReg();
+                    keel::i32 strIdx = addStringConstant(node->children[i]->strValue);
                     emitAD(OpCode::LOAD_STRING, slot, strIdx);
                 }
-                emitAB(op, base, static_cast<uint16_t>(nargs));
+                emitAB(op, base, static_cast<keel::u16>(nargs));
             }
             return tempReg();
         }
@@ -4318,16 +4319,16 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
 
     // ── exist x [type] inside function → EXIST_VAR ──
     if (!isTopLevel_ && name == "exist" && (nargs == 1 || nargs == 2)) {
-        uint16_t nameReg = tempReg();
-        int32_t strIdx = addStringConstant(node->children[0]->strValue);
+        keel::u16 nameReg = tempReg();
+        keel::i32 strIdx = addStringConstant(node->children[0]->strValue);
         emitAD(OpCode::LOAD_STRING, nameReg, strIdx);
-        uint16_t filterReg = 0;
+        keel::u16 filterReg = 0;
         if (nargs == 2) {
             filterReg = tempReg();
-            int32_t fIdx = addStringConstant(node->children[1]->strValue);
+            keel::i32 fIdx = addStringConstant(node->children[1]->strValue);
             emitAD(OpCode::LOAD_STRING, filterReg, fIdx);
         }
-        uint16_t dst = tempReg();
+        keel::u16 dst = tempReg();
         emitABC(OpCode::EXIST_VAR, dst, nameReg, filterReg);
         return dst;
     }
@@ -4337,10 +4338,10 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
         static const std::unordered_set<std::string> kSymsFlags = {
             "real", "positive", "negative", "nonnegative", "integer", "clear"
         };
-        for (size_t i = 0; i < nargs; ++i) {
+        for (keel::usize i = 0; i < nargs; ++i) {
             const std::string &tok = node->children[i]->strValue;
             if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
-                uint16_t reg = varRegWrite(tok);
+                keel::u16 reg = varRegWrite(tok);
                 if (!mayClear_)
                     definedRegs_.set(reg);
             }
@@ -4352,33 +4353,33 @@ uint16_t Compiler::compileCommandCall(const ASTNode *node)
                 && upvalueRegs_.find(name) == upvalueRegs_.end())
                    ? nestedFuncInfo_.find(name)
                    : nestedFuncInfo_.end();
-    uint16_t argBase = nextReg_;
-    for (size_t i = 0; i < nargs; ++i) {
-        uint16_t slot = tempReg();
-        int32_t strIdx = addStringConstant(node->children[i]->strValue);
+    keel::u16 argBase = nextReg_;
+    for (keel::usize i = 0; i < nargs; ++i) {
+        keel::u16 slot = tempReg();
+        keel::i32 strIdx = addStringConstant(node->children[i]->strValue);
         emitAD(OpCode::LOAD_STRING, slot, strIdx);
     }
-    size_t totalCallArgs = nargs;
+    keel::usize totalCallArgs = nargs;
     if (nit != nestedFuncInfo_.end()) {
         for (const auto &uvName : nit->second.upvalueNames) {
-            uint16_t slot = tempReg();
-            uint16_t boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+            keel::u16 slot = tempReg();
+            keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
             if (boxReg != slot)
                 emitAB(OpCode::MOVE, slot, boxReg);
             ++totalCallArgs;
         }
     }
 
-    uint16_t dst = tempReg();
-    int32_t funcIdx = addStringConstant(
+    keel::u16 dst = tempReg();
+    keel::i32 funcIdx = addStringConstant(
         nit != nestedFuncInfo_.end() ? nit->second.compiledName : name);
     emit(
         Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                static_cast<uint16_t>(totalCallArgs), funcIdx, 0));
+                                static_cast<keel::u16>(totalCallArgs), funcIdx, 0));
 
     // Display result if no semicolon (rare for commands, but correct)
     if (!node->suppressOutput) {
-        int32_t nameIdx = addStringConstant("ans");
+        keel::i32 nameIdx = addStringConstant("ans");
         emitAD(OpCode::DISPLAY, dst, nameIdx);
     }
 
@@ -4449,16 +4450,16 @@ void Compiler::collectFreeVars(const ASTNode *node,
         collectFreeVars(node->elseBranch.get(), params, freeVars);
 }
 
-uint16_t Compiler::compileAnonFunc(const ASTNode *node)
+keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
 {
     // Case 1: @funcname — handle to existing function
     if (!node->strValue.empty() && node->children.empty()) {
         auto nit = nestedFuncInfo_.find(node->strValue);
         if (nit != nestedFuncInfo_.end())
             return emitNestedFuncHandle(nit->second);
-        uint16_t dst = tempReg();
-        Value fh = Value::funcHandle(node->strValue, engine_.resource());
-        int32_t constIdx = appendConstant(std::move(fh));
+        keel::u16 dst = tempReg();
+        Value fh = Value::funcHandle(node->strValue, engine_.allocator());
+        keel::i32 constIdx = appendConstant(std::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
@@ -4520,7 +4521,7 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
             cur->children.push_back(std::move(calleeNode));
             return;
         }
-        for (size_t i = 0; i < cur->children.size(); ++i) {
+        for (keel::usize i = 0; i < cur->children.size(); ++i) {
             const bool childIsCallee = (cur->type == NodeType::CALL && i == 0);
             self(self, cur->children[i].get(), boundParams, childIsCallee);
         }
@@ -4552,7 +4553,7 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
         auto fnameStr = makeNode(NodeType::STRING_LITERAL);
         fnameStr->strValue = bodyExpr->children[0]->strValue;
         fwdCall->children.push_back(std::move(fnameStr));
-        for (size_t i = 1; i < bodyExpr->children.size(); ++i) {
+        for (keel::usize i = 1; i < bodyExpr->children.size(); ++i) {
             auto clonedArg = cloneNode(bodyExpr->children[i].get());
             rewriteNestedRefs(rewriteNestedRefs, clonedArg.get(), node->paramNames, false);
             fwdCall->children.push_back(std::move(clonedArg));
@@ -4585,12 +4586,12 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
     // Compile as separate chunk
     BytecodeChunk funcChunk = compileFunction(funcNode.get());
 
-    std::vector<uint16_t> capturedOuterRegs;
+    std::vector<keel::u16> capturedOuterRegs;
     capturedOuterRegs.reserve(activeCaptures.size());
     for (const auto &name : activeCaptures) {
         auto uvIt = upvalueRegs_.find(name);
         if (uvIt != upvalueRegs_.end()) {
-            uint16_t capReg = tempReg();
+            keel::u16 capReg = tempReg();
             emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, capReg, uvIt->second, 1, 0, 0));
             capturedOuterRegs.push_back(capReg);
             continue;
@@ -4648,46 +4649,46 @@ uint16_t Compiler::compileAnonFunc(const ASTNode *node)
 
     if (capturedOuterRegs.empty()) {
         // No captures — simple func handle
-        uint16_t dst = tempReg();
-        Value fh = Value::funcHandle(anonName, engine_.resource());
+        keel::u16 dst = tempReg();
+        Value fh = Value::funcHandle(anonName, engine_.allocator());
         fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-        int32_t constIdx = appendConstant(std::move(fh));
+        keel::i32 constIdx = appendConstant(std::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
 
     // Has captures — create a cell: {funcHandle, cap1, cap2, ...}
-    size_t totalSlots = 1 + capturedOuterRegs.size();
+    keel::usize totalSlots = 1 + capturedOuterRegs.size();
 
     // Compile elements: funcHandle, then captured values
-    std::vector<uint16_t> elemRegs;
+    std::vector<keel::u16> elemRegs;
     // funcHandle constant
-    uint16_t fhReg = tempReg();
-    Value fh = Value::funcHandle(anonName, engine_.resource());
+    keel::u16 fhReg = tempReg();
+    Value fh = Value::funcHandle(anonName, engine_.allocator());
     fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-    int32_t constIdx = appendConstant(std::move(fh));
+    keel::i32 constIdx = appendConstant(std::move(fh));
     emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
     elemRegs.push_back(fhReg);
 
-    for (uint16_t outerReg : capturedOuterRegs) {
+    for (keel::u16 outerReg : capturedOuterRegs) {
         elemRegs.push_back(outerReg);
     }
 
     // Pack into consecutive registers for CLOSURE_MAKE (FUNC_HANDLE with captures)
-    uint16_t base = nextReg_;
-    for (size_t i = 0; i < totalSlots; ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 base = nextReg_;
+    for (keel::usize i = 0; i < totalSlots; ++i) {
+        keel::u16 slot = tempReg();
         if (elemRegs[i] != slot)
             emitAB(OpCode::MOVE, slot, elemRegs[i]);
     }
 
-    uint16_t dst = tempReg();
-    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<uint16_t>(totalSlots));
+    keel::u16 dst = tempReg();
+    emitABC(OpCode::CLOSURE_MAKE, dst, base, static_cast<keel::u16>(totalSlots));
     return dst;
 }
 
-uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
-                                   int explicitOutBase, uint16_t nout)
+keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
+                                   int explicitOutBase, keel::u16 nout)
 {
     const std::string &base = superRef->strValue;
     const ASTNode *lhs = superRef->children[0].get();
@@ -4698,29 +4699,29 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
                             || upvalueRegs_.find(lhs->strValue) != upvalueRegs_.end());
 
     // Constructor: the seed object comes from lhs; args are the ctor args.
-    uint16_t objReg = isCtor ? compileNode(lhs) : 0;
+    keel::u16 objReg = isCtor ? compileNode(lhs) : 0;
 
     // Compile the call args (children[1..]) into a contiguous register
     // block. Brace-index args (obj@Base(c{:})) compile expand so the
     // runtime CSL survives to the VM chain, which splats it
     // (bugs/closed/core/super-call-no-csl-splat).
     bool anyBrace = false;
-    for (size_t i = 1; i < callNode->children.size(); ++i)
+    for (keel::usize i = 1; i < callNode->children.size(); ++i)
         if (callNode->children[i]->type == NodeType::CELL_INDEX) {
             anyBrace = true;
             break;
         }
-    std::vector<uint16_t> ar;
-    for (size_t i = 1; i < callNode->children.size(); ++i)
+    std::vector<keel::u16> ar;
+    for (keel::usize i = 1; i < callNode->children.size(); ++i)
         ar.push_back(anyBrace ? compileNodeExpand(callNode->children[i].get())
                               : compileNode(callNode->children[i].get()));
-    uint16_t argBase = nextReg_;
-    for (size_t i = 0; i < ar.size(); ++i) {
-        uint16_t slot = tempReg();
+    keel::u16 argBase = nextReg_;
+    for (keel::usize i = 0; i < ar.size(); ++i) {
+        keel::u16 slot = tempReg();
         if (ar[i] != slot)
             emitAB(OpCode::MOVE, slot, ar[i]);
     }
-    const uint16_t nargs = static_cast<uint16_t>(ar.size());
+    const keel::u16 nargs = static_cast<keel::u16>(ar.size());
 
     if (isCtor) {
         // The super-ctor initialises obj in place: MATLAB's `obj@Base(a)`
@@ -4731,9 +4732,9 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
         // compileAssign's dst==src check). Saves the extra temp
         // register the tempReg()+MOVE sequence spent
         // (bugs/closed/core/super-ctor-result-discarded.md).
-        uint16_t dst = (explicitOutBase >= 0) ? static_cast<uint16_t>(explicitOutBase)
+        keel::u16 dst = (explicitOutBase >= 0) ? static_cast<keel::u16>(explicitOutBase)
                                              : objReg;
-        int32_t baseIdx = addStringConstant(base);
+        keel::i32 baseIdx = addStringConstant(base);
         emit(Instruction::make_abcde(OpCode::CALL_SUPER_CTOR, dst, objReg, argBase, baseIdx,
                                      nargs));
         if (dst != objReg)
@@ -4741,19 +4742,19 @@ uint16_t Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *supe
         emitUpvalStoreIfShared(lhs->strValue, objReg);
         return dst;
     }
-    uint16_t outBase;
+    keel::u16 outBase;
     if (explicitOutBase >= 0) {
-        outBase = static_cast<uint16_t>(explicitOutBase);
+        outBase = static_cast<keel::u16>(explicitOutBase);
     } else {
-        outBase = reserveRegs(std::max<uint16_t>(nout, 1));
+        outBase = reserveRegs(std::max<keel::u16>(nout, 1));
     }
-    int32_t qualIdx = addStringConstant(base + ">" + lhs->strValue);
+    keel::i32 qualIdx = addStringConstant(base + ">" + lhs->strValue);
     emit(Instruction::make_abcde(OpCode::CALL_SUPER_METHOD, outBase, argBase, nargs, qualIdx,
                                  nout));
     return outBase;
 }
 
-uint16_t Compiler::compileFunctionDef(const ASTNode *node)
+keel::u16 Compiler::compileFunctionDef(const ASTNode *node)
 {
     // Nested functions inside an enclosing function body are pre-compiled
     // into scoped "outer>inner" chunks by compileFunction's prologue and must
@@ -5041,16 +5042,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     {
         Compiler &c;
         BytecodeChunk savedChunk;
-        std::unordered_map<std::string, uint16_t> savedVarRegs;
+        std::unordered_map<std::string, keel::u16> savedVarRegs;
         std::vector<LoopContext> savedLoopStack;
-        std::unordered_map<int32_t, uint16_t> savedConstCache;
-        std::unordered_map<int32_t, uint16_t> savedPinnedConsts;
+        std::unordered_map<keel::i32, keel::u16> savedConstCache;
+        std::unordered_map<keel::i32, keel::u16> savedPinnedConsts;
         RegBitset savedScalarRegs;
         RegBitset savedDefinedRegs;
         bool savedMayClear;
         bool savedMayInjectVars;
-        std::unordered_map<std::string, uint16_t> savedUpvalueRegs;
-        std::unordered_map<std::string, uint16_t> savedAllScopeUpvalBoxRegs;
+        std::unordered_map<std::string, keel::u16> savedUpvalueRegs;
+        std::unordered_map<std::string, keel::u16> savedAllScopeUpvalBoxRegs;
         std::unordered_map<std::string, NestedFuncInfo> savedNestedFuncInfo;
         const EnclosingLexicalContext *savedPendingLexicalCtx;
         int savedNextReg;
@@ -5059,11 +5060,11 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         bool savedTopLevel;
         bool savedInFunctionBody;
         bool savedInFusionFallback;
-        uint16_t savedNargoutContext;
+        keel::u16 savedNargoutContext;
         int savedActiveTryDepth;
-        uint16_t savedIdxArr;
-        uint16_t savedIdxDim;
-        uint16_t savedIdxNdims;
+        keel::u16 savedIdxArr;
+        keel::u16 savedIdxDim;
+        keel::u16 savedIdxNdims;
         SourceLoc savedLoc;
 
         explicit FunctionCompileGuard(Compiler &comp)
@@ -5142,13 +5143,13 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     chunk_.sourceCode = sourceCode ? std::move(sourceCode) : stateGuard.savedChunk.sourceCode;
     chunk_.paramNames = funcDef->paramNames;
     chunk_.returnNames = funcDef->returnNames;
-    if (funcDef->paramNames.size() >= static_cast<size_t>(kInvalidReg)
-        || funcDef->returnNames.size() >= static_cast<size_t>(kInvalidReg))
+    if (funcDef->paramNames.size() >= static_cast<keel::usize>(kInvalidReg)
+        || funcDef->returnNames.size() >= static_cast<keel::usize>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: function '" + funcDef->strValue
             + "' declares more than 65534 parameters or returns");
-    chunk_.numParams = static_cast<uint16_t>(funcDef->paramNames.size());
-    chunk_.numReturns = static_cast<uint16_t>(funcDef->returnNames.size());
+    chunk_.numParams = static_cast<keel::u16>(funcDef->paramNames.size());
+    chunk_.numReturns = static_cast<keel::u16>(funcDef->returnNames.size());
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();
@@ -5188,8 +5189,8 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 
     // Always allocate nargin/nargout so they're visible in debugger (pre-
     // loaded by the VM on entry).
-    uint16_t narginReg = varRegLookup("nargin");
-    uint16_t nargoutReg = varRegLookup("nargout");
+    keel::u16 narginReg = varRegLookup("nargin");
+    keel::u16 nargoutReg = varRegLookup("nargout");
 
     // Collect direct nested function definitions and set up lexical upvalues.
     std::vector<const ASTNode *> directNestedDefs;
@@ -5205,7 +5206,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     std::vector<std::string> activeUpvalues;
     if (lexicalCtx) {
         for (const auto &u : lexicalCtx->inheritedUpvalueNames) {
-            uint16_t boxReg = allocPinnedReg();
+            keel::u16 boxReg = allocPinnedReg();
             chunk_.upvalueParamRegs.push_back(boxReg);
             allScopeUpvalueBoxRegs_[u] = boxReg;
             activeUpvalues.push_back(u);
@@ -5316,9 +5317,9 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
                                 || (identifiers.count(nm) && descAsgnRefs.count(nm));
             if (!shared)
                 continue;
-            uint16_t mirrorReg = varRegLookup(nm, /*preloadReserved=*/false);
-            uint16_t boxReg = allocPinnedReg();
-            uint16_t initSrc = preloadedOnEntry.count(nm) ? mirrorReg : kInvalidReg;
+            keel::u16 mirrorReg = varRegLookup(nm, /*preloadReserved=*/false);
+            keel::u16 boxReg = allocPinnedReg();
+            keel::u16 initSrc = preloadedOnEntry.count(nm) ? mirrorReg : kInvalidReg;
             emitAB(OpCode::UPVAL_NEW, boxReg, initSrc);
             upvalueRegs_[nm] = boxReg;
             allScopeUpvalueBoxRegs_[nm] = boxReg;
@@ -5399,7 +5400,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 
     // Set source location to the 'end' keyword so breakpoints on it fire
     if (funcDef->endLine > 0)
-        currentLoc_ = {static_cast<uint16_t>(funcDef->endLine), 1};
+        currentLoc_ = {static_cast<keel::u16>(funcDef->endLine), 1};
 
     // Emit return: collect return values
     const auto &rnames = funcDef->returnNames;
@@ -5407,36 +5408,36 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     if (hasVarargout) {
         emitVarargoutReturn();
     } else if (rnames.size() == 1) {
-        uint16_t retReg = varRegLookup(funcDef->returnNames[0]);
+        keel::u16 retReg = varRegLookup(funcDef->returnNames[0]);
         emitUpvalLoadRawIfShared(funcDef->returnNames[0], retReg);
         emitA(OpCode::RET, retReg);
     } else if (funcDef->returnNames.empty()) {
         emitNone(OpCode::RET_EMPTY);
     } else {
-        size_t nret = funcDef->returnNames.size();
-        std::vector<uint16_t> retRegs;
+        keel::usize nret = funcDef->returnNames.size();
+        std::vector<keel::u16> retRegs;
         for (auto &name : funcDef->returnNames) {
-            uint16_t r = varRegLookup(name);
+            keel::u16 r = varRegLookup(name);
             emitUpvalLoadRawIfShared(name, r);
             retRegs.push_back(r);
         }
         bool consecutive = true;
-        for (size_t i = 1; i < nret; ++i)
+        for (keel::usize i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
         if (consecutive) {
-            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint16_t>(nret));
+            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<keel::u16>(nret));
         } else {
-            uint16_t base = nextReg_;
-            for (size_t i = 0; i < nret; ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 base = nextReg_;
+            for (keel::usize i = 0; i < nret; ++i) {
+                keel::u16 slot = tempReg();
                 if (retRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, retRegs[i]);
             }
-            emitAB(OpCode::RET_MULTI, base, static_cast<uint16_t>(nret));
+            emitAB(OpCode::RET_MULTI, base, static_cast<keel::u16>(nret));
         }
     }
 
-    chunk_.numRegisters = static_cast<uint32_t>(peakReg_);
+    chunk_.numRegisters = static_cast<keel::u32>(peakReg_);
 
     for (auto &[name, reg] : varRegisters_)
         chunk_.varMap.push_back({name, reg});
@@ -5465,25 +5466,25 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 void Compiler::emitVarargoutReturn()
 {
     const auto &rns = chunk_.returnNames;
-    const size_t numFixed = rns.size() - 1;
-    uint16_t vaReg = varRegLookup("varargout");
+    const keel::usize numFixed = rns.size() - 1;
+    keel::u16 vaReg = varRegLookup("varargout");
     emitUpvalLoadRawIfShared("varargout", vaReg);
-    uint16_t fixedBase = 0;
+    keel::u16 fixedBase = 0;
     if (numFixed > 0) {
-        fixedBase = static_cast<uint16_t>(nextReg_);
-        for (size_t i = 0; i < numFixed; ++i) {
-            uint16_t slot = tempReg();
-            uint16_t r = varRegLookup(rns[i]);
+        fixedBase = static_cast<keel::u16>(nextReg_);
+        for (keel::usize i = 0; i < numFixed; ++i) {
+            keel::u16 slot = tempReg();
+            keel::u16 r = varRegLookup(rns[i]);
             emitUpvalLoadRawIfShared(rns[i], r);
             if (r != slot)
                 emitAB(OpCode::MOVE, slot, r);
         }
     }
     emit(Instruction::make_abcde(OpCode::RET_VARARGOUT, fixedBase,
-                                 static_cast<uint16_t>(numFixed), vaReg, 0, 0));
+                                 static_cast<keel::u16>(numFixed), vaReg, 0, 0));
 }
 
-uint16_t Compiler::compileReturn(const ASTNode * /*node*/)
+keel::u16 Compiler::compileReturn(const ASTNode * /*node*/)
 {
     if (!chunk_.returnNames.empty() && chunk_.returnNames.back() == "varargout") {
         emitVarargoutReturn();
@@ -5491,39 +5492,39 @@ uint16_t Compiler::compileReturn(const ASTNode * /*node*/)
     }
     if (chunk_.returnNames.size() <= 1) {
         if (!chunk_.returnNames.empty()) {
-            uint16_t retReg = varRegLookup(chunk_.returnNames[0]);
+            keel::u16 retReg = varRegLookup(chunk_.returnNames[0]);
             emitUpvalLoadRawIfShared(chunk_.returnNames[0], retReg);
             emitA(OpCode::RET, retReg);
         } else {
             emitNone(OpCode::RET_EMPTY);
         }
     } else {
-        size_t nret = chunk_.returnNames.size();
-        std::vector<uint16_t> retRegs;
+        keel::usize nret = chunk_.returnNames.size();
+        std::vector<keel::u16> retRegs;
         for (auto &name : chunk_.returnNames) {
-            uint16_t r = varRegLookup(name);
+            keel::u16 r = varRegLookup(name);
             emitUpvalLoadRawIfShared(name, r);
             retRegs.push_back(r);
         }
         bool consecutive = true;
-        for (size_t i = 1; i < nret; ++i)
+        for (keel::usize i = 1; i < nret; ++i)
             if (retRegs[i] != retRegs[0] + i) { consecutive = false; break; }
         if (consecutive) {
-            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<uint16_t>(nret));
+            emitAB(OpCode::RET_MULTI, retRegs[0], static_cast<keel::u16>(nret));
         } else {
-            uint16_t base = nextReg_;
-            for (size_t i = 0; i < nret; ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 base = nextReg_;
+            for (keel::usize i = 0; i < nret; ++i) {
+                keel::u16 slot = tempReg();
                 if (retRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, retRegs[i]);
             }
-            emitAB(OpCode::RET_MULTI, base, static_cast<uint16_t>(nret));
+            emitAB(OpCode::RET_MULTI, base, static_cast<keel::u16>(nret));
         }
     }
     return 0;
 }
 
-uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
+keel::u16 Compiler::compileDeleteAssign(const ASTNode *node)
 {
     auto *lhs = node->children[0].get();
     if (lhs->type != NodeType::CALL || lhs->children.empty())
@@ -5533,35 +5534,35 @@ uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
     if (target->type != NodeType::IDENTIFIER)
         throw std::runtime_error("Compiler: invalid delete target");
 
-    uint16_t arr = varRegWrite(target->strValue);
+    keel::u16 arr = varRegWrite(target->strValue);
     emitUpvalLoadRawIfShared(target->strValue, arr);
-    size_t nargs = lhs->children.size() - 1;
+    keel::usize nargs = lhs->children.size() - 1;
 
     {
-        IndexContextGuard guard(*this, arr, static_cast<uint16_t>(nargs));
+        IndexContextGuard guard(*this, arr, static_cast<keel::u16>(nargs));
 
         if (nargs == 1) {
-            uint16_t idx = compileNode(lhs->children[1].get());
+            keel::u16 idx = compileNode(lhs->children[1].get());
             emitAB(OpCode::INDEX_DELETE, arr, idx);
         } else if (nargs == 2) {
-            uint16_t row = compileNode(lhs->children[1].get());
+            keel::u16 row = compileNode(lhs->children[1].get());
             guard.setDim(1);
-            uint16_t col = compileNode(lhs->children[2].get());
+            keel::u16 col = compileNode(lhs->children[2].get());
             emitABC(OpCode::INDEX_DELETE_2D, arr, row, col);
         } else {
-            std::vector<uint16_t> idxRegs;
-            for (size_t i = 0; i < nargs; ++i) {
+            std::vector<keel::u16> idxRegs;
+            for (keel::usize i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
                 if (i + 1 < nargs)
-                    guard.setDim(static_cast<uint16_t>(i + 1));
+                    guard.setDim(static_cast<keel::u16>(i + 1));
             }
-            uint16_t base = nextReg_;
-            for (size_t i = 0; i < nargs; ++i) {
-                uint16_t slot = tempReg();
+            keel::u16 base = nextReg_;
+            for (keel::usize i = 0; i < nargs; ++i) {
+                keel::u16 slot = tempReg();
                 if (idxRegs[i] != slot)
                     emitAB(OpCode::MOVE, slot, idxRegs[i]);
             }
-            emitABC(OpCode::INDEX_DELETE_ND, arr, base, static_cast<uint16_t>(nargs));
+            emitABC(OpCode::INDEX_DELETE_ND, arr, base, static_cast<keel::u16>(nargs));
         }
     }
 
@@ -5574,7 +5575,7 @@ uint16_t Compiler::compileDeleteAssign(const ASTNode *node)
 // ============================================================
 
 // Must match the switch in VM::execute CALL_BUILTIN handler
-int8_t Compiler::resolveBuiltinId(const std::string &name, size_t nargs)
+keel::i8 Compiler::resolveBuiltinId(const std::string &name, keel::usize nargs)
 {
     if (nargs == 1) {
         if (name == "abs")
@@ -5872,7 +5873,7 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
         }
     };
 
-    for (size_t i = 0; i < chunk.code.size(); ++i) {
+    for (keel::usize i = 0; i < chunk.code.size(); ++i) {
         const auto &ins = chunk.code[i];
 
         // Show source location if available
@@ -5887,7 +5888,7 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
 
         if (ins.op == OpCode::LOAD_CONST
             && ins.d >= 0
-            && static_cast<size_t>(ins.d) < chunk.constants.size()) {
+            && static_cast<keel::usize>(ins.d) < chunk.constants.size()) {
             auto &cv = chunk.constants[ins.d];
             if (cv.isDoubleScalar())
                 os << "  ; val=" << cv.scalarVal();

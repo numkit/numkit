@@ -1,10 +1,11 @@
 // toolboxes/io/include/numkit/io/text/csv.hpp
 #pragma once
 
-#include <numkit/value/span.hpp>
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
-#include <memory_resource>
 #include <string>
 
 #include <numkit/sys/fs_context.hpp>
@@ -17,16 +18,16 @@ namespace numkit::io {
 /// MATLAB-facing `csvread` adds VFS path resolution + file read on top of this.
 /// Missing / non-numeric cells read as 0.
 Value csvreadFromString(const std::string &content,
-                        std::pmr::memory_resource *mr = nullptr);
+                        keel::Allocator *mr = nullptr);
 
 /// @brief As above, skipping the first `skipRows` rows / `skipCols` cols
 /// (0-based origin, like `csvread(file, R0, C0)`). Engine-free.
-Value csvreadFromString(const std::string &content, size_t skipRows, size_t skipCols,
-                        std::pmr::memory_resource *mr = nullptr);
+Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::usize skipCols,
+                        keel::Allocator *mr = nullptr);
 
 /// @brief Serialize a numeric matrix to CSV text — **Engine-free** C++ API.
 /// `offR`/`offC` prepend blank rows/cols.
-std::string csvwriteToString(const Value &M, size_t offR = 0, size_t offC = 0);
+std::string csvwriteToString(const Value &M, keel::usize offR = 0, keel::usize offC = 0);
 
 /// @file
 /// @brief CSV text I/O.
@@ -52,8 +53,8 @@ std::string csvwriteToString(const Value &M, size_t offR = 0, size_t offC = 0);
 /// @return        DOUBLE matrix.
 /// @throws Error  Bad args / file not found / parse failure.
 /// @see csvwrite, readmatrix
-Value csvread(FsContext &fs, Span<const Value> args,
-              std::pmr::memory_resource *mr = nullptr);
+Value csvread(FsContext &fs, keel::ArrayRef<Value> args,
+              keel::Allocator *mr = nullptr);
 
 /// @brief `csvwrite` (`csvwrite(filename, M, R0, C0)`).
 ///
@@ -66,6 +67,6 @@ Value csvread(FsContext &fs, Span<const Value> args,
 /// @param args  Variadic arguments as documented above.
 /// @throws Error  Bad args / write failure.
 /// @see csvread, writematrix
-void csvwrite(FsContext &fs, Span<const Value> args);
+void csvwrite(FsContext &fs, keel::ArrayRef<Value> args);
 
 } // namespace numkit::io

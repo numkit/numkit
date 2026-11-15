@@ -3,6 +3,11 @@
 // CallContext register half of math/arithmetic/reductions.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/complex.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>       // reshape (for 'all')
 #include <numkit/core/engine.hpp>
@@ -20,13 +25,10 @@
 #include <numkit/ops/reductions.hpp>
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -41,13 +43,13 @@ namespace detail {
 
 // Helper to reduce boilerplate — unary adapter that calls Fn(mr, args[0]).
 #define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
-                    Span<Value> outs, CallContext &ctx)                        \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                        \
     {                                                                            \
         if (args.empty())                                                        \
             throw Error(#name ": requires 1 argument",                          \
                          0, 0, #name, "", "numkit:" #name ":nargin");           \
-        outs[0] = fn(args[0], ctx.engine->resource());                         \
+        outs[0] = fn(args[0], ctx.engine->allocator());                         \
     }
 
 // Same as NUMKIT_UNARY_ADAPTER but passes &outs[0] through as an
@@ -58,13 +60,13 @@ namespace detail {
 // when none of the args alias the destination — so `z = sin(x)`
 // in a loop reuses z's buffer iteration after iteration.
 #define NUMKIT_UNARY_ADAPTER_HINT(name, fn)                                         \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
-                    Span<Value> outs, CallContext &ctx)                        \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                        \
     {                                                                            \
         if (args.empty())                                                        \
             throw Error(#name ": requires 1 argument",                          \
                          0, 0, #name, "", "numkit:" #name ":nargin");           \
-        outs[0] = fn(args[0], &outs[0], ctx.engine->resource());               \
+        outs[0] = fn(args[0], &outs[0], ctx.engine->allocator());               \
     }
 
 // SIMD-backed unaries — abs lives in backends/MStdAbs_*.cpp,
@@ -156,7 +158,7 @@ inline T toOutT(double v)
 }
 
 template <typename T>
-inline Value makeNativeScalar(T v, ValueType outType, std::pmr::memory_resource *mr)
+inline Value makeNativeScalar(T v, ValueType outType, keel::Allocator *mr)
 {
     if (outType == ValueType::DOUBLE)
         return Value::scalar(static_cast<double>(v), mr);
@@ -174,37 +176,37 @@ void typedReduceAlongDim(const Value &x, int redDim, T *dst,
 {
     const auto &d = x.dims();
     const int redAxis = redDim - 1;
-    const size_t sliceLen = d.dim(redAxis);
-    size_t B = 1;
+    const keel::usize sliceLen = d.dim(redAxis);
+    keel::usize B = 1;
     for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
-    size_t O = 1;
+    keel::usize O = 1;
     for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
-    auto reduceSlice = [&](size_t baseOff, size_t stride) -> T {
+    auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
         double acc = init;
-        for (size_t k = 0; k < sliceLen; ++k)
+        for (keel::usize k = 0; k < sliceLen; ++k)
             acc = accumOp(acc, x.elemAsDouble(baseOff + k * stride));
         return finalize(acc, sliceLen);
     };
 
     if (B == 1) {
-        for (size_t o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
+        for (keel::usize o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
         return;
     }
-    for (size_t o = 0; o < O; ++o) {
-        for (size_t b = 0; b < B; ++b) {
-            const size_t base = o * sliceLen * B + b;
-            const size_t outIdx = o * B + b;
+    for (keel::usize o = 0; o < O; ++o) {
+        for (keel::usize b = 0; b < B; ++b) {
+            const keel::usize base = o * sliceLen * B + b;
+            const keel::usize outIdx = o * B + b;
             dst[outIdx] = reduceSlice(base, B);
         }
     }
 }
 
-inline Value allocReduceOutput(const Value &x, int redDim, ValueType outType, std::pmr::memory_resource *mr)
+inline Value allocReduceOutput(const Value &x, int redDim, ValueType outType, keel::Allocator *mr)
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
-        ScratchArena scratch(mr);
-        auto shape = numkit::ops::outShapeForDimND(x, redDim, &scratch);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        auto shape = numkit::ops::outShapeForDimND(x, redDim, scratch.allocator());
         return Value::matrixND(shape.data(), (int) shape.size(), outType, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);
@@ -212,7 +214,7 @@ inline Value allocReduceOutput(const Value &x, int redDim, ValueType outType, st
 }
 
 template <typename T, typename Init, typename AccumOp, typename Finalize>
-Value reduceTypedAll(const Value &x, ValueType outType, std::pmr::memory_resource *mr,
+Value reduceTypedAll(const Value &x, ValueType outType, keel::Allocator *mr,
                       Init init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty()) {
@@ -222,7 +224,7 @@ Value reduceTypedAll(const Value &x, ValueType outType, std::pmr::memory_resourc
     }
     if (x.isScalar() || x.dims().isVector()) {
         double acc = init;
-        for (size_t i = 0; i < x.numel(); ++i)
+        for (keel::usize i = 0; i < x.numel(); ++i)
             acc = accumOp(acc, x.elemAsDouble(i));
         return makeNativeScalar<T>(finalize(acc, x.numel()), outType, mr);
     }
@@ -234,7 +236,7 @@ Value reduceTypedAll(const Value &x, ValueType outType, std::pmr::memory_resourc
 }
 
 template <typename T, typename Init, typename AccumOp, typename Finalize>
-Value reduceTypedAlongDim(const Value &x, int dim, ValueType outType, std::pmr::memory_resource *mr,
+Value reduceTypedAlongDim(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
                            Init init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty() && x.dims().ndim() < 4) {
@@ -243,14 +245,14 @@ Value reduceTypedAlongDim(const Value &x, int dim, ValueType outType, std::pmr::
     if (x.isScalar() || x.dims().isVector()) {
         if (dim != numkit::ops::firstNonSingletonDim(x)) {
             // Identity: copy x cast to T.
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             Value out;
             if (x.dims().isVector())
                 out = createMatrix({x.dims().rows(), x.dims().cols(), 0}, outType, mr);
             else
                 return makeNativeScalar<T>(toOutT<T>(x.elemAsDouble(0)), outType, mr);
             T *dst = static_cast<T *>(out.rawDataMut());
-            for (size_t i = 0; i < n; ++i)
+            for (keel::usize i = 0; i < n; ++i)
                 dst[i] = toOutT<T>(x.elemAsDouble(i));
             return out;
         }
@@ -271,31 +273,31 @@ struct SumOp {
     static constexpr double init = 0.0;
     static double accum(double a, double b) { return a + b; }
     template<typename T>
-    static T finalize(double acc, size_t /*n*/) { return toOutT<T>(acc); }
-    static Complex cInit() { return Complex(0.0, 0.0); }
-    static Complex cAccum(Complex a, Complex b) { return a + b; }
-    static Complex cFinalize(Complex acc, size_t /*n*/) { return acc; }
+    static T finalize(double acc, keel::usize /*n*/) { return toOutT<T>(acc); }
+    static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
+    static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
+    static keel::c64 cFinalize(keel::c64 acc, keel::usize /*n*/) { return acc; }
 };
 struct ProdOp {
     static constexpr double init = 1.0;
     static double accum(double a, double b) { return a * b; }
     template<typename T>
-    static T finalize(double acc, size_t /*n*/) { return toOutT<T>(acc); }
-    static Complex cInit() { return Complex(1.0, 0.0); }
-    static Complex cAccum(Complex a, Complex b) { return a * b; }
-    static Complex cFinalize(Complex acc, size_t /*n*/) { return acc; }
+    static T finalize(double acc, keel::usize /*n*/) { return toOutT<T>(acc); }
+    static keel::c64 cInit() { return keel::c64(1.0, 0.0); }
+    static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a * b; }
+    static keel::c64 cFinalize(keel::c64 acc, keel::usize /*n*/) { return acc; }
 };
 struct MeanOp {
     static constexpr double init = 0.0;
     static double accum(double a, double b) { return a + b; }
     template<typename T>
-    static T finalize(double acc, size_t n) {
+    static T finalize(double acc, keel::usize n) {
         return toOutT<T>(n == 0 ? std::nan("") : acc / static_cast<double>(n));
     }
-    static Complex cInit() { return Complex(0.0, 0.0); }
-    static Complex cAccum(Complex a, Complex b) { return a + b; }
-    static Complex cFinalize(Complex acc, size_t n) {
-        return n == 0 ? Complex(std::nan(""), 0.0) : acc / static_cast<double>(n);
+    static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
+    static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
+    static keel::c64 cFinalize(keel::c64 acc, keel::usize n) {
+        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / static_cast<double>(n);
     }
 };
 
@@ -303,12 +305,12 @@ struct MeanOp {
 // the 'all' dim placeholder; differs from reduceTypedAll (which does
 // "along first non-singleton dim", returning a vector for matrices).
 template <typename T, typename Init, typename AccumOp, typename Finalize>
-Value reduceAllElementsScalar(const Value &x, ValueType outType, std::pmr::memory_resource *mr,
+Value reduceAllElementsScalar(const Value &x, ValueType outType, keel::Allocator *mr,
                                Init init, AccumOp accumOp, Finalize finalize)
 {
     double acc = init;
-    const size_t n = x.numel();
-    for (size_t i = 0; i < n; ++i)
+    const keel::usize n = x.numel();
+    for (keel::usize i = 0; i < n; ++i)
         acc = accumOp(acc, x.elemAsDouble(i));
     return makeNativeScalar<T>(finalize(acc, n), outType, mr);
 }
@@ -320,17 +322,17 @@ Value reduceAllElementsScalar(const Value &x, ValueType outType, std::pmr::memor
 // double — the round-4 default path used `elemAsDouble` which silently
 // dropped imaginary parts and gave wrong results for sum(complex)).
 
-inline Complex readElemAsComplex(const Value &x, size_t i, bool typeMatches)
+inline keel::c64 readElemAsComplex(const Value &x, keel::usize i, bool typeMatches)
 {
     if (typeMatches) return x.complexData()[i];
-    return Complex(x.elemAsDouble(i), 0.0);
+    return keel::c64(x.elemAsDouble(i), 0.0);
 }
 
-inline Value allocComplexReduceOutput(const Value &x, int redDim, std::pmr::memory_resource *mr)
+inline Value allocComplexReduceOutput(const Value &x, int redDim, keel::Allocator *mr)
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
-        ScratchArena scratch(mr);
-        auto shape = numkit::ops::outShapeForDimND(x, redDim, &scratch);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        auto shape = numkit::ops::outShapeForDimND(x, redDim, scratch.allocator());
         return Value::matrixND(shape.data(), (int) shape.size(), ValueType::COMPLEX, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);
@@ -338,48 +340,48 @@ inline Value allocComplexReduceOutput(const Value &x, int redDim, std::pmr::memo
 }
 
 template <typename AccumOp, typename Finalize>
-void complexReduceAlongDim(const Value &x, int redDim, Complex *dst,
-                           Complex init, AccumOp accumOp, Finalize finalize)
+void complexReduceAlongDim(const Value &x, int redDim, keel::c64 *dst,
+                           keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
     const auto &d = x.dims();
     const int redAxis = redDim - 1;
-    const size_t sliceLen = d.dim(redAxis);
-    size_t B = 1;
+    const keel::usize sliceLen = d.dim(redAxis);
+    keel::usize B = 1;
     for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
-    size_t O = 1;
+    keel::usize O = 1;
     for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
-    auto reduceSlice = [&](size_t baseOff, size_t stride) -> Complex {
-        Complex acc = init;
-        for (size_t k = 0; k < sliceLen; ++k)
+    auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> keel::c64 {
+        keel::c64 acc = init;
+        for (keel::usize k = 0; k < sliceLen; ++k)
             acc = accumOp(acc, readElemAsComplex(x, baseOff + k * stride, typeMatches));
         return finalize(acc, sliceLen);
     };
 
     if (B == 1) {
-        for (size_t o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
+        for (keel::usize o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
         return;
     }
-    for (size_t o = 0; o < O; ++o) {
-        for (size_t b = 0; b < B; ++b) {
-            const size_t base = o * sliceLen * B + b;
-            const size_t outIdx = o * B + b;
+    for (keel::usize o = 0; o < O; ++o) {
+        for (keel::usize b = 0; b < B; ++b) {
+            const keel::usize base = o * sliceLen * B + b;
+            const keel::usize outIdx = o * B + b;
             dst[outIdx] = reduceSlice(base, B);
         }
     }
 }
 
 template <typename AccumOp, typename Finalize>
-Value reduceComplexAll(const Value &x, std::pmr::memory_resource *mr,
-                        Complex init, AccumOp accumOp, Finalize finalize)
+Value reduceComplexAll(const Value &x, keel::Allocator *mr,
+                        keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, ValueType::COMPLEX, mr);
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
     if (x.isScalar() || x.dims().isVector()) {
-        Complex acc = init;
-        for (size_t i = 0; i < x.numel(); ++i)
+        keel::c64 acc = init;
+        for (keel::usize i = 0; i < x.numel(); ++i)
             acc = accumOp(acc, readElemAsComplex(x, i, typeMatches));
         return Value::complexScalar(finalize(acc, x.numel()), mr);
     }
@@ -390,8 +392,8 @@ Value reduceComplexAll(const Value &x, std::pmr::memory_resource *mr,
 }
 
 template <typename AccumOp, typename Finalize>
-Value reduceComplexAlongDim(const Value &x, int dim, std::pmr::memory_resource *mr,
-                             Complex init, AccumOp accumOp, Finalize finalize)
+Value reduceComplexAlongDim(const Value &x, int dim, keel::Allocator *mr,
+                             keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, ValueType::COMPLEX, mr);
@@ -399,13 +401,13 @@ Value reduceComplexAlongDim(const Value &x, int dim, std::pmr::memory_resource *
     if (x.isScalar() || x.dims().isVector()) {
         if (dim != numkit::ops::firstNonSingletonDim(x)) {
             // Identity reduction.
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             if (!x.dims().isVector())
                 return Value::complexScalar(readElemAsComplex(x, 0, typeMatches), mr);
             Value out = createMatrix({x.dims().rows(), x.dims().cols(), 0},
                                       ValueType::COMPLEX, mr);
-            Complex *dst = out.complexDataMut();
-            for (size_t i = 0; i < n; ++i)
+            keel::c64 *dst = out.complexDataMut();
+            for (keel::usize i = 0; i < n; ++i)
                 dst[i] = readElemAsComplex(x, i, typeMatches);
             return out;
         }
@@ -417,19 +419,19 @@ Value reduceComplexAlongDim(const Value &x, int dim, std::pmr::memory_resource *
 }
 
 template <typename AccumOp, typename Finalize>
-Value reduceComplexAllElementsScalar(const Value &x, std::pmr::memory_resource *mr,
-                                      Complex init, AccumOp accumOp, Finalize finalize)
+Value reduceComplexAllElementsScalar(const Value &x, keel::Allocator *mr,
+                                      keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
-    Complex acc = init;
-    const size_t n = x.numel();
-    for (size_t i = 0; i < n; ++i)
+    keel::c64 acc = init;
+    const keel::usize n = x.numel();
+    for (keel::usize i = 0; i < n; ++i)
         acc = accumOp(acc, readElemAsComplex(x, i, typeMatches));
     return Value::complexScalar(finalize(acc, n), mr);
 }
 
 template <typename Op>
-Value runComplexReduction(const Value &x, int dim, std::pmr::memory_resource *mr, bool isAll = false)
+Value runComplexReduction(const Value &x, int dim, keel::Allocator *mr, bool isAll = false)
 {
     Value r = isAll
         ? reduceComplexAllElementsScalar(x, mr, Op::cInit(), Op::cAccum, Op::cFinalize)
@@ -441,7 +443,7 @@ Value runComplexReduction(const Value &x, int dim, std::pmr::memory_resource *mr
 }
 
 template <typename Op>
-Value runNativeReduction(const Value &x, int dim, ValueType outType, std::pmr::memory_resource *mr,
+Value runNativeReduction(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
                           bool isAll = false)
 {
     auto run = [&](auto tag) {
@@ -458,14 +460,14 @@ Value runNativeReduction(const Value &x, int dim, ValueType outType, std::pmr::m
     switch (outType) {
     case ValueType::DOUBLE: return run(double  {});
     case ValueType::SINGLE: return run(float   {});
-    case ValueType::INT8:   return run(int8_t  {});
-    case ValueType::INT16:  return run(int16_t {});
-    case ValueType::INT32:  return run(int32_t {});
-    case ValueType::INT64:  return run(int64_t {});
-    case ValueType::UINT8:  return run(uint8_t {});
-    case ValueType::UINT16: return run(uint16_t{});
-    case ValueType::UINT32: return run(uint32_t{});
-    case ValueType::UINT64: return run(uint64_t{});
+    case ValueType::INT8:   return run(keel::i8  {});
+    case ValueType::INT16:  return run(keel::i16 {});
+    case ValueType::INT32:  return run(keel::i32 {});
+    case ValueType::INT64:  return run(keel::i64 {});
+    case ValueType::UINT8:  return run(keel::u8 {});
+    case ValueType::UINT16: return run(keel::u16{});
+    case ValueType::UINT32: return run(keel::u32{});
+    case ValueType::UINT64: return run(keel::u64{});
     default:
         throw Error("internal: unsupported native output type",
                      0, 0, "", "", "numkit:nativeReduce:type");
@@ -509,7 +511,7 @@ inline StringFlag classifyStringFlag(const Value &v)
 // For COMPLEX, an element is NaN if either its real or imag part is NaN.
 
 template <typename Op>
-inline void nanAccumDouble(double &acc, size_t &count, double v)
+inline void nanAccumDouble(double &acc, keel::usize &count, double v)
 {
     if (std::isnan(v)) return;
     acc = Op::accum(acc, v);
@@ -517,7 +519,7 @@ inline void nanAccumDouble(double &acc, size_t &count, double v)
 }
 
 template <typename T, typename Op>
-inline T nanFinalize(double acc, size_t nonNanCount)
+inline T nanFinalize(double acc, keel::usize nonNanCount)
 {
     if constexpr (std::is_same_v<Op, MeanOp>)
         return toOutT<T>(nonNanCount == 0 ? std::nan("")
@@ -532,37 +534,37 @@ void nanReduceAlongDim(const Value &x, int redDim, T *dst)
 {
     const auto &d = x.dims();
     const int redAxis = redDim - 1;
-    const size_t sliceLen = d.dim(redAxis);
-    size_t B = 1;
+    const keel::usize sliceLen = d.dim(redAxis);
+    keel::usize B = 1;
     for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
-    size_t O = 1;
+    keel::usize O = 1;
     for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
-    auto reduceSlice = [&](size_t baseOff, size_t stride) -> T {
+    auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
         double acc = Op::init;
-        size_t count = 0;
-        for (size_t k = 0; k < sliceLen; ++k)
+        keel::usize count = 0;
+        for (keel::usize k = 0; k < sliceLen; ++k)
             nanAccumDouble<Op>(acc, count, x.elemAsDouble(baseOff + k * stride));
         return nanFinalize<T, Op>(acc, count);
     };
     if (B == 1) {
-        for (size_t o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
+        for (keel::usize o = 0; o < O; ++o) dst[o] = reduceSlice(o * sliceLen, 1);
         return;
     }
-    for (size_t o = 0; o < O; ++o)
-        for (size_t b = 0; b < B; ++b)
+    for (keel::usize o = 0; o < O; ++o)
+        for (keel::usize b = 0; b < B; ++b)
             dst[o * B + b] = reduceSlice(o * sliceLen * B + b, B);
 }
 
 template <typename T, typename Op>
-Value nanReduceAll(const Value &x, ValueType outType, std::pmr::memory_resource *mr)
+Value nanReduceAll(const Value &x, ValueType outType, keel::Allocator *mr)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, outType, mr);
     if (x.isScalar() || x.dims().isVector()) {
         double acc = Op::init;
-        size_t count = 0;
-        for (size_t i = 0; i < x.numel(); ++i)
+        keel::usize count = 0;
+        for (keel::usize i = 0; i < x.numel(); ++i)
             nanAccumDouble<Op>(acc, count, x.elemAsDouble(i));
         return makeNativeScalar<T>(nanFinalize<T, Op>(acc, count), outType, mr);
     }
@@ -573,19 +575,19 @@ Value nanReduceAll(const Value &x, ValueType outType, std::pmr::memory_resource 
 }
 
 template <typename T, typename Op>
-Value nanReduceAlongDimImpl(const Value &x, int dim, ValueType outType, std::pmr::memory_resource *mr)
+Value nanReduceAlongDimImpl(const Value &x, int dim, ValueType outType, keel::Allocator *mr)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, outType, mr);
     if (x.isScalar() || x.dims().isVector()) {
         if (dim != numkit::ops::firstNonSingletonDim(x)) {
             // Identity: copy x as outType (cast where needed).
-            const size_t n = x.numel();
+            const keel::usize n = x.numel();
             if (!x.dims().isVector())
                 return makeNativeScalar<T>(toOutT<T>(x.elemAsDouble(0)), outType, mr);
             Value out = createMatrix({x.dims().rows(), x.dims().cols(), 0}, outType, mr);
             T *dst = static_cast<T *>(out.rawDataMut());
-            for (size_t i = 0; i < n; ++i) dst[i] = toOutT<T>(x.elemAsDouble(i));
+            for (keel::usize i = 0; i < n; ++i) dst[i] = toOutT<T>(x.elemAsDouble(i));
             return out;
         }
         return nanReduceAll<T, Op>(x, outType, mr);
@@ -596,17 +598,17 @@ Value nanReduceAlongDimImpl(const Value &x, int dim, ValueType outType, std::pmr
 }
 
 template <typename T, typename Op>
-Value nanReduceAllElementsScalar(const Value &x, ValueType outType, std::pmr::memory_resource *mr)
+Value nanReduceAllElementsScalar(const Value &x, ValueType outType, keel::Allocator *mr)
 {
     double acc = Op::init;
-    size_t count = 0;
-    for (size_t i = 0; i < x.numel(); ++i)
+    keel::usize count = 0;
+    for (keel::usize i = 0; i < x.numel(); ++i)
         nanAccumDouble<Op>(acc, count, x.elemAsDouble(i));
     return makeNativeScalar<T>(nanFinalize<T, Op>(acc, count), outType, mr);
 }
 
 template <typename Op>
-Value runNanReduction(const Value &x, int dim, ValueType outType, std::pmr::memory_resource *mr,
+Value runNanReduction(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
                        bool isAll = false)
 {
     auto run = [&](auto tag) {
@@ -620,14 +622,14 @@ Value runNanReduction(const Value &x, int dim, ValueType outType, std::pmr::memo
     switch (outType) {
     case ValueType::DOUBLE: return run(double  {});
     case ValueType::SINGLE: return run(float   {});
-    case ValueType::INT8:   return run(int8_t  {});
-    case ValueType::INT16:  return run(int16_t {});
-    case ValueType::INT32:  return run(int32_t {});
-    case ValueType::INT64:  return run(int64_t {});
-    case ValueType::UINT8:  return run(uint8_t {});
-    case ValueType::UINT16: return run(uint16_t{});
-    case ValueType::UINT32: return run(uint32_t{});
-    case ValueType::UINT64: return run(uint64_t{});
+    case ValueType::INT8:   return run(keel::i8  {});
+    case ValueType::INT16:  return run(keel::i16 {});
+    case ValueType::INT32:  return run(keel::i32 {});
+    case ValueType::INT64:  return run(keel::i64 {});
+    case ValueType::UINT8:  return run(keel::u8 {});
+    case ValueType::UINT16: return run(keel::u16{});
+    case ValueType::UINT32: return run(keel::u32{});
+    case ValueType::UINT64: return run(keel::u64{});
     default:
         throw Error("internal: unsupported nan-aware output type",
                      0, 0, "", "", "numkit:nanReduce:type");
@@ -636,30 +638,30 @@ Value runNanReduction(const Value &x, int dim, ValueType outType, std::pmr::memo
 
 // COMPLEX nan-aware reduction: an element is NaN if either its real
 // or imag part is NaN.
-inline bool isComplexNaN(Complex c)
+inline bool isComplexNaN(keel::c64 c)
 {
     return std::isnan(c.real()) || std::isnan(c.imag());
 }
 
 template <typename Op>
-Value runComplexNanReduction(const Value &x, int dim, std::pmr::memory_resource *mr,
+Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
                               bool isAll = false)
 {
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
-    auto readC = [&](size_t i) { return readElemAsComplex(x, i, typeMatches); };
+    auto readC = [&](keel::usize i) { return readElemAsComplex(x, i, typeMatches); };
 
-    auto finalizeOne = [](Complex acc, size_t count) -> Complex {
+    auto finalizeOne = [](keel::c64 acc, keel::usize count) -> keel::c64 {
         if constexpr (std::is_same_v<Op, MeanOp>)
-            return count == 0 ? Complex(std::nan(""), 0.0)
+            return count == 0 ? keel::c64(std::nan(""), 0.0)
                               : acc / static_cast<double>(count);
         else
             return acc;
     };
-    auto reduceRange = [&](size_t baseOff, size_t stride, size_t n) -> Complex {
-        Complex acc = Op::cInit();
-        size_t count = 0;
-        for (size_t k = 0; k < n; ++k) {
-            const Complex v = readC(baseOff + k * stride);
+    auto reduceRange = [&](keel::usize baseOff, keel::usize stride, keel::usize n) -> keel::c64 {
+        keel::c64 acc = Op::cInit();
+        keel::usize count = 0;
+        for (keel::usize k = 0; k < n; ++k) {
+            const keel::c64 v = readC(baseOff + k * stride);
             if (isComplexNaN(v)) continue;
             acc = Op::cAccum(acc, v);
             ++count;
@@ -672,22 +674,22 @@ Value runComplexNanReduction(const Value &x, int dim, std::pmr::memory_resource 
     }
     const int d = (dim > 0) ? dim : numkit::ops::firstNonSingletonDim(x);
     Value out = allocComplexReduceOutput(x, d, mr);
-    Complex *dst = out.complexDataMut();
+    keel::c64 *dst = out.complexDataMut();
 
     const auto &dd = x.dims();
     const int redAxis = d - 1;
-    const size_t sliceLen = dd.dim(redAxis);
-    size_t B = 1;
+    const keel::usize sliceLen = dd.dim(redAxis);
+    keel::usize B = 1;
     for (int i = 0; i < redAxis; ++i) B *= dd.dim(i);
-    size_t O = 1;
+    keel::usize O = 1;
     for (int i = redAxis + 1; i < dd.ndim(); ++i) O *= dd.dim(i);
 
     if (B == 1) {
-        for (size_t o = 0; o < O; ++o)
+        for (keel::usize o = 0; o < O; ++o)
             dst[o] = reduceRange(o * sliceLen, 1, sliceLen);
     } else {
-        for (size_t o = 0; o < O; ++o)
-            for (size_t b = 0; b < B; ++b)
+        for (keel::usize o = 0; o < O; ++o)
+            for (keel::usize b = 0; b < B; ++b)
                 dst[o * B + b] = reduceRange(o * sliceLen * B + b, B, sliceLen);
     }
     return out;
@@ -704,13 +706,13 @@ struct ReductionFlags {
 // Parse args[1..] and populate the reduction-flag struct. Each kind of
 // flag (dim/all, outtype, nanflag) appears at most once. Strings are
 // classified by their content, so order is flexible.
-ReductionFlags parseReductionFlags(Span<const Value> args, const char *fn)
+ReductionFlags parseReductionFlags(keel::ArrayRef<Value> args, const char *fn)
 {
     ReductionFlags r;
     bool haveDim = false;     // either explicit dim or 'all'
     bool haveOutType = false;
     bool haveNanFlag = false;
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         const Value &a = args[i];
         if (a.isEmpty()) continue;
         if (isStringArg(a)) {
@@ -776,8 +778,8 @@ ReductionFlags parseReductionFlags(Span<const Value> args, const char *fn)
 //   Native:  preserve class; LOGICAL/CHAR rejected.
 template <typename DefaultFn, typename NativeFn, typename ComplexFn,
           typename NanFn, typename NanComplexFn>
-Value dispatchReductionAdapter(Span<const Value> args, const char *fn,
-                                std::pmr::memory_resource *mr,
+Value dispatchReductionAdapter(keel::ArrayRef<Value> args, const char *fn,
+                                keel::Allocator *mr,
                                 DefaultFn defaultFn, NativeFn nativeFn,
                                 ComplexFn complexFn, NanFn nanFn,
                                 NanComplexFn nanCFn)
@@ -828,35 +830,35 @@ Value dispatchReductionAdapter(Span<const Value> args, const char *fn,
 } // namespace
 
 #define NUMKIT_REDUCTION_ADAPTER(name, fn, op)                                       \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                 \
-                    Span<Value> outs, CallContext &ctx)                         \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                 \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                         \
     {                                                                             \
         if (args.empty())                                                         \
             throw Error(#name ": requires at least 1 argument",                  \
                          0, 0, #name, "", "numkit:" #name ":nargin");                  \
-        outs[0] = dispatchReductionAdapter(args, #name, ctx.engine->resource(),                           \
+        outs[0] = dispatchReductionAdapter(args, #name, ctx.engine->allocator(),                           \
             [&](const Value &x, int dim, bool isAll) {                           \
                 if (isAll)                                                        \
                     return runNativeReduction<op>(x, 0, ValueType::DOUBLE,            \
-                                                  ctx.engine->resource(), true);\
-                return (dim > 0) ? fn(x, dim, ctx.engine->resource())            \
-                                 : fn(x, ctx.engine->resource());                \
+                                                  ctx.engine->allocator(), true);\
+                return (dim > 0) ? fn(x, dim, ctx.engine->allocator())            \
+                                 : fn(x, ctx.engine->allocator());                \
             },                                                                    \
             [&](const Value &x, int dim, ValueType outT, bool isAll) {               \
                 return runNativeReduction<op>(x, dim, outT,                       \
-                                              ctx.engine->resource(), isAll);   \
+                                              ctx.engine->allocator(), isAll);   \
             },                                                                    \
             [&](const Value &x, int dim, bool isAll) {                           \
                 return runComplexReduction<op>(x, dim,                            \
-                                               ctx.engine->resource(), isAll);  \
+                                               ctx.engine->allocator(), isAll);  \
             },                                                                    \
             [&](const Value &x, int dim, ValueType outT, bool isAll) {               \
                 return runNanReduction<op>(x, dim, outT,                          \
-                                           ctx.engine->resource(), isAll);      \
+                                           ctx.engine->allocator(), isAll);      \
             },                                                                    \
             [&](const Value &x, int dim, bool isAll) {                           \
                 return runComplexNanReduction<op>(x, dim,                         \
-                                                  ctx.engine->resource(), isAll);\
+                                                  ctx.engine->allocator(), isAll);\
             });                                                                   \
     }
 
@@ -885,13 +887,13 @@ namespace {
 // Detect optional trailing 'omitnan'/'includenan' string in the reduction
 // form, returning the effective arg count (excluding the flag if present)
 // and the omit flag.
-size_t stripTrailingMaxMinFlags(Span<const Value> args, bool &omitNan, bool &linear)
+keel::usize stripTrailingMaxMinFlags(keel::ArrayRef<Value> args, bool &omitNan, bool &linear)
 {
     // MATLAB's DEFAULT for max/min is 'omitnan' (NaN is ignored unless every
     // element is NaN). Only an explicit 'includenan' turns omission off.
     omitNan = true;
     linear = false;
-    size_t n = args.size();
+    keel::usize n = args.size();
     while (n >= 2 && isStringArg(args[n - 1])) {
         std::string s = lowercaseStr(args[n - 1]);
         if (s == "omitnan")    { omitNan = true;  --n; continue; }
@@ -905,22 +907,22 @@ size_t stripTrailingMaxMinFlags(Span<const Value> args, bool &omitNan, bool &lin
 // Convert slice-relative 1-based indices `idx` (along the sorted listed
 // dimensions `redDims`) into 1-based column-major linear indices into `a0`.
 Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
-                          Span<const int> redDims,
-                          std::pmr::memory_resource *mr)
+                          keel::ArrayRef<int> redDims,
+                          keel::Allocator *mr)
 {
     if (idx.isEmpty()) return idx;
     const int nd = std::max(2, a0.dims().ndim());
-    std::vector<char> listed(static_cast<size_t>(nd) + 1, 0);
+    std::vector<char> listed(static_cast<keel::usize>(nd) + 1, 0);
     for (int d : redDims)
         if (d >= 1 && d <= nd)
-            listed[static_cast<size_t>(d)] = 1;
+            listed[static_cast<keel::usize>(d)] = 1;
 
-    std::vector<std::pair<size_t, size_t>> nonListedDims;
-    std::vector<std::pair<size_t, size_t>> listedDims;
-    size_t stride = 1;
+    std::vector<std::pair<keel::usize, keel::usize>> nonListedDims;
+    std::vector<std::pair<keel::usize, keel::usize>> listedDims;
+    keel::usize stride = 1;
     for (int d = 1; d <= nd; ++d) {
-        size_t sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
-        if (listed[static_cast<size_t>(d)])
+        keel::usize sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
+        if (listed[static_cast<keel::usize>(d)])
             listedDims.emplace_back(sz, stride);
         else
             nonListedDims.emplace_back(sz, stride);
@@ -929,24 +931,24 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
 
     Value out = idx;
     double *dst = out.doubleDataMut();
-    const size_t total = out.numel();
-    for (size_t q = 0; q < total; ++q) {
+    const keel::usize total = out.numel();
+    for (keel::usize q = 0; q < total; ++q) {
         double v = dst[q];
         if (!std::isfinite(v) || v < 1.0) continue;
-        size_t k = static_cast<size_t>(v) - 1;
+        keel::usize k = static_cast<keel::usize>(v) - 1;
 
-        size_t remQ = q;
-        size_t baseOff = 0;
+        keel::usize remQ = q;
+        keel::usize baseOff = 0;
         for (const auto &[dimSz, st] : nonListedDims) {
-            size_t coord = (dimSz > 0) ? (remQ % dimSz) : 0;
+            keel::usize coord = (dimSz > 0) ? (remQ % dimSz) : 0;
             remQ = (dimSz > 0) ? (remQ / dimSz) : 0;
             baseOff += coord * st;
         }
 
-        size_t remK = k;
-        size_t redOff = 0;
+        keel::usize remK = k;
+        keel::usize redOff = 0;
         for (const auto &[dimSz, st] : listedDims) {
-            size_t coord = (dimSz > 0) ? (remK % dimSz) : 0;
+            keel::usize coord = (dimSz > 0) ? (remK % dimSz) : 0;
             remK = (dimSz > 0) ? (remK / dimSz) : 0;
             redOff += coord * st;
         }
@@ -958,13 +960,13 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
 
 } // namespace
 
-void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 5, "max");
     bool omitNan = false;
     bool linear = false;
-    const size_t n = stripTrailingMaxMinFlags(args, omitNan, linear);
-    auto *mr = ctx.engine->resource();
+    const keel::usize n = stripTrailingMaxMinFlags(args, omitNan, linear);
+    auto *mr = ctx.engine->allocator();
     // MATLAB returns DOUBLE (the code points) for max/min of a CHAR array — the
     // char class is NOT preserved (unlike sort/unique/cummax; note mode DOES
     // keep char). Promote char operands to double up front so every form
@@ -981,7 +983,7 @@ void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
     // max(A, [], 'all'[, 'linear']) — reduce over EVERY element. Flatten to
     // a column and reduce; the column position IS the linear index (matching
     // MATLAB's 'all' 2nd output, which is always linear).
-    for (size_t i = 1; i < n; ++i)
+    for (keel::usize i = 1; i < n; ++i)
         if (isStringArg(args[i]) && lowercaseStr(args[i]) == "all") {
             Value flat = reshape(a0, a0.numel(), 1, 0, mr);
             auto [v, ix] = omitNan ? maxOmitNan(flat, 0, mr) : max(flat, 0, mr);
@@ -1020,20 +1022,20 @@ void max_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         if (linear) {
             int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
             int redArr[1] = {effDim};
-            outs[1] = toLinearMaxMinIndex(idx, a0, Span<const int>(redArr, 1), mr);
+            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<int>(redArr, 1), mr);
         } else {
             outs[1] = std::move(idx);
         }
     }
 }
 
-void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 5, "min");
     bool omitNan = false;
     bool linear = false;
-    const size_t n = stripTrailingMaxMinFlags(args, omitNan, linear);
-    auto *mr = ctx.engine->resource();
+    const keel::usize n = stripTrailingMaxMinFlags(args, omitNan, linear);
+    auto *mr = ctx.engine->allocator();
     // MATLAB returns DOUBLE (code points) for min of a CHAR array — see max_reg
     // + bugs/builtin/maxmin-char-double.md.
     const Value a0 = args[0].isChar() ? toDoubleValue(args[0], mr) : args[0];
@@ -1043,7 +1045,7 @@ void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         return;
     }
     // min(A, [], 'all'[, 'linear']) — reduce over every element (see max_reg).
-    for (size_t i = 1; i < n; ++i)
+    for (keel::usize i = 1; i < n; ++i)
         if (isStringArg(args[i]) && lowercaseStr(args[i]) == "all") {
             Value flat = reshape(a0, a0.numel(), 1, 0, mr);
             auto [v, ix] = omitNan ? minOmitNan(flat, 0, mr) : min(flat, 0, mr);
@@ -1082,7 +1084,7 @@ void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         if (linear) {
             int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
             int redArr[1] = {effDim};
-            outs[1] = toLinearMaxMinIndex(idx, a0, Span<const int>(redArr, 1), mr);
+            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<int>(redArr, 1), mr);
         } else {
             outs[1] = std::move(idx);
         }
@@ -1090,26 +1092,26 @@ void min_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
 }
 
 // Generators
-void linspace_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void linspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "linspace");
     argcheck::checkNargin(args.size(), 2, 3, "linspace");
     const double a = args[0].toScalar();
     const double b = args[1].toScalar();
-    const size_t n = (args.size() >= 3)
+    const keel::usize n = (args.size() >= 3)
         ? argcheck::roundLength(args[2], 3, "n", "linspace") : 100u;
-    outs[0] = linspace(a, b, n, ctx.engine->resource());
+    outs[0] = linspace(a, b, n, ctx.engine->allocator());
 }
 
-void logspace_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void logspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "logspace");
     argcheck::checkNargin(args.size(), 2, 3, "logspace");
     const double a = args[0].toScalar();
     const double b = args[1].toScalar();
-    const size_t n = (args.size() >= 3)
+    const keel::usize n = (args.size() >= 3)
         ? argcheck::roundLength(args[2], 3, "n", "logspace") : 50u;
-    outs[0] = logspace(a, b, n, ctx.engine->resource());
+    outs[0] = logspace(a, b, n, ctx.engine->allocator());
 }
 
 // rand_reg / randn_reg moved to rng.cpp — they share a single

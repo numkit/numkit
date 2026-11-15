@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/types.hpp>
@@ -68,32 +69,32 @@ public:
     /// Single-cell write (the reactive table editor). Native cell
     /// assignment via the engine; marks the ELEMENT-dirty set — only
     /// formulas whose READ regions touch (r,c) re-run.
-    void setParamElement(const std::string &var, size_t r, size_t c,
+    void setParamElement(const std::string &var, keel::usize r, keel::usize c,
                          Value value);
 
     /// Execute the dirty statements in source order through the
     /// per-statement seam. Returns how many ran; on error, stops and
     /// keeps the remaining dirty set (see lastError()).
-    size_t evalDirty();
+    keel::usize evalDirty();
 
     /// True when something is pending for evalDirty().
     bool hasDirty() const { return !dirty_.empty(); }
 
     /// Tarjan SCCs over the dependency edges (invariant guard —
     /// expected empty while edges stay forward-only).
-    std::vector<std::vector<size_t>> detectCycles() const;
+    std::vector<std::vector<keel::usize>> detectCycles() const;
 
     const DependencyGraph &graph() const { return *graph_; }
-    size_t statementCount() const { return statements_.size(); }
+    keel::usize statementCount() const { return statements_.size(); }
     const std::string &lastError() const { return lastError_; }
 
     /// Bumped on every committed write (param/element/evalDirty) — the
     /// buffer-generation source for zero-copy array views (portion C).
-    uint64_t generation() const { return generation_; }
+    keel::u64 generation() const { return generation_; }
 
 private:
-    void markDirty(const std::vector<size_t> &indices);
-    Value runStatement(size_t index);
+    void markDirty(const std::vector<keel::usize> &indices);
+    Value runStatement(keel::usize index);
 
     Engine &engine_;
     std::shared_ptr<const std::string> src_;
@@ -109,10 +110,10 @@ private:
     // (may hold a PREVIOUS script's figures — sessions share the
     // engine). The rollback target when a dirty set starts at 0.
     FigureManager::FigureCheckpoint preScriptCp_;
-    std::set<size_t> dirty_;
+    std::set<keel::usize> dirty_;
     std::set<std::string> params_;   // externally-set variables
     std::string lastError_;
-    uint64_t generation_ = 0;
+    keel::u64 generation_ = 0;
 };
 
 }  // namespace numkit

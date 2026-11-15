@@ -8,6 +8,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/solvers.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 
@@ -22,26 +24,26 @@
 namespace numkit::linalg {
 namespace detail {
 
-void linsolve_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void linsolve_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "linsolve");
-    outs[0] = linsolve(args[0], args[1], ctx.engine->resource());
+    outs[0] = linsolve(args[0], args[1], ctx.engine->allocator());
 }
 
-void lsqminnorm_reg(Span<const Value> args, size_t /*nargout*/,
-                    Span<Value> outs, CallContext &ctx)
+void lsqminnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "lsqminnorm");
     bool have_tol = (args.size() >= 3);
     double tol = have_tol ? args[2].toScalar() : 0.0;
-    outs[0] = lsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->resource());
+    outs[0] = lsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->allocator());
 }
 
-void lsqnonneg_reg(Span<const Value> args, size_t nargout,
-                   Span<Value> outs, CallContext &ctx)
+void lsqnonneg_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "lsqnonneg");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     auto R = lsqnonneg_impl(args[0], args[1], mr);
     const bool wantSingle = (args[0].type() == ValueType::SINGLE ||
                              args[1].type() == ValueType::SINGLE);

@@ -2,6 +2,8 @@
 // CallContext adapters for io.text fileread/readlines/writelines/readmatrix/
 // writematrix. Compute is Engine-free in toolboxes/io/src/text/extras.cpp
 // (FsContext&); type lives in its own Engine-coupled TU (type.cpp).
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/text/extras.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -11,25 +13,25 @@
 
 namespace numkit::io::detail {
 
-void fileread_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void fileread_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "fileread");
     if (!args[0].isChar() && !args[0].isString())
         throw Error("fileread: requires a filename string",
                      0, 0, "fileread", "", "numkit:fileread:nargin");
-    outs[0] = fileread(ctx.engine->fsContext(), args[0].toString(), ctx.engine->resource());
+    outs[0] = fileread(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
 }
 
-void readlines_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void readlines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "readlines");
     if (!args[0].isChar() && !args[0].isString())
         throw Error("readlines: requires a filename string",
                      0, 0, "readlines", "", "numkit:readlines:nargin");
-    outs[0] = readlines(ctx.engine->fsContext(), args[0].toString(), ctx.engine->resource());
+    outs[0] = readlines(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
 }
 
-void writelines_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void writelines_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "writelines");
     if (!args[1].isChar() && !args[1].isString())
@@ -39,16 +41,16 @@ void writelines_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
     outs[0] = Value();
 }
 
-void readmatrix_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void readmatrix_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "readmatrix");
     if (!args[0].isChar() && !args[0].isString())
         throw Error("readmatrix: requires a filename string",
                      0, 0, "readmatrix", "", "numkit:readmatrix:nargin");
-    outs[0] = readmatrix(ctx.engine->fsContext(), args[0].toString(), ctx.engine->resource());
+    outs[0] = readmatrix(ctx.engine->fsContext(), args[0].toString(), ctx.engine->allocator());
 }
 
-void writematrix_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void writematrix_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "writematrix");
     if (!args[1].isChar() && !args[1].isString())

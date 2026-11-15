@@ -5,6 +5,9 @@
 // shared by the per-family plot-table builders. Extracted verbatim from the
 // helper lambdas that used to live at the top of buildPlotTable().
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 
 #include <cctype>
@@ -17,10 +20,10 @@ std::string vecToJson(const Value &v)
     std::ostringstream os;
     os << "[";
     if (v.isComplex()) {
-        for (size_t i = 0; i < v.numel(); ++i) {
+        for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i)
                 os << ",";
-            os << std::abs(v.complexData()[i]);
+            os << keel::abs(v.complexData()[i]);
         }
     } else {
         // MATLAB's plot family accepts any numeric input — logical,
@@ -30,7 +33,7 @@ std::string vecToJson(const Value &v)
         // for the other numeric types.
         const bool fastDouble = v.isDoubleScalar() || v.isHeapDouble();
         const double *fast = fastDouble ? v.doubleData() : nullptr;
-        for (size_t i = 0; i < v.numel(); ++i) {
+        for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i)
                 os << ",";
             double val = fast ? fast[i] : v.elemAsDouble(i);
@@ -46,11 +49,11 @@ std::string vecToJson(const Value &v)
     return os.str();
 }
 
-std::string makeIndexJson(std::size_t n)
+std::string makeIndexJson(keel::usize n)
 {
     std::ostringstream xs;
     xs << "[";
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         if (i)
             xs << ",";
         xs << (i + 1);
@@ -63,7 +66,7 @@ std::string argStr(const Value &v)
 {
     if (v.isCell()) {
         std::string out;
-        for (size_t i = 0; i < v.numel(); ++i) {
+        for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i) out += "\n";
             out += argStr(v.cellAt(i));
         }
@@ -71,7 +74,7 @@ std::string argStr(const Value &v)
     }
     if (v.isString()) {
         std::string out;
-        for (size_t i = 0; i < v.numel(); ++i) {
+        for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i) out += "\n";
             out += v.stringElem(i);
         }
@@ -82,9 +85,9 @@ std::string argStr(const Value &v)
     return "";
 }
 
-void parsePlotArgs(Span<const Value> args, std::size_t startIdx, DatasetInfo &ds)
+void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo &ds)
 {
-    for (size_t i = startIdx; i + 1 < args.size(); i += 2) {
+    for (keel::usize i = startIdx; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             continue;
         std::string key = args[i].toString();
@@ -97,9 +100,9 @@ void parsePlotArgs(Span<const Value> args, std::size_t startIdx, DatasetInfo &ds
     }
 }
 
-std::size_t parsePlotXYStyle(Span<const Value> args, DatasetInfo &ds)
+keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds)
 {
-    size_t nvStart = 2;
+    keel::usize nvStart = 2;
     if (args.size() >= 2 && !args[1].isChar() && !args[1].isString()) {
         ds.xJson = vecToJson(args[0]);
         ds.yJson = vecToJson(args[1]);

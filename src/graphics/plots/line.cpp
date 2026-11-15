@@ -3,6 +3,9 @@
 // graphics.line.* builders (plot / plot3 / stem / stairs / area / errorbar / semilog* / fplot / comet / geoplot / xline), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -35,8 +38,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     };
 
     reg("line", "plot",
-        [](Span<const Value> args, size_t nargout,
-                                          Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                          keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -62,7 +65,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto isData = [](const Value &v) {
                 return v.isNumeric() || v.isLogical() || v.isObject();
             };
-            size_t i = 0;
+            keel::usize i = 0;
             while (i < args.size()) {
                 DatasetInfo ds;
                 ds.type = "line";
@@ -101,15 +104,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     && (xArg->dims().rows() == 1 || xArg->dims().cols() == 1)
                     && xArg->numel() > 1
                     && yArg->dims().rows() > 1 && yArg->dims().cols() > 1) {
-                    const size_t Nx = xArg->numel();
-                    const size_t Yr = yArg->dims().rows();
-                    const size_t Yc = yArg->dims().cols();
+                    const keel::usize Nx = xArg->numel();
+                    const keel::usize Yr = yArg->dims().rows();
+                    const keel::usize Yc = yArg->dims().cols();
                     if (Yr == Nx) {
-                        for (size_t c = 0; c < Yc; ++c) {
+                        for (keel::usize c = 0; c < Yc; ++c) {
                             DatasetInfo colDs = ds;
                             std::ostringstream ys;
                             ys << '[';
-                            for (size_t r = 0; r < Yr; ++r) {
+                            for (keel::usize r = 0; r < Yr; ++r) {
                                 if (r > 0) ys << ',';
                                 ys << yArg->elemAsDouble(c * Yr + r);
                             }
@@ -119,11 +122,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                         }
                         continue;
                     } else if (Yc == Nx) {
-                        for (size_t r = 0; r < Yr; ++r) {
+                        for (keel::usize r = 0; r < Yr; ++r) {
                             DatasetInfo rowDs = ds;
                             std::ostringstream ys;
                             ys << '[';
-                            for (size_t c = 0; c < Yc; ++c) {
+                            for (keel::usize c = 0; c < Yc; ++c) {
                                 if (c > 0) ys << ',';
                                 ys << yArg->elemAsDouble(c * Yr + r);
                             }
@@ -147,8 +150,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // adapter projection.
     auto plot3Impl = [](
                          const char *typeName,
-                         Span<const Value> args, size_t nargout,
-                         Span<Value> outs, GraphicsContext &gc) {
+                         keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.size() < 3) {
             outs[0] = Value();
@@ -170,7 +173,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto isData = [](const Value &v) {
             return v.isNumeric() || v.isLogical() || v.isObject();
         };
-        size_t i = 0;
+        keel::usize i = 0;
         while (i + 2 < args.size()) {
             if (!(isData(args[i]) && isData(args[i + 1])
                   && isData(args[i + 2])))
@@ -216,14 +219,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     //      (one segment per stem, going (x,y,0) → (x,y,z))
     //   2. type='scatter3' markers at the tips.
     reg("line", "stem3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             const auto &X = args[0];
             const auto &Y = args[1];
             const auto &Z = args[2];
-            const size_t N = std::min({X.numel(), Y.numel(), Z.numel()});
+            const keel::usize N = std::min({X.numel(), Y.numel(), Z.numel()});
             if (N == 0) { outs[0] = Value(); return; }
 
             // Stems: 2 points per stem with null between stems. elemAsDouble:
@@ -231,7 +234,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // integer classes, single) to double at the boundary.
             std::ostringstream sx, sy, sz;
             sx << '['; sy << '['; sz << '[';
-            for (size_t i = 0; i < N; ++i) {
+            for (keel::usize i = 0; i < N; ++i) {
                 const double x = X.elemAsDouble(i);
                 const double y = Y.elemAsDouble(i);
                 const double z = Z.elemAsDouble(i);
@@ -252,7 +255,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // Tip markers via scatter3.
             std::ostringstream mx, my, mz;
             mx << '['; my << '['; mz << '[';
-            for (size_t i = 0; i < N; ++i) {
+            for (keel::usize i = 0; i < N; ++i) {
                 if (i) { mx << ','; my << ','; mz << ','; }
                 mx << X.elemAsDouble(i);
                 my << Y.elemAsDouble(i);
@@ -276,8 +279,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // matching length. quiver(x, y, u, v, scale) optionally scales
     // arrow lengths (default 1, packed into ds.style as "scale=N").
     reg("line", "quiver",
-        [](Span<const Value> args, size_t nargout,
-                    Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 4) {
                 outs[0] = Value();
                 return;
@@ -303,17 +306,17 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // (i, 0) and points to (i + U_i, V_i). Same scale=1 contract as
     // compass.
     reg("line", "feather",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 2) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             const auto &U = args[0];
             const auto &V = args[1];
-            const size_t N = std::min(U.numel(), V.numel());
+            const keel::usize N = std::min(U.numel(), V.numel());
             if (N == 0) { outs[0] = Value(); return; }
             std::ostringstream xs, ys, us, vs;
             xs << '['; ys << '['; us << '['; vs << '[';
-            for (size_t i = 0; i < N; ++i) {
+            for (keel::usize i = 0; i < N; ++i) {
                 if (i) { xs << ','; ys << ','; us << ','; vs << ','; }
                 xs << (i + 1);                      // origin: (1..N, 0)
                 ys << '0';
@@ -341,8 +344,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // `markerSize` is also wrong. We pack base into ds.style as
     // "base=<value>" so we don't grow the schema for one optional.
     reg("line", "area",
-        [](Span<const Value> args, size_t nargout,
-                                   Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -352,8 +355,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
 
             // Find optional baseline (last numeric scalar arg) and skip
             // line specs (char args).
-            size_t nData = args.size();
-            for (size_t i = 0; i < args.size(); ++i) {
+            keel::usize nData = args.size();
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 if (args[i].isChar()) { nData = i; break; }
             }
 
@@ -378,8 +381,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             if (!yData) { outs[0] = Value(); return; }
 
-            const size_t Yr = yData->dims().rows();
-            const size_t Yc = yData->dims().cols();
+            const keel::usize Yr = yData->dims().rows();
+            const keel::usize Yc = yData->dims().cols();
             // Stacked path: matrix Y with rows>1 AND cols>1.
             const bool stacked = (Yr > 1 && Yc > 1);
             // Palette colours for stacked series — sampled from a
@@ -423,11 +426,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // for c = Yc-1, Yc-2, ..., 0.
             std::vector<std::vector<double>> S(Yr, std::vector<double>(Yc, 0.0));
             std::vector<double> Ybuf(yData->numel());
-            for (size_t i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yData->elemAsDouble(i);
+            for (keel::usize i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yData->elemAsDouble(i);
             const double *Yp = Ybuf.data();
-            for (size_t r = 0; r < Yr; ++r) {
+            for (keel::usize r = 0; r < Yr; ++r) {
                 double acc = 0;
-                for (size_t c = 0; c < Yc; ++c) {
+                for (keel::usize c = 0; c < Yc; ++c) {
                     acc += Yp[c * Yr + r];   // column-major
                     S[r][c] = acc;
                 }
@@ -436,12 +439,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             std::ostringstream xs;
             xs << '[';
             if (xData) {
-                for (size_t r = 0; r < Yr; ++r) {
+                for (keel::usize r = 0; r < Yr; ++r) {
                     if (r) xs << ',';
                     xs << xData->elemAsDouble(r);
                 }
             } else {
-                for (size_t r = 0; r < Yr; ++r) {
+                for (keel::usize r = 0; r < Yr; ++r) {
                     if (r) xs << ',';
                     xs << (r + 1);
                 }
@@ -456,14 +459,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 ds.xJson = xJsonStr;
                 std::ostringstream ys;
                 ys << '[';
-                for (size_t r = 0; r < Yr; ++r) {
+                for (keel::usize r = 0; r < Yr; ++r) {
                     if (r) ys << ',';
-                    ys << S[r][(size_t)cc];
+                    ys << S[r][(keel::usize)cc];
                 }
                 ys << ']';
                 ds.yJson = ys.str();
                 std::ostringstream sty;
-                sty << "color=" << kStackPalette[(size_t)cc % 8];
+                sty << "color=" << kStackPalette[(keel::usize)cc % 8];
                 if (hasBase) sty << ";base=" << baseline;
                 ds.style = sty.str();
                 fm.pushDataset(std::move(ds));
@@ -475,7 +478,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // y, z, u, v, w) row becomes one arrow from (x, y, z) to
     // (x + s·u, y + s·v, z + s·w). Default scale = 1.
     reg("line", "quiver3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 6) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
@@ -506,8 +509,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // route the resulting matrices through the existing 2-D / 3-D
     // pipelines. Engine::callFunctionHandle works on both backends
     // (TW + VM) so the same body services either scripts.
-    auto fplotImpl = [](Span<const Value> args, size_t nargout,
-                        Span<Value> outs, GraphicsContext &gc) {
+    auto fplotImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.empty() || !args[0].isFuncHandle()) {
             outs[0] = Value();
@@ -531,7 +534,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             Value res;
             try {
                 res = gc.callHandle(fh,
-                    Span<const Value>(argv.data(), 1));
+                    keel::ArrayRef<Value>(argv.data(), 1));
             } catch (...) {
                 continue;       // f(x) blew up at this sample; skip
             }
@@ -556,7 +559,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("line", "fplot", fplotImpl);
-    auto ezNoop = [](Span<const Value>, size_t, Span<Value> outs, GraphicsContext &gc) {
+    auto ezNoop = [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         auto &fm = gc.fm;
         fm.prepareForPlot();
         DatasetInfo ds;
@@ -581,7 +584,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                           double ya, double yb, int N,
                           GraphicsContext &gc) {
         auto *mr = gc.mr;
-        Value Z = Value::matrix((size_t)N, (size_t)N, ValueType::DOUBLE, mr);
+        Value Z = Value::matrix((keel::usize)N, (keel::usize)N, ValueType::DOUBLE, mr);
         for (int i = 0; i < N; ++i) {
             const double y = ya + (yb - ya) * i / (double)(N - 1);
             for (int j = 0; j < N; ++j) {
@@ -592,17 +595,17 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 double r = std::nan("");
                 try {
                     Value res = gc.callHandle(fh,
-                        Span<const Value>(argv.data(), 2));
+                        keel::ArrayRef<Value>(argv.data(), 2));
                     r = res.toScalar();
                 } catch (...) { /* leave as nan */ }
-                Z.doubleDataMut()[(size_t)j * (size_t)N + (size_t)i] = r;
+                Z.doubleDataMut()[(keel::usize)j * (keel::usize)N + (keel::usize)i] = r;
             }
         }
         return Z;
     };
     reg("line", "fcontour",
-        [sampleGrid](Span<const Value> args, size_t nargout,
-                     Span<Value> outs, GraphicsContext &gc) {
+        [sampleGrid](keel::ArrayRef<Value> args, keel::usize nargout,
+                     keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || !args[0].isFuncHandle()) {
                 outs[0] = Value();
@@ -622,8 +625,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const int N = 30;
             auto *mr = gc.mr;
             Value Z = sampleGrid(args[0], xa, xb, ya, yb, N, gc);
-            Value Xv = Value::matrix(1, (size_t)N, ValueType::DOUBLE, mr);
-            Value Yv = Value::matrix(1, (size_t)N, ValueType::DOUBLE, mr);
+            Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
+            Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
             for (int j = 0; j < N; ++j)
                 Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (double)(N - 1);
             for (int i = 0; i < N; ++i)
@@ -632,12 +635,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // marching-squares body is reused as-is.
             std::array<Value, 3> proxied{ Xv, Yv, Z };
             std::array<Value, 1> outBuf;
-            if (!gc.callBuiltin("contour", Span<const Value>(proxied.data(), 3), 0,
-                                Span<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
+            if (!gc.callBuiltin("contour", keel::ArrayRef<Value>(proxied.data(), 3), 0,
+                                keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             outs[0] = Value();
         });
-    auto fSurfMeshImpl = [sampleGrid](Span<const Value> args, size_t nargout,
-                                      Span<Value> outs, GraphicsContext &gc) {
+    auto fSurfMeshImpl = [sampleGrid](keel::ArrayRef<Value> args, keel::usize nargout,
+                                      keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.empty() || !args[0].isFuncHandle()) {
             outs[0] = Value();
@@ -657,16 +660,16 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         const int N = 30;
         auto *mr = gc.mr;
         Value Z = sampleGrid(args[0], xa, xb, ya, yb, N, gc);
-        Value Xv = Value::matrix(1, (size_t)N, ValueType::DOUBLE, mr);
-        Value Yv = Value::matrix(1, (size_t)N, ValueType::DOUBLE, mr);
+        Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
+        Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
         for (int j = 0; j < N; ++j)
             Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (double)(N - 1);
         for (int i = 0; i < N; ++i)
             Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (double)(N - 1);
         std::array<Value, 3> proxied{ Xv, Yv, Z };
         std::array<Value, 1> outBuf;
-        if (!gc.callBuiltin("surf", Span<const Value>(proxied.data(), 3), 0,
-                            Span<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
+        if (!gc.callBuiltin("surf", keel::ArrayRef<Value>(proxied.data(), 3), 0,
+                            keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
         outs[0] = Value();
     };
     reg("line", "fsurf", fSurfMeshImpl);
@@ -675,7 +678,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // Mirror of fplot but with 3 function handles evaluated against a
     // shared parameter t; emits a `plot3` dataset (xJson + yJson + zJson).
     reg("line", "fplot3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 3
                 || !args[0].isFuncHandle()
@@ -704,11 +707,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 double x = std::nan(""), y = std::nan(""), z = std::nan("");
                 try {
                     x = gc.callHandle(fx,
-                        Span<const Value>(argv.data(), 1)).toScalar();
+                        keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
                     y = gc.callHandle(fy,
-                        Span<const Value>(argv.data(), 1)).toScalar();
+                        keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
                     z = gc.callHandle(fz,
-                        Span<const Value>(argv.data(), 1)).toScalar();
+                        keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
                 } catch (...) { /* point becomes NaN — JSON null */ }
                 if (i) { xs << ','; ys << ','; zs << ','; }
                 if (std::isfinite(x)) xs << x; else xs << "null";
@@ -736,16 +739,16 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // for (U, V) at integration points; integration stops when the
     // particle leaves the grid, hits a NaN cell, or stalls (|F| < eps).
     auto streamImpl = [](bool autoSlice,
-                         Span<const Value> args, size_t nargout,
-                         Span<Value> outs, GraphicsContext &gc) {
+                         keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.size() < 4) { outs[0] = Value(); return; }
         const auto &Xv = args[0];
         const auto &Yv = args[1];
         const auto &Uv = args[2];
         const auto &Vv = args[3];
-        const size_t Cx = Xv.numel();
-        const size_t Ry = Yv.numel();
+        const keel::usize Cx = Xv.numel();
+        const keel::usize Ry = Yv.numel();
         if (Cx < 2 || Ry < 2) { outs[0] = Value(); return; }
         if (Uv.dims().rows() != Ry || Uv.dims().cols() != Cx) {
             outs[0] = Value(); return;
@@ -755,17 +758,17 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         }
 
         std::vector<double> Xs(Cx), Ys(Ry);
-        for (size_t c = 0; c < Cx; ++c) Xs[c] = Xv.elemAsDouble(c);
-        for (size_t r = 0; r < Ry; ++r) Ys[r] = Yv.elemAsDouble(r);
+        for (keel::usize c = 0; c < Cx; ++c) Xs[c] = Xv.elemAsDouble(c);
+        for (keel::usize r = 0; r < Ry; ++r) Ys[r] = Yv.elemAsDouble(r);
         const double xMin = Xs.front(), xMax = Xs.back();
         const double yMin = Ys.front(), yMax = Ys.back();
         const double dxAvg = (xMax - xMin) / (double)(Cx - 1);
         const double dyAvg = (yMax - yMin) / (double)(Ry - 1);
 
-        const auto Uat = [&](size_t r, size_t c) {
+        const auto Uat = [&](keel::usize r, keel::usize c) {
             return Uv.elemAsDouble(c * Ry + r);
         };
-        const auto Vat = [&](size_t r, size_t c) {
+        const auto Vat = [&](keel::usize r, keel::usize c) {
             return Vv.elemAsDouble(c * Ry + r);
         };
 
@@ -775,10 +778,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             if (x < xMin || x > xMax || y < yMin || y > yMax) return false;
             // Locate cell index by binary search on Xs / Ys (uniform-
             // friendly but works for any monotonically-increasing grid).
-            size_t c0 = 0;
+            keel::usize c0 = 0;
             while (c0 + 1 < Cx && Xs[c0 + 1] <= x) ++c0;
             if (c0 + 1 >= Cx) c0 = Cx - 2;
-            size_t r0 = 0;
+            keel::usize r0 = 0;
             while (r0 + 1 < Ry && Ys[r0 + 1] <= y) ++r0;
             if (r0 + 1 >= Ry) r0 = Ry - 2;
             const double xL = Xs[c0], xR = Xs[c0 + 1];
@@ -823,8 +826,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             if (args.size() < 6) { outs[0] = Value(); return; }
             const auto &SX = args[4];
             const auto &SY = args[5];
-            const size_t N = std::min(SX.numel(), SY.numel());
-            for (size_t k = 0; k < N; ++k)
+            const keel::usize N = std::min(SX.numel(), SY.numel());
+            for (keel::usize k = 0; k < N; ++k)
                 seeds.emplace_back(SX.elemAsDouble(k), SY.elemAsDouble(k));
         }
 
@@ -837,7 +840,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
 
         const auto traceFrom = [&](double x0, double y0, int dir,
                                    std::ostringstream &xs,
-                                   std::ostringstream &ys, size_t &count) {
+                                   std::ostringstream &ys, keel::usize &count) {
             double x = x0, y = y0;
             for (int step = 0; step < maxSteps; ++step) {
                 double u, v;
@@ -869,13 +872,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
 
         std::ostringstream xs, ys;
         xs << '['; ys << '[';
-        size_t count = 0;
+        keel::usize count = 0;
         for (auto [sx0, sy0] : seeds) {
             // Trace forward then backward; insert a null break before
             // each new seed *and* between forward / backward halves so
             // they render as separate strokes.
             std::ostringstream fwdX, fwdY, bwdX, bwdY;
-            size_t fwdN = 0, bwdN = 0;
+            keel::usize fwdN = 0, bwdN = 0;
             traceFrom(sx0, sy0,  1, fwdX, fwdY, fwdN);
             traceFrom(sx0, sy0, -1, bwdX, bwdY, bwdN);
             if (fwdN == 0 && bwdN == 0) continue;
@@ -907,18 +910,18 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("line", "streamline",
-        [streamImpl](Span<const Value> args, size_t nargout,
-                     Span<Value> outs, GraphicsContext &gc) {
+        [streamImpl](keel::ArrayRef<Value> args, keel::usize nargout,
+                     keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             streamImpl(false, args, nargout, outs, gc);
         });
     reg("line", "streamslice",
-        [streamImpl](Span<const Value> args, size_t nargout,
-                     Span<Value> outs, GraphicsContext &gc) {
+        [streamImpl](keel::ArrayRef<Value> args, keel::usize nargout,
+                     keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             streamImpl(true, args, nargout, outs, gc);
         });
     reg("line", "stem",
-        [](Span<const Value> args, size_t nargout,
-                                          Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                          keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -927,15 +930,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.prepareForPlot();
             DatasetInfo ds;
             ds.type = "stem";
-            size_t nvStart = parsePlotXYStyle(args, ds);
+            keel::usize nvStart = parsePlotXYStyle(args, ds);
             parsePlotArgs(args, nvStart, ds);
             fm.pushDataset(std::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
     reg("line", "stairs",
-        [](Span<const Value> args, size_t nargout,
-                                          Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                          keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -944,7 +947,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.prepareForPlot();
             DatasetInfo ds;
             ds.type = "stairs";
-            size_t nvStart = parsePlotXYStyle(args, ds);
+            keel::usize nvStart = parsePlotXYStyle(args, ds);
             parsePlotArgs(args, nvStart, ds);
             fm.pushDataset(std::move(ds));
             fm.emitModified();
@@ -959,8 +962,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // eNegJson + ePosJson (asym) hold the magnitudes. The renderer
     // draws vertical bars from y-eNeg to y+ePos with caps at each end.
     reg("line", "errorbar",
-        [](Span<const Value> args, size_t nargout,
-                                                  Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                                  keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -971,13 +974,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             ds.type = "errorbar";
 
             // Find the first char arg (line spec) — everything before is data.
-            size_t nData = args.size();
-            for (size_t i = 0; i < args.size(); ++i) {
+            keel::usize nData = args.size();
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 if (args[i].isChar()) { nData = i; break; }
             }
             // Optional N/V pairs after the (optional) spec — same parser as
             // plot() handles 'LineWidth', 'MarkerSize', 'DisplayName'.
-            size_t nvStart = nData;
+            keel::usize nvStart = nData;
             if (nData < args.size() && args[nData].isChar()) {
                 ds.style = args[nData].toString();
                 nvStart = nData + 1;
@@ -1018,7 +1021,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                                 const std::string &yscale) {
         reg("line", name,
             [xscale, yscale](
-                Span<const Value> args, size_t nargout, Span<Value> outs,
+                keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 GraphicsContext &gc) {
                 (void)nargout;
                 if (args.empty()) {
@@ -1041,7 +1044,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 auto isData = [](const Value &v) {
                     return v.isNumeric() || v.isLogical() || v.isObject();
                 };
-                size_t i = 0;
+                keel::usize i = 0;
                 while (i < args.size()) {
                     DatasetInfo ds;
                     ds.type = "line";
@@ -1093,7 +1096,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     //   geobubble(lat, lon, sizes)   — sizes drive marker radius
     // ────────────────────────────────────────────────────────────────
     reg("line", "geoplot",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             geoForward("plot", a, o, gc);
         });
     // comet(x, y) / comet3(x, y, z) — animated trail. Routes to plot
@@ -1102,7 +1105,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // progressively via requestAnimationFrame (the final-state
     // figure is the full curve).
     reg("line", "comet",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             delegateTo("plot", a, o, gc);
             // Stamp the just-pushed dataset with the animation hint.
             auto &fm = gc.fm;
@@ -1116,7 +1119,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
         });
     reg("line", "comet3",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             delegateTo("plot3", a, o, gc);
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1143,14 +1146,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // through parsePlotArgs.
     // ────────────────────────────────────────────────────────────────
     reg("line", "triplot",
-        [](Span<const Value> args, size_t /*nargout*/,
-                        Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) { outs[0] = Value(); return; }
             const auto &TRI = args[0];
             const auto &xv  = args[1];
             const auto &yv  = args[2];
-            const std::size_t M = TRI.dims().rows();
-            const std::size_t N = xv.numel();
+            const keel::usize M = TRI.dims().rows();
+            const keel::usize N = xv.numel();
             if (yv.numel() != N || TRI.dims().cols() != 3 || M == 0) {
                 outs[0] = Value();
                 return;
@@ -1160,15 +1163,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
 
             // Walk TRI column-major: row i, column k → T[k*M + i] (1-based).
             std::vector<double> Tbuf(TRI.numel());
-            for (std::size_t i = 0; i < Tbuf.size(); ++i) Tbuf[i] = TRI.elemAsDouble(i);
+            for (keel::usize i = 0; i < Tbuf.size(); ++i) Tbuf[i] = TRI.elemAsDouble(i);
             const double *T = Tbuf.data();
             std::ostringstream xs, ys;
             xs << '['; ys << '[';
             bool first = true;
-            for (std::size_t i = 0; i < M; ++i) {
-                const std::size_t a = static_cast<std::size_t>(T[0 * M + i]) - 1;
-                const std::size_t b = static_cast<std::size_t>(T[1 * M + i]) - 1;
-                const std::size_t c = static_cast<std::size_t>(T[2 * M + i]) - 1;
+            for (keel::usize i = 0; i < M; ++i) {
+                const keel::usize a = static_cast<keel::usize>(T[0 * M + i]) - 1;
+                const keel::usize b = static_cast<keel::usize>(T[1 * M + i]) - 1;
+                const keel::usize c = static_cast<keel::usize>(T[2 * M + i]) - 1;
                 if (a >= N || b >= N || c >= N) continue;
                 if (!first) { xs << ",null,"; ys << ",null,"; }
                 first = false;
@@ -1183,7 +1186,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             ds.type = "line";
             ds.xJson = xs.str();
             ds.yJson = ys.str();
-            std::size_t nvStart = 3;
+            keel::usize nvStart = 3;
             if (args.size() >= 4 && args[3].isChar()) {
                 ds.style = args[3].toString();
                 nvStart = 4;
@@ -1210,25 +1213,25 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // Properly-extended infinite rays are BACKLOG.
     // ────────────────────────────────────────────────────────────────
     reg("line", "voronoi",
-        [](Span<const Value> args, size_t nargout,
-                     Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                     keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 2) { outs[0] = Value(); return; }
             const auto &xv = args[0];
             const auto &yv = args[1];
-            const size_t n = xv.numel();
+            const keel::usize n = xv.numel();
             if (yv.numel() != n || n < 3) { outs[0] = Value(); return; }
             std::vector<double> X(n), Y(n);
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 X[i] = xv.elemAsDouble(i);
                 Y[i] = yv.elemAsDouble(i);
             }
             // Same Delaunay loop as toolboxes/builtin (kept local to avoid
             // cross-lib dependency).
-            auto sa2 = [&](size_t a, size_t b, size_t c) {
+            auto sa2 = [&](keel::usize a, keel::usize b, keel::usize c) {
                 return (X[b]-X[a]) * (Y[c]-Y[a]) - (Y[b]-Y[a]) * (X[c]-X[a]);
             };
-            auto inC = [&](size_t a, size_t b, size_t c, size_t p) {
+            auto inC = [&](keel::usize a, keel::usize b, keel::usize c, keel::usize p) {
                 const double ax=X[a]-X[p], ay=Y[a]-Y[p];
                 const double bx=X[b]-X[p], by=Y[b]-Y[p];
                 const double cx=X[c]-X[p], cy=Y[c]-Y[p];
@@ -1237,16 +1240,16 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 const double c2=cx*cx+cy*cy;
                 return ax*(by*c2-cy*b2) - ay*(bx*c2-cx*b2) + a2*(bx*cy-cx*by);
             };
-            std::vector<std::array<size_t, 3>> tris;
-            for (size_t a = 0; a < n; ++a)
-                for (size_t b = a + 1; b < n; ++b)
-                    for (size_t c = b + 1; c < n; ++c) {
+            std::vector<std::array<keel::usize, 3>> tris;
+            for (keel::usize a = 0; a < n; ++a)
+                for (keel::usize b = a + 1; b < n; ++b)
+                    for (keel::usize c = b + 1; c < n; ++c) {
                         const double s = sa2(a, b, c);
-                        if (std::abs(s) < 1e-15) continue;
-                        size_t va=a, vb=b, vc=c;
+                        if (keel::abs(s) < 1e-15) continue;
+                        keel::usize va=a, vb=b, vc=c;
                         if (s < 0) std::swap(vb, vc);
                         bool ok = true;
-                        for (size_t p = 0; p < n; ++p) {
+                        for (keel::usize p = 0; p < n; ++p) {
                             if (p == va || p == vb || p == vc) continue;
                             if (inC(va, vb, vc, p) > 1e-12) { ok = false; break; }
                         }
@@ -1255,13 +1258,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // Per-triangle circumcenter.
             struct CC { double x, y; };
             std::vector<CC> ccs(tris.size());
-            for (size_t t = 0; t < tris.size(); ++t) {
+            for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
                 const double ax=X[T[0]], ay=Y[T[0]];
                 const double bx=X[T[1]], by=Y[T[1]];
                 const double cx=X[T[2]], cy=Y[T[2]];
                 const double d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
-                if (std::abs(d) < 1e-15) { ccs[t] = {0, 0}; continue; }
+                if (keel::abs(d) < 1e-15) { ccs[t] = {0, 0}; continue; }
                 const double ax2_ay2 = ax*ax + ay*ay;
                 const double bx2_by2 = bx*bx + by*by;
                 const double cx2_cy2 = cx*cx + cy*cy;
@@ -1272,7 +1275,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // both for clipping unbounded ray endpoints and (later) for
             // setting xlim/ylim on the axes.
             double xMin = X[0], xMax = X[0], yMin = Y[0], yMax = Y[0];
-            for (size_t i = 1; i < n; ++i) {
+            for (keel::usize i = 1; i < n; ++i) {
                 if (X[i] < xMin) xMin = X[i];
                 if (X[i] > xMax) xMax = X[i];
                 if (Y[i] < yMin) yMin = Y[i];
@@ -1290,11 +1293,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // by exactly 1 triangle (= convex-hull edge → unbounded
             // Voronoi cell, draw a ray) or 2 triangles (= interior
             // edge, draw the finite segment between their CCs).
-            std::map<std::pair<size_t, size_t>, std::vector<size_t>> edge2tri;
-            for (size_t t = 0; t < tris.size(); ++t) {
+            std::map<std::pair<keel::usize, keel::usize>, std::vector<keel::usize>> edge2tri;
+            for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
                 for (int e = 0; e < 3; ++e) {
-                    size_t u = T[e], v = T[(e + 1) % 3];
+                    keel::usize u = T[e], v = T[(e + 1) % 3];
                     if (u > v) std::swap(u, v);
                     edge2tri[{u, v}].push_back(t);
                 }
@@ -1315,7 +1318,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             };
 
             for (auto &kv : edge2tri) {
-                const size_t u = kv.first.first, v = kv.first.second;
+                const keel::usize u = kv.first.first, v = kv.first.second;
                 const auto &neighbors = kv.second;
                 if (neighbors.size() == 2) {
                     // Interior edge — bounded segment between two CCs.
@@ -1325,9 +1328,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 } else if (neighbors.size() == 1) {
                     // Hull edge — unbounded ray from the CC, perpendicular
                     // to the edge, going AWAY from the third triangle vertex.
-                    const size_t t = neighbors[0];
+                    const keel::usize t = neighbors[0];
                     const auto &T = tris[t];
-                    const size_t third = (T[0] != u && T[0] != v) ? T[0]
+                    const keel::usize third = (T[0] != u && T[0] != v) ? T[0]
                                        : (T[1] != u && T[1] != v) ? T[1] : T[2];
                     const double ex = X[v] - X[u], ey = Y[v] - Y[u];
                     // Perpendicular candidate (one of two normals).
@@ -1363,8 +1366,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             {
                 const bool wasHold = fm.currentAxes().holdOn;
                 fm.currentAxes().holdOn = true;
-                gc.callBuiltin("scatter", Span<const Value>(ptArgs.data(), 2), 0,
-                               Span<Value>(outBuf.data(), 1));
+                gc.callBuiltin("scatter", keel::ArrayRef<Value>(ptArgs.data(), 2), 0,
+                               keel::MutArrayRef<Value>(outBuf.data(), 1));
                 fm.currentAxes().holdOn = wasHold;
             }
             // Clamp axis to the data extent (computed above as
@@ -1385,12 +1388,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // the input matrix as one line plot across N axis indices; the
     // dedicated multi-axis "parallel" rendering is BACKLOG.
     reg("line", "parallelplot",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             const auto &T = args[0];
-            const size_t R = T.dims().rows();
-            const size_t C = T.dims().cols();
+            const keel::usize R = T.dims().rows();
+            const keel::usize C = T.dims().cols();
             if (R == 0 || C == 0) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
@@ -1399,15 +1402,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.currentAxes().holdOn = true;
             auto *mr = gc.mr;
             auto xv = Value::matrix(1, C, ValueType::DOUBLE, mr);
-            for (size_t c = 0; c < C; ++c) xv.doubleDataMut()[c] = (double)(c + 1);
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize c = 0; c < C; ++c) xv.doubleDataMut()[c] = (double)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) {
                 auto yv = Value::matrix(1, C, ValueType::DOUBLE, mr);
-                for (size_t c = 0; c < C; ++c)
+                for (keel::usize c = 0; c < C; ++c)
                     yv.doubleDataMut()[c] = T.elemAsDouble(c * R + r);
                 std::array<Value, 2> proxied{ xv, yv };
                 std::array<Value, 1> outBuf;
-                gc.callBuiltin("plot", Span<const Value>(proxied.data(), 2), 0,
-                               Span<Value>(outBuf.data(), 1));
+                gc.callBuiltin("plot", keel::ArrayRef<Value>(proxied.data(), 2), 0,
+                               keel::MutArrayRef<Value>(outBuf.data(), 1));
             }
             fm.currentAxes().holdOn = wasHold;
             outs[0] = Value();
@@ -1425,8 +1428,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     // every pan / zoom (range scan ignores these so the auto-range
     // doesn't blow up to ±∞).
     auto refLineImpl = [](const char *type) {
-        return [type](Span<const Value> args, size_t nargout,
-                      Span<Value> outs, GraphicsContext &gc) {
+        return [type](keel::ArrayRef<Value> args, keel::usize nargout,
+                      keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || !args[0].numel()) {
                 outs[0] = Value();
@@ -1435,12 +1438,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             // Vector form: emit one dataset per requested position.
-            const size_t n = args[0].numel();
+            const keel::usize n = args[0].numel();
             std::string lineSpec;
-            for (size_t i = 1; i < args.size(); ++i) {
+            for (keel::usize i = 1; i < args.size(); ++i) {
                 if (args[i].isChar()) { lineSpec = args[i].toString(); break; }
             }
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 DatasetInfo ds;
                 ds.type = type;
                 std::ostringstream xs, ys;
@@ -1458,14 +1461,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
     reg("line", "xline", refLineImpl("xline"));
     reg("line", "yline", refLineImpl("yline"));
     reg("line", "line",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             DatasetInfo ds;
             ds.type = "line";
             ds.xJson = "[0,1]";
             ds.yJson = "[0,1]";
-            size_t i = 0;
+            keel::usize i = 0;
             if (args.size() >= 2 && (args[0].isNumeric() || args[0].isLogical())
                 && (args[1].isNumeric() || args[1].isLogical())) {
                 ds.xJson = vecToJson(args[0]);

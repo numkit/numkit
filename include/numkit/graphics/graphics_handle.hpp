@@ -12,6 +12,8 @@
 //   • the builtin layer (general_reg.cpp — unified delete dispatch).
 #pragma once
 
+#include <keel/core.h>
+#include <keel/memory.h>
 #include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
 
@@ -32,7 +34,7 @@ struct GraphicsHandlePayload : public NativePayload
         p->numericValue = numericValue;
         return p;
     }
-    double asDouble() const override { return static_cast<double>(numericValue != 0 ? numericValue : handleId); }
+    keel::f64 asDouble() const override { return static_cast<keel::f64>(numericValue != 0 ? numericValue : handleId); }
 };
 
 // Registry id of a graphics-handle Value, or -1 when `v` is not one.
@@ -53,7 +55,7 @@ inline int graphicsHandleIdOf(const Value &v)
 // Handle object Value wrapping registry id `id` with MATLAB class name
 // `className` (that string is what class()/isa() report).
 inline Value makeGraphicsHandleValue(const std::string &className, int id,
-                                     std::pmr::memory_resource *mr = nullptr)
+                                     keel::Allocator *mr = nullptr)
 {
     auto st = std::make_shared<ObjectState>(mr);
     auto payload = std::make_shared<GraphicsHandlePayload>();
@@ -64,7 +66,7 @@ inline Value makeGraphicsHandleValue(const std::string &className, int id,
 
 inline Value makeGraphicsHandleValue(const std::string &className, int id,
                                      int numericVal,
-                                     std::pmr::memory_resource *mr = nullptr)
+                                     keel::Allocator *mr = nullptr)
 {
     auto st = std::make_shared<ObjectState>(mr);
     auto payload = std::make_shared<GraphicsHandlePayload>();

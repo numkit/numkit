@@ -3,6 +3,9 @@
 // graphics.layout.* builders (figure / subplot / axes / labels / limits / legend / ticks / colormap), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
@@ -39,7 +42,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     };
 
     regCore("layout", "figure",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto *mr = gc.mr;
             auto &fm = gc.fm;
@@ -66,7 +69,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value::scalar(static_cast<double>(id), mr);
         });
     regCore("layout", "close",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             if (args.empty()) {
@@ -74,7 +77,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             } else if ((args[0].isChar() || args[0].isString()) && args[0].toString() == "all") {
                 fm.closeAllNotify();
             } else if (args[0].isObject()) {
-                for (size_t k = 0; k < args[0].objectCount(); ++k) {
+                for (keel::usize k = 0; k < args[0].objectCount(); ++k) {
                     Value elem = args[0].objectSubArray({k}, gc.mr);
                     const int hid = graphicsHandleIdOf(elem);
                     if (hid < 0) continue;
@@ -87,7 +90,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                         rec->deleted = true;
                 }
             } else if (args[0].isNumeric()) {
-                for (size_t k = 0; k < args[0].numel(); ++k) {
+                for (keel::usize k = 0; k < args[0].numel(); ++k) {
                     int id = static_cast<int>(args[0].elemAsDouble(k));
                     fm.closeFigureNotify(id);
                 }
@@ -95,7 +98,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     regCore("layout", "waitbar",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)args;
             if (nargout >= 1) {
                 const int hid = gc.fm.createHandleAt(
@@ -106,13 +109,13 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
         });
     regCore("layout", "whitebg",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &) {
             (void)args;
             (void)nargout;
             outs[0] = Value();
         });
     reg("layout", "clf",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &fig = fm.current();
             // Everything drawn in this figure dies — stale handles must
@@ -132,9 +135,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     auto queryOrSetLim = [](FigureManager &fm, std::string &limJson,
-                            Span<const Value> args, size_t nargout, Span<Value> outs,
+                            keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                             char axisChar) {
-        size_t idx = (args.size() >= 1 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+        keel::usize idx = (args.size() >= 1 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
         if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() >= 2) {
             limJson = vecToJson(args[idx]);
             fm.current().modified = true;
@@ -157,9 +160,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         double lo = 0.0, hi = 1.0;
         bool parsed = false;
         if (!limJson.empty()) {
-            size_t b = limJson.find('[');
-            size_t c = limJson.find(',');
-            size_t e = limJson.find(']');
+            keel::usize b = limJson.find('[');
+            keel::usize c = limJson.find(',');
+            keel::usize e = limJson.find(']');
             if (b != std::string::npos && c != std::string::npos && e != std::string::npos && b < c && c < e) {
                 try {
                     lo = std::stod(limJson.substr(b + 1, c - b - 1));
@@ -172,10 +175,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             double dmin = 1e300, dmax = -1e300;
             for (const auto &ds : fm.currentAxes().datasets) {
                 const std::string &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
-                size_t pos = 0;
+                keel::usize pos = 0;
                 while (pos < j.size()) {
                     if (std::isdigit((unsigned char)j[pos]) || j[pos] == '-' || j[pos] == '+') {
-                        size_t endp = 0;
+                        keel::usize endp = 0;
                         try {
                             double v = std::stod(j.substr(pos), &endp);
                             if (endp > 0 && std::isfinite(v)) {
@@ -212,9 +215,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         outs[0] = std::move(res);
     };
     regCore("layout", "hold",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &ax = gc.fm.currentAxes();
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size())
                 ax.holdOn = !ax.holdOn;
             else {
@@ -224,18 +227,18 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     regCore("layout", "ishold",
-        [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             outs[0] = Value::logicalScalar(gc.fm.currentAxes().holdOn);
         });
     regCore("layout", "colordef",
-        [](Span<const Value> /*args*/, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (nargout >= 1)
                 outs[0] = Value::scalar(static_cast<double>(gc.fm.current().id));
             else
                 outs[0] = Value();
         });
     reg("layout", "subplot",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             if (args.size() == 1 && !args[0].isEmpty()) {
@@ -243,7 +246,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     if (auto *rec = fm.findHandle(hid)) {
                         if (rec->figureId > 0) fm.setFigure(rec->figureId);
                         if (rec->axesIndex >= 0 &&
-                            static_cast<size_t>(rec->axesIndex) < fm.current().axes.size()) {
+                            static_cast<keel::usize>(rec->axesIndex) < fm.current().axes.size()) {
                             fm.current().currentAxes = rec->axesIndex;
                         }
                     }
@@ -283,7 +286,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // 'TileSpacing', 'TileIndexing') are accepted but currently no-op
     // (the IDE always renders subplot cells with the same fixed gap).
     reg("layout", "tiledlayout",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             int m = 1, n = 1;
             if (args.size() >= 1 && !args[0].isChar()) m = (int)args[0].toScalar();
@@ -299,7 +302,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // (or by `span` if given a numeric arg). When the figure has no
     // tiledlayout grid yet, the call is a no-op.
     reg("layout", "nexttile",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &fig = fm.current();
@@ -323,8 +326,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "title",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx < args.size()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().title = argStr(args[idx]);
@@ -334,8 +337,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "subtitle",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx < args.size()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().subtitle = argStr(args[idx]);
@@ -345,7 +348,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "sgtitle",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty()) {
                 auto &fm = gc.fm;
                 fm.current().superTitle = argStr(args[0]);
@@ -355,8 +358,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "xlabel",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx < args.size()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().xlabel = argStr(args[idx]);
@@ -381,7 +384,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // handle object yet — deferred with the annotation IDE rendering
     // (figure-export-gaps / handle-surface-gaps).
     reg("layout", "annotation",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
             std::string type = args[0].toString();
             for (auto &c : type) c = (char)std::tolower(c);
@@ -454,7 +457,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // Name-Value scan: keys are CHAR args anywhere after the
             // geometry (fixed i+=2 desyncs when the position vector
             // shifts the parity).
-            for (size_t i = 1; i + 1 < args.size(); ++i) {
+            for (keel::usize i = 1; i + 1 < args.size(); ++i) {
                 if (!args[i].isChar())
                     continue;
                 std::string key = args[i].toString();
@@ -475,7 +478,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "text",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) { outs[0] = Value(); return; }
             const Value &xv = args[0];
             const Value &yv = args[1];
@@ -491,7 +494,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             ys << "[" << yv.elemAsDouble(0) << "]";
             ds.xJson = xs.str();
             ds.yJson = ys.str();
-            size_t strIdx = (args.size() >= 4 && args[2].isNumeric() &&
+            keel::usize strIdx = (args.size() >= 4 && args[2].isNumeric() &&
                              (args[3].isChar() || args[3].isString() || args[3].isCell())) ? 3 : 2;
             ds.label = argStr(args[strIdx]);
             std::string extras;
@@ -499,7 +502,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 if (!extras.empty()) extras += ";";
                 extras += kv;
             };
-            for (size_t i = strIdx + 1; i + 1 < args.size(); i += 2) {
+            for (keel::usize i = strIdx + 1; i + 1 < args.size(); i += 2) {
                 std::string key = argStr(args[i]);
                 for (auto &c : key) c = std::tolower(c);
                 const Value &val = args[i + 1];
@@ -530,8 +533,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "ylabel",
-        [](Span<const Value> args, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
-            size_t idx = (args.size() >= 2 && (graphicsHandleIdOf(args[0]) >= 0 || args[0].isNumeric())) ? 1 : 0;
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            keel::usize idx = (args.size() >= 2 && (graphicsHandleIdOf(args[0]) >= 0 || args[0].isNumeric())) ? 1 : 0;
             if (idx < args.size()) {
                 auto &fm = gc.fm;
                 auto &ax = fm.currentAxes();
@@ -545,17 +548,17 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "xlim",
-        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [queryOrSetLim](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             queryOrSetLim(gc.fm, gc.fm.currentAxes().xlimJson, args, nargout, outs, 'x');
         });
     reg("layout", "ylim",
-        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [queryOrSetLim](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &ax = gc.fm.currentAxes();
             std::string &lim = (ax.yyEnabled && ax.activeYside == "right") ? ax.ylim2Json : ax.ylimJson;
             queryOrSetLim(gc.fm, lim, args, nargout, outs, 'y');
         });
     reg("layout", "grid",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // MATLAB semantics:
@@ -565,7 +568,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             //   grid minor    → toggle MINOR (major untouched)
             // Major and minor are independent booleans; the script can
             // hold "minor only" (rare but valid in MATLAB).
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size()) {
                 ax.gridMajor = !ax.gridMajor;
             } else if (args[idx].isChar() || args[idx].isString()) {
@@ -604,7 +607,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         return std::string();
     };
     reg("layout", "legend",
-        [normLocation](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [normLocation](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // Walk args. Plain strings become legend labels; a `'Location'`
@@ -617,7 +620,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // frame/visibility only (MATLAB semantics). Detect up front
             // before zapping legendLabels.
             bool visibilityOnly = !args.empty();
-            for (size_t i = 0; i < args.size() && visibilityOnly; ++i) {
+            for (keel::usize i = 0; i < args.size() && visibilityOnly; ++i) {
                 if (!args[i].isChar()) { visibilityOnly = false; break; }
                 std::string s = args[i].toString();
                 std::string sl;
@@ -633,13 +636,13 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // again — but DO accept an explicit override.
             bool sawLocation = false;
             std::string newLoc;
-            for (size_t i = 0; i < args.size(); ++i) {
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 // Cell of labels — the canonical multi-legend form
                 // legend({'sine','cosine'}, 'Location', ...) — decompose
                 // into individual labels
                 // (bugs/closed/graphics/legend-cell-and-name-value.md).
                 if (args[i].isCell()) {
-                    for (size_t c = 0; c < args[i].numel(); ++c)
+                    for (keel::usize c = 0; c < args[i].numel(); ++c)
                         ax.legendLabels.push_back(argStr(args[i].cellAt(c)));
                     continue;
                 }
@@ -716,7 +719,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "colorbar",
-        [normLocation](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [normLocation](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // Default: presence of the call enables the bar at the
@@ -724,7 +727,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // can move it via 'Location', '<pos>'.
             if (ax.colorbarLocation.empty())
                 ax.colorbarLocation = "east";
-            for (size_t i = 0; i < args.size(); ++i) {
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar()) continue;
                 std::string s = args[i].toString();
                 std::string sLower;
@@ -766,7 +769,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
         });
     reg("layout", "axis",
-        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [queryOrSetLim](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -803,8 +806,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 return;
             }
             Value xl, yl;
-            queryOrSetLim(fm, ax.xlimJson, Span<const Value>{}, 1, Span<Value>(&xl, 1), 'x');
-            queryOrSetLim(fm, ax.ylimJson, Span<const Value>{}, 1, Span<Value>(&yl, 1), 'y');
+            queryOrSetLim(fm, ax.xlimJson, keel::ArrayRef<Value>{}, 1, keel::MutArrayRef<Value>(&xl, 1), 'x');
+            queryOrSetLim(fm, ax.ylimJson, keel::ArrayRef<Value>{}, 1, keel::MutArrayRef<Value>(&yl, 1), 'y');
             Value out = Value::matrix(1, 4, ValueType::DOUBLE, gc.mr);
             out.doubleDataMut()[0] = xl.elemAsDouble(0);
             out.doubleDataMut()[1] = xl.elemAsDouble(1);
@@ -816,7 +819,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // set(gca, 'XDir', 'reverse'); we ship the direct form here,
     // and `set` is on the BACKLOG.
     reg("layout", "xdir",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 std::string v = args[0].toString();
@@ -829,7 +832,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "ydir",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 std::string v = args[0].toString();
@@ -843,7 +846,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     // ── Color limits & colormap — graphics.layout ─────────────────────
     reg("layout", "caxis",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().climJson = vecToJson(args[0]);
@@ -853,7 +856,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "clim",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().climJson = vecToJson(args[0]);
@@ -863,11 +866,11 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "colormap",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 auto cm = Value::matrix(64, 3, ValueType::DOUBLE, gc.mr);
                 double *p = cm.doubleDataMut();
-                for (size_t i = 0; i < 64; ++i) {
+                for (keel::usize i = 0; i < 64; ++i) {
                     const double v = static_cast<double>(i) / 63.0;
                     p[i] = v;
                     p[64 + i] = v;
@@ -887,15 +890,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 // Numeric M×3 matrix → encode as JSON array of triplets
                 // and clear the named colormap.
                 const auto &M = args[0];
-                const std::size_t R = M.dims().rows();
-                const std::size_t C = M.dims().cols();
+                const keel::usize R = M.dims().rows();
+                const keel::usize C = M.dims().cols();
                 if (C != 3 || R == 0) {
                     outs[0] = Value();
                     return;
                 }
                 std::ostringstream os;
                 os << "[";
-                for (std::size_t r = 0; r < R; ++r) {
+                for (keel::usize r = 0; r < R; ++r) {
                     if (r) os << ",";
                     // Column-major: M(r, c) = data[c * R + r].
                     const double rv = M.elemAsDouble(0 * R + r);
@@ -917,7 +920,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // toggling after imagesc does nothing because the data is already
     // quantized).
     reg("layout", "colorscale",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             if (args.empty()) {
                 fm.currentAxes().colorScale = "linear";
@@ -937,7 +940,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // Plot) reads figure.xscale / figure.yscale to drive log-axis display.
     auto regAxisScale = [&](const char *fnName, std::string AxesState::*field) {
         reg("layout", fnName,
-            [field, fnName](Span<const Value> args, size_t nargout, Span<Value> outs,
+            [field, fnName](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                     GraphicsContext &gc) {
                 auto &fm = gc.fm;
                 std::string mode = "linear";
@@ -965,7 +968,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // life of the current axes; toggling only changes which side new
     // plots / ylim / ylabel / yscale calls write to.
     reg("layout", "yyaxis",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             std::string side = "left";
@@ -980,10 +983,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    auto noop = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+    auto noop = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         outs[0] = Value();
     };
-    auto noop_ret1 = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+    auto noop_ret1 = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         outs[0] = Value::scalar(1.0, gc.mr);
     };
     // linkaxes — connect all subplot cells in the current figure for
@@ -995,7 +998,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // unconditionally. The mode is stored on the FigureState and
     // applied by the SubplotGrid renderer.
     reg("layout", "linkaxes",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             std::string mode = "xy";  // MATLAB default when no mode arg
             for (auto &a : args) {
@@ -1022,7 +1025,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // axis-of-interaction for the 3-D renderer. MATLAB also accepts
     // these as no-arg toggles but the e2e parity tests pass strings.
     auto interactionToggle = [](std::string AxesState::*field,
-                                Span<const Value> args, Span<Value> outs,
+                                keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
                                 GraphicsContext &gc) {
         std::string mode = "on";
         if (!args.empty() && args[0].isChar()) {
@@ -1036,15 +1039,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         outs[0] = Value();
     };
     reg("layout", "rotate3d",
-        [interactionToggle](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [interactionToggle](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             interactionToggle(&AxesState::rotate3dMode, a, o, gc);
         });
     reg("layout", "pan3d",
-        [interactionToggle](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [interactionToggle](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             interactionToggle(&AxesState::pan3dMode, a, o, gc);
         });
     reg("layout", "zoom3d",
-        [interactionToggle](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [interactionToggle](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             interactionToggle(&AxesState::zoom3dMode, a, o, gc);
         });
     // xticks / yticks / zticks — set custom tick positions. Accept a
@@ -1053,8 +1056,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // auto-generated tick set; needs renderer-side query plumbing).
     auto ticksReg = [](std::string AxesState::*field,
                        bool AxesState::*autoFlag) {
-        return [field, autoFlag](Span<const Value> args, size_t nargout,
-                       Span<Value> outs, GraphicsContext &gc) {
+        return [field, autoFlag](keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1076,8 +1079,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             }
             std::ostringstream os;
             os << '[';
-            const size_t n = args[0].numel();
-            for (size_t i = 0; i < n; ++i) {
+            const keel::usize n = args[0].numel();
+            for (keel::usize i = 0; i < n; ++i) {
                 if (i) os << ',';
                 os << args[0].elemAsDouble(i);
             }
@@ -1097,8 +1100,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // multiline string. v1: cell-of-chars (most common) supported via
     // per-element toString; "auto" clears.
     auto tickLabelsReg = [](std::string AxesState::*field) {
-        return [field](Span<const Value> args, size_t nargout,
-                       Span<Value> outs, GraphicsContext &gc) {
+        return [field](keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1118,8 +1121,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // Build "[\"a\",\"b\",...]" from cell/string-array.
             std::ostringstream os;
             os << '[';
-            const size_t n = args[0].numel();
-            for (size_t i = 0; i < n; ++i) {
+            const keel::usize n = args[0].numel();
+            for (keel::usize i = 0; i < n; ++i) {
                 if (i) os << ',';
                 Value elem = args[0].elemAt(i, gc.mr);
                 std::string s = elem.isChar() ? elem.toString() : "";
@@ -1143,8 +1146,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // xtickformat / ytickformat / ztickformat — set a sprintf-style
     // format string ("%.2f", "%.0e", etc.). 'auto' clears.
     auto tickFormatReg = [](std::string AxesState::*field) {
-        return [field](Span<const Value> args, size_t nargout,
-                       Span<Value> outs, GraphicsContext &gc) {
+        return [field](keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1170,8 +1173,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "ztickformat", tickFormatReg(&AxesState::zTickFormat));
     // xtickangle / ytickangle — rotation of tick labels in degrees.
     auto tickAngleReg = [](double AxesState::*field) {
-        return [field](Span<const Value> args, size_t nargout,
-                       Span<Value> outs, GraphicsContext &gc) {
+        return [field](keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             if (args.empty()) { outs[0] = Value(); return; }
@@ -1187,8 +1190,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // aspect ratios. v1 maps the canonical [1 1 1] case to
     // axisMode='equal' (equivalent visual). Other ratios accepted but
     // currently no-op — full anisotropic stretching is BACKLOG.
-    auto aspectImpl = [](Span<const Value> args, size_t nargout,
-                         Span<Value> outs, GraphicsContext &gc) {
+    auto aspectImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         if (args.empty()) { outs[0] = Value(); return; }
@@ -1207,7 +1210,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             const double dx = args[0].elemAsDouble(0);
             const double dy = args[0].elemAsDouble(1);
             const double dz = args[0].elemAsDouble(2);
-            if (std::abs(dx - dy) < 1e-9 && std::abs(dy - dz) < 1e-9
+            if (keel::abs(dx - dy) < 1e-9 && keel::abs(dy - dz) < 1e-9
                 && fm.currentAxes().axisMode.empty()) {
                 fm.currentAxes().axisMode = "equal";
                 fm.current().modified = true;
@@ -1221,7 +1224,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // box(on|off|toggle) — show/hide the axis frame rectangle (the
     // full closed box vs. just left + bottom edges).
     reg("layout", "box",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1241,7 +1244,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // wraps the result into an axes/figure handle object
     // (matlab.graphics.axis.Axes / matlab.ui.Figure).
     reg("layout", "axes",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             // MATLAB axes(...) with no output makes the (new) axes
             // current. nk has one axes per non-subplot figure, so
             // this reduces to ensuring it exists (Position etc. no-op).
@@ -1249,12 +1252,12 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "gca",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             gc.fm.currentAxes();   // create-on-demand, like MATLAB
             outs[0] = Value();
         });
     reg("layout", "gcf",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             gc.fm.current();       // create-on-demand, like MATLAB
             outs[0] = Value();
         });
@@ -1262,7 +1265,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // also clears the per-axis config (title, xlabel, etc.). MATLAB's
     // 'reset' is opt-in; default cla preserves axes properties.
     reg("layout", "cla",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
@@ -1319,13 +1322,13 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     auto rebuildAnimatedJson = [](DatasetInfo &ds) {
         std::ostringstream xs, ys;
         xs << '[';
-        for (size_t i = 0; i < ds.animatedX.size(); ++i) {
+        for (keel::usize i = 0; i < ds.animatedX.size(); ++i) {
             if (i) xs << ',';
             xs << ds.animatedX[i];
         }
         xs << ']';
         ys << '[';
-        for (size_t i = 0; i < ds.animatedY.size(); ++i) {
+        for (keel::usize i = 0; i < ds.animatedY.size(); ++i) {
             if (i) ys << ',';
             ys << ds.animatedY[i];
         }
@@ -1334,8 +1337,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         ds.yJson = ys.str();
     };
     reg("layout", "animatedline",
-        [rebuildAnimatedJson](Span<const Value> args, size_t nargout,
-                              Span<Value> outs, GraphicsContext &gc) {
+        [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
+                              keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto *mr = gc.mr;
             auto &fm = gc.fm;
             fm.prepareForPlot();
@@ -1346,10 +1349,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.size() >= 2 && !args[0].isChar() && !args[1].isChar()) {
                 const auto &xa = args[0];
                 const auto &ya = args[1];
-                const size_t n = std::min(xa.numel(), ya.numel());
+                const keel::usize n = std::min(xa.numel(), ya.numel());
                 ds.animatedX.reserve(n);
                 ds.animatedY.reserve(n);
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     ds.animatedX.push_back(xa.elemAsDouble(i));
                     ds.animatedY.push_back(ya.elemAsDouble(i));
                 }
@@ -1364,13 +1367,13 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value::scalar((double)(ax.animatedDatasetIdx + 1), mr);
         });
     reg("layout", "addpoints",
-        [rebuildAnimatedJson](Span<const Value> args, size_t nargout,
-                              Span<Value> outs, GraphicsContext &gc) {
+        [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
+                              keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (ax.animatedDatasetIdx < 0
-                || (size_t)ax.animatedDatasetIdx >= ax.datasets.size()) {
+                || (keel::usize)ax.animatedDatasetIdx >= ax.datasets.size()) {
                 outs[0] = Value();
                 return;
             }
@@ -1378,11 +1381,11 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.size() < 3) { outs[0] = Value(); return; }
             const auto &xa = args[1];
             const auto &ya = args[2];
-            const size_t n = std::min(xa.numel(), ya.numel());
-            auto &ds = ax.datasets[(size_t)ax.animatedDatasetIdx];
+            const keel::usize n = std::min(xa.numel(), ya.numel());
+            auto &ds = ax.datasets[(keel::usize)ax.animatedDatasetIdx];
             ds.animatedX.reserve(ds.animatedX.size() + n);
             ds.animatedY.reserve(ds.animatedY.size() + n);
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 ds.animatedX.push_back(xa.elemAsDouble(i));
                 ds.animatedY.push_back(ya.elemAsDouble(i));
             }
@@ -1392,18 +1395,18 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "clearpoints",
-        [rebuildAnimatedJson](Span<const Value> args, size_t nargout,
-                              Span<Value> outs, GraphicsContext &gc) {
+        [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
+                              keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             (void)args;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (ax.animatedDatasetIdx < 0
-                || (size_t)ax.animatedDatasetIdx >= ax.datasets.size()) {
+                || (keel::usize)ax.animatedDatasetIdx >= ax.datasets.size()) {
                 outs[0] = Value();
                 return;
             }
-            auto &ds = ax.datasets[(size_t)ax.animatedDatasetIdx];
+            auto &ds = ax.datasets[(keel::usize)ax.animatedDatasetIdx];
             ds.animatedX.clear();
             ds.animatedY.clear();
             rebuildAnimatedJson(ds);
@@ -1412,19 +1415,19 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "getpoints",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)args;
             auto *mr = gc.mr;
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (ax.animatedDatasetIdx < 0
-                || (size_t)ax.animatedDatasetIdx >= ax.datasets.size()) {
+                || (keel::usize)ax.animatedDatasetIdx >= ax.datasets.size()) {
                 outs[0] = Value();
                 if (nargout >= 2) outs[1] = Value();
                 return;
             }
-            const auto &ds = ax.datasets[(size_t)ax.animatedDatasetIdx];
-            const size_t n = ds.animatedX.size();
+            const auto &ds = ax.datasets[(keel::usize)ax.animatedDatasetIdx];
+            const keel::usize n = ds.animatedX.size();
             auto xv = Value::matrix(1, n, ValueType::DOUBLE, mr);
             auto yv = Value::matrix(1, n, ValueType::DOUBLE, mr);
             if (n > 0) {
@@ -1440,7 +1443,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // every modification; drawnow just bumps modified + emits to be
     // safe (idempotent if already up-to-date).
     reg("layout", "drawnow",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)args; (void)nargout;
             auto &fm = gc.fm;
             fm.current().modified = true;
@@ -1449,9 +1452,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     // zlabel(text) — 3-D Z-axis label.
     reg("layout", "zlabel",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.currentAxes().zlabel = argStr(args[idx]);
@@ -1461,7 +1464,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         });
     // zlim([z0, z1]) — 3-D Z-axis limits.
     reg("layout", "zlim",
-        [queryOrSetLim](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [queryOrSetLim](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             queryOrSetLim(gc.fm, gc.fm.currentAxes().zlimJson, args, nargout, outs, 'z');
         });
     // view(az, el) — set the 3-D camera azimuth/elevation in degrees.
@@ -1469,14 +1472,14 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // accepted (view([az, el])). The renderer reads cfg.view on mount
     // of Composite3DPlot. Stash on AxesState so it survives prepareForPlot.
     reg("layout", "view",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             double az = 0, el = 0;
             bool ok = false;
             // view(2) / view(3) — preset top-down / default 3-D views.
-            size_t idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
+            keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size()) { outs[0] = Value(); return; }
             if (args.size() - idx == 1 && args[idx].numel() == 1 && !args[idx].isChar()) {
                 const int n = (int)args[idx].toScalar();
@@ -1565,7 +1568,7 @@ void FigureManager::restoreFigures(const FigureCheckpoint &cp)
     }
     for (auto &[id, fig] : figures_) {
         const auto *snaps = find(id);
-        for (size_t i = 0; i < fig.axes.size(); ++i) {
+        for (keel::usize i = 0; i < fig.axes.size(); ++i) {
             auto &ax = fig.axes[i];
             if (snaps && i < snaps->size()) {
                 const auto &s = (*snaps)[i];

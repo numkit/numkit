@@ -2,63 +2,64 @@
 //
 // Registration for numkit::builtin pure datatypes, conversions, and predicates.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/builtin/datatypes.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 // Each registered adapter in datatypes/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
-void allfinite_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void anymissing_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void anynan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cast_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void double_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void flintmax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void int16_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void int32_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void int64_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void int8_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void intmax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void intmin_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void iscell_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ischar_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void iscolumn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isempty_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isequal_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isequaln_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isfinite_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isfloat_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isinf_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isinteger_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void islogical_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ismatrix_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ismissing_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isnan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isnumeric_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isreal_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isrow_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isscalar_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issingle_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issorted_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issortedrows_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void issparse_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isstring_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isstruct_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isuniform_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void isvector_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void logical_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void realmax_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void realmin_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void single_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void standardizeMissing_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void swapbytes_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void typecast_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uint16_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uint32_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uint64_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uint8_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void allfinite_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void anymissing_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void anynan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cast_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void double_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void flintmax_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void int16_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void int32_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void int64_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void int8_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void intmax_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void intmin_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void iscell_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ischar_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void iscolumn_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isempty_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isequal_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isequaln_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isfinite_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isfloat_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isinf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isinteger_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void islogical_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ismatrix_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ismissing_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isnan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isnumeric_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isreal_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isrow_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isscalar_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issingle_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issorted_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issortedrows_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void issparse_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isstring_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isstruct_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isuniform_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void isvector_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void logical_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void realmax_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void realmin_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void single_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void standardizeMissing_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void swapbytes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void typecast_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uint16_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uint32_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uint64_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uint8_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
 namespace numkit::builtin::detail {

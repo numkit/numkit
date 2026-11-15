@@ -1,6 +1,7 @@
 // include/environment.hpp
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/value/value.hpp>
 #include <functional>
 #include <memory>
@@ -115,14 +116,14 @@ public:
 
 private:
     // Small buffer: inline storage for first N variables (avoids unordered_map for small scopes)
-    static constexpr size_t SBO_SLOTS = 8;
+    static constexpr keel::usize SBO_SLOTS = 8;
     struct Slot
     {
         std::string name;
         Value value;
     };
     Slot sbo_[SBO_SLOTS];
-    size_t sboCount_ = 0;
+    keel::usize sboCount_ = 0;
 
     // Overflow map for large scopes
     std::unordered_map<std::string, Value> vars_;

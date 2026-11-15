@@ -1,8 +1,11 @@
 // src/engine.cpp
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
-#include <numkit/core/caching_memory_resource.hpp>
+#include <numkit/core/caching_allocator.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
@@ -54,13 +57,13 @@ const std::unordered_set<std::string> kBuiltinNames = makeBuiltinNamesUnion();
 // ============================================================
 // Construction
 // ============================================================
-// No explicit resource → recycle large transient buffers through a
-// process-wide cache (see caching_memory_resource.hpp). Embedders that supply
-// their own resource are used as-is and never wrapped.
-Engine::Engine() : Engine(numkit::defaultCachedResource()) {}
+// No explicit allocator → recycle large transient buffers through a
+// process-wide cache (see caching_allocator.hpp). Embedders that supply
+// their own allocator are used as-is and never wrapped.
+Engine::Engine() : Engine(numkit::defaultCachedAllocator()) {}
 
-Engine::Engine(std::pmr::memory_resource *mr)
-    : mr_(mr ? mr : numkit::defaultCachedResource())
+Engine::Engine(keel::Allocator *mr)
+    : mr_(mr ? mr : numkit::defaultCachedAllocator())
 {
     globalsEnv_ = std::make_shared<Environment>();
     constantsEnv_ = std::make_unique<Environment>(nullptr, globalsEnv_.get());
@@ -249,7 +252,7 @@ std::string Engine::formatObjectDisplay(const std::string &name, const Value &ob
 {
     const BuiltinClass *cls = findClass(obj.objectClassName());
     std::string body;
-    const size_t n = obj.objectCount();
+    const keel::usize n = obj.objectCount();
     if (cls && cls->dispText) {
         body = cls->dispText(obj);
     }
@@ -286,7 +289,7 @@ void Engine::displayObject(const std::string &name, const Value &obj)
             Value self = obj;
             Value outBuf[1];
             CallContext ctx{this, workspaceEnv_.get()};
-            m(self, Span<const Value>(nullptr, 0), /*nargout=*/0, Span<Value>(outBuf, 1), ctx);
+            m(self, keel::ArrayRef<Value>(nullptr, 0), /*nargout=*/0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
         };
         // `display` owns the entire output (including any variable-name line).
         if (auto it = cls->methods.find("display"); it != cls->methods.end()) {
@@ -370,7 +373,7 @@ bool Engine::tryObjectBinaryOp(const std::string &op, const Value &lhs, const Va
             Value operands[2] = {lhs, rhs};   // args in source order
             Value res[1];
             CallContext ctx{this, env};
-            it->second(self, Span<const Value>(operands, 2), 1, Span<Value>(res, 1), ctx);
+            it->second(self, keel::ArrayRef<Value>(operands, 2), 1, keel::MutArrayRef<Value>(res, 1), ctx);
             out = std::move(res[0]);
             return true;
         }
@@ -392,7 +395,7 @@ bool Engine::tryObjectUnaryOp(const std::string &op, const Value &operand,
             Value self = operand;
             Value res[1];
             CallContext ctx{this, env};
-            it->second(self, Span<const Value>(nullptr, 0), 1, Span<Value>(res, 1), ctx);
+            it->second(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(res, 1), ctx);
             out = std::move(res[0]);
             return true;
         }
@@ -485,10 +488,10 @@ const BytecodeChunk *Engine::resolveUnaryOpChunk(const std::string &op, const Va
 
 // Defined below; forward-declared so the subsref/subsasgn resolvers (which run
 // before its definition) can marshal the substruct argument.
-static Value buildSubsStruct(const char *type, Span<const Value> subscripts,
-                             std::pmr::memory_resource *mr);
+static Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
+                             keel::Allocator *mr);
 
-const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, Span<const Value> idx,
+const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayRef<Value> idx,
                                                  std::string &ownerClassOut,
                                                  std::vector<Value> &argsOut)
 {
@@ -501,7 +504,7 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, Span<const V
     const BytecodeChunk *cc = ensureClassMethodChunk(*it->second);
     if (!cc)
         return nullptr;
-    Value s = buildSubsStruct("()", idx, resource());
+    Value s = buildSubsStruct("()", idx, allocator());
     argsOut.clear();
     argsOut.reserve(2);
     argsOut.push_back(self);          // subsref(obj, S)
@@ -510,7 +513,7 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, Span<const V
     return cc;
 }
 
-const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, Span<const Value> idxAndVal,
+const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::ArrayRef<Value> idxAndVal,
                                                   std::string &ownerClassOut,
                                                   std::vector<Value> &argsOut)
 {
@@ -524,8 +527,8 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, Span<const 
     if (!cc)
         return nullptr;
     // Hook convention: idxAndVal = [subscripts…, value] (value last).
-    const size_t nsub = idxAndVal.empty() ? 0 : idxAndVal.size() - 1;
-    Value s = buildSubsStruct("()", Span<const Value>(idxAndVal.data(), nsub), resource());
+    const keel::usize nsub = idxAndVal.empty() ? 0 : idxAndVal.size() - 1;
+    Value s = buildSubsStruct("()", keel::ArrayRef<Value>(idxAndVal.data(), nsub), allocator());
     argsOut.clear();
     argsOut.reserve(3);
     argsOut.push_back(self);          // subsasgn(obj, S, val)
@@ -535,7 +538,7 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, Span<const 
     return cc;
 }
 
-bool Engine::tryObjectSubsref(Value &self, Span<const Value> args, std::size_t nargout,
+bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                               Value &out, Environment *env)
 {
     const BuiltinClass *cls = findClass(self.objectClassName());
@@ -543,12 +546,12 @@ bool Engine::tryObjectSubsref(Value &self, Span<const Value> args, std::size_t n
         return false;
     Value res[1];
     CallContext ctx{this, env};
-    cls->subsref(self, args, nargout, Span<Value>(res, 1), ctx);
+    cls->subsref(self, args, nargout, keel::MutArrayRef<Value>(res, 1), ctx);
     out = std::move(res[0]);
     return true;
 }
 
-void Engine::objectStoreSlice(Value &dst, const std::vector<std::vector<size_t>> &perDim,
+void Engine::objectStoreSlice(Value &dst, const std::vector<std::vector<keel::usize>> &perDim,
                               const Value &val, Environment *env)
 {
     const std::string &clsName = dst.isObject() ? dst.objectClassName() : val.objectClassName();
@@ -559,18 +562,18 @@ void Engine::objectStoreSlice(Value &dst, const std::vector<std::vector<size_t>>
         if (st && st->native && st->native->fromScalarDouble(0.0) != nullptr) {
             CallContext ctx{this, env};
             Value argBuf[1] = {val};
-            coercedVal = cls->construct(Span<const Value>(argBuf, 1), ctx);
+            coercedVal = cls->construct(keel::ArrayRef<Value>(argBuf, 1), ctx);
         }
     }
     Value fill; // default element for grown gaps (class no-arg constructor)
     if (cls && cls->construct) {
         CallContext ctx{this, env};
-        fill = cls->construct(Span<const Value>(nullptr, 0), ctx);
+        fill = cls->construct(keel::ArrayRef<Value>(nullptr, 0), ctx);
     }
     if (perDim.size() == 1)
-        dst.objectAssignLinear(perDim[0], coercedVal, fill, resource());
+        dst.objectAssignLinear(perDim[0], coercedVal, fill, allocator());
     else
-        dst.objectAssignND(perDim, coercedVal, fill, resource());
+        dst.objectAssignND(perDim, coercedVal, fill, allocator());
 }
 
 // ── classdef → BuiltinClass adapter ──────────────────────────
@@ -686,7 +689,7 @@ static BlockAccess parseBlockAccess(const std::vector<std::string> &attrs)
 {
     BlockAccess ba;
     auto valueOf = [&](const char *key) -> const std::string * {
-        for (size_t i = 0; i + 1 < attrs.size(); ++i)
+        for (keel::usize i = 0; i + 1 < attrs.size(); ++i)
             if (attrs[i] == key)
                 return &attrs[i + 1];
         return nullptr;
@@ -761,11 +764,11 @@ static const PropInfo *findProp(const ClassDefDesc &d, const std::string &name)
 // method: a 1×1 struct with `.type` (e.g. "()") and `.subs` (a 1×N cell of
 // the subscripts). Our object index hooks only fire for paren-indexing, so
 // the type is always "()".
-static Value buildSubsStruct(const char *type, Span<const Value> subscripts,
-                             std::pmr::memory_resource *mr)
+static Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
+                             keel::Allocator *mr)
 {
     Value subs = Value::cell(1, subscripts.size(), mr);
-    for (size_t i = 0; i < subscripts.size(); ++i)
+    for (keel::usize i = 0; i < subscripts.size(); ++i)
         subs.cellAt(i) = subscripts[i];
     Value s = Value::structure(mr);
     s.setField(0, "type", Value::fromString(type, mr));
@@ -1093,14 +1096,14 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         Access acc = si.access;
         std::string decl = si.declClass, mn = sname;
         registerFunction(desc->name, sname,
-                         [uf, acc, decl, mn](Span<const Value> args, size_t nargout,
-                                             Span<Value> outs, CallContext &ctx) {
+                         [uf, acc, decl, mn](keel::ArrayRef<Value> args, keel::usize nargout,
+                                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
                              if (acc != Access::Public)
                                  enforceAccess(ctx.engine, acc, decl, "method", mn);
-                             const size_t nout = std::max<size_t>(nargout, 1);
+                             const keel::usize nout = std::max<keel::usize>(nargout, 1);
                              auto results = ctx.engine->invokeClassMethod(*uf, args, nout);
-                             const size_t writeN = std::min(nout, results.size());
-                             for (size_t i = 0; i < writeN && i < outs.size(); ++i)
+                             const keel::usize writeN = std::min(nout, results.size());
+                             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                                  outs[i] = std::move(results[i]);
                          });
     }
@@ -1111,7 +1114,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         Access getLvl = p.getAccess;
         std::string decl = p.declClass, pn = p.name;
         registerFunction(desc->name, p.name,
-                         [cval, getLvl, decl, pn](Span<const Value>, size_t, Span<Value> outs,
+                         [cval, getLvl, decl, pn](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                                   CallContext &ctx) {
                              if (getLvl != Access::Public)
                                  enforceAccess(ctx.engine, getLvl, decl, "property", pn);
@@ -1182,7 +1185,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             ctx.engine->pushPropAccessor(git->second->name);
             AccessorGuard guard{ctx.engine};
             auto r = ctx.engine->invokeClassMethod(*git->second,
-                                                   Span<const Value>(&self, 1), 1);
+                                                   keel::ArrayRef<Value>(&self, 1), 1);
             out = r.empty() ? Value() : std::move(r[0]);
             return true;
         }
@@ -1222,7 +1225,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             AccessorGuard guard{ctx.engine};
             Value callArgs[2] = {self, val};
             auto r = ctx.engine->invokeClassMethod(*sit->second,
-                                                   Span<const Value>(callArgs, 2), 1);
+                                                   keel::ArrayRef<Value>(callArgs, 2), 1);
             if (!r.empty() && r[0].isObject())
                 self = std::move(r[0]);
             return true;
@@ -1230,7 +1233,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         self.objectStateMut()->props[name] = val;
         return true;
     };
-    cls.construct = [desc](Span<const Value> args, CallContext &ctx) -> Value {
+    cls.construct = [desc](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
         Value obj = ctx.engine->makeDefaultInstance(desc->name);
         if (desc->ctor)
             obj = ctx.engine->invokeClassCtor(*desc->ctor, obj, args);
@@ -1247,8 +1250,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             mdecl = mit->second.declClass;
         }
         cls.methods[mname] = [ufCopy, nameCopy, mlevel, mdecl](
-                                 Value &self, Span<const Value> args, size_t nargout,
-                                 Span<Value> outs, CallContext &ctx) {
+                                 Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
+                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (mlevel != Access::Public)
                 enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
             std::vector<Value> callArgs;
@@ -1256,13 +1259,13 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             callArgs.push_back(self); // MATLAB: obj is the first parameter
             for (const auto &a : args)
                 callArgs.push_back(a);
-            const size_t nout = std::max<size_t>(nargout, 1);
+            const keel::usize nout = std::max<keel::usize>(nargout, 1);
             auto results = ctx.engine->invokeClassMethod(
-                *ufCopy, Span<const Value>(callArgs.data(), callArgs.size()), nout);
+                *ufCopy, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
             // Always produce at least one output (the `ans`/expression value
             // when called with nargout==0), bounded by the outs span.
-            const size_t writeN = std::min(nout, results.size());
-            for (size_t i = 0; i < writeN && i < outs.size(); ++i)
+            const keel::usize writeN = std::min(nout, results.size());
+            for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = std::move(results[i]);
         };
         // Operator-overload method (plus/minus/eq/uminus/…): also wire it into
@@ -1273,8 +1276,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         if (isOperatorMethodName(mname)) {
             auto ufOp = uf;
             cls.ops[mname] = [ufOp, nameCopy, mlevel, mdecl](
-                                 Value &self, Span<const Value> args, size_t nargout,
-                                 Span<Value> outs, CallContext &ctx) {
+                                 Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
+                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 if (mlevel != Access::Public)
                     enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
                 std::vector<Value> callArgs;
@@ -1282,11 +1285,11 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                     callArgs.push_back(self); // unary: operand came as self
                 else
                     callArgs.assign(args.begin(), args.end()); // binary: [lhs, rhs]
-                const size_t nout = std::max<size_t>(nargout, 1);
+                const keel::usize nout = std::max<keel::usize>(nargout, 1);
                 auto results = ctx.engine->invokeClassMethod(
-                    *ufOp, Span<const Value>(callArgs.data(), callArgs.size()), nout);
-                const size_t writeN = std::min(nout, results.size());
-                for (size_t i = 0; i < writeN && i < outs.size(); ++i)
+                    *ufOp, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
+                const keel::usize writeN = std::min(nout, results.size());
+                for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                     outs[i] = std::move(results[i]);
             };
         }
@@ -1298,27 +1301,27 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // property / cell semantics — only `()` routes through these.)
     if (auto it = desc->methods.find("subsref"); it != desc->methods.end()) {
         auto uf = it->second;
-        cls.subsref = [uf](Value &self, Span<const Value> args, size_t nargout, Span<Value> outs,
+        cls.subsref = [uf](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                            CallContext &ctx) {
-            Value s = buildSubsStruct("()", args, ctx.engine->resource());
+            Value s = buildSubsStruct("()", args, ctx.engine->allocator());
             Value callArgs[2] = {self, s};
-            const size_t nout = std::max<size_t>(nargout, 1);
-            auto results = ctx.engine->invokeClassMethod(*uf, Span<const Value>(callArgs, 2), nout);
-            const size_t writeN = std::min(nout, results.size());
-            for (size_t i = 0; i < writeN && i < outs.size(); ++i)
+            const keel::usize nout = std::max<keel::usize>(nargout, 1);
+            auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 2), nout);
+            const keel::usize writeN = std::min(nout, results.size());
+            for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = std::move(results[i]);
         };
     }
     if (auto it = desc->methods.find("subsasgn"); it != desc->methods.end()) {
         auto uf = it->second;
-        cls.subsasgn = [uf](Value &self, Span<const Value> args, size_t, Span<Value>,
+        cls.subsasgn = [uf](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
                             CallContext &ctx) {
             // Hook convention: args = [subscripts…, value] (value last).
-            const size_t nsub = args.empty() ? 0 : args.size() - 1;
-            Value s = buildSubsStruct("()", Span<const Value>(args.data(), nsub),
-                                      ctx.engine->resource());
+            const keel::usize nsub = args.empty() ? 0 : args.size() - 1;
+            Value s = buildSubsStruct("()", keel::ArrayRef<Value>(args.data(), nsub),
+                                      ctx.engine->allocator());
             Value callArgs[3] = {self, s, nsub < args.size() ? args[nsub] : Value()};
-            auto results = ctx.engine->invokeClassMethod(*uf, Span<const Value>(callArgs, 3), 1);
+            auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 3), 1);
             // Value class: subsasgn returns the modified object → write back.
             // Handle class: it mutates shared state in place (write-back of the
             // returned handle is harmless).
@@ -1347,7 +1350,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // `Color.Red == Color.Red`), and display as that name — unless the class
     // defines its own eq / disp.
     if (desc->isEnum) {
-        auto enumEq = [](Value &, Span<const Value> args, size_t, Span<Value> outs,
+        auto enumEq = [](Value &, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                          CallContext &ctx) {
             bool eq = false;
             if (args.size() == 2 && args[0].isObject() && args[1].isObject()
@@ -1356,16 +1359,16 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 const auto *b = args[1].objectStateConst();
                 eq = a && b && !a->enumName.empty() && a->enumName == b->enumName;
             }
-            outs[0] = Value::logicalScalar(eq, ctx.engine->resource());
+            outs[0] = Value::logicalScalar(eq, ctx.engine->allocator());
         };
         if (!cls.ops.count("eq"))
             cls.ops["eq"] = enumEq;
         if (!cls.ops.count("ne"))
-            cls.ops["ne"] = [enumEq](Value &self, Span<const Value> args, size_t no,
-                                     Span<Value> outs, CallContext &ctx) {
+            cls.ops["ne"] = [enumEq](Value &self, keel::ArrayRef<Value> args, keel::usize no,
+                                     keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 enumEq(self, args, no, outs, ctx);
                 if (!outs.empty())
-                    outs[0] = Value::logicalScalar(!outs[0].toBool(), ctx.engine->resource());
+                    outs[0] = Value::logicalScalar(!outs[0].toBool(), ctx.engine->allocator());
             };
         if (!desc->methods.count("disp") && !desc->methods.count("display"))
             cls.dispText = [](const Value &self) -> std::string {
@@ -1391,11 +1394,11 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 for (const auto &a : child->children)
                     args.push_back(evalConstExpr(a.get()));
                 CallContext ctx{this, workspaceEnv_.get()};
-                Value inst = ecls->construct(Span<const Value>(args.data(), args.size()), ctx);
+                Value inst = ecls->construct(keel::ArrayRef<Value>(args.data(), args.size()), ctx);
                 if (inst.isObject())
                     inst.objectStateMut()->enumName = child->strValue;
                 registerFunction(desc->name, child->strValue,
-                                 [inst](Span<const Value>, size_t, Span<Value> outs,
+                                 [inst](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                         CallContext &) { outs[0] = inst; });
             }
         }
@@ -1480,8 +1483,8 @@ struct ClassCtxGuard
 };
 } // namespace
 
-std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, Span<const Value> args,
-                                             size_t nout)
+std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+                                             keel::usize nout)
 {
     // Under the VM backend, run the body on the VM (P4) so C++-initiated
     // classdef callbacks — operator methods, subsref/subsasgn, custom
@@ -1495,7 +1498,7 @@ std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, Span<const 
         const BytecodeChunk *cc = ensureClassMethodChunk(uf);
         if (!cc)
             throw std::runtime_error("Failed to compile classdef method '" + uf.name + "'");
-        return vm_->callReentrant(*cc, args, std::max<size_t>(nout, 1), uf.ownerClass,
+        return vm_->callReentrant(*cc, args, std::max<keel::usize>(nout, 1), uf.ownerClass,
                                   /*isCtor=*/false);
     }
     if (treeWalker_) {
@@ -1506,7 +1509,7 @@ std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, Span<const 
 }
 
 Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
-                              Span<const Value> args)
+                              keel::ArrayRef<Value> args)
 {
     if (backend_ == Backend::VM) {
         if (!vm_)
@@ -1546,7 +1549,7 @@ Value Engine::evalConstExpr(const ASTNode *expr)
         BytecodeChunk chunk = compiler_->compileFunction(&fn);
         vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
                               &compiler_->scriptLocalCompiledFuncs());
-        auto r = vm_->callReentrant(chunk, Span<const Value>{}, 1);
+        auto r = vm_->callReentrant(chunk, keel::ArrayRef<Value>{}, 1);
         return r.empty() ? Value::Empty : std::move(r[0]);
     }
     if (treeWalker_)
@@ -1638,7 +1641,7 @@ void Engine::enforcePropSetAccess(const std::string &className, const std::strin
 }
 
 Value Engine::superConstruct(const std::string &base, const Value &seed,
-                             Span<const Value> args)
+                             keel::ArrayRef<Value> args)
 {
     auto it = classDefs_.find(base);
     if (it == classDefs_.end())
@@ -1652,7 +1655,7 @@ Value Engine::superConstruct(const std::string &base, const Value &seed,
 }
 
 std::vector<Value> Engine::superMethod(const std::string &base, const std::string &method,
-                                       Span<const Value> args, size_t nout)
+                                       keel::ArrayRef<Value> args, keel::usize nout)
 {
     auto it = classDefs_.find(base);
     if (it == classDefs_.end())
@@ -1731,7 +1734,7 @@ void Engine::enforceCtorAccess(const std::string &className)
     }
 }
 
-Value Engine::constructChecked(const BuiltinClass *cls, Span<const Value> args, CallContext &ctx)
+Value Engine::constructChecked(const BuiltinClass *cls, keel::ArrayRef<Value> args, CallContext &ctx)
 {
     enforceCtorAccess(cls->name);
     return cls->construct(args, ctx);
@@ -2063,7 +2066,7 @@ const ExternalFunc *Engine::findExternal(const std::string &name,
                     auto dot = full.find('.');
                     std::string topNs = (dot != std::string::npos)
                                           ? full.substr(0, dot) : full;
-                    for (size_t i = 0; i < namespaceOrder_.size(); ++i)
+                    for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
                         if (namespaceOrder_[i] == topNs)
                             return static_cast<int>(i);
                     return static_cast<int>(namespaceOrder_.size());
@@ -2142,7 +2145,7 @@ std::string Engine::bareNameSource(const std::string &name) const
         auto dot = full.find('.');
         std::string topNs = (dot != std::string::npos)
                               ? full.substr(0, dot) : full;
-        for (size_t i = 0; i < namespaceOrder_.size(); ++i)
+        for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
             if (namespaceOrder_[i] == topNs)
                 return static_cast<int>(i);
         return static_cast<int>(namespaceOrder_.size());
@@ -2281,9 +2284,9 @@ const UserFunction *Engine::lookupUserFunction(const std::string &name,
 void Engine::addPath(const std::string &dir)
 {
     if (dir.find(';') != std::string::npos) {
-        size_t start = 0;
+        keel::usize start = 0;
         while (start <= dir.size()) {
-            size_t pos = dir.find(';', start);
+            keel::usize pos = dir.find(';', start);
             std::string part = (pos == std::string::npos)
                 ? dir.substr(start)
                 : dir.substr(start, pos - start);
@@ -2316,9 +2319,9 @@ void Engine::addPath(const std::string &dir)
 void Engine::rmPath(const std::string &dir)
 {
     if (dir.find(';') != std::string::npos) {
-        size_t start = 0;
+        keel::usize start = 0;
         while (start <= dir.size()) {
-            size_t pos = dir.find(';', start);
+            keel::usize pos = dir.find(';', start);
             std::string part = (pos == std::string::npos)
                 ? dir.substr(start)
                 : dir.substr(start, pos - start);
@@ -2587,7 +2590,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
     std::string leafName = name;
     std::string nsPrefix;            // "+pkg/+sub/" form, empty for unqualified
     {
-        size_t dot = name.find('.');
+        keel::usize dot = name.find('.');
         if (dot != std::string::npos) {
             std::string tail = name;
             while ((dot = tail.find('.')) != std::string::npos) {
@@ -2725,7 +2728,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // lookups keep working transitively through function calls.
         std::string scriptDir;
         {
-            size_t slash = rp.path.find_last_of("/\\");
+            keel::usize slash = rp.path.find_last_of("/\\");
             if (slash == 0)
                 scriptDir.assign(1, rp.path[0]);
             else if (slash != std::string::npos)
@@ -2751,7 +2754,7 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // three now agree (clear/rehash evict cleanly).
                 registerClassDefFrom(classDef, name, rp.fs->name(), scriptDir, rp.path);
                 const std::string cn = name;
-                registerFunction(name, [cn](Span<const Value> args, size_t, Span<Value> outs,
+                registerFunction(name, [cn](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                                             CallContext &ctx) {
                     const BuiltinClass *c = ctx.engine->findClass(cn);
                     if (!c || !c->construct)
@@ -2779,8 +2782,8 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 const std::string sPath = rp.path;
                 auto srcPtr = std::make_shared<const std::string>(std::move(content));
                 registerFunction(name, [scriptName, fsName, sDir, sPath, srcPtr](
-                                           Span<const Value> args, size_t nargout,
-                                           Span<Value> outs, CallContext &ctx) {
+                                           keel::ArrayRef<Value> args, keel::usize nargout,
+                                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
                     if (!args.empty() || nargout > 0)
                         throw Error("Attempt to execute SCRIPT " + scriptName + " as a function.",
                                     0, 0, scriptName, "", "numkit:script:CalledAsFunction");
@@ -2936,7 +2939,7 @@ bool Engine::hasCallableName(const std::string &name) const
 }
 
 Value Engine::callFunctionHandle(const Value &handle,
-                                  Span<const Value> args,
+                                  keel::ArrayRef<Value> args,
                                   Environment *env)
 {
     auto results = callFunctionHandleMulti(handle, args, 1, env);
@@ -2944,8 +2947,8 @@ Value Engine::callFunctionHandle(const Value &handle,
 }
 
 std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
-                                                    Span<const Value> args,
-                                                    size_t nout,
+                                                    keel::ArrayRef<Value> args,
+                                                    keel::usize nout,
                                                     Environment *env)
 {
     if (!handle.isFuncHandle())
@@ -2966,20 +2969,20 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
 
     std::vector<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
-        const std::size_t ncaps = handle.funcHandleCaptureCount();
+        const keel::usize ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
         for (const auto &a : args)
             withCaptures.push_back(a);
-        for (std::size_t i = 0; i < ncaps; ++i)
+        for (keel::usize i = 0; i < ncaps; ++i)
             withCaptures.push_back(handle.funcHandleCapture(i));
-        args = Span<const Value>(withCaptures.data(), withCaptures.size());
+        args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
     const std::string name = handle.funcHandleName();
 
     if (const ExternalFunc *fn = findExternal(name, e)) {
         std::vector<Value> out(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, Span<Value>(out), ctx);
+        (*fn)(args, nout, keel::MutArrayRef<Value>(out), ctx);
         return out;
     }
 
@@ -2999,7 +3002,7 @@ std::vector<Value> Engine::callFunctionHandleMulti(const Value &handle,
     if (const ExternalFunc *fn = findExternal(name, e)) {
         std::vector<Value> out(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, Span<Value>(out), ctx);
+        (*fn)(args, nout, keel::MutArrayRef<Value>(out), ctx);
         return out;
     }
 

@@ -34,6 +34,7 @@
 
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
 
@@ -94,13 +95,13 @@ public:
     /// reads) is SKIPPED: setParam replaces it (re-running would reset
     /// the slider). Affected = readers + merge-writers + wildcard
     /// statements that may invisibly write var + transitive closure.
-    std::vector<size_t> dirtySetFor(const std::string &var) const;
+    std::vector<keel::usize> dirtySetFor(const std::string &var) const;
 
     /// With the set of EXTERNALLY-DEFINED params (ReactiveSession):
     /// the wildcard-prefix rule additionally skips the pure defs of
     /// EVERY param in the set (a prefix re-run must not clobber other
     /// sliders' values back to script defaults).
-    std::vector<size_t> dirtySetFor(
+    std::vector<keel::usize> dirtySetFor(
         const std::string &var,
         const std::set<std::string> &externalDefs) const;
 
@@ -110,24 +111,24 @@ public:
     /// merge-write var while also reading it + transitive closure.
     /// Statements that only WRITE regions of var (definitions of other
     /// cells) stay clean — their inputs did not change.
-    std::vector<size_t> dirtySetForElement(const std::string &var,
-                                           size_t r, size_t c) const;
-    std::vector<size_t> dirtySetForElement(
-        const std::string &var, size_t r, size_t c,
+    std::vector<keel::usize> dirtySetForElement(const std::string &var,
+                                           keel::usize r, keel::usize c) const;
+    std::vector<keel::usize> dirtySetForElement(
+        const std::string &var, keel::usize r, keel::usize c,
         const std::set<std::string> &externalDefs) const;
 
     const std::vector<StatementFacts> &facts() const { return facts_; }
-    size_t size() const { return facts_.size(); }
+    keel::usize size() const { return facts_.size(); }
     /// Direct dependents of statement i (edges i → j). Const accessor
     /// for cycle detection / debug tooling.
-    const std::vector<size_t> &downstreamOf(size_t i) const
+    const std::vector<keel::usize> &downstreamOf(keel::usize i) const
     {
         return downstream_[i];
     }
 
 private:
     std::vector<StatementFacts> facts_;
-    std::vector<std::vector<size_t>> downstream_;   // i → dependents
+    std::vector<std::vector<keel::usize>> downstream_;   // i → dependents
 };
 
 }  // namespace numkit

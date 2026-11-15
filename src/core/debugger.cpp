@@ -1,4 +1,5 @@
 // src/debugger.cpp
+#include <keel/core.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/environment.hpp>
@@ -73,12 +74,12 @@ std::vector<std::string> DebugContext::variableNames() const
 // BreakpointManager
 // ============================================================
 
-int BreakpointManager::addBreakpoint(uint16_t line)
+int BreakpointManager::addBreakpoint(keel::u16 line)
 {
     return addBreakpoint(line, std::string());
 }
 
-int BreakpointManager::addBreakpoint(uint16_t line, const std::string &condition)
+int BreakpointManager::addBreakpoint(keel::u16 line, const std::string &condition)
 {
     int id = nextId_++;
     breakpoints_.push_back({id, line, true, condition});
@@ -86,7 +87,7 @@ int BreakpointManager::addBreakpoint(uint16_t line, const std::string &condition
     return id;
 }
 
-std::string BreakpointManager::conditionForLine(uint16_t line) const
+std::string BreakpointManager::conditionForLine(keel::u16 line) const
 {
     if (breakpoints_.empty())
         return std::string();
@@ -125,7 +126,7 @@ void BreakpointManager::clearAll()
     indexDirty_ = false;
 }
 
-bool BreakpointManager::shouldBreak(uint16_t line) const
+bool BreakpointManager::shouldBreak(keel::u16 line) const
 {
     if (breakpoints_.empty())
         return false;
@@ -138,7 +139,7 @@ bool BreakpointManager::shouldBreak(uint16_t line) const
 void BreakpointManager::rebuildIndex() const
 {
     lineIndex_.clear();
-    for (size_t i = 0; i < breakpoints_.size(); ++i)
+    for (keel::usize i = 0; i < breakpoints_.size(); ++i)
         if (breakpoints_[i].enabled)
             lineIndex_[breakpoints_[i].line] = i;
     indexDirty_ = false;
@@ -156,7 +157,7 @@ void DebugController::reset(DebugAction initialAction)
     lastLine_ = 0;
 }
 
-bool DebugController::checkLine(uint16_t line, uint16_t col, int callDepth)
+bool DebugController::checkLine(keel::u16 line, keel::u16 col, int callDepth)
 {
     if (line == 0 || line == lastLine_)
         return true;
@@ -222,7 +223,7 @@ void DebugController::popFrame()
     lastLine_ = 0;
 }
 
-DebugContext DebugController::makeContext(uint16_t line, uint16_t col) const
+DebugContext DebugController::makeContext(keel::u16 line, keel::u16 col) const
 {
     DebugContext ctx;
     ctx.line = line;

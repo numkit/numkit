@@ -2,6 +2,8 @@
 //
 // Runtime binding for the `pkg` builtin function.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/value/error.hpp>
@@ -12,7 +14,7 @@
 namespace numkit::runtime {
 namespace detail {
 
-void pkg_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     pkg::PackageManager pm;
@@ -33,7 +35,7 @@ void pkg_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         pm.avail(std::cout, ctx.engine);
     } else if (action == "update" || action == "upgrade") {
         std::vector<std::string> names;
-        for (size_t i = 1; i < args.size(); ++i) {
+        for (keel::usize i = 1; i < args.size(); ++i) {
             if (args[i].isChar() || args[i].isString()) {
                 std::string s = args[i].toString();
                 if (s != "--all" && s != "-a") names.push_back(std::move(s));
@@ -61,7 +63,7 @@ void pkg_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
                               ? "isolated"
                               : "compat";
         if (!outs.empty()) {
-            outs[0] = Value::fromString(cur, ctx.engine->resource());
+            outs[0] = Value::fromString(cur, ctx.engine->allocator());
         }
     } else if (action == "install") {
         if (args.size() < 2 || (!args[1].isChar() && !args[1].isString())) {
@@ -69,7 +71,7 @@ void pkg_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
         }
         bool installAll = false;
         std::vector<std::string> targets;
-        for (size_t i = 1; i < args.size(); ++i) {
+        for (keel::usize i = 1; i < args.size(); ++i) {
             if (!args[i].isChar() && !args[i].isString()) continue;
             std::string s = args[i].toString();
             if (s == "--all" || s == "-a") installAll = true;

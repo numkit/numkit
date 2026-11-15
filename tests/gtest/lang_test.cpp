@@ -1,3 +1,4 @@
+#include <keel/ref.h>
 #include <gtest/gtest.h>
 #include <numkit/builtin/lang.hpp>
 #include <numkit/core/standard_library.hpp>
@@ -46,7 +47,7 @@ TEST_F(LangTest, DirectCppLangAPI) {
     EXPECT_NE(std::find(kwList.begin(), kwList.end(), "for"), kwList.end());
 
     // iskeyword Span overload returning cell array
-    Value allKw = builtin::iskeyword(Span<const Value>{});
+    Value allKw = builtin::iskeyword(keel::ArrayRef<Value>{});
     EXPECT_TRUE(allKw.isCell());
     EXPECT_EQ(allKw.numel(), kwList.size());
 

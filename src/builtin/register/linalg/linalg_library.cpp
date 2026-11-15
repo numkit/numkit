@@ -13,94 +13,96 @@
 // Functions land here per migration group as they move out of
 // toolboxes/builtin/src/language/arrays/.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 
 namespace numkit::linalg::detail {
 // vector_ops.cpp
-void cross_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void dot_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void kron_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
+void cross_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void dot_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void kron_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // norms.cpp
-void norm_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void vecnorm_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void norm_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void vecnorm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // properties.cpp
-void inv_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void trace_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void det_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void rank_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void cond_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void normest_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void rcond_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void condest_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void condeig_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void inv_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void trace_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void det_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void rank_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void cond_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void normest_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void rcond_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void condest_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void condeig_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // decompositions.cpp
-void chol_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void lu_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void qr_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void svd_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void cholupdate_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void qrupdate_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void qrinsert_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void qrdelete_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void qz_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ordqz_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void gsvd_reg      (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ordschur_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void eigs_reg      (Span<const Value>, size_t, Span<Value>, CallContext &);
-void svds_reg      (Span<const Value>, size_t, Span<Value>, CallContext &);
-void svdsketch_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void svdappend_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
+void chol_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void lu_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void qr_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void svd_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void cholupdate_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void qrupdate_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void qrinsert_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void qrdelete_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void qz_reg        (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ordqz_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void gsvd_reg      (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ordschur_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void eigs_reg      (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void svds_reg      (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void svdsketch_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void svdappend_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // pseudo_subspace.cpp
-void pinv_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void orth_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void null_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void subspace_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void pinv_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void orth_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void null_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void subspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // balance.cpp
-void balance_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void balance_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // ldl.cpp
-void ldl_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
+void ldl_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // eig.cpp
-void eig_reg      (Span<const Value>, size_t, Span<Value>, CallContext &);
-void hess_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void schur_reg    (Span<const Value>, size_t, Span<Value>, CallContext &);
-void sylvester_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void polyeig_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ordeig_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
+void eig_reg      (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void hess_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void schur_reg    (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void sylvester_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void polyeig_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ordeig_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // schur_convert.cpp
-void cdf2rdf_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
-void rsf2csf_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
+void cdf2rdf_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void rsf2csf_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // // matrix_functions.cpp
-void expm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void logm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void sqrtm_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void expmv_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void funm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
+void expm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void logm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void sqrtm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void expmv_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void funm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // predicates.cpp
-void issymmetric_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void ishermitian_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void isbanded_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void isdiag_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void istril_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void istriu_reg     (Span<const Value>, size_t, Span<Value>, CallContext &);
-void bandwidth_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
+void issymmetric_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ishermitian_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void isbanded_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void isdiag_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void istril_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void istriu_reg     (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void bandwidth_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // solvers.cpp
-void linsolve_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void lsqminnorm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void lsqnonneg_reg  (Span<const Value>, size_t, Span<Value>, CallContext &);
+void linsolve_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void lsqminnorm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void lsqnonneg_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // misc.cpp
-void rref_reg       (Span<const Value>, size_t, Span<Value>, CallContext &);
-void planerot_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
+void rref_reg       (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void planerot_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 // page_ops.cpp
-void pageinv_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pageeig_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagesvd_reg        (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagepinv_reg       (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagenorm_reg       (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagemldivide_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagemrdivide_reg   (Span<const Value>, size_t, Span<Value>, CallContext &);
-void pagelsqminnorm_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
+void pageinv_reg        (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pageeig_reg        (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagesvd_reg        (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagepinv_reg       (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagenorm_reg       (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagemldivide_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagemrdivide_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void pagelsqminnorm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 } // namespace numkit::linalg::detail
 
 namespace numkit {

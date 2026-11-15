@@ -1,6 +1,9 @@
 // bundle/src/register/ode/ode23_reg.cpp — Engine adapter + embedded-.m registration relocated from the
 // ode toolbox in Phase D (solver 3-way split): the toolbox keeps the
 // Engine-free FnHandle kernel; this core-coupled glue lives in bundle.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/ode/solvers.hpp>
 #include <numkit/ode/options.hpp>
 #include <numkit/core/engine.hpp>
@@ -13,15 +16,15 @@ namespace numkit::ode {
 
 namespace detail {
 
-void ode23_reg(Span<const Value> args, size_t nargout,
-               Span<Value> outs, CallContext &ctx)
+void ode23_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+               keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 4, "ode23");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value opts_v = (args.size() > 3) ? args[3] : Value::Empty;
     const Value handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> a, Span<Value> o,
-                              std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> a, keel::MutArrayRef<Value> o,
+                              keel::Allocator * /*mr*/) {
         Value r = ctx.engine->callFunctionHandle(handle, a);
         if (!o.empty()) o[0] = std::move(r);
     };

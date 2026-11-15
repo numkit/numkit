@@ -1,81 +1,82 @@
 // src/bundle/src/register/builtin/elfun_reg.cpp
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/builtin/elfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 // Each registered adapter in elfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
-void abs_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acos_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acosd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acosh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acot_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acotd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acoth_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acsc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acscd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void acsch_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void angle_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asec_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asecd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asech_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asin_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asind_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void asinh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void atan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void atan2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void atan2d_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void atand_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void atanh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cart2pol_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cart2sph_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ceil_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void complex_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void conj_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cos_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cosd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cosh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cospi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cot_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cotd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void coth_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void csc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void cscd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void csch_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void exp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void expm1_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void fix_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void floor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void hypot_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void imag_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void log_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void log10_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void log1p_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void log2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mod_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pol2cart_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pow_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void real_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rem_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void round_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sec_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void secd_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sech_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sign_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sin_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sind_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sinh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sinpi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sph2cart_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sqrt_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void subplus_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void tan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void tand_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void tanh_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void abs_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acos_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acosd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acosh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acot_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acotd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acoth_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acsc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acscd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void acsch_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void angle_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asec_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asecd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asech_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asin_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asind_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void asinh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void atan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void atan2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void atan2d_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void atand_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void atanh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cart2pol_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cart2sph_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ceil_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void complex_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void conj_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cos_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cosd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cosh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cospi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cot_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cotd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void coth_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void csc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void cscd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void csch_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void exp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void expm1_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void fix_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void floor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void hypot_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void imag_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void log_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void log10_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void log1p_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void log2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mod_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pol2cart_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pow_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void real_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rem_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void round_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sec_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void secd_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sech_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sign_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sin_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sind_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sinh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sinpi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sph2cart_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sqrt_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void subplus_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void tan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void tand_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void tanh_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
 namespace numkit::builtin::detail {

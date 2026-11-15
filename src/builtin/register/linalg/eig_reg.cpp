@@ -10,6 +10,11 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/complex.h>
+#include <keel/math.h>
 #include <numkit/linalg/eig.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 #include <numkit/linalg/matrix_functions.hpp>         // sylvester (general)
@@ -31,16 +36,16 @@
 namespace numkit::linalg {
 namespace detail {
 
-void ordeig_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void ordeig_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "ordeig");
-    outs[0] = ordeig(args[0], ctx.engine->resource());
+    outs[0] = ordeig(args[0], ctx.engine->allocator());
 }
 
-void polyeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void polyeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "polyeig");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [V, e] = polyeig_VE(args, mr);
         outs[0] = std::move(V);
@@ -58,13 +63,13 @@ bool isHermitianApprox(const Value &A, double tol)
     if (A.dims().ndim() != 2 || A.dims().rows() != A.dims().cols())
         return false;
     if (!A.isComplex()) return false;
-    const std::size_t n = static_cast<std::size_t>(A.dims().rows());
-    const Complex *d = A.complexData();
-    for (std::size_t i = 0; i < n; ++i)
-        for (std::size_t j = i + 1; j < n; ++j) {
-            const Complex a = d[i + j * n], b = d[j + i * n];
-            const double scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
-            if (std::abs(a - std::conj(b)) > tol * scale)
+    const keel::usize n = static_cast<keel::usize>(A.dims().rows());
+    const keel::c64 *d = A.complexData();
+    for (keel::usize i = 0; i < n; ++i)
+        for (keel::usize j = i + 1; j < n; ++j) {
+            const keel::c64 a = d[i + j * n], b = d[j + i * n];
+            const double scale = std::max(1.0, std::max(keel::abs(a), keel::abs(b)));
+            if (keel::abs(a - keel::conj(b)) > tol * scale)
                 return false;
         }
     return true;
@@ -72,7 +77,7 @@ bool isHermitianApprox(const Value &A, double tol)
 
 // Eigenvalues of M as a column vector, choosing the symmetric (Jacobi) or
 // general (char-poly + roots) path automatically.
-Value eigValuesAuto(const Value &M, std::pmr::memory_resource *mr)
+Value eigValuesAuto(const Value &M, keel::Allocator *mr)
 {
     // Complex input never routes through the double-only symmetric path —
     // isSymmetricApprox reads doubleData() and would reject it outright
@@ -85,7 +90,7 @@ Value eigValuesAuto(const Value &M, std::pmr::memory_resource *mr)
 }
 
 // [V, D] of M, choosing the symmetric or general path automatically.
-std::tuple<Value, Value> eigVDAuto(const Value &M, std::pmr::memory_resource *mr)
+std::tuple<Value, Value> eigVDAuto(const Value &M, keel::Allocator *mr)
 {
     if (M.isComplex()) {
         auto [V, D] = eig_general_VD(M, mr);
@@ -93,10 +98,10 @@ std::tuple<Value, Value> eigVDAuto(const Value &M, std::pmr::memory_resource *mr
         // returns REAL D (the spectrum is real by theory; the complex-Schur
         // pipeline leaves ~1e-16 dust) while V stays complex.
         if (isHermitianApprox(M, 1e-10) && D.isComplex()) {
-            const Complex *dd = D.complexData();
-            const std::size_t n = D.numel();
+            const keel::c64 *dd = D.complexData();
+            const keel::usize n = D.numel();
             auto Dr = Value::matrix(D.dims().rows(), D.dims().cols(), ValueType::DOUBLE, mr);
-            for (std::size_t i = 0; i < n; ++i)
+            for (keel::usize i = 0; i < n; ++i)
                 Dr.doubleDataMut()[i] = dd[i].real();
             return std::make_tuple(std::move(V), std::move(Dr));
         }
@@ -114,55 +119,55 @@ std::tuple<Value, Value> eigVDAuto(const Value &M, std::pmr::memory_resource *mr
 // symmetric M this reduces to W == V. Only real-eigenvalue M is supported (the
 // general eig path itself throws on complex eigenvalues).
 static Value leftEigenvectors(const Value &M, const Value &D,
-                              std::pmr::memory_resource *mr)
+                              keel::Allocator *mr)
 {
-    const std::size_t n = static_cast<std::size_t>(M.dims().dim(0));
+    const keel::usize n = static_cast<keel::usize>(M.dims().dim(0));
     // Mᵀ.
     Value Mt = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *mt = Mt.doubleDataMut();
-    for (std::size_t j = 0; j < n; ++j)
-        for (std::size_t i = 0; i < n; ++i)
+    for (keel::usize j = 0; j < n; ++j)
+        for (keel::usize i = 0; i < n; ++i)
             mt[i + j * n] = M.elemAsDouble(j + i * n);   // Mᵀ(i,j) = M(j,i)
 
     auto [VL, DL] = eigVDAuto(Mt, mr);
 
     std::vector<double> d(n), dl(n);
-    for (std::size_t k = 0; k < n; ++k) d[k]  = D.elemAsDouble(k + k * n);
-    for (std::size_t k = 0; k < n; ++k) dl[k] = DL.elemAsDouble(k + k * n);
+    for (keel::usize k = 0; k < n; ++k) d[k]  = D.elemAsDouble(k + k * n);
+    for (keel::usize k = 0; k < n; ++k) dl[k] = DL.elemAsDouble(k + k * n);
 
     const double *vld = VL.doubleData();
     Value W = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *wd = W.doubleDataMut();
     std::vector<bool> used(n, false);
-    for (std::size_t k = 0; k < n; ++k) {
+    for (keel::usize k = 0; k < n; ++k) {
         // Match D's k-th eigenvalue to the nearest unused eigenvalue of Mᵀ.
-        std::size_t best = n;
+        keel::usize best = n;
         double bestErr = std::numeric_limits<double>::infinity();
-        for (std::size_t j = 0; j < n; ++j) {
+        for (keel::usize j = 0; j < n; ++j) {
             if (used[j]) continue;
             const double e = std::fabs(dl[j] - d[k]);
             if (e < bestErr) { bestErr = e; best = j; }
         }
         used[best] = true;
         double nrm = 0.0;
-        for (std::size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             nrm += vld[i + best * n] * vld[i + best * n];
         nrm = std::sqrt(nrm);
-        for (std::size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             wd[i + k * n] = (nrm > 0.0) ? vld[i + best * n] / nrm : vld[i + best * n];
     }
     return detail::narrowDoubleToSingleIf(W, M.type() == ValueType::SINGLE, mr);
 }
 
-void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "eig");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     const Value *A = &args[0];
     const Value *B = nullptr;
     bool wantMatrix = false;
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].type() == ValueType::CHAR) {
             std::string s = args[i].toString();
             std::transform(s.begin(), s.end(), s.begin(),
@@ -224,10 +229,10 @@ void eig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallConte
     outs[0] = detail::narrowDoubleToSingleIf(eigValuesAuto(M, mr), wantSingle, mr);
 }
 
-void hess_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void hess_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "hess");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [P, H] = hess(args[0], mr);
         outs[0] = std::move(P);
@@ -237,10 +242,10 @@ void hess_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     }
 }
 
-void schur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void schur_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "schur");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     auto [U, T] = (!args[0].isComplex() && isSymmetricApprox(args[0], 1e-10))
                       ? schur_sym(args[0], mr)
                       : schur_general(args[0], mr);
@@ -252,10 +257,10 @@ void schur_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
     }
 }
 
-void sylvester_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void sylvester_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 3, "sylvester");
-    outs[0] = sylvester(args[0], args[1], args[2], ctx.engine->resource());
+    outs[0] = sylvester(args[0], args[1], args[2], ctx.engine->allocator());
 }
 
 } // namespace detail

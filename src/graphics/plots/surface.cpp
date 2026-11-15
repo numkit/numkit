@@ -3,6 +3,9 @@
 // graphics.surface.* builders (surf / mesh / slice / isosurface / coneplot / streamtube / waterfall / lighting), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -40,8 +43,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // skeleton (rows + cols) as plot3-style line segments and let the
     // existing cabinet projection in the JS adapter render it.
     auto surfImpl = [](const char *typeName,
-                       Span<const Value> args, size_t nargout,
-                       Span<Value> outs, GraphicsContext &gc) {
+                       keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -56,20 +59,20 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         }
         if (!Z_arg) { outs[0] = Value(); return; }
 
-        const size_t R = Z_arg->dims().rows();
-        const size_t C = Z_arg->dims().cols();
+        const keel::usize R = Z_arg->dims().rows();
+        const keel::usize C = Z_arg->dims().cols();
         if (R < 2 || C < 2) { outs[0] = Value(); return; }
 
-        const auto Zat = [&](size_t r, size_t c) {
+        const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);
         };
         std::vector<double> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
-            for (size_t c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
-            for (size_t r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
         } else {
-            for (size_t c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
-            for (size_t r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
         }
 
         const std::string kind(typeName);
@@ -80,22 +83,22 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             // per-vertex colors sampled from a colormap by Z.
             std::ostringstream xs, ys, zs;
             xs << '[';
-            for (size_t c = 0; c < C; ++c) {
+            for (keel::usize c = 0; c < C; ++c) {
                 if (c) xs << ',';
                 xs << Xs[c];
             }
             xs << ']';
             ys << '[';
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r) ys << ',';
                 ys << Ys[r];
             }
             ys << ']';
             zs << '[';
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r) zs << ',';
                 zs << '[';
-                for (size_t c = 0; c < C; ++c) {
+                for (keel::usize c = 0; c < C; ++c) {
                     if (c) zs << ',';
                     const double v = Zat(r, c);
                     if (std::isfinite(v)) zs << v;
@@ -120,9 +123,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // draws the lattice.
         std::ostringstream xH, yH, zH;
         xH << '['; yH << '['; zH << '[';
-        size_t hCount = 0;
-        for (size_t r = 0; r < R; ++r) {
-            for (size_t c = 0; c < C; ++c) {
+        keel::usize hCount = 0;
+        for (keel::usize r = 0; r < R; ++r) {
+            for (keel::usize c = 0; c < C; ++c) {
                 if (hCount > 0) {
                     const char *sep = (c == 0) ? ",null," : ",";
                     xH << sep; yH << sep; zH << sep;
@@ -135,9 +138,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
 
         std::ostringstream xV, yV, zV;
         xV << '['; yV << '['; zV << '[';
-        size_t vCount = 0;
-        for (size_t c = 0; c < C; ++c) {
-            for (size_t r = 0; r < R; ++r) {
+        keel::usize vCount = 0;
+        for (keel::usize c = 0; c < C; ++c) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (vCount > 0) {
                     const char *sep = (r == 0) ? ",null," : ",";
                     xV << sep; yV << sep; zV << sep;
@@ -191,8 +194,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // contour HSL ramp — per-cell colormap on the WebGL side is in
     // BACKLOG (needs vertexColors plumbing in buildPolygon3D).
     // ────────────────────────────────────────────────────────────────
-    auto sliceImpl = [](Span<const Value> args, size_t nargout,
-                        Span<Value> outs, GraphicsContext &gc) {
+    auto sliceImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -218,9 +221,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             return;
         }
 
-        const size_t M = V->dims().rows();
-        const size_t N = V->dims().cols();
-        const size_t P = V->dims().pages();
+        const keel::usize M = V->dims().rows();
+        const keel::usize N = V->dims().cols();
+        const keel::usize P = V->dims().pages();
         if (M < 2 || N < 2 || P < 2) {
             outs[0] = Value();
             return;
@@ -229,21 +232,21 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // Default coordinate vectors when X/Y/Z aren't supplied.
         std::vector<double> Xs(N), Ys(M), Zs(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
-            for (size_t i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
-            for (size_t i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
-            for (size_t i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
         } else {
-            for (size_t i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
-            for (size_t i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
-            for (size_t i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
         }
 
         // Compute the volume value range for the single representative
         // colour per slice. (Per-cell colormap is BACKLOG.)
         double vmn = std::numeric_limits<double>::infinity();
         double vmx = -std::numeric_limits<double>::infinity();
-        const size_t Vn = M * N * P;
-        for (size_t i = 0; i < Vn; ++i) {
+        const keel::usize Vn = M * N * P;
+        for (keel::usize i = 0; i < Vn; ++i) {
             const double v = V->elemAsDouble(i);
             if (std::isfinite(v)) {
                 if (v < vmn) vmn = v;
@@ -258,7 +261,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const double Cr = 0.6;
             const double H = Hd / 60.0;
-            const double Xc = Cr * (1.0 - std::abs(std::fmod(H, 2.0) - 1.0));
+            const double Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
             double r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -283,7 +286,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // Index of the volume in column-major + page-major order: the
         // value at logical (i_row, j_col, k_page) is at
         // V[k * M * N + j * M + i].
-        const auto Vat = [&](size_t i, size_t j, size_t k) {
+        const auto Vat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return V->elemAsDouble(k * M * N + j * M + i);
         };
 
@@ -319,7 +322,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                << c3[0] << ',' << c3[1] << ',' << c3[2];
         };
 
-        const auto pushSlice = [&](char axis, size_t fixedIdx,
+        const auto pushSlice = [&](char axis, keel::usize fixedIdx,
                                    double meanVal) {
             (void)meanVal;
             std::ostringstream xs, ys, zs, cs;
@@ -328,8 +331,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             if (axis == 'x') {
                 // Plane x = Xs[fixedIdx]. Loop over (Y, Z) cells.
                 const double xVal = Xs[fixedIdx];
-                for (size_t i = 0; i + 1 < M; ++i) {
-                    for (size_t k = 0; k + 1 < P; ++k) {
+                for (keel::usize i = 0; i + 1 < M; ++i) {
+                    for (keel::usize k = 0; k + 1 < P; ++k) {
                         emitQuad(xs, ys, zs, cs, first,
                                  xVal, Ys[i],     Zs[k],     Vat(i,     fixedIdx, k),
                                  xVal, Ys[i + 1], Zs[k],     Vat(i + 1, fixedIdx, k),
@@ -339,8 +342,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 }
             } else if (axis == 'y') {
                 const double yVal = Ys[fixedIdx];
-                for (size_t j = 0; j + 1 < N; ++j) {
-                    for (size_t k = 0; k + 1 < P; ++k) {
+                for (keel::usize j = 0; j + 1 < N; ++j) {
+                    for (keel::usize k = 0; k + 1 < P; ++k) {
                         emitQuad(xs, ys, zs, cs, first,
                                  Xs[j],     yVal, Zs[k],     Vat(fixedIdx, j,     k),
                                  Xs[j + 1], yVal, Zs[k],     Vat(fixedIdx, j + 1, k),
@@ -350,8 +353,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 }
             } else {
                 const double zVal = Zs[fixedIdx];
-                for (size_t i = 0; i + 1 < M; ++i) {
-                    for (size_t j = 0; j + 1 < N; ++j) {
+                for (keel::usize i = 0; i + 1 < M; ++i) {
+                    for (keel::usize j = 0; j + 1 < N; ++j) {
                         emitQuad(xs, ys, zs, cs, first,
                                  Xs[j],     Ys[i],     zVal, Vat(i,     j,     fixedIdx),
                                  Xs[j + 1], Ys[i],     zVal, Vat(i,     j + 1, fixedIdx),
@@ -375,33 +378,33 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
 
         // Snap each requested slice value to the nearest grid index.
         const auto nearest = [](const std::vector<double> &v, double q) {
-            size_t best = 0;
-            double bestDist = std::abs(v[0] - q);
-            for (size_t i = 1; i < v.size(); ++i) {
-                const double d = std::abs(v[i] - q);
+            keel::usize best = 0;
+            double bestDist = keel::abs(v[0] - q);
+            for (keel::usize i = 1; i < v.size(); ++i) {
+                const double d = keel::abs(v[i] - q);
                 if (d < bestDist) { bestDist = d; best = i; }
             }
             return best;
         };
         // Mean-value-per-slice — just average finite voxels in the
         // selected plane.
-        const auto sliceMean = [&](char axis, size_t idx) {
-            double sum = 0; size_t n = 0;
+        const auto sliceMean = [&](char axis, keel::usize idx) {
+            double sum = 0; keel::usize n = 0;
             if (axis == 'x') {
-                for (size_t i = 0; i < M; ++i)
-                    for (size_t k = 0; k < P; ++k) {
+                for (keel::usize i = 0; i < M; ++i)
+                    for (keel::usize k = 0; k < P; ++k) {
                         const double v = Vat(i, idx, k);
                         if (std::isfinite(v)) { sum += v; ++n; }
                     }
             } else if (axis == 'y') {
-                for (size_t j = 0; j < N; ++j)
-                    for (size_t k = 0; k < P; ++k) {
+                for (keel::usize j = 0; j < N; ++j)
+                    for (keel::usize k = 0; k < P; ++k) {
                         const double v = Vat(idx, j, k);
                         if (std::isfinite(v)) { sum += v; ++n; }
                     }
             } else {
-                for (size_t i = 0; i < M; ++i)
-                    for (size_t j = 0; j < N; ++j) {
+                for (keel::usize i = 0; i < M; ++i)
+                    for (keel::usize j = 0; j < N; ++j) {
                         const double v = Vat(i, j, idx);
                         if (std::isfinite(v)) { sum += v; ++n; }
                     }
@@ -410,20 +413,20 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         };
 
         if (sx && sx->numel() > 0) {
-            for (size_t s = 0; s < sx->numel(); ++s) {
-                const size_t idx = nearest(Xs, sx->elemAsDouble(s));
+            for (keel::usize s = 0; s < sx->numel(); ++s) {
+                const keel::usize idx = nearest(Xs, sx->elemAsDouble(s));
                 pushSlice('x', idx, sliceMean('x', idx));
             }
         }
         if (sy && sy->numel() > 0) {
-            for (size_t s = 0; s < sy->numel(); ++s) {
-                const size_t idx = nearest(Ys, sy->elemAsDouble(s));
+            for (keel::usize s = 0; s < sy->numel(); ++s) {
+                const keel::usize idx = nearest(Ys, sy->elemAsDouble(s));
                 pushSlice('y', idx, sliceMean('y', idx));
             }
         }
         if (sz && sz->numel() > 0) {
-            for (size_t s = 0; s < sz->numel(); ++s) {
-                const size_t idx = nearest(Zs, sz->elemAsDouble(s));
+            for (keel::usize s = 0; s < sz->numel(); ++s) {
+                const keel::usize idx = nearest(Zs, sz->elemAsDouble(s));
                 pushSlice('z', idx, sliceMean('z', idx));
             }
         }
@@ -734,8 +737,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         {0,3,8,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
         {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}
     };
-    auto isosurfaceImpl = [](Span<const Value> args, size_t nargout,
-                             Span<Value> outs, GraphicsContext &gc) {
+    auto isosurfaceImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                             keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -759,30 +762,30 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             return;
         }
 
-        const size_t M = V->dims().rows();
-        const size_t N = V->dims().cols();
-        const size_t P = V->dims().pages();
+        const keel::usize M = V->dims().rows();
+        const keel::usize N = V->dims().cols();
+        const keel::usize P = V->dims().pages();
         if (M < 2 || N < 2 || P < 2) { outs[0] = Value(); return; }
 
         std::vector<double> Xs(N), Ys(M), Zs(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
-            for (size_t i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
-            for (size_t i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
-            for (size_t i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
         } else {
-            for (size_t i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
-            for (size_t i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
-            for (size_t i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
         }
 
-        const auto Vat = [&](size_t i, size_t j, size_t k) {
+        const auto Vat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return V->elemAsDouble(k * M * N + j * M + i);
         };
         if (!isoSet) {
-            double sum = 0; size_t n = 0;
-            for (size_t k = 0; k < P; ++k)
-                for (size_t j = 0; j < N; ++j)
-                    for (size_t i = 0; i < M; ++i) {
+            double sum = 0; keel::usize n = 0;
+            for (keel::usize k = 0; k < P; ++k)
+                for (keel::usize j = 0; j < N; ++j)
+                    for (keel::usize i = 0; i < M; ++i) {
                         const double v = Vat(i, j, k);
                         if (std::isfinite(v)) { sum += v; ++n; }
                     }
@@ -806,9 +809,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // Convert data-axis order to MATLAB convention: axis-0 stripes
         // X (j → cols), axis-1 stripes Y (i → rows), axis-2 stripes Z
         // (k → pages).
-        for (size_t k = 0; k + 1 < P; ++k) {
-            for (size_t j = 0; j + 1 < N; ++j) {
-                for (size_t i = 0; i + 1 < M; ++i) {
+        for (keel::usize k = 0; k + 1 < P; ++k) {
+            for (keel::usize j = 0; j + 1 < N; ++j) {
+                for (keel::usize i = 0; i + 1 < M; ++i) {
                     double cv[8];
                     cv[0] = Vat(i,     j,     k    );
                     cv[1] = Vat(i,     j + 1, k    );
@@ -828,9 +831,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                     if (em == 0) continue;
                     // Compute the world coords of the cube's corners.
                     auto cornerXYZ = [&](int c) {
-                        const size_t ic = i + (size_t)kCornerDY[c];
-                        const size_t jc = j + (size_t)kCornerDX[c];
-                        const size_t kc = k + (size_t)kCornerDZ[c];
+                        const keel::usize ic = i + (keel::usize)kCornerDY[c];
+                        const keel::usize jc = j + (keel::usize)kCornerDX[c];
+                        const keel::usize kc = k + (keel::usize)kCornerDZ[c];
                         return std::array<double, 3>{Xs[jc], Ys[ic], Zs[kc]};
                     };
                     std::array<double, 3> verts[12] = {};
@@ -840,7 +843,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                         const auto pA = cornerXYZ(a);
                         const auto pB = cornerXYZ(b);
                         const double va = cv[a], vb = cv[b];
-                        const double t = (std::abs(vb - va) < 1e-15)
+                        const double t = (keel::abs(vb - va) < 1e-15)
                             ? 0.5 : (iso - va) / (vb - va);
                         verts[e] = { pA[0] + t * (pB[0] - pA[0]),
                                      pA[1] + t * (pB[1] - pA[1]),
@@ -877,8 +880,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // to the volume's own range).
         double vmn = std::numeric_limits<double>::infinity();
         double vmx = -std::numeric_limits<double>::infinity();
-        const size_t Vn = M * N * P;
-        for (size_t ii = 0; ii < Vn; ++ii) {
+        const keel::usize Vn = M * N * P;
+        for (keel::usize ii = 0; ii < Vn; ++ii) {
             const double v = V->elemAsDouble(ii);
             if (std::isfinite(v)) {
                 if (v < vmn) vmn = v;
@@ -916,8 +919,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // 6 side triangles + 4 cap triangles = 10 triangles per cone,
     // emitted into a single fill3 dataset (null-separated triangles).
     // ────────────────────────────────────────────────────────────────
-    auto coneplotImpl = [](Span<const Value> args, size_t nargout,
-                           Span<Value> outs, GraphicsContext &gc) {
+    auto coneplotImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -943,9 +946,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         if (!U || !Vv || !W) { outs[0] = Value(); return; }
         const auto &dims = U->dims();
         if (dims.ndims() != 3) { outs[0] = Value(); return; }
-        const size_t M = dims.rows();
-        const size_t N = dims.cols();
-        const size_t P = dims.pages();
+        const keel::usize M = dims.rows();
+        const keel::usize N = dims.cols();
+        const keel::usize P = dims.pages();
 
         // Resolve grid coords. X/Y/Z come in as meshgrid 3-D outputs:
         //   X(i,j,k) = x(j), Y(i,j,k) = y(i), Z(i,j,k) = z(k)
@@ -958,19 +961,19 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         std::vector<double> Xs(N), Ys(M), Zs(P);
         if (X && Y && Z && X->numel() >= M * N * P
             && Y->numel() >= M * N * P && Z->numel() >= M * N * P) {
-            for (size_t j = 0; j < N; ++j) Xs[j] = X->elemAsDouble(j * M);
-            for (size_t i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
-            for (size_t k = 0; k < P; ++k) Zs[k] = Z->elemAsDouble(k * M * N);
+            for (keel::usize j = 0; j < N; ++j) Xs[j] = X->elemAsDouble(j * M);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
+            for (keel::usize k = 0; k < P; ++k) Zs[k] = Z->elemAsDouble(k * M * N);
         } else if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
             // Fallback for the 1-D vector form: x, y, z passed as
             // straight vectors rather than meshgrid output.
-            for (size_t i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
-            for (size_t i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
-            for (size_t i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
         } else {
-            for (size_t i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
-            for (size_t i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
-            for (size_t i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
         }
 
         // Build the cone-position list. Without Cx/Cy/Cz we place a
@@ -978,34 +981,34 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // demos; the BACKLOG carries skipping).
         struct ConeAt { double x, y, z, u, v, w; };
         std::vector<ConeAt> cones;
-        const auto Uat = [&](size_t i, size_t j, size_t k) {
+        const auto Uat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return U->elemAsDouble(k * M * N + j * M + i);
         };
-        const auto Vat = [&](size_t i, size_t j, size_t k) {
+        const auto Vat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return Vv->elemAsDouble(k * M * N + j * M + i);
         };
-        const auto Wat = [&](size_t i, size_t j, size_t k) {
+        const auto Wat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return W->elemAsDouble(k * M * N + j * M + i);
         };
         if (Cx && Cy && Cz) {
-            const size_t nc = std::min({Cx->numel(), Cy->numel(), Cz->numel()});
-            for (size_t s = 0; s < nc; ++s) {
+            const keel::usize nc = std::min({Cx->numel(), Cy->numel(), Cz->numel()});
+            for (keel::usize s = 0; s < nc; ++s) {
                 const double cxv = Cx->elemAsDouble(s);
                 const double cyv = Cy->elemAsDouble(s);
                 const double czv = Cz->elemAsDouble(s);
                 // Nearest-neighbour sample of (U, V, W) at (cxv, cyv, czv).
                 const auto nearest = [](const std::vector<double> &v, double q) {
-                    size_t best = 0;
-                    double bestD = std::abs(v[0] - q);
-                    for (size_t i = 1; i < v.size(); ++i) {
-                        const double d = std::abs(v[i] - q);
+                    keel::usize best = 0;
+                    double bestD = keel::abs(v[0] - q);
+                    for (keel::usize i = 1; i < v.size(); ++i) {
+                        const double d = keel::abs(v[i] - q);
                         if (d < bestD) { bestD = d; best = i; }
                     }
                     return best;
                 };
-                const size_t jj = nearest(Xs, cxv);
-                const size_t ii = nearest(Ys, cyv);
-                const size_t kk = nearest(Zs, czv);
+                const keel::usize jj = nearest(Xs, cxv);
+                const keel::usize ii = nearest(Ys, cyv);
+                const keel::usize kk = nearest(Zs, czv);
                 cones.push_back({ cxv, cyv, czv,
                                   Uat(ii, jj, kk),
                                   Vat(ii, jj, kk),
@@ -1013,9 +1016,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             }
         } else {
             cones.reserve(M * N * P);
-            for (size_t k = 0; k < P; ++k)
-                for (size_t j = 0; j < N; ++j)
-                    for (size_t i = 0; i < M; ++i)
+            for (keel::usize k = 0; k < P; ++k)
+                for (keel::usize j = 0; j < N; ++j)
+                    for (keel::usize i = 0; i < M; ++i)
                         cones.push_back({ Xs[j], Ys[i], Zs[k],
                                           Uat(i, j, k),
                                           Vat(i, j, k),
@@ -1034,7 +1037,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const double dx = (N > 1) ? (Xs[N - 1] - Xs[0]) / (N - 1) : 1.0;
         const double dy = (M > 1) ? (Ys[M - 1] - Ys[0]) / (M - 1) : 1.0;
         const double dz = (P > 1) ? (Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
-        const double smallStep = std::min({std::abs(dx), std::abs(dy), std::abs(dz)});
+        const double smallStep = std::min({keel::abs(dx), keel::abs(dy), keel::abs(dz)});
         const double coneLen = (smallStep > 0 ? smallStep : 1.0) * 0.7 * S;
         const double coneRad = coneLen * 0.25;
 
@@ -1052,7 +1055,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             const double scale = coneLen * (mag / maxMag);
             // Build orthonormal basis (e1, e2) ⊥ axis.
             double e1x, e1y, e1z;
-            if (std::abs(ax) < 0.9) { e1x = 0; e1y = -az; e1z = ay; }
+            if (keel::abs(ax) < 0.9) { e1x = 0; e1y = -az; e1z = ay; }
             else                    { e1x = -az; e1y = 0; e1z = ax; }
             // Normalize e1.
             const double e1n = std::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
@@ -1125,8 +1128,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // cap of the grid spacing. Output: one fill3 dataset per
     // streamline, triangle list (quads split into two triangles).
     // ────────────────────────────────────────────────────────────────
-    auto streamtubeImpl = [](Span<const Value> args, size_t nargout,
-                             Span<Value> outs, GraphicsContext &gc) {
+    auto streamtubeImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                             keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
@@ -1150,45 +1153,45 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             return;
         }
         const auto &dims = U->dims();
-        const size_t M = dims.rows();
-        const size_t N = dims.cols();
-        const size_t P = dims.pages();
+        const keel::usize M = dims.rows();
+        const keel::usize N = dims.cols();
+        const keel::usize P = dims.pages();
 
         std::vector<double> Xs(N), Ys(M), Zs(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
-            for (size_t i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
-            for (size_t i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
-            for (size_t i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = Z->elemAsDouble(i);
         } else {
-            for (size_t i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
-            for (size_t i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
-            for (size_t i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < N; ++i) Xs[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < M; ++i) Ys[i] = (double)(i + 1);
+            for (keel::usize i = 0; i < P; ++i) Zs[i] = (double)(i + 1);
         }
 
-        const auto Uat = [&](size_t i, size_t j, size_t k) {
+        const auto Uat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return U->elemAsDouble(k * M * N + j * M + i);
         };
-        const auto Vat = [&](size_t i, size_t j, size_t k) {
+        const auto Vat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return Vv->elemAsDouble(k * M * N + j * M + i);
         };
-        const auto Wat = [&](size_t i, size_t j, size_t k) {
+        const auto Wat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return W->elemAsDouble(k * M * N + j * M + i);
         };
         // Nearest-neighbour sampling at world position (x, y, z).
         const auto sampleAt = [&](double xq, double yq, double zq,
                                   double &uo, double &vo, double &wo) {
             const auto nearest = [](const std::vector<double> &v, double q) {
-                size_t best = 0;
-                double bestD = std::abs(v[0] - q);
-                for (size_t i = 1; i < v.size(); ++i) {
-                    const double d = std::abs(v[i] - q);
+                keel::usize best = 0;
+                double bestD = keel::abs(v[0] - q);
+                for (keel::usize i = 1; i < v.size(); ++i) {
+                    const double d = keel::abs(v[i] - q);
                     if (d < bestD) { bestD = d; best = i; }
                 }
                 return best;
             };
-            const size_t jj = nearest(Xs, xq);
-            const size_t ii = nearest(Ys, yq);
-            const size_t kk = nearest(Zs, zq);
+            const keel::usize jj = nearest(Xs, xq);
+            const keel::usize ii = nearest(Ys, yq);
+            const keel::usize kk = nearest(Zs, zq);
             uo = Uat(ii, jj, kk);
             vo = Vat(ii, jj, kk);
             wo = Wat(ii, jj, kk);
@@ -1205,16 +1208,16 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 && zq >= zMn && zq <= zMx;
         };
 
-        const double dx = (N > 1) ? std::abs(Xs[N - 1] - Xs[0]) / (N - 1) : 1.0;
-        const double dy = (M > 1) ? std::abs(Ys[M - 1] - Ys[0]) / (M - 1) : 1.0;
-        const double dz = (P > 1) ? std::abs(Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
+        const double dx = (N > 1) ? keel::abs(Xs[N - 1] - Xs[0]) / (N - 1) : 1.0;
+        const double dy = (M > 1) ? keel::abs(Ys[M - 1] - Ys[0]) / (M - 1) : 1.0;
+        const double dz = (P > 1) ? keel::abs(Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
         const double smallStep = std::min({dx, dy, dz});
         const double tubeR = smallStep * 0.18;
         constexpr int kMaxSteps = 80;
         constexpr int kRingN    = 8;
 
-        const size_t nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
-        for (size_t s = 0; s < nSeeds; ++s) {
+        const keel::usize nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
+        for (keel::usize s = 0; s < nSeeds; ++s) {
             std::vector<std::array<double, 3>> path;
             double xq = sxV->elemAsDouble(s);
             double yq = syV->elemAsDouble(s);
@@ -1241,7 +1244,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             // Pre-compute ring vertices per path point.
             std::vector<std::array<std::array<double, 3>, kRingN>> rings(path.size());
             std::array<double, 3> prevE1 = {0, 0, 1};
-            for (size_t i = 0; i < path.size(); ++i) {
+            for (keel::usize i = 0; i < path.size(); ++i) {
                 std::array<double, 3> tan;
                 if (i + 1 < path.size()) {
                     tan = { path[i + 1][0] - path[i][0],
@@ -1264,7 +1267,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 double e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
                 if (e1n < 1e-9) {
                     // prev was nearly parallel — pick a new e1.
-                    if (std::abs(tan[0]) < 0.9) e1 = {0, -tan[2], tan[1]};
+                    if (keel::abs(tan[0]) < 0.9) e1 = {0, -tan[2], tan[1]};
                     else                        e1 = {-tan[2], 0, tan[0]};
                     e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
                 }
@@ -1296,7 +1299,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 zs << A[2] << ',' << B[2] << ',' << C[2];
                 xs << ",null"; ys << ",null"; zs << ",null";
             };
-            for (size_t i = 0; i + 1 < rings.size(); ++i) {
+            for (keel::usize i = 0; i + 1 < rings.size(); ++i) {
                 for (int n = 0; n < kRingN; ++n) {
                     const int n1 = (n + 1) % kRingN;
                     const auto &A = rings[i][n];
@@ -1327,7 +1330,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // Wire format: type='contour3' with X, Y vectors, Z-matrix, plus
     // a separate `levels` style key.
     reg("surface", "contour3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             const Value *Z_arg = nullptr;
@@ -1338,22 +1341,22 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 levels_arg = &args[1];
             }
             if (!Z_arg) { outs[0] = Value(); return; }
-            const size_t R = Z_arg->dims().rows();
-            const size_t C = Z_arg->dims().cols();
+            const keel::usize R = Z_arg->dims().rows();
+            const keel::usize C = Z_arg->dims().cols();
             if (R < 2 || C < 2) { outs[0] = Value(); return; }
 
             std::ostringstream xs, ys, zs;
             xs << '[';
-            for (size_t c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
+            for (keel::usize c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
             xs << ']';
             ys << '[';
-            for (size_t r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
+            for (keel::usize r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
             ys << ']';
             zs << '[';
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r) zs << ',';
                 zs << '[';
-                for (size_t c = 0; c < C; ++c) {
+                for (keel::usize c = 0; c < C; ++c) {
                     if (c) zs << ',';
                     const double v = Z_arg->elemAsDouble(c * R + r);
                     if (std::isfinite(v)) zs << v;
@@ -1369,7 +1372,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                     sty << "n=" << (int)levels_arg->toScalar();
                 } else {
                     sty << "levels=[";
-                    for (size_t i = 0; i < levels_arg->numel(); ++i) {
+                    for (keel::usize i = 0; i < levels_arg->numel(); ++i) {
                         if (i) sty << ',';
                         sty << levels_arg->elemAsDouble(i);
                     }
@@ -1394,47 +1397,47 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // followed by compat.contour3. hold on between calls so both
     // datasets land on the same axes.
     auto surfMeshContour = [](const char *base,
-                              Span<const Value> args, size_t nargout,
-                              Span<Value> outs, GraphicsContext &gc) {
+                              keel::ArrayRef<Value> args, keel::usize nargout,
+                              keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         std::array<Value, 1> tmp;
-        if (!gc.callBuiltin(base, args, 0, Span<Value>(tmp.data(), 1))) { outs[0] = Value(); return; }
+        if (!gc.callBuiltin(base, args, 0, keel::MutArrayRef<Value>(tmp.data(), 1))) { outs[0] = Value(); return; }
         // Hold on so contour3 doesn't clear the axes.
         gc.fm.currentAxes().holdOn = true;
-        gc.callBuiltin("contour3", args, 0, Span<Value>(tmp.data(), 1));
+        gc.callBuiltin("contour3", args, 0, keel::MutArrayRef<Value>(tmp.data(), 1));
         gc.fm.currentAxes().holdOn = false;
         outs[0] = Value();
     };
-    reg("surface", "surfc", [surfMeshContour](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
+    reg("surface", "surfc", [surfMeshContour](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
         surfMeshContour("surf", a, n, o, gc);
     });
-    reg("surface", "meshc", [surfMeshContour](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
+    reg("surface", "meshc", [surfMeshContour](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
         surfMeshContour("mesh", a, n, o, gc);
     });
     // waterfall(Z) — row-by-row 3-D ribbons. Emits the same Z-matrix
     // wire format as surf/bar3; the WebGL renderer builds per-row
     // ribbons (row Z values down to baseline z=0).
     reg("surface", "waterfall",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             const auto &Z = args[0];
-            const size_t R = Z.dims().rows();
-            const size_t C = Z.dims().cols();
+            const keel::usize R = Z.dims().rows();
+            const keel::usize C = Z.dims().cols();
             if (R < 1 || C < 2) { outs[0] = Value(); return; }
 
             std::ostringstream xs, ys, zs;
             xs << '[';
-            for (size_t c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
+            for (keel::usize c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
             xs << ']';
             ys << '[';
-            for (size_t r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
+            for (keel::usize r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
             ys << ']';
             zs << '[';
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r) zs << ',';
                 zs << '[';
-                for (size_t c = 0; c < C; ++c) {
+                for (keel::usize c = 0; c < C; ++c) {
                     if (c) zs << ',';
                     const double v = Z.elemAsDouble(c * R + r);
                     if (std::isfinite(v)) zs << v;
@@ -1459,7 +1462,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // light positioned relative to the camera. Default: headlight
     // (light from camera).
     reg("surface", "camlight",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             std::string pos = "headlight";
@@ -1474,7 +1477,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("surface", "light",
-        [](Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             if (fm.currentAxes().camlightPos.empty())
                 fm.currentAxes().camlightPos = "headlight";
@@ -1487,7 +1490,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // normals, 'phong' adds specular highlights, 'none' removes
     // shading entirely.
     reg("surface", "lighting",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             std::string m = "gouraud";
@@ -1505,7 +1508,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // material('shiny'|'metal'|'dull') — preset specular response
     // (only meaningful with lighting='phong').
     reg("surface", "material",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
             std::string m;
@@ -1524,10 +1527,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
     // setting camlightPos = 'headlight' and lightingMode = 'gouraud'
     // on the resulting axes.
     reg("surface", "surfl",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             std::array<Value, 1> outBuf;
-            if (!gc.callBuiltin("surf", args, 0, Span<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
+            if (!gc.callBuiltin("surf", args, 0, keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.currentAxes().camlightPos = "headlight";
             fm.currentAxes().lightingMode = "gouraud";

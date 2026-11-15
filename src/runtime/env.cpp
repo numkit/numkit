@@ -2,6 +2,9 @@
 //
 // Process-environment builtins (setenv / getenv).
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/runtime/env.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
@@ -23,7 +26,7 @@ namespace numkit::runtime {
 //   v = getenv(name)       → value, or '' if not set
 // ════════════════════════════════════════════════════════════════════════
 
-void setenv(Span<const Value> args)
+void setenv(keel::ArrayRef<Value> args)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("setenv: first argument must be a variable name");
@@ -45,7 +48,7 @@ void setenv(Span<const Value> args)
 #endif
 }
 
-Value getenv(Span<const Value> args, std::pmr::memory_resource *mr)
+Value getenv(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("getenv: argument must be a variable name");
@@ -58,7 +61,7 @@ Value getenv(Span<const Value> args, std::pmr::memory_resource *mr)
 
 namespace detail {
 
-void setenv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void setenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     (void)outs;
@@ -78,16 +81,16 @@ void setenv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
     ctx.engine->setEnvVar(name, value);
 }
 
-void getenv_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void getenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)nargout;
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
         throw Error("getenv: argument must be a variable name");
     outs[0] = Value::fromString(ctx.engine->getEnvVar(args[0].toString()),
-                                ctx.engine->resource());
+                                ctx.engine->allocator());
 }
 
-void loadmodule_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void loadmodule_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty() || !args[0].isChar())
         throw Error("loadmodule: first argument must be a module path or library name");
@@ -104,14 +107,14 @@ void loadmodule_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Ca
     }
 }
 
-void loadedmodules_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void loadedmodules_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     (void)args;
     (void)nargout;
     auto mods = ctx.engine->pluginLoader().loadedModules();
-    Value c = Value::cell(1, mods.size(), ctx.engine->resource());
-    for (size_t i = 0; i < mods.size(); ++i) {
-        c.cellAt(i) = Value::fromString(mods[i], ctx.engine->resource());
+    Value c = Value::cell(1, mods.size(), ctx.engine->allocator());
+    for (keel::usize i = 0; i < mods.size(); ++i) {
+        c.cellAt(i) = Value::fromString(mods[i], ctx.engine->allocator());
     }
     outs[0] = std::move(c);
 }

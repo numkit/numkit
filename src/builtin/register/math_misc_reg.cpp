@@ -3,6 +3,8 @@
 // CallContext register half of math/arithmetic/misc.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
@@ -12,13 +14,10 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/elfun/mod_simd.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -31,13 +30,13 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 namespace detail {
 
 #define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
-                    Span<Value> outs, CallContext &ctx)                        \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                        \
     {                                                                            \
         if (args.empty())                                                        \
             throw Error(#name ": requires 1 argument",                          \
                          0, 0, #name, "", "numkit:" #name ":nargin");                 \
-        outs[0] = fn(args[0], ctx.engine->resource());                          \
+        outs[0] = fn(args[0], ctx.engine->allocator());                          \
     }
 
 NUMKIT_UNARY_ADAPTER(deg2rad, deg2rad)
@@ -49,32 +48,32 @@ NUMKIT_UNARY_ADAPTER(wrapTo360, wrapTo360)
 
 #undef NUMKIT_UNARY_ADAPTER
 
-void mod_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void mod_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "mod");
     argcheck::checkNargin(args.size(), 2, 2, "mod");
-    outs[0] = mod(args[0], args[1], ctx.engine->resource());
+    outs[0] = mod(args[0], args[1], ctx.engine->allocator());
 }
 
-void rem_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void rem_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rem");
     argcheck::checkNargin(args.size(), 2, 2, "rem");
-    outs[0] = rem(args[0], args[1], ctx.engine->resource());
+    outs[0] = rem(args[0], args[1], ctx.engine->allocator());
 }
 
-void hypot_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void hypot_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "hypot");
     argcheck::checkNargin(args.size(), 2, 2, "hypot");
-    outs[0] = hypot(args[0], args[1], ctx.engine->resource());
+    outs[0] = hypot(args[0], args[1], ctx.engine->allocator());
 }
 
-void nthroot_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void nthroot_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "nthroot");
     argcheck::checkNargin(args.size(), 2, 2, "nthroot");
-    outs[0] = nthroot(args[0], args[1], ctx.engine->resource());
+    outs[0] = nthroot(args[0], args[1], ctx.engine->allocator());
 }
 
 } // namespace detail

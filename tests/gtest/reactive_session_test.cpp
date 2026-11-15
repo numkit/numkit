@@ -3,6 +3,7 @@
 // The beamforming-shaped case mirrors the real gallery script — the
 // top-level if/elseif block is a WILDCARD there.
 
+#include <keel/core.h>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
@@ -188,7 +189,7 @@ TEST(ElemRegions, LiteralExtractionForms)
     EXPECT_EQ(r2.r1, 9u);
     // full rows: r1 == SIZE_MAX
     ElemRegion r3 = f[3].elemReads.at("C").rects[0];
-    EXPECT_EQ(r3.r1, (size_t)-1);
+    EXPECT_EQ(r3.r1, (keel::usize)-1);
     EXPECT_EQ(r3.c0, 2u);
     // Paren forms without end/colon args are AST-ambiguous with
     // function calls (C(7) ≡ foo(3)): NO region entry — the coarse
@@ -281,7 +282,7 @@ TEST(DepGraph, BareCallChainsThroughFigureState)
         "grid on;\n");                              // 5
     ASSERT_EQ(f.size(), 6u);
     EXPECT_EQ(f[0].reads.count(kFigureStateVar), 0u);
-    for (size_t i = 1; i < 6; ++i) {
+    for (keel::usize i = 1; i < 6; ++i) {
         EXPECT_EQ(f[i].reads.count(kFigureStateVar), 1u) << "stmt " << i;
         EXPECT_EQ(f[i].writes.count(kFigureStateVar), 1u) << "stmt " << i;
     }
@@ -338,7 +339,7 @@ std::string snapshotVars(Engine &e,
         out += std::to_string(v->numel()) + ":";
         if (!v->isNumeric())
             continue;   // cells/structs compared only by presence
-        for (size_t k = 0; k < v->numel() && k < 64; ++k) {
+        for (keel::usize k = 0; k < v->numel() && k < 64; ++k) {
             double d = v->elemAsDouble(k);
             out += std::isfinite(d) ? std::to_string(d) : "nan";
             out += ",";
@@ -370,10 +371,10 @@ TEST_F(ReactiveTest, DirtySkippingMatchesFullRerun)
 
     // theta0 change → theta stays cached; the for-loop is a wildcard,
     // so the tail from `ph` re-runs.
-    s.setParam("theta0", Value::scalar(-10.0, engine.resource()));
+    s.setParam("theta0", Value::scalar(-10.0, engine.allocator()));
     EXPECT_TRUE(s.lastError().empty()) << "setParam error: " << s.lastError();
     EXPECT_TRUE(s.hasDirty());
-    size_t ran = s.evalDirty();
+    keel::usize ran = s.evalDirty();
     EXPECT_GT(ran, 0u);
     EXPECT_FALSE(s.hasDirty());
 
@@ -400,10 +401,10 @@ TEST_F(ReactiveTest, ElementWriteOnlyRecalcsTouchingFormulas)
     ReactiveSession s(engine);
     ASSERT_TRUE(s.load(sheet));
 
-    s.setParamElement("C", 1, 1, Value::scalar(7.0, engine.resource()));
+    s.setParamElement("C", 1, 1, Value::scalar(7.0, engine.allocator()));
     EXPECT_TRUE(s.lastError().empty()) << "setParamElement error: "
                                        << s.lastError();
-    size_t ran = s.evalDirty();
+    keel::usize ran = s.evalDirty();
     // Only formula (2,1) re-runs — NOT (2,2), NOT the other defs.
     EXPECT_EQ(ran, 1u);
     auto *v = engine.getVariable("C");
@@ -419,7 +420,7 @@ TEST_F(ReactiveTest, ElementWriteOnlyRecalcsTouchingFormulas)
     full.eval("C = cell(4, 3); C{1,1} = 7; C{1,2} = 3;\n"
               "C{2,1} = C{1,1} * 10; C{2,2} = C{1,2} * 100;\n", true);
     auto *vf = full.getVariable("C");
-    for (size_t k = 0; k < 12; ++k) {
+    for (keel::usize k = 0; k < 12; ++k) {
         ASSERT_EQ(v->cellAt(k).numel(), vf->cellAt(k).numel())
             << "cell " << k;
         if (v->cellAt(k).numel() == 1)
@@ -435,11 +436,11 @@ TEST_F(ReactiveTest, EquivalenceAcrossSequences)
     // the final values (later writes win).
     ReactiveSession s(engine);
     ASSERT_TRUE(s.load(kBeamformingish));
-    s.setParam("N", Value::scalar(8.0, engine.resource()));
+    s.setParam("N", Value::scalar(8.0, engine.allocator()));
     s.evalDirty();
-    s.setParam("d", Value::scalar(0.7, engine.resource()));
+    s.setParam("d", Value::scalar(0.7, engine.allocator()));
     s.evalDirty();
-    s.setParam("theta0", Value::scalar(0.0, engine.resource()));
+    s.setParam("theta0", Value::scalar(0.0, engine.allocator()));
     s.evalDirty();
 
     // Reference: param def lines REPLACED in the source (see
@@ -465,8 +466,8 @@ TEST_F(ReactiveTest, GenerationMonotonic)
 {
     ReactiveSession s(engine);
     ASSERT_TRUE(s.load("x = 1; y = x + 1;\n"));
-    uint64_t g0 = s.generation();
-    s.setParam("x", Value::scalar(5.0, engine.resource()));
+    keel::u64 g0 = s.generation();
+    s.setParam("x", Value::scalar(5.0, engine.allocator()));
     EXPECT_GT(s.generation(), g0);
     s.evalDirty();
     EXPECT_GT(s.generation(), g0);
@@ -479,12 +480,12 @@ TEST_F(ReactiveTest, BeamformingTickBudget)
     // tail re-runs — a realistic WORST-case tick).
     ReactiveSession s(engine);
     ASSERT_TRUE(s.load(kBeamformingish));
-    s.setParam("theta0", Value::scalar(13.0, engine.resource()));
+    s.setParam("theta0", Value::scalar(13.0, engine.allocator()));
     // Warm-up (first tick compiles the loop body chunk).
     s.evalDirty();
     auto t0 = std::chrono::steady_clock::now();
-    s.setParam("theta0", Value::scalar(13.5, engine.resource()));
-    size_t ran = s.evalDirty();
+    s.setParam("theta0", Value::scalar(13.5, engine.allocator()));
+    keel::usize ran = s.evalDirty();
     auto t1 = std::chrono::steady_clock::now();
     double us =
         std::chrono::duration<double, std::micro>(t1 - t0).count();

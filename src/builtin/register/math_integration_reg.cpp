@@ -4,6 +4,11 @@
 // integration compute. The pure calculus + Gauss-Kronrod compute lives
 // engine-free in numkit::builtin (integration.cpp).
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/builtin/detail/polyfun/integration_detail.hpp>
 #include <numkit/core/engine.hpp>
@@ -12,7 +17,6 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/scratch.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -40,10 +44,10 @@ using ::numkit::builtin::detail::kKronrodX;
 using ::numkit::builtin::detail::kKronrodW;
 using ::numkit::builtin::detail::kGaussW;
 
-void gradient_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "gradient");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     const Dims &shape = args[0].dims();
     const bool isND = shape.is3D() || shape.ndim() > 2;
 
@@ -51,7 +55,7 @@ void gradient_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
         if (args.size() >= 2 && !args[1].isScalar() &&
             (shape.rows() == 1 || shape.cols() == 1) &&
             args[0].numel() == args[1].numel() && args[0].numel() >= 1) {
-            const size_t n = args[0].numel();
+            const keel::usize n = args[0].numel();
             Value f = toDoubleCopy(args[0], mr);
             Value x = toDoubleCopy(args[1], mr);
             Value res = Value::matrix(shape.rows(), shape.cols(), ValueType::DOUBLE, mr);
@@ -62,7 +66,7 @@ void gradient_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                 rp[0] = 0.0;
             } else {
                 rp[0] = (fp[1] - fp[0]) / (xp[1] - xp[0]);
-                for (size_t i = 1; i + 1 < n; ++i)
+                for (keel::usize i = 1; i + 1 < n; ++i)
                     rp[i] = (fp[i + 1] - fp[i - 1]) / (xp[i + 1] - xp[i - 1]);
                 rp[n - 1] = (fp[n - 1] - fp[n - 2]) / (xp[n - 1] - xp[n - 2]);
             }
@@ -86,27 +90,27 @@ void gradient_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     }
 
     // N-D (3-D+) array: one gradient per dimension, up to nargout.
-    const size_t nout = (nargout < 1) ? 1 : nargout;
-    ScratchArena arena(mr);
-    auto hs = ScratchVec<double>(&arena);
-    const size_t nspac = (args.size() >= 2) ? args.size() - 1 : 0;
+    const keel::usize nout = (nargout < 1) ? 1 : nargout;
+    keel::ArenaTemp arena = keel::get_scratch(mr);
+    auto hs = keel::Array<double>(arena.allocator());
+    const keel::usize nspac = (args.size() >= 2) ? args.size() - 1 : 0;
     if (nspac == 0) {
         hs.assign(nout, 1.0);
     } else if (nspac == 1) {
         hs.assign(nout, args[1].toScalar());  // single spacing → every dim
     } else {
-        for (size_t i = 1; i < args.size(); ++i) hs.push_back(args[i].toScalar());
+        for (keel::usize i = 1; i < args.size(); ++i) hs.push_back(args[i].toScalar());
         while (hs.size() < nout) hs.push_back(1.0);
     }
     auto results = gradientND(args[0], hs.data(), hs.size(), nout, mr);
-    for (size_t o = 0; o < nout && o < outs.size(); ++o)
+    for (keel::usize o = 0; o < nout && o < outs.size(); ++o)
         outs[o] = std::move(results[o]);
 }
 
-void del2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void del2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "del2");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     double h = 1.0;
     if (args.size() >= 2) {
         if (!args[1].isScalar())
@@ -122,10 +126,10 @@ void del2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     outs[0] = del2(args[0], h, mr);
 }
 
-void cumtrapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cumtrapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "cumtrapz");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = cumtrapz(args[0], mr);
         return;
@@ -150,7 +154,7 @@ void cumtrapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
         throw Error("cumtrapz: the X coordinate must be real",
                      0, 0, "cumtrapz", "", "numkit:cumtrapz:complexX");
     const bool yIsC = (y.type() == ValueType::COMPLEX);
-    const size_t rows = y.dims().rows(), cols = y.dims().cols();
+    const keel::usize rows = y.dims().rows(), cols = y.dims().cols();
     Value ys;
     if (!yIsC) ys = toDoubleCopy(y, mr);
     auto xs = toDoubleCopy(x, mr);
@@ -162,11 +166,11 @@ void cumtrapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     if (x.dims().rows() == rows && x.dims().cols() == cols) {
         std::memcpy(dx, xsrc, rows * cols * sizeof(double));   // per-element
     } else if (xIsVec && dim == 2 && x.numel() == cols) {
-        for (size_t c = 0; c < cols; ++c)
-            for (size_t r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[c];
+        for (keel::usize c = 0; c < cols; ++c)
+            for (keel::usize r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[c];
     } else if (xIsVec && dim != 2 && x.numel() == rows) {
-        for (size_t c = 0; c < cols; ++c)
-            for (size_t r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[r];
+        for (keel::usize c = 0; c < cols; ++c)
+            for (keel::usize r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[r];
     } else {
         throw Error("cumtrapz: X must be a vector of length size(Y,dim)",
                      0, 0, "cumtrapz", "", "numkit:cumtrapz:shapeMismatch");
@@ -183,10 +187,10 @@ void cumtrapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
 // abscissae + weights (NO f-calls). The .m wrapper does the f-evaluations and
 // the adaptive recursion, so the integrand is pausable. xk/wk: 15-vectors,
 // wg: the 7 Gauss weights. (vm_callbacks_plan.md)
-void gk15_nodes_reg(Span<const Value> /*args*/, size_t /*nargout*/, Span<Value> outs,
+void gk15_nodes_reg(keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                     CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     Value xk = Value::matrix(1, 15, ValueType::DOUBLE, mr);
     Value wk = Value::matrix(1, 15, ValueType::DOUBLE, mr);
     Value wg = Value::matrix(1, 7, ValueType::DOUBLE, mr);
@@ -206,7 +210,7 @@ static bool isCallableHandleArg(const Value &v)
     return v.isFuncHandle();
 }
 
-void integral_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 3)
         throw Error("integral: requires at least 3 arguments (fn, a, b)",
@@ -217,7 +221,7 @@ void integral_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     const double a = args[1].toScalar();
     const double b = args[2].toScalar();
     double absTol = 1e-10;
-    for (size_t i = 3; i + 1 < args.size(); i += 2) {
+    for (keel::usize i = 3; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             throw Error("integral: expected option name (string)",
                          0, 0, "integral", "", "numkit:integral:badFlag");
@@ -231,19 +235,19 @@ void integral_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
         }
     }
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = integral(cb, a, b, absTol, ctx.engine->resource());
+    outs[0] = integral(cb, a, b, absTol, ctx.engine->allocator());
 }
 
-static double integral2AbsTol(Span<const Value> args, size_t firstOpt)
+static double integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOpt)
 {
     double absTol = 1e-10;
-    for (size_t i = firstOpt; i + 1 < args.size(); i += 2) {
+    for (keel::usize i = firstOpt; i + 1 < args.size(); i += 2) {
         std::string key = args[i].toString();
         for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (key == "abstol") absTol = args[i + 1].toScalar();
@@ -251,7 +255,7 @@ static double integral2AbsTol(Span<const Value> args, size_t firstOpt)
     return absTol;
 }
 
-void integral2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void integral2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 5, "integral2");
     if (!isCallableHandleArg(args[0]))
@@ -261,16 +265,16 @@ void integral2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     const double c = args[3].toScalar(), d = args[4].toScalar();
     const double absTol = integral2AbsTol(args, 5);
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->resource());
+    outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->allocator());
 }
 
-void integral3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void integral3_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 7, "integral3");
     argcheck::checkNargin(args.size(), 7, 7, "integral3");
@@ -282,19 +286,19 @@ void integral3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
     const double e = args[5].toScalar(), f = args[6].toScalar();
     const double absTol = integral2AbsTol(args, 7);
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = integral3(cb, a, b, c, d, e, f, absTol, ctx.engine->resource());
+    outs[0] = integral3(cb, a, b, c, d, e, f, absTol, ctx.engine->allocator());
 }
 
 // quadgk = adaptive Gauss-Kronrod 1-D quadrature = the existing `integral`.
 // [q, errbnd] = quadgk(...); we return q and the requested tolerance as a
 // (conservative) error-bound placeholder.
-void quadgk_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void quadgk_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, "quadgk");
     if (!isCallableHandleArg(args[0]))
@@ -303,18 +307,18 @@ void quadgk_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     const double a = args[1].toScalar(), b = args[2].toScalar();
     const double absTol = integral2AbsTol(args, 3);
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = integral(cb, a, b, absTol, ctx.engine->resource());
-    if (outs.size() >= 2) outs[1] = Value::scalar(absTol, ctx.engine->resource());
+    outs[0] = integral(cb, a, b, absTol, ctx.engine->allocator());
+    if (outs.size() >= 2) outs[1] = Value::scalar(absTol, ctx.engine->allocator());
 }
 
 // quad2d = the older name for a rectangular double integral = integral2.
-void quad2d_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void quad2d_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 5, "quad2d");
     if (!isCallableHandleArg(args[0]))
@@ -324,19 +328,19 @@ void quad2d_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     const double c = args[3].toScalar(), d = args[4].toScalar();
     const double absTol = integral2AbsTol(args, 5);
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->resource());
+    outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->allocator());
 }
 
-void trapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void trapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "trapz");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // MATLAB promotes a logical X and/or Y to double (trapz(logical([1 0 1 1]))
     // = 2, class double — bugs/builtin/trapz-logical.md). Only logical is
     // coerced; the doubleData() paths below still throw for char / other
@@ -359,7 +363,7 @@ void trapz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     }
     // trapz(X, Y, dim): integrate Y along dim with X spacing.
     const int dim = argcheck::dimArg(args[2], "trapz");
-    const size_t along = (dim != 2) ? a1.dims().rows() : a1.dims().cols();
+    const keel::usize along = (dim != 2) ? a1.dims().rows() : a1.dims().cols();
     if (a0.numel() != along)
         throw Error("trapz: numel(x) must match size(y, dim)",
                      0, 0, "trapz", "", "numkit:trapz:lengthMismatch");

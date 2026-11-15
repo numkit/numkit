@@ -6,6 +6,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/ldl.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -18,14 +20,14 @@
 namespace numkit::linalg {
 namespace detail {
 
-void ldl_reg(Span<const Value> args, size_t nargout,
-             Span<Value> outs, CallContext &ctx)
+void ldl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+             keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "ldl");
 
     bool upper = false;
     bool vec_perm = false;
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString())
             throw Error("ldl: optional args must be 'lower'/'upper'/'matrix'/'vector'",
                         0, 0, "ldl", "", "numkit:ldl:BadOpt");
@@ -39,7 +41,7 @@ void ldl_reg(Span<const Value> args, size_t nargout,
                         0, 0, "ldl", "", "numkit:ldl:BadOpt");
     }
 
-    auto [L, D, P] = ldl(args[0], upper, vec_perm, ctx.engine->resource());
+    auto [L, D, P] = ldl(args[0], upper, vec_perm, ctx.engine->allocator());
     outs[0] = L;
     if (nargout >= 2 && outs.size() >= 2) outs[1] = D;
     if (nargout >= 3 && outs.size() >= 3) outs[2] = P;

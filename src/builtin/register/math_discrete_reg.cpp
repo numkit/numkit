@@ -3,24 +3,25 @@
 // CallContext register half of math/discrete/discrete.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/builtin/specfun.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/builtin/detail/datafun/discrete_detail.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
-#include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
+#include <keel/hash_map.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -37,9 +38,9 @@ namespace detail {
 // preserving element order and type. MATLAB's unique returns ia/ic always as
 // column vectors and the unique values matching the input orientation.
 static Value orientUniqueVec(const Value &v, bool column,
-                             std::pmr::memory_resource *mr)
+                             keel::Allocator *mr)
 {
-    const size_t k = v.numel();
+    const keel::usize k = v.numel();
     if (k == 0) return v; // leave empties untouched
     const bool isCol = (v.dims().cols() == 1 && v.dims().rows() == k);
     if (column == isCol) return v; // already in the desired orientation
@@ -57,20 +58,20 @@ static Value orientUniqueVec(const Value &v, bool column,
 // machinery runs on a promoted copy), so narrowing always round-trips exactly
 // for char codes / logical 0-1 / in-range integers. bugs/builtin/unique-typeclass.md.
 static Value narrowUniqueClass(const Value &d, ValueType vt,
-                               std::pmr::memory_resource *mr)
+                               keel::Allocator *mr)
 {
     if (vt == ValueType::LOGICAL) {
         Value r = createForDims(d.dims(), ValueType::LOGICAL, mr);
-        uint8_t *dst = r.logicalDataMut();
-        const size_t n = d.numel();
-        for (size_t i = 0; i < n; ++i) dst[i] = (d.elemAsDouble(i) != 0.0) ? 1 : 0;
+        keel::u8 *dst = r.logicalDataMut();
+        const keel::usize n = d.numel();
+        for (keel::usize i = 0; i < n; ++i) dst[i] = (d.elemAsDouble(i) != 0.0) ? 1 : 0;
         return r;
     }
     if (vt == ValueType::CHAR) {
         Value r = createForDims(d.dims(), ValueType::CHAR, mr);
         char *dst = r.charDataMut();
-        const size_t n = d.numel();
-        for (size_t i = 0; i < n; ++i)
+        const keel::usize n = d.numel();
+        for (keel::usize i = 0; i < n; ++i)
             dst[i] = static_cast<char>(static_cast<int>(d.elemAsDouble(i)));
         return r;
     }
@@ -84,7 +85,7 @@ static bool setopNarrowable(ValueType t)
 {
     return isIntegerType(t) || t == ValueType::LOGICAL || t == ValueType::CHAR;
 }
-static Value setopPromote(const Value &v, std::pmr::memory_resource *mr)
+static Value setopPromote(const Value &v, keel::Allocator *mr)
 {
     return setopNarrowable(v.type()) ? toDoubleValue(v, mr) : v;
 }
@@ -98,11 +99,11 @@ static ValueType setopNarrowClass(const Value &a, const Value &b)
     return ValueType::DOUBLE;
 }
 
-void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "unique");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // MATLAB unique preserves the input class on the VALUES (integer / logical
     // / char) while ia/ic stay double — but the unique machinery below is
@@ -128,7 +129,7 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     bool useRows = false;
     bool stable  = false;
     bool last    = false;   // 'last': ia selects the LAST occurrence (sorted)
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         const Value &a = args[i];
         if (!a.isChar() && !a.isString())
             throw Error("unique: extra arguments must be string flags",
@@ -149,9 +150,9 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
 
     if (origType == ValueType::CELL || origType == ValueType::STRING) {
         const Value &in = args[0];
-        const size_t n = in.numel();
+        const keel::usize n = in.numel();
         const bool isRow = !in.dims().is3D() && in.dims().rows() == 1 && in.dims().cols() > 1;
-        auto getElemStr = [&](size_t idx) -> std::string {
+        auto getElemStr = [&](keel::usize idx) -> std::string {
             if (origType == ValueType::STRING)
                 return std::string(in.stringElem(idx));
             const Value &el = in.cellAt(idx);
@@ -161,15 +162,15 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                         0, 0, "unique", "", "numkit:unique:cellNotChar");
         };
         std::vector<std::string> uniqStrs;
-        std::vector<size_t> iaVec;
+        std::vector<keel::usize> iaVec;
         std::vector<double> icVec(n, 0.0);
         if (stable) {
-            std::unordered_map<std::string, size_t> seen;
-            for (size_t i = 0; i < n; ++i) {
+            std::unordered_map<std::string, keel::usize> seen;
+            for (keel::usize i = 0; i < n; ++i) {
                 std::string s = getElemStr(i);
                 auto it = seen.find(s);
                 if (it == seen.end()) {
-                    size_t pos = uniqStrs.size();
+                    keel::usize pos = uniqStrs.size();
                     seen.emplace(s, pos);
                     uniqStrs.push_back(std::move(s));
                     iaVec.push_back(i);
@@ -180,34 +181,34 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                 }
             }
         } else {
-            std::unordered_map<std::string, size_t> idxMap;
-            for (size_t i = 0; i < n; ++i) {
+            std::unordered_map<std::string, keel::usize> idxMap;
+            for (keel::usize i = 0; i < n; ++i) {
                 std::string s = getElemStr(i);
                 if (last) idxMap[s] = i;
                 else idxMap.try_emplace(s, i);
             }
-            std::vector<std::pair<std::string, size_t>> sorted;
+            std::vector<std::pair<std::string, keel::usize>> sorted;
             sorted.reserve(idxMap.size());
             for (const auto &kv : idxMap)
                 sorted.push_back(kv);
             std::sort(sorted.begin(), sorted.end(),
                       [](const auto &a, const auto &b) { return a.first < b.first; });
-            std::unordered_map<std::string, size_t> rankMap;
-            for (size_t k = 0; k < sorted.size(); ++k) {
+            std::unordered_map<std::string, keel::usize> rankMap;
+            for (keel::usize k = 0; k < sorted.size(); ++k) {
                 rankMap[sorted[k].first] = k;
                 uniqStrs.push_back(sorted[k].first);
                 iaVec.push_back(sorted[k].second);
             }
-            for (size_t i = 0; i < n; ++i)
+            for (keel::usize i = 0; i < n; ++i)
                 icVec[i] = static_cast<double>(rankMap[getElemStr(i)] + 1);
         }
-        const size_t k = uniqStrs.size();
-        const size_t outR = (n == 0) ? 0 : (isRow ? 1 : k);
-        const size_t outC = (n == 0) ? 0 : (isRow ? k : 1);
+        const keel::usize k = uniqStrs.size();
+        const keel::usize outR = (n == 0) ? 0 : (isRow ? 1 : k);
+        const keel::usize outC = (n == 0) ? 0 : (isRow ? k : 1);
         Value cOut = (origType == ValueType::STRING)
             ? Value::stringArray(outR, outC, mr)
             : Value::cell(outR, outC, mr);
-        for (size_t j = 0; j < k; ++j) {
+        for (keel::usize j = 0; j < k; ++j) {
             if (origType == ValueType::STRING)
                 cOut.stringElemSet(j, uniqStrs[j]);
             else
@@ -216,13 +217,13 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
         outs[0] = std::move(cOut);
         if (nargout > 1) {
             Value iaOut = Value::matrix(k, k == 0 ? 0 : 1, ValueType::DOUBLE, mr);
-            for (size_t j = 0; j < k; ++j)
+            for (keel::usize j = 0; j < k; ++j)
                 iaOut.doubleDataMut()[j] = static_cast<double>(iaVec[j] + 1);
             outs[1] = std::move(iaOut);
         }
         if (nargout > 2) {
             Value icOut = Value::matrix(n, n == 0 ? 0 : 1, ValueType::DOUBLE, mr);
-            for (size_t i = 0; i < n; ++i)
+            for (keel::usize i = 0; i < n; ++i)
                 icOut.doubleDataMut()[i] = icVec[i];
             outs[2] = std::move(icOut);
         }
@@ -255,13 +256,13 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
 }
 
 #define NUMKIT_BIN_SETOP_REG(name, fn)                                             \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
-                    Span<Value> outs, CallContext &ctx)                       \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         if (args.size() < 2)                                                   \
             throw Error(#name ": requires 2 arguments",                       \
                          0, 0, #name, "", "numkit:" #name ":nargin");               \
-        outs[0] = fn(args[0], args[1], ctx.engine->resource());               \
+        outs[0] = fn(args[0], args[1], ctx.engine->allocator());               \
     }
 
 // histcounts(x[, edges | nbins][, name, value...]): bin counts, optionally
@@ -272,11 +273,11 @@ void unique_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
 // 'auto'), 'NumBins', 'BinWidth' and 'BinLimits'. The second output returns the
 // bin edges as a row vector. 'Normalization' ∈ {count, probability,
 // countdensity, pdf, cumcount, cdf}.
-void histcounts_reg(Span<const Value> args, size_t nargout,
-                    Span<Value> outs, CallContext &ctx)
+void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "histcounts");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     HistNorm norm = HistNorm::Count;
     Value edges = Value::Empty;
@@ -297,7 +298,7 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
     // A non-char second argument is either the bin count (scalar) or an
     // explicit edge vector; otherwise every trailing argument is a name-value
     // pair (incl. 'BinEdges').
-    size_t optStart = 1;
+    keel::usize optStart = 1;
     if (args.size() >= 2 && args[1].type() != ValueType::CHAR) {
         if (args[1].numel() == 1) {
             requireNumBins(args[1].toScalar());
@@ -310,7 +311,7 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
         optStart = 2;
     }
 
-    for (size_t i = optStart; i + 1 < args.size(); ++i) {
+    for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (args[i].type() != ValueType::CHAR) continue;
         std::string key = lower(args[i].toString());
         if (key == "normalization") {
@@ -385,7 +386,7 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
     // [n, edges] = histcounts(...): return the edges as a row vector.
     if (nargout >= 2) {
         validateEdges(edges, "histcounts");
-        const size_t ne = edges.numel();
+        const keel::usize ne = edges.numel();
         auto e = Value::matrix(1, ne, ValueType::DOUBLE, mr);
         const double *src = edges.doubleData();
         std::copy(src, src + ne, e.doubleDataMut());
@@ -395,18 +396,18 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
     // [n, edges, bin] = histcounts(...): 1-based bin index per element of X.
     if (nargout >= 3 && outs.size() >= 3) {
         const Value &x = args[0];
-        const size_t nx = x.numel();
-        const size_t ne = edges.numel();
-        const size_t nbins = (ne >= 2) ? (ne - 1) : 0;
+        const keel::usize nx = x.numel();
+        const keel::usize ne = edges.numel();
+        const keel::usize nbins = (ne >= 2) ? (ne - 1) : 0;
         const double *ed = edges.doubleData();
         Value binOut = createLike(x, ValueType::DOUBLE, mr);
         double *bd = binOut.doubleDataMut();
-        for (size_t idx = 0; idx < nx; ++idx) {
+        for (keel::usize idx = 0; idx < nx; ++idx) {
             const double v = x.elemAsDouble(idx);
             if (nbins == 0 || std::isnan(v) || v < ed[0] || v > ed[nbins]) {
                 bd[idx] = 0.0;
             } else {
-                const size_t b = static_cast<size_t>(std::upper_bound(ed, ed + nbins, v) - ed);
+                const keel::usize b = static_cast<keel::usize>(std::upper_bound(ed, ed + nbins, v) - ed);
                 bd[idx] = static_cast<double>(b);
             }
         }
@@ -417,22 +418,22 @@ void histcounts_reg(Span<const Value> args, size_t nargout,
 // histc(x, edges): legacy bin counts (length(edges) bins, last = exact
 // equal to edges(end)). [n, bin] = histc(...) also returns the 1-based bin
 // index of each element (0 if out of range), same shape as x.
-void histc_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void histc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "histc");
     argcheck::checkNargin(args.size(), 2, 3, "histc");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     outs[0] = histc(args[0], args[1], mr);
     if (nargout > 1) {
         const Value &x = args[0], &edges = args[1];
-        const std::size_t nE = edges.numel();
+        const keel::usize nE = edges.numel();
         const double *e = edges.doubleData();
         Value binOut = createLike(x, ValueType::DOUBLE, mr);
         double *bd = binOut.doubleDataMut();
         const double *p = x.doubleData();
-        const std::size_t n = x.numel();
-        for (std::size_t i = 0; i < n; ++i) {
-            const std::size_t b = histcBin(p[i], e, nE);
+        const keel::usize n = x.numel();
+        for (keel::usize i = 0; i < n; ++i) {
+            const keel::usize b = histcBin(p[i], e, nE);
             bd[i] = (b == SIZE_MAX) ? 0.0 : static_cast<double>(b + 1);
         }
         outs[1] = std::move(binOut);
@@ -444,18 +445,18 @@ void histc_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
 // Both outputs are column vectors of height size(A,1). 2-D DOUBLE only; a row
 // containing NaN never matches. vs MATLAB R2025b.
 std::pair<Value, Value>
-ismemberRows(const Value &A, const Value &B, bool wantLoc, std::pmr::memory_resource *mr)
+ismemberRows(const Value &A, const Value &B, bool wantLoc, keel::Allocator *mr)
 {
     validateUniqueRowsInput(A, "ismember");
     validateUniqueRowsInput(B, "ismember");
-    const size_t ar = A.dims().rows(), ac = A.dims().cols();
-    const size_t br = B.dims().rows(), bc = B.dims().cols();
+    const keel::usize ar = A.dims().rows(), ac = A.dims().cols();
+    const keel::usize br = B.dims().rows(), bc = B.dims().cols();
     if (ar > 0 && br > 0 && ac != bc)
         throw Error("ismember: 'rows' inputs must have the same number of columns",
                      0, 0, "ismember", "", "numkit:ismember:rowsCols");
 
     Value tf = Value::matrix(ar, 1, ValueType::LOGICAL, mr);
-    uint8_t *tfd = (ar > 0) ? tf.logicalDataMut() : nullptr;
+    keel::u8 *tfd = (ar > 0) ? tf.logicalDataMut() : nullptr;
     Value loc;
     double *lo = nullptr;
     if (wantLoc) {
@@ -465,37 +466,36 @@ ismemberRows(const Value &A, const Value &B, bool wantLoc, std::pmr::memory_reso
     if (ar == 0) return {std::move(tf), std::move(loc)};
 
     const double *ad = A.doubleData();
-    ScratchArena scratch(mr);
-    std::pmr::unordered_map<RowKey, double, RowKeyHash, RowKeyEq> bmap(&scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::HashMap<RowKey, double, RowKeyHash, RowKeyEq> bmap(scratch.allocator());
     if (br > 0) {
         const double *bd = B.doubleData();
-        for (size_t r = 0; r < br; ++r)
+        for (keel::usize r = 0; r < br; ++r)
             if (!rowHasNan(bd, bc, br, r))
-                bmap.try_emplace(extractRow(bd, bc, br, r, &scratch),
-                                 static_cast<double>(r + 1));  // try_emplace keeps the lowest index
+                bmap.try_insert(extractRow(bd, bc, br, r, scratch.allocator()),
+                                static_cast<double>(r + 1));  // try_insert keeps the lowest index
     }
-    for (size_t r = 0; r < ar; ++r) {
+    for (keel::usize r = 0; r < ar; ++r) {
         if (rowHasNan(ad, ac, ar, r)) {
             tfd[r] = 0;
             if (lo) lo[r] = 0.0;
             continue;
         }
-        RowKey key = extractRow(ad, ac, ar, r, &scratch);
-        auto it = bmap.find(key);
-        const bool found = (it != bmap.end());
+        RowKey key = extractRow(ad, ac, ar, r, scratch.allocator());
+        const double *found = bmap.get(key);
         tfd[r] = found ? 1 : 0;
-        if (lo) lo[r] = found ? it->second : 0.0;
+        if (lo) lo[r] = found ? *found : 0.0;
     }
     return {std::move(tf), std::move(loc)};
 }
 
 // ismember(a,b): tf membership mask; [tf,loc] = ismember(...) also returns
 // loc(i) = the LOWEST 1-based index of a(i) in b (0 if absent), per MATLAB.
-void ismember_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "ismember");
     argcheck::checkNargin(args.size(), 2, 4, "ismember");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // ismember accepts char/logical/integer operands; its outputs are already
     // logical (tf) + double (loc), so only the operands need promoting to
     // double (no value-narrow). bugs/builtin/setops-typeclass.md.
@@ -503,7 +503,7 @@ void ismember_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     // ismember(A,B,'rows'): each row is one element; outputs are columns.
     {
         bool rows = false;
-        for (size_t i = 2; i < args.size(); ++i)
+        for (keel::usize i = 2; i < args.size(); ++i)
             if (args[i].isChar() || args[i].isString()) {
                 std::string s = args[i].toString();
                 for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -525,20 +525,20 @@ void ismember_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     outs[0] = ismember(A, B, mr);
     if (nargout > 1) {
         const Value &a = A, &b = B;
-        ScratchArena scratch(mr);
-        std::pmr::unordered_map<double, double, DoubleHashEq0> idxB(&scratch);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        keel::HashMap<double, double, DoubleHashEq0> idxB(scratch.allocator());
         idxB.reserve(b.numel());
         const double *pb = b.doubleData();
-        for (size_t i = 0; i < b.numel(); ++i)
+        for (keel::usize i = 0; i < b.numel(); ++i)
             if (!std::isnan(pb[i]))
-                idxB.emplace(pb[i], static_cast<double>(i + 1));  // emplace keeps the lowest index
+                idxB.try_insert(pb[i], static_cast<double>(i + 1));  // try_insert keeps the lowest index
         Value loc = createLike(a, ValueType::DOUBLE, mr);
         double *lo = loc.doubleDataMut();
         const double *pa = a.doubleData();
-        for (size_t i = 0; i < a.numel(); ++i) {
+        for (keel::usize i = 0; i < a.numel(); ++i) {
             const double v = pa[i];
-            auto it = std::isnan(v) ? idxB.end() : idxB.find(v);
-            lo[i] = (it != idxB.end()) ? it->second : 0.0;
+            const double *found = std::isnan(v) ? nullptr : idxB.get(v);
+            lo[i] = found ? *found : 0.0;
         }
         outs[1] = std::move(loc);
     }
@@ -547,9 +547,9 @@ void ismember_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 // union / intersect / setdiff accept a trailing 'sorted' (default) or
 // 'stable' setOrder flag; 'stable' keeps first-occurrence (A-then-B) order.
 namespace {
-bool wantsStable(Span<const Value> args, size_t start)
+bool wantsStable(keel::ArrayRef<Value> args, keel::usize start)
 {
-    for (size_t i = start; i < args.size(); ++i) {
+    for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             std::string s = args[i].toString();
             for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -563,28 +563,28 @@ bool wantsStable(Span<const Value> args, size_t start)
 enum class SetOpKind { Intersect, Setdiff, Union };
 
 void buildFirstIndexMap(const Value &x,
-                        std::pmr::unordered_map<double, size_t, DoubleHashEq0> &m)
+                        keel::HashMap<double, keel::usize, DoubleHashEq0> &m)
 {
-    const size_t n = x.numel();
-    for (size_t i = 0; i < n; ++i) {
+    const keel::usize n = x.numel();
+    for (keel::usize i = 0; i < n; ++i) {
         const double v = x.elemAsDouble(i);
-        if (!std::isnan(v)) m.try_emplace(v, i + 1); // 1-based first occurrence
+        if (!std::isnan(v)) m.try_insert(v, i + 1); // 1-based first occurrence
     }
 }
 
 // 1-based index of value v in x (finite via map, NaN via linear scan); 0 if absent.
-size_t setopFirstIndex(const Value &x,
-                       const std::pmr::unordered_map<double, size_t, DoubleHashEq0> &m,
+keel::usize setopFirstIndex(const Value &x,
+                       const keel::HashMap<double, keel::usize, DoubleHashEq0> &m,
                        double v)
 {
     if (std::isnan(v)) {
-        const size_t n = x.numel();
-        for (size_t i = 0; i < n; ++i)
+        const keel::usize n = x.numel();
+        for (keel::usize i = 0; i < n; ++i)
             if (std::isnan(x.elemAsDouble(i))) return i + 1;
         return 0;
     }
-    auto it = m.find(v);
-    return it == m.end() ? 0 : it->second;
+    const keel::usize *p = m.get(v);
+    return p ? *p : 0;
 }
 
 // Emit ia (and ib for intersect/union) for a set operation, matching MATLAB:
@@ -592,31 +592,31 @@ size_t setopFirstIndex(const Value &x,
 // ib indexes B; union: ia indexes the A-sourced result elements, ib the
 // B-only ones.
 void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
-                      const Value &result, size_t nargout, Span<Value> outs,
-                      std::pmr::memory_resource *mr, const char *fn)
+                      const Value &result, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                      keel::Allocator *mr, const char *fn)
 {
     if (A.type() == ValueType::COMPLEX || B.type() == ValueType::COMPLEX)
         throw Error(std::string(fn) + ": index outputs are not supported for "
                     "complex inputs", 0, 0, fn, "",
                     std::string("numkit:") + fn + ":complexIdx");
 
-    ScratchArena scratch(mr);
-    std::pmr::unordered_map<double, size_t, DoubleHashEq0> mapA(&scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::HashMap<double, keel::usize, DoubleHashEq0> mapA(scratch.allocator());
     buildFirstIndexMap(A, mapA);
 
     if (kind == SetOpKind::Union) {
-        std::pmr::unordered_map<double, size_t, DoubleHashEq0> mapB(&scratch);
+        keel::HashMap<double, keel::usize, DoubleHashEq0> mapB(scratch.allocator());
         buildFirstIndexMap(B, mapB);
-        auto iaVec = ScratchVec<double>(&scratch);
-        auto ibVec = ScratchVec<double>(&scratch);
-        const size_t k = result.numel();
-        for (size_t i = 0; i < k; ++i) {
+        auto iaVec = keel::Array<double>(scratch.allocator());
+        auto ibVec = keel::Array<double>(scratch.allocator());
+        const keel::usize k = result.numel();
+        for (keel::usize i = 0; i < k; ++i) {
             const double v = result.elemAsDouble(i);
-            const size_t ai = setopFirstIndex(A, mapA, v);
+            const keel::usize ai = setopFirstIndex(A, mapA, v);
             if (ai != 0) iaVec.push_back(static_cast<double>(ai));
             else ibVec.push_back(static_cast<double>(setopFirstIndex(B, mapB, v)));
         }
-        auto colOf = [&](const ScratchVec<double> &v) {
+        auto colOf = [&](const keel::Array<double> &v) {
             Value c = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
             if (!v.empty()) std::copy(v.begin(), v.end(), c.doubleDataMut());
             return c;
@@ -626,18 +626,18 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
         return;
     }
 
-    const size_t k = result.numel();
+    const keel::usize k = result.numel();
     Value ia = Value::matrix(k, 1, ValueType::DOUBLE, mr);
-    for (size_t i = 0; i < k; ++i)
+    for (keel::usize i = 0; i < k; ++i)
         ia.doubleDataMut()[i] =
             static_cast<double>(setopFirstIndex(A, mapA, result.elemAsDouble(i)));
     if (nargout >= 2) outs[1] = ia;
 
     if (kind == SetOpKind::Intersect && nargout >= 3) {
-        std::pmr::unordered_map<double, size_t, DoubleHashEq0> mapB(&scratch);
+        keel::HashMap<double, keel::usize, DoubleHashEq0> mapB(scratch.allocator());
         buildFirstIndexMap(B, mapB);
         Value ib = Value::matrix(k, 1, ValueType::DOUBLE, mr);
-        for (size_t i = 0; i < k; ++i)
+        for (keel::usize i = 0; i < k; ++i)
             ib.doubleDataMut()[i] =
                 static_cast<double>(setopFirstIndex(B, mapB, result.elemAsDouble(i)));
         outs[2] = ib;
@@ -645,9 +645,9 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
 }
 
 // True if a trailing 'rows' flag is present (case-insensitive).
-bool wantsRows(Span<const Value> args, size_t start)
+bool wantsRows(keel::ArrayRef<Value> args, keel::usize start)
 {
-    for (size_t i = start; i < args.size(); ++i) {
+    for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             std::string s = args[i].toString();
             for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -661,18 +661,18 @@ bool wantsRows(Span<const Value> args, size_t start)
 // as an element; the result is the sorted set of unique rows (NaN-containing
 // rows are distinct and sort last, matching unique('rows')). 2-D DOUBLE only.
 Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
-                const char *fn, size_t nargout, Span<Value> outs,
-                std::pmr::memory_resource *mr)
+                const char *fn, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                keel::Allocator *mr)
 {
     validateUniqueRowsInput(A, fn);
     validateUniqueRowsInput(B, fn);
-    const size_t ar = A.dims().rows(), ac = A.dims().cols();
-    const size_t br = B.dims().rows(), bc = B.dims().cols();
+    const keel::usize ar = A.dims().rows(), ac = A.dims().cols();
+    const keel::usize br = B.dims().rows(), bc = B.dims().cols();
     if (ar > 0 && br > 0 && ac != bc)
         throw Error(std::string(fn) + ": 'rows' inputs must have the same "
                     "number of columns", 0, 0, fn, "",
                     std::string("numkit:") + fn + ":rowsCols");
-    const size_t cols = (ar > 0) ? ac : bc;
+    const keel::usize cols = (ar > 0) ? ac : bc;
     auto makeColVec = [&](const std::vector<double> &v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
         if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
@@ -681,7 +681,7 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
 
     // union(A,B,'rows') == unique rows of the vertical concatenation [A; B].
     if (kind == SetOpKind::Union) {
-        const size_t nr = ar + br;
+        const keel::usize nr = ar + br;
         if (nr == 0) {
             if (nargout >= 2) outs[1] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
             if (nargout >= 3) outs[2] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
@@ -691,16 +691,16 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
         double *cd = combined.doubleDataMut();
         const double *ad = (ar > 0) ? A.doubleData() : nullptr;
         const double *bd = (br > 0) ? B.doubleData() : nullptr;
-        for (size_t c = 0; c < cols; ++c) {
-            for (size_t r = 0; r < ar; ++r)      cd[c * nr + r]      = ad[c * ar + r];
-            for (size_t r = 0; r < br; ++r)      cd[c * nr + ar + r] = bd[c * br + r];
+        for (keel::usize c = 0; c < cols; ++c) {
+            for (keel::usize r = 0; r < ar; ++r)      cd[c * nr + r]      = ad[c * ar + r];
+            for (keel::usize r = 0; r < br; ++r)      cd[c * nr + ar + r] = bd[c * br + r];
         }
         if (nargout <= 1) return uniqueRows(combined, mr);
         auto [uRows, iaAll, icAll] = uniqueRowsWithIndices(combined, /*stable=*/false, /*last=*/false, mr);
         (void)icAll;
         std::vector<double> iaVec, ibVec;
-        for (size_t i = 0; i < iaAll.numel(); ++i) {
-            const size_t idx1 = static_cast<size_t>(iaAll.elemAsDouble(i));
+        for (keel::usize i = 0; i < iaAll.numel(); ++i) {
+            const keel::usize idx1 = static_cast<keel::usize>(iaAll.elemAsDouble(i));
             if (idx1 <= ar) iaVec.push_back(static_cast<double>(idx1));
             else            ibVec.push_back(static_cast<double>(idx1 - ar));
         }
@@ -719,38 +719,38 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
     const double *ad = A.doubleData();
     const double *bd = (br > 0) ? B.doubleData() : nullptr;
 
-    ScratchArena scratch(mr);
-    std::pmr::unordered_map<RowKey, size_t, RowKeyHash, RowKeyEq> bset(&scratch);
-    for (size_t r = 0; r < br; ++r)
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::HashMap<RowKey, keel::usize, RowKeyHash, RowKeyEq> bset(scratch.allocator());
+    for (keel::usize r = 0; r < br; ++r)
         if (!rowHasNan(bd, bc, br, r))
-            bset.try_emplace(extractRow(bd, bc, br, r, &scratch), r + 1);
+            bset.try_insert(extractRow(bd, bc, br, r, scratch.allocator()), r + 1);
 
-    std::pmr::unordered_map<RowKey, char, RowKeyHash, RowKeyEq> seen(&scratch);
-    auto nonNan = ScratchVec<size_t>(&scratch);
-    auto nanIdx = ScratchVec<size_t>(&scratch);
-    for (size_t r = 0; r < ar; ++r) {
+    keel::HashMap<RowKey, char, RowKeyHash, RowKeyEq> seen(scratch.allocator());
+    auto nonNan = keel::Array<keel::usize>(scratch.allocator());
+    auto nanIdx = keel::Array<keel::usize>(scratch.allocator());
+    for (keel::usize r = 0; r < ar; ++r) {
         if (rowHasNan(ad, ac, ar, r)) {
             if (!wantInB) nanIdx.push_back(r);  // setdiff keeps; intersect drops
             continue;
         }
-        RowKey key = extractRow(ad, ac, ar, r, &scratch);
-        if ((bset.count(key) > 0) != wantInB) continue;
-        if (seen.try_emplace(std::move(key), char{1}).second) nonNan.push_back(r);
+        RowKey key = extractRow(ad, ac, ar, r, scratch.allocator());
+        if (bset.contains(key) != wantInB) continue;
+        if (seen.try_insert(std::move(key), char{1}).inserted) nonNan.push_back(r);
     }
     std::sort(nonNan.begin(), nonNan.end(),
-              [ad, ac, ar](size_t a, size_t b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
-    nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
+              [ad, ac, ar](keel::usize a, keel::usize b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
+    nonNan.append(nanIdx);
     if (nargout >= 2) {
         std::vector<double> iaVec(nonNan.size());
-        for (size_t i = 0; i < nonNan.size(); ++i)
+        for (keel::usize i = 0; i < nonNan.size(); ++i)
             iaVec[i] = static_cast<double>(nonNan[i] + 1);
         outs[1] = makeColVec(iaVec);
     }
     if (wantInB && nargout >= 3) {
         std::vector<double> ibVec(nonNan.size());
-        for (size_t i = 0; i < nonNan.size(); ++i) {
-            RowKey key = extractRow(ad, ac, ar, nonNan[i], &scratch);
-            ibVec[i] = static_cast<double>(bset[key]);
+        for (keel::usize i = 0; i < nonNan.size(); ++i) {
+            RowKey key = extractRow(ad, ac, ar, nonNan[i], scratch.allocator());
+            ibVec[i] = static_cast<double>(*bset.get(key));
         }
         outs[2] = makeColVec(ibVec);
     }
@@ -761,19 +761,19 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
 // Row-wise setxor: the symmetric difference of the row sets — unique rows
 // present in exactly one of A or B, sorted.
 Value setxorRows(const Value &A, const Value &B, const char *fn,
-                 size_t nargout, Span<Value> outs,
-                 std::pmr::memory_resource *mr)
+                 keel::usize nargout, keel::MutArrayRef<Value> outs,
+                 keel::Allocator *mr)
 {
     validateUniqueRowsInput(A, fn);
     validateUniqueRowsInput(B, fn);
-    const size_t ar = A.dims().rows(), ac = A.dims().cols();
-    const size_t br = B.dims().rows(), bc = B.dims().cols();
+    const keel::usize ar = A.dims().rows(), ac = A.dims().cols();
+    const keel::usize br = B.dims().rows(), bc = B.dims().cols();
     if (ar > 0 && br > 0 && ac != bc)
         throw Error(std::string(fn) + ": 'rows' inputs must have the same "
                     "number of columns", 0, 0, fn, "",
                     std::string("numkit:") + fn + ":rowsCols");
-    const size_t cols = (ar > 0) ? ac : bc;
-    const size_t nr = ar + br;
+    const keel::usize cols = (ar > 0) ? ac : bc;
+    const keel::usize nr = ar + br;
     auto makeColVec = [&](const std::vector<double> &v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
         if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
@@ -789,38 +789,38 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
     double *cd = combined.doubleDataMut();
     const double *ad = (ar > 0) ? A.doubleData() : nullptr;
     const double *bd = (br > 0) ? B.doubleData() : nullptr;
-    for (size_t c = 0; c < cols; ++c) {
-        for (size_t r = 0; r < ar; ++r) cd[c * nr + r]      = ad[c * ar + r];
-        for (size_t r = 0; r < br; ++r) cd[c * nr + ar + r] = bd[c * br + r];
+    for (keel::usize c = 0; c < cols; ++c) {
+        for (keel::usize r = 0; r < ar; ++r) cd[c * nr + r]      = ad[c * ar + r];
+        for (keel::usize r = 0; r < br; ++r) cd[c * nr + ar + r] = bd[c * br + r];
     }
     const double *cdp = combined.doubleData();
 
-    ScratchArena scratch(mr);
-    std::pmr::unordered_map<RowKey, char, RowKeyHash, RowKeyEq> aset(&scratch), bset(&scratch);
-    for (size_t r = 0; r < ar; ++r)
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::HashMap<RowKey, char, RowKeyHash, RowKeyEq> aset(scratch.allocator()), bset(scratch.allocator());
+    for (keel::usize r = 0; r < ar; ++r)
         if (!rowHasNan(cdp, cols, nr, r))
-            aset.try_emplace(extractRow(cdp, cols, nr, r, &scratch), char{1});
-    for (size_t r = 0; r < br; ++r)
+            aset.try_insert(extractRow(cdp, cols, nr, r, scratch.allocator()), char{1});
+    for (keel::usize r = 0; r < br; ++r)
         if (!rowHasNan(cdp, cols, nr, ar + r))
-            bset.try_emplace(extractRow(cdp, cols, nr, ar + r, &scratch), char{1});
+            bset.try_insert(extractRow(cdp, cols, nr, ar + r, scratch.allocator()), char{1});
 
-    std::pmr::unordered_map<RowKey, char, RowKeyHash, RowKeyEq> seen(&scratch);
-    auto nonNan = ScratchVec<size_t>(&scratch);
-    auto nanIdx = ScratchVec<size_t>(&scratch);
-    for (size_t ci = 0; ci < nr; ++ci) {
+    keel::HashMap<RowKey, char, RowKeyHash, RowKeyEq> seen(scratch.allocator());
+    auto nonNan = keel::Array<keel::usize>(scratch.allocator());
+    auto nanIdx = keel::Array<keel::usize>(scratch.allocator());
+    for (keel::usize ci = 0; ci < nr; ++ci) {
         const bool fromA = (ci < ar);
         if (rowHasNan(cdp, cols, nr, ci)) { nanIdx.push_back(ci); continue; }
-        RowKey key = extractRow(cdp, cols, nr, ci, &scratch);
+        RowKey key = extractRow(cdp, cols, nr, ci, scratch.allocator());
         const auto &other = fromA ? bset : aset;
-        if (other.count(key) > 0) continue;
-        if (seen.try_emplace(std::move(key), char{1}).second) nonNan.push_back(ci);
+        if (other.contains(key)) continue;
+        if (seen.try_insert(std::move(key), char{1}).inserted) nonNan.push_back(ci);
     }
     std::sort(nonNan.begin(), nonNan.end(),
-              [cdp, cols, nr](size_t a, size_t b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
-    nonNan.insert(nonNan.end(), nanIdx.begin(), nanIdx.end());
+              [cdp, cols, nr](keel::usize a, keel::usize b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
+    nonNan.append(nanIdx);
     if (nargout >= 2) {
         std::vector<double> iaVec, ibVec;
-        for (size_t ci : nonNan) {
+        for (keel::usize ci : nonNan) {
             if (ci < ar) iaVec.push_back(static_cast<double>(ci + 1));
             else         ibVec.push_back(static_cast<double>(ci - ar + 1));
         }
@@ -832,11 +832,11 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
 }
 } // namespace
 
-void union_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void union_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "union");
     argcheck::checkNargin(args.size(), 2, 4, "union");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const ValueType setNarrow = setopNarrowClass(args[0], args[1]);
     Value A = setopPromote(args[0], mr), B = setopPromote(args[1], mr);
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
@@ -853,11 +853,11 @@ void union_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCon
     narrowOut();
 }
 
-void intersect_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void intersect_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "intersect");
     argcheck::checkNargin(args.size(), 2, 4, "intersect");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const ValueType setNarrow = setopNarrowClass(args[0], args[1]);
     Value A = setopPromote(args[0], mr), B = setopPromote(args[1], mr);
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
@@ -874,11 +874,11 @@ void intersect_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
     narrowOut();
 }
 
-void setdiff_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void setdiff_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "setdiff");
     argcheck::checkNargin(args.size(), 2, 4, "setdiff");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const ValueType setNarrow = setopNarrowClass(args[0], args[1]);
     Value A = setopPromote(args[0], mr), B = setopPromote(args[1], mr);
     auto narrowOut = [&]{ if (setNarrow != ValueType::DOUBLE)
@@ -899,44 +899,44 @@ NUMKIT_BIN_SETOP_REG(discretize, discretize)
 
 #undef NUMKIT_BIN_SETOP_REG
 
-void primes_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void primes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "primes");
-    outs[0] = primes(args[0].toScalar(), ctx.engine->resource());
+    outs[0] = primes(args[0].toScalar(), ctx.engine->allocator());
 }
 
-void isprime_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void isprime_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "isprime");
-    outs[0] = isprime(args[0], ctx.engine->resource());
+    outs[0] = isprime(args[0], ctx.engine->allocator());
 }
 
-void factor_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void factor_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "factor");
     if (!args[0].isScalar())
         throw Error("factor: argument must be a scalar",
                      0, 0, "factor", "", "numkit:factor:notScalar");
-    outs[0] = factor(args[0].toScalar(), ctx.engine->resource());
+    outs[0] = factor(args[0].toScalar(), ctx.engine->allocator());
 }
 
-void perms_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void perms_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "perms");
-    outs[0] = perms(args[0], ctx.engine->resource());
+    outs[0] = perms(args[0], ctx.engine->allocator());
 }
 
-void factorial_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void factorial_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "factorial");
-    outs[0] = factorial(args[0], ctx.engine->resource());
+    outs[0] = factorial(args[0], ctx.engine->allocator());
 }
 
-void nchoosek_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void nchoosek_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "nchoosek");
     argcheck::checkNargin(args.size(), 2, 2, "nchoosek");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // Scalar N -> binomial coefficient; vector V -> all K-combinations (rows).
     if (args[0].isScalar())
         outs[0] = nchoosek(args[0].toScalar(), args[1].toScalar(), mr);
@@ -946,12 +946,12 @@ void nchoosek_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
 
 // ── Pack 16 adapters ─────────────────────────────────────────────────
 
-void setxor_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void setxor_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "setxor");
     argcheck::checkNargin(args.size(), 2, 4, "setxor");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (wantsRows(args, 2)) {
         outs[0] = setxorRows(args[0], args[1], "setxor", nargout, outs, mr);
         return;
@@ -962,38 +962,38 @@ void setxor_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
                          mr, "setxor");
 }
 
-void allunique_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void allunique_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                    CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "allunique");
-    outs[0] = allunique(args[0], ctx.engine->resource());
+    outs[0] = allunique(args[0], ctx.engine->allocator());
 }
 
-void numunique_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void numunique_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                    CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "numunique");
-    outs[0] = numunique(args[0], ctx.engine->resource());
+    outs[0] = numunique(args[0], ctx.engine->allocator());
 }
 
-void ismembertol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void ismembertol_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                      CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "ismembertol");
     double tol = (args.size() >= 3 && !args[2].isEmpty())
                      ? args[2].toScalar()
                      : 1e-6;
-    outs[0] = ismembertol(args[0], args[1], tol, ctx.engine->resource());
+    outs[0] = ismembertol(args[0], args[1], tol, ctx.engine->allocator());
 }
 
-void uniquetol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void uniquetol_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                    CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "uniquetol");
     double tol = (args.size() >= 2 && !args[1].isEmpty())
                      ? args[1].toScalar()
                      : 1e-6;
-    outs[0] = uniquetol(args[0], tol, ctx.engine->resource());
+    outs[0] = uniquetol(args[0], tol, ctx.engine->allocator());
 }
 
 } // namespace detail

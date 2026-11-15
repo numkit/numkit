@@ -12,6 +12,7 @@
 //
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
 #include <string>
@@ -26,7 +27,7 @@ struct BytecodeChunk;
 // ============================================================
 // DebugAction — returned by observer to control execution
 // ============================================================
-enum class DebugAction : uint8_t {
+enum class DebugAction : keel::u8 {
     Continue, // run until next breakpoint
     StepOver, // next line in current scope (skip function calls)
     StepInto, // step into function call (break on very next line)
@@ -35,7 +36,7 @@ enum class DebugAction : uint8_t {
 };
 
 // Result of a dispatch loop iteration — Completed or Paused (for debugger)
-enum class ExecStatus : uint8_t { Completed, Paused };
+enum class ExecStatus : keel::u8 { Completed, Paused };
 
 // ============================================================
 // StackFrame — one entry in the call stack
@@ -46,8 +47,8 @@ enum class ExecStatus : uint8_t { Completed, Paused };
 struct StackFrame
 {
     std::string functionName; // "<script>" for top-level
-    uint16_t line = 0;
-    uint16_t col = 0;
+    keel::u16 line = 0;
+    keel::u16 col = 0;
 
     // VM backend: variable access via registers
     const BytecodeChunk *chunk = nullptr;
@@ -72,8 +73,8 @@ struct StackFrame
 // ============================================================
 struct DebugContext
 {
-    uint16_t line = 0;
-    uint16_t col = 0;
+    keel::u16 line = 0;
+    keel::u16 col = 0;
     const std::string *functionName = nullptr;
 
     // Source code text for display. Available in VM backend (from BytecodeChunk).
@@ -115,26 +116,26 @@ public:
     struct Breakpoint
     {
         int id = 0;
-        uint16_t line = 0;
+        keel::u16 line = 0;
         bool enabled = true;
         std::string condition; // empty = unconditional; else a boolean expr
     };
 
-    int addBreakpoint(uint16_t line);
-    int addBreakpoint(uint16_t line, const std::string &condition);
+    int addBreakpoint(keel::u16 line);
+    int addBreakpoint(keel::u16 line, const std::string &condition);
     void removeBreakpoint(int id);
     void enableBreakpoint(int id, bool enabled);
     void clearAll();
-    bool shouldBreak(uint16_t line) const;
+    bool shouldBreak(keel::u16 line) const;
     // Condition text of the enabled breakpoint at `line` (empty if none or
     // unconditional). The manager only stores it; the debugger evaluates it.
-    std::string conditionForLine(uint16_t line) const;
+    std::string conditionForLine(keel::u16 line) const;
     const std::vector<Breakpoint> &breakpoints() const { return breakpoints_; }
 
 private:
     std::vector<Breakpoint> breakpoints_;
     int nextId_ = 1;
-    mutable std::unordered_map<uint16_t, size_t> lineIndex_;
+    mutable std::unordered_map<keel::u16, keel::usize> lineIndex_;
     mutable bool indexDirty_ = true;
     void rebuildIndex() const;
 };
@@ -165,7 +166,7 @@ public:
 
     // Called by backend on source line change.
     // Returns false if Stop requested.
-    bool checkLine(uint16_t line, uint16_t col, int callDepth);
+    bool checkLine(keel::u16 line, keel::u16 col, int callDepth);
 
     // Call stack management
     void pushFrame(StackFrame frame);
@@ -203,14 +204,14 @@ public:
     const std::vector<StackFrame> &callStack() const { return callStack_; }
     StackFrame *currentFrame() { return callStack_.empty() ? nullptr : &callStack_.back(); }
 
-    DebugContext makeContext(uint16_t line, uint16_t col) const;
+    DebugContext makeContext(keel::u16 line, keel::u16 col) const;
     DebugContext makeContext() const;
 
     // Set action for resume after pause (called before re-entering dispatch loop)
     void setResumeAction(DebugAction action, int callDepth);
 
     // Restore lastLine_ (used after debug eval to avoid re-triggering on the same line)
-    void setLastLine(uint16_t line) { lastLine_ = line; }
+    void setLastLine(keel::u16 line) { lastLine_ = line; }
 
 private:
     DebugObserver *observer_;
@@ -218,7 +219,7 @@ private:
     std::vector<StackFrame> callStack_;
     DebugAction stepAction_ = DebugAction::Continue;
     int stepDepth_ = 0;
-    uint16_t lastLine_ = 0;
+    keel::u16 lastLine_ = 0;
 
     void applyAction(DebugAction action, int callDepth);
 };

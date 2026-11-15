@@ -1,6 +1,8 @@
 // include/tree_walker.hpp
 #pragma once
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/types.hpp>
 
@@ -43,12 +45,12 @@ public:
     // accept anonymous handles — they're stored as synthetic user
     // functions and looked up via lookupUserFunction.
     Value callHandlePublic(const Value &handle,
-                            Span<const Value> args,
+                            keel::ArrayRef<Value> args,
                             Environment *env);
     std::vector<Value> callHandleMultiPublic(const Value &handle,
-                                              Span<const Value> args,
+                                              keel::ArrayRef<Value> args,
                                               Environment *env,
-                                              size_t nout);
+                                              keel::usize nout);
 
     // classdef support (runs method/constructor bodies on the TreeWalker
     // regardless of the active backend; the object dispatch that calls
@@ -56,10 +58,10 @@ public:
     // (the caller already prepends `self`). `runClassCtor` pre-seeds the
     // constructor's output variable with the default-constructed instance
     // (MATLAB's implicit `obj` initialisation), then returns it.
-    std::vector<Value> runClassMethod(const UserFunction &uf, Span<const Value> args,
-                                      size_t nout);
+    std::vector<Value> runClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+                                      keel::usize nout);
     Value runClassCtor(const UserFunction &ctor, const Value &seed,
-                       Span<const Value> args);
+                       keel::ArrayRef<Value> args);
     // Evaluate a standalone expression AST (used for classdef property
     // default values at registration time).
     Value evalExpressionPublic(const ASTNode *expr, Environment *env);
@@ -67,13 +69,13 @@ public:
     // Function call — public entry points for TreeWalker user-function dispatch.
     // Optional `callNode` extracts caller's arg names for inputname(k);
     // nullptr falls back to no names.
-    Value callUserFunction(const UserFunction &func, Span<const Value> args,
+    Value callUserFunction(const UserFunction &func, keel::ArrayRef<Value> args,
                            Environment *env,
                            const ASTNode *callNode = nullptr);
     std::vector<Value> callUserFunctionMulti(const UserFunction &func,
-                                              Span<const Value> args,
+                                              keel::ArrayRef<Value> args,
                                               Environment *env,
-                                              size_t nout,
+                                              keel::usize nout,
                                               const ASTNode *callNode = nullptr);
 
 private:
@@ -172,19 +174,19 @@ private:
     bool tryFusion(const ASTNode *node, Environment *env, Value &out);
 
     // Statements
-    Value execIdentifier(const ASTNode *node, Environment *env, size_t nargout = 1);
+    Value execIdentifier(const ASTNode *node, Environment *env, keel::usize nargout = 1);
     Value execAssign(const ASTNode *node, Environment *env);
     Value execMultiAssign(const ASTNode *node, Environment *env);
     Value execBinaryOp(const ASTNode *node, Environment *env);
     Value execUnaryOp(const ASTNode *node, Environment *env);
-    Value execCall(const ASTNode *node, Environment *env, size_t nargout = 1);
+    Value execCall(const ASTNode *node, Environment *env, keel::usize nargout = 1);
     // Superclass-qualified call `lhs@Base(args)` (classdef super-call).
     // `superRef` is the SUPERCLASS_REF node, `callNode` the enclosing CALL
     // (its children[1..] are the arguments). Disambiguates super-constructor
     // (`obj@Base(args)`, lhs is a variable) from super-method
     // (`method@Base(obj,...)`, lhs is a method-name identifier).
     std::vector<Value> execSuperCall(const ASTNode *superRef, const ASTNode *callNode,
-                                     Environment *env, size_t nargout);
+                                     Environment *env, keel::usize nargout);
     Value execCellIndex(const ASTNode *node, Environment *env);
     // The SELECTED contents of a single-subscript cell brace-index node `c{sub}`
     // as a comma-separated list: c{:} -> all elements (column-major); c{vec} ->
@@ -237,17 +239,17 @@ private:
                                int dim,
                                int ndims,
                                Environment *env,
-                               size_t &outIdx);
-    std::vector<size_t> resolveIndex(
+                               keel::usize &outIdx);
+    std::vector<keel::usize> resolveIndex(
         const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env);
     Value execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env);
-    std::vector<Value> execCallMulti(const ASTNode *node, Environment *env, size_t nout);
-    Value callFuncHandle(const Value &handle, Span<const Value> args, Environment *env,
+    std::vector<Value> execCallMulti(const ASTNode *node, Environment *env, keel::usize nout);
+    Value callFuncHandle(const Value &handle, keel::ArrayRef<Value> args, Environment *env,
                          const ASTNode *callNode = nullptr);
     std::vector<Value> callFuncHandleMulti(const Value &handle,
-                                            Span<const Value> args,
+                                            keel::ArrayRef<Value> args,
                                             Environment *env,
-                                            size_t nout,
+                                            keel::usize nout,
                                             const ASTNode *callNode = nullptr);
 
     // Utilities

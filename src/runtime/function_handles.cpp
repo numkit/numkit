@@ -11,10 +11,11 @@
 // only the owning translation unit / layer differs. registerFunctionHandles is
 // composed by installRuntimeLibrary (runtime.cpp), which
 // bundle/installStandardLibrary calls.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/engine.hpp>
-#include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 
 #include <stdexcept>
@@ -26,8 +27,8 @@ void registerFunctionHandles(Engine &engine)
 {
     // str2func('name') — create a function handle by name.
     engine.registerFunction("str2func",
-                            [](Span<const Value> args, size_t /*nargout*/,
-                               Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                               keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("str2func requires 1 argument");
                                 if (!args[0].isChar() && !args[0].isString())
@@ -42,7 +43,7 @@ void registerFunctionHandles(Engine &engine)
                                 // leading '@') was stored as the handle NAME,
                                 // so '@sin' / '@(x)..' became unfindable '@@..'.
                                 if (!s.empty() && s[0] == '@') {
-                                    size_t j = 1;
+                                    keel::usize j = 1;
                                     while (j < s.size() && (s[j] == ' ' || s[j] == '\t'))
                                         ++j;
                                     if (j < s.size() && s[j] == '(') {
@@ -50,11 +51,11 @@ void registerFunctionHandles(Engine &engine)
                                         outs[0] = ctx.engine->eval(s, true);
                                     } else {
                                         outs[0] = Value::funcHandle(
-                                            s.substr(j), ctx.engine->resource());
+                                            s.substr(j), ctx.engine->allocator());
                                     }
                                 } else {
                                     outs[0] = Value::funcHandle(
-                                        s, ctx.engine->resource());
+                                        s, ctx.engine->allocator());
                                 }
                             });
 
@@ -66,8 +67,8 @@ void registerFunctionHandles(Engine &engine)
     // absent (e.g. a VM closure-with-captures, represented as a cell) we fall
     // back to the internal `@__anon_<N>` placeholder.
     engine.registerFunction("func2str",
-                            [](Span<const Value> args, size_t /*nargout*/,
-                               Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                               keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("func2str requires 1 argument");
                                 const Value *h = &args[0];
@@ -85,7 +86,7 @@ void registerFunctionHandles(Engine &engine)
                                 } else {
                                     text = name;
                                 }
-                                outs[0] = Value::fromString(text, ctx.engine->resource());
+                                outs[0] = Value::fromString(text, ctx.engine->allocator());
                             });
 }
 

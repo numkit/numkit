@@ -7,6 +7,10 @@
 //
 // Cluster: clear / import / assignin / inputname / who / whos / exist / clearvars.
 // (clc / which stay in toolboxes/builtin — path/meta, not workspace runtime.)
+#include <keel/arena.h>
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/array.h>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
@@ -15,8 +19,6 @@
 #include <numkit/core/environment.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)
-#include <numkit/value/scratch.hpp>   // ScratchArena / ScratchVec (who / whos)
-#include <numkit/value/span.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp> // mtypeName (whos)
 
@@ -37,15 +39,15 @@ namespace numkit::runtime {
 // defined there; declared here so registerWorkspaceRuntime can register
 // them bare (MATLAB save/load are base builtins).
 namespace detail {
-void save_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void load_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void save_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void load_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 } // namespace detail
 
 void registerWorkspaceRuntime(Engine &engine)
 {
     // ── clear ──────────────────────────────────────────────────
     engine.registerFunction("clear",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
                                 ctx.engine->syncFrameToEnv(env);
                                 bool insideFunc = ctx.engine->isInsideFunctionCall();
@@ -66,7 +68,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
                                     if (first == "-regexp") {
                                         std::vector<std::regex> pats;
-                                        for (size_t i = 1; i < args.size(); ++i) {
+                                        for (keel::usize i = 1; i < args.size(); ++i) {
                                             if (!args[i].isChar() && !args[i].isString()) continue;
                                             try { pats.emplace_back(args[i].toString()); }
                                             catch (const std::regex_error &) {
@@ -107,7 +109,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                             if (!insideFunc)
                                                 ctx.engine->markClearAll();
                                         } else {
-                                            for (size_t i = 1; i < args.size(); ++i) {
+                                            for (keel::usize i = 1; i < args.size(); ++i) {
                                                 if (args[i].isChar() || args[i].isString()) {
                                                     std::string gname = args[i].toString();
                                                     if (gs)
@@ -178,20 +180,20 @@ void registerWorkspaceRuntime(Engine &engine)
     //   3-arg form 'a.b' / 'as' / 'name'  → alias
     // Multiple args allowed: `import a.* b.*` pushes two imports.
     engine.registerFunction(
-        "import", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        "import", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto fail = [](const std::string &msg) {
                 throw std::runtime_error("import: " + msg);
             };
-            auto asString = [&](const Value &v, size_t i) {
+            auto asString = [&](const Value &v, keel::usize i) {
                 if (!v.isChar() && !v.isString())
                     fail("argument " + std::to_string(i + 1) + " must be a string");
                 return v.toString();
             };
             auto parseSpec = [&](const std::string &spec, Import &imp) {
                 if (spec.empty()) fail("empty import specifier");
-                size_t pos = 0;
+                keel::usize pos = 0;
                 while (pos < spec.size()) {
-                    size_t dot = spec.find('.', pos);
+                    keel::usize dot = spec.find('.', pos);
                     std::string seg = spec.substr(pos, dot == std::string::npos ? std::string::npos
                                                                                 : dot - pos);
                     if (seg == "*") {
@@ -227,7 +229,7 @@ void registerWorkspaceRuntime(Engine &engine)
                 return;
             }
 
-            for (size_t i = 0; i < args.size(); ++i) {
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 std::string spec = asString(args[i], i);
                 Import imp;
                 parseSpec(spec, imp);
@@ -247,7 +249,7 @@ void registerWorkspaceRuntime(Engine &engine)
     // target frame's register if `name` is statically allocated, so
     // subsequent register-based reads in the target pick up the value.
     engine.registerFunction(
-        "assignin", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        "assignin", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() != 3)
                 throw std::runtime_error("assignin: requires 3 arguments (workspace, name, value)");
             if (!args[0].isChar())
@@ -286,7 +288,7 @@ void registerWorkspaceRuntime(Engine &engine)
     // Empty string if the arg was a literal / expression / non-identifier.
     // Throws when called from outside a function or for k < 1.
     engine.registerFunction(
-        "inputname", [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        "inputname", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() != 1)
                 throw std::runtime_error("inputname: requires one argument (k)");
             double kd = args[0].toScalar();
@@ -294,12 +296,12 @@ void registerWorkspaceRuntime(Engine &engine)
             if (static_cast<double>(k) != kd || k < 1)
                 throw std::runtime_error("inputname: k must be a positive integer");
             std::string name = ctx.engine->inputName(k);
-            outs[0] = Value::fromString(name, ctx.engine->resource());
+            outs[0] = Value::fromString(name, ctx.engine->allocator());
         });
 
     // ── who ────────────────────────────────────────────────────
     engine.registerFunction("who",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
                                 ctx.engine->syncFrameToEnv(env);
 
@@ -311,9 +313,9 @@ void registerWorkspaceRuntime(Engine &engine)
                                     if (!rp.fs || !rp.fs->exists(rp.path))
                                         throw std::runtime_error("who -file: file not found: " + fname);
                                     std::string stem = fname;
-                                    size_t sep = stem.find_last_of("/\\:");
+                                    keel::usize sep = stem.find_last_of("/\\:");
                                     if (sep != std::string::npos) stem = stem.substr(sep + 1);
-                                    size_t dot = stem.find_last_of('.');
+                                    keel::usize dot = stem.find_last_of('.');
                                     if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
                                     std::ostringstream os;
                                     os << "\nYour variables are:\n\n" << stem << "  \n\n";
@@ -346,15 +348,15 @@ void registerWorkspaceRuntime(Engine &engine)
                                         }
                                     }
                                 }
-                                ScratchArena scratch(ctx.engine->resource());
-                                ScratchVec<std::string> names(&scratch);
+                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+                                keel::Array<std::string> names(scratch.allocator());
                                 for (const auto &n : uniqNames)
                                     names.push_back(n);
 
                                 if (nargout > 0) {
-                                    auto *mr = ctx.engine->resource();
+                                    auto *mr = ctx.engine->allocator();
                                     Value c = Value::cell(names.size(), 1, mr);
-                                    for (size_t i = 0; i < names.size(); ++i)
+                                    for (keel::usize i = 0; i < names.size(); ++i)
                                         c.cellAt(i) = Value::fromString(names[i], mr);
                                     outs[0] = std::move(c);
                                     return;
@@ -373,7 +375,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
     // ── whos ───────────────────────────────────────────────────
     engine.registerFunction("whos",
-                            [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 auto *env = ctx.env;
                                 ctx.engine->syncFrameToEnv(env);
 
@@ -385,11 +387,11 @@ void registerWorkspaceRuntime(Engine &engine)
                                     if (!rp.fs || !rp.fs->exists(rp.path))
                                         throw std::runtime_error("whos -file: file not found: " + fname);
                                     auto st = rp.fs->stat(rp.path);
-                                    int64_t bytes = st ? st->size : 0;
+                                    keel::i64 bytes = st ? st->size : 0;
                                     std::string stem = fname;
-                                    size_t sep = stem.find_last_of("/\\:");
+                                    keel::usize sep = stem.find_last_of("/\\:");
                                     if (sep != std::string::npos) stem = stem.substr(sep + 1);
-                                    size_t dot = stem.find_last_of('.');
+                                    keel::usize dot = stem.find_last_of('.');
                                     if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
                                     std::ostringstream os;
                                     os << "  Name      Size    Bytes  Class\n";
@@ -424,13 +426,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                         }
                                     }
                                 }
-                                ScratchArena scratch(ctx.engine->resource());
-                                ScratchVec<std::string> names(&scratch);
+                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+                                keel::Array<std::string> names(scratch.allocator());
                                 for (const auto &n : uniqNames)
                                     names.push_back(n);
 
                                 if (nargout > 0) {
-                                    auto *mr = ctx.engine->resource();
+                                    auto *mr = ctx.engine->allocator();
                                     std::vector<std::pair<std::string, const Value *>> valid;
                                     valid.reserve(names.size());
                                     for (auto &n : names) {
@@ -438,11 +440,11 @@ void registerWorkspaceRuntime(Engine &engine)
                                             valid.emplace_back(n, val);
                                     }
                                     Value sa = Value::structArray(valid.size(), 1, mr);
-                                    for (size_t idx = 0; idx < valid.size(); ++idx) {
+                                    for (keel::usize idx = 0; idx < valid.size(); ++idx) {
                                         const auto &[n, val] = valid[idx];
                                         auto &d = val->dims();
                                         const int nd = std::max(2, d.ndim());
-                                        Value sz = Value::matrix(1, static_cast<size_t>(nd), ValueType::DOUBLE, mr);
+                                        Value sz = Value::matrix(1, static_cast<keel::usize>(nd), ValueType::DOUBLE, mr);
                                         for (int k = 0; k < nd; ++k)
                                             sz.doubleDataMut()[k] = static_cast<double>(d.dim(k));
                                         std::string classStr = val->isSingleComplex()
@@ -487,15 +489,15 @@ void registerWorkspaceRuntime(Engine &engine)
                                             attrStr = "persistent";
 
                                         os << "  " << n;
-                                        for (size_t i = n.size(); i < 10; ++i)
+                                        for (keel::usize i = n.size(); i < 10; ++i)
                                             os << " ";
                                         os << sizeStr;
-                                        for (size_t i = sizeStr.size(); i < 17; ++i)
+                                        for (keel::usize i = sizeStr.size(); i < 17; ++i)
                                             os << " ";
-                                        for (size_t i = bytesStr.size(); i < 5; ++i)
+                                        for (keel::usize i = bytesStr.size(); i < 5; ++i)
                                             os << " ";
                                         os << bytesStr << "  " << classStr;
-                                        for (size_t i = classStr.size(); i < 10; ++i)
+                                        for (keel::usize i = classStr.size(); i < 10; ++i)
                                             os << " ";
                                         os << attrStr << "\n";
                                     }
@@ -507,7 +509,7 @@ void registerWorkspaceRuntime(Engine &engine)
 
     // ── exist ──────────────────────────────────────────────────
     engine.registerFunction("exist",
-                            [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+                            [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("exist requires a name argument");
                                 std::string varName = args[0].toString();
@@ -522,7 +524,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     if (!ctx.engine->findClass(varName))
                                         (void)ctx.engine->lookupUserFunction(varName, env);
                                     double c = ctx.engine->findClass(varName) ? 8.0 : 0.0;
-                                    outs[0] = Value::scalar(c, ctx.engine->resource());
+                                    outs[0] = Value::scalar(c, ctx.engine->allocator());
                                     return;
                                 }
 
@@ -583,13 +585,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                     if (vfsIsDir(varName))                        code = 7;
                                 }
 
-                                outs[0] = Value::scalar(code, ctx.engine->resource());
+                                outs[0] = Value::scalar(code, ctx.engine->allocator());
                             });
 
     // clearvars — clear named workspace variables. With no args, clears
     // all local/persistent variables without unloading functions or touching globals.
     engine.registerFunction("clearvars",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *env = ctx.env;
             ctx.engine->syncFrameToEnv(env);
             if (args.empty()) {
@@ -605,7 +607,7 @@ void registerWorkspaceRuntime(Engine &engine)
             }
             bool exceptMode = false;
             std::vector<std::string> names;
-            for (size_t i = 0; i < args.size(); ++i) {
+            for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
                 const std::string s = args[i].toString();
                 if (s == "-except") { exceptMode = true; continue; }

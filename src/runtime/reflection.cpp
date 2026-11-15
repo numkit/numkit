@@ -2,10 +2,12 @@
 //
 // Language runtime introspection, reflection, and OOP metadata.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/value/error.hpp>
 
@@ -18,14 +20,14 @@ namespace numkit::runtime {
 
 namespace {
 
-Value metaConcat(const std::vector<Value> &v, std::pmr::memory_resource *mr)
+Value metaConcat(const std::vector<Value> &v, keel::Allocator *mr)
 {
     if (v.empty())
         return Value::Empty;
     return Value::objectConcatN(v.data(), v.size(), Dims{v.size(), 1}, mr);
 }
 
-Value buildMetaProperty(const PropMeta &p, std::pmr::memory_resource *mr)
+Value buildMetaProperty(const PropMeta &p, keel::Allocator *mr)
 {
     auto st = std::make_shared<ObjectState>(mr);
     st->props.emplace("Name", Value::fromString(p.name, mr));
@@ -36,7 +38,7 @@ Value buildMetaProperty(const PropMeta &p, std::pmr::memory_resource *mr)
     return Value::object("meta.property", std::move(st), /*isHandle=*/false, mr);
 }
 
-Value buildMetaMethod(const MethodMeta &m, std::pmr::memory_resource *mr)
+Value buildMetaMethod(const MethodMeta &m, keel::Allocator *mr)
 {
     auto st = std::make_shared<ObjectState>(mr);
     st->props.emplace("Name", Value::fromString(m.name, mr));
@@ -46,7 +48,7 @@ Value buildMetaMethod(const MethodMeta &m, std::pmr::memory_resource *mr)
     return Value::object("meta.method", std::move(st), /*isHandle=*/false, mr);
 }
 
-Value buildMetaClass(const std::string &cn, Engine &eng, std::pmr::memory_resource *mr)
+Value buildMetaClass(const std::string &cn, Engine &eng, keel::Allocator *mr)
 {
     const BuiltinClass *cls = eng.findClass(cn);
     auto st = std::make_shared<ObjectState>(mr);
@@ -79,10 +81,10 @@ void registerReflectionRuntime(Engine &engine)
 {
     // ── Function handle introspection ─────────────────────────────
     engine.registerFunction("functions",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isFuncHandle())
                 throw std::runtime_error("functions: argument must be a function handle");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             auto s = Value::structure(mr);
             const std::string name = args[0].funcHandleName();
             s.field("function") = Value::fromString(name, mr);
@@ -92,25 +94,25 @@ void registerReflectionRuntime(Engine &engine)
         });
 
     engine.registerFunction("localfunctions",
-        [](Span<const Value>, size_t, Span<Value> outs, CallContext &ctx) {
-            outs[0] = Value::cell(0, 1, ctx.engine->resource());
+        [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            outs[0] = Value::cell(0, 1, ctx.engine->allocator());
         });
 
     // ── class ──────────────────────────────────────────────────
     engine.registerFunction("class",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("class requires an argument");
             outs[0] = Value::fromString(
                 args[0].isObject()          ? args[0].objectClassName()
                 : args[0].isSingleComplex() ? "single"
                                             : mtypeName(args[0].type()),
-                ctx.engine->resource());
+                ctx.engine->allocator());
         });
 
     // ── isa(x, classOrCategory) ────────────────────────────────
     engine.registerFunction("isa",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw std::runtime_error("isa requires two arguments");
             const std::string target = args[1].toString();
@@ -146,32 +148,32 @@ void registerReflectionRuntime(Engine &engine)
                 else if (target == "integer")
                     result = isInt;
             }
-            outs[0] = Value::logicalScalar(result, ctx.engine->resource());
+            outs[0] = Value::logicalScalar(result, ctx.engine->allocator());
         });
 
     // ── isobject / properties / methods ───────────────────────────
     engine.registerFunction("isobject",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             outs[0] = Value::logicalScalar(!args.empty() && args[0].isObject(),
-                                           ctx.engine->resource());
+                                           ctx.engine->allocator());
         });
 
     engine.registerFunction("properties",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("properties requires an argument");
             std::string cn = args[0].isObject() ? args[0].objectClassName()
                                                 : args[0].toString();
             const BuiltinClass *cls = ctx.engine->findClass(cn);
-            const size_t n = cls ? cls->propNames.size() : 0;
-            Value c = Value::cell(n, 1, ctx.engine->resource());
-            for (size_t i = 0; i < n; ++i)
-                c.cellAt(i) = Value::fromString(cls->propNames[i], ctx.engine->resource());
+            const keel::usize n = cls ? cls->propNames.size() : 0;
+            Value c = Value::cell(n, 1, ctx.engine->allocator());
+            for (keel::usize i = 0; i < n; ++i)
+                c.cellAt(i) = Value::fromString(cls->propNames[i], ctx.engine->allocator());
             outs[0] = c;
         });
 
     engine.registerFunction("methods",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("methods requires an argument");
             std::string cn = args[0].isObject() ? args[0].objectClassName()
@@ -184,15 +186,15 @@ void registerReflectionRuntime(Engine &engine)
                         == cls->hidden.end())
                         names.push_back(mn);
             std::sort(names.begin(), names.end());
-            Value c = Value::cell(names.size(), 1, ctx.engine->resource());
-            for (size_t i = 0; i < names.size(); ++i)
-                c.cellAt(i) = Value::fromString(names[i], ctx.engine->resource());
+            Value c = Value::cell(names.size(), 1, ctx.engine->allocator());
+            for (keel::usize i = 0; i < names.size(); ++i)
+                c.cellAt(i) = Value::fromString(names[i], ctx.engine->allocator());
             outs[0] = c;
         });
 
     // ── isprop / ismethod / superclasses ─────────────────────────
     engine.registerFunction("isprop",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw Error("isprop: requires (obj, name)", 0, 0, "isprop", "",
                             "numkit:isprop:nargin");
@@ -203,19 +205,19 @@ void registerReflectionRuntime(Engine &engine)
                                   != cls->propNames.end();
             };
             if (args[1].isCell()) {
-                const size_t n = args[1].numel();
+                const keel::usize n = args[1].numel();
                 Value r = Value::matrix(args[1].dims().rows(), args[1].dims().cols(),
-                                        ValueType::LOGICAL, ctx.engine->resource());
-                for (size_t i = 0; i < n; ++i)
+                                        ValueType::LOGICAL, ctx.engine->allocator());
+                for (keel::usize i = 0; i < n; ++i)
                     r.logicalDataMut()[i] = has(args[1].cellAt(i).toString()) ? 1 : 0;
                 outs[0] = r;
             } else {
-                outs[0] = Value::logicalScalar(has(args[1].toString()), ctx.engine->resource());
+                outs[0] = Value::logicalScalar(has(args[1].toString()), ctx.engine->allocator());
             }
         });
 
     engine.registerFunction("ismethod",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw Error("ismethod: requires (obj, name)", 0, 0, "ismethod", "",
                             "numkit:ismethod:nargin");
@@ -226,19 +228,19 @@ void registerReflectionRuntime(Engine &engine)
                 return cls && cls->methods.count(n) > 0;
             };
             if (args[1].isCell()) {
-                const size_t n = args[1].numel();
+                const keel::usize n = args[1].numel();
                 Value r = Value::matrix(args[1].dims().rows(), args[1].dims().cols(),
-                                        ValueType::LOGICAL, ctx.engine->resource());
-                for (size_t i = 0; i < n; ++i)
+                                        ValueType::LOGICAL, ctx.engine->allocator());
+                for (keel::usize i = 0; i < n; ++i)
                     r.logicalDataMut()[i] = has(args[1].cellAt(i).toString()) ? 1 : 0;
                 outs[0] = r;
             } else {
-                outs[0] = Value::logicalScalar(has(args[1].toString()), ctx.engine->resource());
+                outs[0] = Value::logicalScalar(has(args[1].toString()), ctx.engine->allocator());
             }
         });
 
     engine.registerFunction("superclasses",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw Error("superclasses: requires (obj or 'ClassName')", 0, 0,
                             "superclasses", "", "numkit:superclasses:nargin");
@@ -252,9 +254,9 @@ void registerReflectionRuntime(Engine &engine)
                     && std::find(names.begin(), names.end(), "handle") == names.end())
                     names.push_back("handle");
             }
-            Value c = Value::cell(names.size(), 1, ctx.engine->resource());
-            for (size_t i = 0; i < names.size(); ++i)
-                c.cellAt(i) = Value::fromString(names[i], ctx.engine->resource());
+            Value c = Value::cell(names.size(), 1, ctx.engine->allocator());
+            for (keel::usize i = 0; i < names.size(); ++i)
+                c.cellAt(i) = Value::fromString(names[i], ctx.engine->allocator());
             outs[0] = c;
         });
 
@@ -289,11 +291,11 @@ void registerReflectionRuntime(Engine &engine)
         engine.registerClass(std::move(mc));
     }
     engine.registerFunction("metaclass",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw Error("metaclass: requires 1 argument", 0, 0, "metaclass", "",
                             "numkit:metaclass:nargin");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             std::string cn;
             if (args[0].isObject()) {
                 cn = args[0].objectClassName();
@@ -320,20 +322,20 @@ void registerReflectionRuntime(Engine &engine)
         return false;
     };
     engine.registerFunction("iscategorical",
-        [checkIsClassOrSub](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [checkIsClassOrSub](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() != 1)
                 throw Error("iscategorical: requires 1 argument", 0, 0, "iscategorical", "",
                             "numkit:iscategorical:nargin");
             outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "categorical", *ctx.engine),
-                                           ctx.engine->resource());
+                                           ctx.engine->allocator());
         });
     engine.registerFunction("istimetable",
-        [checkIsClassOrSub](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [checkIsClassOrSub](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() != 1)
                 throw Error("istimetable: requires 1 argument", 0, 0, "istimetable", "",
                             "numkit:istimetable:nargin");
             outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "timetable", *ctx.engine),
-                                           ctx.engine->resource());
+                                           ctx.engine->allocator());
         });
 }
 

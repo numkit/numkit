@@ -3,6 +3,8 @@
 // CallContext register half of math/trig/trigonometry.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
@@ -13,13 +15,10 @@
 #include <numkit/builtin/detail/elfun/_unary_hint.hpp>   // 3-arg sin/cos hint overloads
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -32,13 +31,13 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 namespace detail {
 
 #define NUMKIT_UNARY_ADAPTER(name, fn)                                              \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,                \
-                    Span<Value> outs, CallContext &ctx)                        \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,                \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                        \
     {                                                                            \
         if (args.empty())                                                        \
             throw Error(#name ": requires 1 argument",                          \
                          0, 0, #name, "", "numkit:" #name ":nargin");                 \
-        outs[0] = fn(args[0], ctx.engine->resource());                          \
+        outs[0] = fn(args[0], ctx.engine->allocator());                          \
     }
 
 NUMKIT_UNARY_ADAPTER(tan,  tan)
@@ -84,25 +83,25 @@ NUMKIT_UNARY_ADAPTER(acotd, acotd)
 
 #undef NUMKIT_UNARY_ADAPTER
 
-void atan2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void atan2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "atan2");
     argcheck::checkNargin(args.size(), 2, 2, "atan2");
-    outs[0] = atan2(args[0], args[1], ctx.engine->resource());
+    outs[0] = atan2(args[0], args[1], ctx.engine->allocator());
 }
 
-void atan2d_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void atan2d_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "atan2d");
     argcheck::checkNargin(args.size(), 2, 2, "atan2d");
-    outs[0] = atan2d(args[0], args[1], ctx.engine->resource());
+    outs[0] = atan2d(args[0], args[1], ctx.engine->allocator());
 }
 
-void cart2pol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void cart2pol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "cart2pol");
     argcheck::checkNargin(args.size(), 2, 3, "cart2pol");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() >= 3) {
         auto [theta, rho, z] = cart2pol(args[0], args[1], args[2], mr);
         outs[0] = std::move(theta);
@@ -115,11 +114,11 @@ void cart2pol_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     if (nargout > 1) outs[1] = std::move(rho);
 }
 
-void pol2cart_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void pol2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "pol2cart");
     argcheck::checkNargin(args.size(), 2, 3, "pol2cart");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() >= 3) {
         auto [xv, yv, zv] = pol2cart(args[0], args[1], args[2], mr);
         outs[0] = std::move(xv);
@@ -132,21 +131,21 @@ void pol2cart_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     if (nargout > 1) outs[1] = std::move(yv);
 }
 
-void cart2sph_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void cart2sph_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "cart2sph");
     argcheck::checkNargin(args.size(), 3, 3, "cart2sph");
-    auto [az, el, r] = cart2sph(args[0], args[1], args[2], ctx.engine->resource());
+    auto [az, el, r] = cart2sph(args[0], args[1], args[2], ctx.engine->allocator());
     outs[0] = std::move(az);
     if (nargout > 1) outs[1] = std::move(el);
     if (nargout > 2) outs[2] = std::move(r);
 }
 
-void sph2cart_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void sph2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "sph2cart");
     argcheck::checkNargin(args.size(), 3, 3, "sph2cart");
-    auto [xv, yv, zv] = sph2cart(args[0], args[1], args[2], ctx.engine->resource());
+    auto [xv, yv, zv] = sph2cart(args[0], args[1], args[2], ctx.engine->allocator());
     outs[0] = std::move(xv);
     if (nargout > 1) outs[1] = std::move(yv);
     if (nargout > 2) outs[2] = std::move(zv);

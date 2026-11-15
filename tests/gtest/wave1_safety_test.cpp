@@ -3,6 +3,8 @@
 // Regression tests for Wave 1 memory safety, concurrency, security, and
 // numeric correctness fixes across value, ops, sys, and numkit core.
 
+#include <keel/core.h>
+#include <keel/complex.h>
 #include "dual_engine_fixture.hpp"
 
 #include <numkit/ops/blas.hpp>
@@ -15,7 +17,6 @@
 
 #include <atomic>
 #include <climits>
-#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -173,14 +174,14 @@ TEST(Wave1OpsSafetyTest, GemmTailPanelAndTransposes)
 {
     // Exercise N = 2050, K = 260 (crosses nc_block = 2048 and kc_block = 256)
     const int M = 4, N = 2050, K = 260;
-    std::vector<double> A(static_cast<size_t>(M * K), 1.0);
-    std::vector<double> B(static_cast<size_t>(K * N), 2.0);
-    std::vector<double> C(static_cast<size_t>(M * N), 0.0);
+    std::vector<double> A(static_cast<keel::usize>(M * K), 1.0);
+    std::vector<double> B(static_cast<keel::usize>(K * N), 2.0);
+    std::vector<double> C(static_cast<keel::usize>(M * N), 0.0);
     numkit::ops::gemm(numkit::ops::MatrixTranspose::NoTrans,
                       numkit::ops::MatrixTranspose::NoTrans,
                       M, N, K, 1.0, A.data(), M, B.data(), K, 0.0, C.data(), M);
     EXPECT_DOUBLE_EQ(C[0], 520.0);
-    EXPECT_DOUBLE_EQ(C[static_cast<size_t>(M * N - 1)], 520.0);
+    EXPECT_DOUBLE_EQ(C[static_cast<keel::usize>(M * N - 1)], 520.0);
 
     // Real Trans: A^T (2x3 -> 3x2) * B^T (2x2 -> 2x2)
     // A (2x3 col-major): [1 3 5; 2 4 6], so A^T is 3x2: [1 2; 3 4; 5 6]
@@ -195,8 +196,8 @@ TEST(Wave1OpsSafetyTest, GemmTailPanelAndTransposes)
     EXPECT_DOUBLE_EQ(Ct[3], 2.0);
 
     // Complex ConjTrans: A^H * A for A = [1+2i] -> (1-2i)*(1+2i) = 5 + 0i
-    std::complex<double> zA[1] = {{1.0, 2.0}};
-    std::complex<double> zC[1] = {{0.0, 0.0}};
+    keel::c64 zA[1] = {{1.0, 2.0}};
+    keel::c64 zC[1] = {{0.0, 0.0}};
     numkit::ops::gemm(numkit::ops::MatrixTranspose::ConjTrans,
                       numkit::ops::MatrixTranspose::NoTrans,
                       1, 1, 1, {1.0, 0.0}, zA, 1, zA, 1, {0.0, 0.0}, zC, 1);
@@ -211,8 +212,8 @@ TEST(Wave1OpsSafetyTest, ThreadPoolAlternatingWorkerSubsetRace)
     for (int iter = 0; iter < 1500; ++iter) {
         int maxW = (iter % 2 == 0) ? 2 : 16;
         std::atomic<int> sum{0};
-        pool.run(32, [&](std::size_t start, std::size_t end) {
-            for (std::size_t i = start; i < end; ++i) {
+        pool.run(32, [&](keel::usize start, keel::usize end) {
+            for (keel::usize i = start; i < end; ++i) {
                 sum.fetch_add(static_cast<int>(i + 1), std::memory_order_relaxed);
             }
         }, maxW);
@@ -224,9 +225,9 @@ TEST(Wave1OpsSafetyTest, ThreadPoolAlternatingWorkerSubsetRace)
 TEST(Wave1OpsSafetyTest, RngCorruptStateAndWideUniformIntSafe)
 {
     numkit::ops::MatlabMT19937 mt;
-    std::uint32_t allZero[624] = {0};
+    keel::u32 allZero[624] = {0};
     mt.setState(allZero, -42); // negative index + all-zero state
-    std::uint32_t u = mt.genUint32();
+    keel::u32 u = mt.genUint32();
     double r = mt.genRes53();
     (void)u;
     EXPECT_GE(r, 0.0);
@@ -252,7 +253,7 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
         std::string bytes(128, ' ');
         bytes[126] = 'I';
         bytes[127] = 'M';
-        const std::uint8_t tag[8] = {0x0E, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xFF, 0xFF};
+        const keel::u8 tag[8] = {0x0E, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xFF, 0xFF};
         bytes.append(reinterpret_cast<const char *>(tag), 8);
         {
             std::ofstream out(bad5, std::ios::binary);
@@ -264,7 +265,7 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
     // 12b. MAT4 with non-NUL-terminated variable name
     {
         fs::path bad4 = tmpDir / "unterm_mat4.mat";
-        std::vector<std::uint8_t> bytes(24, 0);
+        std::vector<keel::u8> bytes(24, 0);
         // mType=0, rows=1, cols=1, imagf=0, namlen=4
         bytes[4] = 1;
         bytes[8] = 1;
@@ -283,7 +284,7 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
 
     // 12c. Deflate output byte cap
     {
-        std::vector<std::uint8_t> bigZeros(8192, 0);
+        std::vector<keel::u8> bigZeros(8192, 0);
         auto compressed = numkit::ops::zlibCompress(bigZeros.data(), bigZeros.size(), 6);
         EXPECT_THROW(numkit::ops::zlibDecompress(compressed.data(), compressed.size(), 0, 1024),
                      std::runtime_error);
@@ -346,7 +347,7 @@ TEST_P(Wave1SafetyTest, CanonicalIndexAndDimBoundsParity)
         EXPECT_THROW(eval(expr), std::exception) << expr;
     }
 
-    if constexpr (sizeof(numkit::Size) >= 8) {
+    if constexpr (sizeof(keel::usize) >= 8) {
         // Largest contiguous exact double integer (2^53 - 1) is accepted as an
         // empty-array dimension without allocating storage.
         EXPECT_DOUBLE_EQ(evalScalar("size(zeros(0, 9007199254740991), 2)"),

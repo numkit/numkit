@@ -6,8 +6,8 @@
 // standard subsystems (Runtime, Builtin) into an Engine instance.
 #pragma once
 
+#include <keel/memory.h>
 #include <memory>
-#include <memory_resource>
 
 namespace numkit {
 
@@ -29,7 +29,7 @@ inline void installStandardLibrary(Engine &engine) {
 
 // Convenience: construct an Engine on the heap with the standard library
 // already installed. Returned by unique_ptr because Engine is non-movable.
-std::unique_ptr<Engine> makeStandardEngine(std::pmr::memory_resource *mr = nullptr);
+std::unique_ptr<Engine> makeStandardEngine(keel::Allocator *mr = nullptr);
 
 
 /// @}

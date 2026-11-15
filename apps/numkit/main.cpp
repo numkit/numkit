@@ -7,6 +7,7 @@
 //   numkit -h | --help      display usage help
 //   numkit -v | --version   display version info
 
+#include <keel/core.h>
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
@@ -75,7 +76,7 @@ bool isIncompleteInput(const std::string &src)
     if (bracket > 0 || blockOpen > 0)
         return true;
 
-    size_t i = src.size();
+    keel::usize i = src.size();
     while (i > 0 && (src[i - 1] == ' ' || src[i - 1] == '\t' ||
                      src[i - 1] == '\r' || src[i - 1] == '\n'))
         --i;

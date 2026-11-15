@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keel/core.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -57,7 +58,7 @@ private:
     void initCategories();
 
     std::vector<HelpCategory> categories_;
-    std::unordered_map<std::string, size_t> categoryIndex_;
+    std::unordered_map<std::string, keel::usize> categoryIndex_;
     std::unordered_map<std::string, HelpEntry> functionIndex_;
 };
 

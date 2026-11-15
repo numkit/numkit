@@ -3,6 +3,7 @@
 // StandardLibrary::install — wires language runtime, builtins, and SIMD fusion rules into an Engine.
 // Toolboxes (signal, stats, etc.) are loaded dynamically as plugins via PluginLoader.
 
+#include <keel/memory.h>
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/runtime/runtime.hpp>
@@ -42,7 +43,7 @@ void StandardLibrary::install(Engine &engine)
     registerFusionRules(engine);
 }
 
-std::unique_ptr<Engine> makeStandardEngine(std::pmr::memory_resource *mr)
+std::unique_ptr<Engine> makeStandardEngine(keel::Allocator *mr)
 {
     auto engine = std::make_unique<Engine>(mr);
     StandardLibrary::install(*engine);

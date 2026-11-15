@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/help/help_catalog.hpp>
 
 #include <algorithm>
@@ -15,7 +16,7 @@ std::string toLowerStr(std::string s) {
     return s;
 }
 
-std::string padRight(const std::string &s, size_t width) {
+std::string padRight(const std::string &s, keel::usize width) {
     if (s.length() >= width) return s + " ";
     return s + std::string(width - s.length(), ' ');
 }
@@ -69,11 +70,11 @@ std::string HelpCatalog::formatAllCategories() const {
     std::ostringstream os;
     os << "NK Help Topics:\n\n";
     os << "  Fundamentals:\n";
-    for (size_t i = 0; i < 12 && i < categories_.size(); ++i) {
+    for (keel::usize i = 0; i < 12 && i < categories_.size(); ++i) {
         os << "    " << padRight(categories_[i].name, 14) << "- " << categories_[i].title << "\n";
     }
     os << "\n  Toolboxes:\n";
-    for (size_t i = 12; i < categories_.size(); ++i) {
+    for (keel::usize i = 12; i < categories_.size(); ++i) {
         os << "    " << padRight(categories_[i].name, 14) << "- " << categories_[i].title << "\n";
     }
     os << "\nType \"help <topic>\" for a list of functions in that topic.\n";
@@ -1066,7 +1067,7 @@ void HelpCatalog::initCategories() {
     categoryIndex_.clear();
     functionIndex_.clear();
 
-    for (size_t i = 0; i < categories_.size(); ++i) {
+    for (keel::usize i = 0; i < categories_.size(); ++i) {
         const auto &cat = categories_[i];
         categoryIndex_[toLowerStr(cat.name)] = i;
 

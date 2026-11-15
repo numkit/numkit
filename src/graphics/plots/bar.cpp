@@ -3,6 +3,9 @@
 // graphics.bar.* builders (bar / barh / scatter / hist / histogram / pie / boxplot / patch / heatmap / bubblechart / swarmchart), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -35,8 +38,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     };
 
     reg("bar", "bar",
-        [](Span<const Value> args, size_t nargout,
-                                   Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -47,7 +50,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // Identify the X (optional) and Y arguments.
             const Value *xArg = nullptr;
             const Value *yArg = nullptr;
-            size_t nvStart = 1;
+            keel::usize nvStart = 1;
             if (args.size() >= 2 && !args[1].isChar()) {
                 xArg = &args[0];
                 yArg = &args[1];
@@ -57,7 +60,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
             // 'stacked' / 'grouped' / 'histc' specifier (string) after Y.
             std::string mode = "grouped";
-            for (size_t i = nvStart; i < args.size(); ++i) {
+            for (keel::usize i = nvStart; i < args.size(); ++i) {
                 if (args[i].isChar()) {
                     std::string s = args[i].toString();
                     for (auto &c : s) c = (char)std::tolower((unsigned char)c);
@@ -68,8 +71,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 }
             }
 
-            size_t Yr = yArg->dims().rows();
-            size_t Yc = yArg->dims().cols();
+            keel::usize Yr = yArg->dims().rows();
+            keel::usize Yc = yArg->dims().cols();
             const bool matrix = (Yr > 1 && Yc > 1);
             bool transposeY = (matrix && xArg && xArg->numel() == Yc && Yr != Yc);
             if (transposeY) std::swap(Yr, Yc);
@@ -100,19 +103,19 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // Build base X vector — explicit when given, else 1..Yr.
             std::vector<double> xb(Yr);
             if (xArg) {
-                for (size_t r = 0; r < Yr; ++r) xb[r] = xArg->elemAsDouble(r);
+                for (keel::usize r = 0; r < Yr; ++r) xb[r] = xArg->elemAsDouble(r);
             } else {
-                for (size_t r = 0; r < Yr; ++r) xb[r] = (double)(r + 1);
+                for (keel::usize r = 0; r < Yr; ++r) xb[r] = (double)(r + 1);
             }
             std::vector<double> Ybuf(yArg->numel());
             if (transposeY) {
-                size_t origR = yArg->dims().rows();
-                size_t origC = yArg->dims().cols();
-                for (size_t r = 0; r < origR; ++r)
-                    for (size_t c = 0; c < origC; ++c)
+                keel::usize origR = yArg->dims().rows();
+                keel::usize origC = yArg->dims().cols();
+                for (keel::usize r = 0; r < origR; ++r)
+                    for (keel::usize c = 0; c < origC; ++c)
                         Ybuf[r * origC + c] = yArg->elemAsDouble(c * origR + r);
             } else {
-                for (size_t i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yArg->elemAsDouble(i);
+                for (keel::usize i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yArg->elemAsDouble(i);
             }
             const double *Yp = Ybuf.data();
             if (mode == "stacked") {
@@ -120,16 +123,16 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 // bands overdraw the bottom of higher ones (same idea
                 // as area-stacked).
                 std::vector<std::vector<double>> S(Yr, std::vector<double>(Yc, 0.0));
-                for (size_t r = 0; r < Yr; ++r) {
+                for (keel::usize r = 0; r < Yr; ++r) {
                     double acc = 0;
-                    for (size_t c = 0; c < Yc; ++c) {
+                    for (keel::usize c = 0; c < Yc; ++c) {
                         acc += Yp[c * Yr + r];
                         S[r][c] = acc;
                     }
                 }
                 std::ostringstream xs;
                 xs << '[';
-                for (size_t r = 0; r < Yr; ++r) {
+                for (keel::usize r = 0; r < Yr; ++r) {
                     if (r) xs << ',';
                     xs << xb[r];
                 }
@@ -141,14 +144,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                     ds.xJson = xJsonStr;
                     std::ostringstream ys;
                     ys << '[';
-                    for (size_t r = 0; r < Yr; ++r) {
+                    for (keel::usize r = 0; r < Yr; ++r) {
                         if (r) ys << ',';
-                        ys << S[r][(size_t)cc];
+                        ys << S[r][(keel::usize)cc];
                     }
                     ys << ']';
                     ds.yJson = ys.str();
                     std::ostringstream sty;
-                    sty << "color=" << kBarPalette[(size_t)cc % 8];
+                    sty << "color=" << kBarPalette[(keel::usize)cc % 8];
                     ds.style = sty.str();
                     fm.pushDataset(std::move(ds));
                 }
@@ -160,13 +163,13 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 // per group, offsets span ±0.4 around the base.
                 const double groupHalf = 0.4;
                 const double slot = (Yc > 1) ? (2 * groupHalf) / (Yc - 1) : 0.0;
-                for (size_t cc = 0; cc < Yc; ++cc) {
+                for (keel::usize cc = 0; cc < Yc; ++cc) {
                     DatasetInfo ds;
                     ds.type = "bar";
                     std::ostringstream xs, ys;
                     xs << '['; ys << '[';
                     const double off = -groupHalf + slot * cc;
-                    for (size_t r = 0; r < Yr; ++r) {
+                    for (keel::usize r = 0; r < Yr; ++r) {
                         if (r) { xs << ','; ys << ','; }
                         xs << (xb[r] + off);
                         ys << Yp[cc * Yr + r];
@@ -189,23 +192,23 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // cdfplot(x) / ecdf(x) — empirical cumulative distribution. Sorts
     // x ascending and renders a right-continuous step function from
     // 0 to 1. NaN inputs are dropped.
-    auto cdfImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+    auto cdfImpl = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
         const auto &X = args[0];
         std::vector<double> xs;
         xs.reserve(X.numel());
-        for (size_t i = 0; i < X.numel(); ++i) {
+        for (keel::usize i = 0; i < X.numel(); ++i) {
             const double v = X.elemAsDouble(i);
             if (std::isfinite(v)) xs.push_back(v);
         }
         if (xs.empty()) { outs[0] = Value(); return; }
         std::sort(xs.begin(), xs.end());
-        const size_t N = xs.size();
+        const keel::usize N = xs.size();
 
         std::ostringstream sx, sy;
         sx << '['; sy << '[';
-        for (size_t i = 0; i < N; ++i) {
+        for (keel::usize i = 0; i < N; ++i) {
             if (i) { sx << ','; sy << ','; }
             sx << xs[i];
             sy << ((double)(i + 1) / (double)N);
@@ -235,17 +238,17 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // — a robust IQR-based fit that beats a naive μ ± σ line on
     // skewed data. Two datasets: scatter (points) + line (reference).
     reg("bar", "qqplot",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
             std::vector<double> xs;
-            for (size_t i = 0; i < args[0].numel(); ++i) {
+            for (keel::usize i = 0; i < args[0].numel(); ++i) {
                 const double v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) xs.push_back(v);
             }
             if (xs.size() < 2) { outs[0] = Value(); return; }
             std::sort(xs.begin(), xs.end());
-            const size_t N = xs.size();
+            const keel::usize N = xs.size();
 
             // Probit (inverse normal CDF) — Abramowitz & Stegun 26.2.23
             // rational approx, good to ~4.5e-4 absolute error. Mirrors
@@ -264,7 +267,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
 
             std::ostringstream tx, ty;
             tx << '['; ty << '[';
-            for (size_t i = 0; i < N; ++i) {
+            for (keel::usize i = 0; i < N; ++i) {
                 if (i) { tx << ','; ty << ','; }
                 tx << probit((i + 0.5) / (double)N);
                 ty << xs[i];
@@ -274,8 +277,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // Reference line: passes through (probit(0.25), q1) and
             // (probit(0.75), q3) where q1, q3 are the 25th / 75th
             // percentiles of the sample.
-            const double q1 = xs[(size_t)((N - 1) * 0.25)];
-            const double q3 = xs[(size_t)((N - 1) * 0.75)];
+            const double q1 = xs[(keel::usize)((N - 1) * 0.25)];
+            const double q3 = xs[(keel::usize)((N - 1) * 0.75)];
             const double t1 = probit(0.25), t3 = probit(0.75);
             const double slope = (q3 - q1) / (t3 - t1);
             const double intercept = q1 - slope * t1;
@@ -311,11 +314,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     //   1. type=bar, X = 1..N (rank), Y sorted descending
     //   2. type=line, same X, Y = 100 * cumsum(Y) / sum(Y)
     reg("bar", "pareto",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
             std::vector<double> ys;
-            for (size_t i = 0; i < args[0].numel(); ++i) {
+            for (keel::usize i = 0; i < args[0].numel(); ++i) {
                 const double v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) ys.push_back(v);
             }
@@ -328,7 +331,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::ostringstream bx, by, lx, ly;
             bx << '['; by << '['; lx << '['; ly << '[';
             double cum = 0;
-            for (size_t i = 0; i < ys.size(); ++i) {
+            for (keel::usize i = 0; i < ys.size(); ++i) {
                 if (i) { bx << ','; by << ','; lx << ','; ly << ','; }
                 cum += ys[i];
                 bx << (i + 1); by << ys[i];
@@ -358,11 +361,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // (N * binWidth) so the curve is visually comparable to the bar
     // counts.
     reg("bar", "histfit",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
             std::vector<double> xs;
-            for (size_t i = 0; i < args[0].numel(); ++i) {
+            for (keel::usize i = 0; i < args[0].numel(); ++i) {
                 const double v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) xs.push_back(v);
             }
@@ -438,13 +441,13 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // value of g becomes its own scatter dataset (so it picks up a
     // distinct color from the renderer's palette).
     reg("bar", "gscatter",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 3) { outs[0] = Value(); return; }
             const auto &X = args[0];
             const auto &Y = args[1];
             const auto &G = args[2];
-            const size_t N = std::min({X.numel(), Y.numel(), G.numel()});
+            const keel::usize N = std::min({X.numel(), Y.numel(), G.numel()});
             if (N == 0) { outs[0] = Value(); return; }
 
             // Group indices: distinct values in G, preserving first-seen
@@ -453,10 +456,10 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // pass numeric labels).
             std::vector<double> groupKeys;
             std::vector<int> groupIdx(N);
-            for (size_t i = 0; i < N; ++i) {
+            for (keel::usize i = 0; i < N; ++i) {
                 const double k = G.elemAsDouble(i);
                 int found = -1;
-                for (size_t j = 0; j < groupKeys.size(); ++j) {
+                for (keel::usize j = 0; j < groupKeys.size(); ++j) {
                     if (groupKeys[j] == k) { found = (int)j; break; }
                 }
                 if (found < 0) {
@@ -471,15 +474,15 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 "#1f77b4", "#d62728", "#2ca02c", "#9467bd",
                 "#ff7f0e", "#17becf", "#e377c2", "#7f7f7f",
             };
-            const size_t nGroups = groupKeys.size();
+            const keel::usize nGroups = groupKeys.size();
 
             auto &fm = gc.fm;
             fm.prepareForPlot();
-            for (size_t gi = 0; gi < nGroups; ++gi) {
+            for (keel::usize gi = 0; gi < nGroups; ++gi) {
                 std::ostringstream sx, sy;
                 sx << '['; sy << '[';
                 bool first = true;
-                for (size_t i = 0; i < N; ++i) {
+                for (keel::usize i = 0; i < N; ++i) {
                     if (groupIdx[i] != (int)gi) continue;
                     if (!first) { sx << ','; sy << ','; }
                     first = false;
@@ -505,18 +508,18 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // where M is non-zero (and finite). Mirrors MATLAB convention of
     // axis ij so the matrix sits like the printed form (row 1 at top).
     reg("bar", "spy",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             const auto &M = args[0];
-            const size_t R = M.dims().rows();
-            const size_t C = M.dims().cols();
+            const keel::usize R = M.dims().rows();
+            const keel::usize C = M.dims().cols();
             std::ostringstream xs, ys;
             xs << '['; ys << '[';
             bool first = true;
-            for (size_t c = 0; c < C; ++c) {
-                for (size_t r = 0; r < R; ++r) {
+            for (keel::usize c = 0; c < C; ++c) {
+                for (keel::usize r = 0; r < R; ++r) {
                     const double v = M.elemAsDouble(c * R + r);
                     if (v == 0.0 || !std::isfinite(v)) continue;
                     if (!first) { xs << ','; ys << ','; }
@@ -546,8 +549,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // yJson = lengths (along X axis); the 'barh' mode in the renderer
     // swaps the axis roles compared to 'bar'.
     reg("bar", "barh",
-        [](Span<const Value> args, size_t nargout,
-                                   Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
                 return;
@@ -568,7 +571,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("bar", "scatter",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 2) {
                 outs[0] = Value();
                 return;
@@ -581,7 +584,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             ds.yJson = vecToJson(args[1]);
             // scatter(x, y, ..., 'filled') → filled markers; MATLAB's default is
             // open (the renderer draws an outline unless the style says filled).
-            for (size_t k = 2; k < args.size(); ++k) {
+            for (keel::usize k = 2; k < args.size(); ++k) {
                 if (args[k].isChar()) {
                     std::string s = args[k].toString();
                     for (auto &c : s) c = static_cast<char>(std::tolower(c));
@@ -593,7 +596,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("bar", "hist",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto *mr = gc.mr;
             if (args.empty()) {
                 outs[0] = Value();
@@ -603,17 +606,17 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             Value centers;
             Value counts;
             if (args.size() >= 2 && args[1].numel() > 1) {
-                const size_t bins = args[1].numel();
+                const keel::usize bins = args[1].numel();
                 centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
                 counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
-                for (size_t b = 0; b < bins; ++b)
+                for (keel::usize b = 0; b < bins; ++b)
                     centers.doubleDataMut()[b] = args[1].elemAsDouble(b);
                 const double *cd = centers.doubleData();
-                for (size_t i = 0; i < data.numel(); ++i) {
+                for (keel::usize i = 0; i < data.numel(); ++i) {
                     const double v = data.elemAsDouble(i);
                     if (std::isnan(v))
                         continue;
-                    size_t b = 0;
+                    keel::usize b = 0;
                     while (b + 1 < bins && v > 0.5 * (cd[b] + cd[b + 1]))
                         ++b;
                     counts.doubleDataMut()[b] += 1.0;
@@ -624,7 +627,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                     : 10;
                 double mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
                 double mx = mn;
-                for (size_t i = 1; i < data.numel(); ++i) {
+                for (keel::usize i = 1; i < data.numel(); ++i) {
                     const double v = data.elemAsDouble(i);
                     if (!std::isnan(v)) {
                         mn = std::min(mn, v);
@@ -638,7 +641,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
                 for (int b = 0; b < bins; ++b)
                     centers.doubleDataMut()[b] = mn + bw * (b + 0.5);
-                for (size_t i = 0; i < data.numel(); ++i) {
+                for (keel::usize i = 0; i < data.numel(); ++i) {
                     const double v = data.elemAsDouble(i);
                     if (std::isnan(v))
                         continue;
@@ -681,25 +684,25 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // Normalization modes, histogram(C)/cat bins, histogram of
     // datetime — see handle-surface-gaps.
     reg("bar", "histogram",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
 
             const Value &X = args[0];
-            const size_t n = X.numel();
+            const keel::usize n = X.numel();
             if (!n) { outs[0] = Value(); return; }
             std::vector<double> v(n);
             double mn = X.elemAsDouble(0), mx = mn, sum = 0, sum2 = 0;
             bool allInt = true;
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 double x = X.elemAsDouble(i);
                 v[i] = x;
                 mn = std::min(mn, x);
                 mx = std::max(mx, x);
                 sum += x;
                 sum2 += x * x;
-                if (std::abs(x - std::round(x)) > 1e-9)
+                if (keel::abs(x - std::round(x)) > 1e-9)
                     allInt = false;
             }
             double mean = sum / n;
@@ -713,7 +716,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             bool hasLimits = false;
             std::string faceKV, edgeKV;
             double faceAlpha = 0.6;   // MATLAB default (probe R2025b)
-            for (size_t i = 1; i + 1 < args.size(); i += 2) {
+            for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar()) continue;
                 std::string key = args[i].toString();
                 for (auto &c : key) c = (char)std::tolower((unsigned char)c);
@@ -760,7 +763,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 if (args[1].numel() >= 2) {
                     // explicit edges vector
                     edges.clear();
-                    for (size_t k = 0; k < args[1].numel(); ++k)
+                    for (keel::usize k = 0; k < args[1].numel(); ++k)
                         edges.push_back(args[1].elemAsDouble(k));
                 } else {
                     int nb = (int)args[1].toScalar();
@@ -799,17 +802,17 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 for (double e = lo; e <= hi + w * 1e-9; e += w)
                     edges.push_back(e);
             }
-            const size_t nb = edges.size() > 1 ? edges.size() - 1 : 1;
+            const keel::usize nb = edges.size() > 1 ? edges.size() - 1 : 1;
 
             std::vector<double> centers(nb), counts(nb, 0.0);
-            for (size_t b = 0; b < nb; ++b)
+            for (keel::usize b = 0; b < nb; ++b)
                 centers[b] = 0.5 * (edges[b] + edges[b + 1]);
-            for (size_t i = 0; i < n; ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 double x = v[i];
                 if (x < edges.front() || x > edges.back())
                     continue;
-                size_t b = nb - 1;
-                for (size_t k = 0; k + 1 < edges.size(); ++k)
+                keel::usize b = nb - 1;
+                for (keel::usize k = 0; k + 1 < edges.size(); ++k)
                     if (x < edges[k + 1] || k + 1 == edges.size() - 1) {
                         b = k;
                         break;
@@ -851,7 +854,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     //   histogram2(X, Y, nx, ny)      — explicit grid (separate args)
     // Name-Value form (NumBins, BinEdges, …) is on the BACKLOG.
     reg("bar", "histogram2",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto *mr = gc.mr;
             if (args.size() < 2 || args[0].numel() == 0 || args[1].numel() == 0) {
                 outs[0] = Value();
@@ -859,7 +862,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
             const auto &X = args[0];
             const auto &Y = args[1];
-            const size_t N = std::min(X.numel(), Y.numel());
+            const keel::usize N = std::min(X.numel(), Y.numel());
 
             int nx = 10, ny = 10;
             if (args.size() >= 3) {
@@ -877,7 +880,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
 
             double xmn = X.elemAsDouble(0), xmx = xmn;
             double ymn = Y.elemAsDouble(0), ymx = ymn;
-            for (size_t k = 1; k < N; ++k) {
+            for (keel::usize k = 1; k < N; ++k) {
                 const double xv = X.elemAsDouble(k);
                 const double yv = Y.elemAsDouble(k);
                 if (std::isfinite(xv)) {
@@ -894,17 +897,17 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             if (bwx == 0) bwx = 1;
             if (bwy == 0) bwy = 1;
 
-            auto centers_x = Value::matrix(1, (size_t)nx, ValueType::DOUBLE, mr);
-            auto centers_y = Value::matrix(1, (size_t)ny, ValueType::DOUBLE, mr);
+            auto centers_x = Value::matrix(1, (keel::usize)nx, ValueType::DOUBLE, mr);
+            auto centers_y = Value::matrix(1, (keel::usize)ny, ValueType::DOUBLE, mr);
             // counts is row-major-as-Y, col-major-as-X (i.e. ny rows, nx
             // cols). MATLAB stores column-major, so element (j, i) is at
             // linear index i * ny + j.
-            auto counts = Value::matrix((size_t)ny, (size_t)nx, ValueType::DOUBLE, mr);
+            auto counts = Value::matrix((keel::usize)ny, (keel::usize)nx, ValueType::DOUBLE, mr);
             for (int i = 0; i < nx; ++i)
                 centers_x.doubleDataMut()[i] = xmn + bwx * (i + 0.5);
             for (int j = 0; j < ny; ++j)
                 centers_y.doubleDataMut()[j] = ymn + bwy * (j + 0.5);
-            for (size_t k = 0; k < N; ++k) {
+            for (keel::usize k = 0; k < N; ++k) {
                 const double xv = X.elemAsDouble(k);
                 const double yv = Y.elemAsDouble(k);
                 if (!std::isfinite(xv) || !std::isfinite(yv))
@@ -915,7 +918,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 if (j >= ny) j = ny - 1;
                 if (i < 0) i = 0;
                 if (j < 0) j = 0;
-                counts.doubleDataMut()[(size_t)i * (size_t)ny + (size_t)j] += 1.0;
+                counts.doubleDataMut()[(keel::usize)i * (keel::usize)ny + (keel::usize)j] += 1.0;
             }
             // Delegate to the heatmap pipeline. typeName='imagesc' so the
             // adapter routes through the existing heatmap renderer with
@@ -924,7 +927,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // Delegate to heatmapImpl. axisIj=false — histogram2 stays on
             // axis xy by default (Y up), unlike imagesc which auto-flips.
             heatmapImpl("imagesc", false,
-                        Span<const Value>(proxied.data(), proxied.size()),
+                        keel::ArrayRef<Value>(proxied.data(), proxied.size()),
                         nargout, outs, gc);
         });
     // ── patch / fill — generic filled polygon ────────────────────────
@@ -937,8 +940,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // polygon per column). For matrix inputs we serialise polygons
     // separated by null markers in the wire JSON; the renderer breaks
     // sub-paths on null and closes each.
-    auto patchImpl = [](Span<const Value> args, size_t nargout,
-                        Span<Value> outs, GraphicsContext &gc, bool isFill) {
+    auto patchImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, GraphicsContext &gc, bool isFill) {
         (void)nargout;
         auto &fm = gc.fm;
         if (args.size() < 2 || args[0].isChar() || args[0].isString()) {
@@ -956,19 +959,19 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         }
         const auto &X = args[0];
         const auto &Y = args[1];
-        const size_t R = X.dims().rows();
-        const size_t C = std::max<size_t>(1, X.dims().cols());
+        const keel::usize R = X.dims().rows();
+        const keel::usize C = std::max<keel::usize>(1, X.dims().cols());
         if (R == 0) { outs[0] = Value(); return; }
-        if (Y.dims().rows() != R || std::max<size_t>(1, Y.dims().cols()) != C) {
+        if (Y.dims().rows() != R || std::max<keel::usize>(1, Y.dims().cols()) != C) {
             outs[0] = Value();
             return;
         }
 
         std::ostringstream xs, ys;
         xs << '['; ys << '[';
-        for (size_t c = 0; c < C; ++c) {
+        for (keel::usize c = 0; c < C; ++c) {
             if (c > 0) { xs << ",null,"; ys << ",null,"; }
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r > 0) { xs << ','; ys << ','; }
                 xs << X.elemAsDouble(c * R + r);
                 ys << Y.elemAsDouble(c * R + r);
@@ -979,9 +982,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         // Color: 3rd arg (or 4th arg for patch(X, Y, Z, C)) accepts a single-char colour,
         // "#rrggbb", or a 3-element [r g b] vector with values in [0, 1].
         std::string color = "#1f77b4";
-        size_t colorIdx = 2;
+        keel::usize colorIdx = 2;
         if (args.size() >= 4 && args[2].isNumeric()
-            && args[2].dims().rows() == R && std::max<size_t>(1, args[2].dims().cols()) == C) {
+            && args[2].dims().rows() == R && std::max<keel::usize>(1, args[2].dims().cols()) == C) {
             colorIdx = 3;
         }
         if (args.size() > colorIdx) {
@@ -1024,12 +1027,12 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         fm.emitModified();
         outs[0] = Value();
     };
-    reg("bar", "patch", [patchImpl](Span<const Value> args, size_t nargout,
-                                    Span<Value> outs, GraphicsContext &gc) {
+    reg("bar", "patch", [patchImpl](keel::ArrayRef<Value> args, keel::usize nargout,
+                                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         patchImpl(args, nargout, outs, gc, false);
     });
-    reg("bar", "fill",  [patchImpl](Span<const Value> args, size_t nargout,
-                                    Span<Value> outs, GraphicsContext &gc) {
+    reg("bar", "fill",  [patchImpl](keel::ArrayRef<Value> args, keel::usize nargout,
+                                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         patchImpl(args, nargout, outs, gc, true);
     });
     // pie(X) — circular slices proportional to X. Each wedge is its
@@ -1038,7 +1041,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     //   pie(X)             — slice for every X(i) > 0
     //   pie(X, explode)    — explode(i) ≠ 0 displaces that wedge
     //                        radially by ~10% of the unit radius
-    auto pieImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs,
+    auto pieImpl = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                       GraphicsContext &gc, bool tilt3d) {
         (void)nargout;
         if (args.empty() || args[0].numel() == 0) {
@@ -1046,9 +1049,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             return;
         }
         const auto &X = args[0];
-        const size_t N = X.numel();
+        const keel::usize N = X.numel();
         double total = 0;
-        for (size_t i = 0; i < N; ++i) {
+        for (keel::usize i = 0; i < N; ++i) {
             const double v = X.elemAsDouble(i);
             if (std::isfinite(v) && v > 0) total += v;
         }
@@ -1071,7 +1074,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         fm.currentAxes().axisMode = "equal";
 
         double angle = 0;
-        for (size_t i = 0; i < N; ++i) {
+        for (keel::usize i = 0; i < N; ++i) {
             const double v = X.elemAsDouble(i);
             if (!std::isfinite(v) || v <= 0) continue;
             const double dθ = v / total * TAU;
@@ -1116,10 +1119,10 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         fm.emitModified();
         outs[0] = Value();
     };
-    reg("bar", "pie",  [pieImpl](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
+    reg("bar", "pie",  [pieImpl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
         pieImpl(a, n, o, gc, false);
     });
-    reg("bar", "pie3", [pieImpl](Span<const Value> a, size_t n, Span<Value> o, GraphicsContext &gc) {
+    reg("bar", "pie3", [pieImpl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
         pieImpl(a, n, o, gc, true);
     });
     // boxplot(X) / boxchart(X) — Tukey box-and-whisker plot.
@@ -1130,28 +1133,28 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     //   • line for the median (horizontal across the box)
     //   • line dataset for the two whisker stems + the two caps
     //   • scatter dataset for outliers (beyond ±1.5·IQR)
-    auto boxImpl = [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+    auto boxImpl = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
         if (args.empty() || args[0].numel() == 0) {
             outs[0] = Value();
             return;
         }
         const auto &M = args[0];
-        const size_t R = std::max<size_t>(1, M.dims().rows());
-        const size_t C = std::max<size_t>(1, M.dims().cols());
+        const keel::usize R = std::max<keel::usize>(1, M.dims().rows());
+        const keel::usize C = std::max<keel::usize>(1, M.dims().cols());
         // Treat 1×N or N×1 as a single column; matrix → C columns.
         const bool single = (R == 1 || C == 1);
-        const size_t nBoxes = single ? 1 : C;
-        const size_t nPerBox = single ? M.numel() : R;
+        const keel::usize nBoxes = single ? 1 : C;
+        const keel::usize nPerBox = single ? M.numel() : R;
 
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
         const double w = 0.4;     // half-width of each box (so total is 0.8)
-        for (size_t bi = 0; bi < nBoxes; ++bi) {
+        for (keel::usize bi = 0; bi < nBoxes; ++bi) {
             std::vector<double> col;
             col.reserve(nPerBox);
-            for (size_t r = 0; r < nPerBox; ++r) {
+            for (keel::usize r = 0; r < nPerBox; ++r) {
                 const double v = single
                     ? M.elemAsDouble(r)
                     : M.elemAsDouble(bi * R + r);
@@ -1159,9 +1162,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
             if (col.size() < 2) continue;
             std::sort(col.begin(), col.end());
-            const double q1 = col[(size_t)((col.size() - 1) * 0.25)];
-            const double q2 = col[(size_t)((col.size() - 1) * 0.50)];
-            const double q3 = col[(size_t)((col.size() - 1) * 0.75)];
+            const double q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
+            const double q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
+            const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
             const double iqr = q3 - q1;
             const double loFence = q1 - 1.5 * iqr;
             const double hiFence = q3 + 1.5 * iqr;
@@ -1265,27 +1268,27 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // → one violin per column at x = 1..C. KDE bandwidth uses
     // Silverman's rule (1.06 · σ · N^(-1/5)).
     reg("bar", "violinplot",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) {
                 outs[0] = Value();
                 return;
             }
             const auto &M = args[0];
-            const size_t R = std::max<size_t>(1, M.dims().rows());
-            const size_t Cmat = std::max<size_t>(1, M.dims().cols());
+            const keel::usize R = std::max<keel::usize>(1, M.dims().rows());
+            const keel::usize Cmat = std::max<keel::usize>(1, M.dims().cols());
             const bool single = (R == 1 || Cmat == 1);
-            const size_t nViolins = single ? 1 : Cmat;
-            const size_t nPerColumn = single ? M.numel() : R;
+            const keel::usize nViolins = single ? 1 : Cmat;
+            const keel::usize nPerColumn = single ? M.numel() : R;
 
             auto &fm = gc.fm;
             fm.prepareForPlot();
 
             const int kdePts = 50;
-            for (size_t bi = 0; bi < nViolins; ++bi) {
+            for (keel::usize bi = 0; bi < nViolins; ++bi) {
                 std::vector<double> col;
                 col.reserve(nPerColumn);
-                for (size_t r = 0; r < nPerColumn; ++r) {
+                for (keel::usize r = 0; r < nPerColumn; ++r) {
                     const double v = single
                         ? M.elemAsDouble(r)
                         : M.elemAsDouble(bi * R + r);
@@ -1305,9 +1308,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
 
                 std::sort(col.begin(), col.end());
                 const double mn = col.front(), mx = col.back();
-                const double q1 = col[(size_t)((col.size() - 1) * 0.25)];
-                const double q2 = col[(size_t)((col.size() - 1) * 0.50)];
-                const double q3 = col[(size_t)((col.size() - 1) * 0.75)];
+                const double q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
+                const double q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
+                const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
 
                 // Sample KDE density on a uniform y grid [mn, mx].
                 std::vector<double> ys(kdePts), den(kdePts);
@@ -1386,26 +1389,26 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // nested rows (same shape as surf), plus implicit (x, y) coords =
     // (1..C, 1..R).
     reg("bar", "bar3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             const auto &Z = args[0];
-            const size_t R = Z.dims().rows();
-            const size_t C = Z.dims().cols();
+            const keel::usize R = Z.dims().rows();
+            const keel::usize C = Z.dims().cols();
             if (R == 0 || C == 0) { outs[0] = Value(); return; }
 
             std::ostringstream xs, ys, zs;
             xs << '[';
-            for (size_t c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
+            for (keel::usize c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
             xs << ']';
             ys << '[';
-            for (size_t r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
+            for (keel::usize r = 0; r < R; ++r) { if (r) ys << ','; ys << (r + 1); }
             ys << ']';
             zs << '[';
-            for (size_t r = 0; r < R; ++r) {
+            for (keel::usize r = 0; r < R; ++r) {
                 if (r) zs << ',';
                 zs << '[';
-                for (size_t c = 0; c < C; ++c) {
+                for (keel::usize c = 0; c < C; ++c) {
                     if (c) zs << ',';
                     const double v = Z.elemAsDouble(c * R + r);
                     if (std::isfinite(v)) zs << v;
@@ -1431,12 +1434,12 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // The WebGL renderer builds a triangle fan per polygon under
     // perspective.
     reg("bar", "fill3",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 3) { outs[0] = Value(); return; }
             const auto &X = args[0], &Y = args[1], &Z = args[2];
-            const size_t R = X.dims().rows();
-            const size_t C = std::max<size_t>(1, X.dims().cols());
+            const keel::usize R = X.dims().rows();
+            const keel::usize C = std::max<keel::usize>(1, X.dims().cols());
             if (R == 0) { outs[0] = Value(); return; }
             if (Y.dims().rows() != R || Z.dims().rows() != R) {
                 outs[0] = Value(); return;
@@ -1447,9 +1450,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // 2-D polygon convention).
             std::ostringstream xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
-            for (size_t c = 0; c < C; ++c) {
+            for (keel::usize c = 0; c < C; ++c) {
                 if (c > 0) { xs << ",null,"; ys << ",null,"; zs << ",null,"; }
-                for (size_t r = 0; r < R; ++r) {
+                for (keel::usize r = 0; r < R; ++r) {
                     if (r > 0) { xs << ','; ys << ','; zs << ','; }
                     const double xv = X.elemAsDouble(c * R + r);
                     const double yv = Y.elemAsDouble(c * R + r);
@@ -1482,11 +1485,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("bar", "geoscatter",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             geoForward("scatter", a, o, gc);
         });
     reg("bar", "geobubble",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             // bubblechart routing — scatter accepts sizes as its 3rd arg.
             geoForward("scatter", a, o, gc);
         });
@@ -1497,11 +1500,11 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // unchanged and the renderer applies it as marker radius.
     // ────────────────────────────────────────────────────────────────
     reg("bar", "bubblechart",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             delegateTo("scatter", a, o, gc);
         });
     reg("bar", "bubblechart3",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             delegateTo("scatter3", a, o, gc);
         });
     // swarmchart(x, y[, sizes[, color]]) — scatter with X-axis jitter
@@ -1510,20 +1513,20 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // a small interval; the spread amount scales with the cluster's
     // local rank (so the layout resembles a violin plot's swarm).
     reg("bar", "swarmchart",
-        [](Span<const Value> args, size_t nargout,
-           Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout,
+           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.size() < 2) { outs[0] = Value(); return; }
             const auto &xv = args[0];
             const auto &yv = args[1];
-            const size_t n = std::min(xv.numel(), yv.numel());
+            const keel::usize n = std::min(xv.numel(), yv.numel());
             auto *mr = gc.mr;
             auto Xjit = Value::matrix(1, n, ValueType::DOUBLE, mr);
             double *xj = Xjit.doubleDataMut();
-            for (size_t i = 0; i < n; ++i) xj[i] = xv.elemAsDouble(i);
+            for (keel::usize i = 0; i < n; ++i) xj[i] = xv.elemAsDouble(i);
             // Group indices by integer-rounded X (categorical use case).
-            std::map<long, std::vector<size_t>> buckets;
-            for (size_t i = 0; i < n; ++i) {
+            std::map<long, std::vector<keel::usize>> buckets;
+            for (keel::usize i = 0; i < n; ++i) {
                 long key = (long)std::llround(xv.elemAsDouble(i));
                 buckets[key].push_back(i);
             }
@@ -1535,7 +1538,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 long prev = LONG_MIN;
                 for (const auto &[k, _] : buckets) {
                     if (prev != LONG_MIN) {
-                        const double g = std::abs((double)(k - prev));
+                        const double g = keel::abs((double)(k - prev));
                         if (g < minGap || minGap == 1.0) minGap = g;
                     }
                     prev = k;
@@ -1543,9 +1546,9 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             }
             const double half = std::min(0.4, 0.35 * minGap);
             for (auto &[k, idxs] : buckets) {
-                const size_t m = idxs.size();
+                const keel::usize m = idxs.size();
                 if (m <= 1) continue;
-                for (size_t j = 0; j < m; ++j) {
+                for (keel::usize j = 0; j < m; ++j) {
                     const double t = (m == 1) ? 0.0
                         : (-half + 2 * half * (double)j / (m - 1));
                     xj[idxs[j]] += t;
@@ -1554,14 +1557,14 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::vector<Value> proxied;
             proxied.push_back(std::move(Xjit));
             proxied.push_back(yv);
-            for (size_t i = 2; i < args.size(); ++i) proxied.push_back(args[i]);
+            for (keel::usize i = 2; i < args.size(); ++i) proxied.push_back(args[i]);
             std::array<Value, 1> outBuf;
-            gc.callBuiltin("scatter", Span<const Value>(proxied.data(), proxied.size()), 0,
-                           Span<Value>(outBuf.data(), 1));
+            gc.callBuiltin("scatter", keel::ArrayRef<Value>(proxied.data(), proxied.size()), 0,
+                           keel::MutArrayRef<Value>(outBuf.data(), 1));
             outs[0] = Value();
         });
     reg("bar", "swarmchart3",
-        [](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             delegateTo("scatter3", a, o, gc);
         });
     // heatmap(C) — table-style heatmap. Same data layout as imagesc:
@@ -1589,7 +1592,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
         fm.pushDataset(std::move(t));
     };
     reg("bar", "heatmap",
-        [pushCellText](Span<const Value> a, size_t, Span<Value> o, GraphicsContext &gc) {
+        [pushCellText](keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
             // Drop trailing N-V pairs that the imagesc adapter doesn't
             // know about — keep only the first numeric argument as the
             // data matrix. 'Colormap' is honoured via a colormap() call
@@ -1601,7 +1604,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             std::string cmap;
             bool cellLabel = true;
             std::string labelFmt = "%g";
-            for (size_t i = 0; i < a.size(); ++i) {
+            for (keel::usize i = 0; i < a.size(); ++i) {
                 if (a[i].isChar()) {
                     if (i + 1 < a.size()) {
                         std::string key = a[i].toString();
@@ -1628,7 +1631,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 proxied.push_back(a[i]);
             }
             delegateTo("imagesc",
-                       Span<const Value>(proxied.data(), proxied.size()), o, gc);
+                       keel::ArrayRef<Value>(proxied.data(), proxied.size()), o, gc);
             if (!cmap.empty()) {
                 gc.fm.currentAxes().colormapName = cmap;
             }
@@ -1637,12 +1640,12 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // avoid clutter.
             if (cellLabel && !proxied.empty()) {
                 const auto &C = proxied[0];
-                const size_t R = C.dims().rows();
-                const size_t W = C.dims().cols();
+                const keel::usize R = C.dims().rows();
+                const keel::usize W = C.dims().cols();
                 if (R * W <= 400) {   // ≤ 20×20 grid — show labels
                     double cmn = std::numeric_limits<double>::infinity();
                     double cmx = -std::numeric_limits<double>::infinity();
-                    for (size_t i = 0; i < R * W; ++i) {
+                    for (keel::usize i = 0; i < R * W; ++i) {
                         const double v = C.elemAsDouble(i);
                         if (std::isfinite(v)) {
                             if (v < cmn) cmn = v;
@@ -1650,8 +1653,8 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                         }
                     }
                     auto &fm = gc.fm;
-                    for (size_t r = 0; r < R; ++r) {
-                        for (size_t cc = 0; cc < W; ++cc) {
+                    for (keel::usize r = 0; r < R; ++r) {
+                        for (keel::usize cc = 0; cc < W; ++cc) {
                             const double v = C.elemAsDouble(cc * R + r);
                             const double t_ = (cmx == cmn) ? 0.5
                                 : (v - cmn) / (cmx - cmn);
@@ -1677,13 +1680,13 @@ void buildBarPlots(std::vector<PlotEntry> &table)
     // axis labels and (when classNames given) categorical tick
     // labels on both axes.
     reg("bar", "confusionchart",
-        [](Span<const Value> args, size_t, Span<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) { outs[0] = Value(); return; }
             // Forward to heatmap (cellLabel default on, no Colormap).
             std::array<Value, 1> outBuf;
             std::array<Value, 1> proxied{ args[0] };
-            if (!gc.callBuiltin("heatmap", Span<const Value>(proxied.data(), 1), 0,
-                                Span<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
+            if (!gc.callBuiltin("heatmap", keel::ArrayRef<Value>(proxied.data(), 1), 0,
+                                keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             ax.xlabel = "Predicted Class";
@@ -1691,10 +1694,10 @@ void buildBarPlots(std::vector<PlotEntry> &table)
             // Optional class names as 2nd arg (cell of chars / string array).
             if (args.size() >= 2) {
                 const Value &cn = args[1];
-                const size_t n = cn.numel();
+                const keel::usize n = cn.numel();
                 std::ostringstream js;
                 js << '[';
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     if (i) js << ',';
                     Value elem = cn.elemAt(i, gc.mr);
                     std::string s = elem.isChar() ? elem.toString() : "";
@@ -1710,7 +1713,7 @@ void buildBarPlots(std::vector<PlotEntry> &table)
                 ax.yTickLabelsJson = js.str();
                 // Tick positions = 1..n so they align with cell centres.
                 std::ostringstream ts; ts << '[';
-                for (size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     if (i) ts << ',';
                     ts << (i + 1);
                 }

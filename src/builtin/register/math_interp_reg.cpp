@@ -3,23 +3,25 @@
 // CallContext register half of math/interp/interp.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/math.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -31,7 +33,7 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-void interp1_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 5, "interp1");
     argcheck::checkNargin(args.size(), 3, 5, "interp1");
@@ -64,7 +66,7 @@ void interp1_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
     }
 
     outs[0] = interp1Dispatch(args[0], args[1], args[2], method, mode, fill,
-                              ctx.engine->resource());
+                              ctx.engine->allocator());
 }
 
 // 2-arg `spline(x, y)` returns a pp struct (piecewise polynomial form)
@@ -73,9 +75,9 @@ void interp1_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
 // (see comment block in implementation). See BUGS.md #22.
 namespace {
 
-Value splinePp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
+Value splinePp(const Value &x, const Value &y, keel::Allocator *mr)
 {
-    const size_t n = x.numel();
+    const keel::usize n = x.numel();
     if (n != y.numel())
         throw Error("spline: x and y must have same length",
                      0, 0, "spline", "", "numkit:spline:lengthMismatch");
@@ -83,15 +85,15 @@ Value splinePp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
         throw Error("spline: need at least 2 data points",
                      0, 0, "spline", "", "numkit:spline:tooFewPoints");
 
-    ScratchArena scratch(mr);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
     const double *xd = x.doubleData();
     const double *yd = y.doubleData();
 
     // Reuse interpSpline's not-a-knot sigma helper. See BUGS.md #22.
-    const size_t nm1 = n - 1;
-    ScratchVec<double> h(nm1, &scratch);
-    for (size_t i = 0; i < nm1; ++i) h[i] = xd[i + 1] - xd[i];
-    auto sigma = computeSplineSigma(xd, yd, n, h.data(), &scratch);
+    const keel::usize nm1 = n - 1;
+    keel::Array<double> h(nm1, scratch.allocator());
+    for (keel::usize i = 0; i < nm1; ++i) h[i] = xd[i + 1] - xd[i];
+    auto sigma = computeSplineSigma(xd, yd, n, h.data(), scratch.allocator());
 
     // Build [nm1 x 4] coefficient matrix in column-major order.
     // For each interval i, with dx = x - xd[i] in [0, h_i]:
@@ -102,7 +104,7 @@ Value splinePp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
     //   d = y_i
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
     double *cp = coefs.doubleDataMut();
-    for (size_t i = 0; i < nm1; ++i) {
+    for (keel::usize i = 0; i < nm1; ++i) {
         const double hi = h[i];
         const double a  = (sigma[i + 1] - sigma[i]) / (6.0 * hi);
         const double b  = sigma[i] / 2.0;
@@ -125,9 +127,9 @@ Value splinePp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
 //   a = (d_i + d_{i+1} - 2*delta_i) / h_i^2
 //   b = (3*delta_i - 2*d_i - d_{i+1}) / h_i
 //   c = d_i,  d = y_i        (delta_i = (y_{i+1}-y_i)/h_i)
-Value pchipPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
+Value pchipPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
-    const size_t n = x.numel();
+    const keel::usize n = x.numel();
     if (n != y.numel())
         throw Error("pchip: x and y must have same length",
                      0, 0, "pchip", "", "numkit:pchip:lengthMismatch");
@@ -135,24 +137,24 @@ Value pchipPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
         throw Error("pchip: need at least 2 data points",
                      0, 0, "pchip", "", "numkit:pchip:tooFewPoints");
 
-    ScratchArena scratch(mr);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
     const double *xd = x.doubleData();
     const double *yd = y.doubleData();
-    const size_t nm1 = n - 1;
+    const keel::usize nm1 = n - 1;
 
-    ScratchVec<double> h(nm1, &scratch), delta(nm1, &scratch);
-    for (size_t i = 0; i < nm1; ++i) {
+    keel::Array<double> h(nm1, scratch.allocator()), delta(nm1, scratch.allocator());
+    for (keel::usize i = 0; i < nm1; ++i) {
         h[i] = xd[i + 1] - xd[i];
         delta[i] = (yd[i + 1] - yd[i]) / h[i];
     }
 
     // Shape-preserving slopes d[0..n-1] (identical to interpPchip).
-    ScratchVec<double> d(n, 0.0, &scratch);
+    keel::Array<double> d(n, 0.0, scratch.allocator());
     if (n == 2) {
         d[0] = delta[0];
         d[1] = delta[0];                       // 2 points → a straight line
     } else {
-        for (size_t i = 1; i < nm1; ++i) {
+        for (keel::usize i = 1; i < nm1; ++i) {
             if (delta[i - 1] * delta[i] <= 0.0) {
                 d[i] = 0.0;
             } else {
@@ -164,20 +166,20 @@ Value pchipPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
         d[0] = ((2.0 * h[0] + h[1]) * delta[0] - h[0] * delta[1]) / (h[0] + h[1]);
         if (d[0] * delta[0] < 0.0)
             d[0] = 0.0;
-        else if (delta[0] * delta[1] < 0.0 && std::abs(d[0]) > std::abs(3.0 * delta[0]))
+        else if (delta[0] * delta[1] < 0.0 && keel::abs(d[0]) > keel::abs(3.0 * delta[0]))
             d[0] = 3.0 * delta[0];
         d[nm1] = ((2.0 * h[nm1 - 1] + h[nm1 - 2]) * delta[nm1 - 1]
                   - h[nm1 - 1] * delta[nm1 - 2]) / (h[nm1 - 1] + h[nm1 - 2]);
         if (d[nm1] * delta[nm1 - 1] < 0.0)
             d[nm1] = 0.0;
         else if (delta[nm1 - 2] * delta[nm1 - 1] < 0.0
-                 && std::abs(d[nm1]) > std::abs(3.0 * delta[nm1 - 1]))
+                 && keel::abs(d[nm1]) > keel::abs(3.0 * delta[nm1 - 1]))
             d[nm1] = 3.0 * delta[nm1 - 1];
     }
 
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
     double *cp = coefs.doubleDataMut();
-    for (size_t i = 0; i < nm1; ++i) {
+    for (keel::usize i = 0; i < nm1; ++i) {
         const double hi = h[i];
         const double a  = (d[i] + d[i + 1] - 2.0 * delta[i]) / (hi * hi);
         const double b  = (3.0 * delta[i] - 2.0 * d[i] - d[i + 1]) / hi;
@@ -196,9 +198,9 @@ Value pchipPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
 // then the identical cubic-Hermite → dx-power coefficient conversion as
 // pchipPp (makima and pchip share the Hermite basis; only the slopes d_i
 // differ).
-Value makimaPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
+Value makimaPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
-    const size_t n = x.numel();
+    const keel::usize n = x.numel();
     if (n != y.numel())
         throw Error("makima: x and y must have same length",
                      0, 0, "makima", "", "numkit:makima:lengthMismatch");
@@ -206,36 +208,36 @@ Value makimaPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
         throw Error("makima: need at least 2 data points",
                      0, 0, "makima", "", "numkit:makima:tooFewPoints");
 
-    ScratchArena scratch(mr);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
     const double *xd = x.doubleData();
     const double *yd = y.doubleData();
-    const size_t nm1 = n - 1;
+    const keel::usize nm1 = n - 1;
 
-    ScratchVec<double> h(nm1, &scratch), delta(nm1, &scratch);
-    for (size_t i = 0; i < nm1; ++i) {
+    keel::Array<double> h(nm1, scratch.allocator()), delta(nm1, scratch.allocator());
+    for (keel::usize i = 0; i < nm1; ++i) {
         h[i] = xd[i + 1] - xd[i];
         delta[i] = (yd[i + 1] - yd[i]) / h[i];
     }
 
-    ScratchVec<double> d(n, 0.0, &scratch);
+    keel::Array<double> d(n, 0.0, scratch.allocator());
     if (n == 2) {
         d[0] = delta[0];
         d[1] = delta[0];                       // 2 points → a straight line
     } else {
         // Slopes m[-2..n] with Akima's quadratic extrapolation, offset 2.
-        ScratchVec<double> mExt(n + 3, &scratch);
-        for (size_t i = 0; i < nm1; ++i) mExt[2 + i] = delta[i];
+        keel::Array<double> mExt(n + 3, scratch.allocator());
+        for (keel::usize i = 0; i < nm1; ++i) mExt[2 + i] = delta[i];
         mExt[1] = 2.0 * mExt[2] - mExt[3];
         mExt[0] = 2.0 * mExt[1] - mExt[2];
         mExt[2 + nm1]     = 2.0 * mExt[2 + nm1 - 1] - mExt[2 + nm1 - 2];
         mExt[2 + nm1 + 1] = 2.0 * mExt[2 + nm1]     - mExt[2 + nm1 - 1];
-        for (size_t i = 0; i < n; ++i) {
+        for (keel::usize i = 0; i < n; ++i) {
             const double ml2 = mExt[i];
             const double ml1 = mExt[i + 1];
             const double mr1 = mExt[i + 2];
             const double mr2 = mExt[i + 3];
-            const double w1 = std::abs(mr2 - mr1) + std::abs(mr2 + mr1) * 0.5;
-            const double w2 = std::abs(ml1 - ml2) + std::abs(ml1 + ml2) * 0.5;
+            const double w1 = keel::abs(mr2 - mr1) + keel::abs(mr2 + mr1) * 0.5;
+            const double w2 = keel::abs(ml1 - ml2) + keel::abs(ml1 + ml2) * 0.5;
             const double wsum = w1 + w2;
             d[i] = (wsum == 0.0) ? 0.0 : (w1 * ml1 + w2 * mr1) / wsum;
         }
@@ -243,7 +245,7 @@ Value makimaPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
 
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
     double *cp = coefs.doubleDataMut();
-    for (size_t i = 0; i < nm1; ++i) {
+    for (keel::usize i = 0; i < nm1; ++i) {
         const double hi = h[i];
         const double a  = (d[i] + d[i + 1] - 2.0 * delta[i]) / (hi * hi);
         const double b  = (3.0 * delta[i] - 2.0 * d[i] - d[i + 1]) / hi;
@@ -259,10 +261,10 @@ Value makimaPp(const Value &x, const Value &y, std::pmr::memory_resource *mr)
 
 } // namespace
 
-void spline_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void spline_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "spline");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // pp-struct form. See BUGS.md #22.
         outs[0] = splinePp(args[0], args[1], mr);
@@ -272,11 +274,11 @@ void spline_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     outs[0] = spline(args[0], args[1], args[2], mr);
 }
 
-void interp2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void interp2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 7, "interp2");
     argcheck::checkNargin(args.size(), 3, 7, "interp2");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     auto isMethodArg = [](const Value &v) {
         return v.isChar() || v.isString();
     };
@@ -298,10 +300,10 @@ void interp2_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
                  0, 0, "interp2", "", "numkit:interp2:nargin");
 }
 
-void interp3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void interp3_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 4, "interp3");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     auto isMethodArg = [](const Value &v) {
         return v.isChar() || v.isString();
     };
@@ -323,10 +325,10 @@ void interp3_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
                  0, 0, "interp3", "", "numkit:interp3:nargin");
 }
 
-void pchip_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pchip_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "pchip");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // pp-struct form, mirroring spline(x, y).
         outs[0] = pchipPp(args[0], args[1], mr);
@@ -336,10 +338,10 @@ void pchip_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     outs[0] = pchip(args[0], args[1], args[2], mr);
 }
 
-void makima_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void makima_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "makima");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // pp-struct form, mirroring spline(x, y) and pchip(x, y).
         outs[0] = makimaPp(args[0], args[1], mr);
@@ -360,7 +362,7 @@ void makima_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
 // (which already does the linear/method interpolation and whose (x, v, xq)
 // spelling matches Form B verbatim). 4+-D remains a parity gap
 // (bugs/math/interpn-nan.md / missing.md).
-void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "interpn");
 
@@ -379,7 +381,7 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     for (const auto &a : args)
         if (isData(a) && isMultiDim(a)) { anyMatrix = true; break; }
     if (!anyMatrix) {
-        size_t L = 0;                                 // leading data (non-method) args
+        keel::usize L = 0;                                 // leading data (non-method) args
         while (L < args.size() && isData(args[L])) ++L;
         if (L >= 3) {                                 // (X, V, Xq[, method[, extrap]])
             interp1_reg(args, nargout, outs, ctx);
@@ -387,11 +389,11 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         }
     }
 
-    size_t L = 0;
+    keel::usize L = 0;
     while (L < args.size() && isData(args[L])) ++L;
 
     int maxNd = 2;
-    for (size_t i = 0; i < L; ++i) {
+    for (keel::usize i = 0; i < L; ++i) {
         const int nd = args[i].dims().is3D() ? 3
                      : (args[i].dims().ndim() <= 2 ? 2 : args[i].dims().ndim());
         if (nd > maxNd) maxNd = nd;
@@ -409,14 +411,14 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     const int N = (maxNd >= 4) ? maxNd
                 : (L >= 5 && (L % 2 == 1) ? static_cast<int>((L - 1) / 2)
                                           : static_cast<int>(L - 1));
-    if (N < 4 || (L != static_cast<size_t>(N + 1) && L != static_cast<size_t>(2 * N + 1))) {
+    if (N < 4 || (L != static_cast<keel::usize>(N + 1) && L != static_cast<keel::usize>(2 * N + 1))) {
         throw Error("interpn: invalid number of arguments for N-D interpolation",
                      0, 0, "interpn", "", "numkit:interpn:nargin");
     }
 
-    const bool hasGrids = (L == static_cast<size_t>(2 * N + 1));
-    const Value &V = hasGrids ? args[static_cast<size_t>(N)] : args[0];
-    const size_t qStart = hasGrids ? static_cast<size_t>(N + 1) : 1;
+    const bool hasGrids = (L == static_cast<keel::usize>(2 * N + 1));
+    const Value &V = hasGrids ? args[static_cast<keel::usize>(N)] : args[0];
+    const keel::usize qStart = hasGrids ? static_cast<keel::usize>(N + 1) : 1;
 
     std::string method = "linear";
     if (L < args.size() && (args[L].isChar() || args[L].isString())) {
@@ -429,94 +431,94 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
                      0, 0, "interpn", "", "numkit:interpn:badMethod");
     }
 
-    std::vector<size_t> vShape(static_cast<size_t>(N));
-    std::vector<size_t> vStrides(static_cast<size_t>(N), 1);
-    size_t strideAcc = 1;
+    std::vector<keel::usize> vShape(static_cast<keel::usize>(N));
+    std::vector<keel::usize> vStrides(static_cast<keel::usize>(N), 1);
+    keel::usize strideAcc = 1;
     for (int d = 0; d < N; ++d) {
-        const size_t sd = (d < V.dims().ndim()) ? static_cast<size_t>(V.dims().dim(d)) : 1;
+        const keel::usize sd = (d < V.dims().ndim()) ? static_cast<keel::usize>(V.dims().dim(d)) : 1;
         if (sd < 2)
             throw Error("interpn: each dimension of V must have length >= 2",
                          0, 0, "interpn", "", "numkit:interpn:smallDim");
-        vShape[static_cast<size_t>(d)] = sd;
-        vStrides[static_cast<size_t>(d)] = strideAcc;
+        vShape[static_cast<keel::usize>(d)] = sd;
+        vStrides[static_cast<keel::usize>(d)] = strideAcc;
         strideAcc *= sd;
     }
 
     // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
-    std::vector<std::vector<double>> grids(static_cast<size_t>(N));
+    std::vector<std::vector<double>> grids(static_cast<keel::usize>(N));
     for (int d = 0; d < N; ++d) {
-        const size_t sd = vShape[static_cast<size_t>(d)];
-        grids[static_cast<size_t>(d)].resize(sd);
+        const keel::usize sd = vShape[static_cast<keel::usize>(d)];
+        grids[static_cast<keel::usize>(d)].resize(sd);
         if (!hasGrids) {
-            for (size_t k = 0; k < sd; ++k)
-                grids[static_cast<size_t>(d)][k] = static_cast<double>(k + 1);
+            for (keel::usize k = 0; k < sd; ++k)
+                grids[static_cast<keel::usize>(d)][k] = static_cast<double>(k + 1);
         } else {
-            const Value &Gd = args[static_cast<size_t>(d)];
+            const Value &Gd = args[static_cast<keel::usize>(d)];
             if (Gd.numel() == sd) {
-                for (size_t k = 0; k < sd; ++k)
-                    grids[static_cast<size_t>(d)][k] = Gd.elemAsDouble(k);
+                for (keel::usize k = 0; k < sd; ++k)
+                    grids[static_cast<keel::usize>(d)][k] = Gd.elemAsDouble(k);
             } else {
                 // Full ndgrid tensor: step along axis d using vStrides[d].
-                const size_t st = vStrides[static_cast<size_t>(d)];
-                for (size_t k = 0; k < sd; ++k)
-                    grids[static_cast<size_t>(d)][k] = Gd.elemAsDouble(k * st);
+                const keel::usize st = vStrides[static_cast<keel::usize>(d)];
+                for (keel::usize k = 0; k < sd; ++k)
+                    grids[static_cast<keel::usize>(d)][k] = Gd.elemAsDouble(k * st);
             }
         }
     }
 
     const Value &Xq0 = args[qStart];
-    const size_t nQuery = Xq0.numel();
-    std::vector<size_t> outShape(static_cast<size_t>(Xq0.dims().ndim()));
+    const keel::usize nQuery = Xq0.numel();
+    std::vector<keel::usize> outShape(static_cast<keel::usize>(Xq0.dims().ndim()));
     for (int k = 0; k < Xq0.dims().ndim(); ++k)
-        outShape[static_cast<size_t>(k)] = static_cast<size_t>(Xq0.dims().dim(k));
+        outShape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
-                                ctx.engine->resource());
+                                ctx.engine->allocator());
     double *od = out.doubleDataMut();
 
-    std::vector<size_t> idx0(static_cast<size_t>(N));
-    std::vector<double> frac(static_cast<size_t>(N));
-    const size_t nCorners = static_cast<size_t>(1) << N;
+    std::vector<keel::usize> idx0(static_cast<keel::usize>(N));
+    std::vector<double> frac(static_cast<keel::usize>(N));
+    const keel::usize nCorners = static_cast<keel::usize>(1) << N;
 
-    for (size_t q = 0; q < nQuery; ++q) {
+    for (keel::usize q = 0; q < nQuery; ++q) {
         bool outOfBounds = false;
         for (int d = 0; d < N; ++d) {
-            const Value &Xqd = args[qStart + static_cast<size_t>(d)];
+            const Value &Xqd = args[qStart + static_cast<keel::usize>(d)];
             const double xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
-            const auto &g = grids[static_cast<size_t>(d)];
+            const auto &g = grids[static_cast<keel::usize>(d)];
             if (std::isnan(xq) || xq < g.front() || xq > g.back()) {
                 outOfBounds = true;
                 break;
             }
             auto it = std::upper_bound(g.begin(), g.end(), xq);
-            size_t i0 = (it == g.begin()) ? 0 : static_cast<size_t>(std::distance(g.begin(), it) - 1);
+            keel::usize i0 = (it == g.begin()) ? 0 : static_cast<keel::usize>(std::distance(g.begin(), it) - 1);
             if (i0 >= g.size() - 1) i0 = g.size() - 2;
             const double denom = g[i0 + 1] - g[i0];
-            idx0[static_cast<size_t>(d)] = i0;
-            frac[static_cast<size_t>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
+            idx0[static_cast<keel::usize>(d)] = i0;
+            frac[static_cast<keel::usize>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
         }
         if (outOfBounds) {
             od[q] = std::numeric_limits<double>::quiet_NaN();
             continue;
         }
         if (isNearest) {
-            size_t lin = 0;
+            keel::usize lin = 0;
             for (int d = 0; d < N; ++d) {
-                const size_t pick = idx0[static_cast<size_t>(d)]
-                                  + (frac[static_cast<size_t>(d)] >= 0.5 ? 1 : 0);
-                lin += pick * vStrides[static_cast<size_t>(d)];
+                const keel::usize pick = idx0[static_cast<keel::usize>(d)]
+                                  + (frac[static_cast<keel::usize>(d)] >= 0.5 ? 1 : 0);
+                lin += pick * vStrides[static_cast<keel::usize>(d)];
             }
             od[q] = V.elemAsDouble(lin);
         } else {
             double acc = 0.0;
-            for (size_t mask = 0; mask < nCorners; ++mask) {
+            for (keel::usize mask = 0; mask < nCorners; ++mask) {
                 double w = 1.0;
-                size_t lin = 0;
+                keel::usize lin = 0;
                 for (int d = 0; d < N; ++d) {
                     const bool hi = ((mask >> d) & 1u) != 0;
-                    const double fd = frac[static_cast<size_t>(d)];
+                    const double fd = frac[static_cast<keel::usize>(d)];
                     w *= hi ? fd : (1.0 - fd);
-                    lin += (idx0[static_cast<size_t>(d)] + (hi ? 1 : 0))
-                         * vStrides[static_cast<size_t>(d)];
+                    lin += (idx0[static_cast<keel::usize>(d)] + (hi ? 1 : 0))
+                         * vStrides[static_cast<keel::usize>(d)];
                 }
                 acc += w * V.elemAsDouble(lin);
             }
@@ -529,21 +531,21 @@ void interpn_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
 // polyfit_reg / polyval_reg → math/elementary/polynomials.cpp
 // trapz_reg                 → math/integration/integration.cpp
 
-void mkpp_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void mkpp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "mkpp");
     argcheck::checkNargin(args.size(), 2, 3, "mkpp");
-    outs[0] = mkpp(args[0], args[1], ctx.engine->resource());
+    outs[0] = mkpp(args[0], args[1], ctx.engine->allocator());
 }
 
-void ppval_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void ppval_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ppval");
     argcheck::checkNargin(args.size(), 2, 2, "ppval");
-    outs[0] = ppval(args[0], args[1], ctx.engine->resource());
+    outs[0] = ppval(args[0], args[1], ctx.engine->allocator());
 }
 
-void unmkpp_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void unmkpp_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "unmkpp");
     const Value &pp = args[0];
@@ -553,11 +555,11 @@ void unmkpp_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
     outs[0] = pp.field("breaks");
     if (nargout > 1) outs[1] = pp.field("coefs");
     if (nargout > 2) outs[2] = pp.hasField("pieces") ? pp.field("pieces")
-                                                     : Value::scalar(0.0, ctx.engine->resource());
+                                                     : Value::scalar(0.0, ctx.engine->allocator());
     if (nargout > 3) outs[3] = pp.hasField("order")  ? pp.field("order")
-                                                     : Value::scalar(0.0, ctx.engine->resource());
+                                                     : Value::scalar(0.0, ctx.engine->allocator());
     if (nargout > 4) outs[4] = pp.hasField("dim")    ? pp.field("dim")
-                                                     : Value::scalar(1.0, ctx.engine->resource());
+                                                     : Value::scalar(1.0, ctx.engine->allocator());
 }
 
 } // namespace detail

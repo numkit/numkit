@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/lexer.hpp>
 
 #include <stdexcept>
@@ -55,7 +56,7 @@ Lexer::Lexer(const std::string &source)
     if (src_.find('\r') != std::string::npos) {
         std::string norm;
         norm.reserve(src_.size());
-        for (size_t i = 0; i < src_.size(); ++i) {
+        for (keel::usize i = 0; i < src_.size(); ++i) {
             if (src_[i] == '\r') {
                 norm.push_back('\n');
                 if (i + 1 < src_.size() && src_[i + 1] == '\n')
@@ -76,9 +77,9 @@ char Lexer::peek() const
 char Lexer::peek(int offset) const
 {
     long long p = static_cast<long long>(pos_) + offset;
-    if (p < 0 || static_cast<size_t>(p) >= src_.size())
+    if (p < 0 || static_cast<keel::usize>(p) >= src_.size())
         return '\0';
-    return src_[static_cast<size_t>(p)];
+    return src_[static_cast<keel::usize>(p)];
 }
 
 char Lexer::advance()
@@ -152,12 +153,12 @@ bool Lexer::isAtLineStart() const
     return isAtLineStart(pos_);
 }
 
-bool Lexer::isAtLineStart(size_t position) const
+bool Lexer::isAtLineStart(keel::usize position) const
 {
     if (position == 0)
         return true;
 
-    for (size_t i = position; i > 0; i--) {
+    for (keel::usize i = position; i > 0; i--) {
         char ch = src_[i - 1];
         if (ch == '\n')
             return true;
@@ -238,7 +239,7 @@ void Lexer::insertImplicitComma()
         }
     }
 
-    size_t scanPos = pos_;
+    keel::usize scanPos = pos_;
 
     while (scanPos < src_.size()) {
         if (src_[scanPos] == ' ' || src_[scanPos] == '\t') {
@@ -260,7 +261,7 @@ void Lexer::insertImplicitComma()
     char next = src_[scanPos];
 
     if (next == '+' || next == '-') {
-        size_t afterOp = scanPos + 1;
+        keel::usize afterOp = scanPos + 1;
         bool spaceAfterOp = (afterOp < src_.size()
                              && (src_[afterOp] == ' ' || src_[afterOp] == '\t'));
         if (!spaceAfterOp) {
@@ -292,7 +293,7 @@ void Lexer::skipBlockComment()
     // skips COMMENT tokens; downstream tools (script-graph viewer,
     // formatters, doc extractors) recover the original text.
     int startLine = line_, startCol = col_;
-    size_t startPos = pos_;
+    keel::usize startPos = pos_;
 
     advance(); // '%'
     advance(); // '{'
@@ -354,7 +355,7 @@ void Lexer::skipSpacesAndComments()
                 // downstream consumers (script-graph viewer, future
                 // formatters) can position around it. Parser ignores.
                 int startLine = line_, startCol = col_;
-                size_t startPos = pos_;
+                keel::usize startPos = pos_;
                 while (pos_ < src_.size() && peek() != '\n')
                     advance();
                 addToken(TokenType::COMMENT,
@@ -382,7 +383,7 @@ void Lexer::skipSpacesAndComments()
 
 // ─── underscore validation in numbers ───────────────────────────────────
 
-void Lexer::validateUnderscores(size_t start, size_t end, int startLine, int startCol)
+void Lexer::validateUnderscores(keel::usize start, keel::usize end, int startLine, int startCol)
 {
     if (start >= end)
         return;
@@ -393,7 +394,7 @@ void Lexer::validateUnderscores(size_t start, size_t end, int startLine, int sta
     if (src_[end - 1] == '_')
         error("Number literal cannot end with underscore", startLine, startCol);
 
-    for (size_t i = start; i + 1 < end; i++) {
+    for (keel::usize i = start; i + 1 < end; i++) {
         if (src_[i] == '_' && src_[i + 1] == '_')
             error("Number literal cannot have consecutive underscores", startLine, startCol);
     }
@@ -405,7 +406,7 @@ void Lexer::readNumber()
 {
     int startLine = line_;
     int startCol = col_;
-    size_t start = pos_;
+    keel::usize start = pos_;
 
     // ── Hex: 0x... ──
     if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
@@ -413,7 +414,7 @@ void Lexer::readNumber()
         advance();
         if (pos_ >= src_.size() || !isXDigit(peek()))
             error("Invalid hex literal", startLine, startCol);
-        size_t digitStart = pos_;
+        keel::usize digitStart = pos_;
         while (pos_ < src_.size() && (isXDigit(peek()) || peek() == '_'))
             advance();
         validateUnderscores(digitStart, pos_, startLine, startCol);
@@ -438,7 +439,7 @@ void Lexer::readNumber()
         advance();
         if (pos_ >= src_.size() || (peek() != '0' && peek() != '1'))
             error("Invalid binary literal", startLine, startCol);
-        size_t digitStart = pos_;
+        keel::usize digitStart = pos_;
         while (pos_ < src_.size() && (peek() == '0' || peek() == '1' || peek() == '_'))
             advance();
         validateUnderscores(digitStart, pos_, startLine, startCol);
@@ -463,7 +464,7 @@ void Lexer::readNumber()
         advance();
         if (pos_ >= src_.size() || peek() < '0' || peek() > '7')
             error("Invalid octal literal", startLine, startCol);
-        size_t digitStart = pos_;
+        keel::usize digitStart = pos_;
         while (pos_ < src_.size() && ((peek() >= '0' && peek() <= '7') || peek() == '_'))
             advance();
         validateUnderscores(digitStart, pos_, startLine, startCol);
@@ -485,7 +486,7 @@ void Lexer::readNumber()
     // ── Decimal / float ──
     bool hasDigits = false;
 
-    size_t intStart = pos_;
+    keel::usize intStart = pos_;
     while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1))))) {
         if (peek() != '_')
             hasDigits = true;
@@ -508,7 +509,7 @@ void Lexer::readNumber()
 
         if (!isDotOperator && !isFieldAccess) {
             advance(); // '.'
-            size_t fracStart = pos_;
+            keel::usize fracStart = pos_;
             while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1))))) {
                 if (peek() != '_')
                     hasDigits = true;
@@ -529,7 +530,7 @@ void Lexer::readNumber()
             advance();
         if (pos_ >= src_.size() || !isDigit(peek()))
             error("Invalid number exponent", startLine, startCol);
-        size_t expStart = pos_;
+        keel::usize expStart = pos_;
         while (pos_ < src_.size() && (isDigit(peek()) || (peek() == '_' && !isAlpha(peek(1)))))
             advance();
         if (pos_ > expStart)
@@ -648,7 +649,7 @@ void Lexer::readIdentifier()
 {
     int startLine = line_;
     int startCol = col_;
-    size_t start = pos_;
+    keel::usize start = pos_;
 
     while (pos_ < src_.size() && (isAlnum(peek()) || peek() == '_'))
         advance();

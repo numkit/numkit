@@ -1,7 +1,11 @@
 // src/core/src/plugin_loader.cpp
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/core/engine.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -62,8 +66,8 @@ public:
         }
     }
 
-    std::pmr::memory_resource *resource() const noexcept override {
-        return engine_.resource();
+    keel::Allocator *allocator() const noexcept override {
+        return engine_.allocator();
     }
 
     void registerFunction(const std::string &ns, const std::string &name, ExternalFunc func) override {
@@ -131,11 +135,11 @@ public:
         }
     }
 
-    Value callFunctionHandle(const Value &handle, Span<const Value> args, Environment *env = nullptr) override {
+    Value callFunctionHandle(const Value &handle, keel::ArrayRef<Value> args, Environment *env = nullptr) override {
         return engine_.callFunctionHandle(handle, args, env);
     }
 
-    std::vector<Value> callFunctionHandleMulti(const Value &handle, Span<const Value> args, size_t nargout, Environment *env = nullptr) override {
+    std::vector<Value> callFunctionHandleMulti(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout, Environment *env = nullptr) override {
         return engine_.callFunctionHandleMulti(handle, args, nargout, env);
     }
 
@@ -181,13 +185,13 @@ private:
 
 static bool parseManifest(const std::string &content, std::string &libName, std::vector<std::string> &funcs) {
     auto extractStringField = [&](const char *key) -> std::string {
-        size_t pos = content.find(key);
+        keel::usize pos = content.find(key);
         if (pos == std::string::npos) return {};
-        size_t colon = content.find(':', pos);
+        keel::usize colon = content.find(':', pos);
         if (colon == std::string::npos) return {};
-        size_t q1 = content.find('"', colon);
+        keel::usize q1 = content.find('"', colon);
         if (q1 == std::string::npos) return {};
-        size_t q2 = content.find('"', q1 + 1);
+        keel::usize q2 = content.find('"', q1 + 1);
         if (q2 == std::string::npos) return {};
         return content.substr(q1 + 1, q2 - q1 - 1);
     };
@@ -200,19 +204,19 @@ static bool parseManifest(const std::string &content, std::string &libName, std:
         }
     }
 
-    size_t fnPos = content.find("\"functions\"");
+    keel::usize fnPos = content.find("\"functions\"");
     if (fnPos == std::string::npos) {
         fnPos = content.find("\"exports\"");
     }
     if (fnPos != std::string::npos) {
-        size_t bOpen = content.find('[', fnPos);
-        size_t bClose = (bOpen != std::string::npos) ? content.find(']', bOpen) : std::string::npos;
+        keel::usize bOpen = content.find('[', fnPos);
+        keel::usize bClose = (bOpen != std::string::npos) ? content.find(']', bOpen) : std::string::npos;
         if (bOpen != std::string::npos && bClose != std::string::npos) {
-            size_t cur = bOpen + 1;
+            keel::usize cur = bOpen + 1;
             while (cur < bClose) {
-                size_t q1 = content.find('"', cur);
+                keel::usize q1 = content.find('"', cur);
                 if (q1 == std::string::npos || q1 >= bClose) break;
-                size_t q2 = content.find('"', q1 + 1);
+                keel::usize q2 = content.find('"', q1 + 1);
                 if (q2 == std::string::npos || q2 >= bClose) break;
                 funcs.push_back(content.substr(q1 + 1, q2 - q1 - 1));
                 cur = q2 + 1;
@@ -459,12 +463,17 @@ void PluginLoader::scanManifests_()
             checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build");
             checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build" / "Release");
 
+            std::vector<std::filesystem::path> subdirs;
             for (const auto &entry : std::filesystem::directory_iterator(sp, ec)) {
                 if (entry.is_directory(ec)) {
-                    checkManifest(entry.path() / "manifest.json", entry.path());
-                    checkManifest(entry.path() / "manifest.json", entry.path() / "build");
-                    checkManifest(entry.path() / "manifest.json", entry.path() / "build" / "Release");
+                    subdirs.push_back(entry.path());
                 }
+            }
+            std::sort(subdirs.begin(), subdirs.end());
+            for (const auto &subdir : subdirs) {
+                checkManifest(subdir / "manifest.json", subdir);
+                checkManifest(subdir / "manifest.json", subdir / "build");
+                checkManifest(subdir / "manifest.json", subdir / "build" / "Release");
             }
         }
     }

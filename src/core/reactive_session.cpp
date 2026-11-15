@@ -1,3 +1,4 @@
+#include <keel/core.h>
 #include <numkit/core/reactive_session.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -54,13 +55,13 @@ bool ReactiveSession::load(const std::string &source)
     // set starts at statement 0 (wildcard-prefix pull).
     preScriptCp_ = engine_.figureManager().checkpointFigures();
     try {
-        for (size_t i = 0; i < statements_.size(); ++i) {
+        for (keel::usize i = 0; i < statements_.size(); ++i) {
             const ASTNode *s = statements_[i].get();
             if (s && (s->type == NodeType::FUNCTION_DEF
                       || s->type == NodeType::CLASSDEF_DEF))
                 runStatement(i);
         }
-        for (size_t i = 0; i < statements_.size(); ++i) {
+        for (keel::usize i = 0; i < statements_.size(); ++i) {
             const ASTNode *s = statements_[i].get();
             if (!s || s->type == NodeType::FUNCTION_DEF
                    || s->type == NodeType::CLASSDEF_DEF)
@@ -90,8 +91,8 @@ void ReactiveSession::setParam(const std::string &var, Value value)
     ++generation_;
 }
 
-void ReactiveSession::setParamElement(const std::string &var, size_t r,
-                                      size_t c, Value value)
+void ReactiveSession::setParamElement(const std::string &var, keel::usize r,
+                                      keel::usize c, Value value)
 {
     lastError_.clear();
     engine_.setVariable(kParamCarrier, std::move(value));
@@ -107,10 +108,10 @@ void ReactiveSession::setParamElement(const std::string &var, size_t r,
     ++generation_;
 }
 
-size_t ReactiveSession::evalDirty()
+keel::usize ReactiveSession::evalDirty()
 {
-    size_t ran = 0;
-    std::vector<size_t> order(dirty_.begin(), dirty_.end());
+    keel::usize ran = 0;
+    std::vector<keel::usize> order(dirty_.begin(), dirty_.end());
     std::sort(order.begin(), order.end());
     // Roll the figure state back to the last CLEAN statement before
     // the dirty set: re-run plots under a persisted `hold on` would
@@ -126,7 +127,7 @@ size_t ReactiveSession::evalDirty()
                 checkpoints_[order.front() - 1]);
         }
     }
-    for (size_t idx : order) {
+    for (keel::usize idx : order) {
         if (idx >= statements_.size() || !statements_[idx])
             continue;
         if (statements_[idx]->type == NodeType::FUNCTION_DEF) {
@@ -149,7 +150,7 @@ size_t ReactiveSession::evalDirty()
     return ran;
 }
 
-Value ReactiveSession::runStatement(size_t index)
+Value ReactiveSession::runStatement(keel::usize index)
 {
     // Suppress display: reactive ticks must stay silent even for
     // semicolon-less gallery scripts (the equivalence compares VALUES;
@@ -168,29 +169,29 @@ Value ReactiveSession::runStatement(size_t index)
     return out;
 }
 
-void ReactiveSession::markDirty(const std::vector<size_t> &indices)
+void ReactiveSession::markDirty(const std::vector<keel::usize> &indices)
 {
-    for (size_t i : indices)
+    for (keel::usize i : indices)
         if (i < statements_.size())
             dirty_.insert(i);
 }
 
-std::vector<std::vector<size_t>> ReactiveSession::detectCycles() const
+std::vector<std::vector<keel::usize>> ReactiveSession::detectCycles() const
 {
     // Tarjan SCC over downstream edges. Edges are strictly forward
     // (writer i → dependent j with j > i), so multi-node SCCs are
     // structurally impossible — this runs as an invariant guard for
     // future cell-level graphs.
-    const size_t n = graph_ ? graph_->size() : 0;
-    std::vector<std::vector<size_t>> sccs;
+    const keel::usize n = graph_ ? graph_->size() : 0;
+    std::vector<std::vector<keel::usize>> sccs;
     if (!n)
         return sccs;
     std::vector<int> idx(n, -1), low(n, 0);
     std::vector<char> on(n, 0);
-    std::vector<size_t> st;
-    std::vector<std::pair<size_t, size_t>> frames;   // {v, next-child}
+    std::vector<keel::usize> st;
+    std::vector<std::pair<keel::usize, keel::usize>> frames;   // {v, next-child}
     int ctr = 0;
-    for (size_t r = 0; r < n; ++r) {
+    for (keel::usize r = 0; r < n; ++r) {
         if (idx[r] != -1)
             continue;
         frames.push_back({r, 0});
@@ -203,7 +204,7 @@ std::vector<std::vector<size_t>> ReactiveSession::detectCycles() const
             }
             const auto &outs = graph_->downstreamOf(v);
             if (child < outs.size()) {
-                size_t w = outs[child++];
+                keel::usize w = outs[child++];
                 if (idx[w] == -1)
                     frames.push_back({w, 0});
                 else if (on[w])
@@ -211,9 +212,9 @@ std::vector<std::vector<size_t>> ReactiveSession::detectCycles() const
                 continue;
             }
             if (low[v] == idx[v]) {
-                std::vector<size_t> comp;
+                std::vector<keel::usize> comp;
                 while (true) {
-                    size_t w = st.back();
+                    keel::usize w = st.back();
                     st.pop_back();
                     on[w] = 0;
                     comp.push_back(w);
@@ -223,11 +224,11 @@ std::vector<std::vector<size_t>> ReactiveSession::detectCycles() const
                 if (comp.size() > 1)
                     sccs.push_back(std::move(comp));
             }
-            size_t lv = low[v];
+            keel::usize lv = low[v];
             frames.pop_back();
             if (!frames.empty())
                 low[frames.back().first] =
-                    (size_t)std::min((int)low[frames.back().first],
+                    (keel::usize)std::min((int)low[frames.back().first],
                                      (int)lv);
         }
     }

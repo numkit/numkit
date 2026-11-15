@@ -3,11 +3,11 @@
 // Pure C++ Language keywords, variable name validation, environment, and evaluation.
 #pragma once
 
-#include <memory_resource>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <string>
 #include <vector>
 #include <numkit/value/value.hpp>
-#include <numkit/value/span.hpp>
 
 namespace numkit::builtin {
 
@@ -50,7 +50,7 @@ std::string getenv(const std::string &name);
 /// @param mr Memory resource for allocations (nullptr for default).
 /// @return Character array Value containing the variable value, or empty `''` if unset.
 /// @see setenv
-Value getenv(const Value &name, std::pmr::memory_resource *mr = nullptr);
+Value getenv(const Value &name, keel::Allocator *mr = nullptr);
 
 // ── Keyword & Identifier Inspection ─────────────────────────────────────────
 
@@ -80,7 +80,7 @@ const std::vector<std::string> &keywords();
 /// @param mr Memory resource for allocations (nullptr for default).
 /// @return LOGICAL scalar if query provided, or cell array of strings if called with no arguments.
 /// @see isvarname, keywords
-Value iskeyword(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Tests whether a string is a valid MATLAB variable name (`isvarname(s)`).
 ///
@@ -101,7 +101,7 @@ bool isvarname(const std::string &name);
 /// @param mr Memory resource for allocations (nullptr for default).
 /// @return LOGICAL scalar `true` if valid, `false` otherwise.
 /// @see iskeyword
-Value isvarname(const Value &name, std::pmr::memory_resource *mr = nullptr);
+Value isvarname(const Value &name, keel::Allocator *mr = nullptr);
 
 /// @brief Span-based MATLAB-compatible overload for @ref isvarname.
 ///
@@ -109,7 +109,7 @@ Value isvarname(const Value &name, std::pmr::memory_resource *mr = nullptr);
 /// @param mr Memory resource for allocations.
 /// @return LOGICAL scalar Value.
 /// @throws std::runtime_error If @p args is empty.
-Value isvarname(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value isvarname(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 
 /// @}

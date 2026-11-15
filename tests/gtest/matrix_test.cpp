@@ -1,6 +1,7 @@
 // tests/stdlib/matrix_test.cpp — Matrix construction, bounds, 3D arrays
 // Parameterized: runs on both TreeWalker and VM backends
 
+#include <keel/core.h>
 #include "dual_engine_fixture.hpp"
 
 using namespace m_test;
@@ -632,7 +633,7 @@ TEST_P(Reductions3DTest, Max3DReturnsIndices)
     EXPECT_TRUE(I->dims().is3D());
     EXPECT_EQ(I->numel(), 6u);
     // max is always in row 2 → idx = 2 everywhere.
-    for (size_t i = 0; i < 6; ++i)
+    for (keel::usize i = 0; i < 6; ++i)
         EXPECT_DOUBLE_EQ(I->doubleData()[i], 2.0);
 }
 
@@ -1720,13 +1721,13 @@ TEST_P(GridKronTest, NdgridXVariesAlongRows)
     auto *X = getVarPtr("X");
     auto *Y = getVarPtr("Y");
     // X(r, c) = x(r)
-    for (size_t r = 0; r < 3; ++r)
-        for (size_t c = 0; c < 4; ++c)
+    for (keel::usize r = 0; r < 3; ++r)
+        for (keel::usize c = 0; c < 4; ++c)
             EXPECT_DOUBLE_EQ((*X)(r, c), (r + 1) * 10.0)
                 << "X at (" << r << "," << c << ")";
     // Y(r, c) = y(c)
-    for (size_t r = 0; r < 3; ++r)
-        for (size_t c = 0; c < 4; ++c)
+    for (keel::usize r = 0; r < 3; ++r)
+        for (keel::usize c = 0; c < 4; ++c)
             EXPECT_DOUBLE_EQ((*Y)(r, c), static_cast<double>(c + 1))
                 << "Y at (" << r << "," << c << ")";
 }
@@ -1799,7 +1800,7 @@ TEST_P(GridKronTest, KronOnesShape)
     auto *K = getVarPtr("K");
     EXPECT_EQ(rows(*K), 8u);
     EXPECT_EQ(cols(*K), 15u);
-    for (size_t i = 0; i < K->numel(); ++i)
+    for (keel::usize i = 0; i < K->numel(); ++i)
         EXPECT_DOUBLE_EQ(K->doubleData()[i], 1.0);
 }
 
@@ -1829,7 +1830,7 @@ TEST_P(GridKronTest, KronVectorVector)
     EXPECT_EQ(rows(*K), 1u);
     EXPECT_EQ(cols(*K), 6u);
     const double expected[] = {10, 20, 20, 40, 30, 60};
-    for (size_t i = 0; i < 6; ++i)
+    for (keel::usize i = 0; i < 6; ++i)
         EXPECT_DOUBLE_EQ(K->doubleData()[i], expected[i]);
 }
 
@@ -1854,8 +1855,8 @@ TEST_P(GridKronTest, KronKnownSmallExample)
         {0, 3, 0, 4},
         {3, 0, 4, 0},
     };
-    for (size_t r = 0; r < 4; ++r)
-        for (size_t c = 0; c < 4; ++c)
+    for (keel::usize r = 0; r < 4; ++r)
+        for (keel::usize c = 0; c < 4; ++c)
             EXPECT_DOUBLE_EQ((*K)(r, c), expected[r][c])
                 << "at (" << r << "," << c << ")";
 }

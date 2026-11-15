@@ -3,8 +3,8 @@
 // toolboxes/builtin/include/numkit/builtin/programming/errors/diagnostics.hpp
 #pragma once
 
-#include <memory_resource>
-#include <numkit/value/span.hpp>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/value/value.hpp>
 
 namespace numkit {
@@ -33,7 +33,7 @@ void registerDiagnosticsRuntime(Engine &engine);
 ///
 /// @param args  Arguments per the forms above.
 /// @throws Error  Always (never returns).
-[[noreturn]] void error(Span<const Value> args);
+[[noreturn]] void error(keel::ArrayRef<Value> args);
 
 /// @brief Engine-stateful warning (`warning(...)`).
 ///
@@ -43,7 +43,7 @@ void registerDiagnosticsRuntime(Engine &engine);
 ///
 /// @param engine  Engine whose output stream receives the message.
 /// @param args    Form-dispatched as for @ref error.
-void warning(Engine &engine, Span<const Value> args);  // lint: engine-io
+void warning(Engine &engine, keel::ArrayRef<Value> args);  // lint: engine-io
 
 /// @brief Snapshot of the most-recent warning.
 struct LastWarn {
@@ -79,7 +79,7 @@ void lastwarnSet(const std::string &msg, const std::string &id);
 /// @param mr    Memory resource (nullptr → process default).
 /// @return      Struct with `{identifier, message}` fields.
 /// @throws Error  Bad argument count (`m:MException:nargin`).
-Value mexception(Span<const Value> args, std::pmr::memory_resource *mr = nullptr);
+Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 // ── rethrow(ME) / throw(ME) ──────────────────────────────────────────
 
@@ -105,7 +105,7 @@ Value mexception(Span<const Value> args, std::pmr::memory_resource *mr = nullptr
 ///
 /// @param args  Arguments per the forms above.
 /// @throws Error  Condition is false (form-dependent identifier / message).
-void assertCond(Span<const Value> args);
+void assertCond(keel::ArrayRef<Value> args);
 
 
 /// @}

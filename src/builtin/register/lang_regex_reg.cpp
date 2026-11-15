@@ -3,22 +3,20 @@
 // CallContext register half of language/strings/regex.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/builtin/detail/strfun/regex_detail.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -32,21 +30,21 @@ namespace detail {
 
 // The default positional output order of regexp/regexpi when no option
 // string is given: [start, end, tokenExtents, match, tokens, names, split].
-inline void regexpDispatch(Span<const Value> args, size_t nargout,
-                           Span<Value> outs, bool ignoreCase, const char *fn,
+inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
+                           keel::MutArrayRef<Value> outs, bool ignoreCase, const char *fn,
                            CallContext &ctx)
 {
     if (args.size() < 2)
         throw Error(std::string(fn) + ": requires at least 2 arguments (s, pat)",
                      0, 0, fn, "", std::string("numkit:") + fn + ":nargin");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // Trailing option strings. 'once' is a modifier (match first occurrence,
     // return the scalarised form); the first non-'once' string selects the
     // output (as before). Additional output selectors are ignored, matching
     // the pre-existing single-option behaviour.
     std::string opt;
     bool once = false;
-    for (size_t i = 2; i < args.size(); ++i) {
+    for (keel::usize i = 2; i < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString())
             throw Error(std::string(fn) + ": option must be a string",
                          0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
@@ -67,22 +65,22 @@ inline void regexpDispatch(Span<const Value> args, size_t nargout,
     }
     static const char *order[] = {"start", "end", "tokenExtents",
                                   "match", "tokens", "names", "split"};
-    const size_t k = std::min<size_t>(nargout, 7);
-    for (size_t i = 0; i < k; ++i)
+    const keel::usize k = std::min<keel::usize>(nargout, 7);
+    for (keel::usize i = 0; i < k; ++i)
         outs[i] = regexpFind(args[0], args[1], order[i], ignoreCase, mr);
 }
 
-void regexp_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void regexp_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     regexpDispatch(args, nargout, outs, /*ignoreCase=*/false, "regexp", ctx);
 }
 
-void regexpi_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void regexpi_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     regexpDispatch(args, nargout, outs, /*ignoreCase=*/true, "regexpi", ctx);
 }
 
-void regexprep_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx)
+void regexprep_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, "regexprep");
     // Trailing option strings: recognise 'ignorecase' and 'once' (other
@@ -90,7 +88,7 @@ void regexprep_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext
     // parsed and are left to their default behaviour).
     bool ignoreCase = false;
     bool once = false;
-    for (size_t i = 3; i < args.size(); ++i) {
+    for (keel::usize i = 3; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             std::string o = args[i].toString();
             for (auto &ch : o) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -98,10 +96,10 @@ void regexprep_reg(Span<const Value> args, size_t, Span<Value> outs, CallContext
             else if (o == "once")       once = true;
         }
     }
-    outs[0] = regexprep(args[0], args[1], args[2], ignoreCase, once, ctx.engine->resource());
+    outs[0] = regexprep(args[0], args[1], args[2], ignoreCase, once, ctx.engine->allocator());
 }
 
-void regexptranslate_reg(Span<const Value> args, size_t, Span<Value> outs,
+void regexptranslate_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                          CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "regexptranslate");
@@ -112,7 +110,7 @@ void regexptranslate_reg(Span<const Value> args, size_t, Span<Value> outs,
     if (!args[1].isChar() && !args[1].isString())
         throw Error("regexptranslate: str must be a char or string",
                      0, 0, "regexptranslate", "", "numkit:regexptranslate:badStr");
-    outs[0] = regexptranslate(args[0].toString(), args[1].toString(), ctx.engine->resource());
+    outs[0] = regexptranslate(args[0].toString(), args[1].toString(), ctx.engine->allocator());
 }
 
 } // namespace detail

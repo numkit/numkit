@@ -9,6 +9,8 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/linalg/properties.hpp>
 #include <numkit/linalg/eig.hpp>     // eig_symmetric / eig_general_VD (condeig [V,D])
 
@@ -26,35 +28,35 @@
 namespace numkit::linalg {
 namespace detail {
 
-void inv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void inv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "inv");
-    outs[0] = inv(args[0], ctx.engine->resource());
+    outs[0] = inv(args[0], ctx.engine->allocator());
 }
 
-void trace_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void trace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "trace");
-    outs[0] = trace(args[0], ctx.engine->resource());
+    outs[0] = trace(args[0], ctx.engine->allocator());
 }
 
-void det_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void det_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "det");
-    outs[0] = det(args[0], ctx.engine->resource());
+    outs[0] = det(args[0], ctx.engine->allocator());
 }
 
-void rank_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void rank_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rank");
     const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
-    outs[0] = rank_of(args[0], tol, ctx.engine->resource());
+    outs[0] = rank_of(args[0], tol, ctx.engine->allocator());
 }
 
-void cond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "cond");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         outs[0] = cond_2norm(args[0], mr);
         return;
@@ -78,28 +80,28 @@ void cond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     outs[0] = cond_pnorm(args[0], p_kind, mr);
 }
 
-void normest_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void normest_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "normest");
-    outs[0] = normest(args[0], ctx.engine->resource());
+    outs[0] = normest(args[0], ctx.engine->allocator());
 }
 
-void rcond_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void rcond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "rcond");
-    outs[0] = rcond(args[0], ctx.engine->resource());
+    outs[0] = rcond(args[0], ctx.engine->allocator());
 }
 
-void condest_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void condest_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "condest");
-    outs[0] = condest(args[0], ctx.engine->resource());
+    outs[0] = condest(args[0], ctx.engine->allocator());
 }
 
-void condeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void condeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "condeig");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (nargout <= 1) {
         outs[0] = condeig(args[0], mr);
         return;

@@ -7,6 +7,9 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/complex.h>
 #include <numkit/linalg/page_ops.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 
@@ -24,16 +27,16 @@
 namespace numkit::linalg {
 namespace detail {
 
-void pageinv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pageinv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "pageinv");
-    outs[0] = pageinv(args[0], ctx.engine->resource());
+    outs[0] = pageinv(args[0], ctx.engine->allocator());
 }
 
-void pageeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void pageeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "pageeig");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [V, D] = pageeig_VD(args[0], mr);
         outs[0] = std::move(V);
@@ -43,10 +46,10 @@ void pageeig_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     }
 }
 
-void pagesvd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void pagesvd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "pagesvd");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [U, S, V] = pagesvd_decompose(args[0], mr);
         outs[0] = std::move(U);
@@ -57,14 +60,14 @@ void pagesvd_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
     }
 }
 
-void pagepinv_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagepinv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pagepinv");
     const double tol = (args.size() == 2) ? args[1].toScalar() : -1.0;
-    outs[0] = pagepinv(args[0], tol, ctx.engine->resource());
+    outs[0] = pagepinv(args[0], tol, ctx.engine->allocator());
 }
 
-void pagenorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pagenorm");
     double p = 2.0;
@@ -79,28 +82,28 @@ void pagenorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
             p = args[1].toScalar();
         }
     }
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (p == -2.0) {
         detail::requireDoubleInput(args[0], "pagenorm");
         const int nd = args[0].dims().ndim();
         if (nd < 2 || nd > 3)
             throw Error("pagenorm: input must be 2-D or 3-D",
                         0, 0, "pagenorm", "", "numkit:pagenorm:badDim");
-        const std::size_t m = static_cast<std::size_t>(args[0].dims().dim(0));
-        const std::size_t n = static_cast<std::size_t>(args[0].dims().dim(1));
-        const std::size_t pages = (nd == 2) ? 1
-            : static_cast<std::size_t>(args[0].dims().dim(2));
+        const keel::usize m = static_cast<keel::usize>(args[0].dims().dim(0));
+        const keel::usize n = static_cast<keel::usize>(args[0].dims().dim(1));
+        const keel::usize pages = (nd == 2) ? 1
+            : static_cast<keel::usize>(args[0].dims().dim(2));
         Value out = (nd == 2) ? Value::matrix(1, 1, ValueType::DOUBLE, mr)
                               : Value::matrix3d(1, 1, pages, ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
-        for (std::size_t pp = 0; pp < pages; ++pp) {
+        for (keel::usize pp = 0; pp < pages; ++pp) {
             double s = 0.0;
             if (args[0].isComplex()) {
-                const Complex *src = args[0].complexData() + pp * m * n;
-                for (std::size_t k = 0; k < m * n; ++k) s += detail::abs_sq(src[k]);
+                const keel::c64 *src = args[0].complexData() + pp * m * n;
+                for (keel::usize k = 0; k < m * n; ++k) s += detail::abs_sq(src[k]);
             } else {
-                const std::size_t base = pp * m * n;
-                for (std::size_t k = 0; k < m * n; ++k) {
+                const keel::usize base = pp * m * n;
+                for (keel::usize k = 0; k < m * n; ++k) {
                     const double v = args[0].elemAsDouble(base + k);
                     s += v * v;
                 }
@@ -113,24 +116,24 @@ void pagenorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, 
     outs[0] = pagenorm(args[0], p, mr);
 }
 
-void pagemldivide_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagemldivide_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "pagemldivide");
-    outs[0] = pagemldivide(args[0], args[1], ctx.engine->resource());
+    outs[0] = pagemldivide(args[0], args[1], ctx.engine->allocator());
 }
 
-void pagemrdivide_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagemrdivide_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "pagemrdivide");
-    outs[0] = pagemrdivide(args[0], args[1], ctx.engine->resource());
+    outs[0] = pagemrdivide(args[0], args[1], ctx.engine->allocator());
 }
 
-void pagelsqminnorm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagelsqminnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "pagelsqminnorm");
     const bool have_tol = (args.size() == 3);
     const double tol = have_tol ? args[2].toScalar() : 0.0;
-    outs[0] = pagelsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->resource());
+    outs[0] = pagelsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->allocator());
 }
 
 } // namespace detail

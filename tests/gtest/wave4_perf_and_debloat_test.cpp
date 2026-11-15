@@ -1,9 +1,9 @@
+#include <keel/core.h>
 #include "dual_engine_fixture.hpp"
 #include <numkit/sys/vfs.hpp>
 
 #include <chrono>
 #include <cmath>
-#include <complex>
 #include <unordered_map>
 
 namespace {
@@ -15,15 +15,15 @@ class CountingMemoryFS : public VirtualFS
 public:
     struct Entry {
         std::string content;
-        int64_t mtime = 1000;
-        int64_t mtimeNs = 1000000000000LL;
+        keel::i64 mtime = 1000;
+        keel::i64 mtimeNs = 1000000000000LL;
     };
 
     explicit CountingMemoryFS(std::string fsName) : name_(std::move(fsName)) {}
 
     std::string name() const override { return name_; }
 
-    void put(const std::string &path, std::string content, int64_t mtime, int64_t mtimeNs)
+    void put(const std::string &path, std::string content, keel::i64 mtime, keel::i64 mtimeNs)
     {
         files_[norm(path)] = Entry{std::move(content), mtime, mtimeNs};
     }
@@ -79,7 +79,7 @@ public:
         auto it = files_.find(p);
         if (it != files_.end()) {
             FileStat st;
-            st.size = static_cast<int64_t>(it->second.content.size());
+            st.size = static_cast<keel::i64>(it->second.content.size());
             st.mtime = it->second.mtime;
             st.mtimeNs = it->second.mtimeNs;
             st.kind = FileStat::Kind::File;

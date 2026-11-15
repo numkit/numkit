@@ -15,6 +15,7 @@
 //
 #pragma once
 
+#include <keel/core.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/debugger.hpp>
@@ -42,7 +43,7 @@ public:
     DebugSession &operator=(const DebugSession &) = delete;
 
     // Set breakpoints (line numbers). Must be called before start().
-    void setBreakpoints(const std::vector<uint16_t> &lines);
+    void setBreakpoints(const std::vector<keel::u16> &lines);
 
     // Compile code and begin debug execution.
     // Returns Paused if a breakpoint/step was hit, Completed if finished.
@@ -73,8 +74,8 @@ public:
     bool frameUp();
     bool frameDown();
     // Current focus depth (0 = deepest/current frame) and the live frame count.
-    size_t selectedFrame() const { return selectedDepth_; }
-    size_t frameCount() const;
+    keel::usize selectedFrame() const { return selectedDepth_; }
+    keel::usize frameCount() const;
 
     // ── Watch expressions ────────────────────────────────────
     // Expressions re-evaluated at each pause for an IDE watch panel.
@@ -84,7 +85,7 @@ public:
         std::string result; // eval display, or "Error: ..." if it failed
     };
     void addWatch(const std::string &expr);
-    void removeWatch(size_t index);
+    void removeWatch(keel::usize index);
     void clearWatches();
     const std::vector<std::string> &watchExpressions() const { return watches_; }
     // Evaluate every watch in the currently focused frame. Valid while paused.
@@ -100,8 +101,8 @@ public:
 
     struct Snapshot
     {
-        uint16_t line = 0;
-        uint16_t col = 0;
+        keel::u16 line = 0;
+        keel::u16 col = 0;
         std::string functionName;
         std::vector<Variable> variables;
         std::vector<StackFrame> callStack;
@@ -187,7 +188,7 @@ private:
 
     // Inspection focus for dbup/dbdown: 0 = deepest (current) frame, increasing
     // toward the base. Reset to 0 on every pause; ws_ is bound to this frame.
-    size_t selectedDepth_ = 0;
+    keel::usize selectedDepth_ = 0;
 
     // Watch expressions, re-evaluated at each pause (see evalWatches()).
     std::vector<std::string> watches_;

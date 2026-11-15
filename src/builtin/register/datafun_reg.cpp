@@ -1,10 +1,15 @@
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/complex.h>
+#include <keel/math.h>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp>
-#include <numkit/value/span.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/signal/transforms/fft.hpp>
@@ -21,72 +26,72 @@
 
 namespace numkit::builtin::detail {
 
-void allunique_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitand_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitcmp_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitget_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitset_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitshift_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void bitxor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void boundary_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void colperm_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void convhull_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void deg2rad_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void del2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void delaunay_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void discretize_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void dsearchn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void expm1_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void findgroups_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void gradient_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void griddata_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void griddatan_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void groupcounts_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void groupfilter_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void groupsummary_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void grouptransform_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void histc_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void histcounts_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void histcounts2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void inpolygon_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void intersect_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ismember_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void ismembertol_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void linspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void log1p_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void logspace_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void matchpairs_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void max_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void mean_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void min_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void nthroot_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void numunique_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void polyarea_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void pow2_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void prod_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rad2deg_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rand_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void randi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void randn_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void randperm_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void reallog_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void realpow_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void realsqrt_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void rng_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void allunique_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitand_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitcmp_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitget_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitset_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitshift_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void bitxor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void boundary_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void colperm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void convhull_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void deg2rad_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void del2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void delaunay_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void discretize_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void dsearchn_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void expm1_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void findgroups_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void gradient_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void griddata_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void griddatan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void groupcounts_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void groupfilter_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void groupsummary_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void grouptransform_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void histc_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void histcounts_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void histcounts2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void inpolygon_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void intersect_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ismember_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void ismembertol_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void linspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void log1p_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void logspace_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void matchpairs_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void max_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void mean_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void min_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void nthroot_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void numunique_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void polyarea_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void pow2_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void prod_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rad2deg_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rand_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void randi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void randn_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void randperm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void reallog_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void realpow_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void realsqrt_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void rng_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void register_randstream(Engine &);
-void setdiff_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void setxor_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void splitapply_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void sum_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void symrcm_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void union_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void unique_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void uniquetol_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void wrapTo180_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void wrapTo2Pi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void wrapTo360_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
-void wrapToPi_reg(Span<const Value>, size_t, Span<Value>, CallContext&);
+void setdiff_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void setxor_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void splitapply_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void sum_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void symrcm_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void union_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void unique_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void uniquetol_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void wrapTo180_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void wrapTo2Pi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void wrapTo360_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void wrapToPi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 
 namespace {
 
@@ -108,44 +113,43 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
     return false;
 }
 
-size_t toSubIndex(double v, size_t maxAllowed, const char *fn)
+keel::usize toSubIndex(double v, keel::usize maxAllowed, const char *fn)
 {
     if (!std::isfinite(v) || v < 1.0)
         throw Error(std::string(fn) + ": subscripts must be positive integers",
                      0, 0, fn, "", std::string("numkit:") + fn + ":subRange");
     const double rounded = std::round(v);
-    if (std::abs(v - rounded) > 1e-9)
+    if (keel::abs(v - rounded) > 1e-9)
         throw Error(std::string(fn) + ": subscripts must be integer-valued",
                      0, 0, fn, "", std::string("numkit:") + fn + ":subInt");
-    const size_t idx = static_cast<size_t>(rounded);
+    const keel::usize idx = static_cast<keel::usize>(rounded);
     if (maxAllowed > 0 && idx > maxAllowed)
         throw Error(std::string(fn) + ": subscript exceeds output dimension",
                      0, 0, fn, "", std::string("numkit:") + fn + ":subOOB");
     return idx;
 }
 
-ScratchVec<size_t> resolveOutShape(const Value &subs, const size_t *userShape,
-                                   std::size_t nUserShape, const char *fn,
-                                   std::pmr::memory_resource *mr)
+keel::Array<keel::usize> resolveOutShape(const Value &subs, const keel::usize *userShape,
+                                   keel::usize nUserShape, const char *fn,
+                                   keel::Allocator *mr)
 {
     const auto &d = subs.dims();
-    const size_t N = d.rows();
-    const size_t D = (d.ndim() <= 1) ? 1 : d.cols();
+    const keel::usize N = d.rows();
+    const keel::usize D = (d.ndim() <= 1) ? 1 : d.cols();
     if (nUserShape > 0) {
         if (nUserShape < D)
             throw Error(std::string(fn) + ": sz length must be at least size(subs, 2)",
                          0, 0, fn, "", std::string("numkit:") + fn + ":sizeRank");
-        ScratchVec<size_t> out(userShape, userShape + nUserShape, mr);
-        return out;
+        return keel::Array<keel::usize>(keel::ArrayRef<keel::usize>(userShape, nUserShape), mr);
     }
-    ScratchVec<size_t> shape(D, mr);
+    keel::Array<keel::usize> shape(D, mr);
     if (N == 0) {
-        return ScratchVec<size_t>(std::max<size_t>(D, 1), 0, mr);
+        return keel::Array<keel::usize>(std::max<keel::usize>(D, 1), 0, mr);
     }
     const double *p = subs.doubleData();
-    for (size_t c = 0; c < D; ++c) {
+    for (keel::usize c = 0; c < D; ++c) {
         double mx = 0.0;
-        for (size_t r = 0; r < N; ++r) {
+        for (keel::usize r = 0; r < N; ++r) {
             const double v = p[c * N + r];
             if (v > mx) mx = v;
         }
@@ -154,21 +158,21 @@ ScratchVec<size_t> resolveOutShape(const Value &subs, const size_t *userShape,
     return shape;
 }
 
-size_t linearIndexFromSubs(const Value &subs, size_t r, size_t N, size_t D,
-                           const size_t *shape, const char *fn)
+keel::usize linearIndexFromSubs(const Value &subs, keel::usize r, keel::usize N, keel::usize D,
+                           const keel::usize *shape, const char *fn)
 {
     const double *p = subs.doubleData();
-    size_t idx = 0;
-    size_t stride = 1;
-    for (size_t c = 0; c < D; ++c) {
-        const size_t s = toSubIndex(p[c * N + r], shape[c], fn);
+    keel::usize idx = 0;
+    keel::usize stride = 1;
+    for (keel::usize c = 0; c < D; ++c) {
+        const keel::usize s = toSubIndex(p[c * N + r], shape[c], fn);
         idx += (s - 1) * stride;
         stride *= shape[c];
     }
     return idx;
 }
 
-Value allocOutput(const size_t *shape, std::size_t nShape, std::pmr::memory_resource *mr)
+Value allocOutput(const keel::usize *shape, keel::usize nShape, keel::Allocator *mr)
 {
     if (nShape == 1)
         return Value::matrix(shape[0], 1, ValueType::DOUBLE, mr);
@@ -178,15 +182,15 @@ Value allocOutput(const size_t *shape, std::size_t nShape, std::pmr::memory_reso
                             ValueType::DOUBLE, mr);
 }
 
-inline double readVal(const Value &vals, size_t i, bool valIsScalar)
+inline double readVal(const Value &vals, keel::usize i, bool valIsScalar)
 {
     return valIsScalar ? vals.toScalar() : vals.doubleData()[i];
 }
 
 Value accumarrayGeneral(const Value &subs, const Value &vals,
-                        Span<const size_t> outShape, const Value &handle,
+                        keel::ArrayRef<keel::usize> outShape, const Value &handle,
                         double fillVal, CallContext &ctx,
-                        std::pmr::memory_resource *mr)
+                        keel::Allocator *mr)
 {
     const char *fn = "accumarray";
     if (subs.type() != ValueType::DOUBLE)
@@ -196,74 +200,74 @@ Value accumarrayGeneral(const Value &subs, const Value &vals,
     const auto &sd = subs.dims();
     if (sd.ndim() > 2)
         throw Error("accumarray: subs must be a 2D matrix", 0, 0, fn, "", "numkit:accumarray:subND");
-    const size_t N = sd.rows();
-    const size_t D = (sd.ndim() <= 1 || sd.cols() == 0) ? 1 : sd.cols();
+    const keel::usize N = sd.rows();
+    const keel::usize D = (sd.ndim() <= 1 || sd.cols() == 0) ? 1 : sd.cols();
     const bool valIsScalar = vals.isScalar();
     if (!valIsScalar && vals.numel() != N)
         throw Error("accumarray: vals must be a scalar or a length-N vector",
                      0, 0, fn, "", "numkit:accumarray:valSize");
 
-    ScratchArena scratch(mr);
-    auto shape = resolveOutShape(subs, outShape.data(), outShape.size(), fn, &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto shape = resolveOutShape(subs, outShape.data(), outShape.size(), fn, scratch.allocator());
     if (shape.size() < D) shape.resize(D, 1);
     Value out = allocOutput(shape.data(), shape.size(), mr);
-    const size_t total = out.numel();
+    const keel::usize total = out.numel();
     double *dst = out.doubleDataMut();
     if (total == 0) return out;
 
-    auto lins = ScratchVec<size_t>(N, &scratch);
-    auto cnt  = ScratchVec<size_t>(total, 0, &scratch);
-    for (size_t r = 0; r < N; ++r) {
+    auto lins = keel::Array<keel::usize>(N, scratch.allocator());
+    auto cnt  = keel::Array<keel::usize>(total, 0, scratch.allocator());
+    for (keel::usize r = 0; r < N; ++r) {
         lins[r] = linearIndexFromSubs(subs, r, N, D, shape.data(), fn);
         ++cnt[lins[r]];
     }
-    auto off = ScratchVec<size_t>(total + 1, 0, &scratch);
-    for (size_t i = 0; i < total; ++i) off[i + 1] = off[i] + cnt[i];
-    auto ordered = ScratchVec<double>(N, &scratch);
-    auto cur = ScratchVec<size_t>(total, 0, &scratch);
-    for (size_t r = 0; r < N; ++r) {
-        const size_t c = lins[r];
+    auto off = keel::Array<keel::usize>(total + 1, 0, scratch.allocator());
+    for (keel::usize i = 0; i < total; ++i) off[i + 1] = off[i] + cnt[i];
+    auto ordered = keel::Array<double>(N, scratch.allocator());
+    auto cur = keel::Array<keel::usize>(total, 0, scratch.allocator());
+    for (keel::usize r = 0; r < N; ++r) {
+        const keel::usize c = lins[r];
         ordered[off[c] + cur[c]++] = readVal(vals, r, valIsScalar);
     }
 
-    for (size_t i = 0; i < total; ++i) {
+    for (keel::usize i = 0; i < total; ++i) {
         if (cnt[i] == 0) { dst[i] = fillVal; continue; }
-        const size_t len = cnt[i];
+        const keel::usize len = cnt[i];
         Value g = Value::matrix(len, 1, ValueType::DOUBLE, mr);
         std::copy(ordered.begin() + off[i], ordered.begin() + off[i] + len,
                   g.doubleDataMut());
         Value callArgs[1] = { std::move(g) };
         Value res = ctx.engine->callFunctionHandle(handle,
-                                                   Span<const Value>(callArgs, 1));
+                                                   keel::ArrayRef<Value>(callArgs, 1));
         dst[i] = res.toScalar();
     }
     return out;
 }
 
-ScratchVec<size_t> parseSizeArg(const Value &sz, std::pmr::memory_resource *mr)
+keel::Array<keel::usize> parseSizeArg(const Value &sz, keel::Allocator *mr)
 {
-    ScratchVec<size_t> shape(mr);
+    keel::Array<keel::usize> shape(mr);
     if (sz.isEmpty()) return shape;
     if (sz.type() != ValueType::DOUBLE || !sz.dims().isVector())
         throw Error("accumarray: sz must be a numeric row vector",
                      0, 0, "accumarray", "", "numkit:accumarray:sizeType");
-    const size_t k = sz.numel();
+    const keel::usize k = sz.numel();
     shape.resize(k);
     const double *p = sz.doubleData();
-    for (size_t i = 0; i < k; ++i) {
+    for (keel::usize i = 0; i < k; ++i) {
         const double v = p[i];
         if (!std::isfinite(v) || v < 0)
             throw Error("accumarray: sz entries must be non-negative integers",
                          0, 0, "accumarray", "", "numkit:accumarray:sizeRange");
-        shape[i] = static_cast<size_t>(std::round(v));
+        shape[i] = static_cast<keel::usize>(std::round(v));
     }
     return shape;
 }
 
 } // namespace
 
-void accumarray_reg(Span<const Value> args, size_t /*nargout*/,
-                    Span<Value> outs, CallContext &ctx)
+void accumarray_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 6, "accumarray");
     argcheck::checkNargin(args.size(), 2, 6, "accumarray");
@@ -271,11 +275,11 @@ void accumarray_reg(Span<const Value> args, size_t /*nargout*/,
         throw Error("accumarray: too many arguments",
                      0, 0, "accumarray", "", "numkit:accumarray:nargin");
 
-    auto *mr = ctx.engine->resource();
-    ScratchArena scratch(mr);
-    auto shape = ScratchVec<size_t>(&scratch);
+    auto *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto shape = keel::Array<keel::usize>(scratch.allocator());
     if (args.size() >= 3 && !args[2].isEmpty())
-        shape = parseSizeArg(args[2], &scratch);
+        shape = parseSizeArg(args[2], scratch.allocator());
 
     AccumReducer op = AccumReducer::Sum;
     const Value *customFn = nullptr;
@@ -303,7 +307,7 @@ void accumarray_reg(Span<const Value> args, size_t /*nargout*/,
     if (valsProm) valsHold = toDoubleValue(valsArg, mr);
     const Value &vals = valsProm ? valsHold : valsArg;
 
-    Span<const size_t> shapeSpan(shape.data(), shape.size());
+    keel::ArrayRef<keel::usize> shapeSpan(shape.data(), shape.size());
     if (customFn) {
         outs[0] = accumarrayGeneral(args[0], vals, shapeSpan, *customFn, fillVal, ctx, mr);
     } else {
@@ -394,17 +398,17 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("colperm",    &::numkit::builtin::detail::colperm_reg);
     engine.registerFunction("symrcm",     &::numkit::builtin::detail::symrcm_reg);
         engine.registerFunction("vec2ind",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw Error("vec2ind: requires at least 1 argument",
                              0, 0, "vec2ind", "", "numkit:vec2ind:nargin");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             const Value &v = args[0];
             if (v.dims().rows() == 1 && v.numel() > 0) {
                 // Row vector: each element is its own column. If the value
                 // is closer to 1 than to 0, index = 1; else NaN (MATLAB).
                 auto out = Value::matrix(1, v.numel(), ValueType::DOUBLE, mr);
-                for (size_t i = 0; i < v.numel(); ++i)
+                for (keel::usize i = 0; i < v.numel(); ++i)
                     out.doubleDataMut()[i] =
                         (v.doubleData()[i] > 0.5) ? 1.0 : std::nan("");
                 outs[0] = std::move(out);
@@ -412,12 +416,12 @@ void register_datafun(Engine &engine) {
             }
             // Matrix: each column → row index of the value closest to 1;
             // NaN if no positive element (MATLAB).
-            const size_t rows = v.dims().rows(), cols = v.dims().cols();
+            const keel::usize rows = v.dims().rows(), cols = v.dims().cols();
             auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
             const double *p = v.doubleData();
-            for (size_t j = 0; j < cols; ++j) {
+            for (keel::usize j = 0; j < cols; ++j) {
                 double best = std::nan(""), bestDist = 1.5;
-                for (size_t i = 0; i < rows; ++i) {
+                for (keel::usize i = 0; i < rows; ++i) {
                     double val = p[i + j * rows];
                     if (val > 0.5) {
                         best = static_cast<double>(i + 1);
@@ -430,42 +434,42 @@ void register_datafun(Engine &engine) {
         });
 
     engine.registerFunction("full",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty())
                 throw std::runtime_error("full requires 1 argument");
             outs[0] = args[0];
         });
 
     engine.registerFunction("dist",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "dist");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             if (args.size() == 1) {
                 const Value &P = args[0];
-                const size_t R = P.dims().rows();
-                const size_t Q = P.dims().cols();
+                const keel::usize R = P.dims().rows();
+                const keel::usize Q = P.dims().cols();
                 if (P.isComplex()) {
                     Value Z = Value::matrix(Q, Q, ValueType::COMPLEX, mr);
                     auto *zd = Z.complexDataMut();
                     const auto *pd = P.complexData();
-                    for (size_t q2 = 0; q2 < Q; ++q2) {
-                        for (size_t q1 = 0; q1 < Q; ++q1) {
-                            std::complex<double> acc(0.0, 0.0);
-                            for (size_t r = 0; r < R; ++r) {
+                    for (keel::usize q2 = 0; q2 < Q; ++q2) {
+                        for (keel::usize q1 = 0; q1 < Q; ++q1) {
+                            keel::c64 acc(0.0, 0.0);
+                            for (keel::usize r = 0; r < R; ++r) {
                                 const auto diff = pd[r + q1 * R] - pd[r + q2 * R];
                                 acc += diff * diff;
                             }
-                            zd[q1 + q2 * Q] = std::sqrt(acc);
+                            zd[q1 + q2 * Q] = keel::sqrt(acc);
                         }
                     }
                     outs[0] = std::move(Z);
                 } else {
                     Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
                     double *zd = Z.doubleDataMut();
-                    for (size_t q2 = 0; q2 < Q; ++q2) {
-                        for (size_t q1 = 0; q1 < Q; ++q1) {
+                    for (keel::usize q2 = 0; q2 < Q; ++q2) {
+                        for (keel::usize q1 = 0; q1 < Q; ++q1) {
                             double acc = 0.0;
-                            for (size_t r = 0; r < R; ++r) {
+                            for (keel::usize r = 0; r < R; ++r) {
                                 const double diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
                                 acc += diff * diff;
                             }
@@ -478,38 +482,38 @@ void register_datafun(Engine &engine) {
             }
             const Value &W = args[0];
             const Value &P = args[1];
-            const size_t S = W.dims().rows();
-            const size_t R = W.dims().cols();
+            const keel::usize S = W.dims().rows();
+            const keel::usize R = W.dims().cols();
             if (P.dims().rows() != R) {
                 throw Error("dist: inner matrix dimensions must agree (size(W,2) must equal size(P,1))",
                             0, 0, "dist", "", "numkit:dist:dimMismatch");
             }
-            const size_t Q = P.dims().cols();
+            const keel::usize Q = P.dims().cols();
             if (W.isComplex() || P.isComplex()) {
                 Value Z = Value::matrix(S, Q, ValueType::COMPLEX, mr);
                 auto *zd = Z.complexDataMut();
-                auto readCx = [](const Value &v, size_t idx) -> std::complex<double> {
+                auto readCx = [](const Value &v, keel::usize idx) -> keel::c64 {
                     return v.isComplex() ? v.complexData()[idx]
-                                         : std::complex<double>(v.elemAsDouble(idx), 0.0);
+                                         : keel::c64(v.elemAsDouble(idx), 0.0);
                 };
-                for (size_t q = 0; q < Q; ++q) {
-                    for (size_t s = 0; s < S; ++s) {
-                        std::complex<double> acc(0.0, 0.0);
-                        for (size_t r = 0; r < R; ++r) {
-                            const auto diff = std::conj(readCx(W, s + r * S)) - readCx(P, r + q * R);
+                for (keel::usize q = 0; q < Q; ++q) {
+                    for (keel::usize s = 0; s < S; ++s) {
+                        keel::c64 acc(0.0, 0.0);
+                        for (keel::usize r = 0; r < R; ++r) {
+                            const auto diff = keel::conj(readCx(W, s + r * S)) - readCx(P, r + q * R);
                             acc += diff * diff;
                         }
-                        zd[s + q * S] = std::sqrt(acc);
+                        zd[s + q * S] = keel::sqrt(acc);
                     }
                 }
                 outs[0] = std::move(Z);
             } else {
                 Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
                 double *zd = Z.doubleDataMut();
-                for (size_t q = 0; q < Q; ++q) {
-                    for (size_t s = 0; s < S; ++s) {
+                for (keel::usize q = 0; q < Q; ++q) {
+                    for (keel::usize s = 0; s < S; ++s) {
                         double acc = 0.0;
-                        for (size_t r = 0; r < R; ++r) {
+                        for (keel::usize r = 0; r < R; ++r) {
                             const double diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
                             acc += diff * diff;
                         }
@@ -522,7 +526,7 @@ void register_datafun(Engine &engine) {
 
     // Base Fourier transforms & helpers (MATLAB datafun / elfun)
     engine.registerFunction("fft",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "fft");
             int n = -1, dim = 0;
             if (args.size() >= 2 && !args[1].isEmpty())
@@ -530,13 +534,13 @@ void register_datafun(Engine &engine) {
                     argcheck::expectedReal(args[1], 2, "n", "fft"), 2, "n", "fft");
             if (args.size() >= 3)
                 dim = argcheck::dimArg(args[2], "fft");
-            outs[0] = signal::fft(args[0], n, dim, ctx.engine->resource());
+            outs[0] = signal::fft(args[0], n, dim, ctx.engine->allocator());
         });
 
     engine.registerFunction("ifft",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 4, "ifft");
-            std::size_t nargs = args.size();
+            keel::usize nargs = args.size();
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
                 std::string flag = args[nargs - 1].toString();
@@ -555,13 +559,13 @@ void register_datafun(Engine &engine) {
                     argcheck::expectedReal(args[1], 2, "n", "ifft"), 2, "n", "ifft");
             if (nargs >= 3)
                 dim = argcheck::dimArg(args[2], "ifft");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             outs[0] = symmetric ? signal::ifftSymmetric(args[0], n, dim, mr)
                                 : signal::ifft(args[0], n, dim, mr);
         });
 
     engine.registerFunction("fft2",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "fft2");
             if (args.size() == 2)
                 throw Error("fft2: requires 1 or 3 arguments (got 2 — specify both m and n)",
@@ -573,13 +577,13 @@ void register_datafun(Engine &engine) {
             if (args.size() >= 3 && !args[2].isEmpty())
                 n = argcheck::expectedInteger(
                     argcheck::expectedReal(args[2], 3, "n", "fft2"), 3, "n", "fft2");
-            outs[0] = signal::fft2(args[0], m, n, ctx.engine->resource());
+            outs[0] = signal::fft2(args[0], m, n, ctx.engine->allocator());
         });
 
     engine.registerFunction("ifft2",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 4, "ifft2");
-            std::size_t nargs = args.size();
+            keel::usize nargs = args.size();
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
                 std::string flag = args[nargs - 1].toString();
@@ -602,7 +606,7 @@ void register_datafun(Engine &engine) {
             if (nargs >= 3 && !args[2].isEmpty())
                 n = argcheck::expectedInteger(
                     argcheck::expectedReal(args[2], 3, "n", "ifft2"), 3, "n", "ifft2");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             if (symmetric) {
                 if (m > 0 || n > 0)
                     throw Error("ifft2: the 'symmetric' option with explicit size args "
@@ -615,80 +619,80 @@ void register_datafun(Engine &engine) {
         });
 
     engine.registerFunction("fftn",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "fftn");
-            std::vector<std::size_t> sz;
+            std::vector<keel::usize> sz;
             if (args.size() >= 2 && !args[1].isEmpty()) {
-                const std::size_t n = args[1].numel();
+                const keel::usize n = args[1].numel();
                 sz.resize(n);
-                for (std::size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     const double d = args[1].elemAsDouble(i);
                     if (d <= 0 || d != std::floor(d))
                         throw Error("fftn: size entries must be positive integers",
                                     0, 0, "fftn", "", "numkit:fftn:badSize");
-                    sz[i] = static_cast<std::size_t>(d);
+                    sz[i] = static_cast<keel::usize>(d);
                 }
             }
-            outs[0] = signal::fftn(args[0], Span<const std::size_t>(sz.data(), sz.size()),
-                                   ctx.engine->resource());
+            outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()),
+                                   ctx.engine->allocator());
         });
 
     engine.registerFunction("ifftn",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "ifftn");
-            std::vector<std::size_t> sz;
+            std::vector<keel::usize> sz;
             if (args.size() >= 2 && !args[1].isEmpty()) {
-                const std::size_t n = args[1].numel();
+                const keel::usize n = args[1].numel();
                 sz.resize(n);
-                for (std::size_t i = 0; i < n; ++i) {
+                for (keel::usize i = 0; i < n; ++i) {
                     const double d = args[1].elemAsDouble(i);
                     if (d <= 0 || d != std::floor(d))
                         throw Error("ifftn: size entries must be positive integers",
                                     0, 0, "ifftn", "", "numkit:ifftn:badSize");
-                    sz[i] = static_cast<std::size_t>(d);
+                    sz[i] = static_cast<keel::usize>(d);
                 }
             }
-            outs[0] = signal::ifftn(args[0], Span<const std::size_t>(sz.data(), sz.size()),
-                                    ctx.engine->resource());
+            outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()),
+                                    ctx.engine->allocator());
         });
 
     engine.registerFunction("nextpow2",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "nextpow2");
-            outs[0] = signal::nextpow2(args[0], ctx.engine->resource());
+            outs[0] = signal::nextpow2(args[0], ctx.engine->allocator());
         });
 
     engine.registerFunction("fftshift",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "fftshift");
             if (args.size() >= 2) {
                 const int dim = argcheck::dimArg(args[1], "fftshift");
                 if (dim < 1 || dim > 3)
                     throw Error("fftshift: dim must be 1, 2, or 3",
                                 0, 0, "fftshift", "", "numkit:fftshift:dim");
-                outs[0] = signal::fftshift(args[0], dim, ctx.engine->resource());
+                outs[0] = signal::fftshift(args[0], dim, ctx.engine->allocator());
             } else {
-                outs[0] = signal::fftshift(args[0], ctx.engine->resource());
+                outs[0] = signal::fftshift(args[0], ctx.engine->allocator());
             }
         });
 
     engine.registerFunction("ifftshift",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "ifftshift");
             if (args.size() >= 2) {
                 const int dim = argcheck::dimArg(args[1], "ifftshift");
                 if (dim < 1 || dim > 3)
                     throw Error("ifftshift: dim must be 1, 2, or 3",
                                 0, 0, "ifftshift", "", "numkit:ifftshift:dim");
-                outs[0] = signal::ifftshift(args[0], dim, ctx.engine->resource());
+                outs[0] = signal::ifftshift(args[0], dim, ctx.engine->allocator());
             } else {
-                outs[0] = signal::ifftshift(args[0], ctx.engine->resource());
+                outs[0] = signal::ifftshift(args[0], ctx.engine->allocator());
             }
         });
 
     // Base convolution & digital filtering (MATLAB datafun)
     engine.registerFunction("conv",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "conv");
             std::string shape = "full";
             if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -697,13 +701,13 @@ void register_datafun(Engine &engine) {
                                 0, 0, "conv", "", "numkit:conv:badShape");
                 shape = args[2].toString();
             }
-            outs[0] = signal::conv(args[0], args[1], shape, ctx.engine->resource());
+            outs[0] = signal::conv(args[0], args[1], shape, ctx.engine->allocator());
         });
 
     engine.registerFunction("conv2",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 4, "conv2");
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             std::string shape = "full";
             if (args.size() >= 3 && !args[2].isEmpty() &&
                 !(args[2].isChar() || args[2].isString())) {
@@ -719,13 +723,13 @@ void register_datafun(Engine &engine) {
                                     0, 0, "conv2", "", "numkit:conv2:badShape");
                     shape = args[3].toString();
                 }
-                const size_t m = args[0].numel();
-                const size_t n = args[1].numel();
+                const keel::usize m = args[0].numel();
+                const keel::usize n = args[1].numel();
                 Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
                 double *kd = k.doubleDataMut();
-                for (size_t c = 0; c < n; ++c) {
+                for (keel::usize c = 0; c < n; ++c) {
                     const double vc = args[1].elemAsDouble(c);
-                    for (size_t r = 0; r < m; ++r)
+                    for (keel::usize r = 0; r < m; ++r)
                         kd[r + c * m] = args[0].elemAsDouble(r) * vc;
                 }
                 outs[0] = signal::conv2(args[2], k, shape, mr);
@@ -738,7 +742,7 @@ void register_datafun(Engine &engine) {
         });
 
     engine.registerFunction("convn",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "convn");
             std::string shape = "full";
             if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -747,24 +751,24 @@ void register_datafun(Engine &engine) {
                                 0, 0, "convn", "", "numkit:convn:badShape");
                 shape = args[2].toString();
             }
-            outs[0] = signal::convn(args[0], args[1], shape, ctx.engine->resource());
+            outs[0] = signal::convn(args[0], args[1], shape, ctx.engine->allocator());
         });
 
     engine.registerFunction("deconv",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "deconv");
-            auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->resource());
+            auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->allocator());
             outs[0] = std::move(q);
             if (nargout > 1)
                 outs[1] = std::move(r);
         });
 
     engine.registerFunction("filter",
-        [](Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 3, 5, "filter");
             const bool hasZi = (args.size() >= 4 && !args[3].isEmpty()
                                 && !args[3].isChar() && !args[3].isString());
-            auto *mr = ctx.engine->resource();
+            auto *mr = ctx.engine->allocator();
             if (!hasZi && nargout <= 1) {
                 outs[0] = signal::filter(args[0], args[1], args[2], mr);
                 return;
@@ -777,7 +781,7 @@ void register_datafun(Engine &engine) {
         });
 
     engine.registerFunction("filter2",
-        [](Span<const Value> args, size_t, Span<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "filter2");
             std::string shape = "same";
             if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -786,7 +790,7 @@ void register_datafun(Engine &engine) {
                                 0, 0, "filter2", "", "numkit:filter2:badShape");
                 shape = args[2].toString();
             }
-            outs[0] = signal::filter2(args[0], args[1], shape, ctx.engine->resource());
+            outs[0] = signal::filter2(args[0], args[1], shape, ctx.engine->allocator());
         });
 }
 

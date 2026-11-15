@@ -4,6 +4,8 @@
 // numkit::io::type(FsContext&, sink, filename) lives in toolboxes/io; this glue
 // unwraps the CallContext and binds the output sink to engine.outputText.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/io/text/extras.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -16,7 +18,7 @@
 
 namespace numkit::io::detail {
 
-void type_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void type_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "type");
     if (!args[0].isChar() && !args[0].isString())

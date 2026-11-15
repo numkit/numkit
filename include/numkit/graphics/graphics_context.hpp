@@ -22,13 +22,14 @@
 // This mirrors the FsContext decoupling: stateful/runtime surfaces are pulled
 // behind a context object so the L2 compute layer never includes <nk/core>.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/core/figure_manager.hpp>  // FigureManager, DatasetInfo, AxesState
 #include <numkit/value/value.hpp>            // Value, ValueType
-#include <numkit/value/span.hpp>             // Span
 
 #include <cstddef>
 #include <functional>
-#include <memory_resource>
 #include <string_view>
 #include <vector>
 
@@ -43,7 +44,7 @@ namespace numkit {
 // for the two operations that genuinely require it (callBuiltin / callHandle).
 struct GraphicsContext {
     FigureManager &fm;                  // active figure / axes session state
-    std::pmr::memory_resource *mr;      // scratch allocator for Value building
+    keel::Allocator *mr;      // scratch allocator for Value building
 
     // Forward to another *registered* plot builtin by name (e.g. surfc → surf).
     // Resolves the builtin at call time, invokes it with (args, nargout, outs),
@@ -51,22 +52,22 @@ struct GraphicsContext {
     // treat that as a no-op and return an empty value). Bound by the adapter to
     // Engine::findExternal + invoke.
     std::function<bool(std::string_view name,
-                       Span<const Value> args,
-                       std::size_t nargout,
-                       Span<Value> outs)>
+                       keel::ArrayRef<Value> args,
+                       keel::usize nargout,
+                       keel::MutArrayRef<Value> outs)>
         callBuiltin;
 
     // Evaluate a user function-handle Value (the @(x)… callbacks fed to
     // fplot / fcontour / fsurf / fplot3). Bound by the adapter to
     // Engine::callFunctionHandle; works on both the TreeWalker and VM backends.
-    std::function<Value(const Value &handle, Span<const Value> args)> callHandle;
+    std::function<Value(const Value &handle, keel::ArrayRef<Value> args)> callHandle;
 };
 
 // A graphics plotting body. Same shape as ExternalFunc but takes the core-free
 // GraphicsContext instead of the Engine-coupled CallContext.
-using GraphicsFn = std::function<void(Span<const Value> args,
-                                      std::size_t nargout,
-                                      Span<Value> outs,
+using GraphicsFn = std::function<void(keel::ArrayRef<Value> args,
+                                      keel::usize nargout,
+                                      keel::MutArrayRef<Value> outs,
                                       GraphicsContext &gc)>;
 
 // One registration record. `sub` is the graphics sub-namespace (layout / line /

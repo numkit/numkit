@@ -3,22 +3,22 @@
 // CallContext register half of math/random/rng.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/ops/rng.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -38,10 +38,10 @@ struct RandStreamPayload : NativePayload {
     }
 };
 
-static ops::RngContext &resolveRngAndStripStream(Span<const Value> &args, CallContext &ctx) {
+static ops::RngContext &resolveRngAndStripStream(keel::ArrayRef<Value> &args, CallContext &ctx) {
     if (!args.empty() && args[0].isObject() && args[0].objectClassName() == "RandStream") {
         auto *st = const_cast<Value &>(args[0]).objectStateMut();
-        args = args.subspan(1);
+        args = args.slice(1);
         if (st && st->native) {
             if (auto *p = dynamic_cast<RandStreamPayload *>(st->native.get()))
                 return p->rng;
@@ -52,7 +52,7 @@ static ops::RngContext &resolveRngAndStripStream(Span<const Value> &args, CallCo
 
 // Cast a DOUBLE Value buffer to single in-place (returns a new Value).
 // Used by rand/randn when the user requests 'single'.
-namespace { Value castDoubleToSingle(const Value &src, std::pmr::memory_resource *mr)
+namespace { Value castDoubleToSingle(const Value &src, keel::Allocator *mr)
 {
     Value dst;
     if (src.dims().is3D())
@@ -60,26 +60,26 @@ namespace { Value castDoubleToSingle(const Value &src, std::pmr::memory_resource
                               src.dims().pages(), ValueType::SINGLE, mr);
     else if (src.dims().ndim() > 3) {
         const auto &dimsRef = src.dims();
-        size_t dimsBuf[Dims::kMaxRank];
+        keel::usize dimsBuf[Dims::kMaxRank];
         for (int i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
         dst = Value::matrixND(dimsBuf, dimsRef.ndim(), ValueType::SINGLE, mr);
     } else
         dst = Value::matrix(src.dims().rows(), src.dims().cols(),
                             ValueType::SINGLE, mr);
-    const size_t n = src.numel();
+    const keel::usize n = src.numel();
     const double *sp = src.doubleData();
     float *dp = dst.singleDataMut();
-    for (size_t i = 0; i < n; ++i) dp[i] = static_cast<float>(sp[i]);
+    for (keel::usize i = 0; i < n; ++i) dp[i] = static_cast<float>(sp[i]);
     return dst;
 }}
 
 // rand / randn supersede the earlier static-RNG versions. Same shape
 // API (parseDimsArgs); the only change is they now share the engine
 // that rng() controls.
-void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
               CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     auto &rngRef = resolveRngAndStripStream(args, ctx);
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
@@ -90,13 +90,13 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed") {
             outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandSeed()),
-                                    ctx.engine->resource());
+                                    ctx.engine->allocator());
             return;
         }
         if (flag == "state") {
-            auto st = Value::matrix(35, 1, ValueType::DOUBLE, ctx.engine->resource());
+            auto st = Value::matrix(35, 1, ValueType::DOUBLE, ctx.engine->allocator());
             double *d = st.doubleDataMut();
-            for (size_t i = 0; i < 32; ++i) d[i] = rngRef.v5SwbZ()[i];
+            for (keel::usize i = 0; i < 32; ++i) d[i] = rngRef.v5SwbZ()[i];
             d[32] = static_cast<double>(rngRef.v5SwbIdx());
             d[33] = rngRef.v5SwbBorrow();
             d[34] = static_cast<double>(rngRef.v5SwbJ()) * 2.2204460492503131e-16;
@@ -104,13 +104,13 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             return;
         }
         if (flag == "twister") {
-            std::uint32_t mt[ops::MatlabMT19937::STATE_SIZE];
+            keel::u32 mt[ops::MatlabMT19937::STATE_SIZE];
             int idx = 0;
             rngRef.engine().getState(mt, idx);
-            auto st = Value::matrix(625, 1, ValueType::UINT32, ctx.engine->resource());
-            std::uint32_t *d = st.uint32DataMut();
-            for (size_t i = 0; i < 624; ++i) d[i] = mt[i];
-            d[624] = static_cast<std::uint32_t>(idx);
+            auto st = Value::matrix(625, 1, ValueType::UINT32, ctx.engine->allocator());
+            keel::u32 *d = st.uint32DataMut();
+            for (keel::usize i = 0; i < 624; ++i) d[i] = mt[i];
+            d[624] = static_cast<keel::u32>(idx);
             outs[0] = std::move(st);
             return;
         }
@@ -120,23 +120,23 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Rand(
-                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                static_cast<keel::u64>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
         if (flag == "state") {
             if (dimArgs[1].isScalar()) {
                 rngRef.setLegacyV5Rand(
-                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                    static_cast<keel::u64>(dimArgs[1].toScalar()));
                 outs[0] = Value();
                 return;
             }
             if (dimArgs[1].numel() == 35) {
                 double z[32];
-                for (size_t i = 0; i < 32; ++i) z[i] = dimArgs[1].elemAsDouble(i);
-                const std::size_t idx = static_cast<std::size_t>(dimArgs[1].elemAsDouble(32));
+                for (keel::usize i = 0; i < 32; ++i) z[i] = dimArgs[1].elemAsDouble(i);
+                const keel::usize idx = static_cast<keel::usize>(dimArgs[1].elemAsDouble(32));
                 const double borrow = dimArgs[1].elemAsDouble(33);
-                const std::uint32_t j = static_cast<std::uint32_t>(
+                const keel::u32 j = static_cast<keel::u32>(
                     std::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
                 rngRef.setLegacyV5RandState(z, idx, borrow, j);
                 outs[0] = Value();
@@ -146,14 +146,14 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         if (flag == "twister") {
             if (dimArgs[1].isScalar()) {
                 rngRef.setLegacyTwisterRand(
-                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                    static_cast<keel::u64>(dimArgs[1].toScalar()));
                 outs[0] = Value();
                 return;
             }
             if (dimArgs[1].numel() == 625) {
-                std::uint32_t mt[ops::MatlabMT19937::STATE_SIZE];
-                for (size_t i = 0; i < 624; ++i)
-                    mt[i] = static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(i));
+                keel::u32 mt[ops::MatlabMT19937::STATE_SIZE];
+                for (keel::usize i = 0; i < 624; ++i)
+                    mt[i] = static_cast<keel::u32>(dimArgs[1].elemAsDouble(i));
                 const int idx = static_cast<int>(dimArgs[1].elemAsDouble(624));
                 rngRef.setLegacyTwisterRandState(mt, idx);
                 outs[0] = Value();
@@ -161,27 +161,27 @@ void rand_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             }
         }
     }
-    ScratchArena scratch(mr);
-    auto dims = parseDimsArgsND(dimArgs, "rand", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto dims = parseDimsArgsND(dimArgs, "rand", scratch.allocator());
     stripTrailingOnes(dims);
     Value out;
     {
         if (dims.size() <= 3) {
-            const size_t r = dims.size() >= 1 ? dims[0] : 1;
-            const size_t c = dims.size() >= 2 ? dims[1] : 1;
-            const size_t p = dims.size() >= 3 ? dims[2] : 0;
+            const keel::usize r = dims.size() >= 1 ? dims[0] : 1;
+            const keel::usize c = dims.size() >= 2 ? dims[1] : 1;
+            const keel::usize p = dims.size() >= 3 ? dims[2] : 0;
             out = rand(rngRef, r, c, p, mr);
         } else {
-            out = randND(rngRef, Span<const size_t>(dims.data(), dims.size()), mr);
+            out = randND(rngRef, keel::ArrayRef<keel::usize>(dims.data(), dims.size()), mr);
         }
     }
     outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : std::move(out);
 }
 
-void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     auto &rngRef = resolveRngAndStripStream(args, ctx);
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
@@ -192,11 +192,11 @@ void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed") {
             outs[0] = Value::scalar(static_cast<double>(rngRef.legacyRandnSeed()),
-                                    ctx.engine->resource());
+                                    ctx.engine->allocator());
             return;
         }
         if (flag == "state") {
-            auto st = Value::matrix(2, 1, ValueType::DOUBLE, ctx.engine->resource());
+            auto st = Value::matrix(2, 1, ValueType::DOUBLE, ctx.engine->allocator());
             st.doubleDataMut()[0] = static_cast<double>(rngRef.v5RandnIcng());
             st.doubleDataMut()[1] = static_cast<double>(rngRef.v5RandnJsr());
             outs[0] = std::move(st);
@@ -208,44 +208,44 @@ void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         const std::string flag = dimArgs[0].toString();
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Randn(
-                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                static_cast<keel::u64>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
         if (flag == "state") {
             if (dimArgs[1].isScalar()) {
                 rngRef.setLegacyV5Randn(
-                    static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                    static_cast<keel::u64>(dimArgs[1].toScalar()));
                 outs[0] = Value();
                 return;
             }
             if (dimArgs[1].numel() == 2) {
                 rngRef.setLegacyV5RandnState(
-                    static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(0)),
-                    static_cast<std::uint32_t>(dimArgs[1].elemAsDouble(1)));
+                    static_cast<keel::u32>(dimArgs[1].elemAsDouble(0)),
+                    static_cast<keel::u32>(dimArgs[1].elemAsDouble(1)));
                 outs[0] = Value();
                 return;
             }
         }
         if (flag == "twister" && dimArgs[1].isScalar()) {
             rngRef.seed(
-                static_cast<std::uint64_t>(dimArgs[1].toScalar()));
+                static_cast<keel::u64>(dimArgs[1].toScalar()));
             outs[0] = Value();
             return;
         }
     }
-    ScratchArena scratch(mr);
-    auto dims = parseDimsArgsND(dimArgs, "randn", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto dims = parseDimsArgsND(dimArgs, "randn", scratch.allocator());
     stripTrailingOnes(dims);
     Value out;
     {
         if (dims.size() <= 3) {
-            const size_t r = dims.size() >= 1 ? dims[0] : 1;
-            const size_t c = dims.size() >= 2 ? dims[1] : 1;
-            const size_t p = dims.size() >= 3 ? dims[2] : 0;
+            const keel::usize r = dims.size() >= 1 ? dims[0] : 1;
+            const keel::usize c = dims.size() >= 2 ? dims[1] : 1;
+            const keel::usize p = dims.size() >= 3 ? dims[2] : 0;
             out = randn(rngRef, r, c, p, mr);
         } else {
-            out = randnND(rngRef, Span<const size_t>(dims.data(), dims.size()), mr);
+            out = randnND(rngRef, keel::ArrayRef<keel::usize>(dims.data(), dims.size()), mr);
         }
     }
     outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : std::move(out);
@@ -253,7 +253,7 @@ void randn_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
 
 // Cast a DOUBLE Value to any integer or single class (for randi typed
 // outputs). Saturating cast (out-of-range int64 values clamp).
-namespace { Value castDoubleToType(const Value &src, ValueType t, std::pmr::memory_resource *mr)
+namespace { Value castDoubleToType(const Value &src, ValueType t, keel::Allocator *mr)
 {
     if (t == ValueType::DOUBLE) return src;
     Value dst;
@@ -262,27 +262,27 @@ namespace { Value castDoubleToType(const Value &src, ValueType t, std::pmr::memo
                               src.dims().pages(), t, mr);
     else if (src.dims().ndim() > 3) {
         const auto &dimsRef = src.dims();
-        size_t dimsBuf[Dims::kMaxRank];
+        keel::usize dimsBuf[Dims::kMaxRank];
         for (int i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
         dst = Value::matrixND(dimsBuf, dimsRef.ndim(), t, mr);
     } else
         dst = Value::matrix(src.dims().rows(), src.dims().cols(), t, mr);
-    const size_t n = src.numel();
+    const keel::usize n = src.numel();
     const double *sp = src.doubleData();
     auto cast_loop = [&](auto *dp, auto /*tag*/) {
         using T = std::remove_pointer_t<decltype(dp)>;
-        for (size_t i = 0; i < n; ++i) dp[i] = static_cast<T>(sp[i]);
+        for (keel::usize i = 0; i < n; ++i) dp[i] = static_cast<T>(sp[i]);
     };
     switch (t) {
       case ValueType::SINGLE: cast_loop(dst.singleDataMut(),  float{});    break;
-      case ValueType::INT8:   cast_loop(dst.int8DataMut(),    int8_t{});   break;
-      case ValueType::INT16:  cast_loop(dst.int16DataMut(),   int16_t{});  break;
-      case ValueType::INT32:  cast_loop(dst.int32DataMut(),   int32_t{});  break;
-      case ValueType::INT64:  cast_loop(dst.int64DataMut(),   int64_t{});  break;
-      case ValueType::UINT8:  cast_loop(dst.uint8DataMut(),   uint8_t{});  break;
-      case ValueType::UINT16: cast_loop(dst.uint16DataMut(),  uint16_t{}); break;
-      case ValueType::UINT32: cast_loop(dst.uint32DataMut(),  uint32_t{}); break;
-      case ValueType::UINT64: cast_loop(dst.uint64DataMut(),  uint64_t{}); break;
+      case ValueType::INT8:   cast_loop(dst.int8DataMut(),    keel::i8{});   break;
+      case ValueType::INT16:  cast_loop(dst.int16DataMut(),   keel::i16{});  break;
+      case ValueType::INT32:  cast_loop(dst.int32DataMut(),   keel::i32{});  break;
+      case ValueType::INT64:  cast_loop(dst.int64DataMut(),   keel::i64{});  break;
+      case ValueType::UINT8:  cast_loop(dst.uint8DataMut(),   keel::u8{});  break;
+      case ValueType::UINT16: cast_loop(dst.uint16DataMut(),  keel::u16{}); break;
+      case ValueType::UINT32: cast_loop(dst.uint32DataMut(),  keel::u32{}); break;
+      case ValueType::UINT64: cast_loop(dst.uint64DataMut(),  keel::u64{}); break;
       default: throw Error("randi: unsupported type for cast",
                            0, 0, "randi", "", "numkit:randi:badType");
     }
@@ -296,23 +296,23 @@ namespace { Value castDoubleToType(const Value &src, ValueType t, std::pmr::memo
 //   randi(imax, [m n p])           shape via vector
 //   randi([imin imax], …)          range form (first arg is 2-vector)
 //   randi(..., 'type')             typed output (any int / 'double' / 'single')
-void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void randi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                CallContext &ctx)
 {
     auto &rngRef = resolveRngAndStripStream(args, ctx);
     argcheck::checkNargin(args.size(), 1, "randi");
 
-    int64_t imin = 1, imax = 0;
+    keel::i64 imin = 1, imax = 0;
     const Value &first = args[0];
     if (!first.isScalar() && first.numel() == 2) {
-        imin = static_cast<int64_t>(first.doubleData()[0]);
-        imax = static_cast<int64_t>(first.doubleData()[1]);
+        imin = static_cast<keel::i64>(first.doubleData()[0]);
+        imax = static_cast<keel::i64>(first.doubleData()[1]);
     } else {
-        imax = static_cast<int64_t>(first.toScalar());
+        imax = static_cast<keel::i64>(first.toScalar());
     }
 
-    Span<const Value> dimArgs = (args.size() > 1) ? args.subspan(1) : Span<const Value>{};
-    auto *mr = ctx.engine->resource();
+    keel::ArrayRef<Value> dimArgs = (args.size() > 1) ? args.slice(1) : keel::ArrayRef<Value>{};
+    auto *mr = ctx.engine->allocator();
 
     // Strip trailing class-name from dim args.
     ValueType t;
@@ -323,13 +323,13 @@ void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
         // Scalar form.
         dbl_out = randi(rngRef, imin, imax, 1, 1, 0, mr);
     } else {
-        ScratchArena scratch(mr);
-        auto dims = parseDimsArgsND(dimArgs, "randi", &scratch);
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        auto dims = parseDimsArgsND(dimArgs, "randi", scratch.allocator());
         stripTrailingOnes(dims);
         if (dims.size() <= 3) {
-            const size_t r = dims.size() >= 1 ? dims[0] : 1;
-            const size_t c = dims.size() >= 2 ? dims[1] : 1;
-            const size_t p = dims.size() >= 3 ? dims[2] : 0;
+            const keel::usize r = dims.size() >= 1 ? dims[0] : 1;
+            const keel::usize c = dims.size() >= 2 ? dims[1] : 1;
+            const keel::usize p = dims.size() >= 3 ? dims[2] : 0;
             dbl_out = randi(rngRef, imin, imax, r, c, p, mr);
         } else {
             // ND form: allocate matrixND and fill via the same uniform-int pass.
@@ -339,7 +339,7 @@ void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
             auto m = Value::matrixND(dims.data(), static_cast<int>(dims.size()),
                                       ValueType::DOUBLE, mr);
             const double span = static_cast<double>(imax - imin + 1);
-            for (size_t i = 0; i < m.numel(); ++i)
+            for (keel::usize i = 0; i < m.numel(); ++i)
                 m.doubleDataMut()[i] = static_cast<double>(imin) + std::floor(rngRef.nextUniform() * span);
             dbl_out = std::move(m);
         }
@@ -348,17 +348,17 @@ void randi_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
                                        : castDoubleToType(dbl_out, t, mr);
 }
 
-void randperm_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs,
+void randperm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                   CallContext &ctx)
 {
     auto &rngRef = resolveRngAndStripStream(args, ctx);
     argcheck::checkNargin(args.size(), 1, 2, "randperm");
-    const size_t n = argcheck::arrayDim(args[0], "randperm");
+    const keel::usize n = argcheck::arrayDim(args[0], "randperm");
     if (args.size() == 1) {
-        outs[0] = randperm(rngRef, n, ctx.engine->resource());
+        outs[0] = randperm(rngRef, n, ctx.engine->allocator());
     } else {
-        const size_t k = argcheck::arrayDim(args[1], "randperm");
-        outs[0] = randperm(rngRef, n, k, ctx.engine->resource());
+        const keel::usize k = argcheck::arrayDim(args[1], "randperm");
+        outs[0] = randperm(rngRef, n, k, ctx.engine->allocator());
     }
 }
 
@@ -368,19 +368,19 @@ void register_randstream(Engine &engine)
     rs.name = "RandStream";
     rs.isHandle = true;
     rs.propNames = {"Type", "Seed"};
-    rs.construct = [](Span<const Value> args, CallContext &ctx) -> Value {
-        auto *mr = ctx.engine->resource();
+    rs.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
+        auto *mr = ctx.engine->allocator();
         auto st = std::make_shared<ObjectState>(mr);
         auto payload = std::make_shared<RandStreamPayload>();
         std::string genType = "mt19937ar";
-        uint64_t seedVal = 0;
+        keel::u64 seedVal = 0;
         if (!args.empty() && (args[0].isChar() || args[0].isString()))
             genType = args[0].toString();
-        for (size_t i = 1; i + 1 < args.size(); i += 2) {
+        for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar() && !args[i].isString()) continue;
             std::string k = args[i].toString();
             if (k == "Seed" || k == "seed")
-                seedVal = static_cast<uint64_t>(std::max(0.0, args[i + 1].toScalar()));
+                seedVal = static_cast<keel::u64>(std::max(0.0, args[i + 1].toScalar()));
         }
         payload->rng.seed(seedVal);
         st->props["Type"] = Value::fromString(genType, mr);
@@ -403,53 +403,53 @@ void register_randstream(Engine &engine)
         }
         return false;
     };
-    rs.methods["reset"] = [](Value &self, Span<const Value> args, size_t, Span<Value>, CallContext &) {
+    rs.methods["reset"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &) {
         if (auto *st = self.objectStateMut()) {
-            uint64_t sd = 0;
+            keel::u64 sd = 0;
             if (!args.empty() && args[0].isNumeric())
-                sd = static_cast<uint64_t>(std::max(0.0, args[0].toScalar()));
+                sd = static_cast<keel::u64>(std::max(0.0, args[0].toScalar()));
             else if (st->props.count("Seed"))
-                sd = static_cast<uint64_t>(std::max(0.0, st->props["Seed"].toScalar()));
+                sd = static_cast<keel::u64>(std::max(0.0, st->props["Seed"].toScalar()));
             if (auto *p = dynamic_cast<RandStreamPayload *>(st->native.get()))
                 p->rng.seed(sd);
         }
     };
-    rs.methods["rand"] = [](Value &self, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+    rs.methods["rand"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
-        rand_reg(Span<const Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
+        rand_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     };
-    rs.methods["randn"] = [](Value &self, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+    rs.methods["randn"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
-        randn_reg(Span<const Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
+        randn_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     };
-    rs.methods["randi"] = [](Value &self, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+    rs.methods["randi"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
-        randi_reg(Span<const Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
+        randi_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     };
-    rs.methods["randperm"] = [](Value &self, Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx) {
+    rs.methods["randperm"] = [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
         std::vector<Value> fullArgs;
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
-        randperm_reg(Span<const Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
+        randperm_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     };
     engine.registerClass(std::move(rs));
 }
 
-void rng_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void rng_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
              CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 2, "rng");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // Always snapshot current state first if caller asked for it.
     Value prev;
@@ -476,7 +476,7 @@ void rng_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
         if (sd < 0.0)
             throw Error("rng: seed must be a non-negative integer",
                          0, 0, "rng", "", "numkit:rng:badSeed");
-        const auto seedVal = static_cast<uint64_t>(sd);
+        const auto seedVal = static_cast<keel::u64>(sd);
         if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
             const auto genName = args[1].toString();
             if (genName == "v4") {

@@ -3,6 +3,13 @@
 // CallContext register half of language/arrays/matrix.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/complex.h>
+#include <keel/math.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -12,7 +19,6 @@
 #include <numkit/ops/la_solve.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/value/scratch.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/datafun/cumsum.hpp>
@@ -20,13 +26,10 @@
 #include <numkit/ops/reductions.hpp>
 #include <numkit/ops/rows_helpers.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/value/scratch.hpp>
-#include <numkit/value/span.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <complex>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -38,15 +41,15 @@ using namespace numkit::builtin;  // C4c localized (umbrella removed)
 
 namespace detail {
 
-void zeros_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void zeros_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // Strip trailing class-name (e.g. 'uint8') or 'like' form before
     // parsing dims. Default type is DOUBLE.
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(dimArgs, "zeros", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(dimArgs, "zeros", scratch.allocator());
     stripTrailingOnes(d);
     // Value::matrix*/matrixND zero-fill the buffer for any type, so
     // createMatrixND with the requested type IS the zeros() output.
@@ -56,32 +59,32 @@ void zeros_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 // Fill `v` with one in its declared type (1 / 1.0 / true).
 namespace { inline void fillOnes(Value &v, ValueType t)
 {
-    const size_t n = v.numel();
+    const keel::usize n = v.numel();
     if (n == 0) return;
     switch (t) {
       case ValueType::DOUBLE:  { auto *p = v.doubleDataMut();  std::fill(p, p + n, 1.0); break; }
       case ValueType::SINGLE:  { auto *p = v.singleDataMut();  std::fill(p, p + n, 1.0f); break; }
-      case ValueType::LOGICAL: { auto *p = v.logicalDataMut(); std::fill(p, p + n, uint8_t(1)); break; }
-      case ValueType::INT8:    { auto *p = v.int8DataMut();    std::fill(p, p + n, int8_t(1)); break; }
-      case ValueType::INT16:   { auto *p = v.int16DataMut();   std::fill(p, p + n, int16_t(1)); break; }
-      case ValueType::INT32:   { auto *p = v.int32DataMut();   std::fill(p, p + n, int32_t(1)); break; }
-      case ValueType::INT64:   { auto *p = v.int64DataMut();   std::fill(p, p + n, int64_t(1)); break; }
-      case ValueType::UINT8:   { auto *p = v.uint8DataMut();   std::fill(p, p + n, uint8_t(1)); break; }
-      case ValueType::UINT16:  { auto *p = v.uint16DataMut();  std::fill(p, p + n, uint16_t(1)); break; }
-      case ValueType::UINT32:  { auto *p = v.uint32DataMut();  std::fill(p, p + n, uint32_t(1)); break; }
-      case ValueType::UINT64:  { auto *p = v.uint64DataMut();  std::fill(p, p + n, uint64_t(1)); break; }
+      case ValueType::LOGICAL: { auto *p = v.logicalDataMut(); std::fill(p, p + n, keel::u8(1)); break; }
+      case ValueType::INT8:    { auto *p = v.int8DataMut();    std::fill(p, p + n, keel::i8(1)); break; }
+      case ValueType::INT16:   { auto *p = v.int16DataMut();   std::fill(p, p + n, keel::i16(1)); break; }
+      case ValueType::INT32:   { auto *p = v.int32DataMut();   std::fill(p, p + n, keel::i32(1)); break; }
+      case ValueType::INT64:   { auto *p = v.int64DataMut();   std::fill(p, p + n, keel::i64(1)); break; }
+      case ValueType::UINT8:   { auto *p = v.uint8DataMut();   std::fill(p, p + n, keel::u8(1)); break; }
+      case ValueType::UINT16:  { auto *p = v.uint16DataMut();  std::fill(p, p + n, keel::u16(1)); break; }
+      case ValueType::UINT32:  { auto *p = v.uint32DataMut();  std::fill(p, p + n, keel::u32(1)); break; }
+      case ValueType::UINT64:  { auto *p = v.uint64DataMut();  std::fill(p, p + n, keel::u64(1)); break; }
       default: throw Error("ones: unsupported type for fill",
                            0, 0, "ones", "", "numkit:ones:badType");
     }
 }}
 
-void ones_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void ones_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(dimArgs, "ones", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(dimArgs, "ones", scratch.allocator());
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     fillOnes(m, t);
@@ -93,11 +96,11 @@ void ones_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
 // and to be a real callable for parity tests. Type preservation matches
 // the operator path (see core/src/tree_walker.cpp:colonOutputType and
 // core/src/vm.cpp:OpCode::COLON).
-namespace { ValueType colonOutType(const Value *ops, size_t n)
+namespace { ValueType colonOutType(const Value *ops, keel::usize n)
 {
     ValueType nonDouble = ValueType::DOUBLE;
     bool found = false;
-    for (size_t i = 0; i < n; ++i) {
+    for (keel::usize i = 0; i < n; ++i) {
         ValueType t = ops[i].type();
         if (t == ValueType::DOUBLE) continue;
         if (!found) { nonDouble = t; found = true; }
@@ -109,11 +112,11 @@ namespace { ValueType colonOutType(const Value *ops, size_t n)
     return nonDouble;
 }}
 
-void colon_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void colon_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "colon");
-    auto *mr = ctx.engine->resource();
-    for (size_t i = 0; i < args.size(); ++i) {
+    auto *mr = ctx.engine->allocator();
+    for (keel::usize i = 0; i < args.size(); ++i) {
         if (args[i].isObject()) {
             const BuiltinClass *cls = ctx.engine->findClass(args[i].objectClassName());
             if (cls && cls->ops.count("colon")) {
@@ -142,14 +145,14 @@ void colon_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 // KNOWN GAP: NumKit returns dense; MATLAB returns sparse storage class.
 // All numerical operations match (zeros on both sides), only class()
 // differs. Documented in PROGRESS for sparse().
-void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 6, "sparse");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         // sparse(M, N) -- allocate MxN dense zeros.
-        const size_t M = argcheck::arrayDim(args[0], "sparse");
-        const size_t N = argcheck::arrayDim(args[1], "sparse");
+        const keel::usize M = argcheck::arrayDim(args[0], "sparse");
+        const keel::usize N = argcheck::arrayDim(args[1], "sparse");
         outs[0] = Value::matrix(M, N, ValueType::DOUBLE, mr);
         return;
     }
@@ -166,18 +169,18 @@ void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
         const Value &vi = args[0];
         const Value &vj = args[1];
         const Value &vv = args[2];
-        const size_t ni = vi.numel();
-        const size_t nj = vj.numel();
-        const size_t nv = vv.numel();
-        const size_t len = std::max({ni, nj, nv});
-        size_t M = 0, N = 0;
-        for (size_t k = 0; k < ni; ++k) {
+        const keel::usize ni = vi.numel();
+        const keel::usize nj = vj.numel();
+        const keel::usize nv = vv.numel();
+        const keel::usize len = std::max({ni, nj, nv});
+        keel::usize M = 0, N = 0;
+        for (keel::usize k = 0; k < ni; ++k) {
             long long r = static_cast<long long>(vi.elemAsDouble(k));
-            if (r > static_cast<long long>(M)) M = static_cast<size_t>(r);
+            if (r > static_cast<long long>(M)) M = static_cast<keel::usize>(r);
         }
-        for (size_t k = 0; k < nj; ++k) {
+        for (keel::usize k = 0; k < nj; ++k) {
             long long c = static_cast<long long>(vj.elemAsDouble(k));
-            if (c > static_cast<long long>(N)) N = static_cast<size_t>(c);
+            if (c > static_cast<long long>(N)) N = static_cast<keel::usize>(c);
         }
         if (args.size() >= 5) {
             M = argcheck::arrayDim(args[3], "sparse");
@@ -185,9 +188,9 @@ void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
         }
         Value out = Value::matrix(M, N, ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
-        for (size_t k = 0; k < len; ++k) {
-            size_t r = static_cast<size_t>(vi.elemAsDouble(ni == 1 ? 0 : k));
-            size_t c = static_cast<size_t>(vj.elemAsDouble(nj == 1 ? 0 : k));
+        for (keel::usize k = 0; k < len; ++k) {
+            keel::usize r = static_cast<keel::usize>(vi.elemAsDouble(ni == 1 ? 0 : k));
+            keel::usize c = static_cast<keel::usize>(vj.elemAsDouble(nj == 1 ? 0 : k));
             double val = vv.elemAsDouble(nv == 1 ? 0 : k);
             if (r >= 1 && r <= M && c >= 1 && c <= N) {
                 od[(r - 1) + (c - 1) * M] += val;
@@ -198,10 +201,10 @@ void sparse_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
     }
 }
 
-void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "spdiags");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // 1 or 2 arguments: [B, d] = spdiags(A) or B = spdiags(A, d)
     if (args.size() <= 2) {
@@ -218,7 +221,7 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
                 const long long iEnd = std::min(m - 1, n - 1 - k);
                 for (long long i = iStart; i <= iEnd; ++i) {
                     const long long j = i + k;
-                    if (A.elemAsDouble(static_cast<size_t>(i + j * m)) != 0.0) {
+                    if (A.elemAsDouble(static_cast<keel::usize>(i + j * m)) != 0.0) {
                         anyNz = true;
                         break;
                     }
@@ -228,14 +231,14 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         } else {
             const Value &dVal = args[1];
             diags.resize(dVal.numel());
-            for (size_t idx = 0; idx < dVal.numel(); ++idx)
+            for (keel::usize idx = 0; idx < dVal.numel(); ++idx)
                 diags[idx] = static_cast<long long>(dVal.elemAsDouble(idx));
         }
 
-        const size_t numD = diags.size();
-        Value B = Value::matrix(static_cast<size_t>(pLen), numD, ValueType::DOUBLE, mr);
+        const keel::usize numD = diags.size();
+        Value B = Value::matrix(static_cast<keel::usize>(pLen), numD, ValueType::DOUBLE, mr);
         double *bd = B.doubleDataMut();
-        for (size_t col = 0; col < numD; ++col) {
+        for (keel::usize col = 0; col < numD; ++col) {
             const long long k = diags[col];
             const long long iStart = std::max(0LL, -k);
             const long long iEnd = std::min(m - 1, n - 1 - k);
@@ -243,15 +246,15 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
                 const long long j = i + k;
                 const long long rowB = (m >= n) ? j : i;
                 if (rowB >= 0 && rowB < pLen)
-                    bd[static_cast<size_t>(rowB) + col * static_cast<size_t>(pLen)] =
-                        A.elemAsDouble(static_cast<size_t>(i + j * m));
+                    bd[static_cast<keel::usize>(rowB) + col * static_cast<keel::usize>(pLen)] =
+                        A.elemAsDouble(static_cast<keel::usize>(i + j * m));
             }
         }
         outs[0] = std::move(B);
         if (nargout >= 2 && args.size() == 1) {
             Value dOut = Value::matrix(numD, 1, ValueType::DOUBLE, mr);
             double *dd = dOut.doubleDataMut();
-            for (size_t idx = 0; idx < numD; ++idx)
+            for (keel::usize idx = 0; idx < numD; ++idx)
                 dd[idx] = static_cast<double>(diags[idx]);
             outs[1] = std::move(dOut);
         }
@@ -267,21 +270,21 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
         const Value &Aold = args[2];
         m = static_cast<long long>(Aold.dims().rows());
         n = static_cast<long long>(Aold.dims().cols());
-        out = Value::matrix(static_cast<size_t>(m), static_cast<size_t>(n), ValueType::DOUBLE, mr);
+        out = Value::matrix(static_cast<keel::usize>(m), static_cast<keel::usize>(n), ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
-        for (size_t idx = 0; idx < Aold.numel(); ++idx)
+        for (keel::usize idx = 0; idx < Aold.numel(); ++idx)
             od[idx] = Aold.elemAsDouble(idx);
     } else {
         m = static_cast<long long>(argcheck::arrayDim(args[2], "spdiags"));
         n = static_cast<long long>(argcheck::arrayDim(args[3], "spdiags"));
-        out = Value::matrix(static_cast<size_t>(m), static_cast<size_t>(n), ValueType::DOUBLE, mr);
+        out = Value::matrix(static_cast<keel::usize>(m), static_cast<keel::usize>(n), ValueType::DOUBLE, mr);
     }
 
     double *od = out.doubleDataMut();
     const long long bRows = static_cast<long long>(B.dims().rows());
     const long long bCols = static_cast<long long>(B.dims().cols());
-    const size_t numD = dVal.numel();
-    for (size_t col = 0; col < numD && static_cast<long long>(col) < bCols; ++col) {
+    const keel::usize numD = dVal.numel();
+    for (keel::usize col = 0; col < numD && static_cast<long long>(col) < bCols; ++col) {
         const long long k = static_cast<long long>(dVal.elemAsDouble(col));
         const long long iStart = std::max(0LL, -k);
         const long long iEnd = std::min(m - 1, n - 1 - k);
@@ -289,9 +292,9 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
             const long long j = i + k;
             const long long rowB = (m >= n) ? j : i;
             const double val = (rowB >= 0 && rowB < bRows)
-                                   ? B.elemAsDouble(static_cast<size_t>(rowB + static_cast<long long>(col) * bRows))
+                                   ? B.elemAsDouble(static_cast<keel::usize>(rowB + static_cast<long long>(col) * bRows))
                                    : 0.0;
-            od[static_cast<size_t>(i + j * m)] = val;
+            od[static_cast<keel::usize>(i + j * m)] = val;
         }
     }
     outs[0] = std::move(out);
@@ -299,39 +302,39 @@ void spdiags_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallC
 
 // Zero-fill incomplete Cholesky factorization ichol(A [, opts]):
 // returns lower-triangular L preserving the sparsity pattern of A.
-void ichol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void ichol_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "ichol");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &A = args[0];
-    const size_t n = A.dims().rows();
+    const keel::usize n = A.dims().rows();
     if (n != A.dims().cols())
         throw Error("ichol: input matrix must be square",
                     0, 0, "ichol", "", "numkit:ichol:notSquare");
     Value L = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *ld = L.doubleDataMut();
-    for (size_t j = 0; j < n; ++j) {
-        for (size_t i = j; i < n; ++i) {
+    for (keel::usize j = 0; j < n; ++j) {
+        for (keel::usize i = j; i < n; ++i) {
             double aij = A.elemAsDouble(i + j * n);
             ld[i + j * n] = aij;
         }
     }
-    for (size_t k = 0; k < n; ++k) {
+    for (keel::usize k = 0; k < n; ++k) {
         double lkk = ld[k + k * n];
         if (lkk <= 0.0)
             throw Error("ichol: encountered nonpositive pivot",
                         0, 0, "ichol", "", "numkit:ichol:nonposPivot");
         lkk = std::sqrt(lkk);
         ld[k + k * n] = lkk;
-        for (size_t i = k + 1; i < n; ++i) {
+        for (keel::usize i = k + 1; i < n; ++i) {
             if (ld[i + k * n] != 0.0) {
                 ld[i + k * n] /= lkk;
             }
         }
-        for (size_t j = k + 1; j < n; ++j) {
+        for (keel::usize j = k + 1; j < n; ++j) {
             double ljk = ld[j + k * n];
             if (ljk == 0.0) continue;
-            for (size_t i = j; i < n; ++i) {
+            for (keel::usize i = j; i < n; ++i) {
                 if (ld[i + j * n] != 0.0) {
                     ld[i + j * n] -= ld[i + k * n] * ljk;
                 }
@@ -348,7 +351,7 @@ void ichol_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 // Same shape parsing as zeros/ones.
 namespace { void nanInfFill(Value &v, double fillD, float fillS, ValueType t)
 {
-    const size_t n = v.numel();
+    const keel::usize n = v.numel();
     if (n == 0) return;
     if (t == ValueType::DOUBLE) {
         auto *p = v.doubleDataMut(); std::fill(p, p + n, fillD);
@@ -357,9 +360,9 @@ namespace { void nanInfFill(Value &v, double fillD, float fillS, ValueType t)
     }
 }}
 
-void nan_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void nan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.empty()) {
         outs[0] = Value::scalar(std::numeric_limits<double>::quiet_NaN(), mr);
         return;
@@ -369,8 +372,8 @@ void nan_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     if (t != ValueType::DOUBLE && t != ValueType::SINGLE)
         throw Error("nan: type must be 'double' or 'single' (NaN is float-only)",
                     0, 0, "nan", "", "numkit:nan:badType");
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(dimArgs, "nan", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(dimArgs, "nan", scratch.allocator());
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, std::numeric_limits<double>::quiet_NaN(),
@@ -378,9 +381,9 @@ void nan_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     outs[0] = std::move(m);
 }
 
-void inf_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void inf_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.empty()) {
         outs[0] = Value::scalar(std::numeric_limits<double>::infinity(), mr);
         return;
@@ -390,8 +393,8 @@ void inf_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     if (t != ValueType::DOUBLE && t != ValueType::SINGLE)
         throw Error("inf: type must be 'double' or 'single' (Inf is float-only)",
                     0, 0, "inf", "", "numkit:inf:badType");
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(dimArgs, "inf", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(dimArgs, "inf", scratch.allocator());
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, std::numeric_limits<double>::infinity(),
@@ -403,40 +406,40 @@ void inf_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
 // bare `true` returns a scalar logical 1; `true(M, N, ...)` returns a
 // logical array filled with 1 (or 0 for false). Mirrors zeros/ones
 // shape parsing. See BUGS.md #30.
-void true_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void true_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.empty()) {
         outs[0] = Value::logicalScalar(true, mr);
         return;
     }
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(args, "true", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(args, "true", scratch.allocator());
     stripTrailingOnes(d);
     auto v = createMatrixND(d.data(), d.size(), ValueType::LOGICAL, mr);
-    uint8_t *p = v.logicalDataMut();
-    for (size_t i = 0; i < v.numel(); ++i) p[i] = 1;
+    keel::u8 *p = v.logicalDataMut();
+    for (keel::usize i = 0; i < v.numel(); ++i) p[i] = 1;
     outs[0] = std::move(v);
 }
 
-void false_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void false_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.empty()) {
         outs[0] = Value::logicalScalar(false, mr);
         return;
     }
-    ScratchArena scratch(mr);
-    auto d = parseDimsArgsND(args, "false", &scratch);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto d = parseDimsArgsND(args, "false", scratch.allocator());
     stripTrailingOnes(d);
     // createMatrixND zero-fills LOGICAL by default.
     outs[0] = createMatrixND(d.data(), d.size(), ValueType::LOGICAL, mr);
 }
 
-void eye_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void eye_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "eye");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     ValueType t;
     auto dimArgs = extractTypeArg(args, t);
     auto d = parseDimsArgs(dimArgs, "eye");
@@ -447,24 +450,24 @@ void eye_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallC
     }
     // Typed eye: zero-fill matrix of `t`, then set diagonal to one.
     auto m = Value::matrix(d.rows, d.cols, t, mr);
-    const size_t k = std::min(d.rows, d.cols);
+    const keel::usize k = std::min(d.rows, d.cols);
     switch (t) {
-      case ValueType::SINGLE: { auto *p = m.singleDataMut(); for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1.0f; break; }
-      case ValueType::LOGICAL:{ auto *p = m.logicalDataMut(); for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::INT8:   { auto *p = m.int8DataMut();    for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::INT16:  { auto *p = m.int16DataMut();   for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::INT32:  { auto *p = m.int32DataMut();   for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::INT64:  { auto *p = m.int64DataMut();   for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::UINT8:  { auto *p = m.uint8DataMut();   for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::UINT16: { auto *p = m.uint16DataMut();  for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::UINT32: { auto *p = m.uint32DataMut();  for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
-      case ValueType::UINT64: { auto *p = m.uint64DataMut();  for (size_t i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::SINGLE: { auto *p = m.singleDataMut(); for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1.0f; break; }
+      case ValueType::LOGICAL:{ auto *p = m.logicalDataMut(); for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::INT8:   { auto *p = m.int8DataMut();    for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::INT16:  { auto *p = m.int16DataMut();   for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::INT32:  { auto *p = m.int32DataMut();   for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::INT64:  { auto *p = m.int64DataMut();   for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::UINT8:  { auto *p = m.uint8DataMut();   for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::UINT16: { auto *p = m.uint16DataMut();  for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::UINT32: { auto *p = m.uint32DataMut();  for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
+      case ValueType::UINT64: { auto *p = m.uint64DataMut();  for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
       default: throw Error("eye: unsupported type", 0, 0, "eye", "", "numkit:eye:badType");
     }
     outs[0] = std::move(m);
 }
 
-void magic_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void magic_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "magic");
     if (args.size() != 1)
@@ -474,52 +477,52 @@ void magic_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     if (nd < 0.0 || nd != std::floor(nd))
         throw Error("magic: N must be a non-negative integer",
                      0, 0, "magic", "", "numkit:magic:badN");
-    outs[0] = magic(static_cast<size_t>(nd), ctx.engine->resource());
+    outs[0] = magic(static_cast<keel::usize>(nd), ctx.engine->allocator());
 }
 
-void toeplitz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void toeplitz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "toeplitz");
     if (args.size() < 1 || args.size() > 2)
         throw Error("toeplitz: requires 1 or 2 arguments",
                     0, 0, "toeplitz", "", "numkit:toeplitz:nargin");
     const Value &r = args.size() == 2 ? args[1] : Value::Empty;
-    outs[0] = toeplitz(args[0], r, ctx.engine->resource());
+    outs[0] = toeplitz(args[0], r, ctx.engine->allocator());
 }
 
-void hankel_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void hankel_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "hankel");
     if (args.size() < 1 || args.size() > 2)
         throw Error("hankel: requires 1 or 2 arguments",
                     0, 0, "hankel", "", "numkit:hankel:nargin");
     const Value &r = args.size() == 2 ? args[1] : Value::Empty;
-    outs[0] = hankel(args[0], r, ctx.engine->resource());
+    outs[0] = hankel(args[0], r, ctx.engine->allocator());
 }
 
-void vander_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void vander_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "vander");
     if (args.size() != 1)
         throw Error("vander: requires exactly 1 argument",
                     0, 0, "vander", "", "numkit:vander:nargin");
-    outs[0] = vander(args[0], ctx.engine->resource());
+    outs[0] = vander(args[0], ctx.engine->allocator());
 }
 
-void compan_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void compan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "compan");
     if (args.size() != 1)
         throw Error("compan: requires exactly 1 argument",
                     0, 0, "compan", "", "numkit:compan:nargin");
-    outs[0] = compan(args[0], ctx.engine->resource());
+    outs[0] = compan(args[0], ctx.engine->allocator());
 }
 
 namespace {
 
 // Common gateway for the "size-from-scalar" test-matrix functions
 // (pascal, hilb, invhilb, wilkinson, hadamard).
-size_t requireSizeArg(Span<const Value> args, const char *fn)
+keel::usize requireSizeArg(keel::ArrayRef<Value> args, const char *fn)
 {
     if (args.size() != 1)
         throw Error(std::string(fn) + ": requires exactly 1 argument",
@@ -528,45 +531,45 @@ size_t requireSizeArg(Span<const Value> args, const char *fn)
     if (nd < 0.0 || nd != std::floor(nd))
         throw Error(std::string(fn) + ": N must be a non-negative integer",
                     0, 0, fn, "", std::string("numkit:") + fn + ":badN");
-    return static_cast<size_t>(nd);
+    return static_cast<keel::usize>(nd);
 }
 
 } // anonymous namespace
 
-void pascal_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pascal_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "pascal");
-    outs[0] = pascal(requireSizeArg(args, "pascal"), ctx.engine->resource());
+    outs[0] = pascal(requireSizeArg(args, "pascal"), ctx.engine->allocator());
 }
 
-void hilb_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void hilb_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "hilb");
-    outs[0] = hilb(requireSizeArg(args, "hilb"), ctx.engine->resource());
+    outs[0] = hilb(requireSizeArg(args, "hilb"), ctx.engine->allocator());
 }
 
-void invhilb_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void invhilb_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "invhilb");
-    outs[0] = invhilb(requireSizeArg(args, "invhilb"), ctx.engine->resource());
+    outs[0] = invhilb(requireSizeArg(args, "invhilb"), ctx.engine->allocator());
 }
 
-void wilkinson_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void wilkinson_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "wilkinson");
-    outs[0] = wilkinson(requireSizeArg(args, "wilkinson"), ctx.engine->resource());
+    outs[0] = wilkinson(requireSizeArg(args, "wilkinson"), ctx.engine->allocator());
 }
 
-void hadamard_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void hadamard_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "hadamard");
-    outs[0] = hadamard(requireSizeArg(args, "hadamard"), ctx.engine->resource());
+    outs[0] = hadamard(requireSizeArg(args, "hadamard"), ctx.engine->allocator());
 }
 
-void rosser_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void rosser_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 0, "rosser");
-    outs[0] = rosser(ctx.engine->resource());
+    outs[0] = rosser(ctx.engine->allocator());
 }
 
 // NOTE: inv_reg migrated to toolboxes/linalg (properties.cpp).
@@ -585,21 +588,21 @@ void rosser_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Ca
 //       expm_reg / logm_reg / sqrtm_reg migrated to toolboxes/linalg
 //       (eig.cpp, matrix_functions.cpp). Block below disabled.
 
-void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "topkrows");
     const double kd = args[1].toScalar();
     if (kd < 0.0 || kd != std::floor(kd))
         throw Error("topkrows: k must be a non-negative integer",
                     0, 0, "topkrows", "", "numkit:topkrows:badK");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     auto toLower = [](std::string s) {
         for (char &ch : s)
             ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         return s;
     };
-    auto parseDirStr = [&](const std::string &raw) -> std::uint8_t {
+    auto parseDirStr = [&](const std::string &raw) -> keel::u8 {
         std::string s = toLower(raw);
         if (s == "descend") return 1u;
         if (s == "ascend")  return 0u;
@@ -607,21 +610,21 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                     0, 0, "topkrows", "", "numkit:topkrows:badDir");
     };
 
-    std::vector<std::size_t> cols;
-    std::vector<std::uint8_t> desc;
+    std::vector<keel::usize> cols;
+    std::vector<keel::u8> desc;
     std::string compMethod = "auto";
-    size_t i = 2;
+    keel::usize i = 2;
     if (i < args.size() && !args[i].isChar() && !args[i].isString() && !args[i].isCell()) {
         // Numeric col vector.
         const Value &c = args[i];
         cols.reserve(c.numel());
-        for (std::size_t kk = 0; kk < c.numel(); ++kk) {
+        for (keel::usize kk = 0; kk < c.numel(); ++kk) {
             const double v = c.elemAsDouble(kk);
             if (v < 1.0 || v != std::floor(v))
                 throw Error("topkrows: col must be a positive integer "
                             "or vector of positive integers",
                             0, 0, "topkrows", "", "numkit:topkrows:badCol");
-            cols.push_back(static_cast<std::size_t>(v) - 1);
+            cols.push_back(static_cast<keel::usize>(v) - 1);
         }
         ++i;
     }
@@ -672,14 +675,14 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
         if (A.dims().ndim() != 2)
             throw Error("topkrows: input must be a 2D matrix",
                         0, 0, "topkrows", "", "numkit:topkrows:notMatrix");
-        const std::size_t m = A.dims().rows();
-        const std::size_t n = A.dims().cols();
-        const std::size_t kk = std::min(static_cast<std::size_t>(kd), m);
+        const keel::usize m = A.dims().rows();
+        const keel::usize n = A.dims().cols();
+        const keel::usize kk = std::min(static_cast<keel::usize>(kd), m);
         if (cols.empty()) {
             cols.reserve(n);
-            for (std::size_t j = 0; j < n; ++j) cols.push_back(j);
+            for (keel::usize j = 0; j < n; ++j) cols.push_back(j);
         }
-        for (std::size_t j : cols)
+        for (keel::usize j : cols)
             if (j >= n)
                 throw Error("topkrows: column index out of range",
                             0, 0, "topkrows", "", "numkit:topkrows:badCol");
@@ -689,25 +692,25 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
             throw Error("topkrows: direction must be a scalar or match the length of col",
                         0, 0, "topkrows", "", "numkit:topkrows:dirSize");
 
-        std::vector<std::size_t> ord(m);
-        for (std::size_t r = 0; r < m; ++r) ord[r] = r;
+        std::vector<keel::usize> ord(m);
+        for (keel::usize r = 0; r < m; ++r) ord[r] = r;
         const bool isCplx = A.isComplex();
         const bool useReal = (compMethod == "real") || (compMethod == "auto" && !isCplx);
-        auto getCplx = [&](std::size_t r, std::size_t c) -> Complex {
-            return isCplx ? A.complexData()[r + c * m] : Complex(A.elemAsDouble(r + c * m), 0.0);
+        auto getCplx = [&](keel::usize r, keel::usize c) -> keel::c64 {
+            return isCplx ? A.complexData()[r + c * m] : keel::c64(A.elemAsDouble(r + c * m), 0.0);
         };
-        std::stable_sort(ord.begin(), ord.end(), [&](std::size_t a, std::size_t b) {
-            for (std::size_t k2 = 0; k2 < cols.size(); ++k2) {
-                const std::size_t j = cols[k2];
-                const Complex za = getCplx(a, j);
-                const Complex zb = getCplx(b, j);
+        std::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
+            for (keel::usize k2 = 0; k2 < cols.size(); ++k2) {
+                const keel::usize j = cols[k2];
+                const keel::c64 za = getCplx(a, j);
+                const keel::c64 zb = getCplx(b, j);
                 double ka1, ka2, kb1, kb2;
                 if (useReal) {
                     ka1 = za.real(); ka2 = za.imag();
                     kb1 = zb.real(); kb2 = zb.imag();
                 } else {
-                    ka1 = std::abs(za); ka2 = std::atan2(za.imag(), za.real());
-                    kb1 = std::abs(zb); kb2 = std::atan2(zb.imag(), zb.real());
+                    ka1 = keel::abs(za); ka2 = std::atan2(za.imag(), za.real());
+                    kb1 = keel::abs(zb); kb2 = std::atan2(zb.imag(), zb.real());
                 }
                 if (ka1 != kb1) return desc[k2] ? (ka1 > kb1) : (ka1 < kb1);
                 if (ka2 != kb2) return desc[k2] ? (ka2 > kb2) : (ka2 < kb2);
@@ -717,11 +720,11 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
 
         Value out = (n == 0) ? Value::matrix(kk, 0, A.type(), mr)
                              : Value::matrix(kk, n, A.type(), mr);
-        for (std::size_t r = 0; r < kk; ++r) {
-            const std::size_t srcR = ord[r];
-            for (std::size_t j = 0; j < n; ++j) {
-                const std::size_t srcLin = srcR + j * m;
-                const std::size_t dstLin = r + j * kk;
+        for (keel::usize r = 0; r < kk; ++r) {
+            const keel::usize srcR = ord[r];
+            for (keel::usize j = 0; j < n; ++j) {
+                const keel::usize srcLin = srcR + j * m;
+                const keel::usize dstLin = r + j * kk;
                 if (isCplx)
                     out.complexDataMut()[dstLin] = A.complexData()[srcLin];
                 else
@@ -732,31 +735,31 @@ void topkrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
         if (nargout >= 2) {
             auto I = Value::matrix(kk, 1, ValueType::DOUBLE, mr);
             double *id = I.doubleDataMut();
-            for (std::size_t k2 = 0; k2 < kk; ++k2)
+            for (keel::usize k2 = 0; k2 < kk; ++k2)
                 id[k2] = static_cast<double>(ord[k2] + 1);
             outs[1] = std::move(I);
         }
         return;
     }
 
-    std::vector<std::size_t> idx_out;
-    auto B = topkrows_full(args[0], static_cast<std::size_t>(kd),
+    std::vector<keel::usize> idx_out;
+    auto B = topkrows_full(args[0], static_cast<keel::usize>(kd),
                             cols, desc,
                             (nargout >= 2) ? &idx_out : nullptr, mr);
     outs[0] = std::move(B);
     if (nargout >= 2) {
         auto I = Value::matrix(idx_out.size(), 1, ValueType::DOUBLE, mr);
         double *id = I.doubleDataMut();
-        for (std::size_t k2 = 0; k2 < idx_out.size(); ++k2)
+        for (keel::usize k2 = 0; k2 < idx_out.size(); ++k2)
             id[k2] = double(idx_out[k2] + 1);  // 1-indexed
         outs[1] = std::move(I);
     }
 }
 
-void size_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void size_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "size");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     if (args.size() >= 2) {
         outs[0] = size(args[0], argcheck::dimArg(args[1], "size"), mr);
@@ -769,13 +772,13 @@ void size_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
         // For ND tensors, dims past nargout-1 are gathered into the last
         // requested output (MATLAB behaviour: extra-dim sizes multiplied
         // into the trailing slot). For dims past actual ndim, return 1.
-        for (size_t i = 0; i < nargout && i < outs.size(); ++i) {
+        for (keel::usize i = 0; i < nargout && i < outs.size(); ++i) {
             double v;
             if (i + 1 < nargout) {
                 v = static_cast<double>(dims.dim(static_cast<int>(i)));
             } else {
                 // Last requested output: multiply remaining dims (if any).
-                size_t prod = 1;
+                keel::usize prod = 1;
                 for (int j = static_cast<int>(i); j < dims.ndim(); ++j)
                     prod *= dims.dim(j);
                 if (dims.ndim() <= static_cast<int>(i)) prod = 1;
@@ -789,22 +792,22 @@ void size_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     outs[0] = size(args[0], mr);
 }
 
-void length_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void length_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "length");
-    outs[0] = length(args[0], ctx.engine->resource());
+    outs[0] = length(args[0], ctx.engine->allocator());
 }
 
-void numel_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void numel_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "numel");
-    outs[0] = numel(args[0], ctx.engine->resource());
+    outs[0] = numel(args[0], ctx.engine->allocator());
 }
 
-void ndims_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void ndims_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "ndims");
-    outs[0] = ndims(args[0], ctx.engine->resource());
+    outs[0] = ndims(args[0], ctx.engine->allocator());
 }
 
 // reshape's Value-boundary resolver (the plan-resolver shape for a
@@ -813,10 +816,10 @@ void ndims_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
 // because the public C++ API takes size_t dims which cannot express what
 // this resolves (bugs/closed/lang/reshape-size-arg-validation.md).
 namespace {
-ScratchVec<size_t> parseReshapeDims(const Value &x, Span<const Value> sizeArgs,
-                                    ScratchArena &scratch)
+keel::Array<keel::usize> parseReshapeDims(const Value &x, keel::ArrayRef<Value> sizeArgs,
+                                    const keel::ArenaTemp &scratch)
 {
-    ScratchVec<size_t> dims(&scratch);
+    keel::Array<keel::usize> dims(scratch.allocator());
 
     // Dims-vector form: reshape(A, [m n p ...]) — any numeric class, never
     // complex. No [] inference here.
@@ -824,17 +827,17 @@ ScratchVec<size_t> parseReshapeDims(const Value &x, Span<const Value> sizeArgs,
         && !sizeArgs[0].isEmpty()) {
         argcheck::reshapeSizeReal(sizeArgs[0], "reshape");
         dims.reserve(sizeArgs[0].numel());
-        for (size_t i = 0; i < sizeArgs[0].numel(); ++i)
+        for (keel::usize i = 0; i < sizeArgs[0].numel(); ++i)
             dims.push_back(
                 argcheck::reshapeSize(sizeArgs[0].elemAsDouble(i), "reshape"));
     } else {
         // Scalar-args form: reshape(A, m, n, ...). One [] allowed for
         // dimension inference from x.numel().
-        const size_t dimCount = sizeArgs.size();
+        const keel::usize dimCount = sizeArgs.size();
         dims.assign(dimCount, 1);
         int inferPos = -1;
-        size_t knownProd = 1;
-        for (size_t i = 0; i < dimCount; ++i) {
+        keel::usize knownProd = 1;
+        for (keel::usize i = 0; i < dimCount; ++i) {
             if (sizeArgs[i].isEmpty()) {
                 if (inferPos >= 0)
                     throw Error("reshape: only one size dimension may be "
@@ -867,69 +870,69 @@ ScratchVec<size_t> parseReshapeDims(const Value &x, Span<const Value> sizeArgs,
 }
 } // namespace
 
-void reshape_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void reshape_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "reshape");
-    auto *mr = ctx.engine->resource();
-    ScratchArena scratch(mr);
-    ScratchVec<size_t> dims = parseReshapeDims(args[0], args.subspan(1),
+    auto *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<keel::usize> dims = parseReshapeDims(args[0], args.slice(1),
                                                scratch);
-    outs[0] = reshape(args[0], Span<const size_t>(dims.data(), dims.size()), mr);
+    outs[0] = reshape(args[0], keel::ArrayRef<keel::usize>(dims.data(), dims.size()), mr);
 }
 
-void transpose_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void transpose_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "transpose");
-    outs[0] = transpose(args[0], ctx.engine->resource());
+    outs[0] = transpose(args[0], ctx.engine->allocator());
 }
 
-void pagetranspose_reg(Span<const Value> args, size_t, Span<Value> outs,
+void pagetranspose_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                        CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "pagetranspose");
-    outs[0] = pagetranspose(args[0], ctx.engine->resource());
+    outs[0] = pagetranspose(args[0], ctx.engine->allocator());
 }
 
-void pagectranspose_reg(Span<const Value> args, size_t, Span<Value> outs,
+void pagectranspose_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                         CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "pagectranspose");
-    outs[0] = pagectranspose(args[0], ctx.engine->resource());
+    outs[0] = pagectranspose(args[0], ctx.engine->allocator());
 }
 
-void peaks_reg(Span<const Value> args, size_t, Span<Value> outs,
+void peaks_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "peaks");
-    size_t n = 49;  // MATLAB default
+    keel::usize n = 49;  // MATLAB default
     if (!args.empty()) {
         const double dn = args[0].toScalar();
         if (dn < 0 || dn > 1.0e9 || std::isnan(dn))
             throw Error("peaks: n must be a non-negative integer",
                          0, 0, "peaks", "", "numkit:peaks:badN");
-        n = static_cast<size_t>(dn);
+        n = static_cast<keel::usize>(dn);
     }
-    outs[0] = peaks(n, ctx.engine->resource());
+    outs[0] = peaks(n, ctx.engine->allocator());
 }
 
-void sphere_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void sphere_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
-    size_t n = 20;  // MATLAB default
+    keel::usize n = 20;  // MATLAB default
     if (!args.empty())
-        n = static_cast<size_t>(argcheck::expectedPositiveInteger(
+        n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[0], 1, "n", "sphere"), 1, "n", "sphere"));
-    auto s = sphere(n, ctx.engine->resource());
+    auto s = sphere(n, ctx.engine->allocator());
     outs[0] = std::move(s.X);
     if (nargout > 1) outs[1] = std::move(s.Y);
     if (nargout > 2) outs[2] = std::move(s.Z);
 }
 
-void cylinder_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void cylinder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                   CallContext &ctx)
 {
-    auto *mr = ctx.engine->resource();
-    size_t n = 20;
+    auto *mr = ctx.engine->allocator();
+    keel::usize n = 20;
     Value R;
     if (args.empty()) {
         // Default profile [1 1].
@@ -939,7 +942,7 @@ void cylinder_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     } else {
         if (args[0].isScalar()) {
             // cylinder(n) — single integer arg is `n`, R defaults to [1 1].
-            n = static_cast<size_t>(argcheck::expectedPositiveInteger(
+            n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
                 argcheck::expectedReal(args[0], 1, "n", "cylinder"), 1, "n", "cylinder"));
             R = Value::matrix(1, 2, ValueType::DOUBLE, mr);
             R.doubleDataMut()[0] = 1.0;
@@ -947,7 +950,7 @@ void cylinder_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
         } else {
             R = args[0];
             if (args.size() >= 2)
-                n = static_cast<size_t>(argcheck::expectedPositiveInteger(
+                n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
                     argcheck::expectedReal(args[1], 2, "n", "cylinder"), 2, "n", "cylinder"));
         }
     }
@@ -957,7 +960,7 @@ void cylinder_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     if (nargout > 2) outs[2] = std::move(s.Z);
 }
 
-void ellipsoid_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
+void ellipsoid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                    CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 6, "ellipsoid");
@@ -967,17 +970,17 @@ void ellipsoid_reg(Span<const Value> args, size_t nargout, Span<Value> outs,
     const double xr = args[3].toScalar();
     const double yr = args[4].toScalar();
     const double zr = args[5].toScalar();
-    size_t n = 20;
+    keel::usize n = 20;
     if (args.size() >= 7)
-        n = static_cast<size_t>(argcheck::expectedPositiveInteger(
+        n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[6], 7, "n", "ellipsoid"), 7, "n", "ellipsoid"));
-    auto s = ellipsoid(xc, yc, zc, xr, yr, zr, n, ctx.engine->resource());
+    auto s = ellipsoid(xc, yc, zc, xr, yr, zr, n, ctx.engine->allocator());
     outs[0] = std::move(s.X);
     if (nargout > 1) outs[1] = std::move(s.Y);
     if (nargout > 2) outs[2] = std::move(s.Z);
 }
 
-void pagemtimes_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void pagemtimes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "pagemtimes");
     auto parseFlag = [](const Value &v) -> TranspOp {
@@ -992,7 +995,7 @@ void pagemtimes_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
                      + "' (expected 'none', 'transpose', or 'ctranspose')",
                      0, 0, "pagemtimes", "", "numkit:pagemtimes:invalidFlag");
     };
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.size() == 2) {
         outs[0] = pagemtimes(args[0], args[1], mr);
         return;
@@ -1005,18 +1008,18 @@ void pagemtimes_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs
                  0, 0, "pagemtimes", "", "numkit:pagemtimes:nargin");
 }
 
-void diag_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void diag_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "diag");
     long k = 0;
     if (args.size() >= 2)
         k = argcheck::expectedInteger(
             argcheck::expectedReal(args[1], 2, "k", "diag"), 2, "k", "diag");
-    outs[0] = numkit::narrowComplex(diag(args[0], k, ctx.engine->resource()),
-                                    ctx.engine->resource());
+    outs[0] = numkit::narrowComplex(diag(args[0], k, ctx.engine->allocator()),
+                                    ctx.engine->allocator());
 }
 
-void sort_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "sort");
     // sort(X[, dim][, direction]): a numeric trailing arg is the dim, a
@@ -1029,7 +1032,7 @@ void sort_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
         for (char &ch : s) if (ch >= 'A' && ch <= 'Z') ch = char(ch + 32);
         return s;
     };
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].isEmpty()) continue;
         if (args[i].isChar() || args[i].isString()) {
             const std::string d = lower(args[i].toString());
@@ -1047,7 +1050,7 @@ void sort_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
             dim = argcheck::dimArg(args[i], "sort");
         }
     }
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     // Integer types: MATLAB keeps the class on the sorted VALUES (the index
     // output stays double). Sort through the double path (the order is
     // identical) then cast the sorted values back to the integer class.
@@ -1091,12 +1094,12 @@ void sort_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
         outs[1] = std::move(idx);
 }
 
-void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "sortrows");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
-    ScratchArena scratch(mr);
-    auto cols = ScratchVec<int>(&scratch);
+    keel::Allocator *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto cols = keel::Array<int>(scratch.allocator());
 
     // 'ascend' (false) / 'descend' (true), case-insensitive.
     auto dirDescend = [](std::string s) -> bool {
@@ -1109,7 +1112,7 @@ void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
     };
     // CHAR/STRING scalar → one flag; CELL or multi-element STRING → one per
     // element (both store their elements as Values in cellDataVec()).
-    auto collectDirs = [&](const Value &v, ScratchVec<uint8_t> &out) {
+    auto collectDirs = [&](const Value &v, keel::Array<keel::u8> &out) {
         if (v.type() == ValueType::CELL ||
             (v.type() == ValueType::STRING && v.numel() > 1)) {
             const auto &vec = v.cellDataVec();
@@ -1130,25 +1133,25 @@ void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
             // sortrows(A, direction[s]) — direction(s) applied over ALL
             // columns. A single direction covers every column; a cell/string
             // array must supply exactly one direction per column.
-            const size_t C = args[0].dims().cols();
-            ScratchVec<uint8_t> dirs(&scratch);
+            const keel::usize C = args[0].dims().cols();
+            keel::Array<keel::u8> dirs(scratch.allocator());
             collectDirs(c, dirs);
             if (dirs.size() == 1) {
                 const bool d = dirs[0] != 0;
-                for (size_t k = 1; k <= C; ++k)
+                for (keel::usize k = 1; k <= C; ++k)
                     cols.push_back(d ? -static_cast<int>(k) : static_cast<int>(k));
             } else {
                 if (dirs.size() != C)
                     throw Error("sortrows: number of directions must match the "
                                 "number of columns",
                                  0, 0, "sortrows", "", "numkit:sortrows:dirCount");
-                for (size_t k = 0; k < C; ++k)
+                for (keel::usize k = 0; k < C; ++k)
                     cols.push_back(dirs[k] ? -static_cast<int>(k + 1)
                                            : static_cast<int>(k + 1));
             }
         } else {
             cols.reserve(c.numel());
-            for (size_t i = 0; i < c.numel(); ++i) {
+            for (keel::usize i = 0; i < c.numel(); ++i) {
                 const double v = c.elemAsDouble(i);
                 if (v != std::floor(v))
                     throw Error("sortrows: column index must be an integer",
@@ -1163,7 +1166,7 @@ void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                     throw Error("sortrows: direction must be 'ascend' or "
                                 "'descend'",
                                  0, 0, "sortrows", "", "numkit:sortrows:badDirection");
-                ScratchVec<uint8_t> dirs(&scratch);
+                keel::Array<keel::u8> dirs(scratch.allocator());
                 collectDirs(args[2], dirs);
                 if (dirs.size() == 1) {
                     const bool d = dirs[0] != 0;
@@ -1176,7 +1179,7 @@ void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                         throw Error("sortrows: number of directions must match "
                                     "the number of sort columns",
                                      0, 0, "sortrows", "", "numkit:sortrows:dirCount");
-                    for (size_t i = 0; i < cols.size(); ++i) {
+                    for (keel::usize i = 0; i < cols.size(); ++i) {
                         const int a = cols[i] < 0 ? -cols[i] : cols[i];
                         cols[i] = dirs[i] ? -a : a;
                     }
@@ -1184,16 +1187,16 @@ void sortrows_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
             }
         }
     }
-    auto [sorted, idx] = sortrows(args[0], Span<const int>(cols.data(), cols.size()), mr);
+    auto [sorted, idx] = sortrows(args[0], keel::ArrayRef<int>(cols.data(), cols.size()), mr);
     outs[0] = std::move(sorted);
     if (nargout > 1)
         outs[1] = std::move(idx);
 }
 
-void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "find");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &x = args[0];
 
     // Optional count K (args[1]) and direction (args[2]: 'first' default /
@@ -1202,7 +1205,7 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     // ascending index order. Applies to BOTH the single-output (linear
     // indices) and the [r,c] / [r,c,v] subscript forms.
     bool haveK = args.size() >= 2 && !args[1].isEmpty();
-    size_t kReq = 0;
+    keel::usize kReq = 0;
     if (haveK) {
         if (args[1].numel() != 1)
             throw Error("find: Second argument must be a positive scalar integer.",
@@ -1211,7 +1214,7 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
         if (!std::isfinite(kd) || kd < 1.0 || kd != std::floor(kd))
             throw Error("find: Second argument must be a positive scalar integer.",
                          0, 0, "find", "", "numkit:find:badK");
-        kReq = static_cast<size_t>(kd);
+        kReq = static_cast<keel::usize>(kd);
     }
     bool fromLast = false;
     if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -1228,18 +1231,18 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
                          0, 0, "find", "", "numkit:find:badDir");
     }
 
-    ScratchArena scratch(mr);
-    auto lin = ScratchVec<size_t>(&scratch);
-    forEachNonzero(x, [&](size_t i) { lin.push_back(i); });
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto lin = keel::Array<keel::usize>(scratch.allocator());
+    forEachNonzero(x, [&](keel::usize i) { lin.push_back(i); });
 
     // Window of [start, start+count) into the ascending nonzero-index list.
-    size_t start = 0, count = lin.size();
+    keel::usize start = 0, count = lin.size();
     if (haveK && kReq < lin.size()) {
         count = kReq;
         start = fromLast ? lin.size() - kReq : 0;
     }
 
-    const size_t R = x.dims().rows() == 0 ? 1 : x.dims().rows();
+    const keel::usize R = x.dims().rows() == 0 ? 1 : x.dims().rows();
     const bool rowResult = !x.dims().is3D() && x.dims().rows() == 1;
     auto mk = [&](ValueType t) {
         return rowResult ? Value::matrix(1, count, t, mr)
@@ -1249,7 +1252,7 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     if (nargout <= 1) {
         Value r = mk(ValueType::DOUBLE);
         double *rd = r.doubleDataMut();
-        for (size_t t = 0; t < count; ++t)
+        for (keel::usize t = 0; t < count; ++t)
             rd[t] = static_cast<double>(lin[start + t] + 1);
         outs[0] = std::move(r);
         return;
@@ -1262,8 +1265,8 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     Value colV = mk(ValueType::DOUBLE);
     double *rd = rowV.doubleDataMut();
     double *cd = colV.doubleDataMut();
-    for (size_t t = 0; t < count; ++t) {
-        const size_t i = lin[start + t];
+    for (keel::usize t = 0; t < count; ++t) {
+        const keel::usize i = lin[start + t];
         rd[t] = static_cast<double>(i % R + 1);
         cd[t] = static_cast<double>(i / R + 1);
     }
@@ -1273,65 +1276,65 @@ void find_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCont
     if (nargout >= 3) {
         if (x.type() == ValueType::COMPLEX) {
             Value valV = mk(ValueType::COMPLEX);
-            const Complex *src = x.complexData();
-            Complex *vd = valV.complexDataMut();
-            for (size_t t = 0; t < count; ++t) vd[t] = src[lin[start + t]];
+            const keel::c64 *src = x.complexData();
+            keel::c64 *vd = valV.complexDataMut();
+            for (keel::usize t = 0; t < count; ++t) vd[t] = src[lin[start + t]];
             outs[2] = std::move(valV);
         } else {
             Value valV = mk(ValueType::DOUBLE);
             double *vd = valV.doubleDataMut();
-            for (size_t t = 0; t < count; ++t) vd[t] = x.elemAsDouble(lin[start + t]);
+            for (keel::usize t = 0; t < count; ++t) vd[t] = x.elemAsDouble(lin[start + t]);
             outs[2] = std::move(valV);
         }
     }
 }
 
-void nnz_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void nnz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "nnz");
-    outs[0] = nnz(args[0], ctx.engine->resource());
+    outs[0] = nnz(args[0], ctx.engine->allocator());
 }
 
-void nonzeros_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void nonzeros_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 1, "nonzeros");
-    outs[0] = nonzeros(args[0], ctx.engine->resource());
+    outs[0] = nonzeros(args[0], ctx.engine->allocator());
 }
 
-void horzcat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void horzcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (!args.empty() && args[0].isObject()) {
         if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
             auto it = bc->ops.find("horzcat");
             if (it != bc->ops.end()) {
                 Value lhs = args[0];
-                it->second(lhs, args.subspan(1), nargout, outs, ctx);
+                it->second(lhs, args.slice(1), nargout, outs, ctx);
                 return;
             }
         }
     }
-    outs[0] = horzcat(args, ctx.engine->resource());
+    outs[0] = horzcat(args, ctx.engine->allocator());
 }
 
-void vertcat_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void vertcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (!args.empty() && args[0].isObject()) {
         if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
             auto it = bc->ops.find("vertcat");
             if (it != bc->ops.end()) {
                 Value lhs = args[0];
-                it->second(lhs, args.subspan(1), nargout, outs, ctx);
+                it->second(lhs, args.slice(1), nargout, outs, ctx);
                 return;
             }
         }
     }
-    outs[0] = vertcat(args, ctx.engine->resource());
+    outs[0] = vertcat(args, ctx.engine->allocator());
 }
 
-void meshgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void meshgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "meshgrid");
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         // meshgrid(x) ≡ meshgrid(x, x). See BUGS.md #21.
         auto [X, Y] = meshgrid(args[0], args[0], mr);
@@ -1356,14 +1359,14 @@ void meshgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Call
                  0, 0, "meshgrid", "", "numkit:meshgrid:tooManyInputs");
 }
 
-void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "ndgrid");
-    std::pmr::memory_resource *mr = ctx.engine->resource();
+    keel::Allocator *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         if (nargout <= 1) {
-            size_t d[2] = {args[0].numel(), 1};
-            outs[0] = reshape(args[0], Span<const size_t>(d, 2), mr);
+            keel::usize d[2] = {args[0].numel(), 1};
+            outs[0] = reshape(args[0], keel::ArrayRef<keel::usize>(d, 2), mr);
             return;
         }
         if (nargout == 2) {
@@ -1379,22 +1382,22 @@ void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
             outs[2] = std::move(Z);
             return;
         }
-        const size_t D = nargout;
-        const size_t n0 = args[0].numel();
-        std::vector<size_t> shape(D, n0);
-        std::vector<size_t> strides(D, 1);
-        size_t total = (D == 0) ? 0 : 1;
-        for (size_t k = 0; k < D; ++k) {
+        const keel::usize D = nargout;
+        const keel::usize n0 = args[0].numel();
+        std::vector<keel::usize> shape(D, n0);
+        std::vector<keel::usize> strides(D, 1);
+        keel::usize total = (D == 0) ? 0 : 1;
+        for (keel::usize k = 0; k < D; ++k) {
             strides[k] = total;
             total *= shape[k];
         }
-        const size_t outCount = std::min(D, outs.size());
-        for (size_t m = 0; m < outCount; ++m) {
+        const keel::usize outCount = std::min(D, outs.size());
+        for (keel::usize m = 0; m < outCount; ++m) {
             Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
             double *gd = G.doubleDataMut();
-            const size_t stride_m = strides[m];
-            for (size_t lin = 0; lin < total; ++lin) {
-                const size_t coord = (lin / stride_m) % n0;
+            const keel::usize stride_m = strides[m];
+            for (keel::usize lin = 0; lin < total; ++lin) {
+                const keel::usize coord = (lin / stride_m) % n0;
                 gd[lin] = args[0].elemAsDouble(coord);
             }
             outs[m] = std::move(G);
@@ -1414,24 +1417,24 @@ void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
         if (nargout > 2) outs[2] = std::move(Z);
         return;
     }
-    const size_t D = args.size();
-    std::vector<size_t> shape(D);
-    std::vector<size_t> strides(D, 1);
-    size_t total = 1;
-    for (size_t k = 0; k < D; ++k) {
+    const keel::usize D = args.size();
+    std::vector<keel::usize> shape(D);
+    std::vector<keel::usize> strides(D, 1);
+    keel::usize total = 1;
+    for (keel::usize k = 0; k < D; ++k) {
         shape[k] = args[k].numel();
         strides[k] = total;
         total *= shape[k];
     }
-    const size_t wantOut = std::max<size_t>(1, nargout);
-    const size_t outCount = std::min({wantOut, D, outs.size()});
-    for (size_t m = 0; m < outCount; ++m) {
+    const keel::usize wantOut = std::max<keel::usize>(1, nargout);
+    const keel::usize outCount = std::min({wantOut, D, outs.size()});
+    for (keel::usize m = 0; m < outCount; ++m) {
         Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
         double *gd = G.doubleDataMut();
-        const size_t stride_m = strides[m];
-        const size_t len_m = shape[m];
-        for (size_t lin = 0; lin < total; ++lin) {
-            const size_t coord = (lin / stride_m) % len_m;
+        const keel::usize stride_m = strides[m];
+        const keel::usize len_m = shape[m];
+        for (keel::usize lin = 0; lin < total; ++lin) {
+            const keel::usize coord = (lin / stride_m) % len_m;
             gd[lin] = args[m].elemAsDouble(coord);
         }
         outs[m] = std::move(G);
@@ -1451,13 +1454,13 @@ void ndgrid_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
 // kernel itself already skips NaN per omitnan default).
 namespace {
 
-void parseCumDirNan(Span<const Value> args, size_t start, const char *fn,
+void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *fn,
                     int &dim, bool &reverse, bool &include_nan)
 {
     dim = 0;
     reverse = false;
     include_nan = false;        // matches nk default = MATLAB default
-    size_t i = start;
+    keel::usize i = start;
     if (i < args.size() && !args[i].isChar() && !args[i].isString()
         && !args[i].isEmpty()) {
         dim = argcheck::dimArg(args[i], fn); ++i;
@@ -1490,24 +1493,24 @@ void propagateNanFromSrc(Value &out, const Value &src, int dim1Based)
     const int nd = dd.ndim();
     const int d = dim1Based;
     if (d < 1 || d > nd) return;
-    size_t inner = 1;
+    keel::usize inner = 1;
     for (int i = 0; i < d - 1; ++i) inner *= dd.dim(i);
-    size_t outer = 1;
+    keel::usize outer = 1;
     for (int i = d; i < nd; ++i) outer *= dd.dim(i);
-    const size_t L = dd.dim(d - 1);
+    const keel::usize L = dd.dim(d - 1);
     const double qnan = std::numeric_limits<double>::quiet_NaN();
     // Complex cummax/cummin (out + src both COMPLEX): an element is "missing"
     // when EITHER component is NaN, and the propagated fill is NaN+NaNi.
     if (out.isComplex() && src.isComplex()) {
-        Complex *o = out.complexDataMut();
-        const Complex *s = src.complexData();
-        for (size_t oc = 0; oc < outer; ++oc)
-            for (size_t b = 0; b < inner; ++b) {
-                const size_t base = oc * inner * L + b;
+        keel::c64 *o = out.complexDataMut();
+        const keel::c64 *s = src.complexData();
+        for (keel::usize oc = 0; oc < outer; ++oc)
+            for (keel::usize b = 0; b < inner; ++b) {
+                const keel::usize base = oc * inner * L + b;
                 bool seenNaN = false;
-                Complex fill{qnan, qnan};
-                for (size_t k = 0; k < L; ++k) {
-                    const Complex z = s[base + k * inner];
+                keel::c64 fill{qnan, qnan};
+                for (keel::usize k = 0; k < L; ++k) {
+                    const keel::c64 z = s[base + k * inner];
                     if (!seenNaN && (std::isnan(z.real()) || std::isnan(z.imag()))) {
                         // includenan: the first NaN operand wins the running
                         // max/min and propagates UNCHANGED (MATLAB keeps its
@@ -1524,11 +1527,11 @@ void propagateNanFromSrc(Value &out, const Value &src, int dim1Based)
     }
     double *o = out.doubleDataMut();
     const double *s = src.doubleData();
-    for (size_t oc = 0; oc < outer; ++oc)
-        for (size_t b = 0; b < inner; ++b) {
-            const size_t base = oc * inner * L + b;
+    for (keel::usize oc = 0; oc < outer; ++oc)
+        for (keel::usize b = 0; b < inner; ++b) {
+            const keel::usize base = oc * inner * L + b;
             bool seenNaN = false;
-            for (size_t k = 0; k < L; ++k) {
+            for (keel::usize k = 0; k < L; ++k) {
                 if (!seenNaN && std::isnan(s[base + k * inner]))
                     seenNaN = true;
                 if (seenNaN)
@@ -1538,8 +1541,8 @@ void propagateNanFromSrc(Value &out, const Value &src, int dim1Based)
 }
 
 template <typename Fn>
-Value runCumWithFlags(const Value &x, Span<const Value> args, const char *fn,
-                      Fn impl, std::pmr::memory_resource *mr)
+Value runCumWithFlags(const Value &x, keel::ArrayRef<Value> args, const char *fn,
+                      Fn impl, keel::Allocator *mr)
 {
     int dim; bool reverse; bool include_nan;
     parseCumDirNan(args, 1, fn, dim, reverse, include_nan);
@@ -1572,24 +1575,24 @@ Value runCumWithFlags(const Value &x, Span<const Value> args, const char *fn,
 
 } // anonymous
 
-void cummax_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cummax_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "cummax");
     outs[0] = numkit::narrowComplex(
-        runCumWithFlags(args[0], args, "cummax", [](const Value &v, int d, std::pmr::memory_resource *mr) {
+        runCumWithFlags(args[0], args, "cummax", [](const Value &v, int d, keel::Allocator *mr) {
             return cummax(v, d, mr);
-        }, ctx.engine->resource()),
-        ctx.engine->resource());
+        }, ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
-void cummin_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cummin_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "cummin");
     outs[0] = numkit::narrowComplex(
-        runCumWithFlags(args[0], args, "cummin", [](const Value &v, int d, std::pmr::memory_resource *mr) {
+        runCumWithFlags(args[0], args, "cummin", [](const Value &v, int d, keel::Allocator *mr) {
             return cummin(v, d, mr);
-        }, ctx.engine->resource()),
-        ctx.engine->resource());
+        }, ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
 namespace {
@@ -1599,11 +1602,11 @@ namespace {
 // 'includenan' default. So 'omitnan' is implemented by replacing NaN with
 // the additive/multiplicative identity (0 / 1) BEFORE the scan. 'reverse'
 // = flip → scan → flip along the operating dimension.
-Value cumScanFlags(const Value &x, Span<const Value> args, bool isProd,
-                   const char *fn, std::pmr::memory_resource *mr)
+Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
+                   const char *fn, keel::Allocator *mr)
 {
     int dim = 0; bool reverse = false; bool omitnan = false;
-    size_t i = 1;
+    keel::usize i = 1;
     if (i < args.size() && !args[i].isEmpty()
         && !args[i].isChar() && !args[i].isString()) {
         dim = argcheck::dimArg(args[i], fn); ++i;
@@ -1629,8 +1632,8 @@ Value cumScanFlags(const Value &x, Span<const Value> args, bool isProd,
     if (omitnan && src.type() == ValueType::DOUBLE) {
         const double id = isProd ? 1.0 : 0.0;
         double *d = src.doubleDataMut();
-        const size_t n = src.numel();
-        for (size_t k = 0; k < n; ++k)
+        const keel::usize n = src.numel();
+        for (keel::usize k = 0; k < n; ++k)
             if (std::isnan(d[k])) d[k] = id;
     }
     if (reverse) src = flip(src, effDim, mr);
@@ -1641,23 +1644,23 @@ Value cumScanFlags(const Value &x, Span<const Value> args, bool isProd,
 
 } // anonymous
 
-void cumsum_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cumsum_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "cumsum");
     outs[0] = numkit::narrowComplex(
-        cumScanFlags(args[0], args, /*isProd=*/false, "cumsum", ctx.engine->resource()),
-        ctx.engine->resource());
+        cumScanFlags(args[0], args, /*isProd=*/false, "cumsum", ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
-void cumprod_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void cumprod_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 4, "cumprod");
     outs[0] = numkit::narrowComplex(
-        cumScanFlags(args[0], args, /*isProd=*/true, "cumprod", ctx.engine->resource()),
-        ctx.engine->resource());
+        cumScanFlags(args[0], args, /*isProd=*/true, "cumprod", ctx.engine->allocator()),
+        ctx.engine->allocator());
 }
 
-void diff_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "diff");
     int n = 1;
@@ -1676,19 +1679,19 @@ void diff_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Call
     }
     if (args.size() >= 3 && !args[2].isEmpty())
         dim = argcheck::dimArg(args[2], "diff");
-    outs[0] = numkit::narrowComplex(diff(args[0], n, dim, ctx.engine->resource()),
-                                    ctx.engine->resource());
+    outs[0] = numkit::narrowComplex(diff(args[0], n, dim, ctx.engine->allocator()),
+                                    ctx.engine->allocator());
 }
 
 #define NUMKIT_LOGICAL_RED_REG(name, fn)                                           \
-    void name##_reg(Span<const Value> args, size_t /*nargout*/,               \
-                    Span<Value> outs, CallContext &ctx)                       \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 1, 2, #name); \
         int dim = 0;                                                           \
         if (args.size() >= 2 && !args[1].isEmpty())                            \
             dim = argcheck::dimArg(args[1], #name);                        \
-        outs[0] = fn(args[0], dim, ctx.engine->resource());                   \
+        outs[0] = fn(args[0], dim, ctx.engine->allocator());                   \
     }
 
 NUMKIT_LOGICAL_RED_REG(any, numkit::builtin::anyOf)
@@ -1696,11 +1699,11 @@ NUMKIT_LOGICAL_RED_REG(all, numkit::builtin::allOf)
 
 #undef NUMKIT_LOGICAL_RED_REG
 
-void xor_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void xor_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "xor");
     argcheck::checkNargin(args.size(), 2, 2, "xor");
-    outs[0] = xorOf(args[0], args[1], ctx.engine->resource());
+    outs[0] = xorOf(args[0], args[1], ctx.engine->allocator());
 }
 
 // NOTE: cross_reg / dot_reg migrated to toolboxes/linalg/src/vector_ops.cpp.

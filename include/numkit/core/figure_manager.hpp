@@ -2,6 +2,7 @@
 /// @ingroup group_graphics
 #pragma once
 
+#include <keel/core.h>
 #include <cstdio>
 #include <functional>
 #include <iostream>
@@ -29,8 +30,8 @@ namespace figdetail {
 
 // Count top-level elements in a flat JSON number array "[a,b,c]" cheaply
 // (commas + 1) — gates the expensive parse on series size.
-inline std::size_t countFlatElements(const std::string &j) {
-    std::size_t commas = 0;
+inline keel::usize countFlatElements(const std::string &j) {
+    keel::usize commas = 0;
     bool any = false;
     for (char c : j) {
         if (c == ',') commas++;
@@ -41,8 +42,8 @@ inline std::size_t countFlatElements(const std::string &j) {
 
 // Parse a flat JSON number array → doubles. "null" → NaN; bare/quoted
 // Inf/NaN handled by strtod. The figure xJson is engine-built (well-formed).
-inline std::vector<double> parseFlatDoubles(const std::string &j) {
-    std::vector<double> out;
+inline std::vector<keel::f64> parseFlatDoubles(const std::string &j) {
+    std::vector<keel::f64> out;
     const char *p = j.c_str();
     const char *end = p + j.size();
     while (p < end && *p != '[') ++p;
@@ -57,7 +58,7 @@ inline std::vector<double> parseFlatDoubles(const std::string &j) {
             continue;
         }
         char *q = nullptr;
-        double v = std::strtod(p, &q);
+        keel::f64 v = std::strtod(p, &q);
         if (q == p) { ++p; continue; }   // skip an unparseable token
         out.push_back(v);
         p = q;
@@ -66,13 +67,13 @@ inline std::vector<double> parseFlatDoubles(const std::string &j) {
 }
 
 // Serialize doubles → flat JSON array. NaN → null, ±Inf → "Inf"/"-Inf".
-inline std::string serializeFlatDoubles(const std::vector<double> &v) {
+inline std::string serializeFlatDoubles(const std::vector<keel::f64> &v) {
     std::ostringstream os;
     os << "[";
     os.precision(17);
-    for (std::size_t i = 0; i < v.size(); ++i) {
+    for (keel::usize i = 0; i < v.size(); ++i) {
         if (i) os << ",";
-        double x = v[i];
+        keel::f64 x = v[i];
         if (std::isnan(x)) os << "null";
         else if (std::isinf(x)) os << (x > 0 ? "\"Inf\"" : "\"-Inf\"");
         else os << x;
@@ -104,8 +105,8 @@ struct DatasetInfo
     std::string type;      // "line", "bar", "scatter", "stem", "stairs", "imagesc", "errorbar", …
     std::string label;     // for legend
     std::string style;     // MATLAB style hint, e.g. "r--o", "b:", "g-."
-    double lineWidth = 0;  // 0 = default
-    double markerSize = 0; // 0 = default
+    keel::f64 lineWidth = 0;  // 0 = default
+    keel::f64 markerSize = 0; // 0 = default
     // set(h,'Visible','off') — emitted as "visible":false only when off
     // (absence = visible, so the wire format stays back-compatible).
     bool visible = true;
@@ -148,17 +149,17 @@ struct DatasetInfo
     // — toggling color scale post-imagesc requires re-emitting the figure.
     // Hover values reconstruct via cminOrig + (idx/254) * range; the
     // 256-level resolution gives ≤0.4% step on a typical [cmin..cmax].
-    std::vector<uint8_t> zQuantized;
-    double cminOrig = 0.0;
-    double cmaxOrig = 1.0;
+    std::vector<keel::u8> zQuantized;
+    keel::f64 cminOrig = 0.0;
+    keel::f64 cmaxOrig = 1.0;
     bool   colorScaleBaked = false;   // log10 applied before quantization?
 
     // Set by imagesc when rows*cols > 2M and the inline JSON preview was
     // mean-pooled. originalRows/Cols always describe zQuantized's shape
     // regardless of whether the inline preview was downsampled.
     bool   downsampled  = false;
-    size_t originalRows = 0;
-    size_t originalCols = 0;
+    keel::usize originalRows = 0;
+    keel::usize originalCols = 0;
 
     // ── Phase 2 large line-series downsampling ──────────────────────────
     // For a huge line/stairs series (> kSeriesPreviewThreshold points) the
@@ -167,10 +168,10 @@ struct DatasetInfo
     // frontend receives O(previewCols) points instead of O(N).
     // getSeriesDisplayTile decimates xRaw/yRaw over a viewport for zoom
     // detail. Empty for small series (which keep their full inline JSON).
-    std::vector<double> xRaw, yRaw;
+    std::vector<keel::f64> xRaw, yRaw;
     bool   seriesDownsampled = false;
-    size_t seriesN = 0;
-    double sxLo = 0, sxHi = 0, syLo = 0, syHi = 0;   // x/y data ranges
+    keel::usize seriesN = 0;
+    keel::f64 sxLo = 0, sxHi = 0, syLo = 0, syHi = 0;   // x/y data ranges
     // Lazy LOD pyramid (coarser levels only — xRaw/yRaw is the finest level)
     // built on the first getSeriesDisplayTile so every viewport tile is
     // O(width), not O(visible), even when fully zoomed out.
@@ -188,8 +189,8 @@ struct DatasetInfo
     //
     // Memory cost: 4/3× original (geometric series). For 16k×42k uint8 =
     // 670 MB → pyramid total ~890 MB.
-    mutable std::vector<std::vector<uint8_t>> lodLevels;
-    mutable std::vector<std::pair<size_t, size_t>> lodDims;
+    mutable std::vector<std::vector<keel::u8>> lodLevels;
+    mutable std::vector<std::pair<keel::usize, keel::usize>> lodDims;
 
     // ── Per-vertex colours for fill3 / polygon3d datasets.
     // Layout: parallel to xJson/yJson/zJson — for each finite (x, y, z)
@@ -204,8 +205,8 @@ struct DatasetInfo
     // created via animatedline / addpoints, these vectors hold the
     // raw point data; xJson/yJson are rebuilt from them on every
     // emit. Empty for non-animated datasets.
-    std::vector<double> animatedX;
-    std::vector<double> animatedY;
+    std::vector<keel::f64> animatedX;
+    std::vector<keel::f64> animatedY;
     bool isAnimated = false;
 
     // ── Image-RGB (truecolor, set by imshow with M×N×3 input) ──────────
@@ -218,7 +219,7 @@ struct DatasetInfo
     // rgbJson is the inline preview: "[[r,g,b],[r,g,b],...]" row-major,
     // mean-pooled if pixel count > 2M (same cap as imagesc). Empty for
     // non-RGB datasets. type == "image-rgb" gates the renderer.
-    std::vector<uint8_t> rgbBytes;
+    std::vector<keel::u8> rgbBytes;
     std::string rgbJson;
 };
 
@@ -300,11 +301,11 @@ struct AxesState
     // label Text objects (title/xlabel/… default to 1.1× the axes font;
     // setting the axes font RESETS even an explicitly-set Text font —
     // MATLAB behaviour, not a default-tracking inheritance).
-    double fontSize = 10.0;
+    keel::f64 fontSize = 10.0;
     std::string fontWeight = "normal";   // normal | bold
     std::string fontName = "Helvetica";
     // Axes frame (box + tick marks) stroke width.
-    double lineWidth = 0.5;
+    keel::f64 lineWidth = 0.5;
     // sprintf-style format string for tick labels (e.g. "%.2f").
     // Empty = renderer's auto format. Honoured only when no explicit
     // tick labels are set.
@@ -312,8 +313,8 @@ struct AxesState
     std::string yTickFormat;
     std::string zTickFormat;
     // Tick-label rotation in degrees. 0 = horizontal (default).
-    double xTickAngle = 0.0;
-    double yTickAngle = 0.0;
+    keel::f64 xTickAngle = 0.0;
+    keel::f64 yTickAngle = 0.0;
     // axisVisible — MATLAB `axis off` / `axis on` controls whether the
     // axes lines / ticks / labels render. true = drawn (default), false
     // = hidden. imshow ships axis off implicitly (image-only viewport).
@@ -430,11 +431,11 @@ struct FigureState
     // HeadSize 10, LineWidth 0.5, textarrow text at the TAIL.
     struct Annotation {
         std::string type;       // line|arrow|textarrow|ellipse|rectangle|textbox
-        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        keel::f64 x1 = 0, y1 = 0, x2 = 0, y2 = 0;
         std::string text;       // textarrow/textbox String
         std::string colorHex;   // "" = default gray
         std::string faceHex;    // "" = none
-        double fontSize = 10;
+        keel::f64 fontSize = 10;
     };
     std::vector<Annotation> annotations;
 
@@ -487,12 +488,12 @@ public:
         // kNoAxes marks figure-scoped records (sgtitle Text) — scoped
         // axes sweeps (prepareForPlot) leave them alone; full-figure
         // sweeps (clf/close) invalidate them.
-        static constexpr size_t kNoAxes = static_cast<size_t>(-1);
-        size_t axesIndex = 0;
+        static constexpr keel::usize kNoAxes = static_cast<keel::usize>(-1);
+        keel::usize axesIndex = 0;
         // Chart records: index into axes[axesIndex].datasets.
         // kNoDataset for everything else (they address state directly).
-        static constexpr size_t kNoDataset = static_cast<size_t>(-1);
-        size_t datasetIndex = kNoDataset;
+        static constexpr keel::usize kNoDataset = static_cast<keel::usize>(-1);
+        keel::usize datasetIndex = kNoDataset;
         // Text records: which label slot this Text writes to
         // ("title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel").
         std::string slot;
@@ -508,12 +509,12 @@ public:
     // Chart record for the dataset just pushed at `datasetIndex` of the
     // CURRENT axes; non-chart records of the current figure/axes.
     int createHandle(std::string type, std::string className,
-                     size_t datasetIndex = HandleRecord::kNoDataset,
+                     keel::usize datasetIndex = HandleRecord::kNoDataset,
                      std::string slot = "")
     {
         auto &fig = current();
         return createHandleAt(currentFigure_,
-                              static_cast<size_t>(fig.currentAxes),
+                              static_cast<keel::usize>(fig.currentAxes),
                               std::move(type), std::move(className),
                               std::move(slot), datasetIndex);
     }
@@ -521,9 +522,9 @@ public:
     // Fully-explicit form (root records pass figureId 0 + kNoAxes;
     // sgtitle passes the figure + kNoAxes; gcf.Children addresses
     // non-current axes).
-    int createHandleAt(int figureId, size_t axesIndex, std::string type,
+    int createHandleAt(int figureId, keel::usize axesIndex, std::string type,
                        std::string className, std::string slot = "",
-                       size_t datasetIndex = HandleRecord::kNoDataset)
+                       keel::usize datasetIndex = HandleRecord::kNoDataset)
     {
         const int id = nextHandleId_++;
         HandleRecord rec;
@@ -577,7 +578,7 @@ public:
 
     // Remove one axes from a figure (delete(axesHandle)). Reindexes the
     // surviving records' axesIndex; marks the figure modified.
-    void removeAxes(int figureId, size_t axesIndex)
+    void removeAxes(int figureId, keel::usize axesIndex)
     {
         auto fit = figures_.find(figureId);
         if (fit == figures_.end() || axesIndex >= fit->second.axes.size())
@@ -650,7 +651,7 @@ public:
         for (auto &[hid, rec] : handleRegistry_) {
             if (rec.figureId != figureId || rec.deleted)
                 continue;
-            if (axesIdx >= 0 && rec.axesIndex != (size_t)axesIdx)
+            if (axesIdx >= 0 && rec.axesIndex != (keel::usize)axesIdx)
                 continue;
             if (!includeFigureRecord && rec.type == "figure")
                 continue;
@@ -692,7 +693,7 @@ public:
     // threshold the full array is shipped and the JS-side viewport
     // decimation (Phase 1) keeps full zoom detail; at/above it the engine
     // ships a small preview + retains raw x/y for getSeriesDisplayTile.
-    static constexpr std::size_t kSeriesPreviewThreshold = 1000000; // points
+    static constexpr keel::usize kSeriesPreviewThreshold = 1000000; // points
     static constexpr int         kSeriesPreviewCols      = 2000;    // preview cols
 
     void pushDataset(DatasetInfo ds)
@@ -716,15 +717,15 @@ public:
         if (figdetail::countFlatElements(ds.xJson) <= kSeriesPreviewThreshold) return;
         auto xr = figdetail::parseFlatDoubles(ds.xJson);
         auto yr = figdetail::parseFlatDoubles(ds.yJson);
-        const std::size_t n = xr.size();
+        const keel::usize n = xr.size();
         if (n != yr.size() || n <= kSeriesPreviewThreshold) return;
         // Decimation buckets by x — valid only for ascending x. Bail on a
         // non-monotonic series (rare for huge data; keeps the full JSON).
-        for (std::size_t i = 1; i < n; ++i) if (xr[i] < xr[i - 1]) return;
-        double xlo = xr.front(), xhi = xr.back();
+        for (keel::usize i = 1; i < n; ++i) if (xr[i] < xr[i - 1]) return;
+        keel::f64 xlo = xr.front(), xhi = xr.back();
         if (xhi < xlo) std::swap(xlo, xhi);
-        double ylo = INFINITY, yhi = -INFINITY;
-        for (double v : yr) if (std::isfinite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
+        keel::f64 ylo = INFINITY, yhi = -INFINITY;
+        for (keel::f64 v : yr) if (std::isfinite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
         if (!std::isfinite(ylo)) { ylo = 0; yhi = 0; }
         auto prev = decimateM4(xr.data(), yr.data(), n, xlo, xhi, kSeriesPreviewCols);
         ds.xJson = figdetail::serializeFlatDoubles(prev.x);
@@ -813,14 +814,14 @@ public:
         if (!ax.holdOn) {
             if (ax.yyEnabled) {
                 const std::string side = ax.activeYside.empty() ? "left" : ax.activeYside;
-                for (size_t idx = ax.datasets.size(); idx-- > 0;) {
+                for (keel::usize idx = ax.datasets.size(); idx-- > 0;) {
                     const std::string dsSide = ax.datasets[idx].yside.empty()
                                                    ? "left"
                                                    : ax.datasets[idx].yside;
                     if (dsSide == side) {
                         for (auto &[hid, rec] : handleRegistry_) {
                             if (rec.deleted || rec.figureId != fig.id
-                                || rec.axesIndex != static_cast<size_t>(fig.currentAxes)
+                                || rec.axesIndex != static_cast<keel::usize>(fig.currentAxes)
                                 || !rec.isChart())
                                 continue;
                             if (rec.datasetIndex == idx)
@@ -828,7 +829,7 @@ public:
                             else if (rec.datasetIndex > idx)
                                 --rec.datasetIndex;
                         }
-                        ax.datasets.erase(ax.datasets.begin() + static_cast<std::ptrdiff_t>(idx));
+                        ax.datasets.erase(ax.datasets.begin() + static_cast<keel::isize>(idx));
                     }
                 }
                 if (side == "right") {
@@ -871,7 +872,7 @@ public:
     // handles for datasets [base, after) — exactly the ones THIS call
     // pushed, whether or not a wipe intervened.
     void beginChartCall() { chartCallBase_ = currentAxes().datasets.size(); }
-    size_t chartCallBase() const { return chartCallBase_; }
+    keel::usize chartCallBase() const { return chartCallBase_; }
 
     /** Emit JSON for all modified figures */
     void emitModified()
@@ -909,7 +910,7 @@ public:
                 os << ",\"superTitle\":\"" << jsonEscapeFig(fig.superTitle) << "\"";
             if (!fig.annotations.empty()) {
                 os << ",\"annotations\":[";
-                for (size_t ai = 0; ai < fig.annotations.size(); ++ai) {
+                for (keel::usize ai = 0; ai < fig.annotations.size(); ++ai) {
                     const auto &an = fig.annotations[ai];
                     if (ai) os << ',';
                     os << "{\"type\":\"" << an.type << "\""
@@ -928,7 +929,7 @@ public:
             }
 
             os << ",\"axes\":[";
-            for (size_t ai = 0; ai < fig.axes.size(); ++ai) {
+            for (keel::usize ai = 0; ai < fig.axes.size(); ++ai) {
                 if (ai)
                     os << ",";
                 auto &ax = fig.axes[ai];
@@ -936,7 +937,7 @@ public:
                 if (ax.subplotIndex > 0)
                     os << "\"subplotIndex\":" << ax.subplotIndex << ",";
                 os << "\"datasets\":[";
-                for (size_t i = 0; i < ax.datasets.size(); ++i) {
+                for (keel::usize i = 0; i < ax.datasets.size(); ++i) {
                     if (i)
                         os << ",";
                     auto &ds = ax.datasets[i];
@@ -1089,7 +1090,7 @@ public:
                 }
                 if (!ax.legendLabels.empty()) {
                     os << ",\"legend\":[";
-                    for (size_t i = 0; i < ax.legendLabels.size(); ++i) {
+                    for (keel::usize i = 0; i < ax.legendLabels.size(); ++i) {
                         if (i)
                             os << ",";
                         os << "\"" << jsonEscapeFig(ax.legendLabels[i]) << "\"";
@@ -1198,7 +1199,7 @@ public:
     // graphics statements reproduce the full-re-run figure state.
     struct AxesCheckpoint {
         bool holdOn = false;
-        size_t datasetCount = 0;
+        keel::usize datasetCount = 0;
     };
     struct FigureCheckpoint {
         // figure id → per-axes snapshot (sized to the axes vector at
@@ -1241,7 +1242,7 @@ public:
     // the dataset isn't a downsampled series or indices are out of range —
     // the frontend refines zoom detail without ever shipping the full array.
     DecimatedSeries getSeriesDisplayTile(int figId, int axIdx, int dsIdx,
-                                         double x0, double x1, int width, int algo) const
+                                         keel::f64 x0, keel::f64 x1, int width, int algo) const
     {
         DecimatedSeries out;
         auto it = figures_.find(figId);
@@ -1264,11 +1265,11 @@ public:
     }
 
     bool getFigureDisplayTile(int figId, int axIdx, int dsIdx,
-                              double srcR0, double srcC0,
-                              double srcH, double srcW,
+                              keel::f64 srcR0, keel::f64 srcC0,
+                              keel::f64 srcH, keel::f64 srcW,
                               int displayH, int displayW,
                               bool xLog, bool yLog,
-                              uint8_t *out) const
+                              keel::u8 *out) const
     {
         if (!out || displayH <= 0 || displayW <= 0) return false;
 
@@ -1281,16 +1282,16 @@ public:
         const auto &ds = axState.datasets[dsIdx];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
-        const size_t fullRows = ds.originalRows;
-        const size_t fullCols = ds.originalCols;
+        const keel::usize fullRows = ds.originalRows;
+        const keel::usize fullCols = ds.originalCols;
         if (fullRows == 0 || fullCols == 0) return false;
         if (ds.zQuantized.size() < fullRows * fullCols) return false;
 
         // Clamp source-rect to the dataset bounds.
         if (srcR0 < 0) { srcH += srcR0; srcR0 = 0; }
         if (srcC0 < 0) { srcW += srcC0; srcC0 = 0; }
-        const double srcR1 = std::min(static_cast<double>(fullRows), srcR0 + srcH);
-        const double srcC1 = std::min(static_cast<double>(fullCols), srcC0 + srcW);
+        const keel::f64 srcR1 = std::min(static_cast<keel::f64>(fullRows), srcR0 + srcH);
+        const keel::f64 srcC1 = std::min(static_cast<keel::f64>(fullCols), srcC0 + srcW);
         if (srcR1 <= srcR0 || srcC1 <= srcC0) return false;
 
         // Log axes need a strictly-positive lower bound.
@@ -1302,9 +1303,9 @@ public:
         // the optimal level is floor(log2(min(rStep, cStep))) clamped to
         // [0, 10]. Building higher levels lazily — first zoom-out builds
         // up the tree once, subsequent zooms reuse cached levels.
-        const double rStep0 = (srcR1 - srcR0) / displayH;
-        const double cStep0 = (srcC1 - srcC0) / displayW;
-        const double minStep = std::min(rStep0, cStep0);
+        const keel::f64 rStep0 = (srcR1 - srcR0) / displayH;
+        const keel::f64 cStep0 = (srcC1 - srcC0) / displayW;
+        const keel::f64 minStep = std::min(rStep0, cStep0);
         int level = 0;
         if (minStep > 1.5) {
             level = static_cast<int>(std::floor(std::log2(minStep)));
@@ -1314,8 +1315,8 @@ public:
         ensureLOD(ds, level);
 
         // Resolve the chosen level's data + dims.
-        const uint8_t *lvlData;
-        size_t lvlRows, lvlCols;
+        const keel::u8 *lvlData;
+        keel::usize lvlRows, lvlCols;
         if (level == 0) {
             lvlData = ds.zQuantized.data();
             lvlRows = fullRows;
@@ -1333,30 +1334,30 @@ public:
         }
 
         // Map source-rect from L0 coords to the chosen level's coords.
-        const double scaleFactor = static_cast<double>(1 << level);
-        const double lvlR0 = srcR0 / scaleFactor;
-        const double lvlC0 = srcC0 / scaleFactor;
-        const double lvlR1 = srcR1 / scaleFactor;
-        const double lvlC1 = srcC1 / scaleFactor;
-        const double rStep = (lvlR1 - lvlR0) / displayH;
-        const double cStep = (lvlC1 - lvlC0) / displayW;
+        const keel::f64 scaleFactor = static_cast<keel::f64>(1 << level);
+        const keel::f64 lvlR0 = srcR0 / scaleFactor;
+        const keel::f64 lvlC0 = srcC0 / scaleFactor;
+        const keel::f64 lvlR1 = srcR1 / scaleFactor;
+        const keel::f64 lvlC1 = srcC1 / scaleFactor;
+        const keel::f64 rStep = (lvlR1 - lvlR0) / displayH;
+        const keel::f64 cStep = (lvlC1 - lvlC0) / displayW;
         const int rBlock = std::max(1, static_cast<int>(std::ceil(rStep)));
         const int cBlock = std::max(1, static_cast<int>(std::ceil(cStep)));
 
         // Log-ratios computed in level coords (log preserves ratios).
-        const double yLogRatio = yLog ? std::log(lvlR1 / lvlR0) : 0.0;
-        const double xLogRatio = xLog ? std::log(lvlC1 / lvlC0) : 0.0;
+        const keel::f64 yLogRatio = yLog ? std::log(lvlR1 / lvlR0) : 0.0;
+        const keel::f64 xLogRatio = xLog ? std::log(lvlC1 / lvlC0) : 0.0;
 
         for (int orow = 0; orow < displayH; ++orow) {
-            const double v = (orow + 0.5) / displayH;
-            const double rCenter = yLog
+            const keel::f64 v = (orow + 0.5) / displayH;
+            const keel::f64 rCenter = yLog
                 ? lvlR0 * std::exp(v * yLogRatio)
                 : lvlR0 + v * (lvlR1 - lvlR0);
             const int rA = std::max(0, static_cast<int>(rCenter) - rBlock / 2);
             const int rB = std::min(static_cast<int>(lvlRows), rA + rBlock);
             for (int ocol = 0; ocol < displayW; ++ocol) {
-                const double u = (ocol + 0.5) / displayW;
-                const double cCenter = xLog
+                const keel::f64 u = (ocol + 0.5) / displayW;
+                const keel::f64 cCenter = xLog
                     ? lvlC0 * std::exp(u * xLogRatio)
                     : lvlC0 + u * (lvlC1 - lvlC0);
                 const int cA = std::max(0, static_cast<int>(cCenter) - cBlock / 2);
@@ -1364,13 +1365,13 @@ public:
                 int sum = 0, n = 0;
                 for (int cc = cA; cc < cB; ++cc) {
                     for (int rr = rA; rr < rB; ++rr) {
-                        const uint8_t q = lvlData[cc * lvlRows + rr];
+                        const keel::u8 q = lvlData[cc * lvlRows + rr];
                         if (q != 255) { sum += q; ++n; }
                     }
                 }
                 out[orow * displayW + ocol] = (n > 0)
-                    ? static_cast<uint8_t>((sum + n / 2) / n)
-                    : uint8_t{255};
+                    ? static_cast<keel::u8>((sum + n / 2) / n)
+                    : keel::u8{255};
             }
         }
         return true;
@@ -1387,8 +1388,8 @@ public:
     void ensureLOD(const DatasetInfo &ds, int targetLevel) const
     {
         while (static_cast<int>(ds.lodLevels.size()) < targetLevel) {
-            size_t pRows, pCols;
-            const uint8_t *parent;
+            keel::usize pRows, pCols;
+            const keel::u8 *parent;
             if (ds.lodLevels.empty()) {
                 parent = ds.zQuantized.data();
                 pRows  = ds.originalRows;
@@ -1399,27 +1400,27 @@ public:
                 pCols = dims.second;
                 parent = ds.lodLevels.back().data();
             }
-            const size_t cRows = (pRows + 1) / 2;
-            const size_t cCols = (pCols + 1) / 2;
+            const keel::usize cRows = (pRows + 1) / 2;
+            const keel::usize cCols = (pCols + 1) / 2;
             if (cRows < 32 || cCols < 32) break;       // stop refining
 
-            std::vector<uint8_t> child(cRows * cCols);
-            for (size_t cc = 0; cc < cCols; ++cc) {
-                const size_t pc0 = 2 * cc;
-                const size_t pc1 = std::min(pCols, pc0 + 2);
-                for (size_t rr = 0; rr < cRows; ++rr) {
-                    const size_t pr0 = 2 * rr;
-                    const size_t pr1 = std::min(pRows, pr0 + 2);
+            std::vector<keel::u8> child(cRows * cCols);
+            for (keel::usize cc = 0; cc < cCols; ++cc) {
+                const keel::usize pc0 = 2 * cc;
+                const keel::usize pc1 = std::min(pCols, pc0 + 2);
+                for (keel::usize rr = 0; rr < cRows; ++rr) {
+                    const keel::usize pr0 = 2 * rr;
+                    const keel::usize pr1 = std::min(pRows, pr0 + 2);
                     int sum = 0, n = 0;
-                    for (size_t pc = pc0; pc < pc1; ++pc) {
-                        for (size_t pr = pr0; pr < pr1; ++pr) {
-                            const uint8_t q = parent[pc * pRows + pr];
+                    for (keel::usize pc = pc0; pc < pc1; ++pc) {
+                        for (keel::usize pr = pr0; pr < pr1; ++pr) {
+                            const keel::u8 q = parent[pc * pRows + pr];
                             if (q != 255) { sum += q; ++n; }
                         }
                     }
                     child[cc * cRows + rr] = (n > 0)
-                        ? static_cast<uint8_t>((sum + n / 2) / n)
-                        : uint8_t{255};
+                        ? static_cast<keel::u8>((sum + n / 2) / n)
+                        : keel::u8{255};
                 }
             }
             ds.lodLevels.push_back(std::move(child));
@@ -1436,8 +1437,8 @@ public:
      */
     bool getFigureTile(int figId, int axIdx, int dsIdx,
                        int r0, int c0, int h, int w, int lod,
-                       std::vector<uint8_t> &out,
-                       size_t &outRows, size_t &outCols) const
+                       std::vector<keel::u8> &out,
+                       keel::usize &outRows, keel::usize &outCols) const
     {
         outRows = 0;
         outCols = 0;
@@ -1452,8 +1453,8 @@ public:
         const auto &ds = axState.datasets[dsIdx];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
-        const size_t fullRows = ds.originalRows;
-        const size_t fullCols = ds.originalCols;
+        const keel::usize fullRows = ds.originalRows;
+        const keel::usize fullCols = ds.originalCols;
         if (fullRows == 0 || fullCols == 0) return false;
         if (ds.zQuantized.size() < fullRows * fullCols) return false;
 
@@ -1462,34 +1463,34 @@ public:
         if (c0 < 0) c0 = 0;
         if (h < 0 || w < 0) return false;
 
-        const size_t rEnd = std::min(fullRows, static_cast<size_t>(r0) + static_cast<size_t>(h));
-        const size_t cEnd = std::min(fullCols, static_cast<size_t>(c0) + static_cast<size_t>(w));
-        if (static_cast<size_t>(r0) >= fullRows || static_cast<size_t>(c0) >= fullCols
-            || rEnd <= static_cast<size_t>(r0) || cEnd <= static_cast<size_t>(c0)) {
+        const keel::usize rEnd = std::min(fullRows, static_cast<keel::usize>(r0) + static_cast<keel::usize>(h));
+        const keel::usize cEnd = std::min(fullCols, static_cast<keel::usize>(c0) + static_cast<keel::usize>(w));
+        if (static_cast<keel::usize>(r0) >= fullRows || static_cast<keel::usize>(c0) >= fullCols
+            || rEnd <= static_cast<keel::usize>(r0) || cEnd <= static_cast<keel::usize>(c0)) {
             return false;
         }
 
-        const size_t srcH = rEnd - static_cast<size_t>(r0);
-        const size_t srcW = cEnd - static_cast<size_t>(c0);
-        const size_t L = static_cast<size_t>(lod);
-        const size_t oH = (srcH + L - 1) / L;
-        const size_t oW = (srcW + L - 1) / L;
+        const keel::usize srcH = rEnd - static_cast<keel::usize>(r0);
+        const keel::usize srcW = cEnd - static_cast<keel::usize>(c0);
+        const keel::usize L = static_cast<keel::usize>(lod);
+        const keel::usize oH = (srcH + L - 1) / L;
+        const keel::usize oW = (srcW + L - 1) / L;
 
         out.resize(oH * oW);
 
         // Mean-pool indices over L×L blocks. Index 255 = NaN, skipped.
         // Row-major output (suits canvas blit). zQuantized is column-major.
-        for (size_t orow = 0; orow < oH; ++orow) {
-            const size_t rA = static_cast<size_t>(r0) + orow * L;
-            const size_t rB = std::min(rEnd, rA + L);
-            for (size_t ocol = 0; ocol < oW; ++ocol) {
-                const size_t cA = static_cast<size_t>(c0) + ocol * L;
-                const size_t cB = std::min(cEnd, cA + L);
+        for (keel::usize orow = 0; orow < oH; ++orow) {
+            const keel::usize rA = static_cast<keel::usize>(r0) + orow * L;
+            const keel::usize rB = std::min(rEnd, rA + L);
+            for (keel::usize ocol = 0; ocol < oW; ++ocol) {
+                const keel::usize cA = static_cast<keel::usize>(c0) + ocol * L;
+                const keel::usize cB = std::min(cEnd, cA + L);
                 int sum = 0;
                 int n = 0;
-                for (size_t cc = cA; cc < cB; ++cc) {
-                    for (size_t rr = rA; rr < rB; ++rr) {
-                        const uint8_t q = ds.zQuantized[cc * fullRows + rr];
+                for (keel::usize cc = cA; cc < cB; ++cc) {
+                    for (keel::usize rr = rA; rr < rB; ++rr) {
+                        const keel::u8 q = ds.zQuantized[cc * fullRows + rr];
                         if (q != 255) {
                             sum += q;
                             ++n;
@@ -1497,8 +1498,8 @@ public:
                     }
                 }
                 out[orow * oW + ocol] = (n > 0)
-                    ? static_cast<uint8_t>((sum + n / 2) / n)
-                    : uint8_t{255};
+                    ? static_cast<keel::u8>((sum + n / 2) / n)
+                    : keel::u8{255};
             }
         }
 
@@ -1513,7 +1514,7 @@ private:
     OutputFunc outputFunc_;
     int nextHandleId_ = 1;
     std::unordered_map<int, HandleRecord> handleRegistry_;
-    size_t chartCallBase_ = 0;
+    keel::usize chartCallBase_ = 0;
 };
 
 

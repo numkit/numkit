@@ -3,6 +3,8 @@
 // Registers all ODE-toolbox functions under ode.<name> and the flat
 // compat.<name> alias.
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/ode/library.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -10,10 +12,10 @@
 
 namespace numkit::ode::detail {
 
-void ode45_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void ode23_reg (Span<const Value>, size_t, Span<Value>, CallContext &);
-void odeset_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
-void odeget_reg(Span<const Value>, size_t, Span<Value>, CallContext &);
+void ode45_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void ode23_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void odeset_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void odeget_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 
 } // namespace numkit::ode::detail
 

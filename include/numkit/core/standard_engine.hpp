@@ -15,11 +15,11 @@
 
 #pragma once
 
+#include <keel/memory.h>
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
 
-#include <memory_resource>
 
 namespace numkit {
 
@@ -34,12 +34,12 @@ struct StandardEngine : Engine
         setNamespaceMode(mode);
         installStandardLibrary(*this);
     }
-    explicit StandardEngine(std::pmr::memory_resource *mr)
+    explicit StandardEngine(keel::Allocator *mr)
         : Engine(mr)
     {
         installStandardLibrary(*this);
     }
-    StandardEngine(std::pmr::memory_resource *mr, NamespaceMode mode)
+    StandardEngine(keel::Allocator *mr, NamespaceMode mode)
         : Engine(mr)
     {
         setNamespaceMode(mode);

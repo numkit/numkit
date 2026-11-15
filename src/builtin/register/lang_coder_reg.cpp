@@ -4,6 +4,8 @@
 //   [status, cmdout] = system(cmd)   → shell command               [native only]
 //   [status, out] = runNative(script)→ run a .m via NUMKIT_INTERP  [native only]
 
+#include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/sys/env.hpp>
@@ -29,17 +31,17 @@ std::string charArg(const Value &v) { return v.toString(); }
 // ════════════════════════════════════════════════════════════════════════
 // [status, cmdout] = system(cmd) — run a shell command, capture stdout+stderr.
 // ════════════════════════════════════════════════════════════════════════
-void system_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void system_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
 #ifdef __EMSCRIPTEN__
     (void)args; (void)ctx;
     if (nargout <= 1)
-        outs[0] = Value::scalar(-1.0, ctx.engine->resource());
+        outs[0] = Value::scalar(-1.0, ctx.engine->allocator());
     else {
-        outs[0] = Value::scalar(-1.0, ctx.engine->resource());
+        outs[0] = Value::scalar(-1.0, ctx.engine->allocator());
         outs[1] = Value::fromString("system: not available in a WASM build — a native "
                                     "process cannot be spawned from the browser.",
-                                    ctx.engine->resource());
+                                    ctx.engine->allocator());
     }
     return;
 #else
@@ -49,9 +51,9 @@ void system_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
                     0, 0, "system", "", "numkit:system:nargin");
     const auto r = numkit::sys::runProcess(charArg(args[0]));
     // Single-output returns status; two outputs [status, cmdout] return both.
-    outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->resource());
+    outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->allocator());
     if (nargout >= 2)
-        outs[1] = Value::fromString(r.output, ctx.engine->resource());
+        outs[1] = Value::fromString(r.output, ctx.engine->allocator());
 #endif
 }
 
@@ -59,17 +61,17 @@ void system_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallCo
 // [status, out] = runNative(script) — run a .m file with the native numkit
 // interpreter whose path is read from NUMKIT_INTERP (set via setenv).
 // ════════════════════════════════════════════════════════════════════════
-void runNative_reg(Span<const Value> args, size_t nargout, Span<Value> outs, CallContext &ctx)
+void runNative_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
 #ifdef __EMSCRIPTEN__
     (void)args; (void)ctx;
     if (nargout <= 1)
-        outs[0] = Value::scalar(-1.0, ctx.engine->resource());
+        outs[0] = Value::scalar(-1.0, ctx.engine->allocator());
     else {
-        outs[0] = Value::scalar(-1.0, ctx.engine->resource());
+        outs[0] = Value::scalar(-1.0, ctx.engine->allocator());
         outs[1] = Value::fromString("runNative: not available in a WASM build — a native "
                                     "process cannot be spawned from the browser.",
-                                    ctx.engine->resource());
+                                    ctx.engine->allocator());
     }
     return;
 #else
@@ -91,9 +93,9 @@ void runNative_reg(Span<const Value> args, size_t nargout, Span<Value> outs, Cal
     cmd = "'" + std::string(interp) + "' '" + script + "'";
 #endif
     const auto r = numkit::sys::runProcess(cmd);
-    outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->resource());
+    outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->allocator());
     if (nargout >= 2)
-        outs[1] = Value::fromString(r.output, ctx.engine->resource());
+        outs[1] = Value::fromString(r.output, ctx.engine->allocator());
 #endif
 }
 

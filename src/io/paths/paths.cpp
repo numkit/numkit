@@ -2,6 +2,9 @@
 //
 // filesep / fullfile / fileparts / tempdir / tempname.
 
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/io/paths/paths.hpp>
 
 #include <numkit/value/error.hpp>
@@ -32,7 +35,7 @@ bool isPathSep(char c) { return c == '/' || c == '\\'; }
 // Strip trailing separators from the right edge.
 std::string rtrimSep(const std::string &s)
 {
-    size_t end = s.size();
+    keel::usize end = s.size();
     while (end > 0 && isPathSep(s[end - 1])) --end;
     return s.substr(0, end);
 }
@@ -40,35 +43,35 @@ std::string rtrimSep(const std::string &s)
 // Strip leading separators from the left edge.
 std::string ltrimSep(const std::string &s)
 {
-    size_t start = 0;
+    keel::usize start = 0;
     while (start < s.size() && isPathSep(s[start])) ++start;
     return s.substr(start);
 }
 
-Value charValue(std::pmr::memory_resource *mr, const std::string &s)
+Value charValue(keel::Allocator *mr, const std::string &s)
 {
     auto v = Value::matrix(1, s.size(), ValueType::CHAR, mr);
-    for (size_t i = 0; i < s.size(); ++i)
+    for (keel::usize i = 0; i < s.size(); ++i)
         v.charDataMut()[i] = static_cast<char>(s[i]);
     return v;
 }
 
 } // namespace
 
-Value filesep(std::pmr::memory_resource *mr)
+Value filesep(keel::Allocator *mr)
 {
     // (mr-last by convention; only one arg here.)
     return charValue(mr, std::string(1, kPathSepChar));
 }
 
-Value fullfile(Span<const std::string> parts,
-               std::pmr::memory_resource *mr)
+Value fullfile(keel::ArrayRef<std::string> parts,
+               keel::Allocator *mr)
 {
-    const size_t n = parts.size();
+    const keel::usize n = parts.size();
     if (n == 0)
         return charValue(mr, std::string{});
     std::string out = parts[0];
-    for (size_t i = 1; i < n; ++i) {
+    for (keel::usize i = 1; i < n; ++i) {
         const std::string &p = parts[i];
         if (p.empty()) continue;
         if (out.empty()) {
@@ -83,11 +86,11 @@ Value fullfile(Span<const std::string> parts,
 }
 
 std::tuple<Value, Value, Value>
-fileparts(const std::string &path, std::pmr::memory_resource *mr)
+fileparts(const std::string &path, keel::Allocator *mr)
 {
     // Find last separator.
-    size_t lastSep = std::string::npos;
-    for (size_t i = path.size(); i-- > 0;) {
+    keel::usize lastSep = std::string::npos;
+    for (keel::usize i = path.size(); i-- > 0;) {
         if (isPathSep(path[i])) { lastSep = i; break; }
     }
     std::string folder, base;
@@ -103,7 +106,7 @@ fileparts(const std::string &path, std::pmr::memory_resource *mr)
     // Find last '.' in base — but ignore a leading dot ('.bashrc').
     std::string name = base, ext;
     if (!base.empty()) {
-        size_t dot = base.find_last_of('.');
+        keel::usize dot = base.find_last_of('.');
         if (dot != std::string::npos && dot > 0) {
             name = base.substr(0, dot);
             ext = base.substr(dot);
@@ -114,7 +117,7 @@ fileparts(const std::string &path, std::pmr::memory_resource *mr)
                             charValue(mr, ext));
 }
 
-Value tempdir(FsContext &fs, std::pmr::memory_resource *mr)
+Value tempdir(FsContext &fs, keel::Allocator *mr)
 {
     // Prefer the resolved-FS temp area when available (lets hosts hook
     // a virtual temp area — IDE / WASM use this). Fall back to host OS.
@@ -138,18 +141,18 @@ Value tempdir(FsContext &fs, std::pmr::memory_resource *mr)
     return charValue(mr, td);
 }
 
-Value tempname(FsContext &fs, std::pmr::memory_resource *mr)
+Value tempname(FsContext &fs, keel::Allocator *mr)
 {
-    static std::atomic<uint64_t> counter{0};
-    const uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
+    static std::atomic<keel::u64> counter{0};
+    const keel::u64 n = counter.fetch_add(1, std::memory_order_relaxed);
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    const uint64_t ns = static_cast<uint64_t>(
+    const keel::u64 ns = static_cast<keel::u64>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
 
     static thread_local std::mt19937_64 rng{
-        std::random_device{}() ^ static_cast<uint64_t>(
+        std::random_device{}() ^ static_cast<keel::u64>(
             std::chrono::high_resolution_clock::now().time_since_epoch().count())};
-    const uint64_t r = rng();
+    const keel::u64 r = rng();
 
     auto td = tempdir(fs, mr).toString();
     std::ostringstream os;

@@ -1,13 +1,17 @@
 // fzero_reg.cpp — Engine adapters + embedded-.m registration relocated from
 // the optim toolbox in Phase D. Toolbox keeps the Engine-free FnHandle
 // kernels (fzero/fminbnd/fminsearch); this core-coupled glue lives in bundle.
+#include <keel/core.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/arena.h>
+#include <keel/array.h>
 #include <numkit/optim/local/fzero.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/scratch.hpp>
 
 namespace numkit::optim {
 
@@ -32,7 +36,7 @@ void requireFuncHandle(const Value &fn, const char *who)
 double evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
 {
     Value a[1] = { pt };
-    auto r = ctx.engine->callFunctionHandleMulti(handle, Span<const Value>(a, 1), 1);
+    auto r = ctx.engine->callFunctionHandleMulti(handle, keel::ArrayRef<Value>(a, 1), 1);
     return r.empty() ? std::nan("") : r[0].toScalar();
 }
 
@@ -41,9 +45,9 @@ double evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
 // Reaching here means the solver converged (it throws otherwise) → the
 // MATLAB exit flag is 1.
 void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
-                      Span<Value> outs, const char *who)
+                      keel::MutArrayRef<Value> outs, const char *who)
 {
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     if (outs.size() >= 2)
         outs[1] = Value::scalar(evalHandleScalar(ctx, handle, x), mr);
     if (outs.size() >= 3)
@@ -59,18 +63,18 @@ void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
 }
 } // anon
 
-void fzero_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void fzero_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "fzero");
     requireFuncHandle(args[0], "fzero");
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
     const Value &v = args[1];
     if (v.numel() == 1) {
         outs[0] = fzero(cb, v.toScalar(), mr);
@@ -84,7 +88,7 @@ void fzero_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, Cal
     emitFvalExitflag(ctx, args[0], outs[0], outs, "fzero");
 }
 
-void fminbnd_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void fminbnd_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 4, "fminbnd");
     requireFuncHandle(args[0], "fminbnd");
@@ -92,45 +96,45 @@ void fminbnd_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, C
     const double hi = args[2].toScalar();
     const double tol = (args.size() >= 4 && !args[3].isEmpty()) ? args[3].toScalar() : 1e-6;
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    outs[0] = fminbnd(cb, lo, hi, tol, ctx.engine->resource());
+    outs[0] = fminbnd(cb, lo, hi, tol, ctx.engine->allocator());
     emitFvalExitflag(ctx, args[0], outs[0], outs, "fminbnd");
 }
 
-void fminsearch_reg(Span<const Value> args, size_t /*nargout*/, Span<Value> outs, CallContext &ctx)
+void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "fminsearch");
     requireFuncHandle(args[0], "fminsearch");
     const double tol = (args.size() >= 3 && !args[2].isEmpty()) ? args[2].toScalar() : 1e-4;
     auto handle = args[0];
-    auto cb = [&ctx, &handle](Span<const Value> ar, Span<Value> ou,
-                               std::pmr::memory_resource * /*mr*/) {
+    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                               keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
-        for (size_t i = 0; i < ou.size() && i < r.size(); ++i)
+        for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
-    auto *mr = ctx.engine->resource();
+    auto *mr = ctx.engine->allocator();
 
     // Extract x0 into a temporary double buffer; the library API takes
     // Span<const double>. Buffer lives until the fminsearch call returns.
     const Value &x0v = args[1];
-    const size_t n = x0v.numel();
-    ScratchArena scratch(mr);
-    ScratchVec<double> x0buf(n, &scratch);
-    for (size_t i = 0; i < n; ++i) x0buf[i] = x0v.elemAsDouble(i);
+    const keel::usize n = x0v.numel();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<double> x0buf(n, scratch.allocator());
+    for (keel::usize i = 0; i < n; ++i) x0buf[i] = x0v.elemAsDouble(i);
 
-    Value r = fminsearch(cb, Span<const double>(x0buf.data(), n), tol, mr);
+    Value r = fminsearch(cb, keel::ArrayRef<double>(x0buf.data(), n), tol, mr);
 
     // MATLAB convention: output shape mirrors input. Library returns
     // a column; if the user passed a row, copy into a row Value.
     if (x0v.dims().rows() == 1 && x0v.dims().cols() >= 1) {
         Value row = Value::matrix(1, n, ValueType::DOUBLE, mr);
-        for (size_t i = 0; i < n; ++i)
+        for (keel::usize i = 0; i < n; ++i)
             row.doubleDataMut()[i] = r.doubleData()[i];
         r = std::move(row);
     }

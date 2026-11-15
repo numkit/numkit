@@ -1,4 +1,5 @@
 // src/debug_workspace.cpp
+#include <keel/core.h>
 #include <numkit/core/debug_workspace.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/engine.hpp>
@@ -20,7 +21,7 @@ bool DebugWorkspace::isHiddenName(const std::string &name) const
     return kBuiltinNames.count(name) > 0;
 }
 
-void DebugWorkspace::bindVMFrame(VM &vm, Engine &engine, size_t depthFromTop)
+void DebugWorkspace::bindVMFrame(VM &vm, Engine &engine, keel::usize depthFromTop)
 {
     engine_ = &engine;
     framePtrs_.clear();
