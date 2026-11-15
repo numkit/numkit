@@ -8,6 +8,7 @@
 //   numkit -v | --version   display version info
 
 #include <keel/core.h>
+#include <keel/fs.h>
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
@@ -18,10 +19,7 @@
 #include <numkit/core/build_info.hpp>
 
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -101,13 +99,11 @@ int runEval(const std::string &code)
 {
     StandardEngine engine;
     {
-        std::error_code ec;
-        std::filesystem::path cwd = std::filesystem::current_path(ec);
-        if (!ec) {
-            auto cU8 = cwd.u8string();
+        auto cwd = keel::fs_current_dir();
+        if (cwd.is_ok()) {
             engine.pushScriptOrigin(
                 "native",
-                std::string(reinterpret_cast<const char *>(cU8.data()), cU8.size()),
+                std::string(cwd->data(), cwd->size()),
                 "");
         }
     }
@@ -123,36 +119,21 @@ int runEval(const std::string &code)
 int runScript(const std::string &path)
 {
     StandardEngine engine;
-    std::filesystem::path fsPath;
-    try {
-        std::error_code ec;
-        auto p = std::filesystem::u8path(path);
-        if (std::filesystem::exists(p, ec))
-            fsPath = p;
-        else
-            fsPath = std::filesystem::path(path);
-    } catch (...) {
-        fsPath = std::filesystem::path(path);
-    }
-    std::ifstream f(fsPath, std::ios::binary);
-    if (!f) {
+    auto textRes = keel::fs_read_text(path);
+    if (!textRes.is_ok()) {
         std::cerr << "numkit: cannot open '" << path << "'\n";
         return 1;
     }
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    const std::string src = ss.str();
+    const std::string src(textRes->data(), textRes->size());
 
     {
-        std::error_code ec;
-        std::filesystem::path abs = std::filesystem::absolute(fsPath, ec);
-        if (!ec) {
-            auto pU8 = abs.parent_path().u8string();
-            auto aU8 = abs.u8string();
+        auto abs = keel::fs_absolute(path);
+        if (abs.is_ok()) {
+            const keel::StringRef dirRef = keel::path_dirname(*abs);
             engine.pushScriptOrigin(
                 "native",
-                std::string(reinterpret_cast<const char *>(pU8.data()), pU8.size()),
-                std::string(reinterpret_cast<const char *>(aU8.data()), aU8.size()));
+                std::string(dirRef.data(), dirRef.size()),
+                std::string(abs->data(), abs->size()));
         }
     }
 
@@ -242,18 +223,19 @@ void printUsage(const char *prog)
 
 std::string findCodegenBinary(const char *argv0)
 {
-    namespace fs = std::filesystem;
-    std::error_code ec;
 #ifdef _WIN32
     const char *binName = "numkit-codegen.exe";
 #else
     const char *binName = "numkit-codegen";
 #endif
     if (argv0 && argv0[0] != '\0') {
-        fs::path selfDir = fs::absolute(fs::path(argv0), ec).parent_path();
-        if (!ec && !selfDir.empty()) {
-            fs::path sibling = selfDir / binName;
-            if (fs::exists(sibling, ec)) return sibling.string();
+        auto absSelf = keel::fs_absolute(argv0);
+        if (absSelf.is_ok() && !absSelf->empty()) {
+            const keel::StringRef selfDir = keel::path_dirname(*absSelf);
+            if (!selfDir.empty()) {
+                keel::String sibling = keel::path_join(selfDir, binName);
+                if (keel::fs_exists(sibling)) return std::string(sibling.data(), sibling.size());
+            }
         }
     }
 #ifdef _WIN32
@@ -262,8 +244,8 @@ std::string findCodegenBinary(const char *argv0)
     std::string home = numkit::envGet("HOME");
 #endif
     if (!home.empty()) {
-        fs::path p = fs::path(home) / ".numkit" / "bin" / binName;
-        if (fs::exists(p, ec)) return p.string();
+        keel::String p = keel::path_join(home, ".numkit", "bin", binName);
+        if (keel::fs_exists(p)) return std::string(p.data(), p.size());
     }
     return binName;
 }

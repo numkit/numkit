@@ -2,6 +2,7 @@
 //
 // Self-contained C-ABI implementation for `numkit/numkit` (`numkit_c`).
 #include <keel/core.h>
+#include <keel/fs.h>
 #include <keel/ref.h>
 #include <numkit/core/c_api.h>
 #include <numkit/core/plugin_loader.hpp>
@@ -12,7 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
-#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,7 +29,7 @@
 
 namespace {
 
-std::filesystem::path currentLibraryDir()
+keel::String currentLibraryDir()
 {
 #if defined(_WIN32)
     HMODULE hm = nullptr;
@@ -39,20 +39,20 @@ std::filesystem::path currentLibraryDir()
         char path[MAX_PATH];
         DWORD len = GetModuleFileNameA(hm, path, MAX_PATH);
         if (len > 0) {
-            return std::filesystem::path(std::string(path, len)).parent_path();
+            return keel::path_normalize(keel::path_dirname(keel::StringRef(path, static_cast<keel::usize>(len))));
         }
     }
 #else
     Dl_info info{};
     if (dladdr(reinterpret_cast<const void *>(&currentLibraryDir), &info) && info.dli_fname) {
-        std::error_code ec;
-        auto p = std::filesystem::canonical(info.dli_fname, ec);
-        if (!ec) return p.parent_path();
-        return std::filesystem::path(info.dli_fname).parent_path();
+        auto p = keel::fs_realpath(info.dli_fname);
+        if (p.is_ok()) return keel::String::from(keel::path_dirname(*p));
+        return keel::String::from(keel::path_dirname(info.dli_fname));
     }
 #endif
-    std::error_code ec;
-    return std::filesystem::current_path(ec);
+    auto cwd = keel::fs_current_dir();
+    if (cwd.is_ok()) return keel::move(*cwd);
+    return keel::String{};
 }
 
 } // namespace
@@ -63,13 +63,17 @@ struct numkit_engine_ctx_s {
     numkit_engine_ctx_s()
     {
         engine.setOutputFunc([](const std::string &) {});
-        auto libDir = currentLibraryDir();
+        keel::String libDir = currentLibraryDir();
         if (!libDir.empty()) {
-            engine.pluginLoader().addSearchPath(libDir.string());
-            engine.pluginLoader().addSearchPath((libDir / "modules").string());
-            if (libDir.has_parent_path()) {
-                engine.pluginLoader().addSearchPath((libDir.parent_path() / "bin" / "modules").string());
-                engine.pluginLoader().addSearchPath((libDir.parent_path() / "lib").string());
+            engine.pluginLoader().addSearchPath(std::string(libDir.data(), libDir.size()));
+            keel::String modDir = keel::path_join(libDir, "modules");
+            engine.pluginLoader().addSearchPath(std::string(modDir.data(), modDir.size()));
+            keel::StringRef parent = keel::path_dirname(libDir);
+            if (!parent.empty() && parent != "." && parent != libDir.as_ref()) {
+                keel::String binMods = keel::path_join(parent, "bin", "modules");
+                keel::String sibLib = keel::path_join(parent, "lib");
+                engine.pluginLoader().addSearchPath(std::string(binMods.data(), binMods.size()));
+                engine.pluginLoader().addSearchPath(std::string(sibLib.data(), sibLib.size()));
             }
         }
         if (const char *envPath = std::getenv("NUMKIT_MODULE_PATH")) {
@@ -200,8 +204,7 @@ int numkit_engine_load_plugin(numkit_engine_ctx *ctx,
         return 1;
     }
     try {
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(name_or_path, ec)) {
+        if (keel::fs_is_file(name_or_path)) {
             if (!ctx->engine.pluginLoader().loadModule(name_or_path)) {
                 throw std::runtime_error(std::string("Failed to load plugin: ") + name_or_path);
             }

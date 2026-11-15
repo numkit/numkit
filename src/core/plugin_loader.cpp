@@ -1,15 +1,13 @@
 // src/core/src/plugin_loader.cpp
 #include <keel/core.h>
+#include <keel/fs.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <mutex>
-#include <sstream>
 
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
@@ -226,24 +224,16 @@ static bool parseManifest(const std::string &content, std::string &libName, std:
     return !libName.empty();
 }
 
-static std::filesystem::path getExecutableDir() {
-#ifdef _WIN32
-    char buf[MAX_PATH];
-    DWORD len = GetModuleFileNameA(NULL, buf, MAX_PATH);
-    if (len > 0 && len < MAX_PATH) {
-        return std::filesystem::path(std::string(buf, len)).parent_path();
+static keel::String getExecutableDir() {
+    auto exe = keel::fs_exe_path();
+    if (exe.is_ok() && !exe->empty()) {
+        return keel::String::from(keel::path_dirname(*exe));
     }
-#elif defined(__linux__)
-    std::error_code ec;
-    auto p = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (!ec) return p.parent_path();
-#endif
     return {};
 }
 
-static bool sharedLibExistsInDir(const std::filesystem::path &dir, const std::string &libName) {
-    std::error_code ec;
-    if (!std::filesystem::exists(dir, ec)) return false;
+static bool sharedLibExistsInDir(keel::StringRef dir, const std::string &libName) {
+    if (!keel::fs_exists(dir)) return false;
     const char *candidates[] = {
         "",
 #ifdef _WIN32
@@ -256,13 +246,15 @@ static bool sharedLibExistsInDir(const std::filesystem::path &dir, const std::st
 #endif
     };
     for (const char *ext : candidates) {
-        if (std::filesystem::exists(dir / (libName + ext), ec) &&
-            std::filesystem::is_regular_file(dir / (libName + ext), ec)) {
+        keel::PathBuf cand;
+        keel::path_join_into(cand, dir, libName + ext);
+        if (keel::fs_is_file(cand)) {
             return true;
         }
 #ifndef _WIN32
-        if (std::filesystem::exists(dir / ("lib" + libName + ext), ec) &&
-            std::filesystem::is_regular_file(dir / ("lib" + libName + ext), ec)) {
+        keel::PathBuf libCand;
+        keel::path_join_into(libCand, dir, "lib" + libName + ext);
+        if (keel::fs_is_file(libCand)) {
             return true;
         }
 #endif
@@ -275,14 +267,14 @@ static bool sharedLibExistsInDir(const std::filesystem::path &dir, const std::st
 PluginLoader::PluginLoader(Engine &engine)
     : engine_(engine)
 {
-    auto addUnique = [&](const std::filesystem::path &p) {
+    auto addUnique = [&](keel::StringRef p) {
         if (p.empty()) return;
-        std::error_code ec;
-        std::string norm = p.lexically_normal().string();
+        keel::String normStr = keel::path_normalize(p);
+        std::string norm(normStr.data(), normStr.size());
         for (const auto &existing : searchPaths_) {
             if (existing == norm) return;
         }
-        searchPaths_.push_back(norm);
+        searchPaths_.push_back(std::move(norm));
     };
 
     if (const char *envMod = std::getenv("NUMKIT_MODULES_PATH")) {
@@ -296,21 +288,21 @@ PluginLoader::PluginLoader(Engine &engine)
 
 #ifdef _WIN32
     if (const char *up = std::getenv("USERPROFILE")) {
-        addUnique(std::filesystem::path(up) / ".numkit" / "modules");
+        addUnique(keel::path_join(up, ".numkit", "modules"));
     }
 #else
     if (const char *home = std::getenv("HOME")) {
-        addUnique(std::filesystem::path(home) / ".numkit" / "modules");
+        addUnique(keel::path_join(home, ".numkit", "modules"));
     }
 #endif
 
-    auto exeDir = getExecutableDir();
+    keel::String exeDir = getExecutableDir();
     if (!exeDir.empty()) {
         addUnique(exeDir);
-        addUnique(exeDir / "modules");
-        addUnique(exeDir / ".." / "modules");
-        addUnique(exeDir / ".." / "..");
-        addUnique(exeDir / ".." / ".." / "..");
+        addUnique(keel::path_join(exeDir, "modules"));
+        addUnique(keel::path_join(exeDir, "..", "modules"));
+        addUnique(keel::path_join(exeDir, "..", ".."));
+        addUnique(keel::path_join(exeDir, "..", "..", ".."));
     }
 }
 
@@ -339,13 +331,14 @@ bool PluginLoader::loadModule(const std::string &pathInput, const std::string &t
         }
     }
 
-    std::filesystem::path p(path);
-    std::string normPath = p.lexically_normal().string();
+    keel::String normPathK = keel::path_normalize(path);
+    std::string normPath(normPathK.data(), normPathK.size());
     std::string cacheKey = targetNamespace.empty() ? normPath : (normPath + "#" + targetNamespace);
     if (loadedPaths_.find(cacheKey) != loadedPaths_.end()) {
         return true;
     }
 
+    const keel::StringRef extRef = keel::path_extension(path);
     NumkitPluginInitFn initFn = nullptr;
     {
         auto &reg = pinnedPluginRegistry();
@@ -358,21 +351,27 @@ bool PluginLoader::loadModule(const std::string &pathInput, const std::string &t
             if (!h) {
                 std::string withExt = path;
 #ifdef _WIN32
-                if (p.extension() != ".dll") withExt += ".dll";
+                if (extRef != ".dll") withExt += ".dll";
 #elif defined(__APPLE__)
-                if (p.extension() != ".dylib") withExt += ".dylib";
+                if (extRef != ".dylib") withExt += ".dylib";
 #else
-                if (p.extension() != ".so") withExt += ".so";
+                if (extRef != ".so") withExt += ".so";
 #endif
                 h = osLoadLibrary(withExt.c_str());
 #ifndef _WIN32
                 if (!h) {
-                    std::filesystem::path libPrefixed = p.parent_path() / ("lib" + p.filename().string());
-                    std::string lpStr = libPrefixed.string();
+                    const keel::StringRef baseRef = keel::path_basename(path);
+                    const keel::StringRef dirRef = keel::path_dirname(path);
+                    std::string libLeaf = "lib" + std::string(baseRef.data(), baseRef.size());
+                    keel::String libPrefixed = (dirRef == "." && path.find('/') == std::string::npos && path.find('\\') == std::string::npos)
+                        ? keel::String::from(libLeaf)
+                        : keel::path_join(dirRef, libLeaf);
+                    std::string lpStr(libPrefixed.data(), libPrefixed.size());
+                    const keel::StringRef lpExt = keel::path_extension(libPrefixed);
 #if defined(__APPLE__)
-                    if (libPrefixed.extension() != ".dylib") lpStr += ".dylib";
+                    if (lpExt != ".dylib") lpStr += ".dylib";
 #else
-                    if (libPrefixed.extension() != ".so") lpStr += ".so";
+                    if (lpExt != ".so") lpStr += ".so";
 #endif
                     h = osLoadLibrary(lpStr.c_str());
                 }
@@ -397,7 +396,8 @@ bool PluginLoader::loadModule(const std::string &pathInput, const std::string &t
         }
     }
 
-    std::string stem = p.stem().string();
+    const keel::StringRef stemRef = keel::path_stem(path);
+    std::string stem(stemRef.data(), stemRef.size());
     if (stem.rfind("lib", 0) == 0 && stem.size() > 3) {
         stem = stem.substr(3);
     }
@@ -431,49 +431,50 @@ void PluginLoader::scanManifests_()
     manifestsScanned_ = true;
 
     for (const auto &sp : searchPaths_) {
-        std::error_code ec;
-        if (!std::filesystem::exists(sp, ec)) continue;
+        if (!keel::fs_exists(sp)) continue;
 
-        auto checkManifest = [&](const std::filesystem::path &manifestPath, const std::filesystem::path &dir) {
-            std::ifstream file(manifestPath);
-            if (!file.is_open()) return;
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            std::string content = buffer.str();
+        auto checkManifest = [&](keel::StringRef manifestPath, keel::StringRef dir) {
+            auto textRes = keel::fs_read_text(manifestPath);
+            if (!textRes.is_ok()) return;
+            std::string content(textRes->data(), textRes->size());
             std::string libName;
             std::vector<std::string> funcs;
             if (parseManifest(content, libName, funcs)) {
                 if (!sharedLibExistsInDir(dir, libName)) return;
-                std::filesystem::path libPath = dir / libName;
+                keel::String libPathK = keel::path_join(dir, libName);
+                std::string libPath(libPathK.data(), libPathK.size());
                 for (const auto &fn : funcs) {
-                    manifestIndex_[fn] = libPath.string();
+                    manifestIndex_[fn] = libPath;
                 }
                 std::string pkgName = libName;
                 if (pkgName.rfind("numkit_", 0) == 0) {
                     pkgName = pkgName.substr(7);
                 }
                 if (!pkgName.empty()) {
-                    manifestIndex_["@pkg:" + pkgName] = libPath.string();
+                    manifestIndex_["@pkg:" + pkgName] = libPath;
                 }
             }
         };
 
-        if (std::filesystem::is_directory(sp, ec)) {
-            checkManifest(std::filesystem::path(sp) / "manifest.json", sp);
-            checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build");
-            checkManifest(std::filesystem::path(sp) / "manifest.json", std::filesystem::path(sp) / "build" / "Release");
+        if (keel::fs_is_dir(sp)) {
+            keel::String spManifest = keel::path_join(sp, "manifest.json");
+            checkManifest(spManifest, sp);
+            checkManifest(spManifest, keel::path_join(sp, "build"));
+            checkManifest(spManifest, keel::path_join(sp, "build", "Release"));
 
-            std::vector<std::filesystem::path> subdirs;
-            for (const auto &entry : std::filesystem::directory_iterator(sp, ec)) {
-                if (entry.is_directory(ec)) {
-                    subdirs.push_back(entry.path());
+            std::vector<std::string> subdirs;
+            (void)keel::fs_read_dir(sp, [&](const keel::DirEntry &entry) {
+                if (entry.is_dir) {
+                    subdirs.emplace_back(entry.full_path.data(), entry.full_path.size());
                 }
-            }
+                return true;
+            });
             std::sort(subdirs.begin(), subdirs.end());
             for (const auto &subdir : subdirs) {
-                checkManifest(subdir / "manifest.json", subdir);
-                checkManifest(subdir / "manifest.json", subdir / "build");
-                checkManifest(subdir / "manifest.json", subdir / "build" / "Release");
+                keel::String subManifest = keel::path_join(subdir, "manifest.json");
+                checkManifest(subManifest, subdir);
+                checkManifest(subManifest, keel::path_join(subdir, "build"));
+                checkManifest(subManifest, keel::path_join(subdir, "build", "Release"));
             }
         }
     }
@@ -517,7 +518,8 @@ std::string PluginLoader::moduleProvidingFunction(const std::string &functionNam
     if (it == manifestIndex_.end()) {
         return {};
     }
-    std::string stem = std::filesystem::path(it->second).stem().string();
+    const keel::StringRef stemRef = keel::path_stem(it->second);
+    std::string stem(stemRef.data(), stemRef.size());
     if (stem.rfind("lib", 0) == 0 && stem.size() > 3) {
         stem = stem.substr(3);
     }
@@ -545,8 +547,8 @@ std::string PluginLoader::findPackageLibrary(const std::string &pkgNameInput)
 
 bool PluginLoader::isLoaded(const std::string &path) const
 {
-    std::filesystem::path p(path);
-    return loadedPaths_.find(p.lexically_normal().string()) != loadedPaths_.end();
+    keel::String norm = keel::path_normalize(path);
+    return loadedPaths_.find(std::string(norm.data(), norm.size())) != loadedPaths_.end();
 }
 
 std::vector<std::string> PluginLoader::loadedModules() const

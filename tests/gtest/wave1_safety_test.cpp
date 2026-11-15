@@ -5,13 +5,14 @@
 
 #include <keel/core.h>
 #include <keel/complex.h>
+#include <keel/fs.h>
+#include <keel/thread_pool.h>
 #include "dual_engine_fixture.hpp"
 
 #include <numkit/ops/blas.hpp>
 #include <numkit/ops/deflate.hpp>
 #include <numkit/ops/matlab_mt19937.hpp>
 #include <numkit/ops/rng.hpp>
-#include <numkit/ops/thread_pool.hpp>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/sys/process.hpp>
 
@@ -19,8 +20,6 @@
 #include <climits>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <vector>
 
 using namespace m_test;
@@ -208,9 +207,9 @@ TEST(Wave1OpsSafetyTest, GemmTailPanelAndTransposes)
 // 10. ThreadPool alternating max_workers stress test
 TEST(Wave1OpsSafetyTest, ThreadPoolAlternatingWorkerSubsetRace)
 {
-    auto &pool = numkit::detail::ThreadPool::global();
+    auto &pool = keel::ThreadPool::global();
     for (int iter = 0; iter < 1500; ++iter) {
-        int maxW = (iter % 2 == 0) ? 2 : 16;
+        keel::u32 maxW = (iter % 2 == 0) ? 2u : 16u;
         std::atomic<int> sum{0};
         pool.run(32, [&](keel::usize start, keel::usize end) {
             for (keel::usize i = start; i < end; ++i) {
@@ -241,30 +240,29 @@ TEST(Wave1OpsSafetyTest, RngCorruptStateAndWideUniformIntSafe)
 // 12. Malformed MAT5 / MAT4 inputs & Deflate bomb cap
 TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
 {
-    namespace fs = std::filesystem;
-    fs::path tmpDir = fs::temp_directory_path() / "numkit_wave1_mat_test";
-    fs::create_directories(tmpDir);
+    auto tmpBase = keel::fs_temp_dir();
+    ASSERT_TRUE(tmpBase.is_ok());
+    keel::String tmpDir = keel::path_join(tmpBase.value(), "numkit_wave1_mat_test");
+    ASSERT_TRUE(keel::fs_create_dirs(tmpDir).is_ok());
 
     StandardEngine eng;
 
     // 12a. MAT5 with 0xFFFFFFFC byteCount (32-bit padding wraparound regression)
     {
-        fs::path bad5 = tmpDir / "wrap_tag.mat";
-        std::string bytes(128, ' ');
-        bytes[126] = 'I';
-        bytes[127] = 'M';
+        keel::String bad5 = keel::path_join(tmpDir, "wrap_tag.mat");
+        std::vector<keel::u8> bytes(128, static_cast<keel::u8>(' '));
+        bytes[126] = static_cast<keel::u8>('I');
+        bytes[127] = static_cast<keel::u8>('M');
         const keel::u8 tag[8] = {0x0E, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xFF, 0xFF};
-        bytes.append(reinterpret_cast<const char *>(tag), 8);
-        {
-            std::ofstream out(bad5, std::ios::binary);
-            out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        }
-        EXPECT_THROW(eng.eval("load('" + bad5.generic_string() + "');"), std::exception);
+        bytes.insert(bytes.end(), tag, tag + 8);
+        ASSERT_TRUE(keel::fs_write_file(bad5, keel::ArrayRef<keel::u8>(bytes.data(), bytes.size())).is_ok());
+        std::string bad5Str(bad5.data(), bad5.size());
+        EXPECT_THROW(eng.eval("load('" + bad5Str + "');"), std::exception);
     }
 
     // 12b. MAT4 with non-NUL-terminated variable name
     {
-        fs::path bad4 = tmpDir / "unterm_mat4.mat";
+        keel::String bad4 = keel::path_join(tmpDir, "unterm_mat4.mat");
         std::vector<keel::u8> bytes(24, 0);
         // mType=0, rows=1, cols=1, imagf=0, namlen=4
         bytes[4] = 1;
@@ -274,12 +272,9 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
         bytes[21] = 'b';
         bytes[22] = 'c';
         bytes[23] = 'd'; // missing NUL!
-        {
-            std::ofstream out(bad4, std::ios::binary);
-            out.write(reinterpret_cast<const char *>(bytes.data()),
-                      static_cast<std::streamsize>(bytes.size()));
-        }
-        EXPECT_THROW(eng.eval("load('" + bad4.generic_string() + "');"), std::exception);
+        ASSERT_TRUE(keel::fs_write_file(bad4, keel::ArrayRef<keel::u8>(bytes.data(), bytes.size())).is_ok());
+        std::string bad4Str(bad4.data(), bad4.size());
+        EXPECT_THROW(eng.eval("load('" + bad4Str + "');"), std::exception);
     }
 
     // 12c. Deflate output byte cap
@@ -290,36 +285,34 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
                      std::runtime_error);
     }
 
-    std::error_code ec;
-    fs::remove_all(tmpDir, ec);
+    (void)keel::fs_remove_all(tmpDir);
 }
 
 // 13. PackageManager path traversal & process shell metacharacter rejection
 TEST(Wave1SysAndMatSafetyTest, PackageManagerTraversalAndCommandInjectionBlocked)
 {
-    namespace fs = std::filesystem;
-    fs::path tmpRoot = fs::temp_directory_path() / "numkit_wave1_pkg_test";
-    fs::path modsDir = tmpRoot / "modules";
-    fs::path victimDir = tmpRoot / "victim";
-    fs::create_directories(modsDir);
-    fs::create_directories(victimDir);
-    {
-        std::ofstream f(victimDir / "keep.txt");
-        f << "do not delete";
-    }
+    auto tmpBase = keel::fs_temp_dir();
+    ASSERT_TRUE(tmpBase.is_ok());
+    keel::String tmpRoot = keel::path_join(tmpBase.value(), "numkit_wave1_pkg_test");
+    keel::String modsDir = keel::path_join(tmpRoot, "modules");
+    keel::String victimDir = keel::path_join(tmpRoot, "victim");
+    ASSERT_TRUE(keel::fs_create_dirs(modsDir).is_ok());
+    ASSERT_TRUE(keel::fs_create_dirs(victimDir).is_ok());
+    keel::String keepTxt = keel::path_join(victimDir, "keep.txt");
+    ASSERT_TRUE(keel::fs_write_text(keepTxt, "do not delete").is_ok());
 
-    numkit::pkg::PackageManager pm(modsDir.string());
+    numkit::pkg::PackageManager pm(std::string(modsDir.data(), modsDir.size()));
     EXPECT_NE(pm.remove("../victim"), 0);
     EXPECT_NE(pm.remove(".."), 0);
     EXPECT_NE(pm.remove("."), 0);
-    EXPECT_TRUE(fs::exists(victimDir / "keep.txt"));
+    EXPECT_TRUE(keel::fs_exists(keepTxt));
 
-    fs::path marker = tmpRoot / "injected_marker";
-    EXPECT_FALSE(numkit::sys::isCommandAvailable("sh; touch " + marker.string()));
-    EXPECT_FALSE(fs::exists(marker));
+    keel::String marker = keel::path_join(tmpRoot, "injected_marker");
+    std::string markerStr(marker.data(), marker.size());
+    EXPECT_FALSE(numkit::sys::isCommandAvailable("sh; touch " + markerStr));
+    EXPECT_FALSE(keel::fs_exists(marker));
 
-    std::error_code ec;
-    fs::remove_all(tmpRoot, ec);
+    (void)keel::fs_remove_all(tmpRoot);
 }
 
 // 14. Canonical Size/Index conversion boundary parity (VM + TreeWalker)

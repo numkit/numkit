@@ -5,16 +5,15 @@
 
 #include "dual_engine_fixture.hpp"
 #include <numkit/core/plugin_loader.hpp>
-#include <filesystem>
+#include <keel/fs.h>
 
 using namespace m_test;
 
 class PluginLoaderTest : public DualEngineTest {
 protected:
     std::string findPluginLib(const std::string &pkgName) {
-        namespace fs = std::filesystem;
         std::string found = engine.pluginLoader().findPackageLibrary(pkgName);
-        if (!found.empty() && fs::exists(found))
+        if (!found.empty() && keel::fs_exists(found))
             return found;
         const std::vector<std::string> candidates = {
             "build/lib/libnumkit_" + pkgName + ".so",
@@ -25,8 +24,10 @@ protected:
             "C:/Users/User/Projects/numkit/" + pkgName + "/build/Release/numkit_" + pkgName + ".dll"
         };
         for (const auto &c : candidates) {
-            if (fs::exists(c))
-                return fs::absolute(c).generic_string();
+            if (keel::fs_exists(c)) {
+                auto abs = keel::fs_absolute(c);
+                if (abs.is_ok()) return std::string(abs->data(), abs->size());
+            }
         }
         return {};
     }

@@ -9,9 +9,9 @@
 //   - Multi-Engine concurrent isolation (lastwarn, setenv/getenv, persistent, closures, paused callbacks)
 
 #include "dual_engine_fixture.hpp"
+#include <keel/fs.h>
 
 #include <atomic>
-#include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -210,15 +210,15 @@ TEST_P(Wave3SemanticsIsolationTest, DynamicWorkspaceSyncEvalAssigninLoadClearvar
     EXPECT_DOUBLE_EQ(getVar("after_base"), 90.0);
 
     // 3d. load (both MAT and -ascii) inside a function populating local scope cleanly
-    namespace fs = std::filesystem;
-    fs::path tmpDir = fs::temp_directory_path() / "numkit_wave3_load_test";
-    fs::create_directories(tmpDir);
-    std::string matPath = (tmpDir / "w3vars.mat").generic_string();
-    std::string ascPath = (tmpDir / "myvec.txt").generic_string();
-    {
-        std::ofstream ofs(ascPath);
-        ofs << "11 22 33\n";
-    }
+    auto tmpBase = keel::fs_temp_dir();
+    ASSERT_TRUE(tmpBase.is_ok());
+    keel::String tmpDir = keel::path_join(tmpBase.value(), "numkit_wave3_load_test");
+    ASSERT_TRUE(keel::fs_create_dirs(tmpDir).is_ok());
+    keel::String matPathK = keel::path_join(tmpDir, "w3vars.mat");
+    keel::String ascPathK = keel::path_join(tmpDir, "myvec.txt");
+    std::string matPath(matPathK.data(), matPathK.size());
+    std::string ascPath(ascPathK.data(), ascPathK.size());
+    ASSERT_TRUE(keel::fs_write_text(ascPathK, "11 22 33\n").is_ok());
     eval("saved_val = [4, 5, 6]; save('" + matPath + "', 'saved_val'); clear saved_val;");
     eval(
         "function [s1, s2] = load_in_fn(mp, ap)\n"
@@ -230,7 +230,7 @@ TEST_P(Wave3SemanticsIsolationTest, DynamicWorkspaceSyncEvalAssigninLoadClearvar
     eval("[lv1, lv2] = load_in_fn('" + matPath + "', '" + ascPath + "');");
     EXPECT_DOUBLE_EQ(getVar("lv1"), 5.0);
     EXPECT_DOUBLE_EQ(getVar("lv2"), 33.0);
-    fs::remove_all(tmpDir);
+    (void)keel::fs_remove_all(tmpDir);
 
     // 3e. clearvars & clearvars -except inside function and top-level (preserving globals)
     eval("global g_keep; g_keep = 77;");

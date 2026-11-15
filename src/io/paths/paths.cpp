@@ -3,6 +3,7 @@
 // filesep / fullfile / fileparts / tempdir / tempname.
 
 #include <keel/core.h>
+#include <keel/fs.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <numkit/io/paths/paths.hpp>
@@ -14,7 +15,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <filesystem>
 #include <random>
 #include <sstream>
 #include <string>
@@ -132,9 +132,8 @@ Value tempdir(FsContext &fs, keel::Allocator *mr)
         try { td = resolved.fs->tempArea(); } catch (...) { td.clear(); }
     }
     if (td.empty()) {
-        std::error_code ec;
-        auto p = std::filesystem::temp_directory_path(ec);
-        if (!ec) td = p.string();
+        auto p = keel::fs_temp_dir();
+        if (p.is_ok()) td.assign(p->data(), p->size());
     }
     if (!td.empty() && !isPathSep(td.back()))
         td.push_back(kPathSepChar);

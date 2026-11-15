@@ -3,6 +3,8 @@
 // NumKit Package Manager implementation.
 
 #include <keel/core.h>
+#include <keel/fs.h>
+#include <keel/small_array.h>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
@@ -10,14 +12,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <tuple>
-
-namespace fs = std::filesystem;
 
 namespace numkit::pkg {
 
@@ -48,11 +46,16 @@ std::string getUserHomeDir()
 #endif
 }
 
-fs::path getNumkitPrefix()
+std::string toStdString(keel::StringRef s)
+{
+    return std::string(s.data(), s.size());
+}
+
+keel::String getNumkitPrefix()
 {
     std::string custom = sys::envGet("NUMKIT_PREFIX");
-    if (!custom.empty()) return fs::path(custom);
-    return fs::path(getUserHomeDir()) / ".numkit";
+    if (!custom.empty()) return keel::path_normalize(custom);
+    return keel::path_join(getUserHomeDir(), ".numkit");
 }
 
 std::string getSharedLibExtension()
@@ -68,8 +71,7 @@ std::string getSharedLibExtension()
 
 std::string cmakeToolchainFlags(const std::string &buildDir)
 {
-    std::error_code ec;
-    if (fs::exists(fs::path(buildDir) / "CMakeCache.txt", ec)) {
+    if (keel::fs_exists(keel::path_join(buildDir, "CMakeCache.txt"))) {
         return " -DNUMKIT_BUILD_TESTS=OFF";
     }
 
@@ -186,20 +188,46 @@ std::string quoteShellArg(const std::string &s)
 #endif
 }
 
-bool isStrictSubpath(const fs::path &parentDir, const fs::path &candidate)
+keel::String weaklyCanonical(keel::StringRef rawPath)
 {
-    std::error_code ec1, ec2;
-    fs::path pCanon = fs::weakly_canonical(parentDir, ec1);
-    fs::path cCanon = fs::weakly_canonical(candidate, ec2);
-    if (ec1 || ec2 || pCanon.empty() || cCanon.empty() || pCanon == cCanon)
-        return false;
-    auto pIt = pCanon.begin();
-    auto cIt = cCanon.begin();
-    for (; pIt != pCanon.end(); ++pIt, ++cIt) {
-        if (cIt == cCanon.end() || *pIt != *cIt)
-            return false;
+    auto absRes = keel::fs_absolute(rawPath);
+    if (absRes.is_err()) return {};
+    keel::String cur = std::move(absRes.value());
+    if (keel::fs_exists(cur)) {
+        auto rp = keel::fs_realpath(cur);
+        return rp.is_ok() ? keel::path_normalize(rp.value()) : keel::path_normalize(cur);
     }
-    return cIt != cCanon.end();
+
+    keel::SmallArray<keel::String, 8> tails;
+    while (!cur.empty() && !keel::fs_exists(cur)) {
+        keel::StringRef base = keel::path_basename(cur);
+        keel::StringRef dir = keel::path_dirname(cur);
+        if (dir == cur || base.empty()) break;
+        tails.push_back(keel::String::from(base));
+        cur = keel::String::from(dir);
+    }
+    if (keel::fs_exists(cur)) {
+        auto rp = keel::fs_realpath(cur);
+        if (rp.is_ok()) cur = std::move(rp.value());
+    }
+    for (keel::usize i = tails.size(); i > 0; --i) {
+        keel::path_append(cur, tails[i - 1]);
+    }
+    return keel::path_normalize(cur);
+}
+
+bool isStrictSubpath(keel::StringRef parentDir, keel::StringRef candidate)
+{
+    keel::String pCanon = weaklyCanonical(parentDir);
+    keel::String cCanon = weaklyCanonical(candidate);
+    if (pCanon.empty() || cCanon.empty() || pCanon == cCanon)
+        return false;
+    keel::StringRef pRef(pCanon);
+    keel::StringRef cRef(cCanon);
+    if (pRef.back() == '/') {
+        return cRef.size() > pRef.size() && cRef.starts_with(pRef);
+    }
+    return cRef.size() > pRef.size() + 1 && cRef.starts_with(pRef) && cRef[pRef.size()] == '/';
 }
 
 std::vector<SemVerTag> fetchRemoteSemVerTags(const std::string &gitPath, const std::string &gitUrl)
@@ -259,18 +287,17 @@ std::string extractJsonStringField(const std::string &json, const std::string &k
     return json.substr(q1 + 1, q2 - q1 - 1);
 }
 
-void writeManifestWithMetadata(const fs::path &srcManifest, const fs::path &destManifest,
+void writeManifestWithMetadata(keel::StringRef srcManifest, keel::StringRef destManifest,
                                const std::string &pkgName, const std::string &libFilename,
                                const std::string &versionStr, const std::string &refStr,
                                const std::string &commitSha, const std::string &gitUrl)
 {
-    std::error_code ec;
     std::string content;
-    if (fs::exists(srcManifest, ec)) {
-        std::ifstream in(srcManifest);
-        std::ostringstream ss;
-        ss << in.rdbuf();
-        content = ss.str();
+    if (keel::fs_exists(srcManifest)) {
+        auto readRes = keel::fs_read_text(srcManifest);
+        if (readRes.is_ok()) {
+            content = toStdString(readRes.value());
+        }
     }
 
     if (!content.empty()) {
@@ -284,23 +311,21 @@ void writeManifestWithMetadata(const fs::path &srcManifest, const fs::path &dest
                  << "  \"commit\": \"" << commitSha << "\",\n"
                  << "  \"git_url\": \"" << gitUrl << "\",";
             std::string patched = content.substr(0, firstBrace) + meta.str() + content.substr(firstBrace + 1);
-            std::ofstream out(destManifest, std::ios::binary);
-            out << patched;
+            (void)keel::fs_write_text(destManifest, patched);
             return;
         }
     }
 
-    std::ofstream mf(destManifest, std::ios::binary);
-    if (mf.is_open()) {
-        mf << "{\n"
-           << "  \"name\": \"" << pkgName << "\",\n"
-           << "  \"library\": \"" << libFilename << "\",\n"
-           << "  \"resolved_version\": \"" << versionStr << "\",\n"
-           << "  \"ref\": \"" << refStr << "\",\n"
-           << "  \"commit\": \"" << commitSha << "\",\n"
-           << "  \"git_url\": \"" << gitUrl << "\"\n"
-           << "}\n";
-    }
+    std::ostringstream mf;
+    mf << "{\n"
+       << "  \"name\": \"" << pkgName << "\",\n"
+       << "  \"library\": \"" << libFilename << "\",\n"
+       << "  \"resolved_version\": \"" << versionStr << "\",\n"
+       << "  \"ref\": \"" << refStr << "\",\n"
+       << "  \"commit\": \"" << commitSha << "\",\n"
+       << "  \"git_url\": \"" << gitUrl << "\"\n"
+       << "}\n";
+    (void)keel::fs_write_text(destManifest, mf.str());
 }
 
 } // namespace
@@ -329,38 +354,38 @@ bool PackageManager::isOfficialPackageName(const std::string &name)
 
 PackageManager::PackageManager(const std::string &modulesDir)
 {
-    fs::path prefix = getNumkitPrefix();
+    keel::String prefix = getNumkitPrefix();
     if (!modulesDir.empty()) {
         modulesDir_ = modulesDir;
     } else {
         std::string custom = sys::envGet("NUMKIT_MODULES_PATH");
         if (!custom.empty()) {
             modulesDir_ = custom;
-        } else if (fs::exists("modules") && fs::is_directory("modules")) {
-            modulesDir_ = fs::absolute("modules").string();
+        } else if (keel::fs_is_dir("modules")) {
+            auto absMods = keel::fs_absolute("modules");
+            modulesDir_ = absMods.is_ok() ? toStdString(absMods.value()) : std::string("modules");
         } else {
-            modulesDir_ = (prefix / "modules").string();
+            modulesDir_ = toStdString(keel::path_join(prefix, "modules"));
         }
     }
 
-    std::error_code ec;
-    fs::path sharedSrc = prefix / "src";
-    if (fs::exists(sharedSrc / "value" / "CMakeLists.txt", ec)) {
-        cacheDir_ = sharedSrc.string();
+    keel::String sharedSrc = keel::path_join(prefix, "src");
+    if (keel::fs_exists(keel::path_join(sharedSrc, "value", "CMakeLists.txt"))) {
+        cacheDir_ = toStdString(sharedSrc);
     } else {
-        cacheDir_ = (prefix / "cache").string();
+        cacheDir_ = toStdString(keel::path_join(prefix, "cache"));
     }
 
-    fs::create_directories(modulesDir_, ec);
-    fs::create_directories(cacheDir_, ec);
+    (void)keel::fs_create_dirs(modulesDir_);
+    (void)keel::fs_create_dirs(cacheDir_);
 }
 
 std::string PackageManager::readCoreVersionRef() const
 {
-    std::error_code ec;
-    fs::path verFile = getNumkitPrefix() / "VERSION";
-    if (fs::exists(verFile, ec)) {
-        std::ifstream in(verFile);
+    keel::String verFile = keel::path_join(getNumkitPrefix(), "VERSION");
+    auto res = keel::fs_read_text(verFile);
+    if (res.is_ok()) {
+        std::istringstream in(toStdString(res.value()));
         std::string line;
         if (std::getline(in, line)) {
             line = trimString(line);
@@ -392,7 +417,6 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
     }
 
     // 1. Check if explicit local directory path (starts with ./, ../, /, \, or drive letter)
-    std::error_code ec;
     if (baseTarget == "." || baseTarget == ".." ||
         baseTarget.rfind("./", 0) == 0 || baseTarget.rfind(".\\", 0) == 0 ||
         baseTarget.rfind("../", 0) == 0 || baseTarget.rfind("..\\", 0) == 0 ||
@@ -400,9 +424,10 @@ PackageTarget PackageManager::resolveTarget(const std::string &input)
         (baseTarget.size() >= 2 && baseTarget[1] == ':'))
     {
         target.isLocal = true;
-        fs::path p = fs::absolute(baseTarget, ec);
-        target.localPath = p.string();
-        target.name = p.filename().string();
+        auto absRes = keel::fs_absolute(baseTarget);
+        keel::String p = absRes.is_ok() ? std::move(absRes.value()) : keel::path_normalize(baseTarget);
+        target.localPath = toStdString(p);
+        target.name = toStdString(keel::path_basename(p));
         if (target.name.rfind("numkit-", 0) == 0) {
             target.name = target.name.substr(7);
         }
@@ -514,16 +539,15 @@ std::string PackageManager::locateSharedLibrary(const std::string &buildDir, con
     std::string expected1 = "numkit_" + name + ext;
     std::string expected2 = name + ext;
 
-    std::error_code ec;
-    for (const auto &entry : fs::recursive_directory_iterator(buildDir, ec)) {
-        if (entry.is_regular_file(ec)) {
-            std::string filename = entry.path().filename().string();
-            if (filename == expected1 || filename == expected2) {
-                return entry.path().string();
-            }
+    std::string found;
+    (void)keel::fs_walk_dir(buildDir, [&](const keel::DirEntry &entry) {
+        if (entry.is_file && (entry.name == expected1 || entry.name == expected2)) {
+            found = toStdString(entry.full_path);
+            return false;
         }
-    }
-    return {};
+        return true;
+    });
+    return found;
 }
 
 int PackageManager::install(const std::string &targetInput, bool verbose, bool forceHead)
@@ -577,8 +601,8 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
             std::cout << "Installing package '" << target.name << "' (ref: " << resolvedRef << ")...\n";
         }
 
-        sourceDir = (fs::path(cacheDir_) / target.name).string();
-        if (fs::exists(sourceDir)) {
+        sourceDir = toStdString(keel::path_join(cacheDir_, target.name));
+        if (keel::fs_exists(sourceDir)) {
             if (verbose) {
                 std::cout << "Fetching " << resolvedRef << " from " << target.gitUrl << "...\n";
             }
@@ -595,13 +619,12 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
                 if (verbose) {
                     std::cout << "Cache switch failed, cloning fresh...\n";
                 }
-                std::error_code rec;
                 if (isStrictSubpath(cacheDir_, sourceDir))
-                    fs::remove_all(sourceDir, rec);
+                    (void)keel::fs_remove_all(sourceDir);
             }
         }
 
-        if (!fs::exists(sourceDir)) {
+        if (!keel::fs_exists(sourceDir)) {
             std::string cloneCmd = quoteShellArg(gitTool.path) + " clone --depth 1 ";
             if (!resolvedRef.empty() && resolvedRef != "HEAD") {
                 cloneCmd += "--branch " + quoteShellArg(resolvedRef) + " ";
@@ -633,7 +656,7 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
 
     // Configure CMake build
-    std::string buildDir = (fs::path(sourceDir) / "build").string();
+    std::string buildDir = toStdString(keel::path_join(sourceDir, "build"));
     std::string cfgCmd = quoteShellArg(cmakeTool.path) + " -B " + quoteShellArg(buildDir)
                        + " -S " + quoteShellArg(sourceDir)
                        + " -DCMAKE_BUILD_TYPE=Release" + cmakeToolchainFlags(buildDir);
@@ -665,26 +688,26 @@ int PackageManager::install(const std::string &targetInput, bool verbose, bool f
     }
 
     // Copy to modules directory
-    std::error_code ec;
-    fs::path destDir = fs::path(modulesDir_) / target.name;
-    fs::create_directories(destDir, ec);
+    keel::String destDir = keel::path_join(modulesDir_, target.name);
+    (void)keel::fs_create_dirs(destDir);
 
-    fs::path destLib = destDir / fs::path(libPath).filename();
-    fs::copy_file(libPath, destLib, fs::copy_options::overwrite_existing, ec);
-    if (ec) {
-        std::cerr << "Error copying module library to " << destLib.string() << ": " << ec.message() << "\n";
+    std::string libFilename = toStdString(keel::path_basename(libPath));
+    keel::String destLib = keel::path_join(destDir, libFilename);
+    keel::Error copyErr = keel::fs_copy_file(libPath, destLib);
+    if (copyErr.is_err()) {
+        std::cerr << "Error copying module library to " << destLib.c_str() << "\n";
         return 1;
     }
 
     // Write manifest.json with version/ref/commit metadata while preserving exports
-    fs::path srcManifest = fs::path(sourceDir) / "manifest.json";
-    fs::path manifestPath = destDir / "manifest.json";
+    keel::String srcManifest = keel::path_join(sourceDir, "manifest.json");
+    keel::String manifestPath = keel::path_join(destDir, "manifest.json");
     writeManifestWithMetadata(srcManifest, manifestPath, target.name,
-                              fs::path(libPath).filename().string(),
+                              libFilename,
                               versionLabel, resolvedRef, shortSha, target.gitUrl);
 
     std::cout << "Package 'numkit-" << target.name << "' (" << versionLabel
-              << ") successfully installed to:\n  " << destDir.string() << "\n";
+              << ") successfully installed to:\n  " << destDir.c_str() << "\n";
     return 0;
 }
 
@@ -784,24 +807,22 @@ int PackageManager::update(const std::vector<std::string> &names, bool verbose, 
 std::vector<InstalledPackage> PackageManager::scanInstalled(const Engine *engine) const
 {
     std::vector<InstalledPackage> pkgs;
-    std::error_code ec;
-    if (!fs::exists(modulesDir_, ec))
+    if (!keel::fs_exists(modulesDir_))
         return pkgs;
 
-    for (const auto &entry : fs::directory_iterator(modulesDir_, ec)) {
-        if (entry.is_directory(ec)) {
-            std::string name = entry.path().filename().string();
-            std::string libPath = locateSharedLibrary(entry.path().string(), name);
+    (void)keel::fs_read_dir(modulesDir_, [&](const keel::DirEntry &entry) {
+        if (entry.is_dir) {
+            std::string name = toStdString(entry.name);
+            std::string entryPath = toStdString(entry.full_path);
+            std::string libPath = locateSharedLibrary(entryPath, name);
             if (!libPath.empty()) {
                 InstalledPackage p;
                 p.name = name;
                 p.libraryPath = libPath;
-                fs::path mfPath = entry.path() / "manifest.json";
-                if (fs::exists(mfPath, ec)) {
-                    std::ifstream in(mfPath);
-                    std::ostringstream ss;
-                    ss << in.rdbuf();
-                    std::string json = ss.str();
+                keel::String mfPath = keel::path_join(entry.full_path, "manifest.json");
+                auto mfRes = keel::fs_read_text(mfPath);
+                if (mfRes.is_ok()) {
+                    std::string json = toStdString(mfRes.value());
                     p.version = extractJsonStringField(json, "resolved_version");
                     if (p.version.empty()) {
                         p.version = extractJsonStringField(json, "version");
@@ -816,7 +837,8 @@ std::vector<InstalledPackage> PackageManager::scanInstalled(const Engine *engine
                 pkgs.push_back(std::move(p));
             }
         }
-    }
+        return true;
+    });
     std::sort(pkgs.begin(), pkgs.end(), [](const InstalledPackage &a, const InstalledPackage &b) {
         return a.name < b.name;
     });
@@ -895,7 +917,7 @@ int PackageManager::build(const std::string &dir, bool verbose)
         return 1;
     }
 
-    std::string buildDir = (fs::path(dir) / "build").string();
+    std::string buildDir = toStdString(keel::path_join(dir, "build"));
     if (verbose) {
         std::cout << "Building module in " << dir << "...\n";
     }
@@ -933,20 +955,19 @@ int PackageManager::remove(const std::string &nameInput)
         return 1;
     }
 
-    fs::path targetDir = fs::path(modulesDir_) / name;
+    keel::String targetDir = keel::path_join(modulesDir_, name);
     if (!isStrictSubpath(modulesDir_, targetDir)) {
         std::cerr << "Error: Refusing to remove path outside modules directory.\n";
         return 1;
     }
-    std::error_code ec;
-    if (!fs::exists(targetDir, ec)) {
+    if (!keel::fs_exists(targetDir)) {
         std::cerr << "Error: Package '" << nameInput << "' is not installed in " << modulesDir_ << "\n";
         return 1;
     }
 
-    fs::remove_all(targetDir, ec);
-    if (ec) {
-        std::cerr << "Error removing package directory " << targetDir.string() << ": " << ec.message() << "\n";
+    keel::Error remErr = keel::fs_remove_all(targetDir);
+    if (remErr.is_err()) {
+        std::cerr << "Error removing package directory " << targetDir.c_str() << "\n";
         return 1;
     }
 
@@ -965,13 +986,13 @@ int PackageManager::load(const std::string &nameInput, Engine &engine, const std
         return 1;
     }
 
-    fs::path targetDir = fs::path(modulesDir_) / name;
-    std::string libPath = locateSharedLibrary(targetDir.string(), name);
+    keel::String targetDir = keel::path_join(modulesDir_, name);
+    std::string libPath = locateSharedLibrary(toStdString(targetDir), name);
     if (libPath.empty()) {
         libPath = engine.pluginLoader().findPackageLibrary(name);
     }
     if (libPath.empty()) {
-        std::cerr << "Error: Module library for package '" << nameInput << "' not found in " << targetDir.string() << "\n";
+        std::cerr << "Error: Module library for package '" << nameInput << "' not found in " << targetDir.c_str() << "\n";
         return 1;
     }
 

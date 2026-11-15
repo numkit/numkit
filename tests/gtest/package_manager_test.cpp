@@ -1,7 +1,7 @@
 // tests/gtest/package_manager_test.cpp
 
+#include <keel/fs.h>
 #include <numkit/pkg/package_manager.hpp>
-#include <filesystem>
 #include <sstream>
 #include <gtest/gtest.h>
 
@@ -50,13 +50,14 @@ TEST(PackageManagerTest, ResolveBareNameDefaultsToNumkitOrg)
 
 TEST(PackageManagerTest, ListEmptyModulesDirectory)
 {
-    auto tmpDir = std::filesystem::temp_directory_path() / "numkit_empty_modules_test_dir";
-    std::error_code ec;
-    std::filesystem::remove_all(tmpDir, ec);
-    PackageManager pm(tmpDir.string());
+    auto tmpBase = keel::fs_temp_dir();
+    ASSERT_TRUE(tmpBase.is_ok());
+    keel::String tmpDir = keel::path_join(tmpBase.value(), "numkit_empty_modules_test_dir");
+    (void)keel::fs_remove_all(tmpDir);
+    PackageManager pm(std::string(tmpDir.data(), tmpDir.size()));
     std::ostringstream ss;
     int rc = pm.list(ss);
-    std::filesystem::remove_all(tmpDir, ec);
+    (void)keel::fs_remove_all(tmpDir);
     EXPECT_EQ(rc, 0);
     EXPECT_NE(ss.str().find("no packages installed"), std::string::npos);
 }
