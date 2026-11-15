@@ -42,13 +42,15 @@ void error(keel::ArrayRef<Value> args)
         std::string id = first;
         std::string second(args[1].toString().as_ref());
         std::string msg = (args.size() > 2)
-                              ? formatOnce(second, args, 2)
+                              ? std::string(formatOnce(second, args, 2).as_ref())
                               : second;
         throw Error(msg, 0, 0, "", "", id);
     }
 
     // error(msg) or error(msg, arg1, ...)
-    std::string msg = (args.size() > 1) ? formatOnce(first, args, 1) : first;
+    std::string msg = (args.size() > 1)
+                          ? std::string(formatOnce(first, args, 1).as_ref())
+                          : first;
     throw Error(msg);
 }
 
@@ -70,10 +72,10 @@ void warning(Engine &engine, keel::ArrayRef<Value> args)
         && (args[1].isChar() || args[1].isString())) {
         id  = first;
         std::string second(args[1].toString().as_ref());
-        msg = (args.size() > 2) ? formatOnce(second, args, 2)
+        msg = (args.size() > 2) ? std::string(formatOnce(second, args, 2).as_ref())
                                 : second;
     } else if (args.size() > 1) {
-        msg = formatOnce(first, args, 1);
+        msg = std::string(formatOnce(first, args, 1).as_ref());
     } else {
         msg = first;
     }
@@ -101,8 +103,9 @@ Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr)
                      "MException", "", "numkit:MException:nargin");
     std::string id(args[0].toString().as_ref());
     std::string second(args[1].toString().as_ref());
-    std::string msg = (args.size() > 2) ? formatOnce(second, args, 2)
-                                        : second;
+    std::string msg = (args.size() > 2)
+                          ? std::string(formatOnce(second, args, 2).as_ref())
+                          : second;
     auto me = Value::structure();
     me.field("identifier") = Value::fromString(id, mr);
     me.field("message") = Value::fromString(msg, mr);
@@ -148,13 +151,15 @@ void assertCond(keel::ArrayRef<Value> args)
         std::string id = first;
         std::string second(args[2].toString().as_ref());
         std::string msg = (args.size() > 3)
-                              ? formatOnce(second, args, 3)
+                              ? std::string(formatOnce(second, args, 3).as_ref())
                               : second;
         throw Error(msg, 0, 0, "", "", id);
     }
 
     // assert(cond, msg) / assert(cond, msg, arg1, ...)
-    std::string msg = (args.size() > 2) ? formatOnce(first, args, 2) : first;
+    std::string msg = (args.size() > 2)
+                          ? std::string(formatOnce(first, args, 2).as_ref())
+                          : first;
     throw Error(msg, 0, 0, "", "", "numkit:assert");
 }
 
@@ -194,7 +199,7 @@ void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         if (!args[1].isChar() && !args[1].isString())
             throw Error("lastwarn: id must be a char or string",
                          0, 0, "lastwarn", "", "numkit:lastwarn:badId");
-        id = args[1].toString();
+        id = std::string(args[1].toString().as_ref());
     }
     ctx.engine->setLastWarn(msg, id);
     // MATLAB's set form returns nothing; we mirror that.

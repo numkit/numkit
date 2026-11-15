@@ -14,6 +14,7 @@
 
 #include <keel/core.h>
 #include <keel/memory.h>
+#include <keel/array.h>
 #include <keel/ref.h>
 #include <keel/complex.h>
 #include <numkit/linalg/decompositions.hpp>
@@ -278,7 +279,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
     const keel::usize m = args[0].dims().rows(), n = args[0].dims().cols();
 
     if (nargout >= 3) {
-        std::vector<keel::usize> perm;
+        keel::Array<keel::usize> perm(mr);
         auto [Q, R] = qr_pivoted(args[0], perm, mr);
         if (econ) {
             const keel::usize k = std::min(m, n);

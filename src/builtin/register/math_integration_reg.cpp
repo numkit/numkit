@@ -9,6 +9,7 @@
 #include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <tuple>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/builtin/detail/polyfun/integration_detail.hpp>
 #include <numkit/core/engine.hpp>

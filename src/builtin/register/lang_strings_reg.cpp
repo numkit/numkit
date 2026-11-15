@@ -110,7 +110,8 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                             expr.push_back(cd[r + c * rows]);
                     }
                 } else {
-                    expr += s.toString();
+                    const keel::String ts = s.toString();
+                    expr.append(ts.data(), ts.size());
                 }
                 expr.push_back(']');
                 Value v = ctx.engine->eval(expr, /*suppressTopLevelDisplay=*/true);
@@ -187,7 +188,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, "strsplit");
     auto *mr = ctx.engine->allocator();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    keel::Array<std::string> delims(scratch.allocator());
+    keel::Array<keel::String> delims(scratch.allocator());
     bool collapse = true;
     // arg 1 (optional) is the delimiter: a string or cell array of strings.
     // Name-Value pairs (CollapseDelimiters) follow at arg 2+.
@@ -209,7 +210,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     if (nargout >= 2) {
         // [tokens, matches] = strsplit(...): also return the matched
         // delimiters (1×(numel(tokens)-1) cell of strings).
-        keel::Array<std::string> matched(scratch.allocator());
+        keel::Array<keel::String> matched(scratch.allocator());
         outs[0] = strsplitImpl(args[0].toString(), delims, collapse, mr, &matched);
         auto mc = Value::cell(1, matched.size());
         for (keel::usize k = 0; k < matched.size(); ++k)
@@ -710,7 +711,7 @@ void strjust_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strjust");
-    std::string side = "right";
+    keel::String side = keel::String::from("right");
     if (args.size() >= 2) {
         if (!args[1].isChar() && !args[1].isString())
             throw Error("strjust: side must be a char or string",

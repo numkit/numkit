@@ -53,7 +53,8 @@ keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
     if (!args[fmtIdx].isChar())
         return 0;
 
-    std::string result = formatCyclic(std::string(args[fmtIdx].toString().as_ref()), args, fmtIdx + 1, mr);
+    keel::String fmtStr = args[fmtIdx].toString();
+    keel::String result = formatCyclic(fmtStr.as_ref(), args, fmtIdx + 1, mr);
 
     if (fid == 1 || fid == 2) {
         engine.outputText(result);

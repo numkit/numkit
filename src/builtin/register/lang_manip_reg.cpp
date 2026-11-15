@@ -321,7 +321,7 @@ void ind2sub_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     argcheck::checkNargin(args.size(), 1, 2, "ind2sub");
     argcheck::checkNargin(args.size(), 2, 2, "ind2sub");
-    std::vector<Value> rs = ind2sub(args[0], args[1],
+    keel::Array<Value> rs = ind2sub(args[0], args[1],
                                     std::max<keel::usize>(nargout, 1),
                                     ctx.engine->allocator());
     for (keel::usize i = 0; i < rs.size() && i < outs.size(); ++i)

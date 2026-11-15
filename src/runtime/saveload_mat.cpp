@@ -1012,7 +1012,7 @@ void saveMat(Engine &engine, Environment &env,
 
         if (matVersion == 7) {
             // -v7: Compressed miMATRIX via zlib
-            std::vector<keel::u8> comp = ops::zlibCompress(
+            keel::Array<keel::u8> comp = ops::zlibCompress(
                 itemWriter.bytes.data(), itemWriter.bytes.size(), 6);
             mw.writeTag(miCOMPRESSED, comp.data(), static_cast<keel::u32>(comp.size()));
         } else {
@@ -1062,7 +1062,7 @@ void loadMat(Engine &engine, Environment &env,
 
             if (tag.type == miCOMPRESSED) {
                 // Decompress zlib stream
-                std::vector<keel::u8> uncompressed = ops::zlibDecompress(
+                keel::Array<keel::u8> uncompressed = ops::zlibDecompress(
                     tag.payload, tag.byteCount);
                 MatReader decompReader(uncompressed.data(), uncompressed.size(), isBigEndian);
                 while (!decompReader.eof()) {

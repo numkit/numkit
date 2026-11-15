@@ -745,9 +745,10 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         return;
     }
 
-    std::vector<keel::usize> idx_out;
+    keel::Array<keel::usize> idx_out(mr);
     auto B = topkrows_full(args[0], static_cast<keel::usize>(kd),
-                            cols, desc,
+                            keel::ArrayRef<keel::usize>(cols.data(), cols.size()),
+                            keel::ArrayRef<keel::u8>(desc.data(), desc.size()),
                             (nargout >= 2) ? &idx_out : nullptr, mr);
     outs[0] = std::move(B);
     if (nargout >= 2) {

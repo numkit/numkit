@@ -9,6 +9,7 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <keel/complex.h>
 #include <numkit/linalg/matrix_functions.hpp>
 
@@ -52,11 +53,11 @@ void funm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     const Value &A = args[0];
     const Value &fnArg = args[1];
 
-    std::string knownName;
+    keel::String knownName;
     if (fnArg.isChar() || fnArg.isString()) {
         knownName = fnArg.toString();
     } else if (fnArg.isFuncHandle()) {
-        knownName = fnArg.funcHandleName();
+        knownName = keel::String::from(fnArg.funcHandleName(), mr);
     }
     if (knownName == "exp" || knownName == "log" || knownName == "sqrt"
         || knownName == "sin" || knownName == "cos"

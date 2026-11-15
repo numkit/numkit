@@ -60,7 +60,7 @@ figrender::SvgImageEmbedder svgPngEmbedder(
                 for (keel::usize ch = 0; ch < 3; ++ch)
                     d[r + c * Hp + ch * Hp * Wp] =
                         rgb[(r * Wp + c) * 3 + ch];
-        std::string png = image::imwriteToBytes(A, "png", mr);
+        keel::String png = image::imwriteToBytes(A, "png", mr);
         std::string b64 = "data:image/png;base64,";
         b64.reserve(b64.size() + (png.size() / 3 + 1) * 4);
         keel::usize i = 0;
@@ -240,7 +240,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
             for (keel::usize ch = 0; ch < 3; ++ch)
                 d[r + c * Hp + ch * Hp * Wp] =
                     rgb[(r * Wp + c) * 3 + ch];
-    std::string bytes = image::imwriteToBytes(A, ea.ext, engine.allocator());
+    keel::String bytes = image::imwriteToBytes(A, ea.ext, engine.allocator());
     rp.fs->writeFileBytes(rp.path, bytes);
 }
 

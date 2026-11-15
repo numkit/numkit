@@ -67,7 +67,7 @@ inline std::vector<keel::f64> parseFlatDoubles(const std::string &j) {
 }
 
 // Serialize doubles → flat JSON array. NaN → null, ±Inf → "Inf"/"-Inf".
-inline std::string serializeFlatDoubles(const std::vector<keel::f64> &v) {
+inline std::string serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
     std::ostringstream os;
     os << "[";
     os.precision(17);
@@ -80,6 +80,10 @@ inline std::string serializeFlatDoubles(const std::vector<keel::f64> &v) {
     }
     os << "]";
     return os.str();
+}
+
+inline std::string serializeFlatDoubles(const std::vector<keel::f64> &v) {
+    return serializeFlatDoubles(keel::ArrayRef<keel::f64>(v.data(), v.size()));
 }
 
 }  // namespace figdetail
@@ -1255,13 +1259,18 @@ public:
         if (ds.xRaw.empty() || ds.xRaw.size() != ds.yRaw.size()) return out;
         // Build the coarse LOD levels once, then pick the cheapest level for
         // this viewport so the decimation is O(width) even fully zoomed out.
-        if (ds.seriesPyramid.empty() && ds.xRaw.size() > 8000)
-            ds.seriesPyramid = buildPyramid(ds.xRaw.data(), ds.yRaw.data(), ds.xRaw.size());
+        if (ds.seriesPyramid.empty() && ds.xRaw.size() > 8000) {
+            auto pyr = buildPyramid(ds.xRaw.data(), ds.yRaw.data(), ds.xRaw.size());
+            ds.seriesPyramid.reserve(pyr.size());
+            for (auto &lvl : pyr)
+                ds.seriesPyramid.push_back(std::move(lvl));
+        }
         DecimAlgo a = (algo == 1) ? DecimAlgo::LTTB
                     : (algo == 2) ? DecimAlgo::None
                     : (algo == 3) ? DecimAlgo::M2 : DecimAlgo::M4;
         return decimateLOD(ds.xRaw.data(), ds.yRaw.data(), ds.xRaw.size(),
-                           ds.seriesPyramid, x0, x1, width, a);
+                           keel::ArrayRef<DecimatedSeries>(ds.seriesPyramid.data(), ds.seriesPyramid.size()),
+                           x0, x1, width, a);
     }
 
     bool getFigureDisplayTile(int figId, int axIdx, int dsIdx,

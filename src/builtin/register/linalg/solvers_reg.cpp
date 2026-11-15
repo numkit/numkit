@@ -18,7 +18,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <string>
 #include <utility>
 
 namespace numkit::linalg {
