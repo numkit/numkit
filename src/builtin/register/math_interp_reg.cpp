@@ -11,6 +11,7 @@
 #include <keel/format.h>
 #include <keel/math.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/polyfun.hpp>
@@ -20,7 +21,6 @@
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -52,7 +52,7 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
         const Value &e = args[4];
         if (e.isChar() || e.isString()) {
             keel::String es = e.toString();
-            for (char &c : es) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (char &c : es) c = keel::to_ascii_lower(c);
             if (es == "extrap")
                 mode = Interp1Extrap::Method;
             else
@@ -422,7 +422,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::String method = keel::String::from("linear");
     if (L < args.size() && (args[L].isChar() || args[L].isString())) {
         method = args[L].toString();
-        for (char &c : method) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : method) c = keel::to_ascii_lower(c);
     }
     const bool isNearest = (method == "nearest");
     if (!isNearest && method != "linear") {

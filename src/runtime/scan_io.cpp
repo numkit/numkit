@@ -16,6 +16,7 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/runtime/io.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/scan_core.hpp>     // detail::scanfEmit + ScanfOut
@@ -24,8 +25,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/io_helpers.hpp>       // SizeSpec / parseReadSize (numkit::builtin::detail)
-
-#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -117,7 +116,7 @@ keel::Array<TextscanConv> parseTextscanFormat(keel::StringRef fmt, keel::Allocat
         bool suppress = false;
         if (i < fmt.size() && fmt[i] == '*') { suppress = true; ++i; }
         int width = -1;
-        while (i < fmt.size() && std::isdigit(static_cast<unsigned char>(fmt[i]))) {
+        while (i < fmt.size() && keel::is_ascii_digit(fmt[i])) {
             if (width < 0) width = 0;
             width = width * 10 + (fmt[i] - '0');
             ++i;
@@ -189,7 +188,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     TextscanOptions opts{scratch.allocator()};
     auto lower = [](keel::StringRef sr) {
         keel::String s = keel::String::from(sr);
-        for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : s) c = keel::to_ascii_lower(c);
         return s;
     };
     while (argIdx + 1 < args.size()) {

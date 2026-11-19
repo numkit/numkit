@@ -10,6 +10,7 @@
 #include <keel/small_array.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -25,7 +26,6 @@
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
 #include <algorithm>
-#include <cctype>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -3414,7 +3414,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         const keel::String &arg = node->children[0]->strValue;
         if (arg.size() < 2 || (arg[0] != '-' && arg[0] != '/'))
             continue;
-        if (!std::isalnum(static_cast<unsigned char>(arg[1])) && arg[1] != '.')
+        if (!keel::is_ascii_alnum(arg[1]) && arg[1] != '.')
             continue;
         if (!getVariable(name) && !isReservedName(name))
             continue;
@@ -3428,11 +3428,11 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
             isNum = (errno == 0 && endPtr == tail.c_str() + tail.size());
         }
         bool isIdent = !tail.empty()
-                       && (std::isalpha(static_cast<unsigned char>(tail[0]))
+                       && (keel::is_ascii_alpha(tail[0])
                            || tail[0] == '_');
         if (isIdent)
             for (char c : tail)
-                if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+                if (!(keel::is_ascii_alnum(c) || c == '_'))
                     { isIdent = false; break; }
         if (!isNum && !isIdent) continue;
         const int ln = node->line, cl = node->col;

@@ -9,12 +9,12 @@
 #include <keel/math.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -62,7 +62,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             for (keel::usize i = nvStart; i < args.size(); ++i) {
                 if (args[i].isChar()) {
                     keel::String s = args[i].toString();
-                    for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                    for (auto &c : s) c = keel::to_ascii_lower(c);
                     if (s == "stacked" || s == "grouped"
                         || s == "histc"  || s == "hist") {
                         mode = keel::move(s);
@@ -589,7 +589,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             for (keel::usize k = 2; k < args.size(); ++k) {
                 if (args[k].isChar()) {
                     keel::String s = args[k].toString();
-                    for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    for (auto &c : s) c = keel::to_ascii_lower(c);
                     if (s == "filled") { ds.style.assign("filled=1"); break; }
                 }
             }
@@ -722,7 +722,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar()) continue;
                 keel::String key = args[i].toString();
-                for (auto &c : key) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : key) c = keel::to_ascii_lower(c);
                 if (key == "binwidth" && args[i + 1].isNumeric())
                     binWidthNV = args[i + 1].elemAsDouble(0);
                 else if (key == "binlimits" && args[i + 1].numel() >= 2) {
@@ -739,7 +739,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     keel::String *kv = key == "facecolor" ? &faceKV : &edgeKV;
                     if (cv.isChar()) {
                         keel::String c = cv.toString();
-                        for (auto &ch : c) ch = (char)std::tolower((unsigned char)ch);
+                        for (auto &ch : c) ch = keel::to_ascii_lower(ch);
                         static const std::pair<const char *, const char *> shorts[] = {
                             {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                             {"k", "#000000"}, {"y", "#ffff00"}, {"m", "#ff00ff"},
@@ -1626,14 +1626,14 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     if (i + 1 < a.size()) {
                         keel::String key = a[i].toString();
                         for (auto &cc : key)
-                            cc = (char)std::tolower((unsigned char)cc);
+                            cc = keel::to_ascii_lower(cc);
                         if (key == "colormap" && a[i + 1].isChar()) {
                             cmap = a[i + 1].toString();
                             ++i; continue;
                         }
                         if (key == "celllabel" && a[i + 1].isChar()) {
                             keel::String v = a[i + 1].toString();
-                            for (auto &cc : v) cc = (char)std::tolower((unsigned char)cc);
+                            for (auto &cc : v) cc = keel::to_ascii_lower(cc);
                             cellLabel = (v != "off");
                             ++i; continue;
                         }

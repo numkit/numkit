@@ -9,12 +9,12 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/vm.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2369,7 +2369,7 @@ enter_frame:
                 }
                 if (!R[I.b].hasField(fname)) {
                     if (fname.size() == 1 && R[I.b].hasField("kind")) {
-                        char up = static_cast<char>(std::toupper(static_cast<unsigned char>(fname[0])));
+                        char up = keel::to_ascii_upper(fname[0]);
                         char upBuf[2] = {up, '\0'};
                         keel::StringRef upField(upBuf, 1);
                         if ((up == 'A' || up == 'B' || up == 'C' || up == 'D') && R[I.b].hasField(upField)) {

@@ -36,6 +36,7 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/graphics/library.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
@@ -46,7 +47,6 @@
 #include <numkit/value/object.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -1659,7 +1659,7 @@ void registerHandleAccessors(Engine &engine)
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
                     keel::String lprop = args[1].toString();
                     for (char &ch : lprop)
-                        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                        ch = keel::to_ascii_lower(ch);
                     if (lprop == "pointerlocation") {
                         Value v = Value::matrix(1, 2, ValueType::DOUBLE, engine.allocator());
                         v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
@@ -1853,7 +1853,7 @@ void registerHandleAccessors(Engine &engine)
                     continue;
                 keel::String key = args[i].toString();
                 for (auto &c : key)
-                    c = (char)std::tolower((unsigned char)c);
+                    c = keel::to_ascii_lower(c);
                 if (key == "-property" && i + 1 < args.size()
                     && args[i + 1].isChar()) {
                     Filt f;

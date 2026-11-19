@@ -15,7 +15,6 @@
 #include <numkit/ops/io_helpers.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <tuple>

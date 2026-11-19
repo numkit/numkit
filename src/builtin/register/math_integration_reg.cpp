@@ -11,6 +11,7 @@
 #include <keel/array.h>
 #include <keel/format.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <tuple>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/builtin/detail/polyfun/integration_detail.hpp>
@@ -22,7 +23,6 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
 
 namespace numkit::builtin {
@@ -228,7 +228,7 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
             throw Error("integral: expected option name (string)",
                          0, 0, "integral", "", "numkit:integral:badFlag");
         keel::String key = args[i].toString();
-        for (char &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : key) c = keel::to_ascii_lower(c);
         if (key == "abstol") {
             absTol = args[i + 1].toScalar();
         } else {
@@ -251,7 +251,7 @@ static double integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOpt)
     double absTol = 1e-10;
     for (keel::usize i = firstOpt; i + 1 < args.size(); i += 2) {
         keel::String key = args[i].toString();
-        for (char &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : key) c = keel::to_ascii_lower(c);
         if (key == "abstol") absTol = args[i + 1].toScalar();
     }
     return absTol;

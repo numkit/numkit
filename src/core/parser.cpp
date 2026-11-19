@@ -1,8 +1,8 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
+#include <keel/utf8.h>
 #include <numkit/core/parser.hpp>
-#include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <stdexcept>
@@ -1447,7 +1447,7 @@ ASTNodePtr Parser::parsePostfix()
         } else if (check(TokenType::DOT)
                    && (peekToken(1).type == TokenType::IDENTIFIER
                        || (!peekToken(1).value.empty()
-                           && std::isalpha(static_cast<unsigned char>(peekToken(1).value[0]))))) {
+                           && keel::is_ascii_alpha(peekToken(1).value[0])))) {
             auto [ln, cl] = loc();
             advance();
             auto fn = makeNode(NodeType::FIELD_ACCESS, ln, cl);

@@ -26,12 +26,12 @@
 #include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/core/figure_manager.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -147,7 +147,7 @@ inline bool textColorSpec(keel::StringRef v, Rgb &out)
     s.reserve(v.size());
     for (char c : v)
         if (c != ' ' && c != '[' && c != ']')
-            s.push_back((char)std::tolower((unsigned char)c));
+            s.push_back(keel::to_ascii_lower(c));
     if (s.size() == 1) {
         for (const auto &kv : kNames)
             if (s[0] == kv.first[0]) {
@@ -351,7 +351,7 @@ const keel::u8 *namedPalette(keel::StringRef name, int &n)
     keel::String key;
     key.reserve(name.size());
     for (char c : name)
-        key.push_back((char)std::tolower((unsigned char)c));
+        key.push_back(keel::to_ascii_lower(c));
     n = 256;
     for (keel::usize idx = 0; idx < kNumPalettes; ++idx)
         if (key == kNamedPaletteHex[idx].name)
@@ -783,7 +783,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     // axes to ~0.68 width; we reserve strip + ticks + labels).
     keel::String cbSide = ax.colorbarLocation.clone();
     for (char &c : cbSide)
-        c = (char)std::tolower((unsigned char)c);
+        c = keel::to_ascii_lower(c);
     if (cbSide.size() > 7
         && cbSide.substr(cbSide.size() - 7) == "outside")
         cbSide = keel::String::from(cbSide.substr(0, cbSide.size() - 7));

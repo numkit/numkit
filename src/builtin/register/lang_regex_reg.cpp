@@ -7,6 +7,7 @@
 #include <keel/format.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/strfun.hpp>
@@ -17,7 +18,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <tuple>
@@ -51,7 +51,7 @@ inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::String o = args[i].toString();
         keel::String lo = o.clone();
         for (keel::usize j = 0; j < lo.size(); ++j)
-            lo[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(lo[j])));
+            lo[j] = keel::to_ascii_lower(lo[j]);
         if (lo == "once") { once = true; continue; }
         if (opt.empty()) opt = std::move(o);
     }
@@ -93,7 +93,7 @@ void regexprep_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
         if (args[i].isChar() || args[i].isString()) {
             keel::String o = args[i].toString();
             for (keel::usize j = 0; j < o.size(); ++j)
-                o[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(o[j])));
+                o[j] = keel::to_ascii_lower(o[j]);
             if      (o == "ignorecase") ignoreCase = true;
             else if (o == "once")       once = true;
         }

@@ -16,8 +16,7 @@
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
-#include <cctype>
-
+#include <keel/utf8.h>
 namespace numkit::runtime {
 
 // Returns true and fills `name` with the PRIMARY function's identifier if
@@ -46,7 +45,7 @@ inline bool primaryFunctionOfFile(keel::StringRef src, keel::String &name)
         trimInPlace(line);
         if (line.empty()) continue;
         if (line.starts_with("function")
-            && (line.size() == 8 || std::isspace(static_cast<unsigned char>(line[8])))) {
+            && (line.size() == 8 || keel::is_ascii_space(line[8]))) {
             haveFirst = true;
             // join continuations ("...") of the signature line
             while (line.ends_with("...") && i < n) {
@@ -78,14 +77,14 @@ inline bool primaryFunctionOfFile(keel::StringRef src, keel::String &name)
     } else {
         namePos = 8; // past "function"
     }
-    while (namePos < line.size() && std::isspace(static_cast<unsigned char>(line[namePos])))
+    while (namePos < line.size() && keel::is_ascii_space(line[namePos]))
         ++namePos;
     if (namePos >= line.size()) return false;
-    if (!std::isalpha(static_cast<unsigned char>(line[namePos])) && line[namePos] != '_')
+    if (!keel::is_ascii_alpha(line[namePos]) && line[namePos] != '_')
         return false;
     keel::usize end = namePos;
     while (end < line.size()
-           && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
+           && (keel::is_ascii_alnum(line[end]) || line[end] == '_'))
         ++end;
     name.assign(line.substr(namePos, end - namePos));
     return !name.empty();

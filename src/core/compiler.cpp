@@ -1,13 +1,13 @@
 // src/compiler.cpp
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
@@ -4227,11 +4227,11 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
                 if (s.empty())
                     return false;
                 unsigned char c0 = static_cast<unsigned char>(s[0]);
-                if (!std::isalpha(c0) && c0 != '_')
+                if (!keel::is_ascii_alpha(c0) && c0 != '_')
                     return false;
                 for (keel::usize k = 1; k < s.size(); ++k) {
                     unsigned char ck = static_cast<unsigned char>(s[k]);
-                    if (!std::isalnum(ck) && ck != '_')
+                    if (!keel::is_ascii_alnum(ck) && ck != '_')
                         return false;
                 }
                 return true;

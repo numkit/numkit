@@ -18,6 +18,7 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/runtime/containers.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
@@ -29,7 +30,6 @@
 #include <numkit/value/object.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -764,8 +764,8 @@ void registerContainersRuntime(Engine &engine)
         if (a.size() != n)
             return false;
         for (keel::usize i = 0; i < n; ++i)
-            if (std::tolower(static_cast<unsigned char>(a.data()[i]))
-                != std::tolower(static_cast<unsigned char>(b[i])))
+            if (keel::to_ascii_lower(a.data()[i])
+                != keel::to_ascii_lower(b[i]))
                 return false;
         return true;
     };
@@ -1213,7 +1213,7 @@ void registerContainersRuntime(Engine &engine)
             if (p->isTimetable) {
                 keel::String low = keel::String::from(name);
                 for (keel::usize i = 0; i < low.size(); ++i)
-                    low[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(low[i])));
+                    low[i] = keel::to_ascii_lower(low[i]);
                 if (low.find("date") != keel::kInvalidIndex || low.find("time") != keel::kInvalidIndex) {
                     out = p->rowTimes;
                     return true;
@@ -3416,18 +3416,18 @@ void registerContainersRuntime(Engine &engine)
     // ── Identifier sanitization + Spreadsheet / Delimited Table I/O ──────────
     static auto makeValidIdStr = [](keel::StringRef raw) -> keel::String {
         keel::usize a = 0, b = raw.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) ++a;
-        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) --b;
+        while (a < b && keel::is_ascii_space(raw[a])) ++a;
+        while (b > a && keel::is_ascii_space(raw[b - 1])) --b;
         keel::String s;
         s.reserve(b - a + 1);
         for (keel::usize i = a; i < b; ++i) {
             unsigned char ch = static_cast<unsigned char>(raw[i]);
-            if (std::isalnum(ch) || ch == '_')
+            if (keel::is_ascii_alnum(ch) || ch == '_')
                 s.push_back(static_cast<char>(ch));
             else
                 s.push_back('_');
         }
-        if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0]))) {
+        if (s.empty() || !keel::is_ascii_alpha(s[0])) {
             keel::String prefixed;
             prefixed.reserve(s.size() + 1);
             prefixed.push_back('x');
@@ -3660,11 +3660,11 @@ void registerContainersRuntime(Engine &engine)
                 continue;
 
             keel::usize colNum = 0, rowNum = 0, k = 0;
-            while (k < ref.size() && std::isalpha(static_cast<unsigned char>(ref[k]))) {
-                colNum = colNum * 26 + (std::toupper(static_cast<unsigned char>(ref[k])) - 'A' + 1);
+            while (k < ref.size() && keel::is_ascii_alpha(ref[k])) {
+                colNum = colNum * 26 + (keel::to_ascii_upper(ref[k]) - 'A' + 1);
                 ++k;
             }
-            while (k < ref.size() && std::isdigit(static_cast<unsigned char>(ref[k]))) {
+            while (k < ref.size() && keel::is_ascii_digit(ref[k])) {
                 rowNum = rowNum * 10 + (ref[k] - '0');
                 ++k;
             }
@@ -3744,7 +3744,7 @@ void registerContainersRuntime(Engine &engine)
             pos = (nl == keel::kInvalidIndex) ? content.size() : (nl + 1);
             bool allWs = true;
             for (keel::usize ci = 0; ci < line.size(); ++ci)
-                if (!std::isspace(static_cast<unsigned char>(line[ci]))) { allWs = false; break; }
+                if (!keel::is_ascii_space(line[ci])) { allWs = false; break; }
             if (allWs)
                 continue;
 
@@ -3783,8 +3783,8 @@ void registerContainersRuntime(Engine &engine)
                         ++nextSep;
                     keel::StringRef rawTok = line.substr(i, nextSep - i);
                     keel::usize a = 0, b = rawTok.size();
-                    while (a < b && std::isspace(static_cast<unsigned char>(rawTok[a]))) ++a;
-                    while (b > a && std::isspace(static_cast<unsigned char>(rawTok[b - 1]))) --b;
+                    while (a < b && keel::is_ascii_space(rawTok[a])) ++a;
+                    while (b > a && keel::is_ascii_space(rawTok[b - 1])) --b;
                     keel::String tok = keel::String::from(rawTok.substr(a, b - a));
                     bool present = !tok.empty();
                     row.push_back(GridCell{present, false, std::move(tok)});
@@ -3807,7 +3807,7 @@ void registerContainersRuntime(Engine &engine)
         char *end = nullptr;
         double v = std::strtod(cs, &end);
         if (end == cs) return false;
-        while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end)))
+        while (*end != '\0' && keel::is_ascii_space(*end))
             ++end;
         if (*end != '\0') return false;
         out = v;
@@ -4416,8 +4416,8 @@ void registerContainersRuntime(Engine &engine)
     // ── Linear regression model: fitlm + predict ─────────────────────────────
     static auto trimStr = [](keel::StringRef s) -> keel::StringRef {
         keel::usize a = 0, b = s.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-        while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+        while (a < b && keel::is_ascii_space(s[a])) ++a;
+        while (b > a && keel::is_ascii_space(s[b - 1])) --b;
         return s.substr(a, b - a);
     };
 

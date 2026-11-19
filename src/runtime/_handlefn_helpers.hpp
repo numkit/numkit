@@ -14,13 +14,12 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/builtin/datafun.hpp>   // sum / prod / mean
 #include <numkit/builtin/elmat.hpp>  // length / ndims
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
-
-#include <cctype>
 #include <cmath>
 
 namespace numkit::runtime::detail::handlefn {
@@ -62,7 +61,7 @@ inline keel::String lowerName(keel::StringRef s)
 {
     keel::String r = keel::String::from(s);
     for (keel::usize i = 0; i < r.size(); ++i)
-        r[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(r[i])));
+        r[i] = keel::to_ascii_lower(r[i]);
     return r;
 }
 

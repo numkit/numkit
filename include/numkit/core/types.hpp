@@ -15,16 +15,14 @@
 #include <numkit/value/error.hpp>   // numkit::Error (L0) — re-exported here for existing users
 #include <numkit/value/value.hpp>
 
-#include <chrono>
 #include <stdexcept>
 
 namespace numkit {
 
 // ============================================================
-// Timer types
+// Timer types (monotonic nanoseconds from keel::monotonic_ns())
 // ============================================================
-using Clock = std::chrono::high_resolution_clock;
-using TimePoint = Clock::time_point;
+using TimePoint = keel::u64;
 
 // ============================================================
 // Function types

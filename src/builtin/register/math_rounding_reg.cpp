@@ -6,6 +6,7 @@
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elfun.hpp>
@@ -19,7 +20,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <tuple>
@@ -62,7 +62,7 @@ void round_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     bool significant = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
         keel::String s = args[2].toString();
-        for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : s) c = keel::to_ascii_lower(c);
         if      (s == "significant") significant = true;
         else if (s == "decimals")    significant = false;
         else

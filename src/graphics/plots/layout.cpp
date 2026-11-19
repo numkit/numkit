@@ -10,13 +10,13 @@
 #include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -180,7 +180,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 const char *base = j.c_str();
                 keel::usize pos = 0;
                 while (pos < j.size()) {
-                    if (std::isdigit((unsigned char)j[pos]) || j[pos] == '-' || j[pos] == '+') {
+                    if (keel::is_ascii_digit(j[pos]) || j[pos] == '-' || j[pos] == '+') {
                         char *endptr = nullptr;
                         double v = std::strtod(base + pos, &endptr);
                         if (endptr && endptr > base + pos && std::isfinite(v)) {
@@ -388,7 +388,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
             keel::String type = args[0].toString();
-            for (auto &c : type) c = (char)std::tolower(c);
+            for (auto &c : type) c = keel::to_ascii_lower(c);
             static const std::array<const char *, 6> kTypes = {
                 "line", "arrow", "textarrow", "ellipse", "rectangle",
                 "textbox"};
@@ -429,7 +429,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 char buf[8];
                 if (cv.isChar()) {
                     keel::String s = cv.toString();
-                    for (auto &ch : s) ch = (char)std::tolower(ch);
+                    for (auto &ch : s) ch = keel::to_ascii_lower(ch);
                     static const std::pair<const char *, const char *> kMap[] = {
                         {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                         {"k", "#000000"}, {"w", "#ffffff"}, {"y", "#ffff00"},
@@ -462,7 +462,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 if (!args[i].isChar())
                     continue;
                 keel::String key = args[i].toString();
-                for (auto &c : key) c = (char)std::tolower(c);
+                for (auto &c : key) c = keel::to_ascii_lower(c);
                 if (key == "string" && args[i + 1].isChar()) {
                     an.text = args[i + 1].toString();
                 } else if (key == "color") {
@@ -505,7 +505,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             };
             for (keel::usize i = strIdx + 1; i + 1 < args.size(); i += 2) {
                 keel::String key = argStr(args[i]);
-                for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto &c : key) c = keel::to_ascii_lower(c);
                 const Value &val = args[i + 1];
                 if (key == "color") {
                     if (val.isChar() || val.isString()) {
@@ -523,7 +523,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                     addExtra(fs.as_ref());
                 } else if (key == "horizontalalignment" && val.isChar()) {
                     keel::String a = argStr(val);
-                    for (auto &c : a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    for (auto &c : a) c = keel::to_ascii_lower(c);
                     if (a == "left" || a == "center" || a == "right") {
                         keel::String kv = keel::format("halign={}", a);
                         addExtra(kv.as_ref());
@@ -577,7 +577,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 ax.gridMajor = !ax.gridMajor;
             } else if (args[idx].isChar() || args[idx].isString()) {
                 keel::String arg = argStr(args[idx]);
-                for (auto &c : arg) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : arg) c = keel::to_ascii_lower(c);
                 if      (arg == "on")    { ax.gridMajor = true; }
                 else if (arg == "off")   { ax.gridMajor = false; ax.gridMinor = false; }
                 else if (arg == "minor") { ax.gridMinor = !ax.gridMinor; }
@@ -593,7 +593,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     auto normLocation = [](keel::StringRef raw) -> keel::String {
         keel::String s;
         s.reserve(raw.size());
-        for (char c : raw) s.push_back((char)std::tolower((unsigned char)c));
+        for (char c : raw) s.push_back(keel::to_ascii_lower(c));
         // Allowed values, mirroring MATLAB:
         //   north, south, east, west, best, none,
         //   northeast, northwest, southeast, southwest,
@@ -629,7 +629,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 keel::String s = args[i].toString();
                 keel::String sl;
                 sl.reserve(s.size());
-                for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
+                for (char c : s) sl.push_back(keel::to_ascii_lower(c));
                 if (sl != "boxoff" && sl != "boxon" && sl != "show"
                     && sl != "on" && sl != "hide" && sl != "off") {
                     visibilityOnly = false;
@@ -662,7 +662,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 keel::String s = args[i].toString();
                 keel::String sLower;
                 sLower.reserve(s.size());
-                for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
+                for (char c : s) sLower.push_back(keel::to_ascii_lower(c));
                 if (sLower == "location" && i + 1 < args.size() && (args[i + 1].isChar() || args[i + 1].isString())) {
                     sawLocation = true;
                     newLoc = normLocation(args[i + 1].toString());
@@ -686,7 +686,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 if (isLegendProp && i + 1 < args.size()) {
                     if (sLower == "box" && (args[i + 1].isChar() || args[i + 1].isString())) {
                         keel::String bv = args[i + 1].toString();
-                        for (char &c : bv) c = (char)std::tolower((unsigned char)c);
+                        for (char &c : bv) c = keel::to_ascii_lower(c);
                         ax.legendBoxOn = (bv != "off");
                     }
                     ++i;  // skip property value
@@ -737,7 +737,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 keel::String s = args[i].toString();
                 keel::String sLower;
                 sLower.reserve(s.size());
-                for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
+                for (char c : s) sLower.push_back(keel::to_ascii_lower(c));
                 if (sLower == "location" && i + 1 < args.size() && args[i + 1].isChar()) {
                     auto loc = normLocation(args[i + 1].toString());
                     if (!loc.empty()) ax.colorbarLocation = keel::move(loc);
@@ -888,7 +888,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             if (args[0].isChar()) {
                 keel::String name = args[0].toString();
-                for (auto &c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto &c : name) c = keel::to_ascii_lower(c);
                 ax.colormapName = keel::move(name);
                 ax.customColormapJson.clear();
             } else {
@@ -931,7 +931,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 fm.currentAxes().colorScale.assign("linear");
             } else if (args[0].isChar()) {
                 keel::String mode = args[0].toString();
-                for (auto &c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto &c : mode) c = keel::to_ascii_lower(c);
                 if (mode == "log" || mode == "linear") {
                     fm.currentAxes().colorScale = keel::move(mode);
                 }
@@ -951,7 +951,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 keel::String mode = keel::String::from("linear");
                 if (!args.empty() && args[0].isChar()) {
                     keel::String m = args[0].toString();
-                    for (auto &c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    for (auto &c : m) c = keel::to_ascii_lower(c);
                     if (m == "log" || m == "linear") mode = keel::move(m);
                 }
                 auto &ax = fm.currentAxes();
@@ -979,7 +979,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             keel::String side = keel::String::from("left");
             if (!args.empty() && args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "left" || s == "right") side = keel::move(s);
             }
             ax.yyEnabled = true;
@@ -1011,7 +1011,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                     keel::String s = a.toString();
                     keel::String sl;
                     sl.reserve(s.size());
-                    for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
+                    for (char c : s) sl.push_back(keel::to_ascii_lower(c));
                     if (sl == "x" || sl == "y" || sl == "xy" || sl == "off") {
                         mode = keel::move(sl);
                         break;  // only the first string arg is the mode
@@ -1035,7 +1035,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         keel::String mode = keel::String::from("on");
         if (!args.empty() && args[0].isChar()) {
             keel::String s = args[0].toString();
-            for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+            for (auto &c : s) c = keel::to_ascii_lower(c);
             if (s == "on" || s == "off") mode = keel::move(s);
         }
         gc.fm.currentAxes().*field = keel::move(mode);
@@ -1072,7 +1072,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             }
             if (args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "auto") {
                     (ax.*field).clear();
                     ax.*autoFlag = true;   // MATLAB XTickMode 'auto'
@@ -1115,7 +1115,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 keel::String s = args[0].toString();
                 keel::String sl;
                 sl.reserve(s.size());
-                for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
+                for (char c : s) sl.push_back(keel::to_ascii_lower(c));
                 if (sl == "auto") {
                     (ax.*field).clear();
                     fm.current().modified = true;
@@ -1164,7 +1164,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             keel::String s = args[0].toString();
             keel::String sl;
             sl.reserve(s.size());
-            for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
+            for (char c : s) sl.push_back(keel::to_ascii_lower(c));
             if (sl == "auto") {
                 (ax.*field).clear();
             } else {
@@ -1204,7 +1204,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         if (args.empty()) { outs[0] = Value(); return; }
         if (args[0].isChar()) {
             keel::String s = args[0].toString();
-            for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+            for (auto &c : s) c = keel::to_ascii_lower(c);
             if (s == "auto") {
                 fm.currentAxes().axisMode.clear();
                 fm.current().modified = true;
@@ -1239,7 +1239,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 ax.boxOn = !ax.boxOn;
             } else if (args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if      (s == "on")  ax.boxOn = true;
                 else if (s == "off") ax.boxOn = false;
             }
@@ -1281,7 +1281,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             // 'reset' arg: also clear axis config + scales.
             if (!args.empty() && args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "reset") {
                     ax.title.clear(); ax.subtitle.clear();
                     ax.xlabel.clear(); ax.ylabel.clear();

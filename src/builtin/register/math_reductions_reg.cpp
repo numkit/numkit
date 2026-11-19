@@ -12,6 +12,7 @@
 #include <keel/ref.h>
 #include <keel/small_array.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>       // reshape (for 'all')
 #include <numkit/builtin/datafun.hpp>
@@ -27,7 +28,6 @@
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -110,7 +110,7 @@ OutTypeMode parseOutTypeMode(const Value &arg, const char *fn)
 {
     keel::String s = arg.toString();
     for (char &c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        c = keel::to_ascii_lower(c);
     if (s == "default") return OutTypeMode::Default;
     if (s == "double")  return OutTypeMode::Double;
     if (s == "native")  return OutTypeMode::Native;
@@ -478,7 +478,7 @@ inline keel::String lowercaseStr(const Value &v)
 {
     keel::String s = v.toString();
     for (char &c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        c = keel::to_ascii_lower(c);
     return s;
 }
 

@@ -8,6 +8,7 @@
 #include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/time.h>
 #include <numkit/io/paths/paths.hpp>
 
 #include <numkit/value/error.hpp>
@@ -15,7 +16,6 @@
 #include <numkit/sys/fs_context.hpp>
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <random>
 
@@ -150,13 +150,10 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
 {
     static std::atomic<keel::u64> counter{0};
     const keel::u64 n = counter.fetch_add(1, std::memory_order_relaxed);
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    const keel::u64 ns = static_cast<keel::u64>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    const keel::u64 ns = keel::monotonic_ns();
 
     static thread_local std::mt19937_64 rng{
-        std::random_device{}() ^ static_cast<keel::u64>(
-            std::chrono::high_resolution_clock::now().time_since_epoch().count())};
+        std::random_device{}() ^ static_cast<keel::u64>(keel::wall_clock_ns())};
     const keel::u64 r = rng();
 
     keel::String out = tempdir(fs, mr).toString();

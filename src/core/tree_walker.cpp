@@ -7,13 +7,13 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/tree_walker.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -2242,7 +2242,7 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
     }
     if (!obj.hasField(node->strValue)) {
         if (node->strValue.size() == 1 && obj.hasField("kind")) {
-            char up = static_cast<char>(std::toupper(static_cast<unsigned char>(node->strValue[0])));
+            char up = keel::to_ascii_upper(node->strValue[0]);
             char upBuf[2] = {up, '\0'};
             keel::StringRef upField(upBuf, 1);
             if ((up == 'A' || up == 'B' || up == 'C' || up == 'D') && obj.hasField(upField))
@@ -2842,7 +2842,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
         const bool isUnshadowedConst =
             cand && engine_.constantsEnv_ && cand == engine_.constantsEnv_->getLocal(name);
         const Value *lhs = (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')
-                            && (std::isalnum(static_cast<unsigned char>(arg[1]))
+                            && (keel::is_ascii_alnum(arg[1])
                                 || arg[1] == '.')
                             && !isUnshadowedConst)
                                ? cand : nullptr;
@@ -2852,11 +2852,11 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
             const double parsedNum = std::strtod(tail.c_str(), &endp);
             const bool isNum = !tail.empty() && endp == tail.c_str() + tail.size();
             bool isIdent = !tail.empty()
-                           && (std::isalpha(static_cast<unsigned char>(tail[0]))
+                           && (keel::is_ascii_alpha(tail[0])
                                || tail[0] == '_');
             if (isIdent)
                 for (char c : tail)
-                    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+                    if (!(keel::is_ascii_alnum(c) || c == '_'))
                         { isIdent = false; break; }
             if (isNum || isIdent) {
                 if (!isNum) {

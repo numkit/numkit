@@ -7,12 +7,12 @@
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -128,7 +128,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
         for (keel::usize i = nvStart; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar()) continue;
             keel::String key = args[i].toString();
-            for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (auto &c : key) c = keel::to_ascii_lower(c);
             if (key == "displayrange")    rangeArg = &args[i + 1];
             else if (key == "xdata")      xDataArg = &args[i + 1];
             else if (key == "ydata")      yDataArg = &args[i + 1];

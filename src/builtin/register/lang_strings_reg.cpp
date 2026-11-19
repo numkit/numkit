@@ -7,6 +7,7 @@
 #include <keel/arena.h>
 #include <keel/array.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/strfun.hpp>
@@ -201,7 +202,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     for (keel::usize k = optStart; k + 1 < args.size(); k += 2) {
         keel::String name = args[k].toString();
         std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                       [](unsigned char ch) { return keel::to_ascii_lower(ch); });
         if (name == "collapsedelimiters")
             collapse = !args[k + 1].isEmpty() && args[k + 1].toScalar() != 0.0;
         // DelimiterType='RegularExpression' is not supported (literal only).
@@ -246,7 +247,7 @@ static bool parseIgnoreCaseOption(keel::ArrayRef<Value> args, keel::usize optSta
     for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString()) continue;
         keel::String k = args[i].toString();
-        for (char &c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : k) c = keel::to_ascii_lower(c);
         if (k == "ignorecase")
             return args[i + 1].toBool();
     }
@@ -324,7 +325,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         if (a.type() == ValueType::CHAR || a.isString()) {
             keel::String s = a.toString();
             std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                           [](unsigned char ch) { return keel::to_ascii_lower(ch); });
             if (s == "class") withClass = true;
         } else if (!a.isEmpty()) {
             prec = argcheck::expectedInteger(

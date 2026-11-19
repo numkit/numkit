@@ -6,6 +6,7 @@
 #include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/builtin/iofun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -22,8 +23,6 @@ void sprintf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, C
 void sscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
-
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <utility>
@@ -140,7 +139,7 @@ struct JsonParser {
     keel::Allocator *mr;
 
     void skipWs() {
-        while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) ++pos;
+        while (pos < s.size() && keel::is_ascii_space(s[pos])) ++pos;
     }
 
     Value parseValue() {
@@ -177,7 +176,7 @@ struct JsonParser {
 
     Value parseNumber() {
         keel::usize start = pos;
-        while (pos < s.size() && (std::isdigit(static_cast<unsigned char>(s[pos])) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
+        while (pos < s.size() && (keel::is_ascii_digit(s[pos]) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
             ++pos;
         }
         double d = keel::parse_f64(s.substr(start, pos - start)).value_or(0.0);

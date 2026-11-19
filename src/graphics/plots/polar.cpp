@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>

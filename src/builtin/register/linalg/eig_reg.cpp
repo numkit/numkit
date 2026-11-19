@@ -18,6 +18,7 @@
 #include <keel/string.h>
 #include <keel/complex.h>
 #include <keel/math.h>
+#include <keel/utf8.h>
 #include <numkit/linalg/eig.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 #include <numkit/linalg/matrix_functions.hpp>         // sylvester (general)
@@ -30,7 +31,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <limits>
 #include <tuple>
@@ -176,7 +176,7 @@ void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].type() == ValueType::CHAR) {
             keel::String s = args[i].toString();
-            for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (char &c : s) c = keel::to_ascii_lower(c);
             if (s == "matrix") wantMatrix = true;
             else if (s == "vector") { /* default for the 1-output form */ }
             else if (s == "chol" || s == "qz" || s == "nobalance") { /* accept */ }

@@ -11,6 +11,7 @@
 #include <keel/format.h>
 #include <keel/hash_map.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -22,7 +23,6 @@
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <tuple>
@@ -135,7 +135,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                          0, 0, "unique", "", "numkit:unique:badArg");
         keel::String s = a.toString();
         for (char &c : s)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            c = keel::to_ascii_lower(c);
         if (s == "rows") useRows = true;
         else if (s == "stable") stable = true;
         else if (s == "sorted") stable = false;
@@ -294,7 +294,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     auto lower = [](keel::StringRef sv) {
         keel::String s(sv);
         for (char &c : s)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            c = keel::to_ascii_lower(c);
         return s;
     };
     auto requireNumBins = [](double v) {
@@ -513,7 +513,7 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         for (keel::usize i = 2; i < args.size(); ++i)
             if (args[i].isChar() || args[i].isString()) {
                 keel::String s = args[i].toString();
-                for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "rows") rows = true;
             }
         if (rows) {
@@ -559,7 +559,7 @@ bool wantsStable(keel::ArrayRef<Value> args, keel::usize start)
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             keel::String s = args[i].toString();
-            for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (auto &c : s) c = keel::to_ascii_lower(c);
             if (s == "stable") return true;
         }
     }
@@ -657,7 +657,7 @@ bool wantsRows(keel::ArrayRef<Value> args, keel::usize start)
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             keel::String s = args[i].toString();
-            for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (auto &c : s) c = keel::to_ascii_lower(c);
             if (s == "rows") return true;
         }
     }

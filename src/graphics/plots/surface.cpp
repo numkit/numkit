@@ -8,12 +8,12 @@
 #include <keel/math.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -1486,7 +1486,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             keel::String pos = keel::String::from("headlight");
             if (!args.empty() && args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "left" || s == "right" || s == "headlight") pos = keel::move(s);
             }
             fm.currentAxes().camlightPos = keel::move(pos);
@@ -1514,7 +1514,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             keel::String m = keel::String::from("gouraud");
             if (!args.empty() && args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "flat" || s == "gouraud" || s == "phong" || s == "none")
                     m = keel::move(s);
             }
@@ -1532,7 +1532,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             keel::String m;
             if (!args.empty() && args[0].isChar()) {
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 if (s == "shiny" || s == "metal" || s == "dull") m = keel::move(s);
             }
             fm.currentAxes().materialPreset = keel::move(m);

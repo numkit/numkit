@@ -11,15 +11,13 @@
 #include <keel/format.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/runtime/saveload.hpp>
 
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/sys/vfs.hpp>
-
-#include <cctype>
-
 namespace numkit::runtime {
 
 // ── Backends ─────────────────────────────────────────────────────────
@@ -49,8 +47,8 @@ bool endsWithIgnoreCase(keel::StringRef s, keel::StringRef suffix)
     for (keel::usize i = 0; i < suffix.size(); ++i) {
         char a = s[s.size() - suffix.size() + i];
         char b = suffix[i];
-        if (std::tolower(static_cast<unsigned char>(a))
-            != std::tolower(static_cast<unsigned char>(b)))
+        if (keel::to_ascii_lower(a)
+            != keel::to_ascii_lower(b))
             return false;
     }
     return true;

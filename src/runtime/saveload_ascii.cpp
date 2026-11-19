@@ -9,12 +9,11 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/runtime/saveload.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
-
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 
@@ -95,7 +94,7 @@ void loadAscii(Engine &engine, Environment &env,
         keel::Array<double> row(scratch.allocator());
         keel::usize q = ws;
         while (q < line.size()) {
-            while (q < line.size() && (std::isspace(static_cast<unsigned char>(line[q])) || line[q] == ',')) ++q;
+            while (q < line.size() && (keel::is_ascii_space(line[q]) || line[q] == ',')) ++q;
             if (q >= line.size()) break;
             const char *start = line.c_str() + q;
             char *endp = nullptr;
@@ -146,7 +145,7 @@ void loadAscii(Engine &engine, Environment &env,
     keel::usize dot = stem.rfind('.');
     if (dot != keel::kInvalidIndex && dot > 0)
         stem = stem.substr(0, dot);
-    if (stem.empty() || !(std::isalpha(static_cast<unsigned char>(stem[0])) || stem[0] == '_'))
+    if (stem.empty() || !(keel::is_ascii_alpha(stem[0]) || stem[0] == '_'))
         throw Error("load: cannot derive a valid variable name from filename");
     env.set(stem, M);
     engine.assignToCaller(0, stem, keel::move(M));

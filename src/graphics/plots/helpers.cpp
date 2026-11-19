@@ -8,9 +8,8 @@
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/utf8.h>
 #include "plot_internal.hpp"
-
-#include <cctype>
 #include <cmath>
 
 namespace numkit::detail {
@@ -111,7 +110,7 @@ void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo
             continue;
         keel::String key = args[i].toString();
         for (auto &c : key)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            c = keel::to_ascii_lower(c);
         if (key == "linewidth")
             ds.lineWidth = args[i + 1].toScalar();
         else if (key == "markersize")

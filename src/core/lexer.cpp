@@ -1,8 +1,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/utf8.h>
 #include <numkit/core/lexer.hpp>
-
-#include <cctype>
 #include <stdexcept>
 
 namespace numkit {
@@ -87,22 +86,22 @@ TokenType lookupKeyword(keel::StringRef word) noexcept
 
 bool Lexer::isDigit(char c)
 {
-    return std::isdigit(static_cast<unsigned char>(c));
+    return keel::is_ascii_digit(c);
 }
 
 bool Lexer::isAlpha(char c)
 {
-    return std::isalpha(static_cast<unsigned char>(c));
+    return keel::is_ascii_alpha(c);
 }
 
 bool Lexer::isAlnum(char c)
 {
-    return std::isalnum(static_cast<unsigned char>(c));
+    return keel::is_ascii_alnum(c);
 }
 
 bool Lexer::isXDigit(char c)
 {
-    return std::isxdigit(static_cast<unsigned char>(c));
+    return keel::is_ascii_hex_digit(c);
 }
 
 // ─── error helpers ──────────────────────────────────────────────────────

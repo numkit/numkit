@@ -12,6 +12,7 @@
 #include <keel/format.h>
 #include <keel/math.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -30,7 +31,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <tuple>
@@ -602,7 +602,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto toLower = [mr](keel::StringRef sv) {
         keel::String s = keel::String::from(sv, mr);
         for (keel::usize idx = 0; idx < s.size(); ++idx)
-            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
+            s[idx] = keel::to_ascii_lower(s[idx]);
         return s;
     };
     auto parseDirStr = [&](keel::StringRef raw) -> keel::u8 {
@@ -1111,7 +1111,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto dirDescend = [](keel::StringRef sv) -> bool {
         keel::String s = keel::String::from(sv);
         for (keel::usize idx = 0; idx < s.size(); ++idx)
-            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
+            s[idx] = keel::to_ascii_lower(s[idx]);
         if (s == "ascend") return false;
         if (s == "descend") return true;
         throw Error("sortrows: direction must be 'ascend' or 'descend'",
@@ -1481,7 +1481,7 @@ void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *f
         }
         keel::String s = args[i].toString();
         for (keel::usize idx = 0; idx < s.size(); ++idx)
-            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
+            s[idx] = keel::to_ascii_lower(s[idx]);
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;
         else if (s == "omitnan")    include_nan = false;
@@ -1625,7 +1625,7 @@ Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
         if (!(args[i].isChar() || args[i].isString())) continue;
         keel::String s = args[i].toString();
         for (keel::usize idx = 0; idx < s.size(); ++idx)
-            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
+            s[idx] = keel::to_ascii_lower(s[idx]);
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;
         else if (s == "omitnan")    omitnan = true;

@@ -49,14 +49,21 @@ public:
     // Return every pooled block to upstream (e.g. to reclaim memory at idle).
     void releaseCached() noexcept
     {
-        std::lock_guard<std::mutex> lk(mu_);
-        for (auto entry : free_) {
-            for (void *p : entry.value) {
-                upstream_->free_bytes(p, entry.key.bytes, entry.key.align);
+        bool hadCached = false;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            hadCached = (cachedBytes_ > 0);
+            for (auto entry : free_) {
+                for (void *p : entry.value) {
+                    upstream_->free_bytes(p, entry.key.bytes, entry.key.align);
+                }
             }
+            free_.clear();
+            cachedBytes_ = 0;
         }
-        free_.clear();
-        cachedBytes_ = 0;
+        if (hadCached) {
+            keel::memory_trim();
+        }
     }
 
 private:

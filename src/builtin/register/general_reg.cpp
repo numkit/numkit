@@ -3,6 +3,7 @@
 #include <keel/format.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/core/types.hpp>
@@ -13,7 +14,6 @@
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <stdexcept>
 #include <utility>
 #include <numkit/core/build_info.hpp>
@@ -607,7 +607,7 @@ void register_general(Engine &engine) {
                     "shorteng", "longeng", "rat", "hex", "bank", "+", "default"
                 };
                 keel::String s = args[0].toString();
-                for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto &c : s) c = keel::to_ascii_lower(c);
                 bool ok = false;
                 for (keel::StringRef k : kKnown) {
                     if (s == k) { ok = true; break; }
@@ -681,7 +681,7 @@ void register_general(Engine &engine) {
             if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
                 keel::String s = args[1].toString();
                 for (auto &c : s)
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    c = keel::to_ascii_lower(c);
                 whole = (s == "whole");
             }
             auto *mr = ctx.engine->allocator();

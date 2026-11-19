@@ -7,10 +7,9 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/builtin/lang.hpp>
 #include <numkit/value/value.hpp>
-
-#include <cctype>
 #include <stdexcept>
 
 namespace numkit::builtin {
@@ -58,10 +57,10 @@ Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr)
 bool isvarname(keel::StringRef s)
 {
     if (s.empty()) return false;
-    if (std::isalpha(static_cast<unsigned char>(s[0])) == 0) return false;
+    if (keel::is_ascii_alpha(s[0]) == 0) return false;
     for (keel::usize i = 1; i < s.size(); ++i) {
         const unsigned char c = static_cast<unsigned char>(s[i]);
-        if (!(std::isalnum(c) || c == '_')) return false;
+        if (!(keel::is_ascii_alnum(c) || c == '_')) return false;
     }
     return !iskeyword(s);
 }

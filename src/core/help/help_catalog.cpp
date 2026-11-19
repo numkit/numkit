@@ -4,10 +4,10 @@
 #include <keel/hash_map.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/help/help_catalog.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <initializer_list>
 
 namespace numkit::bundle {
@@ -17,7 +17,7 @@ keel::String toLowerStr(keel::StringRef s) {
     keel::String out;
     out.reserve(s.size());
     for (char c : s) {
-        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        out.push_back(keel::to_ascii_lower(c));
     }
     return out;
 }
@@ -26,7 +26,7 @@ keel::String toUpperStr(keel::StringRef s) {
     keel::String out;
     out.reserve(s.size());
     for (char c : s) {
-        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        out.push_back(keel::to_ascii_upper(c));
     }
     return out;
 }

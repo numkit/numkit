@@ -7,6 +7,7 @@
 #include <keel/format.h>
 #include <keel/math.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
@@ -21,7 +22,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cctype>
 #include <stdexcept>
 #include <utility>
 
@@ -103,7 +103,7 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
                      0, 0, "accumarray", "", "numkit:accumarray:fnType");
     keel::String s = h.funcHandleName();
     std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                   [](unsigned char c) { return keel::to_ascii_lower(c); });
     if (s == "sum")  { op = AccumReducer::Sum;  return true; }
     if (s == "max")  { op = AccumReducer::Max;  return true; }
     if (s == "min")  { op = AccumReducer::Min;  return true; }
@@ -545,7 +545,7 @@ void register_datafun(Engine &engine) {
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
                 keel::String flag = args[nargs - 1].toString();
-                for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (char &c : flag) c = keel::to_ascii_lower(c);
                 if (flag == "symmetric") symmetric = true;
                 else if (flag == "nonsymmetric") symmetric = false;
                 else
@@ -588,7 +588,7 @@ void register_datafun(Engine &engine) {
             bool symmetric = false;
             if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
                 keel::String flag = args[nargs - 1].toString();
-                for (char &c : flag) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (char &c : flag) c = keel::to_ascii_lower(c);
                 if (flag == "symmetric") symmetric = true;
                 else if (flag == "nonsymmetric") symmetric = false;
                 else

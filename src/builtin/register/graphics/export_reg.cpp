@@ -17,6 +17,7 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -26,7 +27,6 @@
 #include <numkit/value/argcheck.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdlib>
 
@@ -41,7 +41,7 @@ keel::String lowerExtOf(keel::StringRef path)
         return keel::String{};
     keel::String e = keel::String::from(path.substr(dot + 1));
     for (char &c : e)
-        c = (char)std::tolower((unsigned char)c);
+        c = keel::to_ascii_lower(c);
     return e;
 }
 
@@ -148,7 +148,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         keel::String s = a.toString();
         keel::String sl = s.clone();
         for (char &c : sl)
-            c = (char)std::tolower((unsigned char)c);
+            c = keel::to_ascii_lower(c);
         if (!s.empty() && s[0] == '-') {
             // print-style flags: -dpng / -dsvg / -r150 / -ochr…
             if (sl.size() > 2 && sl[1] == 'd')

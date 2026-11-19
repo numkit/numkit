@@ -10,6 +10,7 @@
 #include <keel/format.h>
 #include <keel/math.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>  // poly_of_matrix
 #include <numkit/builtin/polyfun.hpp>
@@ -21,7 +22,6 @@
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -429,7 +429,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     if (secondIsStr) {
         mode = args[1].toString();
         for (char &c : mode)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            c = keel::to_ascii_lower(c);
         if (mode != "fir" && mode != "iir" && mode != "allpole" &&
             mode != "allpass" && mode != "min" && mode != "max") {
             throw Error(keel::format("latc2tf: unknown option '{}'", args[1].toString()),

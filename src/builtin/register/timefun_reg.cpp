@@ -8,6 +8,8 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/time.h>
+#include <keel/utf8.h>
 #include <numkit/builtin/timefun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -16,8 +18,6 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <cctype>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -239,16 +239,16 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
 {
     keel::usize start = 0;
     keel::usize end = raw.size();
-    while (start < end && std::isspace(static_cast<unsigned char>(raw[start])))
+    while (start < end && keel::is_ascii_space(raw[start]))
         ++start;
-    while (end > start && std::isspace(static_cast<unsigned char>(raw[end - 1])))
+    while (end > start && keel::is_ascii_space(raw[end - 1]))
         --end;
     keel::String s = keel::String::from(raw.substr(start, end - start), mr);
     if (s.empty() || s == "NaT")
         return std::numeric_limits<double>::quiet_NaN();
     keel::String sl = s.clone();
     for (keel::usize i = 0; i < sl.size(); ++i)
-        sl[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(sl[i])));
+        sl[i] = keel::to_ascii_lower(sl[i]);
     if (sl == "now")
         return numkit::builtin::now();
     if (sl == "today")
@@ -259,7 +259,7 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
         return std::floor(numkit::builtin::now()) + 1.0;
 
     auto skipWs = [](const char *&p) {
-        while (*p && std::isspace(static_cast<unsigned char>(*p)))
+        while (*p && keel::is_ascii_space(*p))
             ++p;
     };
     auto readInt = [&](const char *&p, int &out) -> bool {
@@ -734,7 +734,7 @@ void register_timefun(Engine &engine) {
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
                 const char *prev = pauseEnabled ? "on" : "off";
                 keel::String mode = args[0].toString();
-                for (char &c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (char &c : mode) c = keel::to_ascii_lower(c);
                 if (mode == "off") pauseEnabled = false;
                 else if (mode == "on") pauseEnabled = true;
                 if (nargout > 0 || mode == "query") {
@@ -754,12 +754,10 @@ void register_timefun(Engine &engine) {
     engine.registerFunction("tic",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 0, 0, "tic");
-            auto now = Clock::now();
-            ctx.engine->setTicTimer(now);
+            const keel::u64 nowNs = keel::monotonic_ns();
+            ctx.engine->setTicTimer(nowNs);
             if (nargout > 0) {
-                double id = static_cast<double>(
-                    std::chrono::duration_cast<std::chrono::microseconds>(
-                        now.time_since_epoch()).count());
+                const double id = static_cast<double>(nowNs / 1000ULL);
                 outs[0] = Value::scalar(id, ctx.engine->allocator());
             } else {
                 outs[0] = Value();
@@ -769,17 +767,17 @@ void register_timefun(Engine &engine) {
     engine.registerFunction("toc",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 0, 1, "toc");
-            auto now = Clock::now();
-            TimePoint start;
+            const keel::u64 nowNs = keel::monotonic_ns();
+            keel::u64 startNs = 0;
             if (!args.empty() && args[0].isScalar()) {
-                auto us = static_cast<long long>(args[0].toScalar());
-                start = TimePoint(std::chrono::microseconds(us));
+                const double v = args[0].toScalar();
+                startNs = (v > 0.0) ? static_cast<keel::u64>(v) * 1000ULL : 0ULL;
             } else if (ctx.engine->ticWasCalled()) {
-                start = ctx.engine->ticTimer();
+                startNs = ctx.engine->ticTimer();
             } else {
                 throw std::runtime_error("toc: You must call 'tic' before calling 'toc'.");
             }
-            double elapsed = std::chrono::duration<double>(now - start).count();
+            const double elapsed = (nowNs >= startNs) ? static_cast<double>(nowNs - startNs) * 1e-9 : 0.0;
             if (nargout > 0) {
                 outs[0] = Value::scalar(elapsed, ctx.engine->allocator());
             } else {
@@ -834,7 +832,7 @@ void register_timefun(Engine &engine) {
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
                     keel::String fmt = args[1].toString();
                     for (auto &c : fmt)
-                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                        c = keel::to_ascii_lower(c);
                     if (fmt == "long")
                         wantLong = true;
                     else if (fmt != "short")
@@ -1037,7 +1035,7 @@ void register_timefun(Engine &engine) {
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
                 keel::String k = args[nPos - 2].toString();
-                for (auto &ch : k) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                for (auto &ch : k) ch = keel::to_ascii_lower(ch);
                 if (k == "format") {
                     fmt = args[nPos - 1].toString();
                     nPos -= 2;
@@ -1603,7 +1601,7 @@ void register_timefun(Engine &engine) {
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
                 keel::String kl = args[nPos - 2].toString();
-                for (auto &ch : kl) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                for (auto &ch : kl) ch = keel::to_ascii_lower(ch);
                 if (kl == "format") {
                     fmt = args[nPos - 1].toString();
                     nPos -= 2;
@@ -1612,7 +1610,7 @@ void register_timefun(Engine &engine) {
                     nPos -= 2;
                 } else if (kl == "convertfrom") {
                     convFrom = args[nPos - 1].toString();
-                    for (auto &ch : convFrom) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    for (auto &ch : convFrom) ch = keel::to_ascii_lower(ch);
                     nPos -= 2;
                 } else if (kl == "timezone") {
                     tz = args[nPos - 1].toString();
@@ -2174,8 +2172,8 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             keel::String rule = args[0].toString();
             keel::String unit = args[1].toString();
-            for (auto &ch : rule) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            for (auto &ch : unit) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            for (auto &ch : rule) ch = keel::to_ascii_lower(ch);
+            for (auto &ch : unit) ch = keel::to_ascii_lower(ch);
             bool isEnd = (rule == "end");
             const keel::usize n = self.objectCount();
             keel::Array<double> sds(mr);
@@ -2222,7 +2220,7 @@ void register_timefun(Engine &engine) {
             bool desc = false;
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
                 keel::String dir = args[0].toString();
-                for (auto &ch : dir) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                for (auto &ch : dir) ch = keel::to_ascii_lower(ch);
                 desc = (dir == "descend");
             }
             keel::Array<keel::usize> order(mr);
@@ -2343,7 +2341,7 @@ void register_timefun(Engine &engine) {
             for (const auto &a : args) {
                 if (a.isChar() || a.isString()) {
                     keel::String s = a.toString();
-                    for (auto &ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    for (auto &ch : s) ch = keel::to_ascii_lower(ch);
                     if (s == "stable") stable = true;
                 }
             }
@@ -2419,7 +2417,7 @@ void register_timefun(Engine &engine) {
             for (keel::usize k = 1; k < args.size(); ++k) {
                 if (args[k].isChar() || args[k].isString()) {
                     keel::String s = args[k].toString();
-                    for (auto &ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    for (auto &ch : s) ch = keel::to_ascii_lower(ch);
                     if (s == "stable") stable = true;
                 }
             }

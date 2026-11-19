@@ -9,13 +9,12 @@
 #include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/io/text/extras.hpp>
 
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
-
-#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -101,8 +100,8 @@ keel::Array<keel::StringRef> splitLines(keel::StringRef content, keel::Allocator
 keel::StringRef trimWs(keel::StringRef s)
 {
     keel::usize a = 0, b = s.size();
-    while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    while (a < b && keel::is_ascii_space(s[a])) ++a;
+    while (b > a && keel::is_ascii_space(s[b - 1])) --b;
     return s.substr(a, b - a);
 }
 
@@ -116,7 +115,7 @@ bool tryParseDouble(keel::StringRef tok, double &out)
     if (endp == buf.c_str() || errno == ERANGE)
         return false;
     // Trailing junk → not a clean number.
-    while (*endp != '\0' && std::isspace(static_cast<unsigned char>(*endp)))
+    while (*endp != '\0' && keel::is_ascii_space(*endp))
         ++endp;
     if (*endp != '\0')
         return false;

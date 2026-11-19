@@ -10,13 +10,13 @@
 #include <keel/ref.h>
 #include <keel/small_array.h>
 #include <keel/string.h>
+#include <keel/utf8.h>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/toolchain.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <tuple>
 
@@ -161,7 +161,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
         keel::StringRef part = (dot == keel::kInvalidIndex) ? rem : rem.substr(0, dot);
         if (part.empty()) return false;
         for (char c : part) {
-            if (!std::isdigit(static_cast<unsigned char>(c)))
+            if (!keel::is_ascii_digit(c))
                 return false;
         }
         auto parsed = keel::parse_i64(part);
@@ -199,7 +199,7 @@ bool isValidPackageName(keel::StringRef name)
         return false;
     for (char chRaw : name) {
         unsigned char ch = static_cast<unsigned char>(chRaw);
-        if (!(std::isalnum(ch) || ch == '_' || ch == '-' || ch == '.'))
+        if (!(keel::is_ascii_alnum(ch) || ch == '_' || ch == '-' || ch == '.'))
             return false;
     }
     return true;
@@ -312,7 +312,7 @@ keel::String queryRemoteRefCommit(keel::StringRef gitPath, keel::StringRef gitUr
     if (!res.ok() || res.output.empty()) return {};
     keel::StringRef s = trimRef(res.output.as_ref());
     keel::usize end = 0;
-    while (end < s.size() && !std::isspace(static_cast<unsigned char>(s[end])))
+    while (end < s.size() && !keel::is_ascii_space(s[end]))
         ++end;
     if (end >= 7) {
         return keel::String::from(s.substr(0, 7));
