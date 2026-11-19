@@ -3,6 +3,7 @@
 // Self-contained C-ABI implementation for `numkit/numkit` (`numkit_c`).
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/env.h>
 #include <keel/format.h>
 #include <keel/fs.h>
 #include <keel/ref.h>
@@ -77,8 +78,8 @@ struct numkit_engine_ctx_s {
                 engine.pluginLoader().addSearchPath(sibLib);
             }
         }
-        if (const char *envPath = std::getenv("NUMKIT_MODULE_PATH")) {
-            if (*envPath) engine.pluginLoader().addSearchPath(envPath);
+        if (auto envPath = keel::env_get("NUMKIT_MODULE_PATH")) {
+            if (!envPath->empty()) engine.pluginLoader().addSearchPath(*envPath);
         }
     }
 

@@ -1,6 +1,7 @@
 // src/engine.cpp
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/env.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
 #include <keel/hash_set.h>
@@ -61,8 +62,8 @@ Engine::Engine(keel::Allocator *mr)
 
     // Element-wise fusion default: on unless NUMKIT_FUSE=0 (kill switch). No
     // effect until the standard library registers rules (see fusionEnabled()).
-    if (const char *fe = std::getenv("NUMKIT_FUSE"))
-        fusionEnabled_ = !(fe[0] == '0' && fe[1] == '\0');
+    if (auto fe = keel::env_get("NUMKIT_FUSE"))
+        fusionEnabled_ = (fe->as_ref() != "0");
 
     keel::String nm = numkit::envGet("NUMKIT_MODE");
     if (nm.empty())

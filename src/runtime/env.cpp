@@ -3,6 +3,7 @@
 // Process-environment builtins (setenv / getenv).
 
 #include <keel/core.h>
+#include <keel/env.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -12,8 +13,6 @@
 
 #include <numkit/sys/env.hpp>
 #include <numkit/core/types.hpp>
-
-#include <cstdlib>
 
 namespace numkit::runtime {
 
@@ -41,11 +40,7 @@ void setenv(keel::ArrayRef<Value> args)
             throw Error("setenv: value must be a char array");
         value = args[1].toString();
     }
-#ifdef _WIN32
-    _putenv_s(name.c_str(), value.c_str());
-#else
-    ::setenv(name.c_str(), value.c_str(), 1);
-#endif
+    (void)keel::env_set(name, value);
 }
 
 Value getenv(keel::ArrayRef<Value> args, keel::Allocator *mr)

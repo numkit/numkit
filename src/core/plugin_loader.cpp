@@ -1,6 +1,8 @@
 // src/core/src/plugin_loader.cpp
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/dynlib.h>
+#include <keel/env.h>
 #include <keel/format.h>
 #include <keel/fs.h>
 #include <keel/hash_map.h>
@@ -13,47 +15,8 @@
 #include <numkit/core/engine.hpp>
 
 #include <algorithm>
-#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
-
-#ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #include <windows.h>
-  static void *osLoadLibrary(const char *path) {
-      return static_cast<void *>(LoadLibraryA(path));
-  }
-  static void *osGetProcAddress(void *handle, const char *symbol) {
-      return reinterpret_cast<void *>(GetProcAddress(static_cast<HMODULE>(handle), symbol));
-  }
-  static void osCloseLibrary(void *handle) {
-      if (handle) FreeLibrary(static_cast<HMODULE>(handle));
-  }
-  static keel::String osLastError() {
-      DWORD err = GetLastError();
-      char buf[256];
-      DWORD len = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                 NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                 buf, sizeof(buf), NULL);
-      return len > 0 ? keel::String::from(keel::StringRef(buf, len))
-                     : keel::format("Error code {}", static_cast<keel::u64>(err));
-  }
-#else
-  #include <dlfcn.h>
-  static void *osLoadLibrary(const char *path) {
-      return dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-  }
-  static void *osGetProcAddress(void *handle, const char *symbol) {
-      return dlsym(handle, symbol);
-  }
-  static void osCloseLibrary(void *handle) {
-      if (handle) dlclose(handle);
-  }
-  static keel::String osLastError() {
-      const char *err = dlerror();
-      return err ? keel::String::from(err) : keel::String::from("Unknown error");
-  }
-#endif
 
 namespace numkit {
 
@@ -258,32 +221,29 @@ static keel::String getExecutableDir() {
 
 static bool sharedLibExistsInDir(keel::StringRef dir, keel::StringRef libName) {
     if (!keel::fs_exists(dir)) return false;
-    const char *candidates[] = {
-        "",
-#ifdef _WIN32
-        ".dll"
-#elif defined(__APPLE__)
-        ".dylib",
-        ".so"
-#else
-        ".so"
+    const keel::StringRef candidates[] = {
+        keel::StringRef(""),
+        keel::dynlib_extension(),
+#if defined(__APPLE__)
+        keel::StringRef(".so"),
 #endif
     };
-    for (const char *ext : candidates) {
+    const keel::StringRef prefix = keel::dynlib_prefix();
+    for (keel::StringRef ext : candidates) {
         keel::String leaf = keel::format("{}{}", libName, ext);
         keel::PathBuf cand;
         keel::path_join_into(cand, dir, leaf);
         if (keel::fs_is_file(cand)) {
             return true;
         }
-#ifndef _WIN32
-        keel::String libLeaf = keel::format("lib{}{}", libName, ext);
-        keel::PathBuf libCand;
-        keel::path_join_into(libCand, dir, libLeaf);
-        if (keel::fs_is_file(libCand)) {
-            return true;
+        if (!prefix.empty()) {
+            keel::String libLeaf = keel::format("{}{}{}", prefix, libName, ext);
+            keel::PathBuf libCand;
+            keel::path_join_into(libCand, dir, libLeaf);
+            if (keel::fs_is_file(libCand)) {
+                return true;
+            }
         }
-#endif
     }
     return false;
 }
@@ -302,8 +262,8 @@ PluginLoader::PluginLoader(Engine &engine)
         searchPaths_.push_back(keel::move(norm));
     };
 
-    if (const char *envMod = std::getenv("NUMKIT_MODULES_PATH")) {
-        if (*envMod) addUnique(envMod);
+    if (auto envMod = keel::env_get("NUMKIT_MODULES_PATH")) {
+        if (!envMod->empty()) addUnique(*envMod);
     }
 
     addUnique(".");
@@ -312,12 +272,12 @@ PluginLoader::PluginLoader(Engine &engine)
     addUnique("..");
 
 #ifdef _WIN32
-    if (const char *up = std::getenv("USERPROFILE")) {
-        addUnique(keel::path_join(up, ".numkit", "modules"));
+    if (auto up = keel::env_get("USERPROFILE")) {
+        if (!up->empty()) addUnique(keel::path_join(*up, ".numkit", "modules"));
     }
 #else
-    if (const char *home = std::getenv("HOME")) {
-        addUnique(keel::path_join(home, ".numkit", "modules"));
+    if (auto home = keel::env_get("HOME")) {
+        if (!home->empty()) addUnique(keel::path_join(*home, ".numkit", "modules"));
     }
 #endif
 
@@ -372,44 +332,47 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
         if (const auto *fnPtr = reg.loadedInitFns.get(normPath)) {
             initFn = *fnPtr;
         } else {
-            void *h = osLoadLibrary(path.c_str());
-            if (!h) {
+            keel::String lastErr;
+            auto tryOpen = [&](keel::StringRef cand) -> keel::Result<keel::DynLib> {
+                keel::String err;
+                auto res = keel::DynLib::open(cand, keel::DynLibFlags::Global, &err);
+                if (res.is_err() && !err.empty()) {
+                    lastErr = keel::move(err);
+                }
+                return res;
+            };
+
+            auto libRes = tryOpen(path);
+            const keel::StringRef dynExt = keel::dynlib_extension();
+            const keel::StringRef dynPrefix = keel::dynlib_prefix();
+            if (libRes.is_err()) {
                 keel::String withExt = path.clone();
-#ifdef _WIN32
-                if (extRef != ".dll") withExt.append(".dll");
-#elif defined(__APPLE__)
-                if (extRef != ".dylib") withExt.append(".dylib");
-#else
-                if (extRef != ".so") withExt.append(".so");
-#endif
-                h = osLoadLibrary(withExt.c_str());
-#ifndef _WIN32
-                if (!h) {
+                if (extRef != dynExt) withExt.append(dynExt);
+                libRes = tryOpen(withExt);
+                if (libRes.is_err() && !dynPrefix.empty()) {
                     const keel::StringRef baseRef = keel::path_basename(path);
                     const keel::StringRef dirRef = keel::path_dirname(path);
-                    keel::String libLeaf = keel::format("lib{}", baseRef);
+                    keel::String libLeaf = keel::format("{}{}", dynPrefix, baseRef);
                     keel::String libPrefixed = (dirRef == "." && !path.contains('/') && !path.contains('\\'))
                         ? keel::move(libLeaf)
                         : keel::path_join(dirRef, libLeaf);
                     const keel::StringRef lpExt = keel::path_extension(libPrefixed);
-#if defined(__APPLE__)
-                    if (lpExt != ".dylib") libPrefixed.append(".dylib");
-#else
-                    if (lpExt != ".so") libPrefixed.append(".so");
-#endif
-                    h = osLoadLibrary(libPrefixed.c_str());
+                    if (lpExt != dynExt) libPrefixed.append(dynExt);
+                    libRes = tryOpen(libPrefixed);
                 }
-#endif
             }
 
-            if (!h) {
-                keel::String msg = keel::format("loadmodule: failed to load '{}': {}", pathInput, osLastError());
+            if (libRes.is_err()) {
+                keel::String msg = keel::format(
+                    "loadmodule: failed to load '{}': {}",
+                    pathInput,
+                    lastErr.empty() ? keel::StringRef(keel::error_message(libRes.error())) : lastErr.as_ref());
                 throw std::runtime_error(msg.c_str());
             }
 
-            initFn = reinterpret_cast<NumkitPluginInitFn>(osGetProcAddress(h, "numkit_plugin_init"));
+            keel::DynLib lib = keel::move(*libRes);
+            initFn = lib.symbol<NumkitPluginInitFn>("numkit_plugin_init");
             if (!initFn) {
-                osCloseLibrary(h);
                 keel::String msg = keel::format(
                     "loadmodule: library '{}' does not export numkit_plugin_init entry point", pathInput);
                 throw std::runtime_error(msg.c_str());
@@ -418,7 +381,7 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
             // Pin valid plugin shared libraries for the process lifetime so
             // NativePayload / std::function vtables inside Values outliving an
             // Engine or shared across Engines can never dangle.
-            reg.pinnedHandles.push_back(h);
+            reg.pinnedHandles.push_back(lib.release());
             reg.loadedInitFns.put(normPath.clone(), initFn);
         }
     }

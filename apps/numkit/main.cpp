@@ -11,6 +11,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/fs.h>
+#include <keel/process.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/core/standard_engine.hpp>
@@ -272,37 +273,20 @@ keel::String findCodegenBinary(const char *argv0)
     return keel::String::from(binName);
 }
 
-keel::String quoteShellArg(keel::StringRef s)
-{
-    bool needsQuote = false;
-    for (char c : s) {
-        if (c == ' ' || c == '\t' || c == '"') {
-            needsQuote = true;
-            break;
-        }
-    }
-    if (!needsQuote) return keel::String::from(s);
-    keel::String out = keel::String::from("\"");
-    for (char c : s) {
-        if (c == '"') out.append("\\\"");
-        else out.push_back(c);
-    }
-    out.push_back('"');
-    return out;
-}
-
 int runCodegenSubcommand(const char *argv0, keel::ArrayRef<keel::String> args)
 {
     const keel::String cgBin = findCodegenBinary(argv0);
-    keel::String cmd = keel::format("\"{}\"", cgBin);
+    keel::Array<keel::StringRef> argv;
+    argv.reserve(args.size() + 1);
+    argv.push_back(cgBin.as_ref());
     for (const auto &a : args) {
-        cmd.push_back(' ');
-        cmd.append(quoteShellArg(a));
+        argv.push_back(a.as_ref());
     }
-#ifdef _WIN32
-    cmd = keel::format("\"{}\"", cmd);
-#endif
-    return std::system(cmd.c_str());
+    keel::ProcessOptions opts;
+    opts.capture_stdout = false;
+    opts.capture_stderr = false;
+    auto res = keel::process_run(argv.as_ref(), opts);
+    return res.is_ok() ? res->exit_code : 1;
 }
 
 void printPkgUsage(const char *prog)
