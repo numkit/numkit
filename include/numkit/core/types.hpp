@@ -200,7 +200,7 @@ inline Value makeUpvalueBox(Value init = Value(), keel::Allocator *mr = nullptr)
 
 inline UpvaluePayload *asUpvalueBox(const Value &v) noexcept
 {
-    if (!v.isObject() || v.objectClassName() != "__upvalue__")
+    if (!v.isObject() || v.objectClassNameRef() != "__upvalue__")
         return nullptr;
     const ObjectState *st = v.objectStateConst();
     return st ? static_cast<UpvaluePayload *>(st->native.get()) : nullptr;

@@ -312,7 +312,7 @@ int numkit_engine_call(numkit_engine_ctx *ctx,
                                                              &ctx->engine.workspaceEnv()};
                                  if (!inSpan.empty() && inSpan[0].isObject()) {
                                      const numkit::BuiltinClass *cls =
-                                         ctx->engine.findClass(inSpan[0].objectClassName());
+                                         ctx->engine.findClass(inSpan[0].objectClassNameRef());
                                      if (cls) {
                                          if (const auto *mPtr = cls->methods.get(nameStr); mPtr && *mPtr) {
                                              numkit::Value selfCopy = inSpan[0];
@@ -399,7 +399,7 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
         const numkit::Value &val = numkit::c_abi::unboxValue(v);
         keel::String s;
         if (val.isObject()) {
-            const numkit::BuiltinClass *cls = ctx->engine.findClass(val.objectClassName());
+            const numkit::BuiltinClass *cls = ctx->engine.findClass(val.objectClassNameRef());
             if (cls) {
                 if (const auto *charPtr = cls->methods.get("char"); charPtr && *charPtr) {
                     numkit::Value selfCopy = val;

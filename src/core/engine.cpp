@@ -228,14 +228,14 @@ bool Engine::isUserCodeHandle(const Value &handle) const
 {
     if (!handle.isFuncHandle())
         return false;
-    keel::String fn = handle.funcHandleName();
+    const keel::StringRef fn = handle.funcHandleNameRef();
     return lookupUserFunctionLocal(fn) != nullptr
            || (compiler_ && compiler_->findCompiled(fn) != nullptr);
 }
 
 keel::String Engine::formatObjectDisplay(keel::StringRef name, const Value &obj) const
 {
-    keel::String clsName = obj.objectClassName();
+    const keel::StringRef clsName = obj.objectClassNameRef();
     const BuiltinClass *cls = findClass(clsName);
     keel::String body;
     const keel::usize n = obj.objectCount();
@@ -266,7 +266,7 @@ keel::String Engine::formatObjectDisplay(keel::StringRef name, const Value &obj)
 
 void Engine::displayObject(keel::StringRef name, const Value &obj)
 {
-    const BuiltinClass *cls = findClass(obj.objectClassName());
+    const BuiltinClass *cls = findClass(obj.objectClassNameRef());
     // Custom disp/display only for a scalar object; arrays use the default.
     if (cls && obj.objectCount() == 1) {
         auto call = [&](const ObjectMethod &m) {
@@ -348,7 +348,7 @@ bool Engine::tryObjectBinaryOp(keel::StringRef op, const Value &lhs, const Value
     // The dominant object decides the class (first object operand wins —
     // v1 dispatch fidelity, see object_model.md §3).
     const Value &dom = lhs.isObject() ? lhs : rhs;
-    keel::String clsName = dom.objectClassName();
+    const keel::StringRef clsName = dom.objectClassNameRef();
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = operatorMethodName(op); cls && mname) {
         if (const auto *m = cls->ops.get(mname)) {
@@ -370,7 +370,7 @@ bool Engine::tryObjectUnaryOp(keel::StringRef op, const Value &operand,
 {
     if (!operand.isObject())
         return false;
-    keel::String clsName = operand.objectClassName();
+    const keel::StringRef clsName = operand.objectClassNameRef();
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = unaryOperatorMethodName(op); cls && mname) {
         if (const auto *m = cls->ops.get(mname)) {
@@ -427,7 +427,7 @@ const BytecodeChunk *Engine::resolveBinaryOpChunk(keel::StringRef op, const Valu
     if (!lhs.isObject() && !rhs.isObject())
         return nullptr; // numeric fast path
     const Value &dom = lhs.isObject() ? lhs : rhs; // first object operand wins
-    keel::String cn = dom.objectClassName();
+    const keel::StringRef cn = dom.objectClassNameRef();
     const BuiltinClass *cls = findClass(cn);
     const char *mname = operatorMethodName(op);
     if (!cls || !mname)
@@ -452,7 +452,7 @@ const BytecodeChunk *Engine::resolveUnaryOpChunk(keel::StringRef op, const Value
 {
     if (!operand.isObject())
         return nullptr;
-    keel::String cn = operand.objectClassName();
+    const keel::StringRef cn = operand.objectClassNameRef();
     const BuiltinClass *cls = findClass(cn);
     const char *mname = unaryOperatorMethodName(op);
     if (!cls || !mname)
@@ -477,7 +477,7 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayR
                                                  keel::String &ownerClassOut,
                                                  keel::Array<Value> &argsOut)
 {
-    keel::String cn = self.objectClassName();
+    const keel::StringRef cn = self.objectClassNameRef();
     const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsref)
         return nullptr;
@@ -500,7 +500,7 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::Array
                                                   keel::String &ownerClassOut,
                                                   keel::Array<Value> &argsOut)
 {
-    keel::String cn = self.objectClassName();
+    const keel::StringRef cn = self.objectClassNameRef();
     const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsasgn)
         return nullptr;
@@ -525,7 +525,7 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::Array
 bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                               Value &out, Environment *env)
 {
-    const BuiltinClass *cls = findClass(self.objectClassName());
+    const BuiltinClass *cls = findClass(self.objectClassNameRef());
     if (!cls || !cls->subsref)
         return false;
     Value res[1];
@@ -538,7 +538,7 @@ bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usi
 void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                               const Value &val, Environment *env)
 {
-    keel::String clsName = dst.isObject() ? dst.objectClassName() : val.objectClassName();
+    const keel::StringRef clsName = dst.isObject() ? dst.objectClassNameRef() : val.objectClassNameRef();
     const BuiltinClass *cls = findClass(clsName);
     Value coercedVal = val;
     if (dst.isObject() && !val.isObject() && cls && cls->construct) {
@@ -1410,7 +1410,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                          CallContext &ctx) {
             bool eq = false;
             if (args.size() == 2 && args[0].isObject() && args[1].isObject()
-                && args[0].objectClassName() == args[1].objectClassName()) {
+                && args[0].objectClassNameRef() == args[1].objectClassNameRef()) {
                 const auto *a = args[0].objectStateConst();
                 const auto *b = args[1].objectStateConst();
                 eq = a && b && !a->enumName.empty() && a->enumName == b->enumName;
@@ -3092,7 +3092,7 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    keel::String name = handle.funcHandleName();
+    const keel::StringRef name = handle.funcHandleNameRef();
 
     if (const ExternalFunc *fn = findExternal(name, e)) {
         keel::Array<Value> out(nout);

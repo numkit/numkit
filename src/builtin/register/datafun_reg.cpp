@@ -101,16 +101,14 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
     if (!h.isFuncHandle())
         throw Error("accumarray: fn argument must be a function handle",
                      0, 0, "accumarray", "", "numkit:accumarray:fnType");
-    keel::String s = h.funcHandleName();
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return keel::to_ascii_lower(c); });
-    if (s == "sum")  { op = AccumReducer::Sum;  return true; }
-    if (s == "max")  { op = AccumReducer::Max;  return true; }
-    if (s == "min")  { op = AccumReducer::Min;  return true; }
-    if (s == "prod") { op = AccumReducer::Prod; return true; }
-    if (s == "mean") { op = AccumReducer::Mean; return true; }
-    if (s == "any")  { op = AccumReducer::Any;  return true; }
-    if (s == "all")  { op = AccumReducer::All;  return true; }
+    const keel::StringRef s = h.funcHandleNameRef();
+    if (s.equals_ignore_ascii_case("sum"))  { op = AccumReducer::Sum;  return true; }
+    if (s.equals_ignore_ascii_case("max"))  { op = AccumReducer::Max;  return true; }
+    if (s.equals_ignore_ascii_case("min"))  { op = AccumReducer::Min;  return true; }
+    if (s.equals_ignore_ascii_case("prod")) { op = AccumReducer::Prod; return true; }
+    if (s.equals_ignore_ascii_case("mean")) { op = AccumReducer::Mean; return true; }
+    if (s.equals_ignore_ascii_case("any"))  { op = AccumReducer::Any;  return true; }
+    if (s.equals_ignore_ascii_case("all"))  { op = AccumReducer::All;  return true; }
     return false;
 }
 

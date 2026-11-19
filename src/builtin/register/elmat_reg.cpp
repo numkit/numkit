@@ -242,7 +242,7 @@ void register_elmat(Engine &engine) {
             auto *mr = ctx.engine->allocator();
 
             if (fn.isFuncHandle()) {
-                const keel::String name = fn.funcHandleName();
+                const keel::StringRef name = fn.funcHandleNameRef();
                 if (!name.empty() && name[0] != '@') {
                     try {
                         outs[0] = numkit::builtin::bsxfun(name, a, b, mr);
@@ -252,7 +252,7 @@ void register_elmat(Engine &engine) {
                 }
             } else if (fn.isChar() || fn.isString()) {
                 try {
-                    outs[0] = numkit::builtin::bsxfun(fn.toString(), a, b, mr);
+                    outs[0] = numkit::builtin::bsxfun(fn.asStringRef(), a, b, mr);
                     return;
                 } catch (...) {
                 }

@@ -74,24 +74,24 @@ inline bool tryParseBuiltinHandle(const Value &h, BuiltinFn &out, const char *fn
     if (!h.isFuncHandle())
         throw Error(keel::format("{}: fn argument must be a function handle", fn),
                      0, 0, fn, "", keel::format("numkit:{}:fnType", fn));
-    const keel::String s = lowerName(h.funcHandleName());
-    if (s == "numel")     { out = BuiltinFn::Numel;     return true; }
-    if (s == "length")    { out = BuiltinFn::Length;    return true; }
-    if (s == "ndims")     { out = BuiltinFn::Ndims;     return true; }
-    if (s == "isempty")   { out = BuiltinFn::IsEmpty;   return true; }
-    if (s == "isnumeric") { out = BuiltinFn::IsNumeric; return true; }
-    if (s == "ischar")    { out = BuiltinFn::IsChar;    return true; }
-    if (s == "islogical") { out = BuiltinFn::IsLogical; return true; }
-    if (s == "iscell")    { out = BuiltinFn::IsCell;    return true; }
-    if (s == "isstruct")  { out = BuiltinFn::IsStruct;  return true; }
-    if (s == "isreal")    { out = BuiltinFn::IsReal;    return true; }
-    if (s == "isnan")     { out = BuiltinFn::IsNan;     return true; }
-    if (s == "isinf")     { out = BuiltinFn::IsInf;     return true; }
-    if (s == "isfinite")  { out = BuiltinFn::IsFinite;  return true; }
-    if (s == "sum")       { out = BuiltinFn::Sum;       return true; }
-    if (s == "prod")      { out = BuiltinFn::Prod;      return true; }
-    if (s == "mean")      { out = BuiltinFn::Mean;      return true; }
-    if (s == "class")     { out = BuiltinFn::ClassName; return true; }
+    const keel::StringRef s = h.funcHandleNameRef();
+    if (s.equals_ignore_ascii_case("numel"))     { out = BuiltinFn::Numel;     return true; }
+    if (s.equals_ignore_ascii_case("length"))    { out = BuiltinFn::Length;    return true; }
+    if (s.equals_ignore_ascii_case("ndims"))     { out = BuiltinFn::Ndims;     return true; }
+    if (s.equals_ignore_ascii_case("isempty"))   { out = BuiltinFn::IsEmpty;   return true; }
+    if (s.equals_ignore_ascii_case("isnumeric")) { out = BuiltinFn::IsNumeric; return true; }
+    if (s.equals_ignore_ascii_case("ischar"))    { out = BuiltinFn::IsChar;    return true; }
+    if (s.equals_ignore_ascii_case("islogical")) { out = BuiltinFn::IsLogical; return true; }
+    if (s.equals_ignore_ascii_case("iscell"))    { out = BuiltinFn::IsCell;    return true; }
+    if (s.equals_ignore_ascii_case("isstruct"))  { out = BuiltinFn::IsStruct;  return true; }
+    if (s.equals_ignore_ascii_case("isreal"))    { out = BuiltinFn::IsReal;    return true; }
+    if (s.equals_ignore_ascii_case("isnan"))     { out = BuiltinFn::IsNan;     return true; }
+    if (s.equals_ignore_ascii_case("isinf"))     { out = BuiltinFn::IsInf;     return true; }
+    if (s.equals_ignore_ascii_case("isfinite"))  { out = BuiltinFn::IsFinite;  return true; }
+    if (s.equals_ignore_ascii_case("sum"))       { out = BuiltinFn::Sum;       return true; }
+    if (s.equals_ignore_ascii_case("prod"))      { out = BuiltinFn::Prod;      return true; }
+    if (s.equals_ignore_ascii_case("mean"))      { out = BuiltinFn::Mean;      return true; }
+    if (s.equals_ignore_ascii_case("class"))     { out = BuiltinFn::ClassName; return true; }
     return false;
 }
 

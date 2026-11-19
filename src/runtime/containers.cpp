@@ -163,7 +163,7 @@ keel::Array<keel::usize> outputOrder(const Value &m, const KVPayload *p,
     keel::Array<keel::usize> idx(mr);
     idx.resize(p->count());
     std::iota(idx.begin(), idx.end(), keel::usize{0});
-    if (m.objectClassName() == "containers.Map") {
+    if (m.objectClassNameRef() == "containers.Map") {
         if (p->keyKind == KVPayload::Num)
             std::sort(idx.begin(), idx.end(),
                       [&](keel::usize a, keel::usize b) { return p->nkeys[a] < p->nkeys[b]; });
@@ -243,7 +243,7 @@ Value keys(const Value &m, keel::Allocator *mr)
     const KVPayload *p = require(m);
     const keel::Array<keel::usize> ord = outputOrder(m, p, mr);
     // containers.Map → cell row (sorted); dictionary → key-typed column.
-    if (m.objectClassName() == "containers.Map") {
+    if (m.objectClassNameRef() == "containers.Map") {
         Value c = Value::cell(1, p->count(), mr);
         for (keel::usize i = 0; i < ord.size(); ++i)
             c.cellAt(i) = (p->keyKind == KVPayload::Num)
@@ -269,7 +269,7 @@ Value values(const Value &m, keel::Allocator *mr)
         mr = keel::default_allocator();
     const KVPayload *p = require(m);
     const keel::Array<keel::usize> ord = outputOrder(m, p, mr);
-    if (m.objectClassName() == "containers.Map") {
+    if (m.objectClassNameRef() == "containers.Map") {
         Value c = Value::cell(1, p->count(), mr);
         for (keel::usize i = 0; i < ord.size(); ++i)
             c.cellAt(i) = p->vals[ord[i]];
@@ -736,14 +736,14 @@ void registerContainersRuntime(Engine &engine)
     };
 
     static auto tableCst = [](const Value &v) -> const TablePayload * {
-        if (!v.isObject() || (v.objectClassName() != "table" && v.objectClassName() != "timetable"))
+        if (!v.isObject() || (v.objectClassNameRef() != "table" && v.objectClassNameRef() != "timetable"))
             return nullptr;
         const auto *st = v.objectStateConst();
         return st ? static_cast<const TablePayload *>(st->native.get()) : nullptr;
     };
 
     static auto tableMut = [](Value &v) -> TablePayload * {
-        if (!v.isObject() || (v.objectClassName() != "table" && v.objectClassName() != "timetable"))
+        if (!v.isObject() || (v.objectClassNameRef() != "table" && v.objectClassNameRef() != "timetable"))
             return nullptr;
         auto *st = v.objectStateMut();
         return st ? static_cast<TablePayload *>(st->native.get()) : nullptr;
@@ -966,7 +966,7 @@ void registerContainersRuntime(Engine &engine)
             return os;
         }
         if (col.isObject()) {
-            return keel::format("<{}>", col.objectClassName());
+            return keel::format("<{}>", col.objectClassNameRef());
         }
         return keel::format("<{}>", mtypeName(col.type()));
     };
@@ -1632,7 +1632,7 @@ void registerContainersRuntime(Engine &engine)
                 sz.doubleDataMut()[1] = static_cast<double>(col.dims().cols());
                 vs.field("Size") = std::move(sz);
                 vs.field("Type") = col.isObject()
-                                 ? Value::fromString(col.objectClassName(), mr)
+                                 ? Value::fromString(col.objectClassNameRef(), mr)
                                  : Value::fromString(mtypeName(col.type()), mr);
                 if (col.isNumeric() && col.numel() > 0) {
                     double mn = std::numeric_limits<double>::infinity();
@@ -2409,7 +2409,7 @@ void registerContainersRuntime(Engine &engine)
             }
             keel::usize startCol = 0;
             if (dataEnd > 0 && args[0].isObject()
-                && (args[0].objectClassName() == "datetime" || args[0].objectClassName() == "duration")) {
+                && (args[0].objectClassNameRef() == "datetime" || args[0].objectClassNameRef() == "duration")) {
                 p->rowTimes = (args[0].dims().rows() == 1 && args[0].dims().cols() > 1)
                             ? args[0].objectReshape(Dims(args[0].numel(), 1), mr)
                             : args[0];
@@ -2933,7 +2933,7 @@ void registerContainersRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "istabular");
             bool ok = tableCst(args[0]) != nullptr
-                   || (args[0].isObject() && args[0].objectClassName() == "timetable");
+                   || (args[0].isObject() && args[0].objectClassNameRef() == "timetable");
             outs[0] = Value::logicalScalar(ok, ctx.engine->allocator());
         });
     engine.registerFunction("height",

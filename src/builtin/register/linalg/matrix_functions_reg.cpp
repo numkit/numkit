@@ -53,11 +53,11 @@ void funm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     const Value &A = args[0];
     const Value &fnArg = args[1];
 
-    keel::String knownName;
+    keel::StringRef knownName;
     if (fnArg.isChar() || fnArg.isString()) {
-        knownName = fnArg.toString();
+        knownName = fnArg.asStringRef();
     } else if (fnArg.isFuncHandle()) {
-        knownName = keel::String::from(fnArg.funcHandleName(), mr);
+        knownName = fnArg.funcHandleNameRef();
     }
     if (knownName == "exp" || knownName == "log" || knownName == "sqrt"
         || knownName == "sin" || knownName == "cos"

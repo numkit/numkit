@@ -648,7 +648,7 @@ inline Value constructDurationFromUnit(keel::ArrayRef<Value> args, double scaleS
 {
     argcheck::checkNargin(args.size(), 1, 1, fnName);
     const Value &x = args[0];
-    if (x.isObject() && x.objectClassName() == "duration") {
+    if (x.isObject() && x.objectClassNameRef() == "duration") {
         // When called on a duration, extract numeric units!
         const keel::usize n = x.objectCount();
         if (n == 1) {
@@ -679,7 +679,7 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
 {
     argcheck::checkNargin(args.size(), 1, 1, fnName);
     const Value &x = args[0];
-    if (x.isObject() && x.objectClassName() == "calendarDuration") {
+    if (x.isObject() && x.objectClassNameRef() == "calendarDuration") {
         const keel::usize n = x.objectCount();
         auto extract = [&](const CalDurElemPayload *p) -> double {
             if (!p) return 0.0;
@@ -960,28 +960,28 @@ void register_timefun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isdatetime");
             outs[0] = Value::logicalScalar(
-                args[0].isObject() && args[0].objectClassName() == "datetime",
+                args[0].isObject() && args[0].objectClassNameRef() == "datetime",
                 ctx.engine->allocator());
         });
     engine.registerFunction("isduration",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isduration");
             outs[0] = Value::logicalScalar(
-                args[0].isObject() && args[0].objectClassName() == "duration",
+                args[0].isObject() && args[0].objectClassNameRef() == "duration",
                 ctx.engine->allocator());
         });
     engine.registerFunction("iscalendarduration",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "iscalendarduration");
             outs[0] = Value::logicalScalar(
-                args[0].isObject() && args[0].objectClassName() == "calendarDuration",
+                args[0].isObject() && args[0].objectClassNameRef() == "calendarDuration",
                 ctx.engine->allocator());
         });
     engine.registerFunction("isnat",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "isnat");
             auto *mr = ctx.engine->allocator();
-            if (!args[0].isObject() || args[0].objectClassName() != "datetime") {
+            if (!args[0].isObject() || args[0].objectClassNameRef() != "datetime") {
                 outs[0] = Value::logicalScalar(false, mr);
                 return;
             }
@@ -1217,8 +1217,8 @@ void register_timefun(Engine &engine) {
                 const Value &lhs = args[0];
                 const Value &rhs = args[1];
                 // duration + datetime
-                if (sign > 0.0 && lhs.isObject() && lhs.objectClassName() == "duration"
-                    && rhs.isObject() && rhs.objectClassName() == "datetime") {
+                if (sign > 0.0 && lhs.isObject() && lhs.objectClassNameRef() == "duration"
+                    && rhs.isObject() && rhs.objectClassNameRef() == "datetime") {
                     Dims d = broadcastDims(lhs, rhs, "plus");
                     const keel::usize n = d.numel();
                     keel::Array<double> sds(mr);
@@ -1234,8 +1234,8 @@ void register_timefun(Engine &engine) {
                                                 p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                     return;
                 }
-                if (!lhs.isObject() || lhs.objectClassName() != "duration"
-                    || !rhs.isObject() || rhs.objectClassName() != "duration")
+                if (!lhs.isObject() || lhs.objectClassNameRef() != "duration"
+                    || !rhs.isObject() || rhs.objectClassNameRef() != "duration")
                     throw std::runtime_error("numkit:duration:TypeMismatch: Both operands must be durations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
@@ -1260,7 +1260,7 @@ void register_timefun(Engine &engine) {
                 const Value &lhs = args[0];
                 const Value &rhs = args[1];
                 if (divide && lhs.isObject() && rhs.isObject()
-                    && lhs.objectClassName() == "duration" && rhs.objectClassName() == "duration") {
+                    && lhs.objectClassNameRef() == "duration" && rhs.objectClassNameRef() == "duration") {
                     Dims d = broadcastDims(lhs, rhs, "rdivide");
                     const keel::usize n = d.numel();
                     if (n == 1) {
@@ -1303,7 +1303,7 @@ void register_timefun(Engine &engine) {
                 const Value &lhs = args[0];
                 const Value &rhs = args[1];
                 if (!lhs.isObject() || !rhs.isObject()
-                    || lhs.objectClassName() != "duration" || rhs.objectClassName() != "duration") {
+                    || lhs.objectClassNameRef() != "duration" || rhs.objectClassNameRef() != "duration") {
                     outs[0] = Value::logicalScalar(mode == 1, mr);
                     return;
                 }
@@ -1484,8 +1484,8 @@ void register_timefun(Engine &engine) {
                 auto *mr = ctx.engine->allocator();
                 const Value &lhs = args[0];
                 const Value &rhs = args[1];
-                if (sign > 0 && lhs.isObject() && lhs.objectClassName() == "calendarDuration"
-                    && rhs.isObject() && rhs.objectClassName() == "datetime") {
+                if (sign > 0 && lhs.isObject() && lhs.objectClassNameRef() == "calendarDuration"
+                    && rhs.isObject() && rhs.objectClassNameRef() == "datetime") {
                     Dims d = broadcastDims(lhs, rhs, "plus");
                     const keel::usize n = d.numel();
                     keel::Array<double> sds(mr);
@@ -1501,8 +1501,8 @@ void register_timefun(Engine &engine) {
                                                 p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                     return;
                 }
-                if (!lhs.isObject() || lhs.objectClassName() != "calendarDuration"
-                    || !rhs.isObject() || rhs.objectClassName() != "calendarDuration")
+                if (!lhs.isObject() || lhs.objectClassNameRef() != "calendarDuration"
+                    || !rhs.isObject() || rhs.objectClassNameRef() != "calendarDuration")
                     throw std::runtime_error("numkit:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
@@ -1529,8 +1529,8 @@ void register_timefun(Engine &engine) {
                 const Value &lhs = args[0];
                 const Value &rhs = args[1];
                 if (!lhs.isObject() || !rhs.isObject()
-                    || lhs.objectClassName() != "calendarDuration"
-                    || rhs.objectClassName() != "calendarDuration") {
+                    || lhs.objectClassNameRef() != "calendarDuration"
+                    || rhs.objectClassNameRef() != "calendarDuration") {
                     outs[0] = Value::logicalScalar(neg, mr);
                     return;
                 }
@@ -1627,7 +1627,7 @@ void register_timefun(Engine &engine) {
             }
 
             // datetime(dt_obj [, 'Format', fmt, 'TimeZone', tz])
-            if (nPos == 1 && args[0].isObject() && args[0].objectClassName() == "datetime") {
+            if (nPos == 1 && args[0].isObject() && args[0].objectClassNameRef() == "datetime") {
                 const keel::usize n = args[0].objectCount();
                 keel::Array<double> sds(mr);
                 sds.resize(n);
@@ -2141,7 +2141,7 @@ void register_timefun(Engine &engine) {
         dt.methods.put(keel::String("between", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
+            if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
                 throw std::runtime_error("numkit:between:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &rhs = args[0];
@@ -2409,7 +2409,7 @@ void register_timefun(Engine &engine) {
         dt.methods.put(keel::String("intersect", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
+            if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
                 throw std::runtime_error("numkit:intersect:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &other = args[0];
@@ -2475,7 +2475,7 @@ void register_timefun(Engine &engine) {
         dt.methods.put(keel::String("ismember", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty() || !args[0].isObject() || args[0].objectClassName() != "datetime")
+            if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
                 throw std::runtime_error("numkit:ismember:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &other = args[0];
@@ -2511,7 +2511,7 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const Value &lhs = args[0];
             const Value &rhs = args[1];
-            const Value &dtVal = (lhs.isObject() && lhs.objectClassName() == "datetime") ? lhs : rhs;
+            const Value &dtVal = (lhs.isObject() && lhs.objectClassNameRef() == "datetime") ? lhs : rhs;
             const Value &other = (&dtVal == &lhs) ? rhs : lhs;
             const auto *p0 = dtElem(dtVal, 0);
             Dims d = broadcastDims(dtVal, other, "plus");
@@ -2519,13 +2519,13 @@ void register_timefun(Engine &engine) {
             keel::Array<double> sds(mr);
             sds.resize(n);
 
-            if (other.isObject() && other.objectClassName() == "calendarDuration") {
+            if (other.isObject() && other.objectClassNameRef() == "calendarDuration") {
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd = dtElem(dtVal, dtVal.objectCount() == 1 ? 0 : i)->serialDay;
                     const auto *cp = calElem(other, other.objectCount() == 1 ? 0 : i);
                     sds[i] = addCalendarMonths(sd, cp->months, cp->days, cp->seconds);
                 }
-            } else if (other.isObject() && other.objectClassName() == "duration") {
+            } else if (other.isObject() && other.objectClassNameRef() == "duration") {
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd = dtElem(dtVal, dtVal.objectCount() == 1 ? 0 : i)->serialDay;
                     double sec = durElem(other, other.objectCount() == 1 ? 0 : i)->seconds;
@@ -2553,11 +2553,11 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const Value &lhs = args[0];
             const Value &rhs = args[1];
-            if (!lhs.isObject() || lhs.objectClassName() != "datetime")
+            if (!lhs.isObject() || lhs.objectClassNameRef() != "datetime")
                 throw std::runtime_error("numkit:datetime:InvalidMinus: Cannot subtract a datetime from a non-datetime.");
 
             // datetime - datetime -> duration
-            if (rhs.isObject() && rhs.objectClassName() == "datetime") {
+            if (rhs.isObject() && rhs.objectClassNameRef() == "datetime") {
                 Dims d = broadcastDims(lhs, rhs, "minus");
                 const keel::usize n = d.numel();
                 keel::Array<double> secs(mr);
@@ -2577,13 +2577,13 @@ void register_timefun(Engine &engine) {
             keel::Array<double> sds(mr);
             sds.resize(n);
 
-            if (rhs.isObject() && rhs.objectClassName() == "calendarDuration") {
+            if (rhs.isObject() && rhs.objectClassNameRef() == "calendarDuration") {
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd = dtElem(lhs, lhs.objectCount() == 1 ? 0 : i)->serialDay;
                     const auto *cp = calElem(rhs, rhs.objectCount() == 1 ? 0 : i);
                     sds[i] = addCalendarMonths(sd, -cp->months, -cp->days, -cp->seconds);
                 }
-            } else if (rhs.isObject() && rhs.objectClassName() == "duration") {
+            } else if (rhs.isObject() && rhs.objectClassNameRef() == "duration") {
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd = dtElem(lhs, lhs.objectCount() == 1 ? 0 : i)->serialDay;
                     double sec = durElem(rhs, rhs.objectCount() == 1 ? 0 : i)->seconds;
@@ -2616,7 +2616,7 @@ void register_timefun(Engine &engine) {
                 if (rhs.isChar() || rhs.isString())
                     rhs = makeDatetimeScalar(parseDateTimeString(rhs.toString(), mr), "", "", mr);
                 if (!lhs.isObject() || !rhs.isObject()
-                    || lhs.objectClassName() != "datetime" || rhs.objectClassName() != "datetime") {
+                    || lhs.objectClassNameRef() != "datetime" || rhs.objectClassNameRef() != "datetime") {
                     outs[0] = Value::logicalScalar(mode == 1, mr);
                     return;
                 }
@@ -2663,8 +2663,8 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const Value &startVal = args[0];
             const Value &stopVal = (args.size() == 3) ? args[2] : args[1];
-            if (!startVal.isObject() || startVal.objectClassName() != "datetime"
-                || !stopVal.isObject() || stopVal.objectClassName() != "datetime")
+            if (!startVal.isObject() || startVal.objectClassNameRef() != "datetime"
+                || !stopVal.isObject() || stopVal.objectClassNameRef() != "datetime")
                 throw std::runtime_error("numkit:datetime:InvalidColonEndpoints: Colon endpoints must be datetimes.");
             double startSd = dtElem(startVal, 0)->serialDay;
             double stopSd = dtElem(stopVal, 0)->serialDay;
@@ -2673,7 +2673,7 @@ void register_timefun(Engine &engine) {
             constexpr double kTol = 1e-9 / kSecondsPerDay;
 
             if (args.size() == 3 && args[1].isObject()
-                && args[1].objectClassName() == "calendarDuration") {
+                && args[1].objectClassNameRef() == "calendarDuration") {
                 const auto *cp = calElem(args[1], 0);
                 double approxStep = static_cast<double>(cp->months) * 30.0
                                     + static_cast<double>(cp->days)
@@ -2690,7 +2690,7 @@ void register_timefun(Engine &engine) {
             } else {
                 double stepDays = 1.0;
                 if (args.size() == 3) {
-                    if (args[1].isObject() && args[1].objectClassName() == "duration")
+                    if (args[1].isObject() && args[1].objectClassNameRef() == "duration")
                         stepDays = durElem(args[1], 0)->seconds / kSecondsPerDay;
                     else if (args[1].isNumeric())
                         stepDays = args[1].toScalar();

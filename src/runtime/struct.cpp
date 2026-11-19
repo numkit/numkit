@@ -75,7 +75,7 @@ Value structure(keel::ArrayRef<Value> nameValuePairs, keel::Allocator *mr)
         auto s = Value::structure(mr);
         for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
             const Value &v = nameValuePairs[i + 1];
-            s.field(nameValuePairs[i].toString()) = (hasCell && v.isCell()) ? v.cellAt(0) : v;
+            s.field(nameValuePairs[i].asStringRef()) = (hasCell && v.isCell()) ? v.cellAt(0) : v;
         }
         return s;
     }
@@ -84,7 +84,7 @@ Value structure(keel::ArrayRef<Value> nameValuePairs, keel::Allocator *mr)
     auto s = Value::structArray(arrRows, arrCols, mr);
     const keel::usize numel = arrRows * arrCols;
     for (keel::usize i = 0; i + 1 < nameValuePairs.size(); i += 2) {
-        keel::String fname = nameValuePairs[i].toString();
+        const keel::StringRef fname = nameValuePairs[i].asStringRef();
         const Value &v = nameValuePairs[i + 1];
         if (v.isCell()) {
             if (v.numel() == 1) {
@@ -121,13 +121,13 @@ Value isfield(const Value &s, const Value &name, keel::Allocator *mr)
     if (!s.isStruct())
         return Value::logicalScalar(false, mr);
     if (s.isStructArray()) {
-        const keel::String n = name.toString();
+        const keel::StringRef n = name.asStringRef();
         if (s.numel() == 0)
             return Value::logicalScalar(false, mr);
         const auto &elem0 = s.structArrayElem(0);
         return Value::logicalScalar(elem0.contains(n), mr);
     }
-    return Value::logicalScalar(s.hasField(name.toString()), mr);
+    return Value::logicalScalar(s.hasField(name.asStringRef()), mr);
 }
 
 Value rmfield(const Value &s, const Value &name, keel::Allocator *)
@@ -136,7 +136,7 @@ Value rmfield(const Value &s, const Value &name, keel::Allocator *)
         throw Error("rmfield requires a struct", 0, 0, "rmfield", "",
                      "numkit:rmfield:notStruct");
     Value out = s;
-    out.removeField(name.toString());  // BUG #15: also clears fieldOrder
+    out.removeField(name.asStringRef());  // BUG #15: also clears fieldOrder
     return out;
 }
 
@@ -197,7 +197,7 @@ Value getfield(const Value &s, const Value &name, keel::Allocator *)
     if (!s.isStruct())
         throw Error("getfield requires a struct", 0, 0, "getfield", "",
                      "numkit:getfield:notStruct");
-    const keel::String n = name.toString();
+    const keel::StringRef n = name.asStringRef();
     if (s.isStructArray()) {
         if (s.numel() == 0)
             throw Error("getfield: struct array is empty", 0, 0, "getfield", "",
@@ -227,9 +227,9 @@ Value setfield(const Value &s, const Value &name, const Value &value, keel::Allo
                      0, 0, "setfield", "", "numkit:setfield:notStruct");
     }
     if (out.isStructArray()) {
-        out.setFieldAll(name.toString(), value);  // BUG #15
+        out.setFieldAll(name.asStringRef(), value);  // BUG #15
     } else {
-        out.field(name.toString()) = value;       // tracks order via field()
+        out.field(name.asStringRef()) = value;       // tracks order via field()
     }
     return out;
 }
@@ -308,44 +308,44 @@ Value orderfieldsByNames(const Value &s, const Value &names,
     if (s.isStructArray() && s.numel() == 0)
         return s;
 
-    keel::Array<keel::String> order;
+    keel::Array<keel::StringRef> order;
     if (names.isCell()) {
         order.reserve(names.numel());
         for (keel::usize i = 0; i < names.numel(); ++i)
-            order.push_back(names.cellAt(i).toString());
+            order.push_back(names.cellAt(i).asStringRef());
     } else if (names.type() == ValueType::CHAR) {
-        order.push_back(names.toString());
+        order.push_back(names.asStringRef());
     } else {
         throw Error("orderfields: second argument must be a cell array of names",
                      0, 0, "orderfields", "", "numkit:orderfields:badPerm");
     }
 
     // Existing field names (from element 0 / the single struct).
-    keel::Array<keel::String> existing;
+    keel::Array<keel::StringRef> existing;
     if (s.isStructArray()) {
         existing.reserve(s.structArrayElem(0).size());
         for (auto [key, val] : s.structArrayElem(0)) {
             (void)val;
-            existing.push_back(key.clone());
+            existing.push_back(key.as_ref());
         }
     } else {
         existing.reserve(s.structFields().size());
         for (auto [key, val] : s.structFields()) {
             (void)val;
-            existing.push_back(key.clone());
+            existing.push_back(key.as_ref());
         }
     }
-    auto contains = [](const keel::Array<keel::String> &v, keel::StringRef x) {
+    auto contains = [](const keel::Array<keel::StringRef> &v, keel::StringRef x) {
         for (const auto &e : v) if (e == x) return true;
         return false;
     };
 
     // Final order: requested names that exist (deduped), then leftovers.
-    keel::Array<keel::String> finalOrder;
+    keel::Array<keel::StringRef> finalOrder;
     for (const auto &n : order)
-        if (contains(existing, n) && !contains(finalOrder, n)) finalOrder.push_back(n.clone());
+        if (contains(existing, n) && !contains(finalOrder, n)) finalOrder.push_back(n);
     for (const auto &n : existing)
-        if (!contains(finalOrder, n)) finalOrder.push_back(n.clone());
+        if (!contains(finalOrder, n)) finalOrder.push_back(n);
 
     const auto rows = s.dims().rows();
     const auto cols = s.dims().cols();
@@ -402,7 +402,8 @@ Value cell2struct(const Value &c, const Value &fields, keel::Allocator *mr)
                      0, 0, "cell2struct", "", "numkit:cell2struct:shape");
     auto out = Value::structure(mr);
     for (keel::usize i = 0; i < nFields; ++i) {
-        const keel::String name = fields.cellAt(i).toString();
+        const keel::StringRef name = fields.isString() ? fields.stringElemRef(i)
+                                                       : fields.cellAt(i).asStringRef();
         out.field(name) = c.cellAt(i);
     }
     return out;

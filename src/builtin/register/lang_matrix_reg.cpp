@@ -118,7 +118,7 @@ void colon_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     auto *mr = ctx.engine->allocator();
     for (keel::usize i = 0; i < args.size(); ++i) {
         if (args[i].isObject()) {
-            const BuiltinClass *cls = ctx.engine->findClass(args[i].objectClassName());
+            const BuiltinClass *cls = ctx.engine->findClass(args[i].objectClassNameRef());
             if (cls) {
                 if (const ObjectMethod *op = cls->ops.get("colon")) {
                     Value self = args[i];
@@ -1311,7 +1311,7 @@ void nonzeros_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
 void horzcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (!args.empty() && args[0].isObject()) {
-        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
+        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassNameRef())) {
             if (const ObjectMethod *op = bc->ops.get("horzcat")) {
                 Value lhs = args[0];
                 (*op)(lhs, args.slice(1), nargout, outs, ctx);
@@ -1325,7 +1325,7 @@ void horzcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 void vertcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (!args.empty() && args[0].isObject()) {
-        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassName())) {
+        if (const BuiltinClass *bc = ctx.engine->findClass(args[0].objectClassNameRef())) {
             if (const ObjectMethod *op = bc->ops.get("vertcat")) {
                 Value lhs = args[0];
                 (*op)(lhs, args.slice(1), nargout, outs, ctx);

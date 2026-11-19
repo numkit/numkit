@@ -897,7 +897,7 @@ enter_frame:
                 const Value &arr = R[I.b];
                 int ndims = I.d;
                 if (arr.isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(arr.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(arr.objectClassNameRef());
                     if (cls) {
                         if (const auto *endFn = cls->methods.get("__end")) {
                             Value self = arr;
@@ -1305,7 +1305,7 @@ enter_frame:
                     if (I.e == kInvalidReg) {
                         if (R[I.b].isObject() || R[I.c].isObject()) {
                             const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
-                            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                            const BuiltinClass *cls = engine_.findClass(dom.objectClassNameRef());
                             if (cls) {
                                 if (const auto *colonOp = cls->ops.get("colon")) {
                                     Value self = dom;
@@ -1338,7 +1338,7 @@ enter_frame:
                         if (R[I.b].isObject() || R[I.e].isObject() || R[I.c].isObject()) {
                             const Value &dom = R[I.b].isObject() ? R[I.b]
                                              : (R[I.c].isObject() ? R[I.c] : R[I.e]);
-                            const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                            const BuiltinClass *cls = engine_.findClass(dom.objectClassNameRef());
                             if (cls) {
                                 if (const auto *colonOp = cls->ops.get("colon")) {
                                     Value self = dom;
@@ -1437,7 +1437,7 @@ enter_frame:
             case OpCode::COLON: {
                 if (R[I.b].isObject() || R[I.c].isObject()) {
                     const Value &dom = R[I.b].isObject() ? R[I.b] : R[I.c];
-                    const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(dom.objectClassNameRef());
                     if (cls) {
                         if (const auto *colonOp = cls->ops.get("colon")) {
                             Value self = dom;
@@ -1474,7 +1474,7 @@ enter_frame:
                 if (R[I.b].isObject() || R[I.c].isObject() || R[I.e].isObject()) {
                     const Value &dom = R[I.b].isObject() ? R[I.b]
                                      : (R[I.e].isObject() ? R[I.e] : R[I.c]);
-                    const BuiltinClass *cls = engine_.findClass(dom.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(dom.objectClassNameRef());
                     if (cls) {
                         if (const auto *colonOp = cls->ops.get("colon")) {
                             Value self = dom;
@@ -1521,7 +1521,7 @@ enter_frame:
                 bool handled = false;
                 for (keel::u16 k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
-                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
+                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassNameRef());
                         if (cls) {
                             if (const auto *catOp = cls->ops.get("horzcat")) {
                                 Value self = R[I.b];
@@ -1553,7 +1553,7 @@ enter_frame:
                 Value elems[2] = { dst, val };
                 if (dst.isObject() || val.isObject()) {
                     const Value &obj = dst.isObject() ? dst : val;
-                    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
                     if (cls) {
                         if (const auto *catOp = cls->ops.get("horzcat")) {
                             Value self = dst;
@@ -1577,7 +1577,7 @@ enter_frame:
                 bool handled = false;
                 for (keel::u16 k = 0; k < I.c; ++k) {
                     if (R[I.b + k].isObject()) {
-                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassName());
+                        const BuiltinClass *cls = engine_.findClass(R[I.b + k].objectClassNameRef());
                         if (cls) {
                             if (const auto *catOp = cls->ops.get("vertcat")) {
                                 Value self = R[I.b];
@@ -1613,7 +1613,7 @@ enter_frame:
                 Value elems[2] = { dst, val };
                 if (dst.isObject() || val.isObject()) {
                     const Value &obj = dst.isObject() ? dst : val;
-                    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
                     if (cls) {
                         if (const auto *catOp = cls->ops.get("vertcat")) {
                             Value self = dst;
@@ -1655,7 +1655,7 @@ enter_frame:
                 } else if (src.isObject()) {
                     // OBJECT array CSL: [arr.prop] expands prop over each
                     // element via the class propGet hook.
-                    const BuiltinClass *cls = engine_.findClass(src.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(src.objectClassNameRef());
                     keel::usize n = src.objectCount();
                     elems.reserve(n + 1);
                     CallContext ctx{&engine_, currentCallEnv()};
@@ -1666,7 +1666,7 @@ enter_frame:
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx))
                             throw std::runtime_error(
                                 keel::format("No appropriate property '{}' for class '{}'",
-                                             fname, src.objectClassName())
+                                             fname, src.objectClassNameRef())
                                     .c_str());
                         elems.push_back(keel::move(out));
                     }
@@ -1820,7 +1820,7 @@ enter_frame:
                     // classdef subsasgn → same-stack VM frame (pausable, P4)
                     if (tryObjectSubsasgnFrame(I.a, keel::ArrayRef<Value>(sargs, 2), frame, ip))
                         goto enter_frame;
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
                     if (cls && cls->subsasgn) {
                         Value args[2] = {ix, R[I.c]};
                         Value out[1];
@@ -1843,15 +1843,15 @@ enter_frame:
                     auto isGfxCls = [](keel::StringRef c) {
                         return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
                     };
-                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassName())) {
+                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassNameRef())) {
                         dst = Value();
                     }
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     const bool sameArr = canPromote1D ||
                         (dst.isObject()
-                         && (dst.objectClassName() == R[I.c].objectClassName()
-                             || (isGfxCls(dst.objectClassName()) && isGfxCls(R[I.c].objectClassName()))));
+                         && (dst.objectClassNameRef() == R[I.c].objectClassNameRef()
+                             || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(R[I.c].objectClassNameRef()))));
                     if (newable || sameArr) {
                         // Linear slice: scalar / range / vector / logical / `:`.
                         keel::Array<keel::usize> pos =
@@ -1865,7 +1865,7 @@ enter_frame:
                 if (R[I.a].isObject())
                     throw std::runtime_error(
                         keel::format("'()' assignment is not defined for class '{}'",
-                                     R[I.a].objectClassName())
+                                     R[I.a].objectClassNameRef())
                             .c_str());
                 if (ix.isDoubleScalar()) {
                     // Fast path: scalar index
@@ -1995,15 +1995,15 @@ enter_frame:
                     auto isGfxCls = [](keel::StringRef c) {
                         return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
                     };
-                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassName())) {
+                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassNameRef())) {
                         dst = Value();
                     }
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
                     const bool sameArr = canPromote2D ||
                         (dst.isObject()
-                         && (dst.objectClassName() == val.objectClassName()
-                             || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName()))));
+                         && (dst.objectClassNameRef() == val.objectClassNameRef()
+                             || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(val.objectClassNameRef()))));
                     if (newable || sameArr) {
                         const keel::usize rDim = (dst.isObject() && dst.objectCount() > 0)
                                                 ? dst.dims().rows() : val.dims().rows();
@@ -2145,8 +2145,8 @@ enter_frame:
                     };
                     const bool sameArr =
                         dst.isObject()
-                        && (dst.objectClassName() == val.objectClassName()
-                            || (isGfxCls(dst.objectClassName()) && isGfxCls(val.objectClassName())));
+                        && (dst.objectClassNameRef() == val.objectClassNameRef()
+                            || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(val.objectClassNameRef())));
                     if (newable || sameArr) {
                         keel::Array<keel::Array<keel::usize>> perDim;
                         perDim.resize(ndims);
@@ -2307,7 +2307,7 @@ enter_frame:
                 const keel::String &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop via class property hook (object model).
                 if (R[I.b].isObject()) {
-                    keel::String cn = R[I.b].objectClassName().clone();
+                    const keel::StringRef cn = R[I.b].objectClassNameRef();
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2345,7 +2345,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassName())
+                                     fname, R[I.b].objectClassNameRef())
                             .c_str());
                 }
                 if (!R[I.b].isStruct())
@@ -2390,7 +2390,7 @@ enter_frame:
                 // `obj.prop(i) = v` can modify the value and FIELD_SET it back
                 // (read-modify-write — objects have no addressable slot).
                 if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
                     if (cls && cls->propGet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
@@ -2401,7 +2401,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassName())
+                                     fname, R[I.b].objectClassNameRef())
                             .c_str());
                 }
                 if (R[I.b].isEmpty())
@@ -2416,7 +2416,7 @@ enter_frame:
                 const keel::String &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop = val via class property hook (object model).
                 if (R[I.a].isObject()) {
-                    keel::String cn = R[I.a].objectClassName().clone();
+                    const keel::StringRef cn = R[I.a].objectClassNameRef();
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2450,7 +2450,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("Cannot set property '{}' on class '{}'",
-                                     fname, R[I.a].objectClassName())
+                                     fname, R[I.a].objectClassNameRef())
                             .c_str());
                 }
                 if (R[I.a].isEmpty()) {
@@ -2536,9 +2536,9 @@ enter_frame:
             }
             case OpCode::FIELD_GET_DYN: {
                 // a=dst, b=obj, c=nameReg — s.(R[nameReg])
-                keel::String fname = R[I.c].toString();
+                const keel::StringRef fname = R[I.c].asStringRef();
                 if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
                     if (cls && cls->propGet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
@@ -2549,7 +2549,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassName())
+                                     fname, R[I.b].objectClassNameRef())
                             .c_str());
                 }
                 if (!R[I.b].isStruct())
@@ -2579,9 +2579,9 @@ enter_frame:
             }
             case OpCode::FIELD_GET_OR_CREATE_DYN: {
                 // a=dst, b=obj (in/out), c=nameReg — lvalue dynamic field
-                keel::String fname = R[I.c].toString();
+                const keel::StringRef fname = R[I.c].asStringRef();
                 if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
                     if (cls && cls->propGet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
@@ -2592,7 +2592,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassName())
+                                     fname, R[I.b].objectClassNameRef())
                             .c_str());
                 }
                 if (R[I.b].isEmpty())
@@ -2604,9 +2604,9 @@ enter_frame:
             }
             case OpCode::FIELD_SET_DYN: {
                 // a=obj, b=nameReg, c=val — s.(R[nameReg]) = R[val]
-                keel::String fname = R[I.b].toString();
+                const keel::StringRef fname = R[I.b].asStringRef();
                 if (R[I.a].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
                     if (cls && cls->propSet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         if (cls->propSet(R[I.a], fname, R[I.c], ctx))
@@ -2614,7 +2614,7 @@ enter_frame:
                     }
                     throw std::runtime_error(
                         keel::format("Cannot set property '{}' on class '{}'",
-                                     fname, R[I.a].objectClassName())
+                                     fname, R[I.a].objectClassNameRef())
                             .c_str());
                 }
                 if (R[I.a].isEmpty())
@@ -2764,7 +2764,7 @@ enter_frame:
             }
             case OpCode::CELL_GET: {
                 if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
                     if (cls) {
                         if (const auto *bgFn = cls->methods.get("__brace_get")) {
                             Value self = R[I.b];
@@ -2809,7 +2809,7 @@ enter_frame:
             }
             case OpCode::CELL_GET_2D: {
                 if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
                     if (cls) {
                         if (const auto *bgFn = cls->methods.get("__brace_get")) {
                             Value self = R[I.b];
@@ -2876,7 +2876,7 @@ enter_frame:
             }
             case OpCode::CELL_SET: {
                 if (R[I.a].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
                     if (cls) {
                         if (const auto *bsFn = cls->methods.get("__brace_set")) {
                             Value args[2] = {R[I.b], R[I.c]};
@@ -2892,7 +2892,7 @@ enter_frame:
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
                     throw std::runtime_error("Cell indexing requires a cell array");
-                const bool isColonSub = R[I.b].isChar() && R[I.b].toString().as_ref() == ":";
+                const bool isColonSub = R[I.b].isChar() && R[I.b].asStringRef() == ":";
                 if (R[I.b].isLogical() || isColonSub || !R[I.b].isScalar()) {
                     keel::usize maxLen = R[I.a].numel();
                     if (!R[I.b].isLogical() && !isColonSub) {
@@ -2928,7 +2928,7 @@ enter_frame:
             }
             case OpCode::CELL_SET_2D: {
                 if (R[I.a].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
                     if (cls) {
                         if (const auto *bsFn = cls->methods.get("__brace_set")) {
                             Value args[3] = {R[I.b], R[I.c], R[I.e]};
@@ -3217,7 +3217,7 @@ enter_frame:
                 // method m beats a same-named global function.
                 if (na >= 1 && R[argBase].isObject()) {
                     const keel::String &mnm = chunk.strings[funcIdx];
-                    const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassNameRef());
                     if (cls) {
                         // classdef method → run its body as a native VM frame
                         // (debuggable). Args are already contiguous at argBase
@@ -3226,7 +3226,7 @@ enter_frame:
                         if (const auto *mfp = cls->methodFns.get(mnm)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(R[argBase].objectClassName(), mnm);
+                                engine_.enforceMethodAccess(R[argBase].objectClassNameRef(), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, &R[argBase], na, I.a, nargout_val, false, 0, 0,
                                               (*mfp)->ownerClass, false);
@@ -3550,12 +3550,12 @@ enter_frame:
 
                 if (NF >= 1 && AB[0].isObject()) {
                     const keel::String &mnm = chunk.strings[funcIdx];
-                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
                     if (cls) {
                         if (const auto *mfp = cls->methodFns.get(mnm)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), mnm);
+                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, AB, NF, I.a, nargout_val, false, 0, 0,
                                               (*mfp)->ownerClass, false);
@@ -3655,7 +3655,7 @@ enter_frame:
                     if (dynLocal && dynLocal->isFuncHandle()) {
                         const Value fh = *dynLocal;
                         const keel::usize ncaps = fh.funcHandleCaptureCount();
-                        keel::String hName = fh.funcHandleName();
+                        const keel::StringRef hName = fh.funcHandleNameRef();
                         keel::Array<Value> cargs(NF + ncaps);
                         for (keel::usize i = 0; i < NF; ++i) cargs[i] = AB[i];
                         for (keel::usize i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
@@ -3735,12 +3735,12 @@ enter_frame:
                 // beats a same-named path function.
                 if (NF >= 1 && AB[0].isObject()) {
                     const BuiltinClass *cls =
-                        engine_.findClass(AB[0].objectClassName());
+                        engine_.findClass(AB[0].objectClassNameRef());
                     if (cls) {
                         if (const auto *mfp = cls->methodFns.get(funcName)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
@@ -3887,12 +3887,12 @@ enter_frame:
                     goto enter_frame;
                 }
                 if (NF >= 1 && AB[0].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
                     if (cls) {
                         if (const auto *mfp = cls->methodFns.get(funcName)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
+                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
@@ -3981,14 +3981,14 @@ enter_frame:
                 const Value *argPtr = splat.data();
                 keel::usize argN = splat.size();
                 if (obj.isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+                    const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
                     // classdef method → native VM frame (debuggable). Receiver
                     // and args aren't contiguous, so build [self, args…].
                     if (cls) {
                         if (const auto *mfp = cls->methodFns.get(mname)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                                engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
                                 keel::Array<Value> frameArgs;
                                 frameArgs.reserve(argN + 1);
                                 frameArgs.push_back(obj);
@@ -4017,7 +4017,7 @@ enter_frame:
                     if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
                         throw std::runtime_error(
                             keel::format("No appropriate property '{}' for class '{}'",
-                                         mname, obj.objectClassName())
+                                         mname, obj.objectClassNameRef())
                                 .c_str());
                     if (execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip))
                         goto enter_frame;
@@ -4055,13 +4055,13 @@ enter_frame:
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *argPtr = splat.data();
                 keel::usize argN = splat.size();
-                const BuiltinClass *cls = engine_.findClass(obj.objectClassName());
+                const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
                 // classdef method → native multi-output VM frame.
                 if (cls) {
                     if (const auto *mfp = cls->methodFns.get(mname)) {
                         const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                         if (mc) {
-                            engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                            engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
                             keel::Array<Value> frameArgs;
                             frameArgs.reserve(argN + 1);
                             frameArgs.push_back(obj);
@@ -4080,7 +4080,7 @@ enter_frame:
                 if (!mfn)
                     throw std::runtime_error(
                         keel::format("No appropriate method '{}' for class '{}'",
-                                     mname, obj.objectClassName())
+                                     mname, obj.objectClassNameRef())
                             .c_str());
                 Value self = obj; // handle: shares state; value: own copy
                 keel::ArrayRef<Value> args(argPtr, argN);
@@ -4176,7 +4176,7 @@ enter_frame:
                 }
                 const Value &fh = R[fhReg];
                 const keel::usize ncaps = fh.funcHandleCaptureCount();
-                keel::String fName = fh.funcHandleName().clone();
+                const keel::StringRef fName = fh.funcHandleNameRef();
                 keel::Array<Value> cargs(nflat + ncaps);
                 for (keel::usize i = 0; i < nflat; ++i) cargs[i] = ABf[i];
                 for (keel::usize i = 0; i < ncaps; ++i)
@@ -4417,10 +4417,10 @@ enter_frame:
 
             case OpCode::EXIST_VAR: {
                 // a=dst, b=nameReg, c=filterReg (0 = no filter)
-                keel::String varName = R[I.b].toString();
-                keel::String filter;
+                const keel::StringRef varName = R[I.b].asStringRef();
+                keel::StringRef filter;
                 if (I.c != 0 && !R[I.c].isEmpty())
-                    filter = R[I.c].toString();
+                    filter = R[I.c].asStringRef();
 
                 double code = 0;
 
@@ -4519,14 +4519,14 @@ enter_frame:
             case OpCode::THROW: {
                 // a = register containing error message (string or struct)
                 if (R[I.a].isChar() || R[I.a].isString())
-                    throw Error(R[I.a].toString());
+                    throw Error(R[I.a].asStringRef());
                 if (R[I.a].isStruct()) {
-                    keel::String msg = R[I.a].hasField("message")
-                                           ? R[I.a].field("message").toString()
-                                           : keel::String::from("User error");
-                    keel::String id = R[I.a].hasField("identifier")
-                                          ? R[I.a].field("identifier").toString()
-                                          : keel::String{};
+                    const keel::StringRef msg = R[I.a].hasField("message")
+                                                    ? R[I.a].field("message").asStringRef()
+                                                    : keel::StringRef("User error");
+                    const keel::StringRef id = R[I.a].hasField("identifier")
+                                                   ? R[I.a].field("identifier").asStringRef()
+                                                   : keel::StringRef{};
                     throw Error(msg, 0, 0, "", "", id);
                 }
                 throw Error("User error");
@@ -5504,7 +5504,7 @@ bool VM::pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    keel::String fhName = keel::String::from(handle.funcHandleName());
+    const keel::StringRef fhName = handle.funcHandleNameRef();
     const UserFunction *uf = engine_.lookupUserFunctionLocal(fhName);
     if (!uf)
         uf = engine_.lookupUserFunction(fhName, currentCallEnv());
@@ -5834,7 +5834,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
     const char *fname = builtinIdName(bid);
     if (fname) {
         if (na >= 1 && R[argBase].isObject()) {
-            const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassName());
+            const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassNameRef());
             if (cls) {
                 if (const auto *mfn = cls->methods.get(fname)) {
                     Value self = R[argBase];
@@ -5957,7 +5957,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         return false;
     }
 
-    keel::String funcName = keel::String::from(funcHandleVal.funcHandleName());
+    const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
 
     // Build args: user args + captured values
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
@@ -6017,7 +6017,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         funcHandleVal = R[fhReg];
         numCaptures = funcHandleVal.funcHandleCaptureCount();
     } else if (R[fhReg].isObject()) {
-        const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassName());
+        const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassNameRef());
         if (cls && cls->subsref) {
             keel::Array<Value> argsBuf;
             argsBuf.resize(na);
@@ -6041,7 +6041,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
             "function handle");
     }
 
-    keel::String funcName = keel::String::from(funcHandleVal.funcHandleName());
+    const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
 
     // Build args: user args followed by captured values.
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
@@ -6256,7 +6256,7 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            keel::String reqName = R[I.a + i].toString();
+            const keel::StringRef reqName = R[I.a + i].asStringRef();
             bool found = false;
             for (const auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {
@@ -6322,7 +6322,7 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            keel::String reqName = R[I.a + i].toString();
+            const keel::StringRef reqName = R[I.a + i].asStringRef();
             bool found = false;
             for (const auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {
@@ -6338,14 +6338,14 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
                 if (curFrame->dynVars) {
                     if (const Value *dv = curFrame->dynVars->get(reqName);
                         dv && !dv->isUnset() && !dv->isDeleted()) {
-                        liveVals.put(reqName.clone(), *dv);
+                        liveVals.put(keel::String::from(reqName), *dv);
                         found = true;
                     }
                 }
                 if (!found && curFrame->env) {
                     if (const Value *lv = curFrame->env->getLocal(reqName);
                         lv && !lv->isUnset() && !lv->isDeleted())
-                        liveVals.put(reqName.clone(), *lv);
+                        liveVals.put(keel::String::from(reqName), *lv);
                 }
             }
         }

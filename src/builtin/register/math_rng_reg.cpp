@@ -38,7 +38,7 @@ struct RandStreamPayload : NativePayload {
 };
 
 static ops::RngContext &resolveRngAndStripStream(keel::ArrayRef<Value> &args, CallContext &ctx) {
-    if (!args.empty() && args[0].isObject() && args[0].objectClassName() == "RandStream") {
+    if (!args.empty() && args[0].isObject() && args[0].objectClassNameRef() == "RandStream") {
         auto *st = const_cast<Value &>(args[0]).objectStateMut();
         args = args.slice(1);
         if (st && st->native) {

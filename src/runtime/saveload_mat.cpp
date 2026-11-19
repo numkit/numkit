@@ -357,7 +357,7 @@ void encodeMat5Matrix(MatWriter &mw, keel::StringRef name, const Value &v) {
     } else if (v.type() == ValueType::STRUCT || v.type() == ValueType::OBJECT) {
         keel::Array<keel::String> fnames;
         if (v.type() == ValueType::OBJECT) {
-            keel::String className = v.objectClassName();
+            const keel::StringRef className = v.objectClassNameRef();
             inner.writeTag(miINT8, className.data(), static_cast<keel::u32>(className.size()));
             if (const auto *st = v.objectStateConst()) {
                 fnames.reserve(st->props.size());

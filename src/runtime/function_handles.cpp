@@ -75,19 +75,19 @@ void registerFunctionHandles(Engine &engine)
                                 if (!h->isFuncHandle())
                                     throw std::runtime_error(
                                         "func2str: argument must be a function handle");
-                                const keel::String name = h->funcHandleName();
-                                const keel::String src = h->funcHandleSource();
+                                const keel::StringRef name = h->funcHandleNameRef();
+                                const keel::StringRef src = h->funcHandleSourceRef();
                                 const bool isAnon = name.starts_with("__anon_");
                                 if (!src.empty()) {
-                                    outs[0] = Value::fromString(src.as_ref(), ctx.engine->allocator());
+                                    outs[0] = Value::fromString(src, ctx.engine->allocator());
                                 } else if (isAnon) {
                                     keel::String text;
                                     text.reserve(1 + name.size());
                                     text.push_back('@');
-                                    text.append(name.as_ref());
+                                    text.append(name);
                                     outs[0] = Value::fromString(text.as_ref(), ctx.engine->allocator());
                                 } else {
-                                    outs[0] = Value::fromString(name.as_ref(), ctx.engine->allocator());
+                                    outs[0] = Value::fromString(name, ctx.engine->allocator());
                                 }
                             });
 }
