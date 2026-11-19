@@ -138,7 +138,7 @@ void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
                 s += V[static_cast<keel::usize>(r) * m + i] * V[static_cast<keel::usize>(c) * m + i];
             VtV[static_cast<keel::usize>(c) * np + r] = s;
         }
-    auto Vty = keel::Array<double>(static_cast<keel::usize>(np), scratch.allocator());
+    auto Vty = keel::Array<double>(np, scratch.allocator());
     for (int r = 0; r < np; ++r) {
         double s = 0.0;
         for (keel::usize i = 0; i < m; ++i) s += V[static_cast<keel::usize>(r) * m + i] * yd[i];
@@ -248,7 +248,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         for (keel::usize i = 0; i < m; ++i) xx[i] = xraw[i];
     }
 
-    auto pbuf = keel::Array<double>(static_cast<keel::usize>(np), scratch.allocator());
+    auto pbuf = keel::Array<double>(np, scratch.allocator());
     auto Rbuf = keel::Array<double>(static_cast<keel::usize>(np) * np, scratch.allocator());
     double normr = 0.0, df = 0.0;
     polyfitCore(xx.data(), yd, m, deg, pbuf.data(), Rbuf.data(), normr, df, scratch);

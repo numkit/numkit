@@ -136,7 +136,7 @@ void circshift_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
                 throw Error("circshift: dim must be a positive integer",
                              0, 0, "circshift", "", "numkit:circshift:badDim");
             keel::ArenaTemp scratch = keel::get_scratch(mr);
-            auto shifts = keel::Array<keel::i64>(static_cast<keel::usize>(dim), scratch.allocator());
+            auto shifts = keel::Array<keel::i64>(dim, scratch.allocator());
             for (int i = 0; i < dim; ++i) shifts[i] = 0;
             shifts[dim - 1] = kk;
             outs[0] = numkit::narrowComplex(circshiftND(args[0],

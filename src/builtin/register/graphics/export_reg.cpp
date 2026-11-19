@@ -252,7 +252,7 @@ void registerFigureExport(Engine &engine)
 {
     // saveas(h, filename [, fmt])
     {
-        ExternalFunc fn = [&engine](keel::ArrayRef<Value> args, keel::usize,
+        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
                                     keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "saveas");
             // saveas(filename) targets the current figure.

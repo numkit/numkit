@@ -434,8 +434,8 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto *sa = scratch.allocator();
 
-    keel::Array<keel::usize> vShape(static_cast<keel::usize>(N), sa);
-    keel::Array<keel::usize> vStrides(static_cast<keel::usize>(N), keel::usize(1), sa);
+    keel::Array<keel::usize> vShape(N, sa);
+    keel::Array<keel::usize> vStrides(N, keel::usize(1), sa);
     keel::usize strideAcc = 1;
     for (int d = 0; d < N; ++d) {
         const keel::usize sd = (d < V.dims().ndim()) ? static_cast<keel::usize>(V.dims().dim(d)) : 1;
@@ -449,7 +449,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
     keel::Array<keel::Array<double>> grids(sa);
-    grids.reserve(static_cast<keel::usize>(N));
+    grids.reserve(N);
     for (int d = 0; d < N; ++d) {
         const keel::usize sd = vShape[static_cast<keel::usize>(d)];
         keel::Array<double> gdVec(sd, sa);
@@ -473,15 +473,15 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     const Value &Xq0 = args[qStart];
     const keel::usize nQuery = Xq0.numel();
-    keel::Array<keel::usize> outShape(static_cast<keel::usize>(Xq0.dims().ndim()), sa);
+    keel::Array<keel::usize> outShape(Xq0.dims().ndim(), sa);
     for (int k = 0; k < Xq0.dims().ndim(); ++k)
         outShape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
                                 mr);
     double *od = out.doubleDataMut();
 
-    keel::Array<keel::usize> idx0(static_cast<keel::usize>(N), sa);
-    keel::Array<double> frac(static_cast<keel::usize>(N), sa);
+    keel::Array<keel::usize> idx0(N, sa);
+    keel::Array<double> frac(N, sa);
     const keel::usize nCorners = static_cast<keel::usize>(1) << N;
 
     for (keel::usize q = 0; q < nQuery; ++q) {

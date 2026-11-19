@@ -160,7 +160,7 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
                                       keel::String &txOut, keel::String &tyOut) {
         const double TAU = 2 * 3.14159265358979323846;
         const double bw  = TAU / nbins;
-        keel::Array<double> counts(static_cast<keel::usize>(nbins), 0.0);
+        keel::Array<double> counts(nbins, 0.0);
         const keel::usize N = theta.numel();
         for (keel::usize i = 0; i < N; ++i) {
             double t = theta.elemAsDouble(i);

@@ -813,8 +813,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         // (and per-axis size) to fit any out-of-range subscripts.
         const int nd = static_cast<int>(nargs);
         keel::Array<keel::Array<keel::usize>> idxLists(static_cast<keel::usize>(nd));
-        keel::Array<const keel::usize *> idxPtrs(static_cast<keel::usize>(nd));
-        keel::Array<keel::usize> idxCounts(static_cast<keel::usize>(nd));
+        keel::Array<const keel::usize *> idxPtrs(nd);
+        keel::Array<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
             idxLists[i] = resolveIndex(lhs->children[i + 1].get(), *var, i, nd, env);
             idxPtrs[i] = idxLists[i].data();
@@ -2050,8 +2050,8 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
     {
         const int nd = static_cast<int>(nargs);
         keel::Array<keel::Array<keel::usize>> idxLists(static_cast<keel::usize>(nd));
-        keel::Array<const keel::usize *> idxPtrs(static_cast<keel::usize>(nd));
-        keel::Array<keel::usize> idxCounts(static_cast<keel::usize>(nd));
+        keel::Array<const keel::usize *> idxPtrs(nd);
+        keel::Array<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
             idxLists[i] = resolveIndex(callNode->children[i + 1].get(), var, i, nd, env);
             idxPtrs[i] = idxLists[i].data();

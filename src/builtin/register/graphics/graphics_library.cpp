@@ -2379,7 +2379,7 @@ void GraphicsLibrary::install(Engine &engine)
                                             ? ctx.engine->allocator()
                                             : keel::default_allocator();
                             keel::Array<keel::Arc<ObjectState>> states(res);
-                            states.reserve(static_cast<keel::usize>(nnew));
+                            states.reserve(nnew);
                             for (int i = 0; i < nnew; ++i) {
                                 const int id = fm.createHandle(
                                     hType, hClass,

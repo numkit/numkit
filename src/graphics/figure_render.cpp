@@ -766,7 +766,7 @@ inline void addPoly(keel::Array<Cmd> &out, std::initializer_list<double> xs,
 // Render ONE axes into its pixel rect. `seriesIdxBase` continues the
 // palette cycle across subplot cells (MATLAB restarts per axes; keep
 // simple: per-axes reset).
-inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
+inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect box,
                        keel::Array<Cmd> &out)
 {
     const Rgb kAxisCol(0x40, 0x40, 0x44);

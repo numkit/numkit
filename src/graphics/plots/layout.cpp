@@ -115,7 +115,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "clf",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &fig = fm.current();
             // Everything drawn in this figure dies — stale handles must
@@ -385,7 +385,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // handle object yet — deferred with the annotation IDE rendering
     // (figure-export-gaps / handle-surface-gaps).
     reg("layout", "annotation",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
             keel::String type = args[0].toString();
             for (auto &c : type) c = keel::to_ascii_lower(c);
@@ -479,7 +479,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "text",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) { outs[0] = Value(); return; }
             const Value &xv = args[0];
             const Value &yv = args[1];
@@ -562,7 +562,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             queryOrSetLim(gc.fm, lim, args, nargout, outs, 'y');
         });
     reg("layout", "grid",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // MATLAB semantics:
@@ -611,7 +611,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         return keel::String{};
     };
     reg("layout", "legend",
-        [normLocation](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [normLocation](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             // Walk args. Plain strings become legend labels; a `'Location'`
@@ -824,7 +824,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // set(gca, 'XDir', 'reverse'); we ship the direct form here,
     // and `set` is on the BACKLOG.
     reg("layout", "xdir",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 keel::String v = args[0].toString();
@@ -837,7 +837,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "ydir",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 keel::String v = args[0].toString();
@@ -851,7 +851,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         });
     // ── Color limits & colormap — graphics.layout ─────────────────────
     reg("layout", "caxis",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().climJson = vecToJson(args[0]);
@@ -861,7 +861,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "clim",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().climJson = vecToJson(args[0]);
@@ -925,7 +925,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // toggling after imagesc does nothing because the data is already
     // quantized).
     reg("layout", "colorscale",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             if (args.empty()) {
                 fm.currentAxes().colorScale.assign("linear");
@@ -945,7 +945,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // Plot) reads figure.xscale / figure.yscale to drive log-axis display.
     auto regAxisScale = [&](const char *fnName, keel::String AxesState::*field) {
         reg("layout", fnName,
-            [field, fnName](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+            [field, fnName](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                     GraphicsContext &gc) {
                 auto &fm = gc.fm;
                 keel::String mode = keel::String::from("linear");
@@ -973,7 +973,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // life of the current axes; toggling only changes which side new
     // plots / ylim / ylabel / yscale calls write to.
     reg("layout", "yyaxis",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             keel::String side = keel::String::from("left");
@@ -988,10 +988,10 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    auto noop = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+    auto noop = [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &/*gc*/) {
         outs[0] = Value();
     };
-    auto noop_ret1 = [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+    auto noop_ret1 = [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         outs[0] = Value::scalar(1.0, gc.mr);
     };
     // linkaxes — connect all subplot cells in the current figure for
@@ -1003,7 +1003,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // unconditionally. The mode is stored on the FigureState and
     // applied by the SubplotGrid renderer.
     reg("layout", "linkaxes",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             keel::String mode = keel::String::from("xy");  // MATLAB default when no mode arg
             for (auto &a : args) {
@@ -1251,7 +1251,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     // wraps the result into an axes/figure handle object
     // (matlab.graphics.axis.Axes / matlab.ui.Figure).
     reg("layout", "axes",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             // MATLAB axes(...) with no output makes the (new) axes
             // current. nk has one axes per non-subplot figure, so
             // this reduces to ensuring it exists (Position etc. no-op).
@@ -1259,12 +1259,12 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("layout", "gca",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             gc.fm.currentAxes();   // create-on-demand, like MATLAB
             outs[0] = Value();
         });
     reg("layout", "gcf",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             gc.fm.current();       // create-on-demand, like MATLAB
             outs[0] = Value();
         });
@@ -1344,7 +1344,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         ds.yJson = ys.take();
     };
     reg("layout", "animatedline",
-        [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
+        [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                               keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto *mr = gc.mr;
             auto &fm = gc.fm;

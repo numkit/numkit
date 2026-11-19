@@ -647,7 +647,7 @@ void register_general(Engine &engine) {
         });
 
     engine.registerFunction("optimget",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.size() < 2)
                 throw std::runtime_error("optimget requires (options, name[, default])");
             const Value &opts = args[0];

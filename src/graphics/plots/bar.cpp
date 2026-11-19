@@ -380,7 +380,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             }
             const double bw = (mx - mn) / nbins;
             const double bwSafe = (bw == 0) ? 1.0 : bw;
-            keel::Array<double> counts(static_cast<keel::usize>(nbins), 0.0), centers(static_cast<keel::usize>(nbins));
+            keel::Array<double> counts(nbins, 0.0), centers(static_cast<keel::usize>(nbins));
             for (int i = 0; i < nbins; ++i)
                 centers[static_cast<keel::usize>(i)] = mn + bwSafe * (i + 0.5);
             for (double v : xs) {
@@ -1317,7 +1317,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
 
                 // Sample KDE density on a uniform y grid [mn, mx].
-                keel::Array<double> ys(static_cast<keel::usize>(kdePts)), den(static_cast<keel::usize>(kdePts));
+                keel::Array<double> ys(kdePts), den(static_cast<keel::usize>(kdePts));
                 double maxD = 0;
                 for (int g = 0; g < kdePts; ++g) {
                     const double y = mn + (mx - mn) * g / (double)(kdePts - 1);

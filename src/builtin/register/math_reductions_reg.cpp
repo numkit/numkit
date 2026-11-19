@@ -482,7 +482,7 @@ inline keel::String lowercaseStr(const Value &v)
     return s;
 }
 
-inline bool isAllString(const Value &v)
+[[maybe_unused]] inline bool isAllString(const Value &v)
 {
     return isStringArg(v) && lowercaseStr(v) == "all";
 }

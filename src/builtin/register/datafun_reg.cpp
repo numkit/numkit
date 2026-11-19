@@ -421,7 +421,7 @@ void register_datafun(Engine &engine) {
             auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
             const double *p = v.doubleData();
             for (keel::usize j = 0; j < cols; ++j) {
-                double best = std::nan(""), bestDist = 1.5;
+                double best = std::nan("");
                 for (keel::usize i = 0; i < rows; ++i) {
                     double val = p[i + j * rows];
                     if (val > 0.5) {

@@ -198,7 +198,7 @@ namespace {
         || s == "nonnegative" || s == "integer" || s == "clear";
 }
 
-[[nodiscard]] constexpr bool isClearFlag(keel::StringRef s) noexcept
+[[maybe_unused]] [[nodiscard]] constexpr bool isClearFlag(keel::StringRef s) noexcept
 {
     return s == "all" || s == "classes" || s == "functions"
         || s == "global" || s == "-regexp" || s == "import";

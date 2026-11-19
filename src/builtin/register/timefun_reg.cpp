@@ -2025,7 +2025,7 @@ void register_timefun(Engine &engine) {
             outs[0] = std::move(cm);
         });
         dt.methods.put(keel::String("datestr", clsAlloc),
-                       [hasNonZeroTime](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
+                       [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                                         keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             keel::Array<Value> modArgs(mr);
@@ -2623,7 +2623,7 @@ void register_timefun(Engine &engine) {
                 Dims d = broadcastDims(lhs, rhs, "relop");
                 const keel::usize n = d.numel();
                 constexpr double kTol = 1e-9 / kSecondsPerDay;
-                auto cmp1 = [mode, kTol](double a, double b) -> bool {
+                auto cmp1 = [mode](double a, double b) -> bool {
                     if (std::isnan(a) || std::isnan(b))
                         return mode == 1;
                     switch (mode) {

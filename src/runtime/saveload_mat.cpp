@@ -70,7 +70,7 @@ enum Mat5ArrayClass : keel::u8 {
 };
 
 constexpr keel::u8 MAT5_FLAG_LOGICAL = 0x02;
-constexpr keel::u8 MAT5_FLAG_GLOBAL  = 0x04;
+[[maybe_unused]] constexpr keel::u8 MAT5_FLAG_GLOBAL  = 0x04;
 constexpr keel::u8 MAT5_FLAG_COMPLEX = 0x08;
 
 // Helper: Factory for matrix of arbitrary shape
@@ -332,7 +332,7 @@ void encodeMat5Matrix(MatWriter &mw, keel::StringRef name, const Value &v) {
     int nd = d.ndims();
     while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
-    keel::Array<keel::i32> dimsVec(static_cast<keel::usize>(nd), static_cast<keel::i32>(1));
+    keel::Array<keel::i32> dimsVec(nd, static_cast<keel::i32>(1));
     for (int i = 0; i < nd; ++i) {
         dimsVec[static_cast<keel::usize>(i)] = static_cast<keel::i32>(d.dim(i));
     }

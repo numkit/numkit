@@ -917,9 +917,9 @@ enter_frame:
                 if (ndims <= 1) {
                     // Linear indexing: end = numel
                     sz = arr.numel();
-                } else if (I.c == ndims - 1 && arr.dims().ndim() > static_cast<keel::usize>(ndims)) {
+                } else if (I.c == ndims - 1 && arr.dims().ndim() > static_cast<keel::i32>(ndims)) {
                     keel::usize prod = 1;
-                    for (keel::usize d = static_cast<keel::usize>(I.c); d < arr.dims().ndim(); ++d)
+                    for (keel::i32 d = static_cast<keel::i32>(I.c); d < arr.dims().ndim(); ++d)
                         prod *= arr.dims().dimSize(d);
                     sz = prod;
                 } else {
@@ -2223,7 +2223,7 @@ enter_frame:
                     const int nd = static_cast<int>(ndims);
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(nd, curNd);
-                    keel::Array<keel::usize> need(static_cast<keel::usize>(newNd), static_cast<keel::usize>(1));
+                    keel::Array<keel::usize> need(newNd, static_cast<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     auto isColon = [](const Value &v) {
@@ -3041,7 +3041,7 @@ enter_frame:
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(static_cast<int>(ndims), curNd);
-                    keel::Array<keel::usize> need(static_cast<keel::usize>(newNd), static_cast<keel::usize>(1));
+                    keel::Array<keel::usize> need(newNd, static_cast<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     bool grow = (static_cast<int>(ndims) > curNd);

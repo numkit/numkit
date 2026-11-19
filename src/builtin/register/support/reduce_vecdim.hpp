@@ -98,7 +98,7 @@ inline Value collapseDims(const Value &x, keel::ArrayRef<int> set,
         if (d <= nd)
             listed[static_cast<keel::usize>(d)] = 1;
     keel::SmallArray<int, 8> order;          // non-listed first, listed last
-    order.reserve(static_cast<keel::usize>(nd));
+    order.reserve(nd);
     keel::usize red = 1;                     // product of the listed real sizes
     for (int d = 1; d <= nd; ++d)
         if (!listed[static_cast<keel::usize>(d)])

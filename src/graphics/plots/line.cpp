@@ -35,7 +35,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     };
 
     reg("line", "plot",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
@@ -219,7 +219,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     //      (one segment per stem, going (x,y,0) → (x,y,z))
     //   2. type='scatter3' markers at the tips.
     reg("line", "stem3",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 3) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
@@ -279,7 +279,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // matching length. quiver(x, y, u, v, scale) optionally scales
     // arrow lengths (default 1, packed into ds.style as "scale=N").
     reg("line", "quiver",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                     keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 4) {
                 outs[0] = Value();
@@ -306,7 +306,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // (i, 0) and points to (i + U_i, V_i). Same scale=1 contract as
     // compass.
     reg("line", "feather",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.size() < 2) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
@@ -344,7 +344,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // `markerSize` is also wrong. We pack base into ds.style as
     // "base=<value>" so we don't grow the schema for one optional.
     reg("line", "area",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
@@ -924,7 +924,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             streamImpl(true, args, nargout, outs, gc);
         });
     reg("line", "stem",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
@@ -941,7 +941,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
         });
     reg("line", "stairs",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();
@@ -966,7 +966,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // eNegJson + ePosJson (asym) hold the magnitudes. The renderer
     // draws vertical bars from y-eNeg to y+ePos with caps at each end.
     reg("line", "errorbar",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
+        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 outs[0] = Value();

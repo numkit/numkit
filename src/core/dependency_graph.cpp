@@ -381,7 +381,7 @@ DependencyGraph::DependencyGraph(keel::Array<StatementFacts> facts)
     for (auto &d : downstream_) {
         std::sort(d.begin(), d.end());
         auto *newEnd = std::unique(d.begin(), d.end());
-        d.resize(static_cast<keel::usize>(newEnd - d.begin()));
+        d.resize(newEnd - d.begin());
     }
 }
 

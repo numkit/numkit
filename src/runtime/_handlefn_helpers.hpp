@@ -116,8 +116,8 @@ inline const char *classNameOf(const Value &v)
     case ValueType::UINT32:      return "uint32";
     case ValueType::UINT64:      return "uint64";
     case ValueType::EMPTY:       return "double";  // empty default class
+    default:                     return "unknown";
     }
-    return "unknown";
 }
 
 inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,

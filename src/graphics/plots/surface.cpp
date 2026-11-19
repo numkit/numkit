@@ -282,15 +282,6 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                      (int)((g1 + m) * 255),
                      (int)((b1 + m) * 255) };
         };
-        const auto colorForValue = [&](double L) {
-            const auto rgb = rgbForValue(L);
-            char buf[40];
-            std::snprintf(buf, sizeof buf,
-                          "color=#%02x%02x%02x;fillOpacity=0.85",
-                          rgb[0], rgb[1], rgb[2]);
-            return keel::String::from(buf);
-        };
-
         // Index of the volume in column-major + page-major order: the
         // value at logical (i_row, j_col, k_page) is at
         // V[k * M * N + j * M + i].
