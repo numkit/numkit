@@ -2,35 +2,44 @@
 //
 // Reserved keywords and identifier predicates for numkit::builtin.
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/builtin/lang.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 #include <cctype>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 namespace numkit::builtin {
 
-const std::vector<std::string> &keywords()
+const keel::Array<keel::String> &keywords()
 {
-    static const std::vector<std::string> kw = {
-        "break", "case", "catch", "classdef", "continue", "else",
-        "elseif", "end", "for", "function", "global", "if",
-        "otherwise", "parfor", "persistent", "return", "spmd",
-        "switch", "try", "while"
-    };
+    static const keel::Array<keel::String> kw = [] {
+        static constexpr const char *kNames[] = {
+            "break", "case", "catch", "classdef", "continue", "else",
+            "elseif", "end", "for", "function", "global", "if",
+            "otherwise", "parfor", "persistent", "return", "spmd",
+            "switch", "try", "while"
+        };
+        keel::Array<keel::String> out;
+        out.reserve(sizeof(kNames) / sizeof(kNames[0]));
+        for (const char *s : kNames)
+            out.push_back(keel::String(s));
+        return out;
+    }();
     return kw;
 }
 
-bool iskeyword(const std::string &name)
+bool iskeyword(keel::StringRef name)
 {
     const auto &kw = keywords();
-    return std::find(kw.begin(), kw.end(), name) != kw.end();
+    for (const auto &k : kw)
+        if (k == name)
+            return true;
+    return false;
 }
 
 Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr)
@@ -42,11 +51,11 @@ Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr)
             c.cellAt(i) = Value::fromString(kw[i], mr);
         return c;
     }
-    const std::string s(args[0].toString().as_ref());
+    const keel::String s = args[0].toString();
     return Value::logicalScalar(iskeyword(s), mr);
 }
 
-bool isvarname(const std::string &s)
+bool isvarname(keel::StringRef s)
 {
     if (s.empty()) return false;
     if (std::isalpha(static_cast<unsigned char>(s[0])) == 0) return false;
@@ -61,7 +70,8 @@ Value isvarname(const Value &a, keel::Allocator *mr)
 {
     const bool isText = a.isChar() || (a.isString() && a.numel() == 1);
     if (!isText) return Value::logicalScalar(false, mr);
-    return Value::logicalScalar(isvarname(std::string(a.toString().as_ref())), mr);
+    const keel::String s = a.toString();
+    return Value::logicalScalar(isvarname(s), mr);
 }
 
 Value isvarname(keel::ArrayRef<Value> args, keel::Allocator *mr)

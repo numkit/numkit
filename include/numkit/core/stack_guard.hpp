@@ -2,7 +2,6 @@
 
 #include <keel/core.h>
 #include <cstddef>
-#include <string>
 
 namespace numkit {
 

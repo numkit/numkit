@@ -3,8 +3,10 @@
 // graphics.polar.* builders (polarplot / polarscatter / polarhistogram / rlim / theta* / r*), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -19,21 +21,16 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildPolarPlots(std::vector<PlotEntry> &table)
+void buildPolarPlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
 
     // compass(U, V) — vector arrows from the origin on a POLAR
@@ -47,13 +44,14 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // renderer (PolarPlot.jsx) treats xJson as theta, yJson as rho.
     reg("polar", "compass",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             fm.currentAxes().polar = true;
 
             // Build polar (theta, rho) pairs from (U, V).
-            std::ostringstream tx, ry;
+            StrBuf tx, ry;
             tx << '['; ry << '[';
             const auto emit = [&](double u, double v, bool first) {
                 if (!first) { tx << ','; ry << ','; }
@@ -81,13 +79,13 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             tx << ']'; ry << ']';
 
             DatasetInfo ds;
-            ds.type  = "compass";   // polar-renderer dispatch key
-            ds.xJson = tx.str();
-            ds.yJson = ry.str();
+            ds.type.assign("compass");   // polar-renderer dispatch key
+            ds.xJson = tx.take();
+            ds.yJson = ry.take();
             if (args.size() > nvStart && args[nvStart].isChar()) {
                 ds.style = args[nvStart].toString();
             }
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -103,7 +101,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         fm.prepareForPlot();
         fm.currentAxes().polar = true;
         DatasetInfo ds;
-        ds.type = "line";
+        ds.type.assign("line");
         ds.xJson = vecToJson(args[0]);
         ds.yJson = vecToJson(args[1]);
         keel::usize nvStart = 2;
@@ -112,12 +110,12 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             nvStart = 3;
         }
         parsePlotArgs(args, nvStart, ds);
-        fm.pushDataset(std::move(ds));
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
     reg("polar", "polarplot", polarPlotFn);
-    reg("polar", "polar", std::move(polarPlotFn));
+    reg("polar", "polar", polarPlotFn);
     table.push_back(PlotEntry{"polar", "polaraxes", /*core=*/true,
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)args; (void)nargout;
@@ -133,12 +131,13 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     reg("polar", "polarscatter",
         [](keel::ArrayRef<Value> args, keel::usize nargout,
                                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (args.size() < 2) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             fm.currentAxes().polar = true;
             DatasetInfo ds;
-            ds.type = "scatter";
+            ds.type.assign("scatter");
             ds.xJson = vecToJson(args[0]);
             ds.yJson = vecToJson(args[1]);
             keel::usize nvStart = 2;
@@ -147,7 +146,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                 nvStart = 3;
             }
             parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -159,10 +158,10 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // legacy rose (type="rose"); the only difference is the
     // dataset `type` tag and the default bin count.
     auto computeAngularHistogram = [](const Value &theta, int nbins,
-                                      std::string &txOut, std::string &tyOut) {
+                                      keel::String &txOut, keel::String &tyOut) {
         const double TAU = 2 * 3.14159265358979323846;
         const double bw  = TAU / nbins;
-        std::vector<double> counts(nbins, 0.0);
+        keel::Array<double> counts(static_cast<keel::usize>(nbins), 0.0);
         const keel::usize N = theta.numel();
         for (keel::usize i = 0; i < N; ++i) {
             double t = theta.elemAsDouble(i);
@@ -172,18 +171,18 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             int b = (int)(t / bw);
             if (b >= nbins) b = nbins - 1;
             if (b < 0) b = 0;
-            counts[b] += 1;
+            counts[static_cast<keel::usize>(b)] += 1;
         }
-        std::ostringstream tx, ty;
+        StrBuf tx, ty;
         tx << '['; ty << '[';
         for (int i = 0; i < nbins; ++i) {
             if (i) { tx << ','; ty << ','; }
             tx << (bw * (i + 0.5));    // bin centre
-            ty << counts[i];
+            ty << counts[static_cast<keel::usize>(i)];
         }
         tx << ']'; ty << ']';
-        txOut = tx.str();
-        tyOut = ty.str();
+        txOut = tx.take();
+        tyOut = ty.take();
     };
     // polarhistogram(theta[, nbins]) — bins θ values into nbins angular
     // sectors over [0, 2π) and emits a polar bar dataset where each
@@ -197,16 +196,16 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             int nbins = (args.size() >= 2 && args[1].numel() == 1)
                         ? std::max(1, (int)args[1].toScalar())
                         : 36;   // 10° bins by default
-            std::string tx, ty;
+            keel::String tx, ty;
             computeAngularHistogram(args[0], nbins, tx, ty);
             auto &fm = gc.fm;
             fm.prepareForPlot();
             fm.currentAxes().polar = true;
             DatasetInfo ds;
-            ds.type = "bar";
-            ds.xJson = std::move(tx);
-            ds.yJson = std::move(ty);
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("bar");
+            ds.xJson = keel::move(tx);
+            ds.yJson = keel::move(ty);
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -224,16 +223,17 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     reg("polar", "polarbubblechart",
         [](keel::ArrayRef<Value> args, keel::usize nargout,
                                    keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (args.size() < 2) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.prepareForPlot();
             fm.currentAxes().polar = true;
             DatasetInfo ds;
-            ds.type  = "bubble";
+            ds.type.assign("bubble");
             ds.xJson = vecToJson(args[0]);   // theta
             ds.yJson = vecToJson(args[1]);   // rho
             // Size column.
-            ds.sizeJson = (args.size() >= 3) ? vecToJson(args[2]) : "[36]";
+            ds.sizeJson = (args.size() >= 3) ? vecToJson(args[2]) : keel::String::from("[36]");
             // Optional colour column. RGB-matrix shape (N-by-3) is
             // emitted as a nested JSON array so the renderer can
             // distinguish "one colour for all" (1-by-3) from
@@ -246,7 +246,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                     // RGB matrix — emit as [[r,g,b], [r,g,b], ...].
                     // MATLAB stores column-major, so row i of an
                     // R×3 matrix is at linear indices i, i+R, i+2R.
-                    std::ostringstream cs;
+                    StrBuf cs;
                     cs << '[';
                     for (keel::usize i = 0; i < R; ++i) {
                         if (i) cs << ',';
@@ -256,7 +256,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
                            << c.elemAsDouble(i + 2 * R) << ']';
                     }
                     cs << ']';
-                    ds.colorJson = cs.str();
+                    ds.colorJson = cs.take();
                 } else {
                     // Scalar / vector → colormap index data.
                     ds.colorJson = vecToJson(c);
@@ -264,7 +264,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             }
             // LineSpec etc. as a trailing string argument.
             parsePlotArgs(args, (args.size() >= 4 && !args[3].isChar()) ? 4 : 3, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -282,22 +282,23 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             int nbins = (args.size() >= 2 && args[1].numel() == 1)
                         ? std::max(1, (int)args[1].toScalar())
                         : 20;
-            std::string tx, ty;
+            keel::String tx, ty;
             computeAngularHistogram(args[0], nbins, tx, ty);
             auto &fm = gc.fm;
             fm.prepareForPlot();
             fm.currentAxes().polar = true;
             DatasetInfo ds;
-            ds.type  = "rose";
-            ds.xJson = std::move(tx);
-            ds.yJson = std::move(ty);
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("rose");
+            ds.xJson = keel::move(tx);
+            ds.yJson = keel::move(ty);
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
     // ── Polar-specific settings — graphics.polar ─────────────────────
     reg("polar", "rlim",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().rlimJson = vecToJson(args[0]);
@@ -308,6 +309,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         });
     reg("polar", "thetalim",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (!args.empty() && args[0].numel() >= 2) {
                 auto &fm = gc.fm;
                 fm.currentAxes().thetalimJson = vecToJson(args[0]);
@@ -318,6 +320,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         });
     reg("polar", "thetadir",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().thetaDir = args[0].toString();
@@ -328,6 +331,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
         });
     reg("polar", "thetazero",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().thetaZeroLocation = args[0].toString();
@@ -341,6 +345,7 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // as an alias keeps copy-pasted MATLAB scripts working.
     reg("polar", "thetazerolocation",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
                 fm.currentAxes().thetaZeroLocation = args[0].toString();
@@ -355,9 +360,10 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // the renderer falls back to its default 30°-spaced grid.
     reg("polar", "thetaticks",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             auto &fm = gc.fm;
             fm.currentAxes().thetaticksJson =
-                (args.empty() || args[0].numel() == 0) ? "" : vecToJson(args[0]);
+                (args.empty() || args[0].numel() == 0) ? keel::String{} : vecToJson(args[0]);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -367,9 +373,10 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // niceStep in the renderer.
     reg("polar", "rticks",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             auto &fm = gc.fm;
             fm.currentAxes().rticksJson =
-                (args.empty() || args[0].numel() == 0) ? "" : vecToJson(args[0]);
+                (args.empty() || args[0].numel() == 0) ? keel::String{} : vecToJson(args[0]);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -377,12 +384,12 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // Helper: build a JSON array of strings from a Value that's
     // either a cell of chars or a single char (one label). Used by
     // thetaticklabels / rticklabels.
-    auto strArrToJson = [](const Value &v) -> std::string {
-        std::ostringstream os;
+    auto strArrToJson = [](const Value &v) -> keel::String {
+        StrBuf os;
         os << '[';
         auto escape = [&](keel::StringRef s) {
             os << '"';
-            for (char c : std::string_view(s)) {
+            for (char c : s) {
                 if (c == '"' || c == '\\') os << '\\' << c;
                 else if (c == '\n')        os << "\\n";
                 else                       os << c;
@@ -394,14 +401,20 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 0; i < N; ++i) {
                 if (i) os << ',';
                 const Value &el = v.cellAt(i);
-                escape(el.isChar() ? el.toString().as_ref() : keel::StringRef(""));
+                if (el.isChar()) {
+                    keel::String tmp = el.toString();
+                    escape(tmp.as_ref());
+                } else {
+                    escape(keel::StringRef(""));
+                }
             }
         } else if (v.isChar()) {
             // Single label — wrap in 1-element array.
-            escape(v.toString().as_ref());
+            keel::String tmp = v.toString();
+            escape(tmp.as_ref());
         }
         os << ']';
-        return os.str();
+        return os.take();
     };
     // thetaticklabels(labels) — set label text for theta ticks.
     // `labels` is a cell array of char vectors (or a single char
@@ -409,18 +422,20 @@ void buildPolarPlots(std::vector<PlotEntry> &table)
     // the labels array length doesn't match the tick count.
     reg("polar", "thetaticklabels",
         [strArrToJson](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             auto &fm = gc.fm;
             fm.currentAxes().thetaticklabelsJson =
-                args.empty() ? "" : strArrToJson(args[0]);
+                args.empty() ? keel::String{} : strArrToJson(args[0]);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
         });
     reg("polar", "rticklabels",
         [strArrToJson](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            (void)nargout;
             auto &fm = gc.fm;
             fm.currentAxes().rticklabelsJson =
-                args.empty() ? "" : strArrToJson(args[0]);
+                args.empty() ? keel::String{} : strArrToJson(args[0]);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();

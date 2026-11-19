@@ -1,9 +1,13 @@
 // src/bundle/src/register/builtin/timefun_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
-#include <keel/math.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/builtin/timefun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -17,14 +21,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <iomanip>
+#include <cstdlib>
 #include <limits>
-#include <memory>
-#include <sstream>
 #include <stdexcept>
-#include <string>
 #include <tuple>
-#include <vector>
 
 namespace numkit::builtin::detail {
 
@@ -153,14 +153,14 @@ static const char *kMonthShort[12] = {
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-inline std::string formatDateTimeElem(double serialDay, const std::string &fmt, bool anyTimeInArray)
+inline keel::String formatDateTimeElem(double serialDay, keel::StringRef fmt, bool anyTimeInArray)
 {
     CivilDateTime c = decomposeSerialDay(serialDay);
     if (c.isNaT)
-        return "NaT";
-    std::string f = fmt;
+        return keel::String::from("NaT");
+    keel::StringRef f = fmt;
     if (f.empty()) {
-        f = anyTimeInArray ? "dd-MMM-uuuu HH:mm:ss" : "dd-MMM-uuuu";
+        f = anyTimeInArray ? keel::StringRef("dd-MMM-uuuu HH:mm:ss") : keel::StringRef("dd-MMM-uuuu");
     }
     char y4[16], m2[8], d2[8], h2[8], mi2[8], s2[16];
     std::snprintf(y4, sizeof(y4), "%04lld", static_cast<long long>(c.year));
@@ -174,56 +174,59 @@ inline std::string formatDateTimeElem(double serialDay, const std::string &fmt, 
     const char *mmm = (c.month >= 1 && c.month <= 12) ? kMonthShort[c.month - 1] : "Jan";
 
     if (f == "dd-MMM-uuuu" || f == "dd-MMM-yyyy")
-        return std::string(d2) + "-" + mmm + "-" + y4;
+        return keel::format("{}-{}-{}", d2, mmm, y4);
     if (f == "dd-MMM-uuuu HH:mm:ss" || f == "dd-MMM-yyyy HH:mm:ss")
-        return std::string(d2) + "-" + mmm + "-" + y4 + " " + h2 + ":" + mi2 + ":" + s2;
+        return keel::format("{}-{}-{} {}:{}:{}", d2, mmm, y4, h2, mi2, s2);
     if (f == "yyyy-MM-dd" || f == "uuuu-MM-dd")
-        return std::string(y4) + "-" + m2 + "-" + d2;
+        return keel::format("{}-{}-{}", y4, m2, d2);
     if (f == "yyyy-MM-dd HH:mm:ss" || f == "uuuu-MM-dd HH:mm:ss")
-        return std::string(y4) + "-" + m2 + "-" + d2 + " " + h2 + ":" + mi2 + ":" + s2;
+        return keel::format("{}-{}-{} {}:{}:{}", y4, m2, d2, h2, mi2, s2);
 
     // Generic token replacement for custom Format strings
-    std::string res;
+    keel::String res;
+    auto matchAt = [&](keel::usize pos, keel::StringRef tok) -> bool {
+        return pos + tok.size() <= f.size() && f.substr(pos, tok.size()) == tok;
+    };
     for (keel::usize i = 0; i < f.size();) {
-        if (f.compare(i, 4, "uuuu") == 0 || f.compare(i, 4, "yyyy") == 0) {
-            res += y4;
+        if (matchAt(i, "uuuu") || matchAt(i, "yyyy")) {
+            res.append(y4);
             i += 4;
-        } else if (f.compare(i, 2, "uu") == 0 || f.compare(i, 2, "yy") == 0) {
+        } else if (matchAt(i, "uu") || matchAt(i, "yy")) {
             char y2[8];
             std::snprintf(y2, sizeof(y2), "%02lld", static_cast<long long>(c.year % 100));
-            res += y2;
+            res.append(y2);
             i += 2;
-        } else if (f.compare(i, 3, "QQQ") == 0) {
+        } else if (matchAt(i, "QQQ")) {
             int q = static_cast<int>((c.month - 1) / 3 + 1);
-            res += "Q" + std::to_string(q);
+            keel::format_into(res, "Q{}", q);
             i += 3;
-        } else if (f.compare(i, 2, "QQ") == 0) {
+        } else if (matchAt(i, "QQ")) {
             int q = static_cast<int>((c.month - 1) / 3 + 1);
-            res += "Q" + std::to_string(q);
+            keel::format_into(res, "Q{}", q);
             i += 2;
-        } else if (f.compare(i, 3, "MMM") == 0) {
-            res += mmm;
+        } else if (matchAt(i, "MMM")) {
+            res.append(mmm);
             i += 3;
-        } else if (f.compare(i, 2, "MM") == 0) {
-            res += m2;
+        } else if (matchAt(i, "MM")) {
+            res.append(m2);
             i += 2;
-        } else if (f.compare(i, 2, "dd") == 0) {
-            res += d2;
+        } else if (matchAt(i, "dd")) {
+            res.append(d2);
             i += 2;
-        } else if (f.compare(i, 2, "HH") == 0) {
-            res += h2;
+        } else if (matchAt(i, "HH")) {
+            res.append(h2);
             i += 2;
-        } else if (f.compare(i, 2, "mm") == 0) {
-            res += mi2;
+        } else if (matchAt(i, "mm")) {
+            res.append(mi2);
             i += 2;
-        } else if (f.compare(i, 6, "ss.SSS") == 0) {
+        } else if (matchAt(i, "ss.SSS")) {
             int ms = static_cast<int>(std::round(fracSec * 1000.0));
             char msBuf[16];
             std::snprintf(msBuf, sizeof(msBuf), "%s.%03d", s2, ms);
-            res += msBuf;
+            res.append(msBuf);
             i += 6;
-        } else if (f.compare(i, 2, "ss") == 0) {
-            res += s2;
+        } else if (matchAt(i, "ss")) {
+            res.append(s2);
             i += 2;
         } else {
             res.push_back(f[i++]);
@@ -234,16 +237,18 @@ inline std::string formatDateTimeElem(double serialDay, const std::string &fmt, 
 
 inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
 {
-    std::string s(raw);
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
-        s.erase(s.begin());
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
-        s.pop_back();
+    keel::usize start = 0;
+    keel::usize end = raw.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(raw[start])))
+        ++start;
+    while (end > start && std::isspace(static_cast<unsigned char>(raw[end - 1])))
+        --end;
+    keel::String s = keel::String::from(raw.substr(start, end - start), mr);
     if (s.empty() || s == "NaT")
         return std::numeric_limits<double>::quiet_NaN();
-    std::string sl = s;
-    for (auto &ch : sl)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    keel::String sl = s.clone();
+    for (keel::usize i = 0; i < sl.size(); ++i)
+        sl[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(sl[i])));
     if (sl == "now")
         return numkit::builtin::now();
     if (sl == "today")
@@ -253,21 +258,53 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     if (sl == "tomorrow")
         return std::floor(numkit::builtin::now()) + 1.0;
 
+    auto skipWs = [](const char *&p) {
+        while (*p && std::isspace(static_cast<unsigned char>(*p)))
+            ++p;
+    };
+    auto readInt = [&](const char *&p, int &out) -> bool {
+        skipWs(p);
+        char *ep = nullptr;
+        long val = std::strtol(p, &ep, 10);
+        if (ep == p)
+            return false;
+        out = static_cast<int>(val);
+        p = ep;
+        return true;
+    };
+    auto readChar = [&](const char *&p, char &out) -> bool {
+        skipWs(p);
+        if (!*p)
+            return false;
+        out = *p++;
+        return true;
+    };
+    auto readDouble = [&](const char *&p, double &out) -> bool {
+        skipWs(p);
+        char *ep = nullptr;
+        double val = std::strtod(p, &ep);
+        if (ep == p)
+            return false;
+        out = val;
+        p = ep;
+        return true;
+    };
+
     // Try ISO YYYY-MM-DD [HH:MM:SS[.fff]] or YYYY/MM/DD
     int y = 0, m = 0, d = 0, hh = 0, mi = 0;
     double sec = 0.0;
     char sep1 = 0, sep2 = 0;
     {
-        std::istringstream iss(s);
-        if ((iss >> y >> sep1 >> m >> sep2 >> d)
+        const char *p = s.c_str();
+        if (readInt(p, y) && readChar(p, sep1) && readInt(p, m) && readChar(p, sep2) && readInt(p, d)
             && (sep1 == '-' || sep1 == '/') && sep1 == sep2 && y >= 1000) {
-            char tsep = 0;
-            if (iss >> std::ws && !iss.eof()) {
-                if (iss.peek() == 'T' || iss.peek() == 't')
-                    iss.get();
+            skipWs(p);
+            if (*p != '\0') {
+                if (*p == 'T' || *p == 't')
+                    ++p;
                 char c1 = 0, c2 = 0;
-                if (iss >> hh >> c1 >> mi) {
-                    if (iss >> c2 >> sec) {
+                if (readInt(p, hh) && readChar(p, c1) && readInt(p, mi)) {
+                    if (readChar(p, c2) && readDouble(p, sec)) {
                         (void)c2;
                     }
                 }
@@ -277,10 +314,11 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     }
     // Delegate to existing datenum parser (handles dd-MMM-yyyy, MM/dd/yyyy, etc.)
     {
-        std::istringstream iss(s);
+        const char *p = s.c_str();
         int a = 0, b = 0, c = 0;
         char c1 = 0, c2 = 0;
-        if ((iss >> a >> c1 >> b >> c2 >> c) && (c1 == '/' || c1 == '-') && c1 == c2 && c >= 1000 && a >= 1 && a <= 12 && b >= 1 && b <= 31) {
+        if (readInt(p, a) && readChar(p, c1) && readInt(p, b) && readChar(p, c2) && readInt(p, c)
+            && (c1 == '/' || c1 == '-') && c1 == c2 && c >= 1000 && a >= 1 && a <= 12 && b >= 1 && b <= 31) {
             return composeSerialDay(c, a, b, 0, 0, 0.0);
         }
     }
@@ -298,45 +336,50 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
 struct DatetimeElemPayload : NativePayload
 {
     double serialDay = 0.0;
-    std::string format;
-    std::string timeZone;
+    keel::String format;
+    keel::String timeZone;
 
     DatetimeElemPayload() = default;
-    DatetimeElemPayload(double sd, std::string fmt = "", std::string tz = "")
-        : serialDay(sd), format(std::move(fmt)), timeZone(std::move(tz)) {}
+    DatetimeElemPayload(double sd, keel::StringRef fmt = "", keel::StringRef tz = "",
+                        keel::Allocator *alloc = nullptr)
+        : serialDay(sd)
+        , format(keel::String::from(fmt, alloc ? alloc : keel::default_allocator()))
+        , timeZone(keel::String::from(tz, alloc ? alloc : keel::default_allocator())) {}
 
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
-        return keel::make_arc_in<DatetimeElemPayload>(alloc, *this);
+        return keel::make_arc_in<DatetimeElemPayload>(alloc, serialDay, format.as_ref(), timeZone.as_ref(), alloc);
     }
 
     double asDouble() const override { return serialDay; }
 
     keel::Arc<NativePayload> fromScalarDouble(double v, keel::Allocator *alloc = nullptr) const override
     {
-        return keel::make_arc_in<DatetimeElemPayload>(alloc, v, format, timeZone);
+        return keel::make_arc_in<DatetimeElemPayload>(alloc, v, format.as_ref(), timeZone.as_ref(), alloc);
     }
 };
 
 struct DurationElemPayload : NativePayload
 {
     double seconds = 0.0;
-    std::string format = "hh:mm:ss";
+    keel::String format = keel::String::from("hh:mm:ss");
 
     DurationElemPayload() = default;
-    DurationElemPayload(double sec, std::string fmt = "hh:mm:ss")
-        : seconds(sec), format(std::move(fmt)) {}
+    DurationElemPayload(double sec, keel::StringRef fmt = "hh:mm:ss",
+                        keel::Allocator *alloc = nullptr)
+        : seconds(sec)
+        , format(keel::String::from(fmt, alloc ? alloc : keel::default_allocator())) {}
 
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
-        return keel::make_arc_in<DurationElemPayload>(alloc, *this);
+        return keel::make_arc_in<DurationElemPayload>(alloc, seconds, format.as_ref(), alloc);
     }
 
     double asDouble() const override { return seconds; }
 
     keel::Arc<NativePayload> fromScalarDouble(double v, keel::Allocator *alloc = nullptr) const override
     {
-        return keel::make_arc_in<DurationElemPayload>(alloc, v, format);
+        return keel::make_arc_in<DurationElemPayload>(alloc, v, format.as_ref(), alloc);
     }
 };
 
@@ -391,8 +434,8 @@ inline Value makeArrayFromDims(const Dims &d, ValueType t, keel::Allocator *mr)
     return Value::matrix(d.rows(), d.cols(), t, mr);
 }
 
-inline Value makeDatetimeArray(const Dims &dims, const std::vector<double> &serialDays,
-                               const std::string &fmt, const std::string &tz,
+inline Value makeDatetimeArray(const Dims &dims, keel::ArrayRef<double> serialDays,
+                               keel::StringRef fmt, keel::StringRef tz,
                                keel::Allocator *mr)
 {
     if (!mr)
@@ -401,7 +444,7 @@ inline Value makeDatetimeArray(const Dims &dims, const std::vector<double> &seri
     states.reserve(serialDays.size());
     for (double sd : serialDays) {
         auto st = keel::make_arc_in<ObjectState>(mr, mr);
-        st->native = keel::make_arc_in<DatetimeElemPayload>(mr, sd, fmt, tz);
+        st->native = keel::make_arc_in<DatetimeElemPayload>(mr, sd, fmt, tz, mr);
         states.push_back(keel::move(st));
     }
     if (dims.numel() == 1 && states.size() == 1)
@@ -409,8 +452,14 @@ inline Value makeDatetimeArray(const Dims &dims, const std::vector<double> &seri
     return Value::objectArray("datetime", dims, keel::move(states), /*isHandle=*/false, mr);
 }
 
-inline Value makeDurationArray(const Dims &dims, const std::vector<double> &secs,
-                               const std::string &fmt, keel::Allocator *mr)
+inline Value makeDatetimeScalar(double sd, keel::StringRef fmt, keel::StringRef tz,
+                                keel::Allocator *mr)
+{
+    return makeDatetimeArray(Dims(1, 1), keel::ArrayRef<double>(&sd, 1), fmt, tz, mr);
+}
+
+inline Value makeDurationArray(const Dims &dims, keel::ArrayRef<double> secs,
+                               keel::StringRef fmt, keel::Allocator *mr)
 {
     if (!mr)
         mr = keel::default_allocator();
@@ -418,7 +467,7 @@ inline Value makeDurationArray(const Dims &dims, const std::vector<double> &secs
     states.reserve(secs.size());
     for (double s : secs) {
         auto st = keel::make_arc_in<ObjectState>(mr, mr);
-        st->native = keel::make_arc_in<DurationElemPayload>(mr, s, fmt);
+        st->native = keel::make_arc_in<DurationElemPayload>(mr, s, fmt, mr);
         states.push_back(keel::move(st));
     }
     if (dims.numel() == 1 && states.size() == 1)
@@ -426,7 +475,12 @@ inline Value makeDurationArray(const Dims &dims, const std::vector<double> &secs
     return Value::objectArray("duration", dims, keel::move(states), /*isHandle=*/false, mr);
 }
 
-inline Value makeCalDurArray(const Dims &dims, const std::vector<CalDurElemPayload> &items,
+inline Value makeDurationScalar(double sec, keel::StringRef fmt, keel::Allocator *mr)
+{
+    return makeDurationArray(Dims(1, 1), keel::ArrayRef<double>(&sec, 1), fmt, mr);
+}
+
+inline Value makeCalDurArray(const Dims &dims, keel::ArrayRef<CalDurElemPayload> items,
                              keel::Allocator *mr)
 {
     if (!mr)
@@ -443,31 +497,20 @@ inline Value makeCalDurArray(const Dims &dims, const std::vector<CalDurElemPaylo
     return Value::objectArray("calendarDuration", dims, keel::move(states), /*isHandle=*/false, mr);
 }
 
-inline std::string formatDurationElem(double sec, const std::string &fmt)
+inline keel::String formatDurationElem(double sec, keel::StringRef fmt)
 {
     if (!std::isfinite(sec))
-        return "NaN";
-    std::ostringstream os;
-    if (fmt == "s" || fmt == "sec") {
-        os << sec << " sec";
-        return os.str();
-    }
-    if (fmt == "m" || fmt == "min") {
-        os << (sec / 60.0) << " min";
-        return os.str();
-    }
-    if (fmt == "h" || fmt == "hr") {
-        os << (sec / 3600.0) << " hr";
-        return os.str();
-    }
-    if (fmt == "d" || fmt == "day") {
-        os << (sec / kSecondsPerDay) << " days";
-        return os.str();
-    }
-    if (fmt == "y" || fmt == "yr") {
-        os << (sec / kSecondsPerYear) << " yr";
-        return os.str();
-    }
+        return keel::String::from("NaN");
+    if (fmt == "s" || fmt == "sec")
+        return keel::format("%g sec", sec);
+    if (fmt == "m" || fmt == "min")
+        return keel::format("%g min", sec / 60.0);
+    if (fmt == "h" || fmt == "hr")
+        return keel::format("%g hr", sec / 3600.0);
+    if (fmt == "d" || fmt == "day")
+        return keel::format("%g days", sec / kSecondsPerDay);
+    if (fmt == "y" || fmt == "yr")
+        return keel::format("%g yr", sec / kSecondsPerYear);
     bool neg = sec < 0.0;
     double a = keel::abs(sec);
     keel::i64 totalMs = static_cast<keel::i64>(std::round(a * 1000.0));
@@ -491,34 +534,34 @@ inline std::string formatDurationElem(double sec, const std::string &fmt)
                       static_cast<long long>(ss),
                       static_cast<long long>(ms));
     }
-    return buf;
+    return keel::String::from(buf);
 }
 
-inline std::string formatCalDurElem(const CalDurElemPayload &cd)
+inline keel::String formatCalDurElem(const CalDurElemPayload &cd)
 {
-    std::ostringstream os;
+    keel::String os;
     keel::i64 y = cd.months / 12;
     keel::i64 m = cd.months % 12;
     bool any = false;
     if (y != 0) {
-        os << y << "y";
+        keel::format_into(os, "{}y", y);
         any = true;
     }
     if (m != 0) {
-        if (any) os << " ";
-        os << m << "m";
+        if (any) os.push_back(' ');
+        keel::format_into(os, "{}m", m);
         any = true;
     }
     if (cd.days != 0 || (!any && cd.seconds == 0.0)) {
-        if (any) os << " ";
-        os << cd.days << "d";
+        if (any) os.push_back(' ');
+        keel::format_into(os, "{}d", cd.days);
         any = true;
     }
     if (cd.seconds != 0.0) {
-        if (any) os << " ";
-        os << formatDurationElem(cd.seconds, "hh:mm:ss");
+        if (any) os.push_back(' ');
+        os.append(formatDurationElem(cd.seconds, "hh:mm:ss").as_ref());
     }
-    return os.str();
+    return os;
 }
 
 inline Dims broadcastDims(const Value &a, const Value &b, const char *fnName)
@@ -533,8 +576,8 @@ inline Dims broadcastDims(const Value &a, const Value &b, const char *fnName)
         return a.dims();
     if (na == nb)
         return a.dims();
-    throw std::runtime_error(std::string("numkit:") + fnName
-                             + ":DimMismatch: Arrays have incompatible sizes for this operation.");
+    throw std::runtime_error(
+        keel::format("numkit:{}:DimMismatch: Arrays have incompatible sizes for this operation.", fnName).c_str());
 }
 
 inline Value extractDatetimeComponent(const Value &self, int comp, keel::Allocator *mr)
@@ -621,13 +664,14 @@ inline Value constructDurationFromUnit(keel::ArrayRef<Value> args, double scaleS
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(std::string("numkit:") + fnName
-                                 + ":InvalidInput: Expected a numeric or duration input.");
+        throw std::runtime_error(
+            keel::format("numkit:{}:InvalidInput: Expected a numeric or duration input.", fnName).c_str());
     const keel::usize n = x.numel();
-    std::vector<double> secs(n);
+    keel::Array<double> secs(mr);
+    secs.resize(n);
     for (keel::usize i = 0; i < n; ++i)
         secs[i] = x.elemAsDouble(i) * scaleSeconds;
-    return makeDurationArray(x.dims(), secs, defaultFmt, mr);
+    return makeDurationArray(x.dims(), secs.as_ref(), defaultFmt, mr);
 }
 
 inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 monthMult, keel::i64 dayMult,
@@ -652,19 +696,20 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(std::string("numkit:") + fnName
-                                 + ":InvalidInput: Expected a numeric integer array.");
+        throw std::runtime_error(
+            keel::format("numkit:{}:InvalidInput: Expected a numeric integer array.", fnName).c_str());
     const keel::usize n = x.numel();
-    std::vector<CalDurElemPayload> items(n);
+    keel::Array<CalDurElemPayload> items(mr);
+    items.resize(n);
     for (keel::usize i = 0; i < n; ++i) {
         double v = x.elemAsDouble(i);
         if (!std::isfinite(v) || std::floor(v) != v)
-            throw std::runtime_error(std::string("numkit:") + fnName
-                                     + ":MustBeInteger: Calendar duration quantities must be finite integers.");
+            throw std::runtime_error(
+                keel::format("numkit:{}:MustBeInteger: Calendar duration quantities must be finite integers.", fnName).c_str());
         keel::i64 iv = static_cast<keel::i64>(v);
         items[i] = CalDurElemPayload(iv * monthMult, iv * dayMult, 0.0);
     }
-    return makeCalDurArray(x.dims(), items, mr);
+    return makeCalDurArray(x.dims(), items.as_ref(), mr);
 }
 
 } // namespace
@@ -687,7 +732,7 @@ void register_timefun(Engine &engine) {
             argcheck::checkNargin(args.size(), 0, 1, "pause");
             static bool pauseEnabled = true;
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
-                const std::string prev = pauseEnabled ? "on" : "off";
+                const char *prev = pauseEnabled ? "on" : "off";
                 keel::String mode = args[0].toString();
                 for (char &c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (mode == "off") pauseEnabled = false;
@@ -738,9 +783,7 @@ void register_timefun(Engine &engine) {
             if (nargout > 0) {
                 outs[0] = Value::scalar(elapsed, ctx.engine->allocator());
             } else {
-                std::ostringstream os;
-                os << "Elapsed time is " << elapsed << " seconds.\n";
-                ctx.engine->outputText(os.str());
+                ctx.engine->outputText(keel::format("Elapsed time is %g seconds.\n", elapsed));
                 outs[0] = Value();
             }
         });
@@ -974,8 +1017,9 @@ void register_timefun(Engine &engine) {
                 r = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
                 c = static_cast<keel::usize>(std::max(0.0, args[1].elemAsDouble(0)));
             }
-            std::vector<double> nats(r * c, std::numeric_limits<double>::quiet_NaN());
-            outs[0] = makeDatetimeArray(Dims(r, c), nats, "", "", mr);
+            keel::Array<double> nats(mr);
+            nats.assign(r * c, std::numeric_limits<double>::quiet_NaN());
+            outs[0] = makeDatetimeArray(Dims(r, c), nats.as_ref(), "", "", mr);
         });
 
     auto *clsAlloc = engine.allocator();
@@ -989,7 +1033,7 @@ void register_timefun(Engine &engine) {
 
         dur.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto *mr = ctx.engine->allocator();
-            std::string fmt = "hh:mm:ss";
+            keel::String fmt = keel::String::from("hh:mm:ss", mr);
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
                 keel::String k = args[nPos - 2].toString();
@@ -1002,23 +1046,25 @@ void register_timefun(Engine &engine) {
                 }
             }
             if (nPos == 0)
-                return makeDurationArray(Dims(1, 1), {0.0}, fmt, mr);
+                return makeDurationScalar(0.0, fmt.as_ref(), mr);
             if (nPos == 1 && args[0].isNumeric() && args[0].dims().cols() == 3) {
                 const keel::usize R = args[0].dims().rows();
-                std::vector<double> secs(R);
+                keel::Array<double> secs(mr);
+                secs.resize(R);
                 for (keel::usize r = 0; r < R; ++r) {
                     double h = args[0].elemAsDouble(r);
                     double m = args[0].elemAsDouble(r + R);
                     double s = args[0].elemAsDouble(r + 2 * R);
                     secs[r] = h * 3600.0 + m * 60.0 + s;
                 }
-                return makeDurationArray(Dims(R, 1), secs, fmt, mr);
+                return makeDurationArray(Dims(R, 1), secs.as_ref(), fmt.as_ref(), mr);
             }
             if (nPos == 3 || nPos == 4) {
                 Dims d = broadcastDims(args[0], args[1], "duration");
                 d = (d.numel() == 1) ? args[2].dims() : d;
                 const keel::usize n = d.numel();
-                std::vector<double> secs(n);
+                keel::Array<double> secs(mr);
+                secs.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     double h = args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i);
                     double m = args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i);
@@ -1028,7 +1074,7 @@ void register_timefun(Engine &engine) {
                                     : 0.0;
                     secs[i] = h * 3600.0 + m * 60.0 + s + ms * 0.001;
                 }
-                return makeDurationArray(d, secs, fmt, mr);
+                return makeDurationArray(d, secs.as_ref(), fmt.as_ref(), mr);
             }
             throw std::runtime_error("numkit:duration:InvalidArgs: Expected duration(H, MI, S) or duration([H MI S]).");
         };
@@ -1037,7 +1083,7 @@ void register_timefun(Engine &engine) {
                          CallContext &ctx) -> bool {
             if (name == "Format") {
                 const auto *p = durElem(self, 0);
-                out = Value::fromString(p ? p->format : "hh:mm:ss", ctx.engine->allocator());
+                out = Value::fromString(p ? p->format.as_ref() : keel::StringRef("hh:mm:ss"), ctx.engine->allocator());
                 return true;
             }
             return false;
@@ -1045,10 +1091,10 @@ void register_timefun(Engine &engine) {
         dur.propSet = [](Value &self, keel::StringRef name, const Value &val,
                          CallContext &) -> bool {
             if (name == "Format") {
-                std::string f(val.toString().as_ref());
+                keel::String f = val.toString();
                 for (keel::usize i = 0; i < self.objectCount(); ++i)
                     if (auto *p = durElemMut(self, i))
-                        p->format = f;
+                        p->format.assign(f.as_ref());
                 return true;
             }
             return false;
@@ -1073,7 +1119,7 @@ void register_timefun(Engine &engine) {
                                  CallContext &ctx) {
             const auto *p = durElem(self, 0);
             outs[0] = Value::fromString(
-                p ? formatDurationElem(p->seconds, p->format) : "00:00:00",
+                p ? formatDurationElem(p->seconds, p->format) : keel::String::from("00:00:00"),
                 ctx.engine->allocator());
         });
         dur.methods.put(keel::String("string", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
@@ -1083,7 +1129,8 @@ void register_timefun(Engine &engine) {
             Value s = Value::stringArray(self.dims().rows(), self.dims().cols(), mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = durElem(self, i);
-                s.stringElemSet(i, p ? formatDurationElem(p->seconds, p->format) : "00:00:00");
+                s.stringElemSet(i, p ? formatDurationElem(p->seconds, p->format)
+                                     : keel::String::from("00:00:00"));
             }
             outs[0] = std::move(s);
         });
@@ -1114,24 +1161,28 @@ void register_timefun(Engine &engine) {
 
         dur.ops.put(keel::String("uminus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
-            std::vector<double> secs(n);
-            std::string fmt = durElem(self, 0) ? durElem(self, 0)->format : "hh:mm:ss";
+            keel::Array<double> secs(mr);
+            secs.resize(n);
+            keel::StringRef fmt = durElem(self, 0) ? durElem(self, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
             for (keel::usize i = 0; i < n; ++i)
                 secs[i] = -(durElem(self, i) ? durElem(self, i)->seconds : 0.0);
-            outs[0] = makeDurationArray(self.dims(), secs, fmt, ctx.engine->allocator());
+            outs[0] = makeDurationArray(self.dims(), secs.as_ref(), fmt, mr);
         });
         dur.ops.put(keel::String("uplus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                               CallContext &) { outs[0] = self; });
 
         dur.methods.put(keel::String("abs", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                 CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
-            std::vector<double> secs(n);
-            std::string fmt = durElem(self, 0) ? durElem(self, 0)->format : "hh:mm:ss";
+            keel::Array<double> secs(mr);
+            secs.resize(n);
+            keel::StringRef fmt = durElem(self, 0) ? durElem(self, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
             for (keel::usize i = 0; i < n; ++i)
                 secs[i] = keel::abs(durElem(self, i) ? durElem(self, i)->seconds : 0.0);
-            outs[0] = makeDurationArray(self.dims(), secs, fmt, ctx.engine->allocator());
+            outs[0] = makeDurationArray(self.dims(), secs.as_ref(), fmt, mr);
         });
         auto addDurMinMaxMethod = [&](const char *mname, bool isMax) {
             dur.methods.put(keel::String(mname, clsAlloc), [isMax](Value &self, keel::ArrayRef<Value>, keel::usize nargout,
@@ -1152,8 +1203,8 @@ void register_timefun(Engine &engine) {
                         bestIdx = i;
                     }
                 }
-                std::string fmt = durElem(self, 0) ? durElem(self, 0)->format : "hh:mm:ss";
-                outs[0] = makeDurationArray(Dims(1, 1), {bestVal}, fmt, mr);
+                keel::StringRef fmt = durElem(self, 0) ? durElem(self, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
+                outs[0] = makeDurationScalar(bestVal, fmt, mr);
                 if (nargout >= 2)
                     outs[1] = Value::scalar(static_cast<double>(bestIdx + 1), mr);
             });
@@ -1172,14 +1223,17 @@ void register_timefun(Engine &engine) {
                     && rhs.isObject() && rhs.objectClassName() == "datetime") {
                     Dims d = broadcastDims(lhs, rhs, "plus");
                     const keel::usize n = d.numel();
-                    std::vector<double> sds(n);
+                    keel::Array<double> sds(mr);
+                    sds.resize(n);
                     const auto *p0 = dtElem(rhs, 0);
                     for (keel::usize i = 0; i < n; ++i) {
                         double sec = durElem(lhs, lhs.objectCount() == 1 ? 0 : i)->seconds;
                         double sd = dtElem(rhs, rhs.objectCount() == 1 ? 0 : i)->serialDay;
                         sds[i] = sd + sec / kSecondsPerDay;
                     }
-                    outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+                    outs[0] = makeDatetimeArray(d, sds.as_ref(),
+                                                p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                                p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                     return;
                 }
                 if (!lhs.isObject() || lhs.objectClassName() != "duration"
@@ -1187,14 +1241,15 @@ void register_timefun(Engine &engine) {
                     throw std::runtime_error("numkit:duration:TypeMismatch: Both operands must be durations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
-                std::vector<double> secs(n);
-                std::string fmt = durElem(lhs, 0) ? durElem(lhs, 0)->format : "hh:mm:ss";
+                keel::Array<double> secs(mr);
+                secs.resize(n);
+                keel::StringRef fmt = durElem(lhs, 0) ? durElem(lhs, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
                 for (keel::usize i = 0; i < n; ++i) {
                     double s1 = durElem(lhs, lhs.objectCount() == 1 ? 0 : i)->seconds;
                     double s2 = durElem(rhs, rhs.objectCount() == 1 ? 0 : i)->seconds;
                     secs[i] = s1 + sign * s2;
                 }
-                outs[0] = makeDurationArray(d, secs, fmt, mr);
+                outs[0] = makeDurationArray(d, secs.as_ref(), fmt, mr);
             };
         };
         dur.ops.put(keel::String("plus", clsAlloc), durAddSub(+1.0));
@@ -1227,14 +1282,15 @@ void register_timefun(Engine &engine) {
                 const Value &nVal = lhs.isObject() ? rhs : lhs;
                 Dims d = broadcastDims(dVal, nVal, divide ? "rdivide" : "times");
                 const keel::usize n = d.numel();
-                std::vector<double> secs(n);
-                std::string fmt = durElem(dVal, 0) ? durElem(dVal, 0)->format : "hh:mm:ss";
+                keel::Array<double> secs(mr);
+                secs.resize(n);
+                keel::StringRef fmt = durElem(dVal, 0) ? durElem(dVal, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
                 for (keel::usize i = 0; i < n; ++i) {
                     double s = durElem(dVal, dVal.objectCount() == 1 ? 0 : i)->seconds;
                     double k = nVal.numel() == 1 ? nVal.toScalar() : nVal.elemAsDouble(i);
                     secs[i] = divide ? (s / k) : (s * k);
                 }
-                outs[0] = makeDurationArray(d, secs, fmt, mr);
+                outs[0] = makeDurationArray(d, secs.as_ref(), fmt, mr);
             };
         };
         dur.ops.put(keel::String("times", clsAlloc), durScale(false));
@@ -1289,25 +1345,29 @@ void register_timefun(Engine &engine) {
 
         dur.dispText = [](const Value &self) -> keel::String {
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::ostringstream os;
+            keel::String os;
             if (R * C == 0) {
-                os << "  " << R << "\xC3\x97" << C << " empty duration array\n";
-                return keel::String(os.str());
+                keel::format_into(os, "  {}\xC3\x97{} empty duration array\n", R, C);
+                return os;
             }
             if (R * C > 1)
-                os << "  " << R << "\xC3\x97" << C << " duration array\n\n";
+                keel::format_into(os, "  {}\xC3\x97{} duration array\n\n", R, C);
             else
-                os << "  duration\n\n";
+                os.append("  duration\n\n");
             for (keel::usize r = 0; r < R; ++r) {
-                os << "   ";
+                os.append("   ");
                 for (keel::usize c = 0; c < C; ++c) {
                     const auto *p = durElem(self, c * R + r);
-                    os << " " << (p ? formatDurationElem(p->seconds, p->format) : "00:00:00");
-                    if (c + 1 < C) os << "   ";
+                    os.push_back(' ');
+                    if (p)
+                        os.append(formatDurationElem(p->seconds, p->format).as_ref());
+                    else
+                        os.append("00:00:00");
+                    if (c + 1 < C) os.append("   ");
                 }
-                os << "\n";
+                os.push_back('\n');
             }
-            return keel::String(os.str());
+            return os;
         };
 
         engine.registerClass(std::move(dur));
@@ -1322,24 +1382,28 @@ void register_timefun(Engine &engine) {
 
         cal.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto *mr = ctx.engine->allocator();
-            if (args.empty())
-                return makeCalDurArray(Dims(1, 1), {CalDurElemPayload(0, 0, 0.0)}, mr);
+            if (args.empty()) {
+                CalDurElemPayload zero(0, 0, 0.0);
+                return makeCalDurArray(Dims(1, 1), keel::ArrayRef<CalDurElemPayload>(&zero, 1), mr);
+            }
             if (args.size() == 1 && args[0].isNumeric() && args[0].dims().cols() == 3) {
                 const keel::usize R = args[0].dims().rows();
-                std::vector<CalDurElemPayload> items(R);
+                keel::Array<CalDurElemPayload> items(mr);
+                items.resize(R);
                 for (keel::usize r = 0; r < R; ++r) {
                     keel::i64 y = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r)));
                     keel::i64 m = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r + R)));
                     keel::i64 d = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r + 2 * R)));
                     items[r] = CalDurElemPayload(y * 12 + m, d, 0.0);
                 }
-                return makeCalDurArray(Dims(R, 1), items, mr);
+                return makeCalDurArray(Dims(R, 1), items.as_ref(), mr);
             }
             if (args.size() == 3 || args.size() == 6) {
                 Dims d = broadcastDims(args[0], args[1], "calendarDuration");
                 d = (d.numel() == 1) ? args[2].dims() : d;
                 const keel::usize n = d.numel();
-                std::vector<CalDurElemPayload> items(n);
+                keel::Array<CalDurElemPayload> items(mr);
+                items.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     keel::i64 y = static_cast<keel::i64>(std::round(args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i)));
                     keel::i64 m = static_cast<keel::i64>(std::round(args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i)));
@@ -1353,7 +1417,7 @@ void register_timefun(Engine &engine) {
                     }
                     items[i] = CalDurElemPayload(y * 12 + m, dy, sec);
                 }
-                return makeCalDurArray(d, items, mr);
+                return makeCalDurArray(d, items.as_ref(), mr);
             }
             throw std::runtime_error("numkit:calendarDuration:InvalidArgs: Expected calendarDuration(Y, M, D) or calendarDuration(Y, M, D, H, MI, S).");
         };
@@ -1386,7 +1450,7 @@ void register_timefun(Engine &engine) {
         cal.methods.put(keel::String("char", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                  CallContext &ctx) {
             const auto *p = calElem(self, 0);
-            outs[0] = Value::fromString(p ? formatCalDurElem(*p) : "0d", ctx.engine->allocator());
+            outs[0] = Value::fromString(p ? formatCalDurElem(*p) : keel::String::from("0d"), ctx.engine->allocator());
         });
         cal.methods.put(keel::String("string", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                    CallContext &ctx) {
@@ -1395,21 +1459,23 @@ void register_timefun(Engine &engine) {
             Value s = Value::stringArray(self.dims().rows(), self.dims().cols(), mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = calElem(self, i);
-                s.stringElemSet(i, p ? formatCalDurElem(*p) : "0d");
+                s.stringElemSet(i, p ? formatCalDurElem(*p) : keel::String::from("0d"));
             }
             outs[0] = std::move(s);
         });
 
         cal.ops.put(keel::String("uminus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                CallContext &ctx) {
+            auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
-            std::vector<CalDurElemPayload> items(n);
+            keel::Array<CalDurElemPayload> items(mr);
+            items.resize(n);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = calElem(self, i);
                 if (p)
                     items[i] = CalDurElemPayload(-p->months, -p->days, -p->seconds);
             }
-            outs[0] = makeCalDurArray(self.dims(), items, ctx.engine->allocator());
+            outs[0] = makeCalDurArray(self.dims(), items.as_ref(), mr);
         });
         cal.ops.put(keel::String("uplus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                               CallContext &) { outs[0] = self; });
@@ -1424,14 +1490,17 @@ void register_timefun(Engine &engine) {
                     && rhs.isObject() && rhs.objectClassName() == "datetime") {
                     Dims d = broadcastDims(lhs, rhs, "plus");
                     const keel::usize n = d.numel();
-                    std::vector<double> sds(n);
+                    keel::Array<double> sds(mr);
+                    sds.resize(n);
                     const auto *p0 = dtElem(rhs, 0);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto *cp = calElem(lhs, lhs.objectCount() == 1 ? 0 : i);
                         const auto *dp = dtElem(rhs, rhs.objectCount() == 1 ? 0 : i);
                         sds[i] = addCalendarMonths(dp->serialDay, cp->months, cp->days, cp->seconds);
                     }
-                    outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+                    outs[0] = makeDatetimeArray(d, sds.as_ref(),
+                                                p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                                p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                     return;
                 }
                 if (!lhs.isObject() || lhs.objectClassName() != "calendarDuration"
@@ -1439,7 +1508,8 @@ void register_timefun(Engine &engine) {
                     throw std::runtime_error("numkit:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
-                std::vector<CalDurElemPayload> items(n);
+                keel::Array<CalDurElemPayload> items(mr);
+                items.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     const auto *c1 = calElem(lhs, lhs.objectCount() == 1 ? 0 : i);
                     const auto *c2 = calElem(rhs, rhs.objectCount() == 1 ? 0 : i);
@@ -1448,7 +1518,7 @@ void register_timefun(Engine &engine) {
                         c1->days + sign * c2->days,
                         c1->seconds + static_cast<double>(sign) * c2->seconds);
                 }
-                outs[0] = makeCalDurArray(d, items, mr);
+                outs[0] = makeCalDurArray(d, items.as_ref(), mr);
             };
         };
         cal.ops.put(keel::String("plus", clsAlloc), calAddSub(+1));
@@ -1491,25 +1561,29 @@ void register_timefun(Engine &engine) {
 
         cal.dispText = [](const Value &self) -> keel::String {
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::ostringstream os;
+            keel::String os;
             if (R * C == 0) {
-                os << "  " << R << "\xC3\x97" << C << " empty calendarDuration array\n";
-                return keel::String(os.str());
+                keel::format_into(os, "  {}\xC3\x97{} empty calendarDuration array\n", R, C);
+                return os;
             }
             if (R * C > 1)
-                os << "  " << R << "\xC3\x97" << C << " calendarDuration array\n\n";
+                keel::format_into(os, "  {}\xC3\x97{} calendarDuration array\n\n", R, C);
             else
-                os << "  calendarDuration\n\n";
+                os.append("  calendarDuration\n\n");
             for (keel::usize r = 0; r < R; ++r) {
-                os << "   ";
+                os.append("   ");
                 for (keel::usize c = 0; c < C; ++c) {
                     const auto *p = calElem(self, c * R + r);
-                    os << " " << (p ? formatCalDurElem(*p) : "0d");
-                    if (c + 1 < C) os << "   ";
+                    os.push_back(' ');
+                    if (p)
+                        os.append(formatCalDurElem(*p).as_ref());
+                    else
+                        os.append("0d");
+                    if (c + 1 < C) os.append("   ");
                 }
-                os << "\n";
+                os.push_back('\n');
             }
-            return keel::String(os.str());
+            return os;
         };
 
         engine.registerClass(std::move(cal));
@@ -1525,10 +1599,10 @@ void register_timefun(Engine &engine) {
 
         dt.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto *mr = ctx.engine->allocator();
-            std::string fmt, inFmt, convFrom, tz;
+            keel::String fmt(mr), inFmt(mr), convFrom(mr), tz(mr);
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
-                std::string kl(args[nPos - 2].toString().as_ref());
+                keel::String kl = args[nPos - 2].toString();
                 for (auto &ch : kl) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
                 if (kl == "format") {
                     fmt = args[nPos - 1].toString();
@@ -1551,24 +1625,25 @@ void register_timefun(Engine &engine) {
 
             // datetime() -> current instant
             if (nPos == 0) {
-                return makeDatetimeArray(Dims(1, 1), {numkit::builtin::now()}, fmt, tz, mr);
+                return makeDatetimeScalar(numkit::builtin::now(), fmt.as_ref(), tz.as_ref(), mr);
             }
 
             // datetime(dt_obj [, 'Format', fmt, 'TimeZone', tz])
             if (nPos == 1 && args[0].isObject() && args[0].objectClassName() == "datetime") {
                 const keel::usize n = args[0].objectCount();
-                std::vector<double> sds(n);
-                std::string f0 = fmt;
-                std::string tz0 = tz;
+                keel::Array<double> sds(mr);
+                sds.resize(n);
+                keel::String f0 = fmt.clone();
+                keel::String tz0 = tz.clone();
                 for (keel::usize i = 0; i < n; ++i) {
                     const auto *p = dtElem(args[0], i);
                     sds[i] = p ? p->serialDay : std::numeric_limits<double>::quiet_NaN();
                     if (i == 0 && p) {
-                        if (f0.empty()) f0 = p->format;
-                        if (tz0.empty()) tz0 = p->timeZone;
+                        if (f0.empty()) f0.assign(p->format.as_ref());
+                        if (tz0.empty()) tz0.assign(p->timeZone.as_ref());
                     }
                 }
-                return makeDatetimeArray(args[0].dims(), sds, f0, tz0, mr);
+                return makeDatetimeArray(args[0].dims(), sds.as_ref(), f0.as_ref(), tz0.as_ref(), mr);
             }
 
             // datetime(x, 'ConvertFrom', type)
@@ -1577,7 +1652,8 @@ void register_timefun(Engine &engine) {
                     throw std::runtime_error("numkit:datetime:InvalidConvertFrom: Expected a single numeric input with 'ConvertFrom'.");
                 const Value &x = args[0];
                 const keel::usize n = x.numel();
-                std::vector<double> sds(n);
+                keel::Array<double> sds(mr);
+                sds.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     double v = x.elemAsDouble(i);
                     if (!std::isfinite(v)) {
@@ -1599,10 +1675,11 @@ void register_timefun(Engine &engine) {
                         keel::i64 d = iv % 100;
                         sds[i] = composeSerialDay(static_cast<double>(y), static_cast<double>(m), static_cast<double>(d));
                     } else {
-                        throw std::runtime_error("numkit:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '" + convFrom + "'.");
+                        throw std::runtime_error(
+                            keel::format("numkit:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '{}'.", convFrom).c_str());
                     }
                 }
-                return makeDatetimeArray(x.dims(), sds, fmt, tz, mr);
+                return makeDatetimeArray(x.dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
             }
 
             // datetime(str [, fmt])
@@ -1615,31 +1692,35 @@ void register_timefun(Engine &engine) {
                     const keel::usize C = args[0].dims().cols();
                     if (R <= 1) {
                         double sd = parseDateTimeString(args[0].toString(), mr);
-                        return makeDatetimeArray(Dims(1, 1), {sd}, fmt, tz, mr);
+                        return makeDatetimeScalar(sd, fmt.as_ref(), tz.as_ref(), mr);
                     }
-                    std::vector<double> sds(R);
+                    keel::Array<double> sds(mr);
+                    sds.resize(R);
                     const char *cd = args[0].charData();
                     for (keel::usize r = 0; r < R; ++r) {
-                        std::string rowStr(C, ' ');
+                        keel::String rowStr(mr);
+                        rowStr.resize(C, ' ');
                         for (keel::usize c = 0; c < C; ++c)
                             rowStr[c] = cd[c * R + r];
                         sds[r] = parseDateTimeString(rowStr, mr);
                     }
-                    return makeDatetimeArray(Dims(R, 1), sds, fmt, tz, mr);
+                    return makeDatetimeArray(Dims(R, 1), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                 }
                 if (args[0].isString()) {
                     const keel::usize n = args[0].numel();
-                    std::vector<double> sds(n);
+                    keel::Array<double> sds(mr);
+                    sds.resize(n);
                     for (keel::usize i = 0; i < n; ++i)
                         sds[i] = parseDateTimeString(args[0].stringElem(i), mr);
-                    return makeDatetimeArray(args[0].dims(), sds, fmt, tz, mr);
+                    return makeDatetimeArray(args[0].dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                 }
                 if (args[0].isCell()) {
                     const keel::usize n = args[0].numel();
-                    std::vector<double> sds(n);
+                    keel::Array<double> sds(mr);
+                    sds.resize(n);
                     for (keel::usize i = 0; i < n; ++i)
                         sds[i] = parseDateTimeString(args[0].cellAt(i).toString(), mr);
-                    return makeDatetimeArray(args[0].dims(), sds, fmt, tz, mr);
+                    return makeDatetimeArray(args[0].dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                 }
             }
 
@@ -1648,7 +1729,7 @@ void register_timefun(Engine &engine) {
                 const keel::usize R = args[0].dims().rows();
                 const keel::usize C = args[0].dims().cols();
                 if (R == 0 && C == 0)
-                    return makeDatetimeArray(Dims(0, 0), {}, fmt, tz, mr);
+                    return makeDatetimeArray(Dims(0, 0), keel::ArrayRef<double>(), fmt.as_ref(), tz.as_ref(), mr);
                 if (C != 3 && C != 6) {
                     // If a 1D vector of Excel serial dates (e.g. from readtable on .xlsx)
                     // is passed directly to datetime(), convert Excel serial dates when values
@@ -1657,18 +1738,20 @@ void register_timefun(Engine &engine) {
                         double v0 = args[0].elemAsDouble(0);
                         if (std::isfinite(v0) && v0 >= 1.0 && v0 <= 200000.0) {
                             const keel::usize n = args[0].numel();
-                            std::vector<double> sds(n);
+                            keel::Array<double> sds(mr);
+                            sds.resize(n);
                             for (keel::usize i = 0; i < n; ++i) {
                                 double v = args[0].elemAsDouble(i);
                                 sds[i] = std::isfinite(v) ? (v + 693960.0)
                                                           : std::numeric_limits<double>::quiet_NaN();
                             }
-                            return makeDatetimeArray(args[0].dims(), sds, fmt, tz, mr);
+                            return makeDatetimeArray(args[0].dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                         }
                     }
                     throw std::runtime_error("numkit:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
                 }
-                std::vector<double> sds(R);
+                keel::Array<double> sds(mr);
+                sds.resize(R);
                 for (keel::usize r = 0; r < R; ++r) {
                     double y = args[0].elemAsDouble(r);
                     double m = args[0].elemAsDouble(r + R);
@@ -1678,7 +1761,7 @@ void register_timefun(Engine &engine) {
                     double s = (C == 6) ? args[0].elemAsDouble(r + 5 * R) : 0.0;
                     sds[r] = composeSerialDay(y, m, d, h, mi, s);
                 }
-                return makeDatetimeArray(Dims(R, 1), sds, fmt, tz, mr);
+                return makeDatetimeArray(Dims(R, 1), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
             }
 
             // datetime(Y, M, D [, H, MI, S [, MS]])
@@ -1695,7 +1778,8 @@ void register_timefun(Engine &engine) {
                     }
                 }
                 const keel::usize n = outDims.numel();
-                std::vector<double> sds(n);
+                keel::Array<double> sds(mr);
+                sds.resize(n);
                 auto elem = [&](keel::usize k, keel::usize idx) -> double {
                     return args[k].numel() == 1 ? args[k].toScalar() : args[k].elemAsDouble(idx);
                 };
@@ -1709,7 +1793,7 @@ void register_timefun(Engine &engine) {
                     double ms = (nPos == 7) ? elem(6, i) : 0.0;
                     sds[i] = composeSerialDay(y, m, d, h, mi, s + ms * 0.001);
                 }
-                return makeDatetimeArray(outDims, sds, fmt, tz, mr);
+                return makeDatetimeArray(outDims, sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
             }
 
             throw std::runtime_error("numkit:datetime:InvalidSyntax: Unsupported arguments to datetime constructor.");
@@ -1726,13 +1810,13 @@ void register_timefun(Engine &engine) {
             if (name == "Second") { out = extractDatetimeComponent(self, 5, mr); return true; }
             if (name == "Format") {
                 const auto *p = dtElem(self, 0);
-                std::string f = (p && !p->format.empty()) ? p->format : "dd-MMM-uuuu";
+                keel::StringRef f = (p && !p->format.empty()) ? p->format.as_ref() : keel::StringRef("dd-MMM-uuuu");
                 out = Value::fromString(f, mr);
                 return true;
             }
             if (name == "TimeZone") {
                 const auto *p = dtElem(self, 0);
-                out = Value::fromString(p ? p->timeZone : "", mr);
+                out = Value::fromString(p ? p->timeZone.as_ref() : keel::StringRef(""), mr);
                 return true;
             }
             return false;
@@ -1747,17 +1831,17 @@ void register_timefun(Engine &engine) {
             if (name == "Minute") { mutateDatetimeComponent(self, 4, val); return true; }
             if (name == "Second") { mutateDatetimeComponent(self, 5, val); return true; }
             if (name == "Format") {
-                std::string f(val.toString().as_ref());
+                keel::String f = val.toString();
                 for (keel::usize i = 0; i < self.objectCount(); ++i)
                     if (auto *p = dtElemMut(self, i))
-                        p->format = f;
+                        p->format.assign(f.as_ref());
                 return true;
             }
             if (name == "TimeZone") {
-                std::string tz(val.toString().as_ref());
+                keel::String tz = val.toString();
                 for (keel::usize i = 0; i < self.objectCount(); ++i)
                     if (auto *p = dtElemMut(self, i))
-                        p->timeZone = tz;
+                        p->timeZone.assign(tz.as_ref());
                 return true;
             }
             return false;
@@ -1909,26 +1993,30 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
             bool anyTime = hasNonZeroTime(self);
-            std::string overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
-                                          ? std::string(args[0].toString().as_ref())
-                                          : std::string();
+            keel::String overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
+                                           ? args[0].toString()
+                                           : keel::String(mr);
             if (n <= 1) {
                 const auto *p = dtElem(self, 0);
-                std::string f = !overrideFmt.empty() ? overrideFmt : (p ? p->format : "");
+                keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
+                                                         : (p ? p->format.as_ref() : keel::StringRef(""));
                 outs[0] = Value::fromString(
                     formatDateTimeElem(p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
                                        f, anyTime),
                     mr);
                 return;
             }
-            std::vector<std::string> rows(n);
+            keel::Array<keel::String> rows(mr);
+            rows.reserve(n);
             keel::usize maxW = 0;
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                std::string f = !overrideFmt.empty() ? overrideFmt : (p ? p->format : "");
-                rows[i] = formatDateTimeElem(p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
-                                             f, anyTime);
-                maxW = std::max(maxW, rows[i].size());
+                keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
+                                                         : (p ? p->format.as_ref() : keel::StringRef(""));
+                keel::String row = formatDateTimeElem(
+                    p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(), f, anyTime);
+                maxW = std::max(maxW, row.size());
+                rows.push_back(std::move(row));
             }
             Value cm = Value::matrix(n, maxW, ValueType::CHAR, mr);
             char *dst = cm.charDataMut();
@@ -1941,20 +2029,24 @@ void register_timefun(Engine &engine) {
         dt.methods.put(keel::String("datestr", clsAlloc),
                        [hasNonZeroTime](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                                         keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            std::vector<Value> modArgs(args.begin(), args.end());
+            auto *mr = ctx.engine->allocator();
+            keel::Array<Value> modArgs(mr);
+            modArgs.reserve(args.size());
+            for (const auto &a : args)
+                modArgs.push_back(a);
             if (!modArgs.empty() && (modArgs[0].isChar() || modArgs[0].isString())) {
-                std::string f(modArgs[0].toString().as_ref());
+                keel::String f = modArgs[0].toString();
                 for (keel::usize i = 0; i + 1 < f.size(); ++i) {
                     if (f[i] == 'm' && f[i + 1] == 'm' && (i == 0 || f[i - 1] != ':')) {
                         f[i] = 'M';
                         f[i + 1] = 'M';
                         ++i;
-                    } else if (f.compare(i, 3, "mmm") == 0) {
+                    } else if (i + 3 <= f.size() && f.as_ref().substr(i, 3) == "mmm") {
                         f[i] = 'M'; f[i + 1] = 'M'; f[i + 2] = 'M';
                         i += 2;
                     }
                 }
-                modArgs[0] = Value::fromString(f, ctx.engine->allocator());
+                modArgs[0] = Value::fromString(f, mr);
             }
             const auto *cls = ctx.engine->findClass("datetime");
             if (cls) {
@@ -1970,13 +2062,14 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
             bool anyTime = hasNonZeroTime(self);
-            std::string overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
-                                          ? std::string(args[0].toString().as_ref())
-                                          : std::string();
+            keel::String overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
+                                           ? args[0].toString()
+                                           : keel::String(mr);
             Value s = Value::stringArray(self.dims().rows(), self.dims().cols(), mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                std::string f = !overrideFmt.empty() ? overrideFmt : (p ? p->format : "");
+                keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
+                                                         : (p ? p->format.as_ref() : keel::StringRef(""));
                 s.stringElemSet(
                     i, formatDateTimeElem(p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
                                           f, anyTime));
@@ -1989,13 +2082,14 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
             bool anyTime = hasNonZeroTime(self);
-            std::string overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
-                                          ? std::string(args[0].toString().as_ref())
-                                          : std::string();
+            keel::String overrideFmt = (!args.empty() && (args[0].isChar() || args[0].isString()))
+                                           ? args[0].toString()
+                                           : keel::String(mr);
             Value c = Value::cell(self.dims().rows(), self.dims().cols(), mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                std::string f = !overrideFmt.empty() ? overrideFmt : (p ? p->format : "");
+                keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
+                                                         : (p ? p->format.as_ref() : keel::StringRef(""));
                 c.cellAt(i) = Value::fromString(
                     formatDateTimeElem(p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
                                        f, anyTime),
@@ -2030,10 +2124,11 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             const keel::usize n = self.objectCount();
             if (n <= 1) {
-                outs[0] = makeDurationArray(Dims(1, 0), {}, "hh:mm:ss", mr);
+                outs[0] = makeDurationArray(Dims(1, 0), keel::ArrayRef<double>(), "hh:mm:ss", mr);
                 return;
             }
-            std::vector<double> secs(n - 1);
+            keel::Array<double> secs(mr);
+            secs.resize(n - 1);
             for (keel::usize i = 0; i + 1 < n; ++i) {
                 double sd1 = dtElem(self, i)->serialDay;
                 double sd2 = dtElem(self, i + 1)->serialDay;
@@ -2042,7 +2137,7 @@ void register_timefun(Engine &engine) {
             Dims outDims = (self.dims().rows() > 1 && self.dims().cols() == 1)
                                ? Dims(n - 1, 1)
                                : Dims(1, n - 1);
-            outs[0] = makeDurationArray(outDims, secs, "hh:mm:ss", mr);
+            outs[0] = makeDurationArray(outDims, secs.as_ref(), "hh:mm:ss", mr);
         });
 
         dt.methods.put(keel::String("between", clsAlloc),
@@ -2054,7 +2149,8 @@ void register_timefun(Engine &engine) {
             const Value &rhs = args[0];
             Dims d = broadcastDims(self, rhs, "between");
             const keel::usize n = d.numel();
-            std::vector<CalDurElemPayload> items(n);
+            keel::Array<CalDurElemPayload> items(mr);
+            items.resize(n);
             for (keel::usize i = 0; i < n; ++i) {
                 double sd1 = dtElem(self, self.objectCount() == 1 ? 0 : i)->serialDay;
                 double sd2 = dtElem(rhs, rhs.objectCount() == 1 ? 0 : i)->serialDay;
@@ -2067,7 +2163,7 @@ void register_timefun(Engine &engine) {
                 double remSec = (remDays - static_cast<double>(wholeDays)) * kSecondsPerDay;
                 items[i] = CalDurElemPayload(months, wholeDays, remSec);
             }
-            outs[0] = makeCalDurArray(d, items, mr);
+            outs[0] = makeCalDurArray(d, items.as_ref(), mr);
         });
 
         dt.methods.put(keel::String("dateshift", clsAlloc),
@@ -2082,7 +2178,8 @@ void register_timefun(Engine &engine) {
             for (auto &ch : unit) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             bool isEnd = (rule == "end");
             const keel::usize n = self.objectCount();
-            std::vector<double> sds(n);
+            keel::Array<double> sds(mr);
+            sds.resize(n);
             const auto *p0 = dtElem(self, 0);
             for (keel::usize i = 0; i < n; ++i) {
                 CivilDateTime c = decomposeSerialDay(dtElem(self, i)->serialDay);
@@ -2112,7 +2209,9 @@ void register_timefun(Engine &engine) {
                     sds[i] = composeSerialDay(c.year, c.month, c.day);
                 }
             }
-            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(self.dims(), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
         dt.methods.put(keel::String("sort", clsAlloc),
@@ -2126,7 +2225,8 @@ void register_timefun(Engine &engine) {
                 for (auto &ch : dir) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
                 desc = (dir == "descend");
             }
-            std::vector<keel::usize> order(n);
+            keel::Array<keel::usize> order(mr);
+            order.resize(n);
             for (keel::usize i = 0; i < n; ++i) order[i] = i;
             std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                 double sa = dtElem(self, a)->serialDay;
@@ -2135,11 +2235,14 @@ void register_timefun(Engine &engine) {
                 if (std::isnan(sb)) return true;
                 return desc ? (sa > sb) : (sa < sb);
             });
-            std::vector<double> sds(n);
+            keel::Array<double> sds(mr);
+            sds.resize(n);
             for (keel::usize i = 0; i < n; ++i)
                 sds[i] = dtElem(self, order[i])->serialDay;
             const auto *p0 = dtElem(self, 0);
-            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(self.dims(), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
             if (nargout >= 2) {
                 Value idx = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < n; ++i)
@@ -2169,8 +2272,9 @@ void register_timefun(Engine &engine) {
                     }
                 }
                 const auto *p0 = dtElem(self, 0);
-                outs[0] = makeDatetimeArray(Dims(1, 1), {bestVal},
-                                            p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+                outs[0] = makeDatetimeScalar(bestVal,
+                                             p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                             p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                 if (nargout >= 2)
                     outs[1] = Value::scalar(static_cast<double>(bestIdx + 1), mr);
             });
@@ -2183,31 +2287,38 @@ void register_timefun(Engine &engine) {
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::vector<double> sds(R * C);
+            keel::Array<double> sds(mr);
+            sds.resize(R * C);
             for (keel::usize c = 0; c < C; ++c)
                 for (keel::usize r = 0; r < R; ++r)
                     sds[c * R + r] = dtElem(self, c * R + (R - 1 - r))->serialDay;
             const auto *p0 = dtElem(self, 0);
-            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(self.dims(), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
         dt.methods.put(keel::String("fliplr", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value>, keel::usize,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::vector<double> sds(R * C);
+            keel::Array<double> sds(mr);
+            sds.resize(R * C);
             for (keel::usize c = 0; c < C; ++c)
                 for (keel::usize r = 0; r < R; ++r)
                     sds[c * R + r] = dtElem(self, (C - 1 - c) * R + r)->serialDay;
             const auto *p0 = dtElem(self, 0);
-            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(self.dims(), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
         dt.methods.put(keel::String("flip", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value>, keel::usize,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::vector<double> sds(R * C);
+            keel::Array<double> sds(mr);
+            sds.resize(R * C);
             if (R > 1) {
                 for (keel::usize c = 0; c < C; ++c)
                     for (keel::usize r = 0; r < R; ++r)
@@ -2218,7 +2329,9 @@ void register_timefun(Engine &engine) {
                         sds[c * R + r] = dtElem(self, (C - 1 - c) * R + r)->serialDay;
             }
             const auto *p0 = dtElem(self, 0);
-            outs[0] = makeDatetimeArray(self.dims(), sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(self.dims(), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
         dt.methods.put(keel::String("unique", clsAlloc),
@@ -2235,9 +2348,10 @@ void register_timefun(Engine &engine) {
                 }
             }
             constexpr double kTol = 1e-9 / kSecondsPerDay;
-            std::vector<double> uniqSds;
-            std::vector<keel::usize> ia;
-            std::vector<keel::usize> ic(n, 0);
+            keel::Array<double> uniqSds(mr);
+            keel::Array<keel::usize> ia(mr);
+            keel::Array<keel::usize> ic(mr);
+            ic.assign(n, 0);
             if (stable) {
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd = dtElem(self, i)->serialDay;
@@ -2252,7 +2366,8 @@ void register_timefun(Engine &engine) {
                     ic[i] = found + 1;
                 }
             } else {
-                std::vector<keel::usize> order(n);
+                keel::Array<keel::usize> order(mr);
+                order.resize(n);
                 for (keel::usize i = 0; i < n; ++i) order[i] = i;
                 std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                     double sa = dtElem(self, a)->serialDay;
@@ -2276,7 +2391,9 @@ void register_timefun(Engine &engine) {
             Dims outDims = (self.dims().rows() == 1 && self.dims().cols() > 1)
                                ? Dims(1, uniqSds.size())
                                : Dims(uniqSds.size(), 1);
-            outs[0] = makeDatetimeArray(outDims, uniqSds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(outDims, uniqSds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
             if (nargout >= 2) {
                 Value iaVal = Value::matrix(ia.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < ia.size(); ++i)
@@ -2310,7 +2427,7 @@ void register_timefun(Engine &engine) {
             const keel::usize nA = self.objectCount();
             const keel::usize nB = other.objectCount();
             struct Item { double sd; keel::usize ia; keel::usize ib; };
-            std::vector<Item> items;
+            keel::Array<Item> items(mr);
             for (keel::usize i = 0; i < nA; ++i) {
                 double sa = dtElem(self, i)->serialDay;
                 if (std::isnan(sa)) continue;
@@ -2332,14 +2449,17 @@ void register_timefun(Engine &engine) {
                     return a.sd < b.sd - kTol;
                 });
             }
-            std::vector<double> sds(items.size());
+            keel::Array<double> sds(mr);
+            sds.resize(items.size());
             for (keel::usize i = 0; i < items.size(); ++i) sds[i] = items[i].sd;
             const auto *p0 = dtElem(self, 0);
             Dims outDims = (self.dims().rows() == 1 && self.dims().cols() > 1
                             && other.dims().rows() == 1 && other.dims().cols() > 1)
                                ? Dims(1, sds.size())
                                : Dims(sds.size(), 1);
-            outs[0] = makeDatetimeArray(outDims, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(outDims, sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
             if (nargout >= 2) {
                 Value iaVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < items.size(); ++i)
@@ -2398,7 +2518,8 @@ void register_timefun(Engine &engine) {
             const auto *p0 = dtElem(dtVal, 0);
             Dims d = broadcastDims(dtVal, other, "plus");
             const keel::usize n = d.numel();
-            std::vector<double> sds(n);
+            keel::Array<double> sds(mr);
+            sds.resize(n);
 
             if (other.isObject() && other.objectClassName() == "calendarDuration") {
                 for (keel::usize i = 0; i < n; ++i) {
@@ -2419,10 +2540,13 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd + dy;
                 }
             } else {
-                throw std::runtime_error("numkit:datetime:InvalidPlusOperand: Cannot add value of type '"
-                                         + std::string(mtypeName(other.type())) + "' to a datetime.");
+                throw std::runtime_error(
+                    keel::format("numkit:datetime:InvalidPlusOperand: Cannot add value of type '{}' to a datetime.",
+                                 mtypeName(other.type())).c_str());
             }
-            outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(d, sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
         dt.ops.put(keel::String("minus", clsAlloc),
@@ -2438,20 +2562,22 @@ void register_timefun(Engine &engine) {
             if (rhs.isObject() && rhs.objectClassName() == "datetime") {
                 Dims d = broadcastDims(lhs, rhs, "minus");
                 const keel::usize n = d.numel();
-                std::vector<double> secs(n);
+                keel::Array<double> secs(mr);
+                secs.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     double sd1 = dtElem(lhs, lhs.objectCount() == 1 ? 0 : i)->serialDay;
                     double sd2 = dtElem(rhs, rhs.objectCount() == 1 ? 0 : i)->serialDay;
                     secs[i] = (sd1 - sd2) * kSecondsPerDay;
                 }
-                outs[0] = makeDurationArray(d, secs, "hh:mm:ss", mr);
+                outs[0] = makeDurationArray(d, secs.as_ref(), "hh:mm:ss", mr);
                 return;
             }
 
             const auto *p0 = dtElem(lhs, 0);
             Dims d = broadcastDims(lhs, rhs, "minus");
             const keel::usize n = d.numel();
-            std::vector<double> sds(n);
+            keel::Array<double> sds(mr);
+            sds.resize(n);
 
             if (rhs.isObject() && rhs.objectClassName() == "calendarDuration") {
                 for (keel::usize i = 0; i < n; ++i) {
@@ -2472,10 +2598,13 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd - dy;
                 }
             } else {
-                throw std::runtime_error("numkit:datetime:InvalidMinusOperand: Cannot subtract value of type '"
-                                         + std::string(mtypeName(rhs.type())) + "' from a datetime.");
+                throw std::runtime_error(
+                    keel::format("numkit:datetime:InvalidMinusOperand: Cannot subtract value of type '{}' from a datetime.",
+                                 mtypeName(rhs.type())).c_str());
             }
-            outs[0] = makeDatetimeArray(d, sds, p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(d, sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
         auto dtCmp = [](int mode) -> ObjectMethod {
@@ -2485,9 +2614,9 @@ void register_timefun(Engine &engine) {
                 Value lhs = args[0];
                 Value rhs = args[1];
                 if (lhs.isChar() || lhs.isString())
-                    lhs = makeDatetimeArray(Dims(1, 1), {parseDateTimeString(lhs.toString(), mr)}, "", "", mr);
+                    lhs = makeDatetimeScalar(parseDateTimeString(lhs.toString(), mr), "", "", mr);
                 if (rhs.isChar() || rhs.isString())
-                    rhs = makeDatetimeArray(Dims(1, 1), {parseDateTimeString(rhs.toString(), mr)}, "", "", mr);
+                    rhs = makeDatetimeScalar(parseDateTimeString(rhs.toString(), mr), "", "", mr);
                 if (!lhs.isObject() || !rhs.isObject()
                     || lhs.objectClassName() != "datetime" || rhs.objectClassName() != "datetime") {
                     outs[0] = Value::logicalScalar(mode == 1, mr);
@@ -2542,7 +2671,7 @@ void register_timefun(Engine &engine) {
             double startSd = dtElem(startVal, 0)->serialDay;
             double stopSd = dtElem(stopVal, 0)->serialDay;
             const auto *p0 = dtElem(startVal, 0);
-            std::vector<double> sds;
+            keel::Array<double> sds(mr);
             constexpr double kTol = 1e-9 / kSecondsPerDay;
 
             if (args.size() == 3 && args[1].isObject()
@@ -2580,34 +2709,36 @@ void register_timefun(Engine &engine) {
                     sds.push_back(cur);
                 }
             }
-            outs[0] = makeDatetimeArray(Dims(1, sds.size()), sds,
-                                        p0 ? p0->format : "", p0 ? p0->timeZone : "", mr);
+            outs[0] = makeDatetimeArray(Dims(1, sds.size()), sds.as_ref(),
+                                        p0 ? p0->format.as_ref() : keel::StringRef(""),
+                                        p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
         dt.dispText = [hasNonZeroTime](const Value &self) -> keel::String {
             const keel::usize R = self.dims().rows(), C = self.dims().cols();
-            std::ostringstream os;
+            keel::String os;
             if (R * C == 0) {
-                os << "  " << R << "\xC3\x97" << C << " empty datetime array\n";
-                return keel::String(os.str());
+                keel::format_into(os, "  {}\xC3\x97{} empty datetime array\n", R, C);
+                return os;
             }
             bool anyTime = hasNonZeroTime(self);
             if (R * C > 1)
-                os << "  " << R << "\xC3\x97" << C << " datetime array\n\n";
+                keel::format_into(os, "  {}\xC3\x97{} datetime array\n\n", R, C);
             else
-                os << "  datetime\n\n";
+                os.append("  datetime\n\n");
             for (keel::usize r = 0; r < R; ++r) {
-                os << "   ";
+                os.append("   ");
                 for (keel::usize c = 0; c < C; ++c) {
                     const auto *p = dtElem(self, c * R + r);
-                    os << " " << formatDateTimeElem(
-                              p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
-                              p ? p->format : "", anyTime);
-                    if (c + 1 < C) os << "   ";
+                    os.push_back(' ');
+                    os.append(formatDateTimeElem(
+                        p ? p->serialDay : std::numeric_limits<double>::quiet_NaN(),
+                        p ? p->format.as_ref() : keel::StringRef(""), anyTime).as_ref());
+                    if (c + 1 < C) os.append("   ");
                 }
-                os << "\n";
+                os.push_back('\n');
             }
-            return keel::String(os.str());
+            return os;
         };
 
         engine.registerClass(std::move(dt));

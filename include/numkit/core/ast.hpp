@@ -1,10 +1,9 @@
 // include/ast.hpp
 #pragma once
+#include <keel/array.h>
 #include <keel/core.h>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 
 namespace numkit {
 
@@ -61,7 +60,13 @@ enum class NodeType {
 };
 
 struct ASTNode;
-using ASTNodePtr = std::unique_ptr<ASTNode>;
+using ASTNodePtr = keel::UniquePtr<ASTNode>;
+
+struct ASTBranch
+{
+    ASTNodePtr cond;
+    ASTNodePtr body;
+};
 
 struct ASTNode
 {
@@ -77,18 +82,18 @@ struct ASTNode
     // (graph view) treat 0 as "slice to end of line".
     int endCol  = 0;
 
-    std::string strValue;
+    keel::String strValue;
     keel::f64 numValue = 0;
     bool boolValue = false;
     bool suppressOutput = false;
 
-    std::vector<ASTNodePtr> children;
-    std::vector<std::string> paramNames;
-    std::vector<std::string> returnNames;
+    keel::Array<ASTNodePtr> children;
+    keel::Array<keel::String> paramNames;
+    keel::Array<keel::String> returnNames;
     // classdef only: attributes of the enclosing properties/methods block,
     // stored as flat tokens (e.g. {"Static"}, {"Constant"},
     // {"Access","private"}) on each CLASSDEF_PROPERTY / method FUNCTION_DEF.
-    std::vector<std::string> classAttrs;
+    keel::Array<keel::String> classAttrs;
 
     // MULTI_ASSIGN only: one lvalue expression per output target when at
     // least one target is a complex lvalue (`s.f`, `a(i)`, `c{i}`, ...).
@@ -96,9 +101,9 @@ struct ASTNode
     // case stays on the fast returnNames-only path). A nullptr entry
     // denotes an ignored `~` output. When non-empty, the size matches
     // returnNames and this is the authoritative target list.
-    std::vector<ASTNodePtr> lhsTargets;
+    keel::Array<ASTNodePtr> lhsTargets;
 
-    std::vector<std::pair<ASTNodePtr, ASTNodePtr>> branches;
+    keel::Array<ASTBranch> branches;
     ASTNodePtr elseBranch;
 
     ASTNode()
@@ -120,7 +125,7 @@ ASTNodePtr cloneNode(const ASTNode *src);
 //
 // On success, *rootIdent is set to the IDENTIFIER node at the chain root
 // (callers need it for variable-shadow checks).
-std::string tryBuildQualifiedName(const ASTNode *node,
+keel::String tryBuildQualifiedName(const ASTNode *node,
                                    const ASTNode **rootIdent = nullptr);
 
 } // namespace numkit

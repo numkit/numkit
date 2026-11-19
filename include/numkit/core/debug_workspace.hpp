@@ -25,13 +25,13 @@
 //
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
-
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace numkit {
 
@@ -64,43 +64,43 @@ public:
     void reset();
 
     // ── Operations ───────────────────────────────────────────
-    const Value *get(const std::string &name) const;
-    void set(const std::string &name, const Value &val);
-    void remove(const std::string &name);
+    const Value *get(keel::StringRef name) const;
+    void set(keel::StringRef name, const Value &val);
+    void remove(keel::StringRef name);
     void clearAll();
 
     // User-visible names — built-in constants and pseudo-vars (pi, eps,
     // nargin, …) are filtered out so the snapshot matches MATLAB's `whos`.
-    std::vector<std::string> names() const;
+    keel::Array<keel::String> names() const;
 
     // All live names, including built-ins and pseudo-vars. Used to inject
     // frame state into the console eval's workspace so `nargin`, `i` in a
     // for-loop, etc. resolve correctly inside debug expressions.
-    std::vector<std::string> allNames() const;
+    keel::Array<keel::String> allNames() const;
 
     // Is `name` bound to a frame register?
-    bool hasFrameVar(const std::string &name) const
+    bool hasFrameVar(keel::StringRef name) const
     {
-        return framePtrs_.count(name) > 0;
+        return framePtrs_.contains(name);
     }
 
     // Overlay exposure — used as VM per-frame dynVars during `continue`
     // so console-created names are resolvable by the running script.
-    std::unordered_map<std::string, Value> &overlay() { return overlay_; }
-    const std::unordered_map<std::string, Value> &overlay() const { return overlay_; }
+    keel::HashMap<keel::String, Value> &overlay() { return overlay_; }
+    const keel::HashMap<keel::String, Value> &overlay() const { return overlay_; }
 
 private:
-    std::unordered_map<std::string, Value *> framePtrs_;
-    std::unordered_map<std::string, Value> overlay_;
+    keel::HashMap<keel::String, Value *> framePtrs_;
+    keel::HashMap<keel::String, Value> overlay_;
 
     // Names the compiler emitted a write for in the paused chunk. Used by
     // names() so built-ins like `pi` appear only when actually shadowed by
     // the script, matching MATLAB's `whos` behaviour.
-    std::unordered_set<std::string> assignedInFrame_;
+    keel::HashSet<keel::String> assignedInFrame_;
 
     // Built-in names the user has shadowed via the debug console at runtime
     // (`pi = 5` at K>>). Sticky across evals until session end.
-    std::unordered_set<std::string> shadowedBuiltins_;
+    keel::HashSet<keel::String> shadowedBuiltins_;
 
     // Engine pointer captured at bindVMFrame time. Used by names() to ask
     // Engine::isReservedName() so host-registered constants are hidden
@@ -109,7 +109,7 @@ private:
 
     // Whether `name` should be filtered out of the user-visible snapshot.
     // Depends on engine_, so it's a member rather than a free function.
-    bool isHiddenName(const std::string &name) const;
+    bool isHiddenName(keel::StringRef name) const;
 };
 
 } // namespace numkit

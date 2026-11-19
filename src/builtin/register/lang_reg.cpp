@@ -1,7 +1,10 @@
 // src/bundle/src/register/builtin/lang_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/builtin/lang.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
@@ -12,30 +15,32 @@
 #include <numkit/runtime/runtime.hpp>
 
 #include <algorithm>
-#include <memory>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 namespace numkit::builtin::detail {
 void runNative_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void system_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 struct FevalCallbackBuiltin : CallbackBuiltin
 {
-    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
-                                             Value *dest, Engine &eng) override
+    keel::Arc<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
+                                       Value *dest, Engine &eng) override
     {
         if (args.empty() || nargout > 1)
             return nullptr;
         if (!eng.isUserCodeHandle(args[0]))
             return nullptr; // name/string/builtin handle -> synchronous feval
-        std::vector<Value> callArgs(args.begin() + 1, args.end());
-        auto cont = std::make_shared<LoopContinuation>();
+        keel::Array<Value> callArgs;
+        callArgs.reserve(args.size() - 1);
+        for (keel::usize i = 1; i < args.size(); ++i)
+            callArgs.push_back(args[i]);
+        auto cont = keel::make_arc<LoopContinuation>();
         cont->handle = args[0];
         cont->n = 1;
         cont->dest = dest;
-        cont->makeArgs = [callArgs](keel::usize) -> std::vector<Value> { return callArgs; };
-        cont->pack = [](std::vector<Value> &results) -> Value {
+        cont->makeArgs = [callArgs = std::move(callArgs)](keel::usize) -> keel::Array<Value> {
+            return callArgs.clone();
+        };
+        cont->pack = [](keel::Array<Value> &results) -> Value {
             return results.empty() ? Value() : std::move(results[0]);
         };
         cont->results.reserve(1);
@@ -81,7 +86,7 @@ void register_lang(Engine &engine) {
                                 }
                             });
     engine.registerCallbackBuiltin(
-        "feval", std::make_shared<::numkit::builtin::detail::FevalCallbackBuiltin>());
+        "feval", keel::make_arc<::numkit::builtin::detail::FevalCallbackBuiltin>());
 
     auto fwdCallFn = [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                         CallContext &ctx) {

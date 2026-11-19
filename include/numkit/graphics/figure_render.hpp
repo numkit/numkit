@@ -4,35 +4,36 @@
 /// Software figure renderer declarations (SVG / EPS / PDF / RGB raster).
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/figure_manager.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <string>
-#include <vector>
 
 namespace numkit {
 namespace figrender {
 
-const keel::u8 *namedPalette(const std::string &name, int &n);
+const keel::u8 *namedPalette(keel::StringRef name, int &n);
 
-void parseNestedDoubles(const std::string &j, std::vector<keel::f64> &out,
+void parseNestedDoubles(keel::StringRef j, keel::Array<keel::f64> &out,
                         keel::usize &rows, keel::usize &cols);
 
-std::vector<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target = 10);
-std::vector<keel::f64> logTicks(keel::f64 mn, keel::f64 mx);
-std::string tickLabel(keel::f64 v);
+keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target = 10);
+keel::Array<keel::f64> logTicks(keel::f64 mn, keel::f64 mx);
+keel::String tickLabel(keel::f64 v);
 
 using SvgImageEmbedder =
-    std::function<std::string(const std::vector<keel::u8> &, int, int)>;
+    keel::Function<keel::String(keel::ArrayRef<keel::u8>, int, int)>;
 
-std::string renderFigureSvg(const FigureState &fig, int W, int H,
-                            const SvgImageEmbedder &embed = {});
-std::string renderFigureEps(const FigureState &fig, int W, int H);
-std::string renderFigurePdf(const FigureState &fig, int W, int H);
-std::vector<keel::u8> renderFigureRgb(const FigureState &fig, int W, int H);
+keel::String renderFigureSvg(const FigureState &fig, int W, int H,
+                             const SvgImageEmbedder &embed = {});
+keel::String renderFigureEps(const FigureState &fig, int W, int H);
+keel::String renderFigurePdf(const FigureState &fig, int W, int H);
+keel::Array<keel::u8> renderFigureRgb(const FigureState &fig, int W, int H);
 
 } // namespace figrender
 } // namespace numkit

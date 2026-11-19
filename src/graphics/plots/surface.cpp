@@ -3,9 +3,11 @@
 // graphics.surface.* builders (surf / mesh / slice / isosurface / coneplot / streamtube / waterfall / lighting), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -20,21 +22,16 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildSurfacePlots(std::vector<PlotEntry> &table)
+void buildSurfacePlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
 
     // ── Surf / mesh — wireframe quad mesh under cabinet projection ──
@@ -66,7 +63,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);
         };
-        std::vector<double> Xs(C), Ys(R);
+        keel::Array<double> Xs, Ys;
+        Xs.resize(C);
+        Ys.resize(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
             for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
             for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
@@ -75,13 +74,13 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
         }
 
-        const std::string kind(typeName);
+        const keel::StringRef kind(typeName);
         if (kind == "surf") {
             // Face-shaded surface: emit a single dataset carrying the
             // X / Y vectors and the Z-matrix as nested rows. The WebGL
             // renderer builds an indexed triangle mesh from this with
             // per-vertex colors sampled from a colormap by Z.
-            std::ostringstream xs, ys, zs;
+            StrBuf xs, ys, zs;
             xs << '[';
             for (keel::usize c = 0; c < C; ++c) {
                 if (c) xs << ',';
@@ -108,11 +107,11 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             }
             zs << ']';
             DatasetInfo ds;
-            ds.type = "surf";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("surf");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
             return;
@@ -121,7 +120,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // mesh — wireframe: emit two big plot3 polylines (horizontal
         // sweep + vertical sweep) so the existing 3-D line renderer
         // draws the lattice.
-        std::ostringstream xH, yH, zH;
+        StrBuf xH, yH, zH;
         xH << '['; yH << '['; zH << '[';
         keel::usize hCount = 0;
         for (keel::usize r = 0; r < R; ++r) {
@@ -136,7 +135,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         }
         xH << ']'; yH << ']'; zH << ']';
 
-        std::ostringstream xV, yV, zV;
+        StrBuf xV, yV, zV;
         xV << '['; yV << '['; zV << '[';
         keel::usize vCount = 0;
         for (keel::usize c = 0; c < C; ++c) {
@@ -156,30 +155,36 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // colormap (MATLAB mesh EdgeColor 'flat'); the IDE adapter maps
         // "mesh" onto its plot3 path unchanged (steel-blue look).
         DatasetInfo dsH;
-        dsH.type = "mesh";
-        dsH.xJson = xH.str();
-        dsH.yJson = yH.str();
-        dsH.zJson = zH.str();
-        dsH.style = "color=#4a90b8";
-        fm.pushDataset(std::move(dsH));
+        dsH.type.assign("mesh");
+        dsH.xJson = xH.take();
+        dsH.yJson = yH.take();
+        dsH.zJson = zH.take();
+        dsH.style.assign("color=#4a90b8");
+        fm.pushDataset(keel::move(dsH));
 
         DatasetInfo dsV;
-        dsV.type = "mesh";
-        dsV.xJson = xV.str();
-        dsV.yJson = yV.str();
-        dsV.zJson = zV.str();
-        dsV.style = "color=#4a90b8";
-        fm.pushDataset(std::move(dsV));
+        dsV.type.assign("mesh");
+        dsV.xJson = xV.take();
+        dsV.yJson = yV.take();
+        dsV.zJson = zV.take();
+        dsV.style.assign("color=#4a90b8");
+        fm.pushDataset(keel::move(dsV));
 
         fm.emitModified();
         outs[0] = Value();
     };
-    {
-        using namespace std::placeholders;
-        reg("surface", "surf", std::bind(surfImpl, "surf", _1, _2, _3, _4));
-        reg("surface", "surface", std::bind(surfImpl, "surf", _1, _2, _3, _4));
-        reg("surface", "mesh", std::bind(surfImpl, "mesh", _1, _2, _3, _4));
-    }
+    reg("surface", "surf",
+        [surfImpl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
+            surfImpl("surf", a, n, o, gc);
+        });
+    reg("surface", "surface",
+        [surfImpl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
+            surfImpl("surf", a, n, o, gc);
+        });
+    reg("surface", "mesh",
+        [surfImpl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
+            surfImpl("mesh", a, n, o, gc);
+        });
     // ────────────────────────────────────────────────────────────────
     // slice — axis-aligned cross sections of a 3-D scalar volume.
     // Forms supported:
@@ -230,7 +235,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         }
 
         // Default coordinate vectors when X/Y/Z aren't supplied.
-        std::vector<double> Xs(N), Ys(M), Zs(P);
+        keel::Array<double> Xs, Ys, Zs;
+        Xs.resize(N);
+        Ys.resize(M);
+        Zs.resize(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
             for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
             for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
@@ -280,7 +288,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             std::snprintf(buf, sizeof buf,
                           "color=#%02x%02x%02x;fillOpacity=0.85",
                           rgb[0], rgb[1], rgb[2]);
-            return std::string(buf);
+            return keel::String::from(buf);
         };
 
         // Index of the volume in column-major + page-major order: the
@@ -295,10 +303,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // vertexColors stream so the renderer can colour each quad
         // by the local volume value.
         const auto emitQuad = [&rgbForValue](
-                std::ostringstream &xs,
-                std::ostringstream &ys,
-                std::ostringstream &zs,
-                std::ostringstream &cs,
+                StrBuf &xs,
+                StrBuf &ys,
+                StrBuf &zs,
+                StrBuf &cs,
                 bool &first,
                 double X0, double Y0, double Z0, double v0,
                 double X1, double Y1, double Z1, double v1,
@@ -325,7 +333,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const auto pushSlice = [&](char axis, keel::usize fixedIdx,
                                    double meanVal) {
             (void)meanVal;
-            std::ostringstream xs, ys, zs, cs;
+            StrBuf xs, ys, zs, cs;
             xs << '['; ys << '['; zs << '['; cs << '[';
             bool first = true;
             if (axis == 'x') {
@@ -367,17 +375,17 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             DatasetInfo ds;
             // Reuse the existing fill3 wire shape — adapter routes
             // type='fill3' to polygon3d mode in the 3-D renderer.
-            ds.type = "fill3";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            ds.vertexColorsJson = cs.str();
-            ds.style = "color=#888888;fillOpacity=0.85";   // fallback
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("fill3");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            ds.vertexColorsJson = cs.take();
+            ds.style.assign("color=#888888;fillOpacity=0.85");   // fallback
+            fm.pushDataset(keel::move(ds));
         };
 
         // Snap each requested slice value to the nearest grid index.
-        const auto nearest = [](const std::vector<double> &v, double q) {
+        const auto nearest = [](const keel::Array<double> &v, double q) {
             keel::usize best = 0;
             double bestDist = keel::abs(v[0] - q);
             for (keel::usize i = 1; i < v.size(); ++i) {
@@ -767,7 +775,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const keel::usize P = V->dims().pages();
         if (M < 2 || N < 2 || P < 2) { outs[0] = Value(); return; }
 
-        std::vector<double> Xs(N), Ys(M), Zs(P);
+        keel::Array<double> Xs, Ys, Zs;
+        Xs.resize(N);
+        Ys.resize(M);
+        Zs.resize(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
             for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
             for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
@@ -802,7 +813,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         static const int kEdge0[12] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3};
         static const int kEdge1[12] = {1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7};
 
-        std::ostringstream xs, ys, zs;
+        StrBuf xs, ys, zs;
         xs << '['; ys << '['; zs << '[';
         bool first = true;
 
@@ -872,10 +883,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         xs << ']'; ys << ']'; zs << ']';
 
         DatasetInfo ds;
-        ds.type = "fill3";
-        ds.xJson = xs.str();
-        ds.yJson = ys.str();
-        ds.zJson = zs.str();
+        ds.type.assign("fill3");
+        ds.xJson = xs.take();
+        ds.yJson = ys.take();
+        ds.zJson = zs.take();
         // Single representative colour from the iso level (relative
         // to the volume's own range).
         double vmn = std::numeric_limits<double>::infinity();
@@ -897,8 +908,8 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         std::snprintf(buf, sizeof buf,
                       "color=#%02x%02x%02x;fillOpacity=0.85;smoothNormals=1",
                       rcomp, gcomp, bcomp);
-        ds.style = buf;
-        fm.pushDataset(std::move(ds));
+        ds.style.assign(buf);
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
@@ -958,7 +969,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // first M elements are exactly y(1..M). The pre-fix code read
         // `X[i]` which gave x(1) for every i — all cones collapsed into
         // a single x/z slice and the field rendered as a flat row.
-        std::vector<double> Xs(N), Ys(M), Zs(P);
+        keel::Array<double> Xs, Ys, Zs;
+        Xs.resize(N);
+        Ys.resize(M);
+        Zs.resize(P);
         if (X && Y && Z && X->numel() >= M * N * P
             && Y->numel() >= M * N * P && Z->numel() >= M * N * P) {
             for (keel::usize j = 0; j < N; ++j) Xs[j] = X->elemAsDouble(j * M);
@@ -980,7 +994,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // cone at every grid point (M*N*P cones — fine for small
         // demos; the BACKLOG carries skipping).
         struct ConeAt { double x, y, z, u, v, w; };
-        std::vector<ConeAt> cones;
+        keel::Array<ConeAt> cones;
         const auto Uat = [&](keel::usize i, keel::usize j, keel::usize k) {
             return U->elemAsDouble(k * M * N + j * M + i);
         };
@@ -997,7 +1011,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
                 const double cyv = Cy->elemAsDouble(s);
                 const double czv = Cz->elemAsDouble(s);
                 // Nearest-neighbour sample of (U, V, W) at (cxv, cyv, czv).
-                const auto nearest = [](const std::vector<double> &v, double q) {
+                const auto nearest = [](const keel::Array<double> &v, double q) {
                     keel::usize best = 0;
                     double bestD = keel::abs(v[0] - q);
                     for (keel::usize i = 1; i < v.size(); ++i) {
@@ -1042,7 +1056,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const double coneRad = coneLen * 0.25;
 
         // Emit cones into a single fill3 dataset.
-        std::ostringstream xs, ys, zs;
+        StrBuf xs, ys, zs;
         xs << '['; ys << '['; zs << '[';
         bool first = true;
         constexpr int kRingN = 6;
@@ -1107,12 +1121,12 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         xs << ']'; ys << ']'; zs << ']';
 
         DatasetInfo ds;
-        ds.type = "fill3";
-        ds.xJson = xs.str();
-        ds.yJson = ys.str();
-        ds.zJson = zs.str();
-        ds.style = "color=#1f77b4;fillOpacity=0.9";
-        fm.pushDataset(std::move(ds));
+        ds.type.assign("fill3");
+        ds.xJson = xs.take();
+        ds.yJson = ys.take();
+        ds.zJson = zs.take();
+        ds.style.assign("color=#1f77b4;fillOpacity=0.9");
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
@@ -1157,7 +1171,10 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         const keel::usize N = dims.cols();
         const keel::usize P = dims.pages();
 
-        std::vector<double> Xs(N), Ys(M), Zs(P);
+        keel::Array<double> Xs, Ys, Zs;
+        Xs.resize(N);
+        Ys.resize(M);
+        Zs.resize(P);
         if (X && Y && Z && X->numel() >= N && Y->numel() >= M && Z->numel() >= P) {
             for (keel::usize i = 0; i < N; ++i) Xs[i] = X->elemAsDouble(i);
             for (keel::usize i = 0; i < M; ++i) Ys[i] = Y->elemAsDouble(i);
@@ -1180,7 +1197,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         // Nearest-neighbour sampling at world position (x, y, z).
         const auto sampleAt = [&](double xq, double yq, double zq,
                                   double &uo, double &vo, double &wo) {
-            const auto nearest = [](const std::vector<double> &v, double q) {
+            const auto nearest = [](const keel::Array<double> &v, double q) {
                 keel::usize best = 0;
                 double bestD = keel::abs(v[0] - q);
                 for (keel::usize i = 1; i < v.size(); ++i) {
@@ -1218,7 +1235,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
 
         const keel::usize nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
         for (keel::usize s = 0; s < nSeeds; ++s) {
-            std::vector<std::array<double, 3>> path;
+            keel::Array<std::array<double, 3>> path;
             double xq = sxV->elemAsDouble(s);
             double yq = syV->elemAsDouble(s);
             double zq = szV->elemAsDouble(s);
@@ -1238,11 +1255,12 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
 
             // Per-segment Frenet-ish frame: tangent = path[i+1] - path[i],
             // normalised; pick a stable e1 ⊥ tangent, e2 = tangent × e1.
-            std::ostringstream xs, ys, zs;
+            StrBuf xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
             bool first = true;
             // Pre-compute ring vertices per path point.
-            std::vector<std::array<std::array<double, 3>, kRingN>> rings(path.size());
+            keel::Array<std::array<std::array<double, 3>, kRingN>> rings;
+            rings.resize(path.size());
             std::array<double, 3> prevE1 = {0, 0, 1};
             for (keel::usize i = 0; i < path.size(); ++i) {
                 std::array<double, 3> tan;
@@ -1313,12 +1331,12 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             xs << ']'; ys << ']'; zs << ']';
 
             DatasetInfo ds;
-            ds.type = "fill3";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            ds.style = "color=#9467bd;fillOpacity=0.85";
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("fill3");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            ds.style.assign("color=#9467bd;fillOpacity=0.85");
+            fm.pushDataset(keel::move(ds));
         }
         fm.emitModified();
         outs[0] = Value();
@@ -1345,7 +1363,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             const keel::usize C = Z_arg->dims().cols();
             if (R < 2 || C < 2) { outs[0] = Value(); return; }
 
-            std::ostringstream xs, ys, zs;
+            StrBuf xs, ys, zs;
             xs << '[';
             for (keel::usize c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
             xs << ']';
@@ -1366,7 +1384,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             }
             zs << ']';
 
-            std::ostringstream sty;
+            StrBuf sty;
             if (levels_arg) {
                 if (levels_arg->numel() == 1) {
                     sty << "n=" << (int)levels_arg->toScalar();
@@ -1383,12 +1401,12 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "contour3";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            ds.style = sty.str();
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("contour3");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            ds.style = sty.take();
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -1426,7 +1444,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             const keel::usize C = Z.dims().cols();
             if (R < 1 || C < 2) { outs[0] = Value(); return; }
 
-            std::ostringstream xs, ys, zs;
+            StrBuf xs, ys, zs;
             xs << '[';
             for (keel::usize c = 0; c < C; ++c) { if (c) xs << ','; xs << (c + 1); }
             xs << ']';
@@ -1450,11 +1468,11 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "waterfall";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("waterfall");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -1465,13 +1483,13 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
-            std::string pos = "headlight";
+            keel::String pos = keel::String::from("headlight");
             if (!args.empty() && args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
-                if (s == "left" || s == "right" || s == "headlight") pos = s;
+                if (s == "left" || s == "right" || s == "headlight") pos = keel::move(s);
             }
-            fm.currentAxes().camlightPos = pos;
+            fm.currentAxes().camlightPos = keel::move(pos);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1480,7 +1498,7 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             if (fm.currentAxes().camlightPos.empty())
-                fm.currentAxes().camlightPos = "headlight";
+                fm.currentAxes().camlightPos.assign("headlight");
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1493,14 +1511,14 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
-            std::string m = "gouraud";
+            keel::String m = keel::String::from("gouraud");
             if (!args.empty() && args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "flat" || s == "gouraud" || s == "phong" || s == "none")
-                    m = s;
+                    m = keel::move(s);
             }
-            fm.currentAxes().lightingMode = m;
+            fm.currentAxes().lightingMode = keel::move(m);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1511,13 +1529,13 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             auto &fm = gc.fm;
-            std::string m;
+            keel::String m;
             if (!args.empty() && args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
-                if (s == "shiny" || s == "metal" || s == "dull") m = s;
+                if (s == "shiny" || s == "metal" || s == "dull") m = keel::move(s);
             }
-            fm.currentAxes().materialPreset = m;
+            fm.currentAxes().materialPreset = keel::move(m);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1532,9 +1550,9 @@ void buildSurfacePlots(std::vector<PlotEntry> &table)
             std::array<Value, 1> outBuf;
             if (!gc.callBuiltin("surf", args, 0, keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
-            fm.currentAxes().camlightPos = "headlight";
-            fm.currentAxes().lightingMode = "gouraud";
-            fm.currentAxes().materialPreset = "shiny";
+            fm.currentAxes().camlightPos.assign("headlight");
+            fm.currentAxes().lightingMode.assign("gouraud");
+            fm.currentAxes().materialPreset.assign("shiny");
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();

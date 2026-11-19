@@ -22,16 +22,15 @@
 // This mirrors the FsContext decoupling: stateful/runtime surfaces are pulled
 // behind a context object so the L2 compute layer never includes <nk/core>.
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <numkit/core/figure_manager.hpp>  // FigureManager, DatasetInfo, AxesState
 #include <numkit/value/value.hpp>            // Value, ValueType
 
 #include <cstddef>
-#include <functional>
-#include <string_view>
-#include <vector>
 
 namespace numkit {
 
@@ -51,24 +50,24 @@ struct GraphicsContext {
     // and returns true; returns false if no such builtin is registered (callers
     // treat that as a no-op and return an empty value). Bound by the adapter to
     // Engine::findExternal + invoke.
-    std::function<bool(std::string_view name,
-                       keel::ArrayRef<Value> args,
-                       keel::usize nargout,
-                       keel::MutArrayRef<Value> outs)>
+    keel::Function<bool(keel::StringRef name,
+                        keel::ArrayRef<Value> args,
+                        keel::usize nargout,
+                        keel::MutArrayRef<Value> outs)>
         callBuiltin;
 
     // Evaluate a user function-handle Value (the @(x)… callbacks fed to
     // fplot / fcontour / fsurf / fplot3). Bound by the adapter to
     // Engine::callFunctionHandle; works on both the TreeWalker and VM backends.
-    std::function<Value(const Value &handle, keel::ArrayRef<Value> args)> callHandle;
+    keel::Function<Value(const Value &handle, keel::ArrayRef<Value> args)> callHandle;
 };
 
 // A graphics plotting body. Same shape as ExternalFunc but takes the core-free
 // GraphicsContext instead of the Engine-coupled CallContext.
-using GraphicsFn = std::function<void(keel::ArrayRef<Value> args,
-                                      keel::usize nargout,
-                                      keel::MutArrayRef<Value> outs,
-                                      GraphicsContext &gc)>;
+using GraphicsFn = keel::Function<void(keel::ArrayRef<Value> args,
+                                       keel::usize nargout,
+                                       keel::MutArrayRef<Value> outs,
+                                       GraphicsContext &gc)>;
 
 // One registration record. `sub` is the graphics sub-namespace (layout / line /
 // bar / surface / polar / contour / image); `core` requests the extra bare-name
@@ -85,7 +84,7 @@ struct PlotEntry {
 // wraps each entry's GraphicsFn in a CallContext→GraphicsContext adapter and
 // registers it under graphics.<sub>.<name> (+ the bare core name when set;
 // non-core names resolve bare through the bare-name resolver).
-void buildPlotTable(std::vector<PlotEntry> &table);
+void buildPlotTable(keel::Array<PlotEntry> &table);
 
 
 /// @}

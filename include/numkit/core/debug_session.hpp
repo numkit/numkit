@@ -15,7 +15,12 @@
 //
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/debugger.hpp>
@@ -23,9 +28,7 @@
 #include <numkit/value/value.hpp>
 #include <numkit/core/vm.hpp>
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <initializer_list>
 
 namespace numkit {
 
@@ -43,11 +46,15 @@ public:
     DebugSession &operator=(const DebugSession &) = delete;
 
     // Set breakpoints (line numbers). Must be called before start().
-    void setBreakpoints(const std::vector<keel::u16> &lines);
+    void setBreakpoints(keel::ArrayRef<keel::u16> lines);
+    void setBreakpoints(std::initializer_list<keel::u16> lines)
+    {
+        setBreakpoints(keel::ArrayRef<keel::u16>(lines.begin(), lines.size()));
+    }
 
     // Compile code and begin debug execution.
     // Returns Paused if a breakpoint/step was hit, Completed if finished.
-    ExecStatus start(const std::string &code);
+    ExecStatus start(keel::StringRef code);
 
     // Resume from pause with the given action.
     ExecStatus resume(DebugAction action);
@@ -62,7 +69,7 @@ public:
     // it). Set before start().
     void setStopOnError(bool enabled);
     bool atErrorPause() const;
-    std::string errorPauseMessage() const;
+    keel::String errorPauseMessage() const;
 
     // ── Frame navigation (dbup / dbdown) ─────────────────────
     // Move the inspection focus one frame toward the base (frameUp / dbup) or
@@ -81,52 +88,57 @@ public:
     // Expressions re-evaluated at each pause for an IDE watch panel.
     struct WatchResult
     {
-        std::string expr;
-        std::string result; // eval display, or "Error: ..." if it failed
+        keel::String expr;
+        keel::String result; // eval display, or "Error: ..." if it failed
     };
-    void addWatch(const std::string &expr);
+    void addWatch(keel::StringRef expr);
     void removeWatch(keel::usize index);
     void clearWatches();
-    const std::vector<std::string> &watchExpressions() const { return watches_; }
+    const keel::Array<keel::String> &watchExpressions() const { return watches_; }
     // Evaluate every watch in the currently focused frame. Valid while paused.
-    std::vector<WatchResult> evalWatches();
+    keel::Array<WatchResult> evalWatches();
 
     // ── State inspection (valid when paused) ─────────────────
 
     struct Variable
     {
-        std::string name;
+        keel::String name;
         const Value *value = nullptr;
+
+        Variable clone(keel::Allocator *alloc = nullptr) const
+        {
+            return Variable{name.clone(alloc), value};
+        }
     };
 
     struct Snapshot
     {
         keel::u16 line = 0;
         keel::u16 col = 0;
-        std::string functionName;
-        std::vector<Variable> variables;
-        std::vector<StackFrame> callStack;
+        keel::String functionName;
+        keel::Array<Variable> variables;
+        keel::Array<StackFrame> callStack;
 
         // Owned backing store for variables[].value. snapshot() copies each
         // value here (COW — cheap) and points Variable.value into it, so the
         // snapshot is self-contained: its pointers stay valid for the
         // Snapshot's own lifetime — including across a resume() that reuses the
-        // VM registers the live values came from. shared_ptr so copies/moves of
+        // VM registers the live values came from. Arc so copies/moves of
         // the Snapshot keep the same backing alive.
-        std::shared_ptr<std::vector<Value>> ownedValues;
+        keel::Arc<keel::Array<Value>> ownedValues;
     };
 
     Snapshot snapshot() const;
 
     // Evaluate an expression in the paused context (preserves debug state).
     // Returns the captured output (e.g. "x = 42").
-    std::string eval(const std::string &code);
+    keel::String eval(keel::StringRef code);
 
     // Get accumulated output since last start/resume.
-    std::string takeOutput();
+    keel::String takeOutput();
 
     // Get error message (valid when start/resume returned after an exception).
-    const std::string &errorMessage() const { return errorMsg_; }
+    const keel::String &errorMessage() const { return errorMsg_; }
     int errorLine() const { return errorLine_; }
 
     bool isActive() const { return active_; }
@@ -139,8 +151,8 @@ private:
 
     // One-line "In <fn> (line N)" status for the currently focused frame, and
     // the MATLAB-style dbstack listing (deepest first, '>' marks the focus).
-    std::string frameFocusLine() const;
-    std::string formatDbStack() const;
+    keel::String frameFocusLine() const;
+    keel::String formatDbStack() const;
 
     // After a run lands on a breakpoint, transparently keep running past any
     // breakpoint whose condition evaluates false (only when `running` — a step
@@ -153,7 +165,7 @@ private:
     // condition / watch evaluation) they are NOT — so a watch/condition never
     // pollutes the workspace (e.g. with `ans`). Sets lastEvalValue_; returns the
     // captured display output. Assumes the session is active.
-    std::string runInDebugScope(const std::string &code, bool applyChanges);
+    keel::String runInDebugScope(keel::StringRef code, bool applyChanges);
 
     Engine &engine_;
     bool active_ = false;
@@ -168,7 +180,7 @@ private:
     ASTNodePtr ast_;
 
     // Error state
-    std::string errorMsg_;
+    keel::String errorMsg_;
     int errorLine_ = 0;
 
     // Observer — always returns Stop so the VM pauses at every event
@@ -177,11 +189,11 @@ private:
     public:
         DebugAction onLine(const DebugContext &) override { return DebugAction::Stop; }
         DebugAction onBreakpoint(const DebugContext &) override { return DebugAction::Stop; }
-        void onError(const DebugContext &, const std::string &) override {}
+        void onError(const DebugContext &, keel::StringRef) override {}
         void onFunctionEntry(const DebugContext &) override {}
         void onFunctionExit(const DebugContext &) override {}
     };
-    std::shared_ptr<SessionObserver> observer_;
+    keel::Arc<SessionObserver> observer_;
 
     // Live view of variables at the pause point: frame pointers + overlay.
     DebugWorkspace ws_;
@@ -191,7 +203,7 @@ private:
     keel::usize selectedDepth_ = 0;
 
     // Watch expressions, re-evaluated at each pause (see evalWatches()).
-    std::vector<std::string> watches_;
+    keel::Array<keel::String> watches_;
 
     // dbstop-if-error mode requested for this session (applied to the VM).
     bool stopOnError_ = false;
@@ -201,8 +213,8 @@ private:
     Value lastEvalValue_;
 
     // Output capture
-    std::string outputBuf_;
-    std::function<void(const std::string &)> savedOutputFunc_;
+    keel::String outputBuf_;
+    keel::Function<void(keel::StringRef)> savedOutputFunc_;
 };
 
 } // namespace numkit

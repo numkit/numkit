@@ -1,21 +1,26 @@
 // src/vm.cpp
-#include <keel/core.h>
-#include <keel/ref.h>
+#include <keel/array.h>
 #include <keel/complex.h>
-#include <cstdio>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/optional.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/vm.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
-#include <iostream>
-#include <optional>
-#include <sstream>
+#include <limits>
 #include <stdexcept>
-#include <string_view>
-#include <unordered_set>
+#include <utility>
 
 // Forward-declarations from toolboxes/builtin/src/backends/binary_ops_loops.hpp.
 // Linked from the same nk library; lets the VM bypass the public
@@ -126,7 +131,7 @@ private:
     friend SplatArgs splatCallArgs(const Value *, keel::u16, keel::u16);
 
     SplatArgs() = default;
-    std::vector<Value> buf_; // filled only on the mixed-position path
+    keel::Array<Value> buf_; // filled only on the mixed-position path
     const Value *ptr_ = nullptr;
     keel::usize n_ = 0;
 };
@@ -202,24 +207,24 @@ namespace {
 
 struct RegDestContinuation : VmContinuation
 {
-    std::shared_ptr<VmContinuation> inner;
-    std::shared_ptr<Value> outBox;
+    keel::Arc<VmContinuation> inner;
+    keel::Arc<Value> outBox;
     keel::usize targetRegOffset = 0;
 
-    RegDestContinuation(std::shared_ptr<VmContinuation> in,
-                        std::shared_ptr<Value> box,
+    RegDestContinuation(keel::Arc<VmContinuation> in,
+                        keel::Arc<Value> box,
                         keel::usize offset)
-        : inner(std::move(in))
-        , outBox(std::move(box))
+        : inner(keel::move(in))
+        , outBox(keel::move(box))
         , targetRegOffset(offset)
     {}
 
     bool step(VM &vm, Value *prevResult,
-              const std::shared_ptr<VmContinuation> &self) override
+              const keel::Arc<VmContinuation> &self) override
     {
         if (inner->step(vm, prevResult, self))
             return true;
-        vm.writeRegAtOffset(targetRegOffset, std::move(*outBox));
+        vm.writeRegAtOffset(targetRegOffset, keel::move(*outBox));
         return false;
     }
 };
@@ -284,8 +289,8 @@ static inline keel::usize checkedIndex(double idx, keel::usize numel)
     if (tryIndex0(idx, i)) {
         if (i < numel)
             return i;
-        throw std::runtime_error("Index " + std::to_string(i + 1) + " exceeds array size "
-                                 + std::to_string(numel));
+        throw std::runtime_error(
+            keel::format("Index {} exceeds array size {}", i + 1, numel).c_str());
     }
     (void) Value::checkedScalarIndex(idx);
     return 0;
@@ -308,33 +313,31 @@ static keel::Array<keel::usize> resolveStoreSubscript(const Value &s, keel::usiz
 
 // Visibility rule for `who`/`whos` over a chunk's register file: hide
 // reserved names unless the chunk has actually assigned them.
-static bool whoVisible(const Engine &engine, const std::string &name,
+static bool whoVisible(const Engine &engine, keel::StringRef name,
                        const BytecodeChunk &chunk)
 {
     if (!engine.isReservedName(name))
         return true;
-    return chunk.assignedVars.count(name) > 0;
+    return chunk.assignedVars.contains(name);
 }
 
 static Value readChunkVar(const BytecodeChunk &chunk, const Value *R, keel::u32 nregs,
-                          const std::string &name, keel::u16 reg)
+                          keel::StringRef name, keel::u16 reg)
 {
-    auto uv = chunk.upvalueBoxRegs.find(name);
-    if (uv != chunk.upvalueBoxRegs.end() && uv->second < nregs) {
-        if (const UpvaluePayload *box = asUpvalueBox(R[uv->second]))
+    if (const keel::u16 *uv = chunk.upvalueBoxRegs.get(name); uv && *uv < nregs) {
+        if (const UpvaluePayload *box = asUpvalueBox(R[*uv]))
             return box->read();
     }
     return (reg < nregs) ? R[reg] : Value();
 }
 
 static void writeChunkVar(const BytecodeChunk &chunk, Value *R, keel::u32 nregs,
-                          const std::string &name, keel::u16 reg, const Value &val)
+                          keel::StringRef name, keel::u16 reg, const Value &val)
 {
     if (reg < nregs)
         R[reg] = val;
-    auto uv = chunk.upvalueBoxRegs.find(name);
-    if (uv != chunk.upvalueBoxRegs.end() && uv->second < nregs) {
-        if (UpvaluePayload *box = asUpvalueBox(R[uv->second]))
+    if (const keel::u16 *uv = chunk.upvalueBoxRegs.get(name); uv && *uv < nregs) {
+        if (UpvaluePayload *box = asUpvalueBox(R[*uv]))
             box->write(val);
     }
 }
@@ -349,12 +352,12 @@ static void exportChunkGlobalsAndPersistents(Engine &engine, Environment &global
                 Value gv = readChunkVar(chunk, R, nregs, vname, reg);
                 if (isTopLevel) {
                     if (!gv.isUnset() && !gv.isDeleted())
-                        globalsEnv.set(gname, std::move(gv));
+                        globalsEnv.set(gname, keel::move(gv));
                 } else {
                     if (gv.isDeleted())
                         globalsEnv.remove(gname);
                     else if (!gv.isUnset())
-                        globalsEnv.set(gname, std::move(gv));
+                        globalsEnv.set(gname, keel::move(gv));
                 }
                 break;
             }
@@ -367,9 +370,9 @@ static void exportChunkGlobalsAndPersistents(Engine &engine, Environment &global
                 if (vname == pname && reg < nregs) {
                     Value pv = readChunkVar(chunk, R, nregs, vname, reg);
                     if (pv.isDeleted())
-                        bucket.erase(pname);
+                        bucket.remove(pname);
                     else if (!pv.isUnset())
-                        bucket[pname] = std::move(pv);
+                        bucket.put(pname.clone(), keel::move(pv));
                     break;
                 }
             }
@@ -399,13 +402,13 @@ static void importChunkGlobalsAndPersistents(Engine &engine, Environment &global
         for (const auto &pname : chunk.persistentNames) {
             for (const auto &[vname, reg] : chunk.varMap) {
                 if (vname == pname && reg < nregs) {
-                    auto it = bucket.find(pname);
-                    if (it != bucket.end() && !it->second.isUnset() && !it->second.isDeleted()) {
-                        writeChunkVar(chunk, R, nregs, vname, reg, it->second);
+                    const Value *pv = bucket.get(pname);
+                    if (pv && !pv->isUnset() && !pv->isDeleted()) {
+                        writeChunkVar(chunk, R, nregs, vname, reg, *pv);
                     } else if (seedMissing) {
-                        bucket[pname] = Value::Empty;
+                        bucket.put(pname.clone(), Value::Empty);
                         writeChunkVar(chunk, R, nregs, vname, reg, Value::Empty);
-                    } else if (it == bucket.end()) {
+                    } else if (!pv) {
                         writeChunkVar(chunk, R, nregs, vname, reg, Value::Empty);
                     }
                     break;
@@ -432,7 +435,7 @@ int VM::callDepth() const
     return d;
 }
 
-bool VM::hasActiveFrameNamed(const std::string &funcName) const
+bool VM::hasActiveFrameNamed(keel::StringRef funcName) const
 {
     for (const auto &f : frames_) {
         if (f.chunk && f.chunk->name == funcName)
@@ -461,7 +464,7 @@ Value VM::execute(const BytecodeChunk &chunk, const Value *args, keel::usize nar
     // through the normal startExecution / dispatch path, then restore
     // so the outer dispatch loop resumes seamlessly.
     const bool reentrant = !frames_.empty();
-    std::unique_ptr<PausedState> outerState;
+    keel::UniquePtr<PausedState> outerState;
     if (reentrant)
         outerState = savePausedState();
 
@@ -500,7 +503,7 @@ Value VM::execute(const BytecodeChunk &chunk, const Value *args, keel::usize nar
         // Inner threw before producing a result. Restore the outer so the
         // outer's catch handler sees consistent VM state, then rethrow.
         if (reentrant)
-            restorePausedState(std::move(outerState));
+            restorePausedState(keel::move(outerState));
         throw;
     }
 
@@ -508,23 +511,23 @@ Value VM::execute(const BytecodeChunk &chunk, const Value *args, keel::usize nar
         // Legacy API: convert pause to exception. The non-reentrant guard
         // wipes state; the reentrant path restores the outer first.
         if (reentrant)
-            restorePausedState(std::move(outerState));
+            restorePausedState(keel::move(outerState));
         throw DebugStopException();
     }
 
-    Value result = std::move(lastResult_);
+    Value result = keel::move(lastResult_);
     if (reentrant) {
         // Commit any workspace exports the inner script produced, then
         // bring back the outer frame stack so dispatch can resume.
         if (!frames_.empty())
             exportTopLevelVariables();
-        restorePausedState(std::move(outerState));
+        restorePausedState(keel::move(outerState));
     }
     return result;
 }
 
-std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<Value> args,
-                                     keel::usize nargout, const std::string &ownerClass,
+keel::Array<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<Value> args,
+                                     keel::usize nargout, keel::StringRef ownerClass,
                                      bool isCtor, const Value *ctorSeed)
 {
     // Save the outer VM state and run `chunk` as a fresh top-level frame, then
@@ -534,37 +537,37 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
     // the buffer address is preserved). Unlike execute() we do NOT reset the
     // debug controller, so the callee's frames nest on the live debug stack.
     const bool reentrant = !frames_.empty();
-    std::unique_ptr<PausedState> outerState;
+    keel::UniquePtr<PausedState> outerState;
     if (reentrant)
         outerState = savePausedState(); // frames_ now empty; outer buffer parked
 
     // popCallFrame's top-level (frames_.size()==1) branch repopulates
     // lastVarMap_ from the callee's locals; snapshot+restore so the outer's
     // pending workspace export is not clobbered by this nested run.
-    std::vector<std::pair<std::string, Value>> savedVarMap = std::move(lastVarMap_);
+    keel::Array<std::pair<keel::String, Value>> savedVarMap = keel::move(lastVarMap_);
 
     struct Restorer
     {
         VM &vm;
         bool reentrant = false;
-        std::unique_ptr<PausedState> st;
-        std::vector<std::pair<std::string, Value>> vm_savedVarMap;
+        keel::UniquePtr<PausedState> st;
+        keel::Array<std::pair<keel::String, Value>> vm_savedVarMap;
         bool done = false;
         void run()
         {
             if (done)
                 return;
             done = true;
-            vm.lastVarMap_ = std::move(vm_savedVarMap);
+            vm.lastVarMap_ = keel::move(vm_savedVarMap);
             if (reentrant)
-                vm.restorePausedState(std::move(st));
+                vm.restorePausedState(keel::move(st));
         }
         ~Restorer() { run(); }
-    } restorer{*this, reentrant, std::move(outerState), std::move(savedVarMap)};
+    } restorer{*this, reentrant, keel::move(outerState), keel::move(savedVarMap)};
 
     const keel::usize nout = std::max<keel::usize>(nargout, 1);
     const bool multi = nout > 1;
-    std::vector<Value> argbuf(args.begin(), args.end());
+    keel::Array<Value> argbuf(args);
 
     returnBuf_.clear();
     lastResult_ = Value();
@@ -580,12 +583,12 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
         throw DebugStopException();
     }
 
-    std::vector<Value> results;
+    keel::Array<Value> results;
     if (!returnBuf_.empty()) {
-        results = std::move(returnBuf_);
+        results = keel::move(returnBuf_);
         returnBuf_.clear();
     } else if (!lastResult_.isUnset()) {
-        results.push_back(std::move(lastResult_));
+        results.push_back(keel::move(lastResult_));
     }
     lastResult_ = Value();
     return results; // restorer dtor restores the outer state
@@ -593,7 +596,7 @@ std::vector<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
 
 // ── Paused state save/restore (for debug eval) ────────────
 
-std::unique_ptr<VM::PausedState> VM::savePausedState()
+keel::UniquePtr<VM::PausedState> VM::savePausedState()
 {
     for (keel::usize fi = 0; fi < frames_.size(); ++fi) {
         const auto &f = frames_[fi];
@@ -601,52 +604,55 @@ std::unique_ptr<VM::PausedState> VM::savePausedState()
         exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, f.R, f.nregs,
                                          f.isScriptFrame);
     }
-    auto s = std::make_unique<PausedState>();
-    // Move (not copy) — CallFrame holds a unique_ptr<Environment>. The
+    auto s = keel::make_unique<PausedState>();
+    // Move (not copy) — CallFrame holds a UniquePtr<Environment>. The
     // inner re-entrant execution will clear frames_ in startExecution()
     // anyway, so move semantics drop nothing we need.
-    s->frames = std::move(frames_);
-    s->forStack = std::move(forStack_);
-    s->tryStack = std::move(tryStack_);
-    s->lvalDetaches = std::move(lvalDetaches_);
+    s->frames = keel::move(frames_);
+    s->forStack = keel::move(forStack_);
+    s->tryStack = keel::move(tryStack_);
+    s->lvalDetaches = keel::move(lvalDetaches_);
     s->regStackTop = regStackTop_;
-    s->lastResult = std::move(lastResult_);
+    s->lastResult = keel::move(lastResult_);
     // BUG #3: rescue chunkCallCache_ before startExecution clears it.
     // The outer dispatch loop holds a reference into one of the map's
-    // value vectors; unordered_map move preserves node addresses, so
+    // value arrays; HashMap move preserves table buffer addresses, so
     // taking custody here keeps the outer's reference valid.
-    s->chunkCallCache = std::move(chunkCallCache_);
+    s->chunkCallCache = keel::move(chunkCallCache_);
     // Snapshot only the used portion of the register stack
-    s->regSnapshot.assign(regStack_.begin(), regStack_.begin() + regStackTop_);
+    s->regSnapshot.assign(keel::ArrayRef<Value>(regStack_.data(), regStackTop_));
     s->wasReentrantEval = inReentrantEval_;
     inReentrantEval_ = true;
     activePausedStates_.push_back(s.get());
     return s;
 }
 
-void VM::restorePausedState(std::unique_ptr<PausedState> s)
+void VM::restorePausedState(keel::UniquePtr<PausedState> s)
 {
     if (!s) return;
-    auto psIt = std::find(activePausedStates_.rbegin(), activePausedStates_.rend(), s.get());
-    if (psIt != activePausedStates_.rend())
-        activePausedStates_.erase(std::next(psIt).base());
+    for (keel::usize i = activePausedStates_.size(); i-- > 0;) {
+        if (activePausedStates_[i] == s.get()) {
+            activePausedStates_.remove_at(i);
+            break;
+        }
+    }
     // The frames being replaced belong to an inner, abandoned run — drop
     // their origin pushes before the outer's frames (whose pushes are still
     // on the stack) become current again.
     if (!frames_.empty())
         engine_.truncateScriptOrigins(frames_.front().originDepth);
     inReentrantEval_ = s->wasReentrantEval;
-    frames_ = std::move(s->frames);
-    forStack_ = std::move(s->forStack);
-    tryStack_ = std::move(s->tryStack);
-    lvalDetaches_ = std::move(s->lvalDetaches);
+    frames_ = keel::move(s->frames);
+    forStack_ = keel::move(s->forStack);
+    tryStack_ = keel::move(s->tryStack);
+    lvalDetaches_ = keel::move(s->lvalDetaches);
     regStackTop_ = s->regStackTop;
-    lastResult_ = std::move(s->lastResult);
+    lastResult_ = keel::move(s->lastResult);
     // BUG #3: restore the outer's call-target cache. The inner's
     // cache (built up during re-entry) is destroyed by this move-assign;
-    // outer's nodes reclaim their original addresses, so the dispatch
+    // outer's table buffers reclaim their original addresses, so the dispatch
     // loop's captured `resolvedFuncs` reference becomes live again.
-    chunkCallCache_ = std::move(s->chunkCallCache);
+    chunkCallCache_ = keel::move(s->chunkCallCache);
     // Restore registers (grow regStack_ first if needed)
     ensureRegStackCapacity(std::max(s->regSnapshot.size(), s->regStackTop));
     std::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
@@ -697,7 +703,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, kee
 
     keel::u32 nregs = chunk.numRegisters;
     keel::usize pc = args ? std::min(nargs, static_cast<keel::usize>(chunk.numParams)) : 0;
-    std::vector<Value> argsCopy(pc);
+    keel::Array<Value> argsCopy(pc);
     for (keel::usize i = 0; i < pc; ++i)
         argsCopy[i] = args[i];
 
@@ -708,7 +714,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, kee
         R_[i] = Value();
 
     for (keel::usize i = 0; i < pc; ++i)
-        R_[i] = std::move(argsCopy[i]);
+        R_[i] = keel::move(argsCopy[i]);
 
     regStackTop_ = nregs;
 
@@ -731,16 +737,16 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, kee
         cf.dynVars = nextFrameDynVars_;
         nextFrameDynVars_ = nullptr;  // single-shot
     }
-    frames_.push_back(std::move(cf));
+    frames_.push_back(keel::move(cf));
 
     // Debug: push top-level debug frame
     if (auto *ctl = debugCtl()) {
         ctl->reset(initialAction);
         StackFrame sf;
-        sf.functionName = chunk.name;
+        sf.functionName = chunk.name.clone();
         sf.chunk = &chunk;
         sf.registers = R_;
-        ctl->pushFrame(std::move(sf));
+        ctl->pushFrame(keel::move(sf));
     }
 
     return dispatchLoop();
@@ -779,17 +785,17 @@ ExecStatus VM::resumeExecution()
 void VM::rollbackLvalDetaches()
 {
     while (!lvalDetaches_.empty()) {
-        LvalDetach d = std::move(lvalDetaches_.back());
+        LvalDetach d = keel::move(lvalDetaches_.back());
         lvalDetaches_.pop_back();
         if (d.containerRegAbs < regStack_.size() && d.valRegAbs < regStack_.size()) {
             Value &cont = regStack_[d.containerRegAbs];
             Value &val = regStack_[d.valRegAbs];
             if (d.kind == LvalDetach::Kind::Field) {
                 if (cont.isStruct() && !cont.isStructArray())
-                    cont.field(d.fieldName) = std::move(val);
+                    cont.field(d.fieldName) = keel::move(val);
             } else {
                 if (cont.isCell() && d.cellLinearIdx < cont.numel())
-                    cont.cellAt(d.cellLinearIdx) = std::move(val);
+                    cont.cellAt(d.cellLinearIdx) = keel::move(val);
             }
         }
     }
@@ -797,8 +803,8 @@ void VM::rollbackLvalDetaches()
 
 // Forward declarations for helpers defined later in this translation unit
 // but called from dispatchLoop's catch blocks.
-static std::string describeInstruction(const Instruction &instr,
-                                       const BytecodeChunk &chunk);
+static keel::String describeInstruction(const Instruction &instr,
+                                        const BytecodeChunk &chunk);
 
 ExecStatus VM::dispatchLoop()
 {
@@ -812,7 +818,7 @@ enter_frame:
         const BytecodeChunk &chunk = *frame.chunk;
         const Instruction *end = chunk.code.data() + chunk.code.size();
         auto *R = frame.R;
-        auto &resolvedFuncs = chunkCallCache_[frame.chunk];
+        auto &resolvedFuncs = chunkCallCache_.get_or_insert(frame.chunk);
 
     try {
         auto *dbgCtl = debugCtl(); // hoist out of hot loop
@@ -1627,23 +1633,23 @@ enter_frame:
                 // a = dst (in/out), b = struct array source, d = nameIdx.
                 // Expand `[dst, src(0).f, ..., src(N-1).f]` in one
                 // horzcat to avoid quadratic growth.
-                const std::string &fname = chunk.strings[I.d];
+                const keel::String &fname = chunk.strings[I.d];
                 Value &dst = R[I.a];
                 const Value &src = R[I.b];
-                std::vector<Value> elems;
+                keel::Array<Value> elems;
                 elems.push_back(dst);
                 if (src.isStruct()) {
                     keel::usize n = src.numel();
                     if (n == 0 && !src.hasField(fname))
                         throw std::runtime_error(
-                            "Reference to non-existent field '" + fname + "'");
+                            keel::format("Reference to non-existent field '{}'", fname).c_str());
                     elems.reserve(n + 1);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = src.structArrayElem(i);
                         const Value *vp = m.get(fname);
                         if (!vp)
                             throw std::runtime_error(
-                                "Reference to non-existent field '" + fname + "'");
+                                keel::format("Reference to non-existent field '{}'", fname).c_str());
                         elems.push_back(*vp);
                     }
                 } else if (src.isObject()) {
@@ -1658,10 +1664,11 @@ enter_frame:
                         Value elem = src.objectSubArray(keel::ArrayRef<keel::usize>(&idx, 1), engine_.mr_);
                         Value out;
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx))
-                            throw std::runtime_error("No appropriate property '" + fname
-                                                     + "' for class '"
-                                                     + std::string(src.objectClassName().as_ref()) + "'");
-                        elems.push_back(std::move(out));
+                            throw std::runtime_error(
+                                keel::format("No appropriate property '{}' for class '{}'",
+                                             fname, src.objectClassName())
+                                    .c_str());
+                        elems.push_back(keel::move(out));
                     }
                 } else {
                     throw std::runtime_error(
@@ -1677,7 +1684,7 @@ enter_frame:
                 // subscript. See dev-docs/memory/csl_first_class.md.
                 Value             &dst  = R[I.a];
                 const Value       &elem = R[I.b];
-                std::vector<Value> elems;
+                keel::Array<Value> elems;
                 elems.push_back(dst);
                 if (elem.isCsl())
                     for (keel::usize k = 0; k < elem.cslCount(); ++k)
@@ -1833,8 +1840,8 @@ enter_frame:
                                           && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
                 if (R[I.c].isObject() || canPromote1D) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](std::string_view c) {
-                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    auto isGfxCls = [](keel::StringRef c) {
+                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
                     };
                     if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassName())) {
                         dst = Value();
@@ -1856,8 +1863,10 @@ enter_frame:
                     }
                 }
                 if (R[I.a].isObject())
-                    throw std::runtime_error("'()' assignment is not defined for class '"
-                                             + std::string(R[I.a].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("'()' assignment is not defined for class '{}'",
+                                     R[I.a].objectClassName())
+                            .c_str());
                 if (ix.isDoubleScalar()) {
                     // Fast path: scalar index
                     keel::usize i = Value::checkedScalarIndex(ix.scalarVal());
@@ -1983,8 +1992,8 @@ enter_frame:
                                           && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
                 if (val.isObject() || canPromote2D) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](std::string_view c) {
-                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    auto isGfxCls = [](keel::StringRef c) {
+                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
                     };
                     if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassName())) {
                         dst = Value();
@@ -2082,7 +2091,7 @@ enter_frame:
                 // OBJECT: a custom subsref controls indexing; otherwise the
                 // builtin N-D path below (indexGet3D/indexGetND) handles it.
                 if (mv.isObject()) {
-                    std::vector<Value> idx(ndims);
+                    keel::Array<Value> idx(ndims);
                     for (keel::u16 i = 0; i < ndims; ++i)
                         idx[i] = R[base + i];
                     // classdef subsref → same-stack VM frame (pausable, P4)
@@ -2092,7 +2101,7 @@ enter_frame:
                     Value out;
                     if (engine_.tryObjectSubsref(R[I.b], keel::ArrayRef<Value>(idx.data(), ndims),
                                                  1, out, currentCallEnv())) {
-                        R[I.a] = std::move(out);
+                        R[I.a] = keel::move(out);
                         break;
                     }
                 }
@@ -2107,9 +2116,10 @@ enter_frame:
                 } else {
                     // ND read (≥4): CELL handled by indexGetND directly now.
                     const int nd = static_cast<int>(ndims);
-                    std::vector<keel::Array<keel::usize>> idxLists(nd);
-                    std::vector<const keel::usize *> idxPtrs(nd);
-                    std::vector<keel::usize> idxCounts(nd);
+                    const keel::usize ndu = static_cast<keel::usize>(nd);
+                    keel::Array<keel::Array<keel::usize>> idxLists(ndu);
+                    keel::Array<const keel::usize *> idxPtrs(ndu);
+                    keel::Array<keel::usize> idxCounts(ndu);
                     for (int i = 0; i < nd; ++i) {
                         const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
                         idxLists[i] = Value::resolveIndices(R[base + i], lim);
@@ -2130,8 +2140,8 @@ enter_frame:
                     const Value &val = R[I.e];
                     const bool newable =
                         !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    auto isGfxCls = [](std::string_view c) {
-                        return c.rfind("matlab.graphics.", 0) == 0 || c.rfind("matlab.ui.", 0) == 0;
+                    auto isGfxCls = [](keel::StringRef c) {
+                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
                     };
                     const bool sameArr =
                         dst.isObject()
@@ -2213,7 +2223,7 @@ enter_frame:
                     const int nd = static_cast<int>(ndims);
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(nd, curNd);
-                    std::vector<keel::usize> need(newNd, 1);
+                    keel::Array<keel::usize> need(static_cast<keel::usize>(newNd), static_cast<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     auto isColon = [](const Value &v) {
@@ -2239,9 +2249,10 @@ enter_frame:
                     if (grow)
                         R[I.a].resizeND(need.data(), newNd, engine_.mr_);
 
-                    std::vector<keel::Array<keel::usize>> idxLists(nd);
-                    std::vector<const keel::usize *> idxPtrs(nd);
-                    std::vector<keel::usize> idxCounts(nd);
+                    const keel::usize ndu = static_cast<keel::usize>(nd);
+                    keel::Array<keel::Array<keel::usize>> idxLists(ndu);
+                    keel::Array<const keel::usize *> idxPtrs(ndu);
+                    keel::Array<keel::usize> idxCounts(ndu);
                     for (int i = 0; i < nd; ++i) {
                         const keel::usize lim = (i < R[I.a].dims().ndim()) ? R[I.a].dims().dim(i) : 1;
                         idxLists[i] = Value::resolveIndices(R[base + i], lim);
@@ -2274,9 +2285,9 @@ enter_frame:
             case OpCode::INDEX_DELETE_ND: {
                 // a=arr, b=base, c=ndims
                 keel::u16 base = I.b, ndims = I.c;
-                std::vector<keel::Array<keel::usize>> perDim(ndims);
-                std::vector<const keel::usize *> perDimPtrs(ndims);
-                std::vector<keel::usize> perDimCount(ndims);
+                keel::Array<keel::Array<keel::usize>> perDim(ndims);
+                keel::Array<const keel::usize *> perDimPtrs(ndims);
+                keel::Array<keel::usize> perDimCount(ndims);
                 const auto &srcDims = R[I.a].dims();
                 const int srcNd = srcDims.ndim();
                 for (keel::u16 i = 0; i < ndims; ++i) {
@@ -2293,10 +2304,10 @@ enter_frame:
             // ── Struct field access ──────────────────────────────
             case OpCode::FIELD_GET: {
                 // a=dst, b=obj, d=nameIdx — strict: throws if field missing
-                const std::string &fname = chunk.strings[I.d];
+                const keel::String &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop via class property hook (object model).
                 if (R[I.b].isObject()) {
-                    std::string cn(R[I.b].objectClassName().as_ref());
+                    keel::String cn = R[I.b].objectClassName().clone();
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2318,7 +2329,7 @@ enter_frame:
                         if (cls->propGet) {
                             Value out;
                             if (cls->propGet(R[I.b], fname, out, ctx)) {
-                                R[I.a] = std::move(out);
+                                R[I.a] = keel::move(out);
                                 break;
                             }
                         }
@@ -2328,47 +2339,53 @@ enter_frame:
                             Value out[1];
                             (*mfn)(self, keel::ArrayRef<Value>(nullptr, 0), 1,
                                    keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
-                    throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("No appropriate property '{}' for class '{}'",
+                                     fname, R[I.b].objectClassName())
+                            .c_str());
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
                 if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
                     keel::usize n = R[I.b].numel();
                     if (n == 0 && !R[I.b].hasField(fname))
-                        throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                        throw std::runtime_error(
+                            keel::format("Reference to non-existent field '{}'", fname).c_str());
                     Value csl = Value::csl(n, engine_.mr_);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
                         const Value *vp = m.get(fname);
                         if (!vp)
-                            throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                            throw std::runtime_error(
+                                keel::format("Reference to non-existent field '{}'", fname).c_str());
                         csl.cslAt(i) = *vp;
                     }
-                    R[I.a] = std::move(csl);
+                    R[I.a] = keel::move(csl);
                     break;
                 }
                 if (!R[I.b].hasField(fname)) {
                     if (fname.size() == 1 && R[I.b].hasField("kind")) {
                         char up = static_cast<char>(std::toupper(static_cast<unsigned char>(fname[0])));
-                        std::string upField(1, up);
+                        char upBuf[2] = {up, '\0'};
+                        keel::StringRef upField(upBuf, 1);
                         if ((up == 'A' || up == 'B' || up == 'C' || up == 'D') && R[I.b].hasField(upField)) {
                             R[I.a] = R[I.b].field(upField);
                             break;
                         }
                     }
-                    throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                    throw std::runtime_error(
+                        keel::format("Reference to non-existent field '{}'", fname).c_str());
                 }
                 R[I.a] = R[I.b].field(fname);
                 break;
             }
             case OpCode::FIELD_GET_OR_CREATE: {
                 // a=dst, b=obj, d=nameIdx — lvalue: auto-creates struct and field
-                const std::string &fname = chunk.strings[I.d];
+                const keel::String &fname = chunk.strings[I.d];
                 // OBJECT: read the property (propGet) so a compound lvalue
                 // `obj.prop(i) = v` can modify the value and FIELD_SET it back
                 // (read-modify-write — objects have no addressable slot).
@@ -2378,12 +2395,14 @@ enter_frame:
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
                         if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = std::move(out);
+                            R[I.a] = keel::move(out);
                             break;
                         }
                     }
-                    throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("No appropriate property '{}' for class '{}'",
+                                     fname, R[I.b].objectClassName())
+                            .c_str());
                 }
                 if (R[I.b].isEmpty())
                     R[I.b] = Value::structure();
@@ -2394,10 +2413,10 @@ enter_frame:
             }
             case OpCode::FIELD_SET: {
                 // a=obj, b=val, d=nameIdx
-                const std::string &fname = chunk.strings[I.d];
+                const keel::String &fname = chunk.strings[I.d];
                 // OBJECT: obj.Prop = val via class property hook (object model).
                 if (R[I.a].isObject()) {
-                    std::string cn(R[I.a].objectClassName().as_ref());
+                    keel::String cn = R[I.a].objectClassName().clone();
                     const BuiltinClass *cls = engine_.findClass(cn);
                     if (cls) {
                         CallContext ctx{&engine_, currentCallEnv()};
@@ -2429,8 +2448,10 @@ enter_frame:
                                 break;
                         }
                     }
-                    throw std::runtime_error("Cannot set property '" + fname
-                                             + "' on class '" + std::string(R[I.a].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("Cannot set property '{}' on class '{}'",
+                                     fname, R[I.a].objectClassName())
+                            .c_str());
                 }
                 if (R[I.a].isEmpty()) {
                     R[I.a] = Value::structure();
@@ -2447,7 +2468,7 @@ enter_frame:
                            && lvalDetaches_.back().valRegAbs == frame.regBase + I.b
                            && lvalDetaches_.back().fieldName == fname) {
                     lvalDetaches_.pop_back();
-                    R[I.a].field(fname) = std::move(R[I.b]);
+                    R[I.a].field(fname) = keel::move(R[I.b]);
                 } else {
                     R[I.a].field(fname) = R[I.b];        // tracks via field()
                 }
@@ -2455,7 +2476,7 @@ enter_frame:
             }
             case OpCode::STRUCT_ELEM_FIELD_SET: {
                 // a=obj (struct array, in/out), b=idxReg, c=valReg, d=nameIdx
-                const std::string &fname = chunk.strings[I.d];
+                const keel::String &fname = chunk.strings[I.d];
                 keel::usize idx = Value::checkedScalarIndex(R[I.b].toScalar());
                 Value &obj = R[I.a];
                 obj.growStructArrayTo(idx, engine_.allocator());
@@ -2515,57 +2536,64 @@ enter_frame:
             }
             case OpCode::FIELD_GET_DYN: {
                 // a=dst, b=obj, c=nameReg — s.(R[nameReg])
-                std::string fname(R[I.c].toString().as_ref());
+                keel::String fname = R[I.c].toString();
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
                     if (cls && cls->propGet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
                         if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = std::move(out);
+                            R[I.a] = keel::move(out);
                             break;
                         }
                     }
-                    throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("No appropriate property '{}' for class '{}'",
+                                     fname, R[I.b].objectClassName())
+                            .c_str());
                 }
                 if (!R[I.b].isStruct())
                     throw std::runtime_error("Dot indexing requires a struct");
                 if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
                     keel::usize n = R[I.b].numel();
                     if (n == 0 && !R[I.b].hasField(fname))
-                        throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                        throw std::runtime_error(
+                            keel::format("Reference to non-existent field '{}'", fname).c_str());
                     Value csl = Value::csl(n, engine_.mr_);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = R[I.b].structArrayElem(i);
                         const Value *vp = m.get(fname);
                         if (!vp)
-                            throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                            throw std::runtime_error(
+                                keel::format("Reference to non-existent field '{}'", fname).c_str());
                         csl.cslAt(i) = *vp;
                     }
-                    R[I.a] = std::move(csl);
+                    R[I.a] = keel::move(csl);
                     break;
                 }
                 if (!R[I.b].hasField(fname))
-                    throw std::runtime_error("Reference to non-existent field '" + fname + "'");
+                    throw std::runtime_error(
+                        keel::format("Reference to non-existent field '{}'", fname).c_str());
                 R[I.a] = R[I.b].field(fname);
                 break;
             }
             case OpCode::FIELD_GET_OR_CREATE_DYN: {
                 // a=dst, b=obj (in/out), c=nameReg — lvalue dynamic field
-                std::string fname(R[I.c].toString().as_ref());
+                keel::String fname = R[I.c].toString();
                 if (R[I.b].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassName());
                     if (cls && cls->propGet) {
                         CallContext ctx{&engine_, currentCallEnv()};
                         Value out;
                         if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = std::move(out);
+                            R[I.a] = keel::move(out);
                             break;
                         }
                     }
-                    throw std::runtime_error("No appropriate property '" + fname
-                                             + "' for class '" + std::string(R[I.b].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("No appropriate property '{}' for class '{}'",
+                                     fname, R[I.b].objectClassName())
+                            .c_str());
                 }
                 if (R[I.b].isEmpty())
                     R[I.b] = Value::structure();
@@ -2576,7 +2604,7 @@ enter_frame:
             }
             case OpCode::FIELD_SET_DYN: {
                 // a=obj, b=nameReg, c=val — s.(R[nameReg]) = R[val]
-                std::string fname(R[I.b].toString().as_ref());
+                keel::String fname = R[I.b].toString();
                 if (R[I.a].isObject()) {
                     const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassName());
                     if (cls && cls->propSet) {
@@ -2584,8 +2612,10 @@ enter_frame:
                         if (cls->propSet(R[I.a], fname, R[I.c], ctx))
                             break;
                     }
-                    throw std::runtime_error("Cannot set property '" + fname
-                                             + "' on class '" + std::string(R[I.a].objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("Cannot set property '{}' on class '{}'",
+                                     fname, R[I.a].objectClassName())
+                            .c_str());
                 }
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::structure();
@@ -2597,7 +2627,7 @@ enter_frame:
                     && lvalDetaches_.back().valRegAbs == frame.regBase + I.c
                     && lvalDetaches_.back().fieldName == fname) {
                     lvalDetaches_.pop_back();
-                    R[I.a].field(fname) = std::move(R[I.c]);
+                    R[I.a].field(fname) = keel::move(R[I.c]);
                 } else {
                     R[I.a].field(fname) = R[I.c];
                 }
@@ -2608,11 +2638,11 @@ enter_frame:
                 Value &obj = R[I.b];
                 if (obj.isStruct() && !obj.isStructArray() && obj.heapRefCount() == 1
                     && !R[I.a].isObject()) {
-                    std::string fname = (I.c == 0) ? chunk.strings[I.d] : std::string(R[I.e].toString().as_ref());
+                    keel::String fname = (I.c == 0) ? chunk.strings[I.d].clone() : R[I.e].toString();
                     if (obj.hasField(fname)) {
                         obj.field(fname) = Value();
                         lvalDetaches_.push_back({frame.regBase + I.b, frame.regBase + I.a,
-                                                 LvalDetach::Kind::Field, std::move(fname), 0});
+                                                 LvalDetach::Kind::Field, keel::move(fname), 0});
                     }
                 }
                 break;
@@ -2656,14 +2686,14 @@ enter_frame:
             }
             case OpCode::UPVAL_NEW: {
                 Value initVal = (I.b != kInvalidReg) ? R[I.b] : Value();
-                Value boxVal = makeUpvalueBox(std::move(initVal), engine_.mr_);
+                Value boxVal = makeUpvalueBox(keel::move(initVal), engine_.mr_);
                 if (!chunk.globalNames.empty() || !chunk.persistentNames.empty()) {
                     if (UpvaluePayload *box = asUpvalueBox(boxVal)) {
                         for (const auto &gname : chunk.globalNames) {
-                            auto uv = chunk.upvalueBoxRegs.find(gname);
-                            if (uv != chunk.upvalueBoxRegs.end() && uv->second == I.a) {
+                            const keel::u16 *uv = chunk.upvalueBoxRegs.get(gname);
+                            if (uv && *uv == I.a) {
                                 box->globalEnv = engine_.globalsEnv_;
-                                box->backingName = gname;
+                                box->backingName = gname.clone();
                                 if (!box->value.isUnset() && !box->value.isDeleted())
                                     engine_.globalsEnv_->set(gname, box->value);
                                 break;
@@ -2671,19 +2701,19 @@ enter_frame:
                         }
                         if (!box->globalEnv) {
                             for (const auto &pname : chunk.persistentNames) {
-                                auto uv = chunk.upvalueBoxRegs.find(pname);
-                                if (uv != chunk.upvalueBoxRegs.end() && uv->second == I.a) {
+                                const keel::u16 *uv = chunk.upvalueBoxRegs.get(pname);
+                                if (uv && *uv == I.a) {
                                     box->persistentBucket = engine_.persistentBucketPtr(chunk.name);
-                                    box->backingName = pname;
+                                    box->backingName = pname.clone();
                                     if (!box->value.isUnset() && !box->value.isDeleted())
-                                        (*box->persistentBucket)[pname] = box->value;
+                                        box->persistentBucket->put(pname.clone(), box->value);
                                     break;
                                 }
                             }
                         }
                     }
                 }
-                R[I.a] = std::move(boxVal);
+                R[I.a] = keel::move(boxVal);
                 break;
             }
             case OpCode::UPVAL_LOAD: {
@@ -2691,9 +2721,10 @@ enter_frame:
                 Value v = box ? box->read() : Value();
                 if (I.c == 0 && (v.isUnset() || v.isDeleted())) {
                     throw std::runtime_error(
-                        "Undefined function or variable '" + chunk.strings[I.d] + "'");
+                        keel::format("Undefined function or variable '{}'", chunk.strings[I.d])
+                            .c_str());
                 }
-                R[I.a] = std::move(v);
+                R[I.a] = keel::move(v);
                 break;
             }
             case OpCode::UPVAL_STORE: {
@@ -3005,12 +3036,12 @@ enter_frame:
                     // General ND (≥4): auto-grow on out-of-range subscripts
                     // (rank ↑ for new trailing axes, axis-size ↑ otherwise),
                     // then column-major linear-index assign.
-                    std::vector<keel::usize> coords(ndims);
+                    keel::Array<keel::usize> coords(ndims);
                     for (keel::u16 i = 0; i < ndims; ++i)
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(static_cast<int>(ndims), curNd);
-                    std::vector<keel::usize> need(newNd, 1);
+                    keel::Array<keel::usize> need(static_cast<keel::usize>(newNd), static_cast<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     bool grow = (static_cast<int>(ndims) > curNd);
@@ -3056,9 +3087,9 @@ enter_frame:
                 // Dynamically injected local variable (via eval/load/assignin)
                 // shadows functions and builtins.
                 if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
-                    const std::string &candName = chunk.strings[funcIdx];
+                    const keel::String &candName = chunk.strings[funcIdx];
                     bool clearedInChunk = false;
-                    if (chunk.assignedVars.count(candName)) {
+                    if (chunk.assignedVars.contains(candName)) {
                         for (const auto &[vn, reg] : chunk.varMap) {
                             if (vn == candName && reg < chunk.numRegisters) {
                                 Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
@@ -3071,9 +3102,9 @@ enter_frame:
                     const Value *dynLocal = nullptr;
                     if (!clearedInChunk) {
                         if (frame.dynVars) {
-                            auto it = frame.dynVars->find(candName);
-                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
-                                dynLocal = &it->second;
+                            if (const Value *dvp = frame.dynVars->get(candName);
+                                dvp && !dvp->isUnset() && !dvp->isDeleted())
+                                dynLocal = dvp;
                         }
                         if (!dynLocal) {
                             if (frame.isScriptFrame) {
@@ -3089,7 +3120,7 @@ enter_frame:
                     if (dynLocal) {
                         Value target = *dynLocal;
                         if (na == 0 && !target.isFuncHandle()) {
-                            R[I.a] = std::move(target);
+                            R[I.a] = keel::move(target);
                         } else {
                             if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
                                 goto enter_frame;
@@ -3123,17 +3154,17 @@ enter_frame:
                             if (&R[argBase + i] == &R[I.a])
                                 canHint = false;
                         if (canHint)
-                            ob[0] = std::move(R[I.a]);
+                            ob[0] = keel::move(R[I.a]);
                         keel::MutArrayRef<Value> os(ob, 1);
                         CallContext ctx{&engine_, currentCallEnv()};
                         (*ce.extFunc)(as, nargout_val, os, ctx);
-                        R[I.a] = std::move(ob[0]);
+                        R[I.a] = keel::move(ob[0]);
                         break;
                     }
                 }
 
                 if (!targetChunk) {
-                    const std::string &funcName = chunk.strings[funcIdx];
+                    const keel::String &funcName = chunk.strings[funcIdx];
                     const BytecodeChunk *found = findCompiledFunc(funcName);
                     if (found) {
                         if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
@@ -3153,7 +3184,7 @@ enter_frame:
                 // OBJECT: ClassName(args) constructs an instance when the
                 // name is a registered class (object model, object_model.md).
                 {
-                    const std::string &ctorName = chunk.strings[funcIdx];
+                    const keel::String &ctorName = chunk.strings[funcIdx];
                     if (const BuiltinClass *cls = engine_.findClass(ctorName);
                         cls && cls->construct) {
                         engine_.enforceCtorAccess(ctorName); // private/protected ctor
@@ -3185,7 +3216,7 @@ enter_frame:
                 // OBJECT function-form: m(obj, ...) where obj's class has
                 // method m beats a same-named global function.
                 if (na >= 1 && R[argBase].isObject()) {
-                    const std::string &mnm = chunk.strings[funcIdx];
+                    const keel::String &mnm = chunk.strings[funcIdx];
                     const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassName());
                     if (cls) {
                         // classdef method → run its body as a native VM frame
@@ -3195,8 +3226,7 @@ enter_frame:
                         if (const auto *mfp = cls->methodFns.get(mnm)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(
-                                    std::string(R[argBase].objectClassName().as_ref()), mnm);
+                                engine_.enforceMethodAccess(R[argBase].objectClassName(), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, &R[argBase], na, I.a, nargout_val, false, 0, 0,
                                               (*mfp)->ownerClass, false);
@@ -3210,7 +3240,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
                                    ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -3225,7 +3255,7 @@ enter_frame:
                 // (CALL_MULTI/VM picked the builtin and broke
                 // [a,b] = split(5) destructure).
                 {
-                    const std::string &funcName = chunk.strings[funcIdx];
+                    const keel::String &funcName = chunk.strings[funcIdx];
 
                     // M-file lookup (Phase 9a; Phase 10 adds packages).
                     // Compiler::registerFunctionAs binds the chunk under
@@ -3250,12 +3280,12 @@ enter_frame:
                     CallbackBuiltin *cb = engine_.callbackBuiltin(funcName);
                     if (cb) {
                         keel::ArrayRef<Value> as(&R[argBase], na);
-                        auto outBox = std::make_shared<Value>();
+                        auto outBox = keel::make_arc<Value>();
                         if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
-                            auto cont = std::make_shared<RegDestContinuation>(
-                                std::move(inner), std::move(outBox), frame.regBase + I.a);
+                            auto cont = keel::make_arc<RegDestContinuation>(
+                                keel::move(inner), keel::move(outBox), frame.regBase + I.a);
                             frame.ip = ip + 1;
-                            if (startContinuation(std::move(cont)))
+                            if (startContinuation(keel::move(cont)))
                                 goto enter_frame;
                             R = frame.R;
                             break;
@@ -3293,16 +3323,16 @@ enter_frame:
                             if (&R[argBase + i] == &R[I.a])
                                 canHint = false;
                         if (canHint)
-                            ob[0] = std::move(R[I.a]);
+                            ob[0] = keel::move(R[I.a]);
                         keel::MutArrayRef<Value> os(ob, 1);
                         CallContext ctx{&engine_, currentCallEnv()};
                         (*fnPtr)(as, nargout_val, os, ctx);
-                        R[I.a] = std::move(ob[0]);
+                        R[I.a] = keel::move(ob[0]);
                         break;
                     }
-                    auto findParentVar = [&](const std::string &varName) -> std::optional<Value> {
+                    auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
                         if (chunk.parentFuncName.empty())
-                            return std::nullopt;
+                            return keel::kNullOpt;
                         for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
@@ -3336,16 +3366,16 @@ enter_frame:
                                 }
                             }
                         }
-                        return std::nullopt;
+                        return keel::kNullOpt;
                     };
                     keel::usize dot = funcName.find('.');
-                    if (dot != std::string::npos) {
-                        std::string root = funcName.substr(0, dot);
-                        std::optional<Value> rootOpt;
+                    if (dot != keel::kInvalidIndex) {
+                        keel::StringRef root = funcName.substr(0, dot);
+                        keel::Optional<Value> rootOpt;
                         if (frame.dynVars) {
-                            auto it = frame.dynVars->find(root);
-                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
-                                rootOpt = it->second;
+                            if (const Value *dvp = frame.dynVars->get(root);
+                                dvp && !dvp->isUnset() && !dvp->isDeleted())
+                                rootOpt = *dvp;
                         }
                         if (!rootOpt)
                             rootOpt = findParentVar(root);
@@ -3360,25 +3390,27 @@ enter_frame:
                                 rootOpt = *wv;
                         }
                         if (rootOpt) {
-                            Value cur = std::move(*rootOpt);
+                            Value cur = keel::move(*rootOpt);
                             keel::usize pos = dot + 1;
                             while (pos < funcName.size()) {
                                 keel::usize nextDot = funcName.find('.', pos);
-                                std::string seg = (nextDot == std::string::npos)
-                                                      ? funcName.substr(pos)
-                                                      : funcName.substr(pos, nextDot - pos);
+                                keel::StringRef seg = (nextDot == keel::kInvalidIndex)
+                                                          ? funcName.substr(pos)
+                                                          : funcName.substr(pos, nextDot - pos);
                                 if (!cur.isStruct())
                                     throw std::runtime_error("Dot indexing requires a struct");
                                 if (!cur.hasField(seg))
-                                    throw std::runtime_error("Reference to non-existent field '" + seg + "'");
+                                    throw std::runtime_error(
+                                        keel::format("Reference to non-existent field '{}'", seg)
+                                            .c_str());
                                 Value nextVal = cur.field(seg);
-                                cur = std::move(nextVal);
-                                if (nextDot == std::string::npos)
+                                cur = keel::move(nextVal);
+                                if (nextDot == keel::kInvalidIndex)
                                     break;
                                 pos = nextDot + 1;
                             }
                             if (na == 0) {
-                                R[I.a] = std::move(cur);
+                                R[I.a] = keel::move(cur);
                             } else {
                                 if (execCallIndirectSpan(cur, I.a, &R[argBase], na, R, frame, ip))
                                     goto enter_frame;
@@ -3386,12 +3418,12 @@ enter_frame:
                             break;
                         }
                     }
-                    if (dot == std::string::npos && na > 0) {
-                        std::optional<Value> varOpt;
+                    if (dot == keel::kInvalidIndex && na > 0) {
+                        keel::Optional<Value> varOpt;
                         if (frame.dynVars) {
-                            auto it = frame.dynVars->find(funcName);
-                            if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
-                                varOpt = it->second;
+                            if (const Value *dvp = frame.dynVars->get(funcName);
+                                dvp && !dvp->isUnset() && !dvp->isDeleted())
+                                varOpt = *dvp;
                         }
                         if (!varOpt)
                             varOpt = findParentVar(funcName);
@@ -3406,15 +3438,17 @@ enter_frame:
                                 varOpt = *wv;
                         }
                         if (varOpt) {
-                            Value target = std::move(*varOpt);
+                            Value target = keel::move(*varOpt);
                             if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
                                 goto enter_frame;
                             break;
                         }
                     }
                     throw std::runtime_error(
-                        engine_.formatUndefinedFunctionError(
-                            funcName, "VM: undefined function '" + funcName + "'"));
+                        engine_
+                            .formatUndefinedFunctionError(
+                                funcName, keel::format("VM: undefined function '{}'", funcName))
+                            .c_str());
                 }
             }
 
@@ -3433,12 +3467,12 @@ enter_frame:
                 keel::usize NF = splat.size();
 
                 if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
-                    const std::string &candName = chunk.strings[funcIdx];
+                    const keel::String &candName = chunk.strings[funcIdx];
                     const Value *dynLocal = nullptr;
                     if (frame.dynVars) {
-                        auto it = frame.dynVars->find(candName);
-                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
-                            dynLocal = &it->second;
+                        if (const Value *dvp = frame.dynVars->get(candName);
+                            dvp && !dvp->isUnset() && !dvp->isDeleted())
+                            dynLocal = dvp;
                     }
                     if (!dynLocal) {
                         if (frame.isScriptFrame) {
@@ -3453,7 +3487,7 @@ enter_frame:
                     if (dynLocal) {
                         Value target = *dynLocal;
                         if (NF == 0 && !target.isFuncHandle()) {
-                            R[I.a] = std::move(target);
+                            R[I.a] = keel::move(target);
                         } else {
                             if (execCallIndirectSpan(target, I.a, AB, NF, R, frame, ip))
                                 goto enter_frame;
@@ -3477,7 +3511,7 @@ enter_frame:
                     && resolvedFuncs[funcIdx].userChunk)
                     targetChunk = resolvedFuncs[funcIdx].userChunk;
                 if (!targetChunk) {
-                    const std::string &funcName = chunk.strings[funcIdx];
+                    const keel::String &funcName = chunk.strings[funcIdx];
                     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
                         if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
                             resolvedFuncs.resize(funcIdx + 1);
@@ -3492,7 +3526,7 @@ enter_frame:
                 }
 
                 {
-                    const std::string &ctorName = chunk.strings[funcIdx];
+                    const keel::String &ctorName = chunk.strings[funcIdx];
                     if (const BuiltinClass *cls = engine_.findClass(ctorName);
                         cls && cls->construct) {
                         engine_.enforceCtorAccess(ctorName);
@@ -3515,14 +3549,13 @@ enter_frame:
                 }
 
                 if (NF >= 1 && AB[0].isObject()) {
-                    const std::string &mnm = chunk.strings[funcIdx];
+                    const keel::String &mnm = chunk.strings[funcIdx];
                     const BuiltinClass *cls = engine_.findClass(AB[0].objectClassName());
                     if (cls) {
                         if (const auto *mfp = cls->methodFns.get(mnm)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(
-                                    std::string(AB[0].objectClassName().as_ref()), mnm);
+                                engine_.enforceMethodAccess(AB[0].objectClassName(), mnm);
                                 frame.ip = ip + 1;
                                 pushCallFrame(*mc, AB, NF, I.a, nargout_val, false, 0, 0,
                                               (*mfp)->ownerClass, false);
@@ -3536,14 +3569,14 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
                                    ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
                 }
 
                 {
-                    const std::string &funcName = chunk.strings[funcIdx];
+                    const keel::String &funcName = chunk.strings[funcIdx];
                     if (auto *uf =
                             engine_.lookupUserFunction(funcName, currentCallEnv())) {
                         const BytecodeChunk *found = findCompiledFunc(uf->name);
@@ -3560,12 +3593,12 @@ enter_frame:
                     }
                     if (CallbackBuiltin *cb = engine_.callbackBuiltin(funcName)) {
                         keel::ArrayRef<Value> as(AB, NF);
-                        auto outBox = std::make_shared<Value>();
+                        auto outBox = keel::make_arc<Value>();
                         if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
-                            auto cont = std::make_shared<RegDestContinuation>(
-                                std::move(inner), std::move(outBox), frame.regBase + I.a);
+                            auto cont = keel::make_arc<RegDestContinuation>(
+                                keel::move(inner), keel::move(outBox), frame.regBase + I.a);
                             frame.ip = ip + 1;
-                            if (startContinuation(std::move(cont)))
+                            if (startContinuation(keel::move(cont)))
                                 goto enter_frame;
                             R = frame.R;
                             break;
@@ -3579,12 +3612,14 @@ enter_frame:
                         keel::MutArrayRef<Value>       os(ob, 1);
                         CallContext       ctx{&engine_, currentCallEnv()};
                         (*fnPtr)(as, nargout_val, os, ctx);
-                        R[I.a] = std::move(ob[0]);
+                        R[I.a] = keel::move(ob[0]);
                         break;
                     }
                     throw std::runtime_error(
-                        engine_.formatUndefinedFunctionError(
-                            funcName, "VM: undefined function '" + funcName + "'"));
+                        engine_
+                            .formatUndefinedFunctionError(
+                                funcName, keel::format("VM: undefined function '{}'", funcName))
+                            .c_str());
                 }
             }
 
@@ -3593,7 +3628,7 @@ enter_frame:
                 // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout
                 keel::u16 outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
                 keel::i32 funcIdx = I.d;
-                const std::string &funcName = chunk.strings[funcIdx];
+                const keel::String &funcName = chunk.strings[funcIdx];
                 // Splat any runtime CSL arg (pkg.fn(c{:})); zero-copy on a
                 // pure splice (bugs/closed/core/qualified-call-no-csl-splat).
                 SplatArgs splat = splatCallArgs(R, argBase, na);
@@ -3603,9 +3638,9 @@ enter_frame:
                 if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
                     const Value *dynLocal = nullptr;
                     if (frame.dynVars) {
-                        auto it = frame.dynVars->find(funcName);
-                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
-                            dynLocal = &it->second;
+                        if (const Value *dvp = frame.dynVars->get(funcName);
+                            dvp && !dvp->isUnset() && !dvp->isDeleted())
+                            dynLocal = dvp;
                     }
                     if (!dynLocal) {
                         if (frame.isScriptFrame) {
@@ -3620,8 +3655,8 @@ enter_frame:
                     if (dynLocal && dynLocal->isFuncHandle()) {
                         const Value fh = *dynLocal;
                         const keel::usize ncaps = fh.funcHandleCaptureCount();
-                        std::string hName(fh.funcHandleName().as_ref());
-                        std::vector<Value> cargs(NF + ncaps);
+                        keel::String hName = fh.funcHandleName();
+                        keel::Array<Value> cargs(NF + ncaps);
                         for (keel::usize i = 0; i < NF; ++i) cargs[i] = AB[i];
                         for (keel::usize i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
                         if (const BytecodeChunk *fc = findCompiledFunc(hName)) {
@@ -3632,7 +3667,7 @@ enter_frame:
                         }
                         if (const ExternalFunc *fp = engine_.findExternal(hName, currentCallEnv())) {
                             Value smallOb[8];
-                            std::vector<Value> bigOb;
+                            keel::Array<Value> bigOb;
                             Value *obPtr = (nout <= 8) ? smallOb : (bigOb.resize(nout), bigOb.data());
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*fp)(keel::ArrayRef<Value>(cargs.data(), NF), nout, keel::MutArrayRef<Value>(obPtr, nout), ctx);
@@ -3640,7 +3675,7 @@ enter_frame:
                                 if (obPtr[i].isUnset())
                                     throw std::runtime_error("Too many output arguments.");
                             for (keel::u16 i = 0; i < nout; ++i)
-                                R[outBase + i] = std::move(obPtr[i]);
+                                R[outBase + i] = keel::move(obPtr[i]);
                             break;
                         }
                     }
@@ -3668,7 +3703,7 @@ enter_frame:
                     if (ce.extFunc && !hasImports && originStable
                         && !(NF >= 1 && AB[0].isObject())) {
                         Value smallOut[8];
-                        std::vector<Value> bigOut;
+                        keel::Array<Value> bigOut;
                         Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         keel::ArrayRef<Value> as(AB, NF);
                         keel::MutArrayRef<Value> os(outPtr, nout);
@@ -3678,7 +3713,7 @@ enter_frame:
                             if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
+                            R[outBase + i] = keel::move(outPtr[i]);
                         break;
                     }
                 }
@@ -3705,8 +3740,7 @@ enter_frame:
                         if (const auto *mfp = cls->methodFns.get(funcName)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(
-                                    std::string(AB[0].objectClassName().as_ref()), funcName);
+                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
@@ -3718,7 +3752,7 @@ enter_frame:
                             Value self = AB[0];
                             keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
                             Value smallOut[8];
-                            std::vector<Value> bigOut;
+                            keel::Array<Value> bigOut;
                             Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*mfn)(self, rest, nout,
@@ -3727,7 +3761,7 @@ enter_frame:
                                 if (outPtr[i].isUnset())
                                     throw std::runtime_error("Too many output arguments.");
                             for (keel::usize i = 0; i < nout; ++i)
-                                R[outBase + i] = std::move(outPtr[i]);
+                                R[outBase + i] = keel::move(outPtr[i]);
                             break;
                         }
                     }
@@ -3770,7 +3804,7 @@ enter_frame:
                             resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
                         }
                         Value smallOut[8];
-                        std::vector<Value> bigOut;
+                        keel::Array<Value> bigOut;
                         Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         keel::ArrayRef<Value> as(AB, NF);
                         keel::MutArrayRef<Value> os(outPtr, nout);
@@ -3784,12 +3818,14 @@ enter_frame:
                             if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
+                            R[outBase + i] = keel::move(outPtr[i]);
                         break;
                     }
                     throw std::runtime_error(
-                        engine_.formatUndefinedFunctionError(
-                            funcName, "VM: undefined function '" + funcName + "'"));
+                        engine_
+                            .formatUndefinedFunctionError(
+                                funcName, keel::format("VM: undefined function '{}'", funcName))
+                            .c_str());
                 }
             }
 
@@ -3800,7 +3836,7 @@ enter_frame:
                 // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout.
                 keel::u16 outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
                 keel::i32 funcIdx = I.d;
-                const std::string &funcName = chunk.strings[funcIdx];
+                const keel::String &funcName = chunk.strings[funcIdx];
                 SplatArgs splat = splatCallArgs(R, argBase, na);
                 const Value *AB = splat.data();
                 keel::usize NF = splat.size();
@@ -3826,7 +3862,7 @@ enter_frame:
                     if (ce.extFunc && !hasImports && originStable
                         && !(NF >= 1 && AB[0].isObject())) {
                         Value smallOut[8];
-                        std::vector<Value> bigOut;
+                        keel::Array<Value> bigOut;
                         Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         keel::ArrayRef<Value> as(AB, NF);
                         keel::MutArrayRef<Value> os(outPtr, nout);
@@ -3836,7 +3872,7 @@ enter_frame:
                             if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
+                            R[outBase + i] = keel::move(outPtr[i]);
                         break;
                     }
                 }
@@ -3856,8 +3892,7 @@ enter_frame:
                         if (const auto *mfp = cls->methodFns.get(funcName)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(
-                                    std::string(AB[0].objectClassName().as_ref()), funcName);
+                                engine_.enforceMethodAccess(AB[0].objectClassName(), funcName);
                                 frame.ip = ip + 1;
                                 returnBuf_.clear();
                                 pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
@@ -3869,7 +3904,7 @@ enter_frame:
                             Value              self = AB[0];
                             keel::ArrayRef<Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
                             Value              smallOut[8];
-                            std::vector<Value> bigOut;
+                            keel::Array<Value> bigOut;
                             Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                             CallContext        ctx{&engine_, currentCallEnv()};
                             (*mfn)(self, rest, nout,
@@ -3878,7 +3913,7 @@ enter_frame:
                                 if (outPtr[i].isUnset())
                                     throw std::runtime_error("Too many output arguments.");
                             for (keel::usize i = 0; i < nout; ++i)
-                                R[outBase + i] = std::move(outPtr[i]);
+                                R[outBase + i] = keel::move(outPtr[i]);
                             break;
                         }
                     }
@@ -3911,7 +3946,7 @@ enter_frame:
                             resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
                         }
                         Value              smallOut[8];
-                        std::vector<Value> bigOut;
+                        keel::Array<Value> bigOut;
                         Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
                         keel::ArrayRef<Value>  as(AB, NF);
                         keel::MutArrayRef<Value>        os(outPtr, nout);
@@ -3921,12 +3956,14 @@ enter_frame:
                             if (outPtr[i].isUnset())
                                 throw std::runtime_error("Too many output arguments.");
                         for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = std::move(outPtr[i]);
+                            R[outBase + i] = keel::move(outPtr[i]);
                         break;
                     }
                     throw std::runtime_error(
-                        engine_.formatUndefinedFunctionError(
-                            funcName, "VM: undefined function '" + funcName + "'"));
+                        engine_
+                            .formatUndefinedFunctionError(
+                                funcName, keel::format("VM: undefined function '{}'", funcName))
+                            .c_str());
                 }
             }
 
@@ -3935,7 +3972,7 @@ enter_frame:
                 // a=dst, b=objReg, c=argBase, d=nameIdx, e=nargs.
                 // obj.name(args): dispatch a class method, else fall back
                 // to field-value + CALL_INDIRECT (func handle / index).
-                const std::string &mname = chunk.strings[I.d];
+                const keel::String &mname = chunk.strings[I.d];
                 const Value &obj = R[I.b];
                 // obj.fh(c{:}) / obj.method(c{:}): flatten any CSL arg ONCE
                 // at the top so every dispatch below sees the splatted
@@ -3951,9 +3988,8 @@ enter_frame:
                         if (const auto *mfp = cls->methodFns.get(mname)) {
                             const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                             if (mc) {
-                                engine_.enforceMethodAccess(
-                                    std::string(obj.objectClassName().as_ref()), mname);
-                                std::vector<Value> frameArgs;
+                                engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                                keel::Array<Value> frameArgs;
                                 frameArgs.reserve(argN + 1);
                                 frameArgs.push_back(obj);
                                 for (keel::usize k = 0; k < argN; ++k)
@@ -3971,7 +4007,7 @@ enter_frame:
                             Value out[1];
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*mfn)(self, args, 1, keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -3979,8 +4015,10 @@ enter_frame:
                     Value out;
                     CallContext ctx{&engine_, currentCallEnv()};
                     if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
-                        throw std::runtime_error("No appropriate property '" + mname
-                                                 + "' for class '" + std::string(obj.objectClassName().as_ref()) + "'");
+                        throw std::runtime_error(
+                            keel::format("No appropriate property '{}' for class '{}'",
+                                         mname, obj.objectClassName())
+                                .c_str());
                     if (execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip))
                         goto enter_frame;
                 } else {
@@ -3989,7 +4027,8 @@ enter_frame:
                     if (!obj.isStruct())
                         throw std::runtime_error("Dot indexing requires a struct");
                     if (!obj.hasField(mname))
-                        throw std::runtime_error("Reference to non-existent field '" + mname + "'");
+                        throw std::runtime_error(
+                            keel::format("Reference to non-existent field '{}'", mname).c_str());
                     Value fv = obj.field(mname);
                     if (execCallIndirectSpan(fv, I.a, argPtr, argN, R, frame, ip))
                         goto enter_frame;
@@ -4003,12 +4042,13 @@ enter_frame:
                 keel::u16 outBase = I.a, objReg = I.b, argBase = I.c;
                 keel::u16 na = static_cast<keel::u16>((I.e >> 8) & 0xFF);
                 keel::u16 nout = static_cast<keel::u16>(I.e & 0xFF);
-                const std::string &mname = chunk.strings[I.d];
+                const keel::String &mname = chunk.strings[I.d];
                 Value &obj = R[objReg];
                 if (!obj.isObject())
                     throw std::runtime_error(
-                        "Dot-indexing multi-output requires an object; '" + mname
-                        + "' is not a method of a " + std::string(mtypeName(obj.type())));
+                        keel::format("Dot-indexing multi-output requires an object; '{}' is not a method of a {}",
+                                     mname, mtypeName(obj.type()))
+                            .c_str());
                 // Splat any runtime CSL arg so [a,b] = o.mm(c{:}) sees the
                 // expanded list, exactly like the single-output CALL_METHOD
                 // (bugs/closed/core/call-method-multi-no-csl-splat).
@@ -4021,9 +4061,8 @@ enter_frame:
                     if (const auto *mfp = cls->methodFns.get(mname)) {
                         const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
                         if (mc) {
-                            engine_.enforceMethodAccess(
-                                std::string(obj.objectClassName().as_ref()), mname);
-                            std::vector<Value> frameArgs;
+                            engine_.enforceMethodAccess(obj.objectClassName(), mname);
+                            keel::Array<Value> frameArgs;
                             frameArgs.reserve(argN + 1);
                             frameArgs.push_back(obj);
                             for (keel::usize k = 0; k < argN; ++k)
@@ -4039,25 +4078,27 @@ enter_frame:
                 }
                 const ObjectMethod *mfn = cls ? cls->methods.get(mname) : nullptr;
                 if (!mfn)
-                    throw std::runtime_error("No appropriate method '" + mname
-                                             + "' for class '" + std::string(obj.objectClassName().as_ref()) + "'");
+                    throw std::runtime_error(
+                        keel::format("No appropriate method '{}' for class '{}'",
+                                     mname, obj.objectClassName())
+                            .c_str());
                 Value self = obj; // handle: shares state; value: own copy
                 keel::ArrayRef<Value> args(argPtr, argN);
-                std::vector<Value> outBuf(nout);
+                keel::Array<Value> outBuf(nout);
                 CallContext ctx{&engine_, currentCallEnv()};
                 (*mfn)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
                 for (keel::u16 i = 0; i < nout; ++i)
                     if (outBuf[i].isUnset())
                         throw std::runtime_error("Too many output arguments.");
                 for (keel::usize i = 0; i < nout; ++i)
-                    R[outBase + i] = std::move(outBuf[i]);
+                    R[outBase + i] = keel::move(outBuf[i]);
                 break;
             }
             // ── Superclass calls inside a classdef body ──
             case OpCode::CALL_SUPER_CTOR: {
                 // obj = obj@Base(args): a=dst, b=objReg(seed), c=argBase,
                 // d=baseNameIdx, e=nargs.
-                const std::string &base = chunk.strings[I.d];
+                const keel::String &base = chunk.strings[I.d];
                 SplatArgs splat = splatCallArgs(R, I.c, I.e);
                 const Value *argPtr = splat.data();
                 keel::usize argN = splat.size();
@@ -4071,10 +4112,10 @@ enter_frame:
                 // The receiver at [0] is an object (never a CSL), so the
                 // splat below can only expand the trailing args
                 // (bugs/closed/core/super-call-no-csl-splat).
-                const std::string &qual = chunk.strings[I.d];
+                const keel::String &qual = chunk.strings[I.d];
                 keel::usize gt = qual.find('>');
-                std::string base = qual.substr(0, gt);
-                std::string method = qual.substr(gt + 1);
+                keel::StringRef base = qual.substr(0, gt);
+                keel::StringRef method = (gt == keel::kInvalidIndex) ? keel::StringRef{} : qual.substr(gt + 1);
                 keel::u16 outBase = I.a, argBase = I.b, nout = I.e;
                 SplatArgs splat = splatCallArgs(R, argBase, I.c);
                 const Value *argPtr = splat.data();
@@ -4083,7 +4124,7 @@ enter_frame:
                     base, method, keel::ArrayRef<Value>(argPtr, argN),
                     std::max<keel::usize>(nout, 1));
                 for (keel::u16 i = 0; i < nout; ++i)
-                    R[outBase + i] = (i < results.size()) ? std::move(results[i]) : Value();
+                    R[outBase + i] = (i < results.size()) ? keel::move(results[i]) : Value();
                 break;
             }
             case OpCode::CALL_INDIRECT:
@@ -4135,8 +4176,8 @@ enter_frame:
                 }
                 const Value &fh = R[fhReg];
                 const keel::usize ncaps = fh.funcHandleCaptureCount();
-                std::string fName(fh.funcHandleName().as_ref());
-                std::vector<Value> cargs(nflat + ncaps);
+                keel::String fName = fh.funcHandleName().clone();
+                keel::Array<Value> cargs(nflat + ncaps);
                 for (keel::usize i = 0; i < nflat; ++i) cargs[i] = ABf[i];
                 for (keel::usize i = 0; i < ncaps; ++i)
                     cargs[nflat + i] = fh.funcHandleCapture(i);
@@ -4160,7 +4201,7 @@ enter_frame:
                 }
                 if (const ExternalFunc *fp =
                         engine_.findExternal(fName, currentCallEnv())) {
-                    std::vector<Value> ob(fnout);
+                    keel::Array<Value> ob(fnout);
                     CallContext ctx{&engine_, currentCallEnv()};
                     (*fp)(keel::ArrayRef<Value>(cargs.data(), ctot), fnout,
                           keel::MutArrayRef<Value>(ob.data(), fnout), ctx);
@@ -4168,11 +4209,11 @@ enter_frame:
                         if (ob[i].isUnset())
                             throw std::runtime_error("Too many output arguments.");
                     for (keel::u16 i = 0; i < fnout; ++i)
-                        R[I.a + i] = std::move(ob[i]);
+                        R[I.a + i] = keel::move(ob[i]);
                     break;
                 }
                 throw std::runtime_error(
-                    "VM: undefined function in handle '@" + fName + "'");
+                    keel::format("VM: undefined function in handle '@{}'", fName).c_str());
             }
 
             // ── Display ──────────────────────────────────────────
@@ -4226,16 +4267,16 @@ enter_frame:
                     // (workspaceEnv HOLDS a top-level nargin value, which
                     // would otherwise silently resolve the name).
                     if (!inReentrantEval_) {
-                        const std::string &nn = chunk.strings[I.d];
+                        const keel::String &nn = chunk.strings[I.d];
                         if (nn == "nargin" || nn == "nargout")
                             throw std::runtime_error(
                                 "You can only call nargin/nargout from within a function.");
                     }
                     // Fallback: check dynamic variables (debug eval, runtime eval)
                     if (frame.dynVars) {
-                        auto it = frame.dynVars->find(chunk.strings[I.d]);
-                        if (it != frame.dynVars->end() && !it->second.isDeleted()) {
-                            R[I.a] = it->second;
+                        if (const Value *dv = frame.dynVars->get(chunk.strings[I.d]);
+                            dv && !dv->isDeleted()) {
+                            R[I.a] = *dv;
                             break;
                         }
                     }
@@ -4264,7 +4305,7 @@ enter_frame:
                         }
                     }
                     if (!chunk.parentFuncName.empty()) {
-                        const std::string &nn = chunk.strings[I.d];
+                        const keel::String &nn = chunk.strings[I.d];
                         bool foundInParent = false;
                         for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
@@ -4274,7 +4315,7 @@ enter_frame:
                                 if (vname == nn && reg < pf.nregs) {
                                     Value pv = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
                                     if (!pv.isUnset() && !pv.isDeleted()) {
-                                        R[I.a] = std::move(pv);
+                                        R[I.a] = keel::move(pv);
                                         foundInParent = true;
                                     }
                                     break;
@@ -4298,7 +4339,7 @@ enter_frame:
                                         if (vname == nn && reg < pf.nregs) {
                                             Value pv = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
                                             if (!pv.isUnset() && !pv.isDeleted()) {
-                                                R[I.a] = std::move(pv);
+                                                R[I.a] = keel::move(pv);
                                                 foundInParent = true;
                                             }
                                             break;
@@ -4313,7 +4354,7 @@ enter_frame:
                             break;
                     }
                     {
-                        const std::string &nn = chunk.strings[I.d];
+                        const keel::String &nn = chunk.strings[I.d];
                         if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
                             const BytecodeChunk *found = findCompiledFunc(uf->name);
                             if (!found)
@@ -4327,12 +4368,12 @@ enter_frame:
                             keel::MutArrayRef<Value> os(ob, 1);
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*fnPtr)(keel::ArrayRef<Value>(nullptr, 0), 0, os, ctx);
-                            R[I.a] = std::move(ob[0]);
+                            R[I.a] = keel::move(ob[0]);
                             break;
                         }
                     }
                     throw std::runtime_error(
-                        "Undefined function or variable '" + std::string(chunk.strings[I.d]) + "'");
+                        keel::format("Undefined function or variable '{}'", chunk.strings[I.d]).c_str());
                 }
                 break;
 
@@ -4341,22 +4382,22 @@ enter_frame:
                 break;
 
             case OpCode::CLEAR_DYN: {
-                auto clearOneVar = [&](const std::string &varName) {
-                    for (auto &[vn, reg] : chunk.varMap) {
+                auto clearOneVar = [&](keel::StringRef varName) {
+                    for (const auto &[vn, reg] : chunk.varMap) {
                         if (vn == varName && reg < chunk.numRegisters) {
                             writeChunkVar(chunk, R, chunk.numRegisters, vn, reg, Value::deleted());
                             break;
                         }
                     }
                     if (frame.dynVars)
-                        frame.dynVars->erase(varName);
+                        frame.dynVars->remove(varName);
                     if (frame.env)
                         frame.env->remove(varName);
                 };
                 if (R[I.a].isCsl()) {
                     const keel::usize n = R[I.a].cslCount();
                     if (n == 0 && I.b <= 1) {
-                        for (auto &[vn, reg] : chunk.varMap) {
+                        for (const auto &[vn, reg] : chunk.varMap) {
                             if (reg < chunk.numRegisters && engine_.isReservedName(vn) == 0)
                                 writeChunkVar(chunk, R, chunk.numRegisters, vn, reg, Value::deleted());
                         }
@@ -4366,25 +4407,25 @@ enter_frame:
                             frame.env->clearAll(/*keepImports=*/true);
                     } else {
                         for (keel::usize k = 0; k < n; ++k)
-                            clearOneVar(std::string(R[I.a].cslAt(k).toString().as_ref()));
+                            clearOneVar(R[I.a].cslAt(k).toString());
                     }
                     break;
                 }
-                clearOneVar(std::string(R[I.a].toString().as_ref()));
+                clearOneVar(R[I.a].toString());
                 break;
             }
 
             case OpCode::EXIST_VAR: {
                 // a=dst, b=nameReg, c=filterReg (0 = no filter)
-                std::string varName(R[I.b].toString().as_ref());
-                std::string filter;
+                keel::String varName = R[I.b].toString();
+                keel::String filter;
                 if (I.c != 0 && !R[I.c].isEmpty())
-                    filter = std::string(R[I.c].toString().as_ref());
+                    filter = R[I.c].toString();
 
                 double code = 0;
 
                 auto hasLocalVar = [&]() -> bool {
-                    for (auto &[vn, reg] : chunk.varMap) {
+                    for (const auto &[vn, reg] : chunk.varMap) {
                         if (vn == varName && reg < chunk.numRegisters) {
                             Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
                             if (!rv.isUnset() && !rv.isDeleted())
@@ -4395,8 +4436,8 @@ enter_frame:
                         }
                     }
                     if (frame.dynVars) {
-                        auto it = frame.dynVars->find(varName);
-                        if (it != frame.dynVars->end() && !it->second.isUnset() && !it->second.isDeleted())
+                        if (const Value *dv = frame.dynVars->get(varName);
+                            dv && !dv->isUnset() && !dv->isDeleted())
                             return true;
                     }
                     if (frame.env) {
@@ -4480,19 +4521,20 @@ enter_frame:
                 if (R[I.a].isChar() || R[I.a].isString())
                     throw Error(R[I.a].toString());
                 if (R[I.a].isStruct()) {
-                    std::string msg = R[I.a].hasField("message")
-                                          ? std::string(R[I.a].field("message").toString().as_ref())
-                                          : "User error";
-                    std::string id = R[I.a].hasField("identifier")
-                                         ? std::string(R[I.a].field("identifier").toString().as_ref())
-                                         : "";
+                    keel::String msg = R[I.a].hasField("message")
+                                           ? R[I.a].field("message").toString()
+                                           : keel::String::from("User error");
+                    keel::String id = R[I.a].hasField("identifier")
+                                          ? R[I.a].field("identifier").toString()
+                                          : keel::String{};
                     throw Error(msg, 0, 0, "", "", id);
                 }
                 throw Error("User error");
             }
 
             default:
-                throw std::runtime_error("VM: unimplemented opcode " + std::to_string((int) I.op));
+                throw std::runtime_error(
+                    keel::format("VM: unimplemented opcode {}", (int) I.op).c_str());
 
             } // switch
             ++ip;
@@ -4502,9 +4544,9 @@ enter_frame:
         throw; // pass through — not a user error
     } catch (Error &mle) {
         rollbackLvalDetaches();
-        std::string id = mle.identifier().empty()
-                             ? "numkit:error"
-                             : std::string(mle.identifier().as_ref());
+        keel::String id = mle.identifier().empty()
+                              ? keel::String::from("numkit:error")
+                              : mle.identifier().clone();
         if (dispatchTryCatch(mle.what(), id.c_str()))
             goto enter_frame;
         // Enrich with current instruction's source location if missing
@@ -4521,7 +4563,7 @@ enter_frame:
             // dbstop if error: pause at the failing instruction with frames
             // intact; resumeExecution() rethrows the stored exception later.
             frame.ip = ip;
-            errorPauseMsg_ = mle.what();
+            errorPauseMsg_.assign(mle.what());
             pausedError_ = std::current_exception();
             atErrorPause_ = true;
             return ExecStatus::Paused;
@@ -4533,7 +4575,7 @@ enter_frame:
             goto enter_frame;
         if (stopOnError_ && debugCtl()) {
             frame.ip = ip;
-            errorPauseMsg_ = ex.what();
+            errorPauseMsg_.assign(ex.what());
             pausedError_ = std::current_exception();
             atErrorPause_ = true;
             return ExecStatus::Paused;
@@ -4559,24 +4601,25 @@ enter_frame:
 // would otherwise make syncVMToWorkspace remove() it (cascading into globalsEnv_
 // and clobbering the live value). Global membership is O(1) via a set built once
 // — and skipped entirely when the chunk declares no globals (the common case).
-static void rebuildLocalVarMap(std::vector<std::pair<std::string, Value>> &out,
+static void rebuildLocalVarMap(keel::Array<std::pair<keel::String, Value>> &out,
                                const BytecodeChunk &chunk, const Value *R, keel::u32 nregs)
 {
     out.clear();
     const auto &assigned = chunk.assignedVars;
     if (chunk.globalNames.empty() && chunk.persistentNames.empty()) {
-        for (auto &[name, reg] : chunk.varMap)
-            if (reg < nregs && assigned.count(name))
-                out.push_back({name, readChunkVar(chunk, R, nregs, name, reg)});
+        for (const auto &[name, reg] : chunk.varMap)
+            if (reg < nregs && assigned.contains(name))
+                out.push_back({name.clone(), readChunkVar(chunk, R, nregs, name, reg)});
         return;
     }
-    std::unordered_set<std::string_view> excluded(chunk.globalNames.begin(),
-                                                  chunk.globalNames.end());
+    keel::HashSet<keel::StringRef> excluded;
+    for (const auto &gn : chunk.globalNames)
+        excluded.insert(gn.as_ref());
     for (const auto &pn : chunk.persistentNames)
-        excluded.insert(pn);
-    for (auto &[name, reg] : chunk.varMap)
-        if (reg < nregs && assigned.count(name) && !excluded.count(name))
-            out.push_back({name, readChunkVar(chunk, R, nregs, name, reg)});
+        excluded.insert(pn.as_ref());
+    for (const auto &[name, reg] : chunk.varMap)
+        if (reg < nregs && assigned.contains(name) && !excluded.contains(name.as_ref()))
+            out.push_back({name.clone(), readChunkVar(chunk, R, nregs, name, reg)});
 }
 
 void VM::exportTopLevelVariables()
@@ -4647,7 +4690,7 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
     Value err = Value::structure();
     err.field("message") = Value::fromString(msg, engine_.mr_);
     err.field("identifier") = Value::fromString(identifier, engine_.mr_);
-    frame.R[th.exReg] = std::move(err);
+    frame.R[th.exReg] = keel::move(err);
     frame.ip = th.catchIp;
     return true;
 }
@@ -4655,8 +4698,8 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
 // Derive error context description from the opcode + operands at throw time.
 // This is the VM equivalent of TreeWalker's describeNode() — zero storage overhead,
 // only runs on the error path.
-static std::string describeInstruction(const Instruction &instr,
-                                       const BytecodeChunk &chunk)
+static keel::String describeInstruction(const Instruction &instr,
+                                        const BytecodeChunk &chunk)
 {
     switch (instr.op) {
     // Function calls
@@ -4664,23 +4707,24 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::CALL_MULTI: {
         keel::i32 funcIdx = instr.d;
         if (funcIdx >= 0 && funcIdx < (keel::i32)chunk.strings.size())
-            return "in call to '" + chunk.strings[funcIdx] + "'";
-        return "in function call";
+            return keel::format("in call to '{}'", chunk.strings[funcIdx]);
+        return keel::String::from("in function call");
     }
     case OpCode::CALL_BUILTIN: {
         const char *nm = builtinIdName(instr.d);
-        return nm ? std::string("in call to '") + nm + "'" : "in builtin call";
+        return nm ? keel::format("in call to '{}'", nm)
+                  : keel::String::from("in builtin call");
     }
     case OpCode::CALL_INDIRECT:
     case OpCode::CALL_INDIRECT_FLATTEN:
     case OpCode::CALL_INDIRECT_MULTI:
-        return "in function call";
+        return keel::String::from("in function call");
     case OpCode::CALL_METHOD:
     case OpCode::CALL_METHOD_MULTI: {
         keel::i32 nameIdx = instr.d;
         if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return "in method call '." + chunk.strings[nameIdx] + "'";
-        return "in method call";
+            return keel::format("in method call '.{}'", chunk.strings[nameIdx]);
+        return keel::String::from("in method call");
     }
 
     // Cell indexing
@@ -4692,7 +4736,7 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::CELL_GET_MULTI:
     case OpCode::CELL_GET_ND:
     case OpCode::CELL_SET_ND:
-        return "in cell indexing";
+        return keel::String::from("in cell indexing");
 
     // Field access
     case OpCode::FIELD_GET:
@@ -4700,56 +4744,56 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::FIELD_SET: {
         keel::i32 nameIdx = instr.d;
         if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return "in field access '." + chunk.strings[nameIdx] + "'";
-        return "in field access";
+            return keel::format("in field access '.{}'", chunk.strings[nameIdx]);
+        return keel::String::from("in field access");
     }
     case OpCode::FIELD_GET_DYN:
     case OpCode::FIELD_GET_OR_CREATE_DYN:
     case OpCode::FIELD_SET_DYN:
-        return "in dynamic field access";
+        return keel::String::from("in dynamic field access");
     case OpCode::STRUCT_ELEM_FIELD_SET: {
         keel::i32 nameIdx = instr.d;
         if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return "in struct-array element write '." + chunk.strings[nameIdx] + "'";
-        return "in struct-array element write";
+            return keel::format("in struct-array element write '.{}'", chunk.strings[nameIdx]);
+        return keel::String::from("in struct-array element write");
     }
     case OpCode::STRUCT_ELEM_GET_OR_CREATE:
     case OpCode::STRUCT_ELEM_SET:
-        return "in struct-array element access";
+        return keel::String::from("in struct-array element access");
 
     // Binary operators (base and scalar-specialized variants share text)
-    case OpCode::ADD:  case OpCode::ADD_SS:  return "in operator '+'";
-    case OpCode::SUB:  case OpCode::SUB_SS:  return "in operator '-'";
-    case OpCode::MUL:  case OpCode::MUL_SS:  return "in operator '*'";
-    case OpCode::RDIV: case OpCode::RDIV_SS: return "in operator '/'";
-    case OpCode::LDIV: return "in operator '\'";
-    case OpCode::POW:  case OpCode::POW_SS:  return "in operator '^'";
-    case OpCode::EMUL: return "in operator '.*'";
-    case OpCode::ERDIV:return "in operator './'";
-    case OpCode::ELDIV:return "in operator '.\'";
-    case OpCode::EPOW: return "in operator '.^'";
+    case OpCode::ADD:  case OpCode::ADD_SS:  return keel::String::from("in operator '+'");
+    case OpCode::SUB:  case OpCode::SUB_SS:  return keel::String::from("in operator '-'");
+    case OpCode::MUL:  case OpCode::MUL_SS:  return keel::String::from("in operator '*'");
+    case OpCode::RDIV: case OpCode::RDIV_SS: return keel::String::from("in operator '/'");
+    case OpCode::LDIV: return keel::String::from("in operator '\\'");
+    case OpCode::POW:  case OpCode::POW_SS:  return keel::String::from("in operator '^'");
+    case OpCode::EMUL: return keel::String::from("in operator '.*'");
+    case OpCode::ERDIV:return keel::String::from("in operator './'");
+    case OpCode::ELDIV:return keel::String::from("in operator '.\\'");
+    case OpCode::EPOW: return keel::String::from("in operator '.^'");
 
     // Unary operators
-    case OpCode::NEG:        case OpCode::NEG_S: return "in unary operator '-'";
-    case OpCode::NOT:        return "in unary operator '~'";
+    case OpCode::NEG:        case OpCode::NEG_S: return keel::String::from("in unary operator '-'");
+    case OpCode::NOT:        return keel::String::from("in unary operator '~'");
     case OpCode::CTRANSPOSE:
-    case OpCode::TRANSPOSE:  return "in transpose operator";
+    case OpCode::TRANSPOSE:  return keel::String::from("in transpose operator");
 
     // Colon expressions
     case OpCode::COLON:
     case OpCode::COLON3:
-        return "in colon expression";
+        return keel::String::from("in colon expression");
 
     // Matrix/cell construction
     case OpCode::HORZCAT:
     case OpCode::HORZCAT_APPEND:
     case OpCode::VERTCAT:
     case OpCode::VERTCAT_APPEND:
-        return "in matrix construction";
+        return keel::String::from("in matrix construction");
     case OpCode::CELL_LITERAL:
-        return "in cell construction";
+        return keel::String::from("in cell construction");
     case OpCode::CLOSURE_MAKE:
-        return "in anonymous function creation";
+        return keel::String::from("in anonymous function creation");
 
     // Indexing
     case OpCode::INDEX_GET:
@@ -4761,10 +4805,10 @@ static std::string describeInstruction(const Instruction &instr,
     case OpCode::INDEX_DELETE:
     case OpCode::INDEX_DELETE_2D:
     case OpCode::INDEX_DELETE_ND:
-        return "in array indexing";
+        return keel::String::from("in array indexing");
 
     default:
-        return "";
+        return keel::String{};
     }
 }
 
@@ -4774,12 +4818,12 @@ static std::string describeInstruction(const Instruction &instr,
 {
     keel::usize instrIdx = static_cast<keel::usize>(ip - chunk.code.data());
     if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
-        std::string context = describeInstruction(*ip, chunk);
+        keel::String context = describeInstruction(*ip, chunk);
         throw Error(ex.what(),
-                        chunk.sourceMap[instrIdx].line,
-                        chunk.sourceMap[instrIdx].col,
-                        chunk.name,
-                        context);
+                    chunk.sourceMap[instrIdx].line,
+                    chunk.sourceMap[instrIdx].col,
+                    chunk.name,
+                    context);
     }
     // No source location available — wrap in Error anyway for consistency
     throw Error(ex.what());
@@ -4805,11 +4849,11 @@ Environment *VM::currentCallEnv()
     auto &frame = frames_.back();
     if (!frame.env) {
         if (!envPool_.empty()) {
-            frame.env = std::move(envPool_.back());
+            frame.env = keel::move(envPool_.back());
             envPool_.pop_back();
             frame.env->reset(&engine_.constantsEnv(), engine_.globalsEnv_.get());
         } else {
-            frame.env = std::make_unique<Environment>(
+            frame.env = keel::make_unique<Environment>(
                 &engine_.constantsEnv(),
                 engine_.globalsEnv_.get());
         }
@@ -4823,11 +4867,11 @@ Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
         return f.env ? f.env.get() : (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv());
     if (!f.env) {
         if (!envPool_.empty()) {
-            f.env = std::move(envPool_.back());
+            f.env = keel::move(envPool_.back());
             envPool_.pop_back();
             f.env->reset(&engine_.constantsEnv(), engine_.globalsEnv_.get());
         } else {
-            f.env = std::make_unique<Environment>(
+            f.env = keel::make_unique<Environment>(
                 &engine_.constantsEnv(),
                 engine_.globalsEnv_.get());
         }
@@ -4844,12 +4888,14 @@ Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
         exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, frameRegs,
                                          f.nregs, /*isTopLevel=*/false);
 
-        std::unordered_set<std::string_view> gset(f.chunk->globalNames.begin(),
-                                                  f.chunk->globalNames.end());
-        std::unordered_set<std::string_view> pset(f.chunk->persistentNames.begin(),
-                                                  f.chunk->persistentNames.end());
+        keel::HashSet<keel::StringRef> gset;
+        for (const auto &gn : f.chunk->globalNames)
+            gset.insert(gn.as_ref());
+        keel::HashSet<keel::StringRef> pset;
+        for (const auto &pn : f.chunk->persistentNames)
+            pset.insert(pn.as_ref());
         for (const auto &[vn, reg] : f.chunk->varMap) {
-            if (gset.count(vn) || pset.count(vn))
+            if (gset.contains(vn.as_ref()) || pset.contains(vn.as_ref()))
                 continue;
             if (!whoVisible(engine_, vn, *f.chunk) && vn != "nargin" && vn != "nargout")
                 continue;
@@ -4861,7 +4907,7 @@ Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
         }
     }
     if (f.dynVars) {
-        for (const auto &[dn, dv] : *f.dynVars) {
+        for (auto [dn, dv] : *f.dynVars) {
             if (!dv.isUnset() && !dv.isDeleted())
                 f.env->setLocal(dn, dv);
         }
@@ -4900,7 +4946,7 @@ Environment *VM::callerEnvAtDepth(int n)
     return &engine_.workspaceEnv();
 }
 
-void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
+void VM::assignInCallerFrame(int n, keel::StringRef name, const Value &val)
 {
     if (n < 0) n = 0;
     int seen = 0;
@@ -4911,8 +4957,8 @@ void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
         if (seen == n) {
             if (f.chunk) {
                 for (const auto &entry : f.chunk->varMap) {
-                    if (entry.first == name && entry.second < f.nregs) {
-                        writeChunkVar(*f.chunk, f.R, f.nregs, entry.first, entry.second, val);
+                    if (entry.name == name && entry.reg < f.nregs) {
+                        writeChunkVar(*f.chunk, f.R, f.nregs, entry.name, entry.reg, val);
                         break;
                     }
                 }
@@ -4934,8 +4980,8 @@ void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
                 if (f.chunk && f.regBase + f.nregs <= ps->regSnapshot.size()) {
                     Value *psR = &ps->regSnapshot[f.regBase];
                     for (const auto &entry : f.chunk->varMap) {
-                        if (entry.first == name && entry.second < f.nregs) {
-                            writeChunkVar(*f.chunk, psR, f.nregs, entry.first, entry.second, val);
+                        if (entry.name == name && entry.reg < f.nregs) {
+                            writeChunkVar(*f.chunk, psR, f.nregs, entry.name, entry.reg, val);
                             break;
                         }
                     }
@@ -4951,7 +4997,7 @@ void VM::assignInCallerFrame(int n, const std::string &name, const Value &val)
     writeToFrameMatchingEnv(&engine_.workspaceEnv(), name, val);
 }
 
-void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
+void VM::writeToFrameMatchingEnv(Environment *env, keel::StringRef name,
                                  const Value &val)
 {
     if (!env) return;
@@ -4964,14 +5010,14 @@ void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
         if (fEnv != env) continue;
         if (f.chunk) {
             for (const auto &entry : f.chunk->varMap) {
-                if (entry.first == name && entry.second < f.nregs) {
-                    writeChunkVar(*f.chunk, f.R, f.nregs, entry.first, entry.second, val);
+                if (entry.name == name && entry.reg < f.nregs) {
+                    writeChunkVar(*f.chunk, f.R, f.nregs, entry.name, entry.reg, val);
                     break;
                 }
             }
         }
         if (f.dynVars)
-            (*f.dynVars)[name] = val;
+            f.dynVars->put(keel::String::from(name), val);
     }
     for (keel::usize psi = activePausedStates_.size(); psi-- > 0;) {
         PausedState *ps = activePausedStates_[psi];
@@ -4984,14 +5030,14 @@ void VM::writeToFrameMatchingEnv(Environment *env, const std::string &name,
             if (f.chunk && f.regBase + f.nregs <= ps->regSnapshot.size()) {
                 Value *psR = &ps->regSnapshot[f.regBase];
                 for (const auto &entry : f.chunk->varMap) {
-                    if (entry.first == name && entry.second < f.nregs) {
-                        writeChunkVar(*f.chunk, psR, f.nregs, entry.first, entry.second, val);
+                    if (entry.name == name && entry.reg < f.nregs) {
+                        writeChunkVar(*f.chunk, psR, f.nregs, entry.name, entry.reg, val);
                         break;
                     }
                 }
             }
             if (f.dynVars)
-                (*f.dynVars)[name] = val;
+                f.dynVars->put(keel::String::from(name), val);
         }
     }
 }
@@ -5033,7 +5079,7 @@ void VM::syncEnvRemovalsToFrame(Environment *env)
         if (!f.chunk || !regs) return;
         for (const auto &[vn, reg] : f.chunk->varMap) {
             if (reg >= f.nregs) continue;
-            if (engine_.isReservedName(vn) && !f.chunk->assignedVars.count(vn))
+            if (engine_.isReservedName(vn) && !f.chunk->assignedVars.contains(vn))
                 continue;
             if (vn == "nargin" || vn == "nargout")
                 continue;
@@ -5047,13 +5093,14 @@ void VM::syncEnvRemovalsToFrame(Environment *env)
             }
         }
         if (f.dynVars) {
-            for (auto it = f.dynVars->begin(); it != f.dynVars->end();) {
-                if (env->getLocal(it->first) == nullptr && !env->isGlobal(it->first)
-                    && !env->isPersistent(it->first))
-                    it = f.dynVars->erase(it);
-                else
-                    ++it;
+            keel::Array<keel::String> toRemove;
+            for (auto [dk, dv] : *f.dynVars) {
+                if (env->getLocal(dk) == nullptr && !env->isGlobal(dk)
+                    && !env->isPersistent(dk))
+                    toRemove.push_back(dk.clone());
             }
+            for (const auto &dk : toRemove)
+                f.dynVars->remove(dk);
         }
     };
     for (keel::usize fi = frames_.size(); fi-- > 0;) {
@@ -5083,14 +5130,14 @@ void VM::flushWorkspaceFrame()
     auto flushOne = [&](const CallFrame &f, const Value *regs, Environment &ws) {
         if (!f.chunk || !regs || f.env) return;
         for (const auto &entry : f.chunk->varMap) {
-            if (entry.second < f.nregs) {
-                if (!whoVisible(engine_, entry.first, *f.chunk))
+            if (entry.reg < f.nregs) {
+                if (!whoVisible(engine_, entry.name, *f.chunk))
                     continue;
-                Value v = readChunkVar(*f.chunk, regs, f.nregs, entry.first, entry.second);
+                Value v = readChunkVar(*f.chunk, regs, f.nregs, entry.name, entry.reg);
                 if (!v.isUnset() && !v.isDeleted())
-                    ws.set(entry.first, std::move(v));
+                    ws.set(entry.name, keel::move(v));
                 else if (v.isDeleted())
-                    ws.remove(entry.first);
+                    ws.remove(entry.name);
             }
         }
         exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, regs, f.nregs,
@@ -5108,9 +5155,9 @@ void VM::flushWorkspaceFrame()
     }
 }
 
-std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameEnv)
+keel::HashMap<keel::String, Value> VM::snapshotFrameVars(Environment *frameEnv)
 {
-    std::unordered_map<std::string, Value> out;
+    keel::HashMap<keel::String, Value> out;
     if (!frameEnv) return out;
     const CallFrame *match = nullptr;
     const Value *matchRegs = nullptr;
@@ -5140,16 +5187,16 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
     }
     if (match && match->chunk && matchRegs) {
         for (const auto &entry : match->chunk->varMap) {
-            if (entry.second < match->nregs) {
-                Value v = readChunkVar(*match->chunk, matchRegs, match->nregs, entry.first, entry.second);
+            if (entry.reg < match->nregs) {
+                Value v = readChunkVar(*match->chunk, matchRegs, match->nregs, entry.name, entry.reg);
                 if (!v.isUnset() && !v.isDeleted())
-                    out.emplace(entry.first, std::move(v));
+                    out.try_insert(entry.name.clone(), keel::move(v));
             }
         }
         if (match->dynVars) {
-            for (const auto &kv : *match->dynVars) {
-                if (!kv.second.isUnset() && !kv.second.isDeleted())
-                    out[kv.first] = kv.second;
+            for (auto [dk, dv] : *match->dynVars) {
+                if (!dv.isUnset() && !dv.isDeleted())
+                    out.put(dk.clone(), dv);
             }
         }
     }
@@ -5159,7 +5206,7 @@ std::unordered_map<std::string, Value> VM::snapshotFrameVars(Environment *frameE
 void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::usize nargs,
                        keel::u16 destReg, keel::usize nargout,
                        bool isMulti, keel::u16 outBase, keel::u16 nout,
-                       const std::string &ownerClass, bool isCtor,
+                       keel::StringRef ownerClass, bool isCtor,
                        const Value *ctorSeed)
 {
     if (callDepth() >= maxRecursion_)
@@ -5173,7 +5220,8 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     const bool va = !funcChunk.paramNames.empty()
                     && funcChunk.paramNames.back() == "varargin";
     if (!va && userNargs > static_cast<keel::usize>(funcChunk.numParams))
-        throw std::runtime_error("Too many input arguments for function '" + funcChunk.name + "'");
+        throw std::runtime_error(
+            keel::format("Too many input arguments for function '{}'", funcChunk.name).c_str());
 
     keel::u32 nregs = funcChunk.numRegisters;
     keel::usize pc = std::min(userNargs, static_cast<keel::usize>(funcChunk.numParams));
@@ -5182,13 +5230,13 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     // since `args` or `ctorSeed` may point into caller registers inside regStack_.
     // Use stack buffers for common arities to avoid heap allocation per call.
     Value smallArgs[16];
-    std::vector<Value> bigArgs;
+    keel::Array<Value> bigArgs;
     Value *argsPtr = (pc <= 16) ? smallArgs : (bigArgs.resize(pc), bigArgs.data());
     for (keel::usize i = 0; i < pc; ++i)
         argsPtr[i] = args[i];
 
     Value smallUpvals[8];
-    std::vector<Value> bigUpvals;
+    keel::Array<Value> bigUpvals;
     Value *upvalsPtr = (nUpvals <= 8) ? smallUpvals : (bigUpvals.resize(nUpvals), bigUpvals.data());
     if (nUpvals > 0 && nargs >= nUpvals) {
         for (keel::usize i = 0; i < nUpvals; ++i)
@@ -5220,19 +5268,19 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     for (keel::usize i = 0; i < nUpvals; ++i) {
         keel::u16 uvReg = funcChunk.upvalueParamRegs[i];
         if (uvReg < nregs)
-            newR[uvReg] = std::move(upvalsPtr[i]);
+            newR[uvReg] = keel::move(upvalsPtr[i]);
     }
 
     for (keel::usize i = 0; i < pc; ++i)
-        newR[i] = std::move(argsPtr[i]);
+        newR[i] = keel::move(argsPtr[i]);
 
     if (va) {
         if (funcChunk.vararginReg < nregs) {
-            newR[funcChunk.vararginReg] = std::move(vaCell);
+            newR[funcChunk.vararginReg] = keel::move(vaCell);
         } else {
-            for (auto &[vname, reg] : funcChunk.varMap)
+            for (const auto &[vname, reg] : funcChunk.varMap)
                 if (vname == "varargin" && reg < nregs) {
-                    newR[reg] = std::move(vaCell);
+                    newR[reg] = keel::move(vaCell);
                     break;
                 }
         }
@@ -5244,7 +5292,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     if (funcChunk.nargoutReg < nregs)
         newR[funcChunk.nargoutReg] = Value::scalar(static_cast<double>(nargout), nullptr);
     if (funcChunk.narginReg == kInvalidReg && funcChunk.nargoutReg == kInvalidReg) {
-        for (auto &[vname, reg] : funcChunk.varMap) {
+        for (const auto &[vname, reg] : funcChunk.varMap) {
             if (vname == "nargin" && reg < nregs)
                 newR[reg] = Value::scalar(static_cast<double>(userNargs), nullptr);
             else if (vname == "nargout" && reg < nregs)
@@ -5254,12 +5302,12 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
 
     if (hasSeed) {
         if (funcChunk.firstReturnReg < nregs) {
-            newR[funcChunk.firstReturnReg] = std::move(seedCopy);
+            newR[funcChunk.firstReturnReg] = keel::move(seedCopy);
         } else {
-            const std::string &rn = funcChunk.returnNames[0];
-            for (auto &[vname, reg] : funcChunk.varMap)
+            const keel::String &rn = funcChunk.returnNames[0];
+            for (const auto &[vname, reg] : funcChunk.varMap)
                 if (vname == rn && reg < nregs) {
-                    newR[reg] = std::move(seedCopy);
+                    newR[reg] = keel::move(seedCopy);
                     break;
                 }
         }
@@ -5281,17 +5329,16 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     }
 
     // Pre-compute caller's CALL-site arg names only when callee may inspect inputname(k).
-    std::vector<std::string> callerArgNames;
+    keel::Array<keel::String> callerArgNames;
     if (funcChunk.mayUseInputname && !frames_.empty()) {
         const auto &callerFrame = frames_.back();
         if (callerFrame.chunk && callerFrame.ip
             && callerFrame.ip > callerFrame.chunk->code.data()) {
             keel::usize callIdx = static_cast<keel::usize>(
                 (callerFrame.ip - 1) - callerFrame.chunk->code.data());
-            auto it = callerFrame.chunk->callSiteArgNames.find(
-                static_cast<keel::u32>(callIdx));
-            if (it != callerFrame.chunk->callSiteArgNames.end())
-                callerArgNames = it->second;
+            if (const auto *argNames = callerFrame.chunk->callSiteArgNames.get(
+                    static_cast<keel::u32>(callIdx)))
+                callerArgNames = argNames->clone();
         }
     }
 
@@ -5319,11 +5366,11 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     cf.isMultiReturn = isMulti;
     cf.outBase = outBase;
     cf.nout = nout;
-    cf.ownerClass = ownerClass;
+    cf.ownerClass = keel::String::from(ownerClass);
     cf.isCtor = isCtor;
     cf.originDepth = originDepth;
-    cf.callerArgNames = std::move(callerArgNames);
-    frames_.push_back(std::move(cf));
+    cf.callerArgNames = keel::move(callerArgNames);
+    frames_.push_back(keel::move(cf));
 
     regStackTop_ += nregs;
     R_ = newR;
@@ -5331,10 +5378,10 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     // Push debug frame
     if (auto *ctl = debugCtl()) {
         StackFrame sf;
-        sf.functionName = funcChunk.name;
+        sf.functionName = funcChunk.name.clone();
         sf.chunk = &funcChunk;
         sf.registers = newR;
-        ctl->pushFrame(std::move(sf));
+        ctl->pushFrame(keel::move(sf));
     }
 }
 
@@ -5345,7 +5392,7 @@ void VM::popCallFrame(Value retVal)
     // State-machine callback: detach the continuation so we can route this
     // frame's result into it (instead of a caller register) after the frame's
     // bookkeeping is unwound below.
-    std::shared_ptr<VmContinuation> cont = std::move(frame.cont);
+    keel::Arc<VmContinuation> cont = keel::move(frame.cont);
     // Captured before pop_back invalidates the reference.
     const keel::usize originDepth = frame.originDepth;
 
@@ -5380,7 +5427,7 @@ void VM::popCallFrame(Value retVal)
 
     if (frame.env && !isScriptFrame && envPool_.size() < 32) {
         frame.env->reset(nullptr, nullptr);
-        envPool_.push_back(std::move(frame.env));
+        envPool_.push_back(keel::move(frame.env));
     }
 
     // Restore stack pointers
@@ -5416,55 +5463,56 @@ void VM::popCallFrame(Value retVal)
             }
             if (!returnBuf_.empty()) {
                 for (keel::usize i = 0; i < nout && i < returnBuf_.size(); ++i)
-                    caller.R[outBase + i] = std::move(returnBuf_[i]);
+                    caller.R[outBase + i] = keel::move(returnBuf_[i]);
                 returnBuf_.clear();
             } else {
-                caller.R[outBase] = std::move(retVal);
+                caller.R[outBase] = keel::move(retVal);
                 for (keel::usize i = 1; i < nout; ++i)
                     caller.R[outBase + i] = Value();
             }
         } else {
-            caller.R[destReg] = std::move(retVal);
+            caller.R[destReg] = keel::move(retVal);
             returnBuf_.clear();
         }
     } else {
         R_ = nullptr;
-        lastResult_ = std::move(retVal);
+        lastResult_ = keel::move(retVal);
     }
 }
 
-bool VM::startContinuation(std::shared_ptr<VmContinuation> cont)
+bool VM::startContinuation(keel::Arc<VmContinuation> cont)
 {
     // First step: no prior callback result yet.
     return cont->step(*this, nullptr, cont);
 }
 
 bool VM::pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout,
-                           std::shared_ptr<VmContinuation> cont)
+                           keel::Arc<VmContinuation> cont)
 {
     // Unwrap a closure cell {handle, captures…}: captures append to the args,
     // matching the [user_params…, captures…] chunk parameter layout (same as
     // callFunctionHandleMulti).
     if (!handle.isFuncHandle())
         return false;
-    std::vector<Value> withCaptures;
+    keel::Array<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
         const keel::usize ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
-        withCaptures.assign(args.begin(), args.end());
+        for (const auto &a : args)
+            withCaptures.push_back(a);
         for (keel::usize i = 0; i < ncaps; ++i)
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    std::string fhName(handle.funcHandleName().as_ref());
+    keel::String fhName = keel::String::from(handle.funcHandleName());
     const UserFunction *uf = engine_.lookupUserFunctionLocal(fhName);
     if (!uf)
         uf = engine_.lookupUserFunction(fhName, currentCallEnv());
     if (!uf) {
         if (const BytecodeChunk *fc = findCompiledFunc(fhName)) {
             pushCallFrame(*fc, args.data(), args.size(), /*destReg=*/0, nargout,
-                          /*isMulti=*/false, 0, 0, std::string(), /*isCtor=*/false, /*ctorSeed=*/nullptr);
-            frames_.back().cont = std::move(cont);
+                          /*isMulti=*/false, 0, 0, keel::StringRef{}, /*isCtor=*/false, /*ctorSeed=*/nullptr);
+            frames_.back().cont = keel::move(cont);
             return true;
         }
         return false; // not user code — caller must use the synchronous path
@@ -5473,27 +5521,27 @@ bool VM::pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel
     if (!cc)
         return false;
     pushCallFrame(*cc, args.data(), args.size(), /*destReg=*/0, nargout,
-                  /*isMulti=*/false, 0, 0, std::string(), /*isCtor=*/false, /*ctorSeed=*/nullptr);
-    frames_.back().cont = std::move(cont);
+                  /*isMulti=*/false, 0, 0, keel::StringRef{}, /*isCtor=*/false, /*ctorSeed=*/nullptr);
+    frames_.back().cont = keel::move(cont);
     return true;
 }
 
 bool LoopContinuation::step(VM &vm, Value *prevResult,
-                            const std::shared_ptr<VmContinuation> &self)
+                            const keel::Arc<VmContinuation> &self)
 {
     if (prevResult) {
-        results.push_back(std::move(*prevResult));
+        results.push_back(keel::move(*prevResult));
         ++i;
     }
     if (i >= n) {
         *dest = pack ? pack(results) : Value();
         return false; // finished — output written
     }
-    std::vector<Value> a = makeArgs(i);
+    keel::Array<Value> a = makeArgs(i);
     return vm.pushCallbackFrame(handle, keel::ArrayRef<Value>(a.data(), a.size()), 1, self);
 }
 
-void VM::setFrameDynVars(std::unordered_map<std::string, Value> *dv)
+void VM::setFrameDynVars(keel::HashMap<keel::String, Value> *dv)
 {
     if (!frames_.empty())
         frames_.back().dynVars = dv;
@@ -5604,9 +5652,8 @@ Value VM::binarySlowPath(OpCode op, const Value &lhs, const Value &rhs)
             return out;
     }
     if (opStr) {
-        auto it = engine_.binaryOps_.find(opStr);
-        if (it != engine_.binaryOps_.end())
-            return it->second(lhs, rhs);
+        if (const auto *fn = engine_.binaryOps_.get(opStr))
+            return (*fn)(lhs, rhs);
     }
     throw std::runtime_error("VM: unsupported binary op");
 }
@@ -5621,9 +5668,8 @@ Value VM::unarySlowPath(OpCode op, const Value &operand)
             return out;
     }
     if (opStr) {
-        auto it = engine_.unaryOps_.find(opStr);
-        if (it != engine_.unaryOps_.end())
-            return it->second(operand);
+        if (const auto *fn = engine_.unaryOps_.get(opStr))
+            return (*fn)(operand);
     }
     throw std::runtime_error("VM: unsupported unary op");
 }
@@ -5637,7 +5683,7 @@ bool VM::tryBinaryOpFrame(keel::u16 dst, OpCode op, keel::u16 lhsReg, keel::u16 
     const char *opStr = binaryOpString(op);
     if (!opStr)
         return false;
-    std::string ownerClass;
+    keel::String ownerClass;
     const BytecodeChunk *cc =
         engine_.resolveBinaryOpChunk(opStr, R[lhsReg], R[rhsReg], ownerClass);
     if (!cc)
@@ -5657,7 +5703,7 @@ bool VM::tryUnaryOpFrame(keel::u16 dst, OpCode op, keel::u16 operandReg,
     const char *opStr = unaryOpString(op);
     if (!opStr)
         return false;
-    std::string ownerClass;
+    keel::String ownerClass;
     const BytecodeChunk *cc = engine_.resolveUnaryOpChunk(opStr, R[operandReg], ownerClass);
     if (!cc)
         return false;
@@ -5681,8 +5727,8 @@ bool VM::tryObjectSubsrefFrameObj(const Value &self, keel::u16 dst, keel::ArrayR
 {
     if (!self.isObject())
         return false;
-    std::string ownerClass;
-    std::vector<Value> args;
+    keel::String ownerClass;
+    keel::Array<Value> args;
     const BytecodeChunk *cc = engine_.resolveSubsrefChunk(self, idx, ownerClass, args);
     if (!cc)
         return false;
@@ -5698,8 +5744,8 @@ bool VM::tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVa
     Value *R = frame.R;
     if (!R[objReg].isObject())
         return false;
-    std::string ownerClass;
-    std::vector<Value> args;
+    keel::String ownerClass;
+    keel::Array<Value> args;
     const BytecodeChunk *cc = engine_.resolveSubsasgnChunk(R[objReg], idxAndVal, ownerClass, args);
     if (!cc)
         return false;
@@ -5860,7 +5906,8 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         // (A known variable `obj(i)` compiles to CALL_INDIRECT, so the
         // object subsref hook is needed here too, not just in INDEX_GET.)
         {
-            std::vector<Value> idx(na);
+            keel::Array<Value> idx;
+            idx.resize(na);
             for (keel::usize i = 0; i < na; ++i)
                 idx[i] = AB[i];
             // classdef subsref → same-stack VM frame (pausable, P4e). Returns
@@ -5872,7 +5919,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
             Value out;
             if (engine_.tryObjectSubsref(const_cast<Value&>(target), keel::ArrayRef<Value>(idx.data(), na), 1,
                                          out, currentCallEnv())) {
-                R[dstReg] = std::move(out);
+                R[dstReg] = keel::move(out);
                 return false;
             }
         }
@@ -5889,9 +5936,12 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
                                    engine_.mr_);
         } else {
             const int nd = static_cast<int>(na);
-            std::vector<keel::Array<keel::usize>> lists(nd);
-            std::vector<const keel::usize *> ptrs(nd);
-            std::vector<keel::usize> counts(nd);
+            keel::Array<keel::Array<keel::usize>> lists;
+            lists.resize(nd);
+            keel::Array<const keel::usize *> ptrs;
+            ptrs.resize(nd);
+            keel::Array<keel::usize> counts;
+            counts.resize(nd);
             for (int i = 0; i < nd; ++i) {
                 const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
                 lists[i] = Value::resolveIndices(AB[i], lim);
@@ -5907,11 +5957,12 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         return false;
     }
 
-    std::string funcName(funcHandleVal.funcHandleName().as_ref());
+    keel::String funcName = keel::String::from(funcHandleVal.funcHandleName());
 
     // Build args: user args + captured values
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
-    std::vector<Value> argsBuf(totalArgsN);
+    keel::Array<Value> argsBuf;
+    argsBuf.resize(totalArgsN);
     for (keel::usize i = 0; i < na; ++i)
         argsBuf[i] = AB[i];
     for (keel::usize i = 0; i < numCaptures; ++i)
@@ -5926,14 +5977,13 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
     }
 
     // External function
-    auto extIt = engine_.externalFuncs_.find(funcName);
-    if (extIt != engine_.externalFuncs_.end()) {
+    if (const ExternalFunc *extFn = engine_.externalFuncs_.get(funcName)) {
         keel::ArrayRef<Value> as(argsBuf.data(), na);
         Value ob[1];
         keel::MutArrayRef<Value> os(ob, 1);
         CallContext ctx{&engine_, currentCallEnv()};
-        extIt->second(as, 1, os, ctx);
-        R[dstReg] = std::move(ob[0]);
+        (*extFn)(as, 1, os, ctx);
+        R[dstReg] = keel::move(ob[0]);
         return false;
     }
 
@@ -5948,7 +5998,8 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
         return true;
     }
-    throw std::runtime_error("VM: undefined function in handle '@" + funcName + "'");
+    throw std::runtime_error(
+        keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
 }
 
 bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
@@ -5968,15 +6019,17 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     } else if (R[fhReg].isObject()) {
         const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassName());
         if (cls && cls->subsref) {
-            std::vector<Value> argsBuf(na);
+            keel::Array<Value> argsBuf;
+            argsBuf.resize(na);
             for (keel::usize i = 0; i < na; ++i)
                 argsBuf[i] = R[argBase + i];
-            std::vector<Value> outBuf(nout);
+            keel::Array<Value> outBuf;
+            outBuf.resize(nout);
             CallContext ctx{&engine_, currentCallEnv()};
             cls->subsref(R[fhReg], keel::ArrayRef<Value>(argsBuf.data(), na), nout,
                          keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
             for (keel::usize i = 0; i < nout; ++i)
-                R[outBase + i] = std::move(outBuf[i]);
+                R[outBase + i] = keel::move(outBuf[i]);
             return false;
         }
         throw std::runtime_error(
@@ -5988,11 +6041,12 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
             "function handle");
     }
 
-    std::string funcName(funcHandleVal.funcHandleName().as_ref());
+    keel::String funcName = keel::String::from(funcHandleVal.funcHandleName());
 
     // Build args: user args followed by captured values.
     keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
-    std::vector<Value> argsBuf(totalArgsN);
+    keel::Array<Value> argsBuf;
+    argsBuf.resize(totalArgsN);
     for (keel::usize i = 0; i < na; ++i)
         argsBuf[i] = R[argBase + i];
     for (keel::usize i = 0; i < numCaptures; ++i)
@@ -6012,7 +6066,8 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     // External (builtin) function called for several outputs.
     const ExternalFunc *fnPtr = engine_.findExternal(funcName, currentCallEnv());
     if (fnPtr) {
-        std::vector<Value> outBuf(nout);
+        keel::Array<Value> outBuf;
+        outBuf.resize(nout);
         keel::ArrayRef<Value> as(argsBuf.data(), totalArgs);
         keel::MutArrayRef<Value> os(outBuf.data(), nout);
         CallContext ctx{&engine_, currentCallEnv()};
@@ -6021,7 +6076,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
             if (outBuf[i].isUnset())
                 throw std::runtime_error("Too many output arguments.");
         for (keel::usize i = 0; i < nout; ++i)
-            R[outBase + i] = std::move(outBuf[i]);
+            R[outBase + i] = keel::move(outBuf[i]);
         return false;
     }
 
@@ -6035,7 +6090,8 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
                       0, nout, true, outBase, nout);
         return true;
     }
-    throw std::runtime_error("VM: undefined function in handle '@" + funcName + "'");
+    throw std::runtime_error(
+        keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
 }
 
 void VM::execIndirectIndex(const Instruction &I, Value *R)
@@ -6073,7 +6129,7 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
                     keel::usize es = elementSize(t);
                     std::memcpy(res.rawDataMut(), mv.rawData(), n * es);
                 }
-                R[dstReg] = numkit::narrowComplex(std::move(res), engine_.mr_);  // z(:) all-real -> real
+                R[dstReg] = numkit::narrowComplex(keel::move(res), engine_.mr_);  // z(:) all-real -> real
             }
         } else if (mv.isScalar() && ix.isDoubleScalar()) {
             checkedIndex(ix.scalarVal(), 1);
@@ -6100,7 +6156,7 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
                 if (res.dims().rows() != ix.dims().rows() || res.dims().cols() != ix.dims().cols())
                     res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
             }
-            R[dstReg] = std::move(res);
+            R[dstReg] = keel::move(res);
         }
     } else if (na == 2) {
         const Value &ri = AB[0];
@@ -6131,9 +6187,12 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
     } else {
         // ND indexing fallback for na >= 4. CELL handled by indexGetND.
         const int nd = static_cast<int>(na);
-        std::vector<keel::Array<keel::usize>> idxLists(nd);
-        std::vector<const keel::usize *> idxPtrs(nd);
-        std::vector<keel::usize> idxCounts(nd);
+        keel::Array<keel::Array<keel::usize>> idxLists;
+        idxLists.resize(nd);
+        keel::Array<const keel::usize *> idxPtrs;
+        idxPtrs.resize(nd);
+        keel::Array<keel::usize> idxCounts;
+        idxCounts.resize(nd);
         for (int i = 0; i < nd; ++i) {
             const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
             idxLists[i] = Value::resolveIndices(AB[i], lim);
@@ -6148,7 +6207,7 @@ void VM::execDisplay(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 {
     if (R[I.a].isUnset())
         return;
-    const std::string &name = chunk.strings[I.d];
+    const keel::String &name = chunk.strings[I.d];
     if (R[I.a].isCsl()) {
         for (keel::usize k = 0; k < R[I.a].cslCount(); ++k) {
             const Value &elem = R[I.a].cslAt(k);
@@ -6170,15 +6229,15 @@ void VM::execDisplay(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 
 void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 {
-    std::unordered_set<std::string> seen;
-    std::vector<std::string> names;
-    auto addName = [&](const std::string &nm) {
-        if (seen.insert(nm).second)
-            names.push_back(nm);
+    keel::HashSet<keel::String> seen;
+    keel::Array<keel::String> names;
+    auto addName = [&](keel::StringRef nm) {
+        if (seen.insert(keel::String::from(nm)))
+            names.push_back(keel::String::from(nm));
     };
     const CallFrame *curFrame = frames_.empty() ? nullptr : &frames_.back();
     if (I.b == 0) {
-        for (auto &[vn, reg] : chunk.varMap) {
+        for (const auto &[vn, reg] : chunk.varMap) {
             if (reg < chunk.numRegisters && whoVisible(engine_, vn, chunk)) {
                 Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
                 if (!rv.isUnset() && !rv.isDeleted())
@@ -6186,7 +6245,7 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
             }
         }
         if (curFrame && curFrame->dynVars) {
-            for (const auto &[dn, dv] : *curFrame->dynVars)
+            for (auto [dn, dv] : *curFrame->dynVars)
                 if (!dv.isUnset() && !dv.isDeleted() && dn != "nargin" && dn != "nargout")
                     addName(dn);
         }
@@ -6197,9 +6256,9 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            std::string reqName(R[I.a + i].toString().as_ref());
+            keel::String reqName = R[I.a + i].toString();
             bool found = false;
-            for (auto &[vn, reg] : chunk.varMap) {
+            for (const auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {
                     Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
                     if (!rv.isUnset() && !rv.isDeleted()) {
@@ -6211,8 +6270,8 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
             }
             if (!found && curFrame) {
                 if (curFrame->dynVars) {
-                    auto it = curFrame->dynVars->find(reqName);
-                    if (it != curFrame->dynVars->end() && !it->second.isUnset() && !it->second.isDeleted()) {
+                    if (const Value *dv = curFrame->dynVars->get(reqName);
+                        dv && !dv->isUnset() && !dv->isDeleted()) {
                         addName(reqName);
                         found = true;
                     }
@@ -6224,53 +6283,52 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
     }
     std::sort(names.begin(), names.end());
     if (!names.empty()) {
-        std::ostringstream os;
-        os << "\nYour variables are:\n\n";
-        for (auto &n : names)
-            os << n << "  ";
-        os << "\n\n";
-        if (engine_.outputFunc_)
-            engine_.outputFunc_(os.str());
-        else
-            std::cout << os.str();
+        keel::String os;
+        os.append("\nYour variables are:\n\n");
+        for (const auto &n : names) {
+            os.append(n);
+            os.append("  ");
+        }
+        os.append("\n\n");
+        engine_.outputText(os);
     }
 }
 
 void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
 {
-    std::unordered_map<std::string, Value> liveVals;
+    keel::HashMap<keel::String, Value> liveVals;
     const CallFrame *curFrame = frames_.empty() ? nullptr : &frames_.back();
     if (I.b == 0) {
-        for (auto &[vn, reg] : chunk.varMap) {
+        for (const auto &[vn, reg] : chunk.varMap) {
             if (reg < chunk.numRegisters && whoVisible(engine_, vn, chunk)) {
                 Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
                 if (!rv.isUnset() && !rv.isDeleted())
-                    liveVals[vn] = std::move(rv);
+                    liveVals.put(vn.clone(), keel::move(rv));
             }
         }
         if (curFrame && curFrame->dynVars) {
-            for (const auto &[dn, dv] : *curFrame->dynVars)
+            for (auto [dn, dv] : *curFrame->dynVars)
                 if (!dv.isUnset() && !dv.isDeleted() && dn != "nargin" && dn != "nargout")
-                    liveVals[dn] = dv;
+                    liveVals.put(dn.clone(), dv);
         }
         if (curFrame && curFrame->env) {
             for (const auto &dn : curFrame->env->localNames()) {
                 if (dn != "nargin" && dn != "nargout") {
                     if (const Value *lv = curFrame->env->getLocal(dn);
                         lv && !lv->isUnset() && !lv->isDeleted())
-                        liveVals[dn] = *lv;
+                        liveVals.put(dn.clone(), *lv);
                 }
             }
         }
     } else {
         for (keel::u16 i = 0; i < I.b; ++i) {
-            std::string reqName(R[I.a + i].toString().as_ref());
+            keel::String reqName = R[I.a + i].toString();
             bool found = false;
-            for (auto &[vn, reg] : chunk.varMap) {
+            for (const auto &[vn, reg] : chunk.varMap) {
                 if (vn == reqName && reg < chunk.numRegisters) {
                     Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
                     if (!rv.isUnset() && !rv.isDeleted()) {
-                        liveVals[vn] = std::move(rv);
+                        liveVals.put(vn.clone(), keel::move(rv));
                         found = true;
                     }
                     break;
@@ -6278,65 +6336,69 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
             }
             if (!found && curFrame) {
                 if (curFrame->dynVars) {
-                    auto it = curFrame->dynVars->find(reqName);
-                    if (it != curFrame->dynVars->end() && !it->second.isUnset() && !it->second.isDeleted()) {
-                        liveVals[reqName] = it->second;
+                    if (const Value *dv = curFrame->dynVars->get(reqName);
+                        dv && !dv->isUnset() && !dv->isDeleted()) {
+                        liveVals.put(reqName.clone(), *dv);
                         found = true;
                     }
                 }
                 if (!found && curFrame->env) {
                     if (const Value *lv = curFrame->env->getLocal(reqName);
                         lv && !lv->isUnset() && !lv->isDeleted())
-                        liveVals[reqName] = *lv;
+                        liveVals.put(reqName.clone(), *lv);
                 }
             }
         }
     }
-    std::vector<std::string> names;
+    keel::Array<keel::String> names;
     names.reserve(liveVals.size());
-    for (const auto &[k, _] : liveVals)
-        names.push_back(k);
+    for (auto [k, _] : liveVals)
+        names.push_back(k.clone());
     std::sort(names.begin(), names.end());
-    std::unordered_set<std::string> globalSet(chunk.globalNames.begin(),
-                                              chunk.globalNames.end());
-    std::unordered_set<std::string> persistentSet(chunk.persistentNames.begin(),
-                                                  chunk.persistentNames.end());
+    keel::HashSet<keel::StringRef> globalSet;
+    for (const auto &gn : chunk.globalNames)
+        globalSet.insert(gn.as_ref());
+    keel::HashSet<keel::StringRef> persistentSet;
+    for (const auto &pn : chunk.persistentNames)
+        persistentSet.insert(pn.as_ref());
     if (!names.empty()) {
-        std::ostringstream os;
-        os << "  Name" << std::string(6, ' ') << "Size" << std::string(13, ' ')
-           << "Bytes  Class" << std::string(5, ' ') << "Attributes\n\n";
-        for (auto &n : names) {
-            const Value &val = liveVals.at(n);
+        keel::String os;
+        os.append("  Name      Size             Bytes  Class     Attributes\n\n");
+        for (const auto &n : names) {
+            const Value *valPtr = liveVals.get(n);
+            if (!valPtr)
+                continue;
+            const Value &val = *valPtr;
             auto &d = val.dims();
-            std::string sizeStr = std::to_string(d.rows()) + "x"
-                                  + std::to_string(d.cols());
-            if (d.is3D())
-                sizeStr += "x" + std::to_string(d.pages());
-            std::string bytesStr = std::to_string(val.deepBytes());
-            std::string classStr = mtypeName(val.type());
-            std::string attrStr;
-            if (globalSet.count(n))
+            keel::String sizeStr = d.is3D()
+                                       ? keel::format("{}x{}x{}", d.rows(), d.cols(), d.pages())
+                                       : keel::format("{}x{}", d.rows(), d.cols());
+            keel::String bytesStr = keel::format("{}", val.deepBytes());
+            keel::StringRef classStr = mtypeName(val.type());
+            keel::StringRef attrStr;
+            if (globalSet.contains(n.as_ref()))
                 attrStr = "global";
-            else if (persistentSet.count(n))
+            else if (persistentSet.contains(n.as_ref()))
                 attrStr = "persistent";
-            os << "  " << n;
+            os.append("  ");
+            os.append(n);
             for (keel::usize i = n.size(); i < 10; ++i)
-                os << " ";
-            os << sizeStr;
+                os.push_back(' ');
+            os.append(sizeStr);
             for (keel::usize i = sizeStr.size(); i < 17; ++i)
-                os << " ";
+                os.push_back(' ');
             for (keel::usize i = bytesStr.size(); i < 5; ++i)
-                os << " ";
-            os << bytesStr << "  " << classStr;
+                os.push_back(' ');
+            os.append(bytesStr);
+            os.append("  ");
+            os.append(classStr);
             for (keel::usize i = classStr.size(); i < 10; ++i)
-                os << " ";
-            os << attrStr << "\n";
+                os.push_back(' ');
+            os.append(attrStr);
+            os.push_back('\n');
         }
-        os << "\n";
-        if (engine_.outputFunc_)
-            engine_.outputFunc_(os.str());
-        else
-            std::cout << os.str();
+        os.push_back('\n');
+        engine_.outputText(os);
     }
 }
 

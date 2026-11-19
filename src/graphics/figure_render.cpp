@@ -19,22 +19,25 @@
 /// port), polar, text overlays, yyaxis right-scale, annotations —
 /// tracked in bugs/opened/graphics/handle-surface-gaps.md sibling
 /// export-gaps file.
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/number.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/core/figure_manager.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
-#include <map>
-#include <string>
-#include <vector>
+#include <initializer_list>
 
 namespace numkit {
 namespace figrender {
@@ -45,33 +48,39 @@ struct Rgb {
     Rgb() = default;
     Rgb(keel::u8 rr, keel::u8 gg, keel::u8 bb)
         : r(rr), g(gg), b(bb) {}
-    static Rgb fromHex(const std::string &hex)
+    static Rgb fromHex(keel::StringRef hex)
     {
         if (hex.size() >= 7 && hex[0] == '#') {
-            auto h = [&](keel::usize i) {
-                return static_cast<keel::u8>(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16));
+            auto hexNibble = [](char c) -> keel::u8 {
+                if (c >= '0' && c <= '9') return static_cast<keel::u8>(c - '0');
+                if (c >= 'a' && c <= 'f') return static_cast<keel::u8>(10 + c - 'a');
+                if (c >= 'A' && c <= 'F') return static_cast<keel::u8>(10 + c - 'A');
+                return 0;
+            };
+            auto h = [&](keel::usize i) -> keel::u8 {
+                return static_cast<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
             };
             return Rgb(h(1), h(3), h(5));
         }
         return Rgb(0, 0, 0);
     }
-    std::string hex() const
+    keel::String hex() const
     {
         char buf[8];
         std::snprintf(buf, sizeof buf, "#%02x%02x%02x", r, g, b);
-        return buf;
+        return keel::String::from(buf);
     }
 };
 
 // Series palette — the SAME hexes the IDE renderer's KIND_PALETTE uses,
 // so saveas output matches the on-screen figure.
-inline const std::vector<Rgb> &palette()
+inline const std::array<Rgb, 8> &palette()
 {
-    static const std::vector<Rgb> p = {
+    static const std::array<Rgb, 8> p = {{
         Rgb(0x7f, 0xd9, 0x9a), Rgb(0x5f, 0xb3, 0xd4), Rgb(0xe9, 0xb8, 0x70),
         Rgb(0x9b, 0x8c, 0xf2), Rgb(0xe2, 0x6a, 0x6a), Rgb(0xd4, 0xa5, 0xe6),
         Rgb(0xf2, 0xa3, 0x7e), Rgb(0x6f, 0xcf, 0xbf),
-    };
+    }};
     return p;
 }
 
@@ -95,8 +104,8 @@ inline bool charSpecColor(char c, Rgb &out)
 struct StyleParts {
     Rgb color{0x7f, 0xd9, 0x9a};
     bool hasColor = false;   // explicit colour (char or kv)
-    std::string lineStyle;   // "-", "--", ":", "-.", "" (unset), "none"
-    std::string marker;      // "", "o", "+", "*", ".", "x", "s", "d", …
+    keel::String lineStyle;  // "-", "--", ":", "-.", "" (unset), "none"
+    keel::String marker;     // "", "o", "+", "*", ".", "x", "s", "d", …
     // histogram extras (portion 39; engine histogram() packs them):
     Rgb faceColor{0x00, 0x72, 0xbd};   // MATLAB FaceColor 'auto'
     bool hasFaceColor = false;
@@ -122,7 +131,7 @@ struct TextExtras {
 // One MATLAB colour spec → Rgb. Accepts the linespec short letters,
 // long colour names, #rrggbb, and "r,g,b" / "r g b" float triplets
 // (0..1, MATLAB convention). Returns false when unrecognised.
-inline bool textColorSpec(const std::string &v, Rgb &out)
+inline bool textColorSpec(keel::StringRef v, Rgb &out)
 {
     // MATLAB-exact named colours (short letters are the SAME values:
     // 'r' == 'red' == (1,0,0)) — NOT the soft series palette, which is
@@ -134,10 +143,11 @@ inline bool textColorSpec(const std::string &v, Rgb &out)
         {"black", {0, 0, 0}},       {"white", {255, 255, 255}},
         {"none", {255, 255, 255}},
     };
-    std::string s;
+    keel::String s;
+    s.reserve(v.size());
     for (char c : v)
         if (c != ' ' && c != '[' && c != ']')
-            s += (char)std::tolower((unsigned char)c);
+            s.push_back((char)std::tolower((unsigned char)c));
     if (s.size() == 1) {
         for (const auto &kv : kNames)
             if (s[0] == kv.first[0]) {
@@ -162,11 +172,10 @@ inline bool textColorSpec(const std::string &v, Rgb &out)
         keel::usize e = i;
         while (e < s.size() && s[e] != ',')
             ++e;
-        try {
-            ch[n++] = std::stod(s.substr(i, e - i));
-        } catch (...) {
+        auto r = keel::parse_f64(s.substr(i, e - i));
+        if (!r.is_ok())
             return false;
-        }
+        ch[n++] = r.value();
         i = e + 1;
     }
     if (n == 3) {
@@ -178,7 +187,7 @@ inline bool textColorSpec(const std::string &v, Rgb &out)
     return false;
 }
 
-inline TextExtras parseTextExtras(const std::string &style)
+inline TextExtras parseTextExtras(keel::StringRef style)
 {
     TextExtras t;
     if (style.empty())
@@ -186,12 +195,12 @@ inline TextExtras parseTextExtras(const std::string &style)
     keel::usize i = 0;
     while (i < style.size()) {
         keel::usize semi = style.find(';', i);
-        std::string kv = style.substr(
-            i, (semi == std::string::npos ? style.size() : semi) - i);
+        keel::StringRef kv = style.substr(
+            i, (semi == keel::kInvalidIndex ? style.size() : semi) - i);
         keel::usize eq = kv.find('=');
-        if (eq != std::string::npos) {
-            std::string key = kv.substr(0, eq);
-            std::string val = kv.substr(eq + 1);
+        if (eq != keel::kInvalidIndex) {
+            keel::StringRef key = kv.substr(0, eq);
+            keel::StringRef val = kv.substr(eq + 1);
             if (key == "color") {
                 Rgb c;
                 if (textColorSpec(val, c))
@@ -201,40 +210,39 @@ inline TextExtras parseTextExtras(const std::string &style)
                 if (textColorSpec(val, c))
                     t.color = c;
             } else if (key == "fontSize") {
-                try {
-                    t.fontSize = std::stod(val);
-                } catch (...) {
-                }
+                auto r = keel::parse_f64(val.trim());
+                if (r.is_ok())
+                    t.fontSize = r.value();
             } else if (key == "halign") {
                 t.halign = val == "center" ? 1 : val == "right" ? 2 : 0;
             }
         }
-        i = semi == std::string::npos ? style.size() : semi + 1;
+        i = semi == keel::kInvalidIndex ? style.size() : semi + 1;
     }
     return t;
 }
 
-inline StyleParts parseStyle(const std::string &s)
+inline StyleParts parseStyle(keel::StringRef s)
 {
     StyleParts p;
     if (s.empty())
         return p;
-    if (s.find('=') != std::string::npos) {
+    if (s.find('=') != keel::kInvalidIndex) {
         for (keel::usize i = 0; i < s.size();) {
             keel::usize eq = s.find('=', i);
-            if (eq == std::string::npos)
+            if (eq == keel::kInvalidIndex)
                 break;
             keel::usize semi = s.find(';', eq);
-            std::string key = s.substr(i, eq - i);
-            std::string val = s.substr(
-                eq + 1, (semi == std::string::npos ? s.size() : semi) - eq - 1);
+            keel::StringRef key = s.substr(i, eq - i);
+            keel::StringRef val = s.substr(
+                eq + 1, (semi == keel::kInvalidIndex ? s.size() : semi) - eq - 1);
             if (key == "color") {
                 p.color = Rgb::fromHex(val);
                 p.hasColor = true;
             } else if (key == "lineStyle") {
-                p.lineStyle = val;
+                p.lineStyle.assign(val);
             } else if (key == "marker") {
-                p.marker = val;
+                p.marker.assign(val);
             } else if (key == "faceColor") {
                 p.faceColor = Rgb::fromHex(val);
                 p.hasFaceColor = true;
@@ -242,27 +250,37 @@ inline StyleParts parseStyle(const std::string &s)
                 p.edgeColor = Rgb::fromHex(val);
                 p.hasEdgeColor = true;
             } else if (key == "binWidth") {
-                try {
-                    p.binWidth = std::stod(val);
-                } catch (...) {
-                }
+                auto r = keel::parse_f64(val.trim());
+                if (r.is_ok())
+                    p.binWidth = r.value();
             } else if (key == "faceAlpha") {
-                try {
-                    p.faceAlpha = std::stod(val);
-                } catch (...) {
-                }
+                auto r = keel::parse_f64(val.trim());
+                if (r.is_ok())
+                    p.faceAlpha = r.value();
             }
-            i = semi == std::string::npos ? s.size() : semi + 1;
+            i = semi == keel::kInvalidIndex ? s.size() : semi + 1;
         }
         return p;
     }
-    static const std::string markers = "o+*.xsd^v<>ph";
+    static constexpr keel::StringRef markers("o+*.xsd^v<>ph");
     keel::usize i = 0;
     while (i < s.size()) {
-        if (p.lineStyle.empty() && s.compare(i, 2, "--") == 0) { p.lineStyle = "--"; i += 2; continue; }
-        if (p.lineStyle.empty() && s.compare(i, 2, "-.") == 0)  { p.lineStyle = "-.";  i += 2; continue; }
+        if (p.lineStyle.empty() && i + 2 <= s.size() && s.substr(i, 2) == "--") {
+            p.lineStyle.assign("--");
+            i += 2;
+            continue;
+        }
+        if (p.lineStyle.empty() && i + 2 <= s.size() && s.substr(i, 2) == "-.") {
+            p.lineStyle.assign("-.");
+            i += 2;
+            continue;
+        }
         char c = s[i];
-        if (p.lineStyle.empty() && (c == '-' || c == ':')) { p.lineStyle = std::string(1, c); ++i; continue; }
+        if (p.lineStyle.empty() && (c == '-' || c == ':')) {
+            p.lineStyle.push_back(c);
+            ++i;
+            continue;
+        }
         if (!p.hasColor) {
             Rgb col;
             if (charSpecColor(c, col)) {
@@ -272,8 +290,8 @@ inline StyleParts parseStyle(const std::string &s)
                 continue;
             }
         }
-        if (p.marker.empty() && markers.find(c) != std::string::npos) {
-            p.marker = std::string(1, c);
+        if (p.marker.empty() && markers.find(c) != keel::kInvalidIndex) {
+            p.marker.push_back(c);
             ++i;
             continue;
         }
@@ -310,43 +328,51 @@ inline const NamedPaletteHex kNamedPaletteHex[] = {
 };
 
 // Parsed-once 256x3 RGB tables, keyed by name (lowercase).
-const keel::u8 *namedPalette(const std::string &name, int &n)
+const keel::u8 *namedPalette(keel::StringRef name, int &n)
 {
-    static const std::map<std::string, std::vector<keel::u8>> tables = [] {
-        std::map<std::string, std::vector<keel::u8>> m;
-        for (const auto &p : kNamedPaletteHex) {
-            std::vector<keel::u8> v;
-            v.reserve(256 * 3);
-            for (keel::usize i = 0; i + 1 < strlen(p.hex); i += 2)
-                v.push_back((keel::u8)strtoul(std::string(p.hex, i, 2).c_str(),
-                                        nullptr, 16));
-            m[p.name] = std::move(v);
+    static constexpr keel::usize kNumPalettes =
+        sizeof(kNamedPaletteHex) / sizeof(kNamedPaletteHex[0]);
+    static const auto tables = [] {
+        std::array<std::array<keel::u8, 256 * 3>, kNumPalettes> t{};
+        auto hexNibble = [](char c) -> keel::u8 {
+            if (c >= '0' && c <= '9') return static_cast<keel::u8>(c - '0');
+            if (c >= 'a' && c <= 'f') return static_cast<keel::u8>(10 + c - 'a');
+            if (c >= 'A' && c <= 'F') return static_cast<keel::u8>(10 + c - 'A');
+            return 0;
+        };
+        for (keel::usize idx = 0; idx < kNumPalettes; ++idx) {
+            const char *hex = kNamedPaletteHex[idx].hex;
+            const keel::usize len = std::strlen(hex);
+            for (keel::usize i = 0, outIdx = 0; i + 1 < len && outIdx < 256 * 3; i += 2, ++outIdx)
+                t[idx][outIdx] = static_cast<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
         }
-        return m;
+        return t;
     }();
-    std::string key;
+    keel::String key;
+    key.reserve(name.size());
     for (char c : name)
-        key += (char)std::tolower((unsigned char)c);
-    auto it = tables.find(key);
-    if (it == tables.end())
-        it = tables.find("parula");
+        key.push_back((char)std::tolower((unsigned char)c));
     n = 256;
-    return it->second.data();
+    for (keel::usize idx = 0; idx < kNumPalettes; ++idx)
+        if (key == kNamedPaletteHex[idx].name)
+            return tables[idx].data();
+    return tables[0].data();   // fallback: parula
 }
 
 // Custom palette from colormap(M) JSON "[[r,g,b],...]" (values [0,1]).
 // figdetail::parseFlatDoubles stops at the first ']' (flat arrays), so
 // brackets are stripped first and the numbers re-wrapped — "[[0,0,0],
 // [1,0,0]]" → "[0,0,0,1,0,0]" — then grouped into RGB triplets.
-inline std::vector<Rgb> parseCustomPalette(const std::string &json)
+inline keel::Array<Rgb> parseCustomPalette(keel::StringRef json)
 {
-    std::string flat = "[";
+    keel::String flat = keel::String::from("[");
+    flat.reserve(json.size() + 2);
     for (char ch : json)
         if (ch != '[' && ch != ']')
-            flat += ch;
-    flat += "]";
+            flat.push_back(ch);
+    flat.push_back(']');
     auto v = figdetail::parseFlatDoubles(flat);
-    std::vector<Rgb> out;
+    keel::Array<Rgb> out;
     out.reserve(v.size() / 3);
     for (keel::usize k = 0; k + 3 <= v.size(); k += 3)
         out.push_back(Rgb((keel::u8)std::lround(v[k] * 255),
@@ -358,19 +384,19 @@ inline std::vector<Rgb> parseCustomPalette(const std::string &json)
 // ── Display list ─────────────────────────────────────────────────────
 struct Cmd {
     enum Kind { LINE, POLY, TEXT, MARK, IMAGE } kind;
-    std::vector<double> xs, ys;   // LINE/POLY pixel points; MARK single;
+    keel::Array<double> xs, ys;   // LINE/POLY pixel points; MARK single;
                                   // IMAGE screen rect {x0,x1}/{y0,y1} of
                                   // the DATA rect [ix0,ix1]x[iy0,iy1]
     Rgb color;
     double width = 1.0;           // stroke width / marker size px
     bool fill = false;            // POLY: filled
     bool dash = false;            // LINE: dashed
-    std::string text;             // TEXT
+    keel::String text;            // TEXT
     double fontSize = 12;         // TEXT
     double x = 0, y = 0;          // TEXT baseline-left anchor / MARK centre
     bool rot90 = false;           // TEXT: rotate CCW (ylabel)
     bool bold = false;            // TEXT: FontWeight bold
-    std::string fontFamily;       // TEXT: font name (SVG honours it;
+    keel::String fontFamily;      // TEXT: font name (SVG honours it;
                                   // the raster backend is monospace)
 
     // ── IMAGE (imagesc / image / imshow) ─────────────────────────────
@@ -382,13 +408,13 @@ struct Cmd {
     // the baked quantization range; a cell's reconstructed value is
     // qLo + idx/254*(qHi-qLo). climLo/climHi is the display window
     // (CLim; auto = [qLo,qHi]).
-    std::vector<keel::u8> img;
+    keel::Array<keel::u8> img;
     int imgW = 0, imgH = 0;
     double ix0 = 0, ix1 = 1, iy0 = 0, iy1 = 1;
     double qLo = 0, qHi = 1;
     double climLo = 0, climHi = 1;
-    std::string cmap = "parula";
-    std::string cmapCustom;       // colormap(M) JSON, overrides cmap
+    keel::String cmap = keel::String::from("parula");
+    keel::String cmapCustom;      // colormap(M) JSON, overrides cmap
     bool rgbDirect = false;
 };
 
@@ -398,13 +424,14 @@ struct Cmd {
 // containing cell via its centre (MATLAB-style nearest cell). Row/col 0
 // sit at the screen end where the DATA rect's iy0/ix0 edge landed — the
 // axes transform has already baked in yDir/xDir.
-inline std::vector<keel::u8> imageCmdRgb(const Cmd &c)
+inline keel::Array<keel::u8> imageCmdRgb(const Cmd &c)
 {
     double sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
     double sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
     int pw = std::max(1, (int)std::lround(sx1 - sx0));
     int ph = std::max(1, (int)std::lround(sy1 - sy0));
-    std::vector<keel::u8> buf((keel::usize)pw * ph * 3, 255);
+    keel::Array<keel::u8> buf;
+    buf.resize((keel::usize)pw * ph * 3, 255);
 
     // u increases from the screen end of data edge ix0 toward ix1; same
     // for v with iy0. When the transform flipped the axis, the ix0 end
@@ -412,7 +439,7 @@ inline std::vector<keel::u8> imageCmdRgb(const Cmd &c)
     auto frac = [](double lo, double hi, double v) {
         return hi > lo ? (v - lo) / (hi - lo) : 0.5;
     };
-    std::vector<Rgb> custom;
+    keel::Array<Rgb> custom;
     if (!c.cmapCustom.empty())
         custom = parseCustomPalette(c.cmapCustom);
     int nPal = 256;
@@ -470,7 +497,7 @@ inline std::vector<keel::u8> imageCmdRgb(const Cmd &c)
 // Null entries (NaN cells) → NaN. Depth-tracked: only INNER brackets
 // (depth 2) delimit rows — the outer pair is the wrapper (counting it
 // as a row over-read the value vector).
-void parseNestedDoubles(const std::string &j, std::vector<double> &out,
+void parseNestedDoubles(keel::StringRef j, keel::Array<keel::f64> &out,
                         keel::usize &rows, keel::usize &cols)
 {
     out.clear();
@@ -499,12 +526,13 @@ void parseNestedDoubles(const std::string &j, std::vector<double> &out,
             keel::usize e = i;
             while (e < j.size() && j[e] != ',' && j[e] != ']')
                 ++e;
-            std::string tok = j.substr(i, e - i);
-            bool nullTok = tok.find("null") != std::string::npos;
-            try {
-                out.push_back(nullTok ? std::nan("") : std::stod(tok));
-            } catch (...) {
+            keel::StringRef tok = j.substr(i, e - i).trim();
+            bool nullTok = tok.find("null") != keel::kInvalidIndex;
+            if (nullTok) {
                 out.push_back(std::nan(""));
+            } else {
+                auto r = keel::parse_f64(tok);
+                out.push_back(r.is_ok() ? r.value() : std::nan(""));
             }
             ++colCount;
             i = e;
@@ -520,26 +548,33 @@ void parseNestedDoubles(const std::string &j, std::vector<double> &out,
 // MATLAB-exact auto ticks (probe-verified R2025b, portion 34): target
 // 10 intervals, ladder breakpoints 1/2/5 — [0,10]→step 1 (11 ticks),
 // [0,3]→step 0.5 (7), [0,7]→step 1 (8).
-std::vector<double> niceTicks(double mn, double mx, int target)
+keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target)
 {
-    std::vector<double> major;
+    keel::Array<keel::f64> major;
     double range = mx - mn;
-    if (!(range > 0))
-        return {mn};
+    if (!(range > 0)) {
+        major.push_back(mn);
+        return major;
+    }
     double rough = range / target;
     double pow = std::pow(10.0, std::floor(std::log10(rough)));
     double norm = rough / pow;
     double step = norm <= 1.0 ? pow
                 : norm <= 2.0 ? 2 * pow
                 : norm <= 5.0 ? 5 * pow : 10 * pow;
-    for (double v = std::ceil(mn / step) * step; v <= mx + step * 1e-6; v += step)
-        major.push_back(std::stod(std::to_string(v).substr(0, 12)));
+    for (double v = std::ceil(mn / step) * step; v <= mx + step * 1e-6; v += step) {
+        char buf[64];
+        int n = std::snprintf(buf, sizeof buf, "%f", v);
+        if (n > 12)
+            buf[12] = '\0';
+        major.push_back(std::strtod(buf, nullptr));
+    }
     return major;
 }
 
-std::vector<double> logTicks(double mn, double mx)
+keel::Array<keel::f64> logTicks(keel::f64 mn, keel::f64 mx)
 {
-    std::vector<double> major;
+    keel::Array<keel::f64> major;
     if (!(mn > 0) || !(mx > mn))
         return major;
     int lmin = (int)std::floor(std::log10(mn));
@@ -554,31 +589,38 @@ std::vector<double> logTicks(double mn, double mx)
 
 // Default tick label: %g-style with trailing-zero trim + exponent
 // compaction ("1e+06" → "1e6").
-std::string tickLabel(double v)
+keel::String tickLabel(keel::f64 v)
 {
     if (v == 0)
-        return "0";
+        return keel::String::from("0");
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.6g", v);
-    std::string s = buf;
+    keel::String s = keel::String::from(buf);
     keel::usize e = s.find('e');
-    if (e != std::string::npos) {
-        std::string mant = s.substr(0, e);
-        std::string exp = s.substr(e + 1);
-        bool neg = !exp.empty() && exp[0] == '-';
+    if (e != keel::kInvalidIndex) {
+        keel::StringRef mantRef = s.substr(0, e);
+        keel::StringRef expRef = s.substr(e + 1);
+        bool neg = !expRef.empty() && expRef[0] == '-';
         keel::usize k = 0;
-        while (k < exp.size() && (exp[k] == '+' || exp[k] == '-'))
+        while (k < expRef.size() && (expRef[k] == '+' || expRef[k] == '-'))
             ++k;
-        while (k + 1 < exp.size() && exp[k] == '0')
-            exp.erase(k, 1);
-        if (mant.size() > 1 && mant.compare(mant.size() - 1, 1, "0") == 0
-            && mant.find('.') != std::string::npos)
-            while (mant.back() == '0')
-                mant.pop_back();
-        if (!mant.empty() && mant.back() == '.')
-            mant.pop_back();
-        s = mant + "e" + (neg ? "-" : "") + exp.substr(k);
-    } else if (s.find('.') != std::string::npos) {
+        while (k + 1 < expRef.size() && expRef[k] == '0')
+            ++k;
+        keel::usize mlen = mantRef.size();
+        if (mlen > 1 && mantRef[mlen - 1] == '0'
+            && mantRef.find('.') != keel::kInvalidIndex)
+            while (mlen > 0 && mantRef[mlen - 1] == '0')
+                --mlen;
+        if (mlen > 0 && mantRef[mlen - 1] == '.')
+            --mlen;
+        keel::String out;
+        out.append(mantRef.substr(0, mlen));
+        out.push_back('e');
+        if (neg)
+            out.push_back('-');
+        out.append(expRef.substr(k));
+        return out;
+    } else if (s.find('.') != keel::kInvalidIndex) {
         while (!s.empty() && s.back() == '0')
             s.pop_back();
         if (!s.empty() && s.back() == '.')
@@ -605,7 +647,7 @@ struct AxisRange {
     }
 };
 
-inline void dataRange(const std::vector<double> &v, double &lo, double &hi)
+inline void dataRange(keel::ArrayRef<double> v, double &lo, double &hi)
 {
     lo = +INFINITY;
     hi = -INFINITY;
@@ -616,24 +658,24 @@ inline void dataRange(const std::vector<double> &v, double &lo, double &hi)
         }
 }
 
-inline std::vector<double> parseVec(const std::string &json)
+inline keel::Array<double> parseVec(const keel::String &json)
 {
     return figdetail::parseFlatDoubles(json);
 }
 
 // ["a","b",…] tick-label json → strings.
-inline std::vector<std::string> parseTickLabelVec(const std::string &json)
+inline keel::Array<keel::String> parseTickLabelVec(keel::StringRef json)
 {
-    std::vector<std::string> labels;
+    keel::Array<keel::String> labels;
     keel::usize i = 0;
     while (i < json.size()) {
         keel::usize q1 = json.find('"', i);
-        if (q1 == std::string::npos)
+        if (q1 == keel::kInvalidIndex)
             break;
         keel::usize q2 = json.find('"', q1 + 1);
-        if (q2 == std::string::npos)
+        if (q2 == keel::kInvalidIndex)
             break;
-        labels.push_back(json.substr(q1 + 1, q2 - q1 - 1));
+        labels.push_back(keel::String::from(json.substr(q1 + 1, q2 - q1 - 1)));
         i = q2 + 1;
     }
     return labels;
@@ -642,40 +684,49 @@ inline std::vector<std::string> parseTickLabelVec(const std::string &json)
 // ── Display-list builder ─────────────────────────────────────────────
 struct Rect { double x0, y0, x1, y1; };   // pixel, y DOWN
 
-inline void addLine(std::vector<Cmd> &out, std::vector<double> xs,
-                    std::vector<double> ys, Rgb c, double w, bool dash)
+inline void addLine(keel::Array<Cmd> &out, keel::ArrayRef<double> xs,
+                    keel::ArrayRef<double> ys, Rgb c, double w, bool dash)
 {
     Cmd cmd;
     cmd.kind = Cmd::LINE;
-    cmd.xs = std::move(xs);
-    cmd.ys = std::move(ys);
+    cmd.xs.reserve(xs.size());
+    for (double v : xs) cmd.xs.push_back(v);
+    cmd.ys.reserve(ys.size());
+    for (double v : ys) cmd.ys.push_back(v);
     cmd.color = c;
     cmd.width = w;
     cmd.dash = dash;
-    out.push_back(std::move(cmd));
+    out.push_back(keel::move(cmd));
 }
 
-inline void addText(std::vector<Cmd> &out, const std::string &s, double x,
+inline void addLine(keel::Array<Cmd> &out, std::initializer_list<double> xs,
+                    std::initializer_list<double> ys, Rgb c, double w, bool dash)
+{
+    addLine(out, keel::ArrayRef<double>(xs.begin(), xs.size()),
+            keel::ArrayRef<double>(ys.begin(), ys.size()), c, w, dash);
+}
+
+inline void addText(keel::Array<Cmd> &out, keel::StringRef s, double x,
                     double y, double size, Rgb c, bool rot90 = false,
-                    bool bold = false, const std::string &family = "")
+                    bool bold = false, keel::StringRef family = "")
 {
     if (s.empty())
         return;
     Cmd cmd;
     cmd.kind = Cmd::TEXT;
-    cmd.text = s;
+    cmd.text = keel::String::from(s);
     cmd.x = x;
     cmd.y = y;
     cmd.fontSize = size;
     cmd.color = c;
     cmd.rot90 = rot90;
     cmd.bold = bold;
-    cmd.fontFamily = family;
-    out.push_back(std::move(cmd));
+    cmd.fontFamily = keel::String::from(family);
+    out.push_back(keel::move(cmd));
 }
 
-inline void addMarker(std::vector<Cmd> &out, double x, double y, double size,
-                      Rgb c, const std::string &kind)
+inline void addMarker(keel::Array<Cmd> &out, double x, double y, double size,
+                      Rgb c, keel::StringRef kind)
 {
     Cmd cmd;
     cmd.kind = Cmd::MARK;
@@ -683,31 +734,40 @@ inline void addMarker(std::vector<Cmd> &out, double x, double y, double size,
     cmd.y = y;
     cmd.width = size;
     cmd.color = c;
-    cmd.text = kind;   // marker glyph selector
+    cmd.text = keel::String::from(kind);   // marker glyph selector
     cmd.fill = true;
-    out.push_back(std::move(cmd));
+    out.push_back(keel::move(cmd));
 }
 
-inline void addPoly(std::vector<Cmd> &out, std::vector<double> xs,
-                    std::vector<double> ys, Rgb c, bool fill)
+inline void addPoly(keel::Array<Cmd> &out, keel::ArrayRef<double> xs,
+                    keel::ArrayRef<double> ys, Rgb c, bool fill)
 {
     if (xs.size() < 2)
         return;
     Cmd cmd;
     cmd.kind = Cmd::POLY;
-    cmd.xs = std::move(xs);
-    cmd.ys = std::move(ys);
+    cmd.xs.reserve(xs.size());
+    for (double v : xs) cmd.xs.push_back(v);
+    cmd.ys.reserve(ys.size());
+    for (double v : ys) cmd.ys.push_back(v);
     cmd.color = c;
     cmd.fill = fill;
     cmd.width = 1;
-    out.push_back(std::move(cmd));
+    out.push_back(keel::move(cmd));
+}
+
+inline void addPoly(keel::Array<Cmd> &out, std::initializer_list<double> xs,
+                    std::initializer_list<double> ys, Rgb c, bool fill)
+{
+    addPoly(out, keel::ArrayRef<double>(xs.begin(), xs.size()),
+            keel::ArrayRef<double>(ys.begin(), ys.size()), c, fill);
 }
 
 // Render ONE axes into its pixel rect. `seriesIdxBase` continues the
 // palette cycle across subplot cells (MATLAB restarts per axes; keep
 // simple: per-axes reset).
 inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
-                       std::vector<Cmd> &out)
+                       keel::Array<Cmd> &out)
 {
     const Rgb kAxisCol(0x40, 0x40, 0x44);
     const Rgb kGridCol(0xd8, 0xd8, 0xdc);
@@ -721,14 +781,14 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         mt += 18;
     // Colorbar reserves space on its side (MATLAB eastoutside shrinks the
     // axes to ~0.68 width; we reserve strip + ticks + labels).
-    std::string cbSide = ax.colorbarLocation;
+    keel::String cbSide = ax.colorbarLocation.clone();
     for (char &c : cbSide)
         c = (char)std::tolower((unsigned char)c);
     if (cbSide.size() > 7
-        && cbSide.compare(cbSide.size() - 7, 7, "outside") == 0)
-        cbSide.erase(cbSide.size() - 7);
+        && cbSide.substr(cbSide.size() - 7) == "outside")
+        cbSide = keel::String::from(cbSide.substr(0, cbSide.size() - 7));
     if (cbSide.empty() || cbSide == "best")
-        cbSide = ax.colorbarLocation.empty() ? "" : "east";
+        cbSide = ax.colorbarLocation.empty() ? keel::String{} : keel::String::from("east");
     if (!cbSide.empty() && cbSide != "none") {
         if (cbSide == "east")
             mr += 48;
@@ -748,7 +808,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             plot.y0 += 18;
     }
 
-    auto applyLim = [](const std::string &json, double &lo, double &hi) {
+    auto applyLim = [](const keel::String &json, double &lo, double &hi) {
         if (json.empty())
             return;
         auto v = figdetail::parseFlatDoubles(json);
@@ -796,7 +856,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 if (rv <= rlo || rv > rhi + 1e-9)
                     continue;
                 double rn = ((rv - rlo) / (rhi - rlo)) * R;
-                std::vector<double> rx, ry;
+                keel::Array<double> rx, ry;
                 for (int k = 0; k <= 64; ++k) {
                     double a = 2.0 * kPi * k / 64.0;
                     rx.push_back(cx + rn * std::cos(a));
@@ -807,17 +867,21 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 polarPt(80.0 * kPi / 180.0, rv, lx, ly);
                 addText(out, tickLabel(rv), lx + 3, ly, ax.fontSize * 0.9, kTextCol);
             }
-            std::vector<double> ox, oy;
+            keel::Array<double> ox, oy;
             for (int k = 0; k <= 64; ++k) {
                 double a = 2.0 * kPi * k / 64.0;
                 ox.push_back(cx + R * std::cos(a));
                 oy.push_back(cy - R * std::sin(a));
             }
             addLine(out, ox, oy, kAxisCol, std::max(0.75, ax.lineWidth), false);
-            std::vector<double> tticks = !ax.thetaticksJson.empty()
-                ? parseVec(ax.thetaticksJson)
-                : std::vector<double>{0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330};
-            std::vector<std::string> ttLab;
+            keel::Array<double> tticks;
+            if (!ax.thetaticksJson.empty()) {
+                tticks = parseVec(ax.thetaticksJson);
+            } else {
+                for (int d = 0; d < 360; d += 30)
+                    tticks.push_back((double)d);
+            }
+            keel::Array<keel::String> ttLab;
             if (!ax.thetaticklabelsJson.empty())
                 ttLab = parseTickLabelVec(ax.thetaticklabelsJson);
             for (keel::usize k = 0; k < tticks.size(); ++k) {
@@ -827,7 +891,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 polarPt(rad, rhi, sx, sy);
                 addLine(out, {cx, sx}, {cy, sy}, kGridCol, 0.75, false);
                 polarPt(rad, rlo + (rhi - rlo) * 1.12, lx, ly);
-                std::string lab = k < ttLab.size() ? ttLab[k] : tickLabel(deg);
+                keel::String lab = k < ttLab.size() ? ttLab[k].clone() : tickLabel(deg);
                 addText(out, lab, lx - 3.0 * lab.size(), ly + 3.5, ax.fontSize * 0.9, kTextCol);
             }
         }
@@ -872,7 +936,9 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 for (keel::usize k = 0; k < n; ++k) {
                     if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]) || rv[k] <= rlo)
                         continue;
-                    std::vector<double> wx = {cx}, wy = {cy};
+                    keel::Array<double> wx, wy;
+                    wx.push_back(cx);
+                    wy.push_back(cy);
                     for (int s = 0; s <= 6; ++s) {
                         double th = tv[k] - bw * 0.45 + (bw * 0.9 * s) / 6.0;
                         double px, py;
@@ -888,10 +954,10 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                         continue;
                     double px, py;
                     polarPt(tv[k], rv[k], px, py);
-                    addMarker(out, px, py, ms, col, st.marker.empty() ? "o" : st.marker);
+                    addMarker(out, px, py, ms, col, st.marker.empty() ? keel::StringRef("o") : st.marker.as_ref());
                 }
             } else {
-                std::vector<double> px, py;
+                keel::Array<double> px, py;
                 for (keel::usize k = 0; k < n; ++k) {
                     if (!std::isfinite(tv[k]) || !std::isfinite(rv[k]))
                         continue;
@@ -916,7 +982,9 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
 
     double xlo = +INFINITY, xhi = -INFINITY, ylo = +INFINITY, yhi = -INFINITY;
     double y2lo = +INFINITY, y2hi = -INFINITY;
-    std::vector<std::vector<double>> xs(ax.datasets.size()), ys(ax.datasets.size());
+    keel::Array<keel::Array<double>> xs, ys;
+    xs.resize(ax.datasets.size());
+    ys.resize(ax.datasets.size());
     int imgDatasets = 0, seriesDatasets = 0;
 
     // Image data rect (probe-verified MATLAB R2025b, portion 35). The
@@ -928,7 +996,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     // span/(2*(cells-1)) where span = x(end)-x(1) of the GIVEN vector —
     // e.g. default 3x4 image → XLim [0.5 4.5]; centers [10..40] →
     // [5 45]; edges [10..50] → [3.333 56.667].
-    auto imageEdges = [](const std::vector<double> &v, keel::usize cells,
+    auto imageEdges = [](keel::ArrayRef<double> v, keel::usize cells,
                          double &e0, double &e1, double &pad) {
         if (v.size() < 2 || cells == 0) {
             e0 = 0.5;
@@ -1003,7 +1071,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             }
         }
         // errorbar extents
-        auto ext = [&](const std::string &j, bool pos) {
+        auto ext = [&](const keel::String &j, bool pos) {
             auto e = parseVec(j);
             if (e.empty())
                 return;
@@ -1037,7 +1105,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     applyLim(ax.xlimJson, xlo, xhi);
     applyLim(ax.ylimJson, ylo, yhi);
     applyLim(ax.ylim2Json, y2lo, y2hi);
-    auto pad = [](double &lo, double &hi, const std::string &lim) {
+    auto pad = [](double &lo, double &hi, const keel::String &lim) {
         if (!lim.empty())
             return;
         double d = (hi - lo) * 0.05;
@@ -1122,7 +1190,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         Cmd c;
         c.kind = Cmd::IMAGE;
         if (ds.type == "imagesc") {
-            c.img = ds.zQuantized;
+            c.img = ds.zQuantized.clone();
             c.imgW = (int)cols;
             c.imgH = (int)rows;
             c.qLo = ds.cminOrig;
@@ -1135,10 +1203,10 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 c.climLo = c.qLo;   // CLim auto = data range
                 c.climHi = c.qHi;
             }
-            c.cmap = ax.colormapName.empty() ? "parula" : ax.colormapName;
-            c.cmapCustom = ax.customColormapJson;
+            c.cmap = ax.colormapName.empty() ? keel::String::from("parula") : ax.colormapName.clone();
+            c.cmapCustom = ax.customColormapJson.clone();
         } else {
-            c.img = ds.rgbBytes;
+            c.img = ds.rgbBytes.clone();
             c.imgW = (int)cols;
             c.imgH = (int)rows;
             c.rgbDirect = true;
@@ -1147,9 +1215,11 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         c.ix1 = xe1;
         c.iy0 = ye0;
         c.iy1 = ye1;
-        c.xs = {X(xe0), X(xe1)};
-        c.ys = {Y(ye0), Y(ye1)};
-        out.push_back(std::move(c));
+        c.xs.push_back(X(xe0));
+        c.xs.push_back(X(xe1));
+        c.ys.push_back(Y(ye0));
+        c.ys.push_back(Y(ye1));
+        out.push_back(keel::move(c));
     }
 
     // ── 3-D content (portion 40; MATLAB probes R2025b): surf = flat ──
@@ -1179,25 +1249,25 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 hi = std::max(hi, v);
             };
             struct SurfGrid {
-                std::vector<double> z;   // row-major R x C
-                std::vector<double> gx;  // column coords
-                std::vector<double> gy;  // row coords
+                keel::Array<double> z;   // row-major R x C
+                keel::Array<double> gx;  // column coords
+                keel::Array<double> gy;  // row coords
                 keel::usize r, c;
             };
-            std::vector<SurfGrid> grids;
+            keel::Array<SurfGrid> grids;
             for (const auto &ds : ax.datasets) {
                 if (!ds.visible || ds.zJson.empty())
                     continue;
                 if (ds.type == "surf" || ds.type == "waterfall") {
                     auto xv = parseVec(ds.xJson);
                     auto yv = parseVec(ds.yJson);
-                    std::vector<double> zf;
+                    keel::Array<double> zf;
                     keel::usize r = 0, c = 0;
                     parseNestedDoubles(ds.zJson, zf, r, c);
                     if (xv.empty() || yv.empty() || !r || !c)
                         continue;
                     SurfGrid g;
-                    g.z = std::move(zf);
+                    g.z = keel::move(zf);
                     for (keel::usize cc = 0; cc < c; ++cc)
                         g.gx.push_back(xv[std::min(cc, xv.size() - 1)]);
                     for (keel::usize rr = 0; rr < r; ++rr)
@@ -1210,7 +1280,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                             acc(ylo3, yhi3, g.gy[rr]);
                             acc(zlo3, zhi3, g.z[rr * c + cc]);
                         }
-                    grids.push_back(std::move(g));
+                    grids.push_back(keel::move(g));
                 } else if (ds.type == "mesh" || ds.type == "plot3") {
                     auto xv = parseVec(ds.xJson);
                     auto yv = parseVec(ds.yJson);
@@ -1239,15 +1309,15 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                     chi3 = cl[1];
                 }
             }
-            std::vector<Rgb> custom3;
+            keel::Array<Rgb> custom3;
             if (!ax.customColormapJson.empty())
                 custom3 = parseCustomPalette(ax.customColormapJson);
             int nPal3 = 256;
             const keel::u8 *pal3 =
                 custom3.empty()
                     ? namedPalette(ax.colormapName.empty()
-                                       ? std::string("parula")
-                                       : ax.colormapName, nPal3)
+                                       ? keel::StringRef("parula")
+                                       : ax.colormapName.as_ref(), nPal3)
                     : nullptr;
             if (!custom3.empty())
                 nPal3 = (int)custom3.size();
@@ -1355,7 +1425,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                     double px[4], py[4], depth;
                     Rgb col;
                 };
-                std::vector<Q> quads;
+                keel::Array<Q> quads;
                 for (keel::usize rr = 0; rr + 1 < g.r; ++rr)
                     for (keel::usize cc = 0; cc + 1 < g.c; ++cc) {
                         double z00 = g.z[rr * g.c + cc];
@@ -1411,7 +1481,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 if (ds.type == "waterfall") {
                     auto xv = parseVec(ds.xJson);
                     auto yv = parseVec(ds.yJson);
-                    std::vector<double> zf;
+                    keel::Array<double> zf;
                     keel::usize r, c;
                     parseNestedDoubles(ds.zJson, zf, r, c);
                     if (!r || !c)
@@ -1479,12 +1549,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         double ms = ds.markerSize > 0 ? ds.markerSize * 1.4 : 6.0;
         bool dashed = st.lineStyle == "--" || st.lineStyle == ":" || st.lineStyle == "-.";
         const keel::usize n = std::min(xs[i].size(), ys[i].size());
-        const std::string &t = ds.type;
+        const keel::String &t = ds.type;
         const AxisRange &YRs = (ax.yyEnabled && ds.yside == "right") ? YR2 : YR;
         auto Ys = [&](double v) { return YRs.map(v, py0, py1); };
 
         if (t == "line" || t == "comet" || t == "animatedline") {
-            std::vector<double> px, py;
+            keel::Array<double> px, py;
             auto flushRun = [&]() {
                 if (st.lineStyle != "none" && px.size() >= 2)
                     addLine(out, px, py, col, lw, dashed);
@@ -1504,7 +1574,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 for (keel::usize k = 0; k < px.size(); ++k)
                     addMarker(out, px[k], py[k], ms, col, st.marker);
         } else if (t == "stairs") {
-            std::vector<double> px, py;
+            keel::Array<double> px, py;
             for (keel::usize k = 0; k < n; ++k) {
                 if (k && px.size()) {
                     px.push_back(X(xs[i][k]));
@@ -1526,9 +1596,9 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                             {Ys(base), Ys(ys[i][k])}, col, lw, dashed);
             for (keel::usize k = 0; k < n; ++k)
                 addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms,
-                          col, st.marker.empty() ? "o" : st.marker);
+                          col, st.marker.empty() ? keel::StringRef("o") : st.marker.as_ref());
         } else if (t == "scatter" || t == "bubble") {
-            std::vector<double> sz;
+            keel::Array<double> sz;
             if (!ds.sizeJson.empty())
                 sz = parseVec(ds.sizeJson);
             for (keel::usize k = 0; k < n; ++k)
@@ -1596,7 +1666,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                 addLine(out, {bxr, x1}, {byr, y1}, col, 1.2, false);
             }
         } else if (t == "polygon") {
-            std::vector<double> px, py;
+            keel::Array<double> px, py;
             auto flushRing = [&]() {
                 if (px.size() >= 3)
                     addPoly(out, px, py, col, true);
@@ -1613,7 +1683,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             }
             flushRing();
         } else if (t == "area") {
-            std::vector<double> px, py;
+            keel::Array<double> px, py;
             double yBase = Ys(std::min(std::max(0.0, YRs.lo), YRs.hi));
             px.push_back(X(xs[i].front()));
             py.push_back(yBase);
@@ -1672,7 +1742,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     const double tickFS = ax.fontSize;
     const double labelFS = ax.fontSize * 1.1;
     const bool fBold = ax.fontWeight == "bold";
-    const std::string &fam = ax.fontName;
+    const keel::String &fam = ax.fontName;
     if (ax.axisVisible) {
     addLine(out, {plot.x0, plot.x1, plot.x1, plot.x0, plot.x0},
             {plot.y0, plot.y0, plot.y1, plot.y1, plot.y0}, kAxisCol, boxW,
@@ -1683,7 +1753,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
     auto ty = !ax.yTicksJson.empty()
                   ? parseVec(ax.yTicksJson)
                   : (YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi));
-    std::vector<std::string> txLab, tyLab;
+    keel::Array<keel::String> txLab, tyLab;
     if (!ax.xTickLabelsJson.empty())
         txLab = parseTickLabelVec(ax.xTickLabelsJson);
     if (!ax.yTickLabelsJson.empty())
@@ -1692,14 +1762,14 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         const double v = tx[k];
         double p = X(v);
         addLine(out, {p, p}, {plot.y1, plot.y1 + 4}, kAxisCol, boxW, false);
-        std::string lab = k < txLab.size()
-                              ? txLab[k]
-                              : tickLabel(v);
+        keel::String lab = k < txLab.size()
+                               ? txLab[k].clone()
+                               : tickLabel(v);
         if (k >= txLab.size() && !ax.xTickFormat.empty()
             && ax.xTickFormat.size() > 1 && ax.xTickFormat[0] == '%') {
             char b[40];
             std::snprintf(b, sizeof b, ax.xTickFormat.c_str(), v);
-            lab = b;
+            lab.assign(b);
         }
         addText(out, lab, p - 3.0 * lab.size(), plot.y1 + 8, tickFS,
                 kTextCol, false, fBold, fam);
@@ -1708,14 +1778,14 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         const double v = ty[k];
         double p = Y(v);
         addLine(out, {plot.x0 - 4, plot.x0}, {p, p}, kAxisCol, boxW, false);
-        std::string lab = k < tyLab.size()
-                              ? tyLab[k]
-                              : tickLabel(v);
+        keel::String lab = k < tyLab.size()
+                               ? tyLab[k].clone()
+                               : tickLabel(v);
         if (k >= tyLab.size() && !ax.yTickFormat.empty()
             && ax.yTickFormat.size() > 1 && ax.yTickFormat[0] == '%') {
             char b[40];
             std::snprintf(b, sizeof b, ax.yTickFormat.c_str(), v);
-            lab = b;
+            lab.assign(b);
         }
         double w = 6.0 * lab.size();
         addText(out, lab, plot.x0 - 8 - w, p + 4, tickFS, kTextCol, false,
@@ -1727,7 +1797,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             const double v = ty2[k];
             double p = Y2(v);
             addLine(out, {plot.x1, plot.x1 + 4}, {p, p}, kAxisCol, boxW, false);
-            std::string lab = tickLabel(v);
+            keel::String lab = tickLabel(v);
             addText(out, lab, plot.x1 + 8, p + 4, tickFS, kTextCol, false,
                     fBold, fam);
         }
@@ -1766,15 +1836,15 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
                     break;
                 }
         }
-        std::vector<Rgb> customPal;
+        keel::Array<Rgb> customPal;
         if (!ax.customColormapJson.empty())
             customPal = parseCustomPalette(ax.customColormapJson);
         int nPal = 256;
         const keel::u8 *pal =
             customPal.empty()
                 ? namedPalette(ax.colormapName.empty()
-                                   ? std::string("parula")
-                                   : ax.colormapName,
+                                   ? keel::StringRef("parula")
+                                   : ax.colormapName.as_ref(),
                                nPal)
                 : nullptr;
         auto entryColor = [&](double t) -> Rgb {
@@ -1804,7 +1874,8 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         }
         int pw = std::max(1, (int)std::lround(sw));
         int ph = std::max(1, (int)std::lround(sh));
-        std::vector<keel::u8> grad((keel::usize)pw * ph * 4, 255);
+        keel::Array<keel::u8> grad;
+        grad.resize((keel::usize)pw * ph * 4, 255);
         for (int py = 0; py < ph; ++py)
             for (int px = 0; px < pw; ++px) {
                 double t = vert ? 1.0 - (py + 0.5) / ph
@@ -1820,10 +1891,12 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         strip.rgbDirect = true;     // RGBA quads
         strip.imgW = pw;
         strip.imgH = ph;
-        strip.img = std::move(grad);
-        strip.xs = {sx, sx + pw};
-        strip.ys = {sy, sy + ph};
-        out.push_back(std::move(strip));
+        strip.img = keel::move(grad);
+        strip.xs.push_back(sx);
+        strip.xs.push_back(sx + pw);
+        strip.ys.push_back(sy);
+        strip.ys.push_back(sy + ph);
+        out.push_back(keel::move(strip));
         // Frame around the strip (MATLAB draws a thin box).
         addLine(out, {sx, sx + sw, sx + sw, sx, sx},
                 {sy, sy, sy + sh, sy + sh, sy}, kAxisCol, 0.75, false);
@@ -1832,7 +1905,7 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
             double t = (v - lo) / (hi - lo);
             if (t < -1e-9 || t > 1 + 1e-9)
                 continue;
-            std::string lab = tickLabel(v);
+            keel::String lab = tickLabel(v);
             double w = 6.0 * lab.size();
             if (vert) {
                 double pyv = sy + sh - t * sh;
@@ -1863,11 +1936,11 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
         double wLegend = pad2 + lw2 + 6 + tw + pad2;
         double hLegend = pad2 + rowH * ax.legendLabels.size() + pad2;
         double lx = plot.x1 - 10 - wLegend, ly = plot.y0 + 10;
-        if (ax.legendLocation.find("south") != std::string::npos)
+        if (ax.legendLocation.find("south") != keel::kInvalidIndex)
             ly = plot.y1 - 10 - hLegend;
-        if (ax.legendLocation.find("west") != std::string::npos)
+        if (ax.legendLocation.find("west") != keel::kInvalidIndex)
             lx = plot.x0 + 10;
-        if (ax.legendLocation.find("outside") != std::string::npos)
+        if (ax.legendLocation.find("outside") != keel::kInvalidIndex)
             lx = plot.x1 + 8;
         addPoly(out, {lx, lx + wLegend, lx + wLegend, lx},
                 {ly, ly, ly + hLegend, ly + hLegend}, kAxisCol, false);
@@ -1891,14 +1964,14 @@ inline void renderAxes(const FigureState &fig, const AxesState &ax, Rect box,
 
 // Full figure → display list. Subplot grid tiling; single axes uses the
 // whole canvas.
-inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
+inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, int W,
                                             int H)
 {
-    std::vector<Cmd> out;
+    keel::Array<Cmd> out;
     int rows = std::max(1, fig.subplotRows);
     int cols = std::max(1, fig.subplotCols);
     // Order axes by subplotIndex (1-based reading order) when gridded.
-    std::vector<const AxesState *> ordered;
+    keel::Array<const AxesState *> ordered;
     for (int p = 1; p <= rows * cols; ++p)
         for (const auto &ax : fig.axes)
             if (ax.subplotIndex == p) {
@@ -1977,7 +2050,7 @@ inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
         } else if (an.type == "ellipse") {
             double cx = (ax0 + ax1) / 2, cy = (ay0 + ay1) / 2;
             double rx = keel::abs(ax1 - ax0) / 2, ry = keel::abs(ay1 - ay0) / 2;
-            std::vector<double> ex, ey;
+            keel::Array<double> ex, ey;
             for (int k = 0; k <= 64; ++k) {
                 double t = 2 * 3.14159265358979323846 * k / 64.0;
                 ex.push_back(cx + rx * std::cos(t));
@@ -2000,128 +2073,161 @@ inline std::vector<Cmd> renderFigureDisplay(const FigureState &fig, int W,
 // for SVG (a data: URL). The figure layer stays free of codec code —
 // the bundle export glue supplies a PNG+base64 implementation; without
 // one, SVG export skips IMAGE cmds (raster export always renders them).
-std::string renderFigureSvg(const FigureState &fig, int W, int H,
-                            const SvgImageEmbedder &embed)
+keel::String renderFigureSvg(const FigureState &fig, int W, int H,
+                             const SvgImageEmbedder &embed)
 {
-    std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
-    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"";
-    s += std::to_string(W) + "\" height=\"" + std::to_string(H)
-       + "\" viewBox=\"0 0 " + std::to_string(W) + " " + std::to_string(H)
-       + "\">\n<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n";
-    auto esc = [](const std::string &t) {
-        std::string o;
+    keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    keel::String s = keel::format(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" "
+        "viewBox=\"0 0 {} {}\">\n"
+        "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n",
+        W, H, W, H);
+    auto esc = [](keel::StringRef t) {
+        keel::String o;
+        o.reserve(t.size());
         for (char ch : t) {
             if (ch == '&')
-                o += "&amp;";
+                o.append("&amp;");
             else if (ch == '<')
-                o += "&lt;";
+                o.append("&lt;");
             else if (ch == '>')
-                o += "&gt;";
+                o.append("&gt;");
             else
-                o += ch;
+                o.push_back(ch);
         }
         return o;
+    };
+    auto appendF = [](keel::String &dst, double v) {
+        char b[64];
+        int n = std::snprintf(b, sizeof b, "%f", v);
+        if (n > 0) dst.append(keel::StringRef(b, static_cast<keel::usize>(n)));
     };
     for (const Cmd &c : cmds) {
         if (c.kind == Cmd::IMAGE) {
             if (!embed)
                 continue;   // no codec available — skip (PNG path renders)
-            std::vector<keel::u8> buf = imageCmdRgb(c);
+            keel::Array<keel::u8> buf = imageCmdRgb(c);
             int pw = std::max(1, (int)std::lround(std::max(c.xs[0], c.xs[1])
                                                   - std::min(c.xs[0], c.xs[1])));
             int ph = std::max(1, (int)std::lround(std::max(c.ys[0], c.ys[1])
                                                   - std::min(c.ys[0], c.ys[1])));
-            s += "<image x=\""
-               + std::to_string(std::lround(std::min(c.xs[0], c.xs[1])))
-               + "\" y=\""
-               + std::to_string(std::lround(std::min(c.ys[0], c.ys[1])))
-               + "\" width=\"" + std::to_string(pw) + "\" height=\""
-               + std::to_string(ph) + "\" preserveAspectRatio=\"none\" href=\""
-               + embed(buf, pw, ph) + "\"/>\n";
+            long ix = std::lround(std::min(c.xs[0], c.xs[1]));
+            long iy = std::lround(std::min(c.ys[0], c.ys[1]));
+            keel::String href = embed(buf.as_ref(), pw, ph);
+            s.append(keel::format(
+                "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" "
+                "preserveAspectRatio=\"none\" href=\"{}\"/>\n",
+                ix, iy, pw, ph, href));
         } else if (c.kind == Cmd::TEXT) {
-            s += "<text x=\"" + std::to_string(c.x) + "\" y=\""
-               + std::to_string(c.y) + "\" font-size=\""
-               + std::to_string(c.fontSize)
-               + "\" font-family=\""
-               + (c.fontFamily.empty() ? std::string("monospace")
-                                       : c.fontFamily)
-               + "\"" + std::string(c.bold ? " font-weight=\"bold\"" : "")
-               + " fill=\"" + c.color.hex() + "\"";
-            if (c.rot90)
-                s += " transform=\"rotate(-90 " + std::to_string(c.x) + " "
-                   + std::to_string(c.y) + ")\"";
-            s += ">" + esc(c.text) + "</text>\n";
+            s.append("<text x=\"");
+            appendF(s, c.x);
+            s.append("\" y=\"");
+            appendF(s, c.y);
+            s.append("\" font-size=\"");
+            appendF(s, c.fontSize);
+            s.append("\" font-family=\"");
+            s.append(c.fontFamily.empty() ? keel::StringRef("monospace") : c.fontFamily.as_ref());
+            s.push_back('"');
+            if (c.bold)
+                s.append(" font-weight=\"bold\"");
+            s.append(" fill=\"");
+            s.append(c.color.hex());
+            s.push_back('"');
+            if (c.rot90) {
+                s.append(" transform=\"rotate(-90 ");
+                appendF(s, c.x);
+                s.push_back(' ');
+                appendF(s, c.y);
+                s.append(")\"");
+            }
+            s.push_back('>');
+            s.append(esc(c.text));
+            s.append("</text>\n");
         } else if (c.kind == Cmd::MARK) {
             double r = c.width / 2;
+            keel::String colHex = c.color.hex();
             if (c.text == "s" || c.text == "d") {
-                s += "<rect x=\"" + std::to_string(c.x - r) + "\" y=\""
-                   + std::to_string(c.y - r) + "\" width=\""
-                   + std::to_string(c.width) + "\" height=\""
-                   + std::to_string(c.width) + "\" fill=\""
-                   + (c.text == "d" ? "none" : c.color.hex()) + "\" stroke=\""
-                   + c.color.hex() + "\"/>\n";
+                s.append("<rect x=\""); appendF(s, c.x - r);
+                s.append("\" y=\""); appendF(s, c.y - r);
+                s.append("\" width=\""); appendF(s, c.width);
+                s.append("\" height=\""); appendF(s, c.width);
+                s.append("\" fill=\"");
+                s.append(c.text == "d" ? keel::StringRef("none") : colHex.as_ref());
+                s.append("\" stroke=\""); s.append(colHex);
+                s.append("\"/>\n");
             } else if (c.text == "+" || c.text == "x") {
-                s += "<path d=\"M" + std::to_string(c.x - r) + " "
-                   + std::to_string(c.y) + " L" + std::to_string(c.x + r) + " "
-                   + std::to_string(c.y) + " M" + std::to_string(c.x) + " "
-                   + std::to_string(c.y - r) + " L" + std::to_string(c.x)
-                   + " " + std::to_string(c.y + r)
-                   + (c.text == "x" ? " M" + std::to_string(c.x - r) + " "
-                                        + std::to_string(c.y - r) + " L"
-                                        + std::to_string(c.x + r) + " "
-                                        + std::to_string(c.y + r) + " M"
-                                        + std::to_string(c.x + r) + " "
-                                        + std::to_string(c.y - r) + " L"
-                                        + std::to_string(c.x - r) + " "
-                                        + std::to_string(c.y + r)
-                                    : "")
-                   + "\" stroke=\"" + c.color.hex() + "\" stroke-width=\"1.2\" fill=\"none\"/>\n";
+                s.append("<path d=\"M"); appendF(s, c.x - r);
+                s.push_back(' '); appendF(s, c.y);
+                s.append(" L"); appendF(s, c.x + r);
+                s.push_back(' '); appendF(s, c.y);
+                s.append(" M"); appendF(s, c.x);
+                s.push_back(' '); appendF(s, c.y - r);
+                s.append(" L"); appendF(s, c.x);
+                s.push_back(' '); appendF(s, c.y + r);
+                if (c.text == "x") {
+                    s.append(" M"); appendF(s, c.x - r);
+                    s.push_back(' '); appendF(s, c.y - r);
+                    s.append(" L"); appendF(s, c.x + r);
+                    s.push_back(' '); appendF(s, c.y + r);
+                    s.append(" M"); appendF(s, c.x + r);
+                    s.push_back(' '); appendF(s, c.y - r);
+                    s.append(" L"); appendF(s, c.x - r);
+                    s.push_back(' '); appendF(s, c.y + r);
+                }
+                s.append("\" stroke=\""); s.append(colHex);
+                s.append("\" stroke-width=\"1.2\" fill=\"none\"/>\n");
             } else {   // o . * ^ v < > p h → circle
-                s += "<circle cx=\"" + std::to_string(c.x) + "\" cy=\""
-                   + std::to_string(c.y) + "\" r=\"" + std::to_string(r)
-                   + "\" fill=\"none\" stroke=\"" + c.color.hex()
-                   + "\" stroke-width=\"1.4\"/>\n";
+                s.append("<circle cx=\""); appendF(s, c.x);
+                s.append("\" cy=\""); appendF(s, c.y);
+                s.append("\" r=\""); appendF(s, r);
+                s.append("\" fill=\"none\" stroke=\""); s.append(colHex);
+                s.append("\" stroke-width=\"1.4\"/>\n");
             }
         } else {
             // LINE / POLY → <polyline>/<polygon>
-            std::string pts;
+            keel::String pts;
             for (keel::usize i = 0; i < c.xs.size(); ++i) {
                 if (i)
-                    pts += " ";
+                    pts.push_back(' ');
                 char b[48];
                 std::snprintf(b, sizeof b, "%.1f,%.1f", c.xs[i], c.ys[i]);
-                pts += b;
+                pts.append(b);
             }
             if (c.kind == Cmd::POLY && c.fill) {
-                s += "<polygon points=\"" + pts + "\" fill=\"" + c.color.hex()
-                   + "\" stroke=\"none\"/>\n";
+                s.append("<polygon points=\""); s.append(pts);
+                s.append("\" fill=\""); s.append(c.color.hex());
+                s.append("\" stroke=\"none\"/>\n");
             } else {
-                s += "<polyline points=\"" + pts + "\" fill=\"none\" stroke=\""
-                   + c.color.hex() + "\" stroke-width=\""
-                   + std::to_string(c.width) + "\"";
+                s.append("<polyline points=\""); s.append(pts);
+                s.append("\" fill=\"none\" stroke=\""); s.append(c.color.hex());
+                s.append("\" stroke-width=\""); appendF(s, c.width);
+                s.push_back('"');
                 if (c.dash)
-                    s += " stroke-dasharray=\"7 5\"";
-                s += "/>\n";
+                    s.append(" stroke-dasharray=\"7 5\"");
+                s.append("/>\n");
             }
         }
     }
-    s += "</svg>\n";
+    s.append("</svg>\n");
     return s;
 }
 
-std::string renderFigureEps(const FigureState &fig, int W, int H)
+keel::String renderFigureEps(const FigureState &fig, int W, int H)
 {
-    std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
-    std::string s = "%!PS-Adobe-3.0 EPSF-3.0\n"
-                    "%%BoundingBox: 0 0 " + std::to_string(W) + " " + std::to_string(H) + "\n"
-                    "%%EndComments\n"
-                    "1 1 1 setrgbcolor 0 0 " + std::to_string(W) + " " + std::to_string(H) + " rectfill\n";
-    auto escPs = [](const std::string &t) {
-        std::string o;
+    keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    keel::String s = keel::format(
+        "%!PS-Adobe-3.0 EPSF-3.0\n"
+        "%%BoundingBox: 0 0 {} {}\n"
+        "%%EndComments\n"
+        "1 1 1 setrgbcolor 0 0 {} {} rectfill\n",
+        W, H, W, H);
+    auto escPs = [](keel::StringRef t) {
+        keel::String o;
+        o.reserve(t.size());
         for (char ch : t) {
-            if (ch == '(' || ch == ')' || ch == '\\') o += '\\';
-            if (ch >= 0x20 && ch <= 0x7E) o += ch;
+            if (ch == '(' || ch == ')' || ch == '\\') o.push_back('\\');
+            if (ch >= 0x20 && ch <= 0x7E) o.push_back(ch);
         }
         return o;
     };
@@ -2129,9 +2235,9 @@ std::string renderFigureEps(const FigureState &fig, int W, int H)
     for (const Cmd &c : cmds) {
         std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f setrgbcolor\n",
                       c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
-        s += buf;
+        s.append(buf);
         if (c.kind == Cmd::IMAGE) {
-            std::vector<keel::u8> rgb = imageCmdRgb(c);
+            keel::Array<keel::u8> rgb = imageCmdRgb(c);
             double sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
             double sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
             int pw = std::max(1, (int)std::lround(sx1 - sx0));
@@ -2139,47 +2245,49 @@ std::string renderFigureEps(const FigureState &fig, int W, int H)
             std::snprintf(buf, sizeof buf,
                           "gsave %.1f %.1f translate %.1f %.1f scale %d %d 8 [%d 0 0 -%d 0 %d] {<",
                           sx0, H - sy1, sx1 - sx0, sy1 - sy0, pw, ph, pw, ph, ph);
-            s += buf;
+            s.append(buf);
             static const char kHex[] = "0123456789abcdef";
             for (keel::u8 b : rgb) {
-                s += kHex[(b >> 4) & 0xF];
-                s += kHex[b & 0xF];
+                s.push_back(kHex[(b >> 4) & 0xF]);
+                s.push_back(kHex[b & 0xF]);
             }
-            s += ">} false 3 colorimage grestore\n";
+            s.append(">} false 3 colorimage grestore\n");
         } else if (c.kind == Cmd::TEXT) {
+            keel::String escaped = escPs(c.text);
             std::snprintf(buf, sizeof buf, "/Courier findfont %.1f scalefont setfont %.1f %.1f moveto (%s) show\n",
-                          c.fontSize, c.x, H - c.y, escPs(c.text).c_str());
-            s += buf;
+                          c.fontSize, c.x, H - c.y, escaped.c_str());
+            s.append(buf);
         } else if (c.kind == Cmd::MARK) {
             double r = c.width / 2.0;
             std::snprintf(buf, sizeof buf, "newpath %.1f %.1f %.1f 0 360 arc stroke\n",
                           c.x, H - c.y, r);
-            s += buf;
+            s.append(buf);
         } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
             std::snprintf(buf, sizeof buf, "%.2f setlinewidth %s newpath %.1f %.1f moveto\n",
                           c.width, c.dash ? "[7 5] 0 setdash" : "[] 0 setdash",
                           c.xs[0], H - c.ys[0]);
-            s += buf;
+            s.append(buf);
             for (keel::usize i = 1; i < c.xs.size(); ++i) {
                 std::snprintf(buf, sizeof buf, "%.1f %.1f lineto\n", c.xs[i], H - c.ys[i]);
-                s += buf;
+                s.append(buf);
             }
-            s += (c.kind == Cmd::POLY && c.fill) ? "closepath fill\n" : "stroke\n";
+            s.append((c.kind == Cmd::POLY && c.fill) ? "closepath fill\n" : "stroke\n");
         }
     }
-    s += "showpage\n%%EOF\n";
+    s.append("showpage\n%%EOF\n");
     return s;
 }
 
-std::string renderFigurePdf(const FigureState &fig, int W, int H)
+keel::String renderFigurePdf(const FigureState &fig, int W, int H)
 {
-    std::vector<Cmd> cmds = renderFigureDisplay(fig, W, H);
-    std::string stream = "1 1 1 rg 0 0 " + std::to_string(W) + " " + std::to_string(H) + " re f\n";
-    auto escPdf = [](const std::string &t) {
-        std::string o;
+    keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    keel::String stream = keel::format("1 1 1 rg 0 0 {} {} re f\n", W, H);
+    auto escPdf = [](keel::StringRef t) {
+        keel::String o;
+        o.reserve(t.size());
         for (char ch : t) {
-            if (ch == '(' || ch == ')' || ch == '\\') o += '\\';
-            if (ch >= 0x20 && ch <= 0x7E) o += ch;
+            if (ch == '(' || ch == ')' || ch == '\\') o.push_back('\\');
+            if (ch >= 0x20 && ch <= 0x7E) o.push_back(ch);
         }
         return o;
     };
@@ -2187,7 +2295,7 @@ std::string renderFigurePdf(const FigureState &fig, int W, int H)
     for (const Cmd &c : cmds) {
         double r = c.color.r / 255.0, g = c.color.g / 255.0, b = c.color.b / 255.0;
         if (c.kind == Cmd::IMAGE) {
-            std::vector<keel::u8> rgb = imageCmdRgb(c);
+            keel::Array<keel::u8> rgb = imageCmdRgb(c);
             double sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
             double sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
             int pw = std::max(1, (int)std::lround(sx1 - sx0));
@@ -2195,58 +2303,60 @@ std::string renderFigurePdf(const FigureState &fig, int W, int H)
             std::snprintf(buf, sizeof buf,
                           "q %.1f 0 0 %.1f %.1f %.1f cm BI /W %d /H %d /CS /RGB /BPC 8 /F /AHx ID ",
                           sx1 - sx0, sy1 - sy0, sx0, H - sy1, pw, ph);
-            stream += buf;
+            stream.append(buf);
             static const char kHex[] = "0123456789abcdef";
             for (keel::u8 by : rgb) {
-                stream += kHex[(by >> 4) & 0xF];
-                stream += kHex[by & 0xF];
+                stream.push_back(kHex[(by >> 4) & 0xF]);
+                stream.push_back(kHex[by & 0xF]);
             }
-            stream += "> EI Q\n";
+            stream.append("> EI Q\n");
         } else if (c.kind == Cmd::TEXT) {
+            keel::String escaped = escPdf(c.text);
             std::snprintf(buf, sizeof buf, "BT /F1 %.1f Tf %.3f %.3f %.3f rg %.1f %.1f Td (%s) Tj ET\n",
-                          c.fontSize, r, g, b, c.x, H - c.y, escPdf(c.text).c_str());
-            stream += buf;
+                          c.fontSize, r, g, b, c.x, H - c.y, escaped.c_str());
+            stream.append(buf);
         } else if (c.kind == Cmd::MARK) {
             double rad = c.width / 2.0;
             std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f RG 1 w %.1f %.1f %.1f %.1f re S\n",
                           r, g, b, c.x - rad, (H - c.y) - rad, c.width, c.width);
-            stream += buf;
+            stream.append(buf);
         } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
             std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f %s %.2f w %s %.1f %.1f m\n",
                           r, g, b, (c.kind == Cmd::POLY && c.fill) ? "rg" : "RG",
                           c.width, c.dash ? "[7 5] 0 d" : "[] 0 d",
                           c.xs[0], H - c.ys[0]);
-            stream += buf;
+            stream.append(buf);
             for (keel::usize i = 1; i < c.xs.size(); ++i) {
                 std::snprintf(buf, sizeof buf, "%.1f %.1f l\n", c.xs[i], H - c.ys[i]);
-                stream += buf;
+                stream.append(buf);
             }
-            stream += (c.kind == Cmd::POLY && c.fill) ? "h f\n" : "S\n";
+            stream.append((c.kind == Cmd::POLY && c.fill) ? "h f\n" : "S\n");
         }
     }
-    std::string pdf = "%PDF-1.4\n";
+    keel::String pdf = keel::String::from("%PDF-1.4\n");
     keel::usize off1 = pdf.size();
-    pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+    pdf.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
     keel::usize off2 = pdf.size();
-    pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+    pdf.append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     keel::usize off3 = pdf.size();
-    pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
-        + std::to_string(W) + " " + std::to_string(H)
-        + "] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n";
+    pdf.append(keel::format(
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] "
+        "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+        W, H));
     keel::usize off4 = pdf.size();
-    pdf += "4 0 obj\n<< /Length " + std::to_string(stream.size()) + " >>\nstream\n"
-        + stream + "endstream\nendobj\n";
+    pdf.append(keel::format("4 0 obj\n<< /Length {} >>\nstream\n", stream.size()));
+    pdf.append(stream);
+    pdf.append("endstream\nendobj\n");
     keel::usize off5 = pdf.size();
-    pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n";
+    pdf.append("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n");
     keel::usize xref = pdf.size();
-    pdf += "xref\n0 6\n0000000000 65535 f \n";
+    pdf.append("xref\n0 6\n0000000000 65535 f \n");
     keel::usize offs[5] = {off1, off2, off3, off4, off5};
     for (int i = 0; i < 5; ++i) {
-        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", offs[i]);
-        pdf += buf;
+        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", static_cast<std::size_t>(offs[i]));
+        pdf.append(buf);
     }
-    pdf += "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
-        + std::to_string(xref) + "\n%%EOF\n";
+    pdf.append(keel::format("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref));
     return pdf;
 }
 
@@ -2302,7 +2412,10 @@ inline const keel::u8 *font5x7(char c)
 class Raster
 {
 public:
-    Raster(int w, int h) : w_(w), h_(h), px_(w * h * 3, 255) {}
+    Raster(int w, int h) : w_(w), h_(h)
+    {
+        px_.resize(static_cast<keel::usize>(w) * static_cast<keel::usize>(h) * 3, 255);
+    }
 
     void px(int x, int y, Rgb c)
     {
@@ -2341,7 +2454,7 @@ public:
         }
     }
 
-    void polygon(const std::vector<double> &xs, const std::vector<double> &ys,
+    void polygon(keel::ArrayRef<double> xs, keel::ArrayRef<double> ys,
                  Rgb c, bool fill)
     {
         if (xs.size() < 2)
@@ -2354,7 +2467,7 @@ public:
                 ymx = std::max(ymx, y);
             }
             for (int y = (int)std::floor(ymn); y <= (int)std::ceil(ymx); ++y) {
-                std::vector<double> xi;
+                keel::Array<double> xi;
                 for (keel::usize i = 0; i < xs.size(); ++i) {
                     keel::usize j = (i + 1) % xs.size();
                     double ya = ys[i], yb = ys[j];
@@ -2375,7 +2488,7 @@ public:
         }
     }
 
-    void marker(double x, double y, double size, Rgb c, const std::string &k)
+    void marker(double x, double y, double size, Rgb c, keel::StringRef k)
     {
         int r = (int)std::max(2.0, size / 2);
         if (k == "s") {
@@ -2409,7 +2522,7 @@ public:
 
     // Monospace text, scale = fontSize / 7 (glyph 5×7 + 1 col spacing).
     // rot90 renders the run bottom-to-top (ylabel).
-    void text(double x, double y, const std::string &s, double fontSize, Rgb c,
+    void text(double x, double y, keel::StringRef s, double fontSize, Rgb c,
               bool rot90)
     {
         int scale = std::max(1, (int)std::lround(fontSize / 7.0));
@@ -2430,8 +2543,8 @@ public:
             // Glyph columns run UPWARD from (x,y); within a glyph rows
             // go left→right after rotation.
             double cy = y;
-            for (auto it = s.rbegin(); it != s.rend(); ++it) {
-                const keel::u8 *g = font5x7(*it);
+            for (keel::usize i = s.size(); i-- > 0;) {
+                const keel::u8 *g = font5x7(s[i]);
                 for (int row = 0; row < 7; ++row)
                     for (int col = 0; col < 5; ++col)
                         if (g[col] & (1 << row))
@@ -2446,7 +2559,7 @@ public:
 
     // Blit a top-down RGB buffer (pw×ph×3) at pixel (x0,y0). Used by the
     // IMAGE cmd; the buffer is already at on-screen resolution.
-    void image(int x0, int y0, const std::vector<keel::u8> &buf, int pw,
+    void image(int x0, int y0, keel::ArrayRef<keel::u8> buf, int pw,
                int ph)
     {
         for (int y = 0; y < ph; ++y) {
@@ -2466,18 +2579,19 @@ public:
         }
     }
 
-    const std::vector<keel::u8> &bytes() const { return px_; }
+    const keel::Array<keel::u8> &bytes() const { return px_; }
+    keel::Array<keel::u8> takeBytes() { return keel::move(px_); }
     int width() const { return w_; }
     int height() const { return h_; }
 
 private:
     int w_, h_;
-    std::vector<keel::u8> px_;
+    keel::Array<keel::u8> px_;
 };
 
 // Render to a top-down RGB buffer (H×W×3 bytes).
-std::vector<keel::u8> renderFigureRgb(const FigureState &fig,
-                                          int W, int H)
+keel::Array<keel::u8> renderFigureRgb(const FigureState &fig,
+                                      int W, int H)
 {
     Raster r(W, H);
     for (const Cmd &c : renderFigureDisplay(fig, W, H)) {
@@ -2499,7 +2613,7 @@ std::vector<keel::u8> renderFigureRgb(const FigureState &fig,
                        c.width, c.dash);
             break;
         case Cmd::IMAGE: {
-            std::vector<keel::u8> buf = imageCmdRgb(c);
+            keel::Array<keel::u8> buf = imageCmdRgb(c);
             int pw = std::max(1, (int)std::lround(std::max(c.xs[0], c.xs[1])
                                                   - std::min(c.xs[0], c.xs[1])));
             int ph = std::max(1, (int)std::lround(std::max(c.ys[0], c.ys[1])
@@ -2510,7 +2624,7 @@ std::vector<keel::u8> renderFigureRgb(const FigureState &fig,
         }
         }
     }
-    return r.bytes();
+    return r.takeBytes();
 }
 
 } // namespace figrender

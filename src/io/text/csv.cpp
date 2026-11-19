@@ -6,21 +6,20 @@
 // entries (csvread/csvwrite + the detail reg adapters) add VFS path resolution +
 // read/write via the Engine.
 
-#include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/io/text/csv.hpp>
 
 #include <numkit/value/error.hpp>
 #include <numkit/sys/fs_context.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <sstream>
-#include <string>
 
 namespace numkit::io {
 
@@ -32,12 +31,19 @@ namespace {
 
 // Auto-append ".csv" when the filename's basename has no extension.
 // Matches MATLAB's quiet behaviour so short names like "out" still DTRT.
-std::string resolveCsvPath(std::string path)
+keel::String resolveCsvPath(keel::StringRef rawPath)
 {
-    keel::usize slash = path.find_last_of("/\\");
-    keel::usize fromIdx = (slash == std::string::npos) ? 0 : slash + 1;
-    if (path.find('.', fromIdx) == std::string::npos)
-        path += ".csv";
+    keel::String path = keel::String::from(rawPath);
+    keel::usize slash = keel::kInvalidIndex;
+    for (keel::usize i = path.size(); i > 0; --i) {
+        if (path[i - 1] == '/' || path[i - 1] == '\\') {
+            slash = i - 1;
+            break;
+        }
+    }
+    keel::usize fromIdx = (slash == keel::kInvalidIndex) ? 0 : slash + 1;
+    if (path.find('.', fromIdx) == keel::kInvalidIndex)
+        path.append(".csv");
     return path;
 }
 
@@ -45,7 +51,7 @@ std::string resolveCsvPath(std::string path)
 // cells map to 0.0 (matching MATLAB's csvread contract). Trailing \r
 // is stripped so CRLF files don't leak a carriage return into the last
 // cell's parse range.
-keel::Array<double> parseCsvLine(keel::Allocator *mr, const std::string &raw)
+keel::Array<double> parseCsvLine(keel::Allocator *mr, keel::StringRef raw)
 {
     keel::Array<double> out(mr);
     keel::usize len = raw.size();
@@ -55,7 +61,7 @@ keel::Array<double> parseCsvLine(keel::Allocator *mr, const std::string &raw)
     keel::usize start = 0;
     for (keel::usize i = 0; i <= len; ++i) {
         if (i == len || raw[i] == ',') {
-            const char *p = raw.c_str() + start;
+            const char *p = raw.data() + start;
             keel::usize n = i - start;
             while (n > 0 && (*p == ' ' || *p == '\t')) {
                 ++p;
@@ -65,7 +71,7 @@ keel::Array<double> parseCsvLine(keel::Allocator *mr, const std::string &raw)
                 --n;
             double v = 0.0;
             if (n > 0) {
-                std::string cell(p, n);
+                keel::SmallString<64> cell(keel::StringRef(p, n), mr);
                 char *endp = nullptr;
                 double parsed = std::strtod(cell.c_str(), &endp);
                 if (endp != cell.c_str())
@@ -78,15 +84,9 @@ keel::Array<double> parseCsvLine(keel::Allocator *mr, const std::string &raw)
     return out;
 }
 
-} // namespace
-
-// ════════════════════════════════════════════════════════════════════════
-// Engine-free PARSE / SERIALIZE cores (pure text ↔ Value — no Engine/VFS)
-// ════════════════════════════════════════════════════════════════════════
-
-Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::usize skipCols,
-                        bool haveRange, keel::usize lastRow, keel::usize lastCol,
-                        keel::Allocator *mr)
+Value csvreadFromStringImpl(keel::StringRef content, keel::usize skipRows, keel::usize skipCols,
+                            bool haveRange, keel::usize lastRow, keel::usize lastCol,
+                            keel::Allocator *mr)
 {
     const keel::usize r1 = skipRows, c1 = skipCols, r2 = lastRow, c2 = lastCol;
     keel::ArenaTemp scratch = keel::get_scratch(mr);
@@ -98,13 +98,13 @@ Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::
     keel::usize pos = 0;
     while (pos <= content.size()) {
         keel::usize nl = content.find('\n', pos);
-        keel::usize end = (nl == std::string::npos) ? content.size() : nl;
+        keel::usize end = (nl == keel::kInvalidIndex) ? content.size() : nl;
         // Stop cleanly on a trailing newline with nothing after it —
         // otherwise we'd produce one bogus empty row.
-        if (end == pos && nl == std::string::npos)
+        if (end == pos && nl == keel::kInvalidIndex)
             break;
-        std::string line = content.substr(pos, end - pos);
-        pos = (nl == std::string::npos) ? content.size() + 1 : nl + 1;
+        keel::StringRef line = content.substr(pos, end - pos);
+        pos = (nl == keel::kInvalidIndex) ? content.size() + 1 : nl + 1;
 
         if (lineNo < r1) {
             ++lineNo;
@@ -116,10 +116,10 @@ Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::
 
         keel::Array<double> cells = parseCsvLine(scratch.allocator(), line);
         keel::Array<double> row(scratch.allocator());
-        keel::usize endCol = haveRange ? std::min(c2 + 1, cells.size()) : cells.size();
+        keel::usize endCol = haveRange ? keel::min(c2 + 1, cells.size()) : cells.size();
         if (c1 < endCol)
             row.assign(cells.slice(c1, endCol - c1));
-        rows.push_back(std::move(row));
+        rows.push_back(keel::move(row));
     }
 
     keel::usize R, C;
@@ -143,45 +143,52 @@ Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::
     double *data = M.doubleDataMut();
     for (keel::usize r = 0; r < R; ++r) {
         const auto &row = rows[r];
-        keel::usize n = std::min(C, row.size());
+        keel::usize n = keel::min(C, row.size());
         for (keel::usize c = 0; c < n; ++c)
             data[c * R + r] = row[c];
     }
     return M;
 }
 
-Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::usize skipCols,
+} // namespace
+
+// ════════════════════════════════════════════════════════════════════════
+// Engine-free PARSE / SERIALIZE cores (pure text ↔ Value — no Engine/VFS)
+// ════════════════════════════════════════════════════════════════════════
+
+Value csvreadFromString(keel::StringRef content, keel::usize skipRows, keel::usize skipCols,
                         keel::Allocator *mr)
 {
-    return csvreadFromString(content, skipRows, skipCols, false, 0, 0, mr);
+    return csvreadFromStringImpl(content, skipRows, skipCols, false, 0, 0, mr);
 }
 
-Value csvreadFromString(const std::string &content, keel::Allocator *mr)
+Value csvreadFromString(keel::StringRef content, keel::Allocator *mr)
 {
-    return csvreadFromString(content, 0, 0, false, 0, 0, mr);
+    return csvreadFromStringImpl(content, 0, 0, false, 0, 0, mr);
 }
 
-std::string csvwriteToString(const Value &M, keel::usize offR, keel::usize offC)
+keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC)
 {
     keel::usize R = M.dims().rows();
     keel::usize C = M.dims().cols();
 
-    std::ostringstream os;
+    keel::String out;
     for (keel::usize r = 0; r < offR; ++r)
-        os << '\n';
+        out.push_back('\n');
 
     auto writeCell = [&](double v) {
         char buf[32];
-        std::snprintf(buf, sizeof(buf), "%.15g", v);
-        os << buf;
+        int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
+        if (len > 0)
+            out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
     };
 
     for (keel::usize r = 0; r < R; ++r) {
         for (keel::usize c = 0; c < offC; ++c)
-            os << ',';
+            out.push_back(',');
         for (keel::usize c = 0; c < C; ++c) {
             if (c > 0)
-                os << ',';
+                out.push_back(',');
             double v = 0.0;
             if (M.type() == ValueType::DOUBLE) {
                 v = M.isScalar() ? M.toScalar() : M(r, c);
@@ -195,9 +202,9 @@ std::string csvwriteToString(const Value &M, keel::usize offR, keel::usize offC)
             }
             writeCell(v);
         }
-        os << '\n';
+        out.push_back('\n');
     }
-    return os.str();
+    return out;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -216,7 +223,7 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
     if (args.empty() || !args[0].isChar())
         throw Error("csvread requires a filename as the first argument");
 
-    std::string filename = resolveCsvPath(std::string(args[0].toString().as_ref()));
+    keel::String filename = resolveCsvPath(args[0].toString().as_ref());
 
     keel::usize r1 = 0, c1 = 0, r2 = 0, c2 = 0;
     bool haveRange = false;
@@ -237,17 +244,17 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
 
     FsContext::ResolvedPath resolved{};
     try {
-        resolved = fs.resolvePath(filename);
+        resolved = fs.resolvePath(filename.as_ref());
     } catch (const std::runtime_error &e) {
         throw Error(e.what());
     }
-    std::string content;
+    keel::String content;
     try {
-        content = resolved.fs->readFile(resolved.path);
+        content = resolved.fs->readFile(resolved.path.as_ref());
     } catch (const std::exception &e) {
-        throw Error(std::string("csvread: ") + e.what());
+        throw Error(keel::format("csvread: {}", e.what()));
     }
-    return csvreadFromString(content, r1, c1, haveRange, r2, c2, mr);
+    return csvreadFromStringImpl(content.as_ref(), r1, c1, haveRange, r2, c2, mr);
 }
 
 void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
@@ -257,7 +264,7 @@ void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
     if (!args[0].isChar())
         throw Error("csvwrite: first argument must be a filename");
 
-    std::string filename = resolveCsvPath(std::string(args[0].toString().as_ref()));
+    keel::String filename = resolveCsvPath(args[0].toString().as_ref());
     const Value &M = args[1];
 
     keel::usize offR = 0, offC = 0;
@@ -266,18 +273,18 @@ void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
     if (args.size() >= 4)
         offC = static_cast<keel::usize>(args[3].toScalar());
 
-    const std::string out = csvwriteToString(M, offR, offC);
+    const keel::String out = csvwriteToString(M, offR, offC);
 
     FsContext::ResolvedPath resolved{};
     try {
-        resolved = fs.resolvePath(filename);
+        resolved = fs.resolvePath(filename.as_ref());
     } catch (const std::runtime_error &e) {
         throw Error(e.what());
     }
     try {
-        resolved.fs->writeFile(resolved.path, out);
+        resolved.fs->writeFile(resolved.path.as_ref(), out.as_ref());
     } catch (const std::exception &e) {
-        throw Error(std::string("csvwrite: ") + e.what());
+        throw Error(keel::format("csvwrite: {}", e.what()));
     }
 }
 

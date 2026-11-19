@@ -15,9 +15,9 @@
 
 namespace numkit::detail {
 
-std::string vecToJson(const Value &v)
+keel::String vecToJson(const Value &v)
 {
-    std::ostringstream os;
+    StrBuf os;
     os << "[";
     if (v.isComplex()) {
         for (keel::usize i = 0; i < v.numel(); ++i) {
@@ -46,12 +46,31 @@ std::string vecToJson(const Value &v)
         }
     }
     os << "]";
-    return os.str();
+    return os.take();
 }
 
-std::string makeIndexJson(keel::usize n)
+keel::String vecToJson(keel::ArrayRef<double> v)
 {
-    std::ostringstream xs;
+    StrBuf os;
+    os << "[";
+    for (keel::usize i = 0; i < v.size(); ++i) {
+        if (i)
+            os << ",";
+        double val = v[i];
+        if (std::isnan(val))
+            os << "null";
+        else if (std::isinf(val))
+            os << (val > 0 ? "1e308" : "-1e308");
+        else
+            os << val;
+    }
+    os << "]";
+    return os.take();
+}
+
+keel::String makeIndexJson(keel::usize n)
+{
+    StrBuf xs;
     xs << "[";
     for (keel::usize i = 0; i < n; ++i) {
         if (i)
@@ -59,30 +78,30 @@ std::string makeIndexJson(keel::usize n)
         xs << (i + 1);
     }
     xs << "]";
-    return xs.str();
+    return xs.take();
 }
 
-std::string argStr(const Value &v)
+keel::String argStr(const Value &v)
 {
     if (v.isCell()) {
-        std::string out;
+        keel::String out;
         for (keel::usize i = 0; i < v.numel(); ++i) {
-            if (i) out += "\n";
-            out += argStr(v.cellAt(i));
+            if (i) out.push_back('\n');
+            out.append(argStr(v.cellAt(i)).as_ref());
         }
         return out;
     }
     if (v.isString()) {
-        std::string out;
+        keel::String out;
         for (keel::usize i = 0; i < v.numel(); ++i) {
-            if (i) out += "\n";
-            out += v.stringElem(i);
+            if (i) out.push_back('\n');
+            out.append(v.stringElem(i).as_ref());
         }
         return out;
     }
     if (v.isChar())
-        return std::string(v.toString().as_ref());
-    return "";
+        return v.toString();
+    return keel::String{};
 }
 
 void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo &ds)
@@ -90,9 +109,9 @@ void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo
     for (keel::usize i = startIdx; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             continue;
-        std::string key(args[i].toString().as_ref());
+        keel::String key = args[i].toString();
         for (auto &c : key)
-            c = std::tolower(c);
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (key == "linewidth")
             ds.lineWidth = args[i + 1].toScalar();
         else if (key == "markersize")
@@ -123,7 +142,7 @@ keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds)
     return nvStart;
 }
 
-void doubleToJson(std::ostringstream &os, double val)
+void doubleToJson(StrBuf &os, double val)
 {
     if (std::isnan(val))
         os << "null";

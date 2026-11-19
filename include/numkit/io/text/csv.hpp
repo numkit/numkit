@@ -4,9 +4,8 @@
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
-
-#include <string>
 
 #include <numkit/sys/fs_context.hpp>
 
@@ -17,17 +16,17 @@ namespace numkit::io {
 /// Pure text→Value: no Engine, no VFS (mirrors `image::imreadFromBytes`). The
 /// MATLAB-facing `csvread` adds VFS path resolution + file read on top of this.
 /// Missing / non-numeric cells read as 0.
-Value csvreadFromString(const std::string &content,
+Value csvreadFromString(keel::StringRef content,
                         keel::Allocator *mr = nullptr);
 
 /// @brief As above, skipping the first `skipRows` rows / `skipCols` cols
 /// (0-based origin, like `csvread(file, R0, C0)`). Engine-free.
-Value csvreadFromString(const std::string &content, keel::usize skipRows, keel::usize skipCols,
+Value csvreadFromString(keel::StringRef content, keel::usize skipRows, keel::usize skipCols,
                         keel::Allocator *mr = nullptr);
 
 /// @brief Serialize a numeric matrix to CSV text — **Engine-free** C++ API.
 /// `offR`/`offC` prepend blank rows/cols.
-std::string csvwriteToString(const Value &M, keel::usize offR = 0, keel::usize offC = 0);
+keel::String csvwriteToString(const Value &M, keel::usize offR = 0, keel::usize offC = 0);
 
 /// @file
 /// @brief CSV text I/O.

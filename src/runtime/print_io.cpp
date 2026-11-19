@@ -13,6 +13,7 @@
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/io.hpp>
 #include <numkit/builtin/strfun.hpp>  // formatCyclic, dispFormat
 #include <numkit/core/engine.hpp>     // Engine, findFile, OpenFile
@@ -22,7 +23,6 @@
 
 #include <cstddef>
 #include <cstring>
-#include <string>
 
 namespace numkit::runtime {
 
@@ -67,7 +67,8 @@ keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
         keel::usize writePos = f->appendOnly ? f->buffer.size() : f->cursor;
         if (writePos + result.size() > f->buffer.size())
             f->buffer.resize(writePos + result.size());
-        std::memcpy(f->buffer.data() + writePos, result.data(), result.size());
+        if (!result.empty())
+            std::memcpy(f->buffer.data() + writePos, result.data(), result.size());
         f->cursor = writePos + result.size();
     } else {
         throw Error("fprintf: invalid file identifier");

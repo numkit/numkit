@@ -2,18 +2,15 @@
 //
 // Help system C++ API and Engine registration adapters for NK bundle.
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/help.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
-
-#include <algorithm>
-#include <iomanip>
-#include <sstream>
-#include <string>
-#include <vector>
 
 namespace numkit::bundle {
 
@@ -21,7 +18,7 @@ namespace numkit::bundle {
 // C++ API
 // ════════════════════════════════════════════════════════════════════════
 
-std::string help(const std::string &query)
+keel::String help(keel::StringRef query)
 {
     const auto &catalog = HelpCatalog::instance();
     if (query.empty()) {
@@ -35,16 +32,16 @@ std::string help(const std::string &query)
     if (func) {
         return catalog.formatFunction(func->name);
     }
-    return "'" + query + "' not found. Type 'help' for a list of topics.\n";
+    return keel::format("'{}' not found. Type 'help' for a list of topics.\n", query);
 }
 
 Value help(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
-    std::string query = args.empty() ? std::string() : std::string(args[0].toString().as_ref());
+    keel::String query = args.empty() ? keel::String{} : args[0].toString();
     return Value::fromString(help(query), mr);
 }
 
-std::vector<std::string> what(const std::string &category)
+keel::Array<keel::String> what(keel::StringRef category)
 {
     const auto &catalog = HelpCatalog::instance();
     const HelpCategory *cat = catalog.findCategory(category);
@@ -57,23 +54,24 @@ std::vector<std::string> what(const std::string &category)
 Value what(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     const auto &catalog = HelpCatalog::instance();
-    std::string topic = args.empty() ? std::string("elmat") : std::string(args[0].toString().as_ref());
+    keel::String topic = args.empty() ? keel::String::from("elmat") : args[0].toString();
     const HelpCategory *cat = catalog.findCategory(topic);
-    std::vector<std::string> funcs = what(topic);
+    keel::Array<keel::String> funcs = what(topic);
 
     Value cellM = Value::cell(funcs.size(), 1, mr);
     for (keel::usize i = 0; i < funcs.size(); ++i) {
         cellM.cellAt(i) = Value::fromString(funcs[i], mr);
     }
     Value st = Value::structure(mr);
-    st.structFields().put(keel::String::from("path"), Value::fromString(cat ? cat->name : topic, mr));
-    st.structFields().put(keel::String::from("m"), std::move(cellM));
+    st.structFields().put(keel::String::from("path"),
+                          Value::fromString(cat ? cat->name.as_ref() : topic.as_ref(), mr));
+    st.structFields().put(keel::String::from("m"), keel::move(cellM));
     st.structFields().put(keel::String::from("classes"), Value::cell(0, 1, mr));
     st.structFields().put(keel::String::from("packages"), Value::cell(0, 1, mr));
     return st;
 }
 
-std::vector<std::string> builtins(const std::string &category)
+keel::Array<keel::String> builtins(keel::StringRef category)
 {
     const auto &catalog = HelpCatalog::instance();
     if (category.empty()) {
@@ -84,8 +82,8 @@ std::vector<std::string> builtins(const std::string &category)
 
 Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
-    std::string topic = args.empty() ? std::string() : std::string(args[0].toString().as_ref());
-    std::vector<std::string> funcs = builtins(topic);
+    keel::String topic = args.empty() ? keel::String{} : args[0].toString();
+    keel::Array<keel::String> funcs = builtins(topic);
     Value cellOut = Value::cell(funcs.size(), 1, mr);
     for (keel::usize i = 0; i < funcs.size(); ++i) {
         cellOut.cellAt(i) = Value::fromString(funcs[i], mr);
@@ -93,13 +91,13 @@ Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr)
     return cellOut;
 }
 
-std::vector<std::string> categories()
+keel::Array<keel::String> categories()
 {
     const auto &catalog = HelpCatalog::instance();
-    std::vector<std::string> cats;
+    keel::Array<keel::String> cats;
     cats.reserve(catalog.categories().size());
     for (const auto &c : catalog.categories()) {
-        cats.push_back(c.name);
+        cats.push_back(c.name.clone());
     }
     return cats;
 }
@@ -122,13 +120,13 @@ namespace detail {
 
 static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     const auto &catalog = HelpCatalog::instance();
-    std::string text;
+    keel::String text;
 
     if (args.empty()) {
         text = catalog.formatAllCategories();
     } else {
-        std::string query = args[0].isChar() ? std::string(args[0].toString().as_ref()) : std::string();
-        if (query.empty() && args[0].isString()) query = std::string(args[0].toString().as_ref());
+        keel::String query = args[0].isChar() ? args[0].toString() : keel::String{};
+        if (query.empty() && args[0].isString()) query = args[0].toString();
 
         const HelpCategory *cat = catalog.findCategory(query);
         if (cat) {
@@ -138,11 +136,11 @@ static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
             if (func) {
                 text = catalog.formatFunction(func->name);
             } else if (ctx.engine->hasUserFunction(query)) {
-                text = query + " is a user-defined function.\n";
+                text = keel::format("{} is a user-defined function.\n", query);
             } else if (ctx.engine->hasExternalFunction(query)) {
-                text = query + " is a built-in function.\n";
+                text = keel::format("{} is a built-in function.\n", query);
             } else {
-                text = "'" + query + "' not found. Type 'help' for a list of topics.\n";
+                text = keel::format("'{}' not found. Type 'help' for a list of topics.\n", query);
             }
         }
     }
@@ -159,20 +157,20 @@ static void what_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     if (nargout > 0) {
         outs[0] = what(args, ctx.engine->allocator());
     } else {
-        std::string topic = args.empty() ? std::string("elmat") : (args[0].isChar() ? std::string(args[0].toString().as_ref()) : std::string());
+        keel::String topic = args.empty() ? keel::String::from("elmat")
+                                          : (args[0].isChar() ? args[0].toString() : keel::String{});
         const auto &catalog = HelpCatalog::instance();
         const HelpCategory *cat = catalog.findCategory(topic);
-        std::vector<std::string> funcs = what(topic);
-        std::string title = cat ? cat->title : topic;
+        keel::Array<keel::String> funcs = what(topic);
+        keel::StringRef title = cat ? cat->title.as_ref() : topic.as_ref();
 
-        std::ostringstream os;
-        os << "Functions in " << topic << " (" << title << "):\n\n";
+        keel::String out = keel::format("Functions in {} ({}):\n\n", topic, title);
         for (keel::usize i = 0; i < funcs.size(); ++i) {
-            os << std::left << std::setw(16) << funcs[i];
-            if ((i + 1) % 4 == 0 || i + 1 == funcs.size()) os << "\n";
+            keel::format_into(out, "{:<16}", funcs[i]);
+            if ((i + 1) % 4 == 0 || i + 1 == funcs.size()) out.push_back('\n');
         }
-        os << "\n";
-        ctx.engine->outputText(os.str());
+        out.push_back('\n');
+        ctx.engine->outputText(out);
         outs[0] = Value();
     }
 }
@@ -186,18 +184,18 @@ static void categories_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef
 }
 
 static void inmem_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-    std::vector<std::string> userFuncs;
-    std::vector<std::string> classes;
+    keel::Array<keel::String> userFuncs;
+    keel::Array<keel::String> classes;
 
     for (const auto &name : ctx.engine->namespaces()) {
-        classes.push_back(name);
+        classes.push_back(name.clone());
     }
 
     Value mCell = Value::cell(userFuncs.size(), 1, ctx.engine->allocator());
     for (keel::usize i = 0; i < userFuncs.size(); ++i) {
         mCell.cellAt(i) = Value::fromString(userFuncs[i], ctx.engine->allocator());
     }
-    outs[0] = std::move(mCell);
+    outs[0] = keel::move(mCell);
 
     if (nargout > 1) {
         outs[1] = Value::cell(0, 1, ctx.engine->allocator()); // MEX
@@ -207,7 +205,7 @@ static void inmem_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArray
         for (keel::usize i = 0; i < classes.size(); ++i) {
             cCell.cellAt(i) = Value::fromString(classes[i], ctx.engine->allocator());
         }
-        outs[2] = std::move(cCell);
+        outs[2] = keel::move(cCell);
     }
 }
 

@@ -1,27 +1,26 @@
 // math/src/geom/geom_reg.cpp
 //
 // CallContext register half (Phase 2b multi-block split).
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/figure_manager.hpp>
-#include <numkit/core/engine.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/value/error.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -143,20 +142,21 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     fm.prepareForPlot();
     const double *k = K.doubleData();
     const keel::usize m = K.numel();
-    std::ostringstream xs, ys;
-    xs << '['; ys << '[';
+    keel::String xs(ctx.engine->allocator());
+    keel::String ys(ctx.engine->allocator());
+    xs.push_back('['); ys.push_back('[');
     for (keel::usize i = 0; i < m; ++i) {
-        if (i) { xs << ','; ys << ','; }
+        if (i) { xs.push_back(','); ys.push_back(','); }
         const keel::usize kk = static_cast<keel::usize>(k[i]) - 1;
-        xs << args[0].elemAsDouble(kk);
-        ys << args[1].elemAsDouble(kk);
+        figdetail::appendDouble(xs, args[0].elemAsDouble(kk));
+        figdetail::appendDouble(ys, args[1].elemAsDouble(kk));
     }
-    xs << ']'; ys << ']';
+    xs.push_back(']'); ys.push_back(']');
     DatasetInfo ds;
-    ds.type  = "line";
-    ds.xJson = xs.str();
-    ds.yJson = ys.str();
-    ds.style = "color=#1f77b4";
+    ds.type.assign("line");
+    ds.xJson = keel::move(xs);
+    ds.yJson = keel::move(ys);
+    ds.style.assign("color=#1f77b4");
     fm.pushDataset(std::move(ds));
     fm.emitModified();
 }
@@ -186,7 +186,7 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
     // Determine bin edges.
     int nx = 10, ny = 10;
-    std::vector<double> xedges, yedges;
+    keel::Array<double> xedges(mr), yedges(mr);
     if (args.size() == 3) {
         if (args[2].numel() == 1) {
             nx = ny = (int)args[2].toScalar();
@@ -201,7 +201,7 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                 xedges.resize(args[2].numel());
                 for (keel::usize i = 0; i < xedges.size(); ++i)
                     xedges[i] = args[2].elemAsDouble(i);
-                yedges = xedges;
+                yedges = xedges.clone(mr);
             }
         }
     } else if (args.size() >= 4) {
@@ -297,7 +297,7 @@ void griddata_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 {
     argcheck::checkNargin(args.size(), 5, 7, "griddata");
     auto *mr = ctx.engine->allocator();
-    std::string method = "linear";
+    keel::String method = keel::String::from("linear", mr);
     if (args.size() >= 6 && (args[5].isChar() || args[5].isString()))
         method = args[5].toString();
 
@@ -343,7 +343,7 @@ void griddatan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 {
     argcheck::checkNargin(args.size(), 1, 5, "griddatan");
     argcheck::checkNargin(args.size(), 3, 5, "griddatan");
-    std::string method = "linear";
+    keel::String method = keel::String::from("linear", ctx.engine->allocator());
     if (args.size() >= 4 && args[3].isChar())
         method = args[3].toString();
     outs[0] = griddatan(args[0], args[1], args[2], method,
@@ -360,7 +360,7 @@ void matchpairs_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     argcheck::checkNargin(args.size(), 1, 3, "matchpairs");
     argcheck::checkNargin(args.size(), 2, 3, "matchpairs");
     const double cU = args[1].toScalar();
-    std::string mode = "min";
+    keel::String mode = keel::String::from("min", ctx.engine->allocator());
     if (args.size() >= 3 && args[2].isChar())
         mode = args[2].toString();
     auto r = matchpairs(args[0], cU, mode, ctx.engine->allocator());

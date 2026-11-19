@@ -9,7 +9,9 @@
 #include <keel/arena.h>
 #include <keel/array.h>
 #include <keel/complex.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -31,10 +33,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -215,7 +215,7 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         const long long n = static_cast<long long>(A.dims().cols());
         const long long pLen = std::min(m, n);
 
-        std::vector<long long> diags;
+        keel::Array<long long> diags(mr);
         if (args.size() == 1) {
             for (long long k = -(m - 1); k <= n - 1; ++k) {
                 bool anyNz = false;
@@ -527,12 +527,12 @@ namespace {
 keel::usize requireSizeArg(keel::ArrayRef<Value> args, const char *fn)
 {
     if (args.size() != 1)
-        throw Error(std::string(fn) + ": requires exactly 1 argument",
-                    0, 0, fn, "", std::string("numkit:") + fn + ":nargin");
+        throw Error(keel::format("{}: requires exactly 1 argument", fn),
+                    0, 0, fn, "", keel::format("numkit:{}:nargin", fn));
     const double nd = args[0].toScalar();
     if (nd < 0.0 || nd != std::floor(nd))
-        throw Error(std::string(fn) + ": N must be a non-negative integer",
-                    0, 0, fn, "", std::string("numkit:") + fn + ":badN");
+        throw Error(keel::format("{}: N must be a non-negative integer", fn),
+                    0, 0, fn, "", keel::format("numkit:{}:badN", fn));
     return static_cast<keel::usize>(nd);
 }
 
@@ -599,23 +599,23 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                     0, 0, "topkrows", "", "numkit:topkrows:badK");
     auto *mr = ctx.engine->allocator();
 
-    auto toLower = [](keel::StringRef sv) {
-        std::string s(sv);
-        for (char &ch : s)
-            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    auto toLower = [mr](keel::StringRef sv) {
+        keel::String s = keel::String::from(sv, mr);
+        for (keel::usize idx = 0; idx < s.size(); ++idx)
+            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
         return s;
     };
     auto parseDirStr = [&](keel::StringRef raw) -> keel::u8 {
-        std::string s = toLower(raw);
+        keel::String s = toLower(raw);
         if (s == "descend") return 1u;
         if (s == "ascend")  return 0u;
         throw Error("topkrows: direction must be 'ascend' or 'descend'",
                     0, 0, "topkrows", "", "numkit:topkrows:badDir");
     };
 
-    std::vector<keel::usize> cols;
-    std::vector<keel::u8> desc;
-    std::string compMethod = "auto";
+    keel::Array<keel::usize> cols(mr);
+    keel::Array<keel::u8> desc(mr);
+    keel::String compMethod = keel::String::from("auto", mr);
     keel::usize i = 2;
     if (i < args.size() && !args[i].isChar() && !args[i].isString() && !args[i].isCell()) {
         // Numeric col vector.
@@ -639,7 +639,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                 desc.push_back(parseDirStr(el.toString()));
             ++i;
         } else if (args[i].isChar() || args[i].isString()) {
-            const std::string s = toLower(args[i].toString());
+            const keel::String s = toLower(args[i].toString());
             if (s == "comparisonmethod") {
                 if (i + 1 >= args.size() || (!args[i + 1].isChar() && !args[i + 1].isString()))
                     throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
@@ -657,7 +657,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     }
     // Optional trailing 'ComparisonMethod' NV (after dir).
     while (i + 1 < args.size() && (args[i].isChar() || args[i].isString())) {
-        const std::string nm = toLower(args[i].toString());
+        const keel::String nm = toLower(args[i].toString());
         if (nm == "comparisonmethod") {
             if (!args[i + 1].isChar() && !args[i + 1].isString())
                 throw Error("topkrows: ComparisonMethod must be 'auto', 'real', or 'abs'",
@@ -695,7 +695,8 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             throw Error("topkrows: direction must be a scalar or match the length of col",
                         0, 0, "topkrows", "", "numkit:topkrows:dirSize");
 
-        std::vector<keel::usize> ord(m);
+        keel::Array<keel::usize> ord(mr);
+        ord.resize(m);
         for (keel::usize r = 0; r < m; ++r) ord[r] = r;
         const bool isCplx = A.isComplex();
         const bool useReal = (compMethod == "real") || (compMethod == "auto" && !isCplx);
@@ -858,10 +859,9 @@ keel::Array<keel::usize> parseReshapeDims(const Value &x, keel::ArrayRef<Value> 
         }
         if (inferPos >= 0) {
             if (knownProd == 0 || x.numel() % knownProd != 0)
-                throw Error("reshape: product of known dimensions ("
-                                + std::to_string(knownProd)
-                                + ") does not divide the total number of "
-                                "elements (" + std::to_string(x.numel()) + ").",
+                throw Error(keel::format("reshape: product of known dimensions ({}) "
+                                         "does not divide the total number of elements ({}).",
+                                         knownProd, x.numel()),
                              0, 0, "reshape", "",
                              "numkit:reshape:notDivisible");
             dims[inferPos] = x.numel() / knownProd;
@@ -991,12 +991,12 @@ void pagemtimes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
         if (!v.isChar() && !v.isString())
             throw Error("pagemtimes: transpose flag must be a string",
                          0, 0, "pagemtimes", "", "numkit:pagemtimes:flagType");
-        const std::string s(v.toString().as_ref());
+        const keel::String s = v.toString();
         if (s == "none")       return TranspOp::None;
         if (s == "transpose")  return TranspOp::Transpose;
         if (s == "ctranspose") return TranspOp::CTranspose;
-        throw Error("pagemtimes: invalid transpose flag '" + s
-                     + "' (expected 'none', 'transpose', or 'ctranspose')",
+        throw Error(keel::format("pagemtimes: invalid transpose flag '{}' "
+                                 "(expected 'none', 'transpose', or 'ctranspose')", s),
                      0, 0, "pagemtimes", "", "numkit:pagemtimes:invalidFlag");
     };
     keel::Allocator *mr = ctx.engine->allocator();
@@ -1033,18 +1033,19 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     bool descend = false;
     NanPlace nanPlace = NanPlace::Auto;
     auto lower = [](keel::StringRef sv) {
-        std::string s(sv);
-        for (char &ch : s) if (ch >= 'A' && ch <= 'Z') ch = char(ch + 32);
+        keel::String s = keel::String::from(sv);
+        for (keel::usize idx = 0; idx < s.size(); ++idx)
+            if (s[idx] >= 'A' && s[idx] <= 'Z') s[idx] = char(s[idx] + 32);
         return s;
     };
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].isEmpty()) continue;
         if (args[i].isChar() || args[i].isString()) {
-            const std::string d = lower(args[i].toString());
+            const keel::String d = lower(args[i].toString());
             if (d == "descend") descend = true;
             else if (d == "ascend") descend = false;
             else if (d == "missingplacement" && i + 1 < args.size()) {
-                const std::string v = lower(args[i + 1].toString());
+                const keel::String v = lower(args[i + 1].toString());
                 nanPlace = (v == "first") ? NanPlace::First
                          : (v == "last")  ? NanPlace::Last
                                           : NanPlace::Auto;
@@ -1108,9 +1109,9 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
 
     // 'ascend' (false) / 'descend' (true), case-insensitive.
     auto dirDescend = [](keel::StringRef sv) -> bool {
-        std::string s(sv);
-        for (auto &ch : s)
-            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        keel::String s = keel::String::from(sv);
+        for (keel::usize idx = 0; idx < s.size(); ++idx)
+            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
         if (s == "ascend") return false;
         if (s == "descend") return true;
         throw Error("sortrows: direction must be 'ascend' or 'descend'",
@@ -1388,8 +1389,10 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         }
         const keel::usize D = nargout;
         const keel::usize n0 = args[0].numel();
-        std::vector<keel::usize> shape(D, n0);
-        std::vector<keel::usize> strides(D, 1);
+        keel::Array<keel::usize> shape(mr);
+        shape.assign(D, n0);
+        keel::Array<keel::usize> strides(mr);
+        strides.assign(D, 1);
         keel::usize total = (D == 0) ? 0 : 1;
         for (keel::usize k = 0; k < D; ++k) {
             strides[k] = total;
@@ -1422,8 +1425,10 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         return;
     }
     const keel::usize D = args.size();
-    std::vector<keel::usize> shape(D);
-    std::vector<keel::usize> strides(D, 1);
+    keel::Array<keel::usize> shape(mr);
+    shape.resize(D);
+    keel::Array<keel::usize> strides(mr);
+    strides.assign(D, 1);
     keel::usize total = 1;
     for (keel::usize k = 0; k < D; ++k) {
         shape[k] = args[k].numel();
@@ -1474,14 +1479,15 @@ void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *f
             throw Error("cummax/cummin: trailing positional must be a string flag",
                         0, 0, "cummax/cummin", "", "numkit:cum:badArg");
         }
-        std::string s(args[i].toString().as_ref());
-        for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        keel::String s = args[i].toString();
+        for (keel::usize idx = 0; idx < s.size(); ++idx)
+            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;
         else if (s == "omitnan")    include_nan = false;
         else if (s == "includenan") include_nan = true;
         else
-            throw Error("cummax/cummin: unknown flag '" + s + "'",
+            throw Error(keel::format("cummax/cummin: unknown flag '{}'", s),
                         0, 0, "cummax/cummin", "", "numkit:cum:flag");
         ++i;
     }
@@ -1617,8 +1623,9 @@ Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
     }
     for (; i < args.size(); ++i) {
         if (!(args[i].isChar() || args[i].isString())) continue;
-        std::string s(args[i].toString().as_ref());
-        for (auto &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        keel::String s = args[i].toString();
+        for (keel::usize idx = 0; idx < s.size(); ++idx)
+            s[idx] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[idx])));
         if      (s == "reverse")    reverse = true;
         else if (s == "forward")    reverse = false;
         else if (s == "omitnan")    omitnan = true;

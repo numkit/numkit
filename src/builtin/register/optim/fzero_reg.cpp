@@ -1,17 +1,21 @@
 // fzero_reg.cpp — Engine adapters + embedded-.m registration relocated from
 // the optim toolbox in Phase D. Toolbox keeps the Engine-free FnHandle
 // kernels (fzero/fminbnd/fminsearch); this core-coupled glue lives in bundle.
-#include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
 #include <numkit/optim/local/fzero.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
+
+#include <cmath>
+#include <utility>
 
 namespace numkit::optim {
 
@@ -28,8 +32,8 @@ namespace {
 void requireFuncHandle(const Value &fn, const char *who)
 {
     if (!fn.isFuncHandle())
-        throw Error(std::string(who) + ": 1st argument must be a function handle",
-                     0, 0, who, "", std::string("numkit:") + who + ":fnType");
+        throw Error(keel::format("{}: 1st argument must be a function handle", who),
+                     0, 0, who, "", keel::format_small<96>("numkit:{}:fnType", who));
 }
 
 // Evaluate the objective at a point (scalar or vector Value) → scalar.

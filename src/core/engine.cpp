@@ -1,7 +1,14 @@
 // src/engine.cpp
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/small_array.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -17,42 +24,14 @@
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <climits>
 #include <cmath>
 #include <cstdlib>
-#include <iostream>
 #include <limits>
-#include <sstream>
-#include <unordered_set>
 
 namespace numkit {
-
-// ============================================================
-// Reserved names — see types.hpp for per-set semantics.
-// ============================================================
-const std::unordered_set<std::string> kBuiltinConstants = {
-    // `true`/`false`/`nan`/`NaN`/`inf`/`Inf`/`eps` are built-in
-    // functions, not constants — they support argument forms
-    // `nan(M, N, 'single')`, `Inf(N)`, `eps(X)`, `eps('single')`, etc.
-    "pi", "i", "j",
-};
-
-const std::unordered_set<std::string> kPseudoVars = {
-    "ans", "nargin", "nargout", "end",
-};
-
-// Union kept as a named constant so existing filter sites keep reading
-// naturally ("is this any reserved name?"). Initialised at static-init
-// time — order within this TU doesn't matter since both operands above
-// are defined first.
-static std::unordered_set<std::string> makeBuiltinNamesUnion()
-{
-    std::unordered_set<std::string> u = kBuiltinConstants;
-    u.insert(kPseudoVars.begin(), kPseudoVars.end());
-    return u;
-}
-const std::unordered_set<std::string> kBuiltinNames = makeBuiltinNamesUnion();
 
 // ============================================================
 // Construction
@@ -65,16 +44,17 @@ Engine::Engine() : Engine(numkit::defaultCachedAllocator()) {}
 Engine::Engine(keel::Allocator *mr)
     : mr_(mr ? mr : numkit::defaultCachedAllocator())
 {
-    globalsEnv_ = std::make_shared<Environment>();
-    constantsEnv_ = std::make_unique<Environment>(nullptr, globalsEnv_.get());
-    workspaceEnv_ = std::make_unique<Environment>(constantsEnv_.get(), globalsEnv_.get());
-    figureManager_ = std::make_unique<FigureManager>();
-    treeWalker_ = std::make_unique<TreeWalker>(*this);
-    compiler_ = std::make_unique<Compiler>(*this);
-    vm_ = std::make_unique<VM>(*this);
+    globalsEnv_ = keel::make_arc<Environment>();
+    constantsEnv_ = keel::make_unique<Environment>(nullptr, globalsEnv_.get());
+    workspaceEnv_ = keel::make_unique<Environment>(constantsEnv_.get(), globalsEnv_.get());
+    figureManager_ = keel::make_unique<FigureManager>();
+    figureManager_->setOutputFunc([this](keel::StringRef s) { this->outputText(s); });
+    treeWalker_ = keel::make_unique<TreeWalker>(*this);
+    compiler_ = keel::make_unique<Compiler>(*this);
+    vm_ = keel::make_unique<VM>(*this);
     vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
                           &compiler_->scriptLocalCompiledFuncs());
-    pluginLoader_ = std::make_unique<PluginLoader>(*this);
+    pluginLoader_ = keel::make_unique<PluginLoader>(*this);
 
     reinstallConstants();
     registerVirtualFS(keel::make_unique<NativeFS>());
@@ -141,67 +121,70 @@ void Engine::reinstallConstants()
     constantsEnv_->set("j", Value::complexScalar(0.0, 1.0, mr_));
 
     // Re-install host-registered constants so they survive `clear all`.
-    for (auto &[name, val] : userConstants_)
+    for (auto [name, val] : userConstants_)
         constantsEnv_->set(name, val);
 }
 
-void Engine::registerConstant(const std::string &name, Value val)
+void Engine::registerConstant(keel::StringRef name, Value val)
 {
-    userConstants_[name] = val;
-    constantsEnv_->set(name, std::move(val));
+    userConstants_.put(keel::String::from(name), val);
+    constantsEnv_->set(name, keel::move(val));
 }
 
-bool Engine::isReservedName(const std::string &name) const
+bool Engine::isReservedName(keel::StringRef name) const
 {
-    return kBuiltinNames.count(name) > 0 || userConstants_.count(name) > 0;
+    return isBuiltinName(name) || userConstants_.contains(name);
 }
 
 // ============================================================
 // Registration & accessors
 // ============================================================
-void Engine::registerBinaryOp(const std::string &op, BinaryOpFunc func)
+void Engine::registerBinaryOp(keel::StringRef op, BinaryOpFunc func)
 {
-    binaryOps_[op] = std::move(func);
+    binaryOps_.put(keel::String::from(op), keel::move(func));
 }
-void Engine::registerUnaryOp(const std::string &op, UnaryOpFunc func)
+void Engine::registerUnaryOp(keel::StringRef op, UnaryOpFunc func)
 {
-    unaryOps_[op] = std::move(func);
+    unaryOps_.put(keel::String::from(op), keel::move(func));
 }
 // Internal helper — implements the actual registration logic shared
 // by both registerFunction overloads. Maintains the auxiliary indices
 // (shortNameIndex_, namespaceOrder_) and enforces uniqueness of the
 // full name in the primary externalFuncs_ map.
-void Engine::registerFunctionImpl_(const std::string &fullName,
-                                   const std::string &leafName,
+void Engine::registerFunctionImpl_(keel::StringRef fullName,
+                                   keel::StringRef leafName,
                                    ExternalFunc func)
 {
-    if (externalFuncs_.find(fullName) != externalFuncs_.end()) {
+    if (externalFuncs_.contains(fullName)) {
         // Common cause for `compat.<name>` collisions: a stale `noop`
         // placeholder was left in a library's install() while the real
         // implementation was registered elsewhere. Each `reg(<sub>,
         // <name>, …)` helper auto-registers `compat.<name>` once, so
         // two such calls with the same `<name>` (even from different
         // sub-namespaces) crash here. Hint the user where to look.
-        std::string hint;
-        if (fullName.rfind("compat.", 0) == 0) {
-            hint = " (look for a stale `reg(<sub>, \"" + leafName
-                 + "\", noop)` or two real implementations sharing this"
-                   " name across sub-namespaces)";
+        keel::String hint;
+        if (fullName.starts_with("compat.")) {
+            hint = keel::format(
+                " (look for a stale `reg(<sub>, \"{}\", noop)` or two real implementations sharing this"
+                " name across sub-namespaces)",
+                leafName);
         }
-        throw std::runtime_error("duplicate function registration: "
-                                 + fullName + hint);
+        auto msg = keel::format("duplicate function registration: {}{}", fullName, hint);
+        throw std::runtime_error(msg.c_str());
     }
-    externalFuncs_.emplace(fullName, std::move(func));
-    shortNameIndex_.emplace(leafName, fullName);
+    externalFuncs_.put(keel::String::from(fullName), keel::move(func));
+    shortNameIndex_.get_or_insert(keel::String::from(leafName),
+                                  keel::SmallArray<keel::String, 2>{})
+        .push_back(keel::String::from(fullName));
     bumpCallCacheEpoch();
 
     // Track top-level namespace (everything before the first '.').
     // Core registrations (no '.') do not introduce a namespace.
-    auto dot = fullName.find('.');
-    if (dot != std::string::npos) {
-        std::string topNs = fullName.substr(0, dot);
-        if (namespaceSet_.insert(topNs).second) {
-            namespaceOrder_.push_back(topNs);
+    const keel::usize dot = fullName.find('.');
+    if (dot != keel::kInvalidIndex) {
+        keel::StringRef topNs = fullName.substr(0, dot);
+        if (namespaceSet_.insert(keel::String::from(topNs))) {
+            namespaceOrder_.push_back(keel::String::from(topNs));
         }
     }
 }
@@ -209,80 +192,78 @@ void Engine::registerFunctionImpl_(const std::string &fullName,
 void Engine::registerFunction(keel::StringRef name, ExternalFunc func)
 {
     // 1-arg form: equivalent to namespace = "" (core). full name == leaf name.
-    std::string s(name);
-    registerFunctionImpl_(s, s, std::move(func));
+    registerFunctionImpl_(name, name, keel::move(func));
 }
 
 void Engine::registerClass(BuiltinClass cls)
 {
-    std::string key(cls.name.as_ref());
-    if (classes_.count(key))
-        throw std::runtime_error("Engine::registerClass: duplicate class '" + key + "'");
-    classes_.emplace(std::move(key), std::move(cls));
+    if (classes_.contains(cls.name)) {
+        auto msg = keel::format("Engine::registerClass: duplicate class '{}'", cls.name);
+        throw std::runtime_error(msg.c_str());
+    }
+    keel::String key = cls.name.clone();
+    classes_.put(keel::move(key), keel::move(cls));
     bumpCallCacheEpoch();
 }
 
 const BuiltinClass *Engine::findClass(keel::StringRef name) const
 {
-    auto it = classes_.find(std::string(name));
-    return it == classes_.end() ? nullptr : &it->second;
+    return classes_.get(name);
 }
 
-void Engine::registerCallbackBuiltin(const std::string &name, std::shared_ptr<CallbackBuiltin> cb)
+void Engine::registerCallbackBuiltin(keel::StringRef name, keel::Arc<CallbackBuiltin> cb)
 {
-    callbackBuiltins_[name] = std::move(cb);
+    callbackBuiltins_.put(keel::String::from(name), keel::move(cb));
     bumpCallCacheEpoch();
 }
 
-CallbackBuiltin *Engine::callbackBuiltin(const std::string &name) const
+CallbackBuiltin *Engine::callbackBuiltin(keel::StringRef name) const
 {
-    auto it = callbackBuiltins_.find(name);
-    return it == callbackBuiltins_.end() ? nullptr : it->second.get();
+    const auto *p = callbackBuiltins_.get(name);
+    return p ? p->get() : nullptr;
 }
 
 bool Engine::isUserCodeHandle(const Value &handle) const
 {
     if (!handle.isFuncHandle())
         return false;
-    const std::string fn(handle.funcHandleName().as_ref());
+    keel::String fn = handle.funcHandleName();
     return lookupUserFunctionLocal(fn) != nullptr
            || (compiler_ && compiler_->findCompiled(fn) != nullptr);
 }
 
-std::string Engine::formatObjectDisplay(const std::string &name, const Value &obj) const
+keel::String Engine::formatObjectDisplay(keel::StringRef name, const Value &obj) const
 {
-    const std::string clsName(obj.objectClassName().as_ref());
+    keel::String clsName = obj.objectClassName();
     const BuiltinClass *cls = findClass(clsName);
-    std::string body;
+    keel::String body;
     const keel::usize n = obj.objectCount();
     if (cls && cls->dispText) {
-        body = std::string(cls->dispText(obj).as_ref());
+        body = cls->dispText(obj);
     }
     if (body.empty()) {
         if (n == 1) {
-            body = "  " + clsName + "\n";
+            body = keel::format("  {}\n", clsName);
         } else {
             // Object array: "<rows>×<cols> <ClassName> array" + property list.
             const Dims &d = obj.dims();
-            std::string hdr = "  " + std::to_string(d.rows()) + "\xC3\x97"
-                              + std::to_string(d.cols()) + " " + clsName
-                              + " array";
+            keel::String hdr = keel::format("  {}\xC3\x97{} {} array", d.rows(), d.cols(), clsName);
             if (cls && !cls->propNames.empty()) {
-                hdr += " with properties:\n\n";
+                hdr.append(" with properties:\n\n");
                 for (const auto &p : cls->propNames)
-                    hdr += "    " + std::string(p.as_ref()) + "\n";
+                    keel::format_into(hdr, "    {}\n", p);
             } else {
-                hdr += "\n";
+                hdr.push_back('\n');
             }
-            body = hdr;
+            body = keel::move(hdr);
         }
     }
     if (name.empty())
         return body;
-    return name + " =\n\n" + body + "\n";
+    return keel::format("{} =\n\n{}\n", name, body);
 }
 
-void Engine::displayObject(const std::string &name, const Value &obj)
+void Engine::displayObject(keel::StringRef name, const Value &obj)
 {
     const BuiltinClass *cls = findClass(obj.objectClassName());
     // Custom disp/display only for a scalar object; arrays use the default.
@@ -302,7 +283,7 @@ void Engine::displayObject(const std::string &name, const Value &obj)
         // header around it (only when shown as a named variable).
         if (const auto *m = cls->methods.get("disp")) {
             if (!name.empty())
-                outputText(name + " =\n\n");
+                outputText(keel::format("{} =\n\n", name));
             call(*m);
             if (!name.empty())
                 outputText("\n");
@@ -334,14 +315,14 @@ static constexpr OpMethod kOpMethods[] = {
     {"'", "ctranspose", true}, {".'", "transpose", true},
 };
 
-static const char *operatorMethodName(const std::string &op)
+static const char *operatorMethodName(keel::StringRef op)
 {
     for (const auto &e : kOpMethods)
         if (!e.unary && op == e.token)
             return e.method;
     return nullptr;
 }
-static const char *unaryOperatorMethodName(const std::string &op)
+static const char *unaryOperatorMethodName(keel::StringRef op)
 {
     for (const auto &e : kOpMethods)
         if (e.unary && op == e.token)
@@ -350,7 +331,7 @@ static const char *unaryOperatorMethodName(const std::string &op)
 }
 // True when a classdef method name is an operator-overload method (wired into
 // BuiltinClass::ops so `a + b`, `-a`, `a == b`, … dispatch to it).
-static bool isOperatorMethodName(const std::string &n)
+static bool isOperatorMethodName(keel::StringRef n)
 {
     for (const auto &e : kOpMethods)
         if (n == e.method)
@@ -358,7 +339,7 @@ static bool isOperatorMethodName(const std::string &n)
     return false;
 }
 
-bool Engine::tryObjectBinaryOp(const std::string &op, const Value &lhs, const Value &rhs,
+bool Engine::tryObjectBinaryOp(keel::StringRef op, const Value &lhs, const Value &rhs,
                                Environment *env, Value &out)
 {
     if (!lhs.isObject() && !rhs.isObject())
@@ -366,7 +347,7 @@ bool Engine::tryObjectBinaryOp(const std::string &op, const Value &lhs, const Va
     // The dominant object decides the class (first object operand wins —
     // v1 dispatch fidelity, see object_model.md §3).
     const Value &dom = lhs.isObject() ? lhs : rhs;
-    const std::string clsName(dom.objectClassName().as_ref());
+    keel::String clsName = dom.objectClassName();
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = operatorMethodName(op); cls && mname) {
         if (const auto *m = cls->ops.get(mname)) {
@@ -375,20 +356,20 @@ bool Engine::tryObjectBinaryOp(const std::string &op, const Value &lhs, const Va
             Value res[1];
             CallContext ctx{this, env};
             (*m)(self, keel::ArrayRef<Value>(operands, 2), 1, keel::MutArrayRef<Value>(res, 1), ctx);
-            out = std::move(res[0]);
+            out = keel::move(res[0]);
             return true;
         }
     }
-    throw std::runtime_error("Undefined operator '" + op
-                             + "' for input arguments of type '" + clsName + "'.");
+    auto msg = keel::format("Undefined operator '{}' for input arguments of type '{}'.", op, clsName);
+    throw std::runtime_error(msg.c_str());
 }
 
-bool Engine::tryObjectUnaryOp(const std::string &op, const Value &operand,
+bool Engine::tryObjectUnaryOp(keel::StringRef op, const Value &operand,
                               Environment *env, Value &out)
 {
     if (!operand.isObject())
         return false;
-    const std::string clsName(operand.objectClassName().as_ref());
+    keel::String clsName = operand.objectClassName();
     const BuiltinClass *cls = findClass(clsName);
     if (const char *mname = unaryOperatorMethodName(op); cls && mname) {
         if (const auto *m = cls->ops.get(mname)) {
@@ -396,7 +377,7 @@ bool Engine::tryObjectUnaryOp(const std::string &op, const Value &operand,
             Value res[1];
             CallContext ctx{this, env};
             (*m)(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(res, 1), ctx);
-            out = std::move(res[0]);
+            out = keel::move(res[0]);
             return true;
         }
     }
@@ -406,11 +387,11 @@ bool Engine::tryObjectUnaryOp(const std::string &op, const Value &operand,
     // (uminus/uplus/not) are overload-only → undefined without one.
     if (op == "'" || op == ".'")
         return false;
-    throw std::runtime_error("Undefined operator '" + op
-                             + "' for input arguments of type '" + clsName + "'.");
+    auto msg = keel::format("Undefined operator '{}' for input arguments of type '{}'.", op, clsName);
+    throw std::runtime_error(msg.c_str());
 }
 
-Value Engine::applyBinaryOp(const std::string &op, const Value &lhs, const Value &rhs)
+Value Engine::applyBinaryOp(keel::StringRef op, const Value &lhs, const Value &rhs)
 {
     // Object overloading first (env=nullptr: an embedding-initiated call has no
     // caller environment; a numeric operand short-circuits
@@ -420,32 +401,32 @@ Value Engine::applyBinaryOp(const std::string &op, const Value &lhs, const Value
         if (tryObjectBinaryOp(op, lhs, rhs, /*env=*/nullptr, out))
             return out;
     }
-    auto it = binaryOps_.find(op);
-    if (it != binaryOps_.end())
-        return it->second(lhs, rhs);
-    throw std::runtime_error("Undefined binary operator: " + op);
+    if (const auto *fn = binaryOps_.get(op))
+        return (*fn)(lhs, rhs);
+    auto msg = keel::format("Undefined binary operator: {}", op);
+    throw std::runtime_error(msg.c_str());
 }
 
-Value Engine::applyUnaryOp(const std::string &op, const Value &operand)
+Value Engine::applyUnaryOp(keel::StringRef op, const Value &operand)
 {
     if (operand.isObject()) {
         Value out;
         if (tryObjectUnaryOp(op, operand, /*env=*/nullptr, out))
             return out;  // (returns false for ' / .': fall through to builtin transpose)
     }
-    auto it = unaryOps_.find(op);
-    if (it != unaryOps_.end())
-        return it->second(operand);
-    throw std::runtime_error("Undefined unary operator: " + op);
+    if (const auto *fn = unaryOps_.get(op))
+        return (*fn)(operand);
+    auto msg = keel::format("Undefined unary operator: {}", op);
+    throw std::runtime_error(msg.c_str());
 }
 
-const BytecodeChunk *Engine::resolveBinaryOpChunk(const std::string &op, const Value &lhs,
-                                                  const Value &rhs, std::string &ownerClassOut)
+const BytecodeChunk *Engine::resolveBinaryOpChunk(keel::StringRef op, const Value &lhs,
+                                                  const Value &rhs, keel::String &ownerClassOut)
 {
     if (!lhs.isObject() && !rhs.isObject())
         return nullptr; // numeric fast path
     const Value &dom = lhs.isObject() ? lhs : rhs; // first object operand wins
-    const std::string cn(dom.objectClassName().as_ref());
+    keel::String cn = dom.objectClassName();
     const BuiltinClass *cls = findClass(cn);
     const char *mname = operatorMethodName(op);
     if (!cls || !mname)
@@ -461,16 +442,16 @@ const BytecodeChunk *Engine::resolveBinaryOpChunk(const std::string &op, const V
     if (!cc)
         return nullptr; // uncompilable body → slow path (callReentrant / TW)
     enforceMethodAccess(cn, mname);
-    ownerClassOut = cn;
+    ownerClassOut.assign(cn);
     return cc;
 }
 
-const BytecodeChunk *Engine::resolveUnaryOpChunk(const std::string &op, const Value &operand,
-                                                 std::string &ownerClassOut)
+const BytecodeChunk *Engine::resolveUnaryOpChunk(keel::StringRef op, const Value &operand,
+                                                 keel::String &ownerClassOut)
 {
     if (!operand.isObject())
         return nullptr;
-    const std::string cn(operand.objectClassName().as_ref());
+    keel::String cn = operand.objectClassName();
     const BuiltinClass *cls = findClass(cn);
     const char *mname = unaryOperatorMethodName(op);
     if (!cls || !mname)
@@ -482,7 +463,7 @@ const BytecodeChunk *Engine::resolveUnaryOpChunk(const std::string &op, const Va
     if (!cc)
         return nullptr;
     enforceMethodAccess(cn, mname);
-    ownerClassOut = cn;
+    ownerClassOut.assign(cn);
     return cc;
 }
 
@@ -492,10 +473,10 @@ static Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
                              keel::Allocator *mr);
 
 const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayRef<Value> idx,
-                                                 std::string &ownerClassOut,
-                                                 std::vector<Value> &argsOut)
+                                                 keel::String &ownerClassOut,
+                                                 keel::Array<Value> &argsOut)
 {
-    const std::string cn(self.objectClassName().as_ref());
+    keel::String cn = self.objectClassName();
     const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsref)
         return nullptr;
@@ -509,16 +490,16 @@ const BytecodeChunk *Engine::resolveSubsrefChunk(const Value &self, keel::ArrayR
     argsOut.clear();
     argsOut.reserve(2);
     argsOut.push_back(self);          // subsref(obj, S)
-    argsOut.push_back(std::move(s));
-    ownerClassOut = cn;
+    argsOut.push_back(keel::move(s));
+    ownerClassOut.assign(cn);
     return cc;
 }
 
 const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::ArrayRef<Value> idxAndVal,
-                                                  std::string &ownerClassOut,
-                                                  std::vector<Value> &argsOut)
+                                                  keel::String &ownerClassOut,
+                                                  keel::Array<Value> &argsOut)
 {
-    const std::string cn(self.objectClassName().as_ref());
+    keel::String cn = self.objectClassName();
     const BuiltinClass *cls = findClass(cn);
     if (!cls || !cls->subsasgn)
         return nullptr;
@@ -534,9 +515,9 @@ const BytecodeChunk *Engine::resolveSubsasgnChunk(const Value &self, keel::Array
     argsOut.clear();
     argsOut.reserve(3);
     argsOut.push_back(self);          // subsasgn(obj, S, val)
-    argsOut.push_back(std::move(s));
+    argsOut.push_back(keel::move(s));
     argsOut.push_back(nsub < idxAndVal.size() ? idxAndVal[nsub] : Value());
-    ownerClassOut = cn;
+    ownerClassOut.assign(cn);
     return cc;
 }
 
@@ -549,14 +530,14 @@ bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usi
     Value res[1];
     CallContext ctx{this, env};
     cls->subsref(self, args, nargout, keel::MutArrayRef<Value>(res, 1), ctx);
-    out = std::move(res[0]);
+    out = keel::move(res[0]);
     return true;
 }
 
 void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                               const Value &val, Environment *env)
 {
-    const std::string clsName((dst.isObject() ? dst.objectClassName() : val.objectClassName()).as_ref());
+    keel::String clsName = dst.isObject() ? dst.objectClassName() : val.objectClassName();
     const BuiltinClass *cls = findClass(clsName);
     Value coercedVal = val;
     if (dst.isObject() && !val.isObject() && cls && cls->construct) {
@@ -580,7 +561,7 @@ void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize
 
 // ── classdef → BuiltinClass adapter ──────────────────────────
 // Descriptor captured by the synthesised BuiltinClass hooks; kept alive by
-// the std::functions in the class registry, and stored in classDefs_ so a
+// the keel::SmallFunctions in the class registry, and stored in classDefs_ so a
 // subclass can merge its bases. (Namespace-scope to match the engine.hpp
 // forward declaration used by Engine::classDefs_.)
 // classdef member-access levels (private/protected enforcement). `Immutable`
@@ -599,53 +580,76 @@ enum class Access
 // and inherited properties keep their original declaring class).
 struct PropInfo
 {
-    std::string name;
+    keel::String name;
     Value def;
     Access getAccess = Access::Public;
     Access setAccess = Access::Public;
-    std::string declClass;
+    keel::String declClass;
     bool isConstant = false; // `Constant` → also exposed as ClassName.Prop
     bool isDependent = false; // `properties (Dependent)` → computed via get.Prop
+
+    PropInfo clone(keel::Allocator *alloc = nullptr) const
+    {
+        return PropInfo{
+            name.clone(alloc),
+            def,
+            getAccess,
+            setAccess,
+            declClass.clone(alloc),
+            isConstant,
+            isDependent,
+        };
+    }
 };
 // Method access recorded ONLY for non-public methods (absent == public →
 // no check, no overhead). `declClass` as above.
 struct MethodAccess
 {
     Access level = Access::Public;
-    std::string declClass;
+    keel::String declClass;
+
+    MethodAccess clone(keel::Allocator *alloc = nullptr) const
+    {
+        return MethodAccess{level, declClass.clone(alloc)};
+    }
 };
 // A Static method: callable as `ClassName.method(args)`. Stored so it can be
 // inherited (re-registered under a subclass name) and access-checked.
 struct StaticInfo
 {
-    std::shared_ptr<UserFunction> uf;
+    keel::Arc<UserFunction> uf;
     Access access = Access::Public;
-    std::string declClass;
+    keel::String declClass;
+
+    StaticInfo clone(keel::Allocator *alloc = nullptr) const
+    {
+        return StaticInfo{uf, access, declClass.clone(alloc)};
+    }
 };
 
 struct ClassDefDesc
 {
-    std::string name;
+    keel::String name;
     bool isHandle = false;
-    std::vector<PropInfo> props;                                     // name+default+access
+    keel::Array<PropInfo> props;                                     // name+default+access
     bool anyNonPublicProp = false;                                   // fast-path gate
-    std::shared_ptr<UserFunction> ctor;                              // null if none
-    std::unordered_map<std::string, std::shared_ptr<UserFunction>> methods;
-    std::unordered_map<std::string, std::shared_ptr<UserFunction>> getters; // get.Prop
-    std::unordered_map<std::string, std::shared_ptr<UserFunction>> setters; // set.Prop
-    std::unordered_map<std::string, StaticInfo> statics;             // Static methods
-    std::vector<std::string> superclasses;                           // transitive, for isa
+    keel::Arc<UserFunction> ctor;                                    // null if none
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> methods;
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> getters;    // get.Prop
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> setters;    // set.Prop
+    keel::HashMap<keel::String, StaticInfo> statics;                 // Static methods
+    keel::Array<keel::String> superclasses;                          // transitive, for isa
     // Non-public methods only (public == absent).
-    std::unordered_map<std::string, MethodAccess> methodAccess;
+    keel::HashMap<keel::String, MethodAccess> methodAccess;
     // Constructor access (this class's OWN ctor). Public unless the ctor sits
     // in a `methods (Access = private|protected)` block.
     Access ctorAccess = Access::Public;
-    std::string ctorDeclClass;
+    keel::String ctorDeclClass;
     bool isEnum = false;                          // has an `enumeration` block
-    std::vector<std::string> abstractMethods;     // declared Abstract (own + inherited)
+    keel::Array<keel::String> abstractMethods;    // declared Abstract (own + inherited)
     bool isAbstract = false;                      // an abstract method is unimplemented
     bool isSealed = false;                        // `Sealed` — cannot be subclassed
-    std::vector<std::string> hiddenMembers;       // `Hidden` props/methods (own + inherited)
+    keel::Array<keel::String> hiddenMembers;      // `Hidden` props/methods (own + inherited)
 };
 
 // Translate an attribute keyword to an Access level. `Immutable` is only
@@ -654,7 +658,7 @@ struct ClassDefDesc
 // such a class fails to load loudly and never reaches this function. The
 // default below therefore only covers `public` and any access keyword we don't
 // yet model, which fall back to Public (permissive, forward-compatible).
-static Access parseAccessLevel(const std::string &v)
+static Access parseAccessLevel(keel::StringRef v)
 {
     if (v == "private")
         return Access::Private;
@@ -687,10 +691,10 @@ struct BlockAccess
     Access set = Access::Public;
     bool any = false;
 };
-static BlockAccess parseBlockAccess(const std::vector<std::string> &attrs)
+static BlockAccess parseBlockAccess(const keel::Array<keel::String> &attrs)
 {
     BlockAccess ba;
-    auto valueOf = [&](const char *key) -> const std::string * {
+    auto valueOf = [&](const char *key) -> const keel::String * {
         for (keel::usize i = 0; i + 1 < attrs.size(); ++i)
             if (attrs[i] == key)
                 return &attrs[i + 1];
@@ -699,16 +703,16 @@ static BlockAccess parseBlockAccess(const std::vector<std::string> &attrs)
     // `Access` is the default for both sides; the specific `GetAccess` /
     // `SetAccess` always override it (MATLAB is order-independent here, so
     // resolve the general first, then the specific).
-    if (const std::string *a = valueOf("Access")) {
+    if (const keel::String *a = valueOf("Access")) {
         Access lvl = parseAccessLevel(*a);
         ba.get = (lvl == Access::Immutable) ? Access::Public : lvl; // immutable is set-only
         ba.set = lvl;
     }
-    if (const std::string *g = valueOf("GetAccess")) {
+    if (const keel::String *g = valueOf("GetAccess")) {
         Access lvl = parseAccessLevel(*g);
         ba.get = (lvl == Access::Immutable) ? Access::Public : lvl;
     }
-    if (const std::string *s = valueOf("SetAccess"))
+    if (const keel::String *s = valueOf("SetAccess"))
         ba.set = parseAccessLevel(*s);
     ba.any = ba.get != Access::Public || ba.set != Access::Public;
     return ba;
@@ -731,8 +735,8 @@ static const char *accessWord(Access a)
 // Throw a MATLAB-style error when the current execution context may not
 // touch a member with the given access level. `kind` is "property" or
 // "method". Public members and allowed contexts return silently.
-static void enforceAccess(Engine *engine, Access level, const std::string &declClass,
-                          const char *kind, const std::string &name)
+static void enforceAccess(Engine *engine, Access level, keel::StringRef declClass,
+                          const char *kind, keel::StringRef name)
 {
     if (level == Access::Public)
         return;
@@ -740,21 +744,22 @@ static void enforceAccess(Engine *engine, Access level, const std::string &declC
         // Settable only inside the declaring class's own constructor.
         if (engine->classCtxInCtorOf(declClass))
             return;
-        throw std::runtime_error("Cannot set property '" + name
-                                 + "': it has immutable SetAccess (settable only in the "
-                                 + declClass + " constructor)");
+        auto msg = keel::format(
+            "Cannot set property '{}': it has immutable SetAccess (settable only in the {} constructor)",
+            name, declClass);
+        throw std::runtime_error(msg.c_str());
     }
     if (engine->classCtxAllows(declClass, /*privateOnly=*/level == Access::Private))
         return;
-    throw std::runtime_error(std::string("Cannot access ") + kind + " '" + name
-                             + "' of class '" + declClass + "': it has " + accessWord(level)
-                             + " access");
+    auto msg = keel::format("Cannot access {} '{}' of class '{}': it has {} access",
+                            kind, name, declClass, accessWord(level));
+    throw std::runtime_error(msg.c_str());
 }
 
 // Find a property by name in a class descriptor (linear; property counts are
 // small, and access checks only reach here when the class has a non-public
 // property). Returns nullptr if absent.
-static const PropInfo *findProp(const ClassDefDesc &d, const std::string &name)
+static const PropInfo *findProp(const ClassDefDesc &d, keel::StringRef name)
 {
     for (const auto &p : d.props)
         if (p.name == name)
@@ -778,27 +783,33 @@ static Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
     return s;
 }
 
-void Engine::unregisterClassDef(const std::string &name)
+void Engine::unregisterClassDef(keel::StringRef name)
 {
-    auto dit = classDefs_.find(name);
-    if (dit != classDefs_.end()) {
-        const ClassDefDesc &desc = *dit->second;
+    if (const auto *dp = classDefs_.get(name)) {
+        const ClassDefDesc &desc = **dp;
         // Remove the `Name.member` qualified externals registered for Static
         // methods and Constant properties. registerFunctionImpl_ throws on a
         // duplicate full name, so these MUST be cleared before re-registration.
-        auto dropExternal = [&](const std::string &leaf) {
-            const std::string full = name + "." + leaf;
-            externalFuncs_.erase(full);
-            auto range = shortNameIndex_.equal_range(leaf);
-            for (auto it = range.first; it != range.second;)
-                it = (it->second == full) ? shortNameIndex_.erase(it) : std::next(it);
+        auto dropExternal = [&](keel::StringRef leaf) {
+            keel::String full = keel::format("{}.{}", name, leaf);
+            externalFuncs_.remove(full);
+            if (auto *vec = shortNameIndex_.get(leaf)) {
+                for (keel::usize i = vec->size(); i > 0; --i) {
+                    if ((*vec)[i - 1] == full)
+                        vec->remove_at(i - 1);
+                }
+                if (vec->empty())
+                    shortNameIndex_.remove(leaf);
+            }
         };
-        for (const auto &[sname, si] : desc.statics)
+        for (auto [sname, si] : desc.statics) {
+            (void)si;
             dropExternal(sname);
+        }
         for (const auto &p : desc.props)
             if (p.isConstant)
                 dropExternal(p.name);
-        classDefs_.erase(dit);
+        classDefs_.remove(name);
     }
     // Drop compiled method chunks ("Name>method") so rewritten bodies recompile
     // instead of serving the stale cache.
@@ -806,26 +817,31 @@ void Engine::unregisterClassDef(const std::string &name)
         compiler_->eraseCompiledFuncsForClass(name);
     clearPersistentForFunc(name);
     // Source AST kept for derived-class re-merge — drop it too (the cascade in
-    // reregisterDerivedClasses holds its own shared_ptr across this erase).
-    classDefAst_.erase(name);
+    // reregisterDerivedClasses holds its own Arc across this erase).
+    classDefAst_.remove(name);
     // Drop the registry class last: registerClass throws on a duplicate, so the
     // re-registration that follows depends on this entry being gone.
-    classes_.erase(name);
+    classes_.remove(name);
     bumpCallCacheEpoch();
 }
 
-void Engine::dropFileClassCtorExternal_(const std::string &name)
+void Engine::dropFileClassCtorExternal_(keel::StringRef name)
 {
     // resolveMFile_ registers a bare constructor external for a class loaded
     // from `Name.m`. Guard on mFileCache_ membership: only a file-loaded class
     // has this external, so we never erase a core builtin that merely shares a
     // name with an inline classdef.
-    if (!mFileCache_.count(name))
+    if (!mFileCache_.contains(name))
         return;
-    externalFuncs_.erase(name);
-    auto range = shortNameIndex_.equal_range(name);
-    for (auto it = range.first; it != range.second;)
-        it = (it->second == name) ? shortNameIndex_.erase(it) : std::next(it);
+    externalFuncs_.remove(name);
+    if (auto *vec = shortNameIndex_.get(name)) {
+        for (keel::usize i = vec->size(); i > 0; --i) {
+            if ((*vec)[i - 1] == name)
+                vec->remove_at(i - 1);
+        }
+        if (vec->empty())
+            shortNameIndex_.remove(name);
+    }
     bumpCallCacheEpoch();
 }
 
@@ -834,10 +850,12 @@ void Engine::clearClassDefs()
     // Collect names first — unregisterClassDef mutates classDefs_ as it goes.
     // Built-in classes live in classes_ but NOT classDefs_, so iterating
     // classDefs_ touches only user classes.
-    std::vector<std::string> names;
+    keel::Array<keel::String> names;
     names.reserve(classDefs_.size());
-    for (const auto &kv : classDefs_)
-        names.push_back(kv.first);
+    for (auto [k, v] : classDefs_) {
+        (void)v;
+        names.push_back(k.clone());
+    }
     for (const auto &name : names) {
         dropFileClassCtorExternal_(name); // enable file-class reload on next ref
         unregisterClassDef(name);
@@ -845,39 +863,40 @@ void Engine::clearClassDefs()
     bumpCallCacheEpoch();
 }
 
-void Engine::registerClassDef(const ASTNode *cd, const std::string &qualifiedName)
+void Engine::registerClassDef(const ASTNode *cd, keel::StringRef qualifiedName)
 {
     // Inline classdef (script statement / eval'd source): the defining file
     // is whatever is executing now. Known-but-empty at the command window.
     UserFunction prov;
     captureScriptOrigin(prov);
     registerClassDefImpl_(cd, qualifiedName, prov.originKnown,
-                          std::move(prov.sourceFs), std::move(prov.sourceDir),
-                          std::move(prov.sourceFile));
+                          prov.sourceFs, prov.sourceDir, prov.sourceFile);
 }
 
-void Engine::registerClassDefFrom(const ASTNode *cd, const std::string &qualifiedName,
-                                  const std::string &fsName, const std::string &scriptDir,
-                                  const std::string &scriptFile)
+void Engine::registerClassDefFrom(const ASTNode *cd, keel::StringRef qualifiedName,
+                                  keel::StringRef fsName, keel::StringRef scriptDir,
+                                  keel::StringRef scriptFile)
 {
     registerClassDefImpl_(cd, qualifiedName, /*originKnown=*/true,
                           fsName, scriptDir, scriptFile);
 }
 
-void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifiedName,
-                                   bool originKnown, const std::string &fsName,
-                                   const std::string &scriptDir, const std::string &scriptFile)
+void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedName,
+                                   bool originKnown, keel::StringRef fsName,
+                                   keel::StringRef scriptDir, keel::StringRef scriptFile)
 {
     if (!cd || cd->type != NodeType::CLASSDEF_DEF || cd->strValue.empty())
         return;
     // Registry identity: the qualified name for a `+pkg/Name.m` class, else the
     // node's own (leaf == full for inline / unpackaged classes).
-    const std::string className = qualifiedName.empty() ? cd->strValue : qualifiedName;
+    const keel::String className = qualifiedName.empty()
+                                       ? cd->strValue.clone()
+                                       : keel::String::from(qualifiedName);
     // The in-source constructor / accessor names are always the LEAF (`Vec`,
     // never `geo.Vec`), so ctor detection compares against the leaf even though
     // the class is registered under its qualified name.
-    std::string classLeaf = className;
-    if (auto dot = classLeaf.rfind('.'); dot != std::string::npos)
+    keel::StringRef classLeaf = className.as_ref();
+    if (const keel::usize dot = classLeaf.rfind('.'); dot != keel::kInvalidIndex)
         classLeaf = classLeaf.substr(dot + 1);
 
     const bool wasRedefinition = findClass(className) != nullptr;
@@ -888,8 +907,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         // a method had no effect until a full restart.
         unregisterClassDef(className);
 
-    auto desc = std::make_shared<ClassDefDesc>();
-    desc->name = className;
+    auto desc = keel::make_arc<ClassDefDesc>();
+    desc->name = className.clone();
     for (const auto &super : cd->paramNames)
         if (super == "handle")
             desc->isHandle = true;
@@ -916,40 +935,40 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             // qualified external is registered after the merge (so inherited
             // constants resolve under a subclass too).
             BlockAccess ba = parseBlockAccess(child->classAttrs);
-            desc->props.push_back(
-                {child->strValue, def, ba.get, ba.set, desc->name,
-                 hasAttr(child, "Constant"), hasAttr(child, "Dependent")});
+            desc->props.push_back(PropInfo{
+                child->strValue.clone(), def, ba.get, ba.set, desc->name.clone(),
+                hasAttr(child, "Constant"), hasAttr(child, "Dependent")});
             desc->anyNonPublicProp = desc->anyNonPublicProp || ba.any;
             if (hasAttr(child, "Hidden"))
-                desc->hiddenMembers.push_back(child->strValue);
+                desc->hiddenMembers.push_back(child->strValue.clone());
         } else if (child->type == NodeType::FUNCTION_DEF) {
             // Abstract method: a signature with no body (no children[0]).
             // Record the name; a concrete subclass implements it. The class
             // stays abstract (uninstantiable) until every such name is
             // implemented.
             if (hasAttr(child, "Abstract")) {
-                desc->abstractMethods.push_back(child->strValue);
+                desc->abstractMethods.push_back(child->strValue.clone());
                 continue;
             }
-            auto uf = std::make_shared<UserFunction>();
-            uf->name = desc->name + ">" + child->strValue;
-            uf->params = child->paramNames;
-            uf->returns = child->returnNames;
-            uf->body = std::shared_ptr<const ASTNode>(cloneNode(child->children[0].get()));
+            auto uf = keel::make_arc<UserFunction>();
+            uf->name = keel::format("{}>{}", desc->name, child->strValue);
+            uf->params = child->paramNames.clone();
+            uf->returns = child->returnNames.clone();
+            uf->body = keel::Arc<const ASTNode>(cloneNode(child->children[0].get()));
             uf->closureEnv = nullptr;
-            uf->ownerClass = desc->name; // member-access execution context
+            uf->ownerClass = desc->name.clone(); // member-access execution context
             // mfilename() inside any method reports the CLASSDEF file (the
             // class name == file base). Inherited methods keep their
             // declaring class's provenance — the merge reuses these ufs.
             uf->originKnown = originKnown;
-            uf->sourceFs = fsName;
-            uf->sourceDir = scriptDir;
-            uf->sourceFile = scriptFile;
-            const std::string &mn = child->strValue;
-            if (mn.rfind("get.", 0) == 0) {
-                desc->getters[mn.substr(4)] = uf; // property get accessor
-            } else if (mn.rfind("set.", 0) == 0) {
-                desc->setters[mn.substr(4)] = uf; // property set accessor
+            uf->sourceFs = keel::String::from(fsName);
+            uf->sourceDir = keel::String::from(scriptDir);
+            uf->sourceFile = keel::String::from(scriptFile);
+            const keel::String &mn = child->strValue;
+            if (mn.starts_with("get.")) {
+                desc->getters.put(keel::String::from(mn.substr(4)), uf); // property get accessor
+            } else if (mn.starts_with("set.")) {
+                desc->setters.put(keel::String::from(mn.substr(4)), uf); // property set accessor
             } else if (hasAttr(child, "Static")) {
                 // Static method: callable as `ClassName.method(args)` (no
                 // self). Stored now; the qualified external is registered
@@ -957,25 +976,25 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 // meaningless for a method.
                 BlockAccess ba = parseBlockAccess(child->classAttrs);
                 Access slvl = (ba.set == Access::Immutable) ? Access::Public : ba.set;
-                desc->statics[child->strValue] = {uf, slvl, desc->name};
+                desc->statics.put(child->strValue.clone(), StaticInfo{uf, slvl, desc->name.clone()});
             } else if (child->strValue == classLeaf) {
                 desc->ctor = uf; // constructor: method named like the class (leaf)
                 BlockAccess ba = parseBlockAccess(child->classAttrs);
                 Access clvl = (ba.set == Access::Immutable) ? Access::Public : ba.set;
                 if (clvl != Access::Public) {
                     desc->ctorAccess = clvl;
-                    desc->ctorDeclClass = desc->name;
+                    desc->ctorDeclClass = desc->name.clone();
                 }
             } else {
-                desc->methods[child->strValue] = uf;
+                desc->methods.put(child->strValue.clone(), uf);
                 // Record non-public method access (Access sets the level;
                 // immutable is meaningless for a method → treat as public).
                 BlockAccess ba = parseBlockAccess(child->classAttrs);
                 Access lvl = (ba.set == Access::Immutable) ? Access::Public : ba.set;
                 if (lvl != Access::Public)
-                    desc->methodAccess[child->strValue] = {lvl, desc->name};
+                    desc->methodAccess.put(child->strValue.clone(), MethodAccess{lvl, desc->name.clone()});
                 if (hasAttr(child, "Hidden"))
-                    desc->hiddenMembers.push_back(child->strValue);
+                    desc->hiddenMembers.push_back(child->strValue.clone());
             }
         }
     }
@@ -986,10 +1005,12 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // protected base method stays public). Properties need no such capture:
     // their access travels inside PropInfo, and a derived property fully
     // replaces the inherited entry in the merge below.
-    std::vector<std::string> ownMethodNames;
+    keel::Array<keel::String> ownMethodNames;
     ownMethodNames.reserve(desc->methods.size());
-    for (const auto &[mn, uf] : desc->methods)
-        ownMethodNames.push_back(mn);
+    for (auto [mn, uf] : desc->methods) {
+        (void)uf;
+        ownMethodNames.push_back(mn.clone());
+    }
 
     // Make inheritance order-independent: if a superclass is a file-based
     // class not yet loaded, pull it in from the path now (it registers as a
@@ -997,7 +1018,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // would register Derived with the base members missing. Inline classes
     // that aren't on the path simply stay unregistered (recorded for isa).
     for (const auto &superName : cd->paramNames)
-        if (superName != "handle" && !classDefs_.count(superName))
+        if (superName != "handle" && !classDefs_.contains(superName))
             resolveMFile_(superName);
 
     // ── Inheritance: merge registered superclasses (base members first,
@@ -1005,108 +1026,111 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     for (const auto &superName : cd->paramNames) {
         if (superName == "handle")
             continue;
-        auto bit = classDefs_.find(superName);
-        if (bit == classDefs_.end())
+        const auto *bp = classDefs_.get(superName);
+        if (!bp)
             continue; // unknown / non-classdef base — skip (still recorded below)
-        const auto &base = bit->second;
-        if (base->isSealed)
-            throw std::runtime_error("Cannot subclass sealed class '" + superName + "'");
+        const auto &base = *bp;
+        if (base->isSealed) {
+            auto msg = keel::format("Cannot subclass sealed class '{}'", superName);
+            throw std::runtime_error(msg.c_str());
+        }
         desc->isHandle = desc->isHandle || base->isHandle;
         // Properties: base first; a derived property of the same name fully
         // replaces the inherited entry (default + access + declaring class),
         // so a public override of a protected base property stays public.
-        std::vector<PropInfo> merged = base->props;
-        for (const auto &dp : desc->props) {
+        keel::Array<PropInfo> merged = base->props.clone();
+        for (auto &dp : desc->props) {
             auto it = std::find_if(merged.begin(), merged.end(),
                                    [&](const PropInfo &m) { return m.name == dp.name; });
             if (it != merged.end())
-                *it = dp;
+                *it = keel::move(dp);
             else
-                merged.push_back(dp);
+                merged.push_back(keel::move(dp));
         }
-        desc->props = std::move(merged);
+        desc->props = keel::move(merged);
         desc->anyNonPublicProp = desc->anyNonPublicProp || base->anyNonPublicProp;
         // Methods + accessors: inherit those the derived class doesn't override.
-        for (const auto &[mn, uf] : base->methods)
-            if (!desc->methods.count(mn))
-                desc->methods[mn] = uf;
-        for (const auto &[pn, uf] : base->getters)
-            if (!desc->getters.count(pn))
-                desc->getters[pn] = uf;
-        for (const auto &[pn, uf] : base->setters)
-            if (!desc->setters.count(pn))
-                desc->setters[pn] = uf;
+        for (auto [mn, uf] : base->methods)
+            if (!desc->methods.contains(mn))
+                desc->methods.put(mn.clone(), uf);
+        for (auto [pn, uf] : base->getters)
+            if (!desc->getters.contains(pn))
+                desc->getters.put(pn.clone(), uf);
+        for (auto [pn, uf] : base->setters)
+            if (!desc->setters.contains(pn))
+                desc->setters.put(pn.clone(), uf);
         // Static methods: inherit those not overridden (keeping the base's
         // declaring class for the access check).
-        for (const auto &[sn, si] : base->statics)
-            if (!desc->statics.count(sn))
-                desc->statics[sn] = si;
+        for (auto [sn, si] : base->statics)
+            if (!desc->statics.contains(sn))
+                desc->statics.put(sn.clone(), si.clone());
         // Abstract method obligations propagate to the subclass (satisfied
         // when the subclass provides a concrete method of the same name).
         for (const auto &am : base->abstractMethods)
             if (std::find(desc->abstractMethods.begin(), desc->abstractMethods.end(), am)
                 == desc->abstractMethods.end())
-                desc->abstractMethods.push_back(am);
+                desc->abstractMethods.push_back(am.clone());
         // Hidden members stay hidden in the subclass.
         for (const auto &hm : base->hiddenMembers)
             if (std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), hm)
                 == desc->hiddenMembers.end())
-                desc->hiddenMembers.push_back(hm);
+                desc->hiddenMembers.push_back(hm.clone());
         // Method access: inherit base entries (keeping the base's declaring
         // class so `protected` still admits this subclass) unless the derived
         // class declared the method itself (its own access — or public by
         // omission — then wins).
-        for (const auto &[mn, ma] : base->methodAccess)
+        for (auto [mn, ma] : base->methodAccess)
             if (std::find(ownMethodNames.begin(), ownMethodNames.end(), mn)
                 == ownMethodNames.end())
-                desc->methodAccess.emplace(mn, ma);
+                desc->methodAccess.try_insert(mn.clone(), ma.clone());
         if (!desc->ctor) {
             // Inherit the base constructor — and its access, so a subclass
             // without its own ctor honours a private/protected base ctor
             // (the declaring class stays the base, for protected/subclass).
             desc->ctor = base->ctor;
             desc->ctorAccess = base->ctorAccess;
-            desc->ctorDeclClass = base->ctorDeclClass;
+            desc->ctorDeclClass = base->ctorDeclClass.clone();
         }
     }
     // Ancestry (transitive) for isa(): direct supers + their ancestors.
     for (const auto &superName : cd->paramNames) {
         if (superName == "handle")
             continue;
-        desc->superclasses.push_back(superName);
-        auto bit = classDefs_.find(superName);
-        if (bit != classDefs_.end())
-            for (const auto &a : bit->second->superclasses)
+        desc->superclasses.push_back(superName.clone());
+        if (const auto *bp = classDefs_.get(superName))
+            for (const auto &a : (*bp)->superclasses)
                 if (std::find(desc->superclasses.begin(), desc->superclasses.end(), a)
                     == desc->superclasses.end())
-                    desc->superclasses.push_back(a);
+                    desc->superclasses.push_back(a.clone());
     }
     // A class is abstract — uninstantiable — while any declared abstract
     // method has no concrete implementation (own or inherited).
     for (const auto &am : desc->abstractMethods)
-        if (!desc->methods.count(am)) {
+        if (!desc->methods.contains(am)) {
             desc->isAbstract = true;
             break;
         }
-    classDefs_[desc->name] = desc;
+    classDefs_.put(desc->name.clone(), desc);
 
     // Register `ClassName.member` qualified externals for every Static method
     // and Constant property — own AND inherited (the merged maps above hold
     // both) — so e.g. `Subclass.baseStatic()` / `Subclass.BASE_CONST` resolve.
-    for (const auto &[sname, si] : desc->statics) {
+    for (auto [sname, si] : desc->statics) {
         auto uf = si.uf;
         Access acc = si.access;
-        std::string decl = si.declClass, mn = sname;
+        keel::String decl = si.declClass.clone();
+        keel::String mn = sname.clone();
         registerFunction(desc->name, sname,
-                         [uf, acc, decl, mn](keel::ArrayRef<Value> args, keel::usize nargout,
-                                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                         [uf, acc, decl = keel::move(decl), mn = keel::move(mn)](
+                             keel::ArrayRef<Value> args, keel::usize nargout,
+                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
                              if (acc != Access::Public)
                                  enforceAccess(ctx.engine, acc, decl, "method", mn);
                              const keel::usize nout = std::max<keel::usize>(nargout, 1);
                              auto results = ctx.engine->invokeClassMethod(*uf, args, nout);
                              const keel::usize writeN = std::min(nout, results.size());
                              for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
-                                 outs[i] = std::move(results[i]);
+                                 outs[i] = keel::move(results[i]);
                          });
     }
     for (const auto &p : desc->props) {
@@ -1114,10 +1138,12 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             continue;
         auto cval = keel::make_arc<Value>(p.def);
         Access getLvl = p.getAccess;
-        std::string decl = p.declClass, pn = p.name;
+        keel::String decl = p.declClass.clone();
+        keel::String pn = p.name.clone();
         registerFunction(desc->name, p.name,
-                         [cval, getLvl, decl, pn](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
-                                                  CallContext &ctx) {
+                         [cval, getLvl, decl = keel::move(decl), pn = keel::move(pn)](
+                             keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
+                             CallContext &ctx) {
                              if (getLvl != Access::Public)
                                  enforceAccess(ctx.engine, getLvl, decl, "property", pn);
                              outs[0] = *cval;
@@ -1125,18 +1151,18 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     }
 
     BuiltinClass cls;
-    cls.name = keel::String::from(desc->name);
+    cls.name = desc->name.clone();
     cls.isHandle = desc->isHandle;
     cls.hidden.reserve(desc->hiddenMembers.size());
     for (const auto &h : desc->hiddenMembers)
-        cls.hidden.push_back(keel::String::from(h));
+        cls.hidden.push_back(h.clone());
     cls.propNames.reserve(desc->props.size());
     for (const auto &p : desc->props)
         if (std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), p.name) == desc->hiddenMembers.end())
-            cls.propNames.push_back(keel::String::from(p.name)); // Hidden props omitted from properties()/disp
+            cls.propNames.push_back(p.name.clone()); // Hidden props omitted from properties()/disp
     cls.superclasses.reserve(desc->superclasses.size());
     for (const auto &s : desc->superclasses)
-        cls.superclasses.push_back(keel::String::from(s));
+        cls.superclasses.push_back(s.clone());
     cls.isSealed = desc->isSealed;
     cls.isAbstract = desc->isAbstract;
     // ── Reflection metadata (metaclass / meta.property / meta.method) ──
@@ -1144,66 +1170,69 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // introspection needn't reach back into ClassDefDesc. Hidden members are
     // omitted, matching properties()/methods().
     {
-        auto isHidden = [&](const std::string &n) {
-            return std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), n)
-                   != desc->hiddenMembers.end();
+        auto isHidden = [&](keel::StringRef n) {
+            for (const auto &h : desc->hiddenMembers)
+                if (h == n)
+                    return true;
+            return false;
         };
         for (const auto &p : desc->props)
             if (!isHidden(p.name))
-                cls.propMeta.push_back({keel::String::from(p.name),
+                cls.propMeta.push_back({p.name.clone(),
                                         keel::String::from(accessName(p.getAccess)),
                                         keel::String::from(accessName(p.setAccess)),
                                         p.isConstant, p.isDependent});
         struct TmpMethodMeta {
-            std::string access = "public";
+            const char *access = "public";
             bool isStatic = false;
             bool isAbstract = false;
         };
-        std::map<std::string, TmpMethodMeta> mm; // dedup + deterministic order
-        for (const auto &[name, uf] : desc->methods) {
+        keel::HashMap<keel::String, TmpMethodMeta> mm; // dedup; sorted below for deterministic order
+        for (auto [name, uf] : desc->methods) {
+            (void)uf;
             TmpMethodMeta m;
-            if (auto it = desc->methodAccess.find(name); it != desc->methodAccess.end())
-                m.access = accessName(it->second.level);
-            mm[name] = m;
+            if (const auto *ma = desc->methodAccess.get(name))
+                m.access = accessName(ma->level);
+            mm.put(name.clone(), m);
         }
-        for (const auto &[name, si] : desc->statics) {
-            TmpMethodMeta &m = mm[name];
+        for (auto [name, si] : desc->statics) {
+            TmpMethodMeta &m = mm.get_or_insert(name, TmpMethodMeta{});
             m.isStatic = true;
             m.access = accessName(si.access);
         }
         for (const auto &name : desc->abstractMethods) {
-            TmpMethodMeta &m = mm[name];
+            TmpMethodMeta &m = mm.get_or_insert(name, TmpMethodMeta{});
             m.isAbstract = true;
         }
-        for (auto &[name, m] : mm)
+        for (auto [name, m] : mm)
             if (!isHidden(name)) {
                 MethodMeta meta;
-                meta.name = keel::String::from(name);
+                meta.name = name.clone();
                 meta.access = keel::String::from(m.access);
                 meta.isStatic = m.isStatic;
                 meta.isAbstract = m.isAbstract;
-                cls.methodMeta.push_back(std::move(meta));
+                cls.methodMeta.push_back(keel::move(meta));
             }
+        std::sort(cls.methodMeta.begin(), cls.methodMeta.end(),
+                  [](const MethodMeta &a, const MethodMeta &b) { return a.name < b.name; });
     }
     cls.propGet = [desc](const Value &self, keel::StringRef nameRef, Value &out,
                          CallContext &ctx) -> bool {
-        const std::string name(nameRef);
         if (desc->anyNonPublicProp)
-            if (const PropInfo *pi = findProp(*desc, name);
+            if (const PropInfo *pi = findProp(*desc, nameRef);
                 pi && pi->getAccess != Access::Public)
-                enforceAccess(ctx.engine, pi->getAccess, pi->declClass, "property", name);
-        auto git = desc->getters.find(name);
-        if (git != desc->getters.end()
-            && !ctx.engine->isPropAccessorActive(git->second->name)) {
+                enforceAccess(ctx.engine, pi->getAccess, pi->declClass, "property", nameRef);
+        if (const auto *gp = desc->getters.get(nameRef);
+            gp && !ctx.engine->isPropAccessorActive((*gp)->name)) {
             struct AccessorGuard {
                 Engine *eng;
                 ~AccessorGuard() { eng->popPropAccessor(); }
             };
-            ctx.engine->pushPropAccessor(git->second->name);
+            ctx.engine->pushPropAccessor((*gp)->name);
             AccessorGuard guard{ctx.engine};
-            auto r = ctx.engine->invokeClassMethod(*git->second,
+            auto r = ctx.engine->invokeClassMethod(**gp,
                                                    keel::ArrayRef<Value>(&self, 1), 1);
-            out = r.empty() ? Value() : std::move(r[0]);
+            out = r.empty() ? Value() : keel::move(r[0]);
             return true;
         }
         const auto *st = self.objectStateConst();
@@ -1217,35 +1246,35 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     };
     cls.propSet = [desc](Value &self, keel::StringRef nameRef, const Value &val,
                          CallContext &ctx) -> bool {
-        const std::string name(nameRef);
-        const PropInfo *pi = findProp(*desc, name);
+        const PropInfo *pi = findProp(*desc, nameRef);
         if (pi) {
-            if (pi->isConstant)
-                throw std::runtime_error("Cannot set Constant property '" + name
-                                         + "' of class '" + desc->name + "'");
+            if (pi->isConstant) {
+                auto msg = keel::format("Cannot set Constant property '{}' of class '{}'",
+                                        nameRef, desc->name);
+                throw std::runtime_error(msg.c_str());
+            }
             if (pi->setAccess != Access::Public)
-                enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", name);
-        } else if (!desc->setters.count(name)
+                enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", nameRef);
+        } else if (!desc->setters.contains(nameRef)
                    && std::find(desc->superclasses.begin(), desc->superclasses.end(),
                                 "dynamicprops")
                           == desc->superclasses.end()) {
-            throw std::runtime_error("No public property '" + name
-                                     + "' for class '" + desc->name + "'");
+            auto msg = keel::format("No public property '{}' for class '{}'", nameRef, desc->name);
+            throw std::runtime_error(msg.c_str());
         }
-        auto sit = desc->setters.find(name);
-        if (sit != desc->setters.end()
-            && !ctx.engine->isPropAccessorActive(sit->second->name)) {
+        if (const auto *sp = desc->setters.get(nameRef);
+            sp && !ctx.engine->isPropAccessorActive((*sp)->name)) {
             struct AccessorGuard {
                 Engine *eng;
                 ~AccessorGuard() { eng->popPropAccessor(); }
             };
-            ctx.engine->pushPropAccessor(sit->second->name);
+            ctx.engine->pushPropAccessor((*sp)->name);
             AccessorGuard guard{ctx.engine};
             Value callArgs[2] = {self, val};
-            auto r = ctx.engine->invokeClassMethod(*sit->second,
+            auto r = ctx.engine->invokeClassMethod(**sp,
                                                    keel::ArrayRef<Value>(callArgs, 2), 1);
             if (!r.empty() && r[0].isObject())
-                self = std::move(r[0]);
+                self = keel::move(r[0]);
             return true;
         }
         self.objectStateMut()->props.put(keel::String::from(nameRef), val);
@@ -1257,23 +1286,23 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             obj = ctx.engine->invokeClassCtor(*desc->ctor, obj, args);
         return obj;
     };
-    for (const auto &[mname, uf] : desc->methods) {
-        auto ufCopy = uf; // shared_ptr keeps the body alive
-        cls.methodFns.put(keel::String::from(mname), keel::make_arc<const UserFunction>(*uf)); // classdef method → VM can run it as a frame
-        std::string nameCopy = mname;
+    for (auto [mname, uf] : desc->methods) {
+        auto ufCopy = uf; // Arc keeps the body alive
+        cls.methodFns.put(mname.clone(), keel::Arc<const UserFunction>(uf)); // classdef method → VM can run it as a frame
         Access mlevel = Access::Public;
-        std::string mdecl;
-        if (auto mit = desc->methodAccess.find(mname); mit != desc->methodAccess.end()) {
-            mlevel = mit->second.level;
-            mdecl = mit->second.declClass;
+        keel::StringRef mdeclRef;
+        if (const auto *ma = desc->methodAccess.get(mname)) {
+            mlevel = ma->level;
+            mdeclRef = ma->declClass.as_ref();
         }
-        cls.methods.put(keel::String::from(mname),
-                        [ufCopy, nameCopy, mlevel, mdecl](
+        cls.methods.put(mname.clone(),
+                        [ufCopy, nameCopy = mname.clone(), mlevel,
+                         mdecl = keel::String::from(mdeclRef)](
                             Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (mlevel != Access::Public)
                 enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
-            std::vector<Value> callArgs;
+            keel::Array<Value> callArgs;
             callArgs.reserve(args.size() + 1);
             callArgs.push_back(self); // MATLAB: obj is the first parameter
             for (const auto &a : args)
@@ -1285,7 +1314,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             // when called with nargout==0), bounded by the outs span.
             const keel::usize writeN = std::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
-                outs[i] = std::move(results[i]);
+                outs[i] = keel::move(results[i]);
         });
         // Operator-overload method (plus/minus/eq/uminus/…): also wire it into
         // `ops` so `a + b`, `-a`, `a == b`, … dispatch here. Unlike a regular
@@ -1294,23 +1323,24 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         // arrives as the receiver `self` with empty `args`.
         if (isOperatorMethodName(mname)) {
             auto ufOp = uf;
-            cls.ops.put(keel::String::from(mname),
-                        [ufOp, nameCopy, mlevel, mdecl](
+            cls.ops.put(mname.clone(),
+                        [ufOp, nameCopy = mname.clone(), mlevel,
+                         mdecl = keel::String::from(mdeclRef)](
                             Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 if (mlevel != Access::Public)
                     enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
-                std::vector<Value> callArgs;
+                keel::Array<Value> callArgs;
                 if (args.empty())
                     callArgs.push_back(self); // unary: operand came as self
                 else
-                    callArgs.assign(args.begin(), args.end()); // binary: [lhs, rhs]
+                    callArgs.append(args); // binary: [lhs, rhs]
                 const keel::usize nout = std::max<keel::usize>(nargout, 1);
                 auto results = ctx.engine->invokeClassMethod(
                     *ufOp, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
                 const keel::usize writeN = std::min(nout, results.size());
                 for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
-                    outs[i] = std::move(results[i]);
+                    outs[i] = keel::move(results[i]);
             });
         }
     }
@@ -1319,8 +1349,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // (subsref(obj, S) / subsasgn(obj, S, val)); our paren-index hooks pass
     // flat subscripts, which we wrap into S here. (`.`/`{}` keep their default
     // property / cell semantics — only `()` routes through these.)
-    if (auto it = desc->methods.find("subsref"); it != desc->methods.end()) {
-        auto uf = it->second;
+    if (const auto *ufp = desc->methods.get("subsref")) {
+        auto uf = *ufp;
         cls.subsref = [uf](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                            CallContext &ctx) {
             Value s = buildSubsStruct("()", args, ctx.engine->allocator());
@@ -1329,11 +1359,11 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 2), nout);
             const keel::usize writeN = std::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
-                outs[i] = std::move(results[i]);
+                outs[i] = keel::move(results[i]);
         };
     }
-    if (auto it = desc->methods.find("subsasgn"); it != desc->methods.end()) {
-        auto uf = it->second;
+    if (const auto *ufp = desc->methods.get("subsasgn")) {
+        auto uf = *ufp;
         cls.subsasgn = [uf](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
                             CallContext &ctx) {
             // Hook convention: args = [subscripts…, value] (value last).
@@ -1346,24 +1376,30 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
             // Handle class: it mutates shared state in place (write-back of the
             // returned handle is harmless).
             if (!results.empty() && results[0].isObject())
-                self = std::move(results[0]);
+                self = keel::move(results[0]);
         };
     }
     cls.dispText = [desc](const Value &self) -> keel::String {
         if (self.objectCount() != 1)
             return keel::String{};
-        std::string body = "  " + desc->name + " with properties:\n\n";
+        keel::String body = keel::format("  {} with properties:\n\n", desc->name);
         const auto *st = self.objectStateConst();
         for (const auto &p : desc->props) {
-            body += "    " + p.name;
+            keel::format_into(body, "    {}", p.name);
             if (st) {
                 if (const Value *vp = st->props.get(p.name);
-                    vp && vp->isScalar() && vp->type() == ValueType::DOUBLE)
-                    body += ": " + std::to_string(vp->toScalar());
+                    vp && vp->isScalar() && vp->type() == ValueType::DOUBLE) {
+                    char numBuf[64];
+                    int n = std::snprintf(numBuf, sizeof(numBuf), "%f", vp->toScalar());
+                    if (n > 0) {
+                        body.append(": ");
+                        body.append(keel::StringRef(numBuf, static_cast<keel::usize>(n)));
+                    }
+                }
             }
-            body += "\n";
+            body.push_back('\n');
         }
-        return keel::String::from(body);
+        return body;
     };
     // Enumeration defaults: members compare by their member name (so
     // `Color.Red == Color.Red`), and display as that name — unless the class
@@ -1390,19 +1426,17 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                             if (!outs.empty())
                                 outs[0] = Value::logicalScalar(!outs[0].toBool(), ctx.engine->allocator());
                         });
-        if (!desc->methods.count("disp") && !desc->methods.count("display"))
+        if (!desc->methods.contains("disp") && !desc->methods.contains("display"))
             cls.dispText = [](const Value &self) -> keel::String {
                 if (self.objectCount() != 1)
                     return keel::String{};
                 const auto *st = self.objectStateConst();
-                if (st && !st->enumName.empty()) {
-                    std::string out = "    " + std::string(st->enumName.as_ref()) + "\n";
-                    return keel::String::from(out);
-                }
+                if (st && !st->enumName.empty())
+                    return keel::format("    {}\n", st->enumName);
                 return keel::String{};
             };
     }
-    registerClass(std::move(cls));
+    registerClass(keel::move(cls));
 
     // Instantiate enumeration members: each is a constant instance exposed as
     // `ClassName.Member`, built by the constructor with the member's args (so
@@ -1414,14 +1448,14 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
                 const ASTNode *child = childPtr.get();
                 if (child->type != NodeType::CLASSDEF_ENUM_MEMBER)
                     continue;
-                std::vector<Value> args;
+                keel::Array<Value> args;
                 for (const auto &a : child->children)
                     args.push_back(evalConstExpr(a.get()));
                 CallContext ctx{this, workspaceEnv_.get()};
                 Value inst = ecls->construct(keel::ArrayRef<Value>(args.data(), args.size()), ctx);
                 if (inst.isObject())
-                    inst.objectStateMut()->enumName = keel::String::from(child->strValue);
-                auto instPtr = keel::make_arc<Value>(std::move(inst));
+                    inst.objectStateMut()->enumName = child->strValue.clone();
+                auto instPtr = keel::make_arc<Value>(keel::move(inst));
                 registerFunction(desc->name, child->strValue,
                                  [instPtr](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                                            CallContext &) { outs[0] = *instPtr; });
@@ -1433,8 +1467,8 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
     // this class (see reregisterDerivedClasses). Cloned because `cd` may be
     // transient — resolveMFile_'s parsed AST is freed once this returns, and on
     // a redefinition `cd` may alias the very entry we overwrite here (the
-    // cascade holds its own shared_ptr to keep it alive across this clone).
-    classDefAst_[className] = std::shared_ptr<const ASTNode>(cloneNode(cd));
+    // cascade holds its own Arc to keep it alive across this clone).
+    classDefAst_.put(className.clone(), keel::Arc<const ASTNode>(cloneNode(cd)));
 
     // Re-register every class that (transitively) derives from this one, so the
     // new members propagate to subclasses (which hold a snapshot of the base's
@@ -1447,24 +1481,24 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, const std::string &qualifi
         reregisterDerivedClasses(className);
 }
 
-void Engine::reregisterDerivedClasses(const std::string &base)
+void Engine::reregisterDerivedClasses(keel::StringRef base)
 {
     // Classes whose transitive superclasses include `base`.
-    std::vector<std::string> deps;
-    for (const auto &[name, desc] : classDefs_) {
+    keel::Array<keel::String> deps;
+    for (auto [name, desc] : classDefs_) {
         if (name == base)
             continue;
         if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
             != desc->superclasses.end())
-            deps.push_back(name);
+            deps.push_back(name.clone());
     }
     if (deps.empty())
         return;
     // Parent-first: a subclass's transitive-ancestor set strictly contains each
     // ancestor's, so ascending ancestor count is a valid topological order (a
     // base is re-registered before any class that derives from it).
-    std::sort(deps.begin(), deps.end(), [&](const std::string &a, const std::string &b) {
-        return classDefs_.at(a)->superclasses.size() < classDefs_.at(b)->superclasses.size();
+    std::sort(deps.begin(), deps.end(), [&](const keel::String &a, const keel::String &b) {
+        return (*classDefs_.get(a))->superclasses.size() < (*classDefs_.get(b))->superclasses.size();
     });
     // RAII restore: a re-register that throws must NOT leave the flag stuck at
     // true — that would silently disable propagation for the rest of the
@@ -1479,13 +1513,13 @@ void Engine::reregisterDerivedClasses(const std::string &base)
         CascadeGuard &operator=(const CascadeGuard &) = delete;
     } guard(suppressDependentCascade_);
     for (const auto &name : deps) {
-        auto it = classDefAst_.find(name);
-        if (it == classDefAst_.end() || !it->second)
+        const auto *astPtr = classDefAst_.get(name);
+        if (!astPtr || !*astPtr)
             continue;
         // Hold our own ref: registerClassDef → unregisterClassDef erases the map
         // entry, then re-stores a fresh clone; this keeps the node alive in
         // between. Re-register under the same (possibly qualified) name.
-        std::shared_ptr<const ASTNode> ast = it->second;
+        keel::Arc<const ASTNode> ast = *astPtr;
         registerClassDef(ast.get(), name);
     }
 }
@@ -1497,7 +1531,7 @@ namespace {
 struct ClassCtxGuard
 {
     Engine *engine;
-    ClassCtxGuard(Engine *e, const std::string &className, bool isCtor)
+    ClassCtxGuard(Engine *e, keel::StringRef className, bool isCtor)
         : engine(e)
     {
         engine->pushClassCtx(className, isCtor);
@@ -1508,7 +1542,7 @@ struct ClassCtxGuard
 };
 } // namespace
 
-std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+keel::Array<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
                                              keel::usize nout)
 {
     // Under the VM backend, run the body on the VM (P4) so C++-initiated
@@ -1521,8 +1555,10 @@ std::vector<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::Array
         if (!vm_)
             throw std::runtime_error("classdef methods require an active VM");
         const BytecodeChunk *cc = ensureClassMethodChunk(uf);
-        if (!cc)
-            throw std::runtime_error("Failed to compile classdef method '" + uf.name + "'");
+        if (!cc) {
+            auto msg = keel::format("Failed to compile classdef method '{}'", uf.name);
+            throw std::runtime_error(msg.c_str());
+        }
         return vm_->callReentrant(*cc, args, std::max<keel::usize>(nout, 1), uf.ownerClass,
                                   /*isCtor=*/false);
     }
@@ -1540,10 +1576,12 @@ Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
         if (!vm_)
             throw std::runtime_error("classdef constructor requires an active VM");
         const BytecodeChunk *cc = ensureClassMethodChunk(ctor);
-        if (!cc)
-            throw std::runtime_error("Failed to compile classdef constructor '" + ctor.name + "'");
+        if (!cc) {
+            auto msg = keel::format("Failed to compile classdef constructor '{}'", ctor.name);
+            throw std::runtime_error(msg.c_str());
+        }
         auto r = vm_->callReentrant(*cc, args, 1, ctor.ownerClass, /*isCtor=*/true, &seed);
-        return r.empty() ? seed : std::move(r[0]);
+        return r.empty() ? seed : keel::move(r[0]);
     }
     if (treeWalker_) {
         ClassCtxGuard ctx(this, ctor.ownerClass, /*isCtor=*/true);
@@ -1560,22 +1598,22 @@ Value Engine::evalConstExpr(const ASTNode *expr)
         if (!compiler_ || !vm_)
             throw std::runtime_error("evalConstExpr: VM backend is unavailable");
         ASTNode fn(NodeType::FUNCTION_DEF);
-        fn.strValue = "__const_expr__";
-        fn.returnNames = {"__result__"};
-        auto bodyBlock = std::make_unique<ASTNode>(NodeType::BLOCK);
-        auto assignNode = std::make_unique<ASTNode>(NodeType::ASSIGN);
+        fn.strValue.assign("__const_expr__");
+        fn.returnNames.push_back(keel::String::from("__result__"));
+        auto bodyBlock = keel::make_unique<ASTNode>(NodeType::BLOCK);
+        auto assignNode = keel::make_unique<ASTNode>(NodeType::ASSIGN);
         assignNode->suppressOutput = true;
-        auto resultId = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
-        resultId->strValue = "__result__";
-        assignNode->children.push_back(std::move(resultId));
+        auto resultId = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        resultId->strValue.assign("__result__");
+        assignNode->children.push_back(keel::move(resultId));
         assignNode->children.push_back(cloneNode(expr));
-        bodyBlock->children.push_back(std::move(assignNode));
-        fn.children.push_back(std::move(bodyBlock));
+        bodyBlock->children.push_back(keel::move(assignNode));
+        fn.children.push_back(keel::move(bodyBlock));
         BytecodeChunk chunk = compiler_->compileFunction(&fn);
         vm_->setCompiledFuncs(&compiler_->compiledFuncs(),
                               &compiler_->scriptLocalCompiledFuncs());
         auto r = vm_->callReentrant(chunk, keel::ArrayRef<Value>{}, 1);
-        return r.empty() ? Value::Empty : std::move(r[0]);
+        return r.empty() ? Value::Empty : keel::move(r[0]);
     }
     if (treeWalker_)
         return treeWalker_->evalExpressionPublic(expr, &constantsEnv());
@@ -1587,91 +1625,94 @@ const BytecodeChunk *Engine::ensureClassMethodChunk(const UserFunction &uf)
     return compiler_ ? compiler_->ensureClassMethodCompiled(uf) : nullptr;
 }
 
-void Engine::enforceMethodAccess(const std::string &className, const std::string &method)
+void Engine::enforceMethodAccess(keel::StringRef className, keel::StringRef method)
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end())
+    const auto *dp = classDefs_.get(className);
+    if (!dp)
         return;
-    auto mit = it->second->methodAccess.find(method);
-    if (mit != it->second->methodAccess.end())
-        enforceAccess(this, mit->second.level, mit->second.declClass, "method", method);
+    if (const auto *ma = (*dp)->methodAccess.get(method))
+        enforceAccess(this, ma->level, ma->declClass, "method", method);
 }
 
-const UserFunction *Engine::classGetter(const std::string &className,
-                                        const std::string &prop) const
+const UserFunction *Engine::classGetter(keel::StringRef className,
+                                        keel::StringRef prop) const
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end())
+    const auto *dp = classDefs_.get(className);
+    if (!dp)
         return nullptr;
-    auto git = it->second->getters.find(prop);
-    if (git == it->second->getters.end())
+    const auto *gp = (*dp)->getters.get(prop);
+    if (!gp)
         return nullptr;
-    if (isPropAccessorActive(git->second->name))
+    if (isPropAccessorActive((*gp)->name))
         return nullptr;
-    return git->second.get();
+    return gp->get();
 }
 
-const UserFunction *Engine::classSetter(const std::string &className,
-                                        const std::string &prop) const
+const UserFunction *Engine::classSetter(keel::StringRef className,
+                                        keel::StringRef prop) const
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end())
+    const auto *dp = classDefs_.get(className);
+    if (!dp)
         return nullptr;
-    auto sit = it->second->setters.find(prop);
-    if (sit == it->second->setters.end())
+    const auto *sp = (*dp)->setters.get(prop);
+    if (!sp)
         return nullptr;
-    if (isPropAccessorActive(sit->second->name))
+    if (isPropAccessorActive((*sp)->name))
         return nullptr;
-    return sit->second.get();
+    return sp->get();
 }
 
-bool Engine::isPropAccessorActive(const std::string &accessorName) const
+bool Engine::isPropAccessorActive(keel::StringRef accessorName) const
 {
-    if (std::find(activePropAccessors_.begin(), activePropAccessors_.end(), accessorName)
-        != activePropAccessors_.end())
-        return true;
+    for (const auto &a : activePropAccessors_)
+        if (a == accessorName)
+            return true;
     if (vm_ && vm_->hasActiveFrameNamed(accessorName))
         return true;
     return false;
 }
 
-void Engine::enforcePropGetAccess(const std::string &className, const std::string &prop)
+void Engine::enforcePropGetAccess(keel::StringRef className, keel::StringRef prop)
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end() || !it->second->anyNonPublicProp)
+    const auto *dp = classDefs_.get(className);
+    if (!dp || !(*dp)->anyNonPublicProp)
         return;
-    if (const PropInfo *pi = findProp(*it->second, prop); pi && pi->getAccess != Access::Public)
+    if (const PropInfo *pi = findProp(**dp, prop); pi && pi->getAccess != Access::Public)
         enforceAccess(this, pi->getAccess, pi->declClass, "property", prop);
 }
 
-void Engine::enforcePropSetAccess(const std::string &className, const std::string &prop)
+void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef prop)
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end())
+    const auto *dp = classDefs_.get(className);
+    if (!dp)
         return;
-    const ClassDefDesc &desc = *it->second;
+    const ClassDefDesc &desc = **dp;
     const PropInfo *pi = findProp(desc, prop);
     if (pi) {
-        if (pi->isConstant)
-            throw std::runtime_error("Cannot set Constant property '" + prop
-                                     + "' of class '" + className + "'");
+        if (pi->isConstant) {
+            auto msg = keel::format("Cannot set Constant property '{}' of class '{}'",
+                                    prop, className);
+            throw std::runtime_error(msg.c_str());
+        }
         if (pi->setAccess != Access::Public)
             enforceAccess(this, pi->setAccess, pi->declClass, "property", prop);
-    } else if (!desc.setters.count(prop)
+    } else if (!desc.setters.contains(prop)
                && std::find(desc.superclasses.begin(), desc.superclasses.end(), "dynamicprops")
                       == desc.superclasses.end()) {
-        throw std::runtime_error("No public property '" + prop
-                                 + "' for class '" + className + "'");
+        auto msg = keel::format("No public property '{}' for class '{}'", prop, className);
+        throw std::runtime_error(msg.c_str());
     }
 }
 
-Value Engine::superConstruct(const std::string &base, const Value &seed,
+Value Engine::superConstruct(keel::StringRef base, const Value &seed,
                              keel::ArrayRef<Value> args)
 {
-    auto it = classDefs_.find(base);
-    if (it == classDefs_.end())
-        throw std::runtime_error("superclass '" + base + "' is not a classdef");
-    const auto &desc = it->second;
+    const auto *dp = classDefs_.get(base);
+    if (!dp) {
+        auto msg = keel::format("superclass '{}' is not a classdef", base);
+        throw std::runtime_error(msg.c_str());
+    }
+    const auto &desc = *dp;
     // A base with no explicit constructor contributes only its default
     // property values, which are already present on `seed` — nothing to run.
     if (!desc->ctor)
@@ -1679,27 +1720,31 @@ Value Engine::superConstruct(const std::string &base, const Value &seed,
     return invokeClassCtor(*desc->ctor, seed, args);
 }
 
-std::vector<Value> Engine::superMethod(const std::string &base, const std::string &method,
+keel::Array<Value> Engine::superMethod(keel::StringRef base, keel::StringRef method,
                                        keel::ArrayRef<Value> args, keel::usize nout)
 {
-    auto it = classDefs_.find(base);
-    if (it == classDefs_.end())
-        throw std::runtime_error("superclass '" + base + "' is not a classdef");
-    const auto &desc = it->second;
-    auto mit = desc->methods.find(method);
-    if (mit == desc->methods.end())
-        throw std::runtime_error("superclass '" + base + "' has no method '" + method + "'");
+    const auto *dp = classDefs_.get(base);
+    if (!dp) {
+        auto msg = keel::format("superclass '{}' is not a classdef", base);
+        throw std::runtime_error(msg.c_str());
+    }
+    const auto &desc = *dp;
+    const auto *mp = desc->methods.get(method);
+    if (!mp) {
+        auto msg = keel::format("superclass '{}' has no method '{}'", base, method);
+        throw std::runtime_error(msg.c_str());
+    }
     // Enforce the base method's access from the calling context (the current
     // top frame is the subclass method making the super-call): a `protected`
     // base method is reachable from a subclass, a `private` one is not.
-    if (auto ait = desc->methodAccess.find(method); ait != desc->methodAccess.end())
-        enforceAccess(this, ait->second.level, ait->second.declClass, "method", method);
-    return invokeClassMethod(*mit->second, args, nout);
+    if (const auto *ma = desc->methodAccess.get(method))
+        enforceAccess(this, ma->level, ma->declClass, "method", method);
+    return invokeClassMethod(**mp, args, nout);
 }
 
-void Engine::pushClassCtx(std::string className, bool isCtor)
+void Engine::pushClassCtx(keel::StringRef className, bool isCtor)
 {
-    classCtx_.push_back({std::move(className), isCtor});
+    classCtx_.push_back({keel::String::from(className), isCtor});
 }
 
 void Engine::popClassCtx()
@@ -1712,18 +1757,18 @@ void Engine::popClassCtx()
 // ClassCtxGuard (classCtx_) is innermost when present; otherwise, under the VM
 // backend, the running class is the VM's top method frame. Empty == script
 // scope. (No separate VM stack — read on demand, so it stays exception-safe.)
-std::string Engine::currentClassCtx_() const
+keel::StringRef Engine::currentClassCtx_() const
 {
     if (!classCtx_.empty())
-        return classCtx_.back().className;
+        return classCtx_.back().className.as_ref();
     if (vm_ && backend_ == Backend::VM)
         return vm_->currentMethodClass();
-    return std::string();
+    return {};
 }
 
-bool Engine::classCtxAllows(const std::string &declClass, bool privateOnly) const
+bool Engine::classCtxAllows(keel::StringRef declClass, bool privateOnly) const
 {
-    const std::string ctx = currentClassCtx_();
+    const keel::StringRef ctx = currentClassCtx_();
     if (ctx.empty())
         return false; // script scope — only public members are reachable
     if (ctx == declClass)
@@ -1731,14 +1776,14 @@ bool Engine::classCtxAllows(const std::string &declClass, bool privateOnly) cons
     if (privateOnly)
         return false;
     // protected: the running class must be a subclass of the declaring class.
-    auto it = classDefs_.find(ctx);
-    if (it == classDefs_.end())
+    const auto *dp = classDefs_.get(ctx);
+    if (!dp)
         return false;
-    const auto &sc = it->second->superclasses;
+    const auto &sc = (*dp)->superclasses;
     return std::find(sc.begin(), sc.end(), declClass) != sc.end();
 }
 
-bool Engine::classCtxInCtorOf(const std::string &declClass) const
+bool Engine::classCtxInCtorOf(keel::StringRef declClass) const
 {
     if (!classCtx_.empty())
         return classCtx_.back().isCtor && classCtx_.back().className == declClass;
@@ -1747,57 +1792,61 @@ bool Engine::classCtxInCtorOf(const std::string &declClass) const
     return false;
 }
 
-void Engine::enforceCtorAccess(const std::string &className)
+void Engine::enforceCtorAccess(keel::StringRef className)
 {
-    auto it = classDefs_.find(className);
-    if (it != classDefs_.end() && it->second->ctorAccess != Access::Public) {
-        const Access lvl = it->second->ctorAccess;
-        if (!classCtxAllows(it->second->ctorDeclClass, /*privateOnly=*/lvl == Access::Private))
-            throw std::runtime_error(std::string("Cannot call the ") + accessWord(lvl)
-                                     + " constructor of '" + className
-                                     + "' from outside the class");
+    const auto *dp = classDefs_.get(className);
+    if (dp && (*dp)->ctorAccess != Access::Public) {
+        const Access lvl = (*dp)->ctorAccess;
+        if (!classCtxAllows((*dp)->ctorDeclClass, /*privateOnly=*/lvl == Access::Private)) {
+            auto msg = keel::format("Cannot call the {} constructor of '{}' from outside the class",
+                                    accessWord(lvl), className);
+            throw std::runtime_error(msg.c_str());
+        }
     }
 }
 
 Value Engine::constructChecked(const BuiltinClass *cls, keel::ArrayRef<Value> args, CallContext &ctx)
 {
-    enforceCtorAccess(std::string(cls->name.as_ref()));
+    enforceCtorAccess(cls->name);
     return cls->construct(args, ctx);
 }
 
-Value Engine::makeDefaultInstance(const std::string &className)
+Value Engine::makeDefaultInstance(keel::StringRef className)
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end())
-        throw std::runtime_error("'" + className + "' is not a classdef");
-    const auto &desc = it->second;
-    if (desc->isAbstract)
-        throw std::runtime_error("Cannot instantiate abstract class '" + className
-                                 + "' (unimplemented abstract method)");
+    const auto *dp = classDefs_.get(className);
+    if (!dp) {
+        auto msg = keel::format("'{}' is not a classdef", className);
+        throw std::runtime_error(msg.c_str());
+    }
+    const auto &desc = *dp;
+    if (desc->isAbstract) {
+        auto msg = keel::format("Cannot instantiate abstract class '{}' (unimplemented abstract method)",
+                                className);
+        throw std::runtime_error(msg.c_str());
+    }
     auto st = keel::make_arc_in<ObjectState>(mr_, mr_);
     for (const auto &p : desc->props)
-        st->props.put(keel::String::from(p.name), p.def);
+        st->props.put(p.name.clone(), p.def);
     return Value::object(desc->name, st, desc->isHandle, mr_);
 }
 
-const UserFunction *Engine::classCtor(const std::string &className) const
+const UserFunction *Engine::classCtor(keel::StringRef className) const
 {
-    auto it = classDefs_.find(className);
-    if (it == classDefs_.end() || !it->second->ctor)
+    const auto *dp = classDefs_.get(className);
+    if (!dp || !(*dp)->ctor)
         return nullptr;
-    return it->second->ctor.get();
+    return (*dp)->ctor.get();
 }
 
 void Engine::registerFunction(keel::StringRef ns,
                               keel::StringRef name,
                               ExternalFunc func)
 {
-    std::string nsStr(ns);
-    std::string nameStr(name);
-    if (nsStr.empty()) {
-        registerFunctionImpl_(nameStr, nameStr, std::move(func));
+    if (ns.empty()) {
+        registerFunctionImpl_(name, name, keel::move(func));
     } else {
-        registerFunctionImpl_(nsStr + "." + nameStr, nameStr, std::move(func));
+        keel::String full = keel::format("{}.{}", ns, name);
+        registerFunctionImpl_(full, name, keel::move(func));
     }
 }
 
@@ -1816,14 +1865,14 @@ void Engine::registerFunction(keel::StringRef ns,
 //   * `import a.b as x`   → when `name` starts with "x.", rewrites to
 //                           "a.b.<rest>" and tries that; otherwise skipped.
 template <class ShortNameIndex, class Fn>
-static bool walkImportCandidates_(const std::string &name,
+static bool walkImportCandidates_(keel::StringRef name,
                                    const Environment *env,
                                    const Environment *workspaceEnv,
                                    const ShortNameIndex &shortNameIndex,
                                    Fn &&tryQualified)
 {
-    auto buildPrefix = [](const std::vector<std::string> &path) {
-        std::string s;
+    auto buildPrefix = [](const keel::Array<keel::String> &path) {
+        keel::String s;
         s.reserve(64);
         for (const auto &p : path) {
             if (!s.empty()) s.push_back('.');
@@ -1841,14 +1890,14 @@ static bool walkImportCandidates_(const std::string &name,
         for (const Environment *cur = env; cur != nullptr;
              cur = cur->parentForImports()) {
             const auto &imps = cur->activeImports();
-            for (auto rit = imps.rbegin(); rit != imps.rend(); ++rit)
-                if (fn(*rit))
+            for (keel::usize i = imps.size(); i > 0; --i)
+                if (fn(imps[i - 1]))
                     return true;
         }
         if (workspaceEnv && env != workspaceEnv) {
             const auto &imps = workspaceEnv->activeImports();
-            for (auto rit = imps.rbegin(); rit != imps.rend(); ++rit)
-                if (fn(*rit))
+            for (keel::usize i = imps.size(); i > 0; --i)
+                if (fn(imps[i - 1]))
                     return true;
         }
         return false;
@@ -1860,27 +1909,27 @@ static bool walkImportCandidates_(const std::string &name,
     // shadowing-order match per hop) until a fixed point; the hop cap
     // guards cyclic imports (`import a as b; import b as a`)
     // (bugs/closed/core/import-alias-chain.md).
-    auto resolveAliasHeads = [&](std::string s) -> std::string {
+    auto resolveAliasHeads = [&](keel::String s) -> keel::String {
         for (int hop = 0; hop < 8; ++hop) {
-            std::string next = s;
+            keel::String next = s.clone();
             eachVisibleImport([&](const Import &imp) {
                 if (imp.alias.empty())
                     return false;
-                const std::string ad = imp.alias + ".";
-                if (next.size() > ad.size()
-                    && next.compare(0, ad.size(), ad) == 0) {
-                    std::string r = buildPrefix(imp.path);
+                if (next.size() > imp.alias.size() + 1
+                    && next.starts_with(imp.alias)
+                    && next[imp.alias.size()] == '.') {
+                    keel::String r = buildPrefix(imp.path);
                     r.push_back('.');
-                    r.append(next, ad.size(), std::string::npos);
+                    r.append(next.substr(imp.alias.size() + 1));
                     if (r != next) // self-alias counts as settled
-                        next = std::move(r);
+                        next = keel::move(r);
                     return true;
                 }
                 return false;
             });
             if (next == s)
                 break; // fixed point: no head matched (or settled)
-            s = std::move(next);
+            s = keel::move(next);
         }
         return s;
     };
@@ -1891,31 +1940,27 @@ static bool walkImportCandidates_(const std::string &name,
         // leaf. activeImports() pushes append-only, so iterate in
         // reverse order.
         const auto &imps = cur->activeImports();
-        for (auto rit = imps.rbegin(); rit != imps.rend(); ++rit) {
-            const auto &imp = *rit;
+        for (keel::usize i = imps.size(); i > 0; --i) {
+            const auto &imp = imps[i - 1];
             if (imp.path.empty()) continue;
             if (imp.wildcard) {
-                std::string prefix = buildPrefix(imp.path);
-                std::string direct = prefix + "." + name;
-                if (tryQualified(direct))
+                keel::String prefix = buildPrefix(imp.path);
+                keel::String direct = keel::format("{}.{}", prefix, name);
+                if (tryQualified(direct.as_ref()))
                     return true;
                 // Deep scan: any registered "a.b.SUB.<name>" (or deeper)
                 // also matches `import a.b.*`.
-                std::string dottedPrefix = prefix + ".";
-                std::string dottedSuffix = "." + name;
-                auto range = shortNameIndex.equal_range(name);
-                for (auto it = range.first; it != range.second; ++it) {
-                    const std::string &full = it->second;
-                    if (full == direct) continue;            // already tried
-                    if (full.size() <= dottedPrefix.size())  continue;
-                    if (full.compare(0, dottedPrefix.size(),
-                                     dottedPrefix) != 0)     continue;
-                    if (full.size() < dottedSuffix.size()) continue;
-                    if (full.compare(full.size() - dottedSuffix.size(),
-                                     dottedSuffix.size(),
-                                     dottedSuffix) != 0) continue;
-                    if (tryQualified(full))
-                        return true;
+                keel::String dottedPrefix = keel::format("{}.", prefix);
+                keel::String dottedSuffix = keel::format(".{}", name);
+                if (const auto *vec = shortNameIndex.get(name)) {
+                    for (const auto &full : *vec) {
+                        if (full == direct) continue;            // already tried
+                        if (full.size() <= dottedPrefix.size())  continue;
+                        if (!full.starts_with(dottedPrefix))     continue;
+                        if (!full.ends_with(dottedSuffix))       continue;
+                        if (tryQualified(full.as_ref()))
+                            return true;
+                    }
                 }
             } else if (!imp.alias.empty()) {
                 // Alias import (`import a.b as alias`): rewrite a name
@@ -1923,19 +1968,19 @@ static bool walkImportCandidates_(const std::string &name,
                 // registered qualified form. Bare names (no dot in
                 // `name`) and names whose prefix doesn't match the
                 // alias fall through.
-                const std::string aliasDot = imp.alias + ".";
-                if (name.size() > aliasDot.size()
-                    && name.compare(0, aliasDot.size(), aliasDot) == 0) {
-                    std::string candidate = buildPrefix(imp.path);
+                if (name.size() > imp.alias.size() + 1
+                    && name.starts_with(imp.alias)
+                    && name[imp.alias.size()] == '.') {
+                    keel::String candidate = buildPrefix(imp.path);
                     candidate.push_back('.');
-                    candidate.append(name, aliasDot.size(),
-                                     std::string::npos);
-                    candidate = resolveAliasHeads(std::move(candidate));
-                    if (tryQualified(candidate))
+                    candidate.append(name.substr(imp.alias.size() + 1));
+                    candidate = resolveAliasHeads(keel::move(candidate));
+                    if (tryQualified(candidate.as_ref()))
                         return true;
                 }
             } else if (imp.path.back() == name) {
-                if (tryQualified(buildPrefix(imp.path)))
+                keel::String cand = buildPrefix(imp.path);
+                if (tryQualified(cand.as_ref()))
                     return true;
             }
         }
@@ -1957,48 +2002,49 @@ static bool walkImportCandidates_(const std::string &name,
     return false;
 }
 
-void Engine::markPluginNamespace(const std::string &ns, bool isolated)
+void Engine::markPluginNamespace(keel::StringRef ns, bool isolated)
 {
     if (ns.empty()) return;
-    auto dot = ns.find('.');
-    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
-    pluginNamespaces_.insert(topNs);
+    const keel::usize dot = ns.find('.');
+    keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
+    pluginNamespaces_.insert(keel::String::from(topNs));
     if (isolated) {
-        isolatedPluginNamespaces_.insert(topNs);
+        isolatedPluginNamespaces_.insert(keel::String::from(topNs));
     }
     bumpCallCacheEpoch();
 }
 
-bool Engine::isPluginNamespace(const std::string &ns) const
+bool Engine::isPluginNamespace(keel::StringRef ns) const
 {
-    auto dot = ns.find('.');
-    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
-    return pluginNamespaces_.count(topNs) > 0;
+    const keel::usize dot = ns.find('.');
+    keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
+    return pluginNamespaces_.contains(topNs);
 }
 
-bool Engine::isIsolatedPluginNamespace(const std::string &ns) const
+bool Engine::isIsolatedPluginNamespace(keel::StringRef ns) const
 {
-    auto dot = ns.find('.');
-    std::string topNs = (dot != std::string::npos) ? ns.substr(0, dot) : ns;
-    return isolatedPluginNamespaces_.count(topNs) > 0;
+    const keel::usize dot = ns.find('.');
+    keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
+    return isolatedPluginNamespaces_.contains(topNs);
 }
 
-std::string Engine::formatUndefinedFunctionError(const std::string &name,
-                                                 const std::string &baseMsg) const
+keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
+                                                  keel::StringRef baseMsg) const
 {
-    if (name.find('.') != std::string::npos)
-        return baseMsg;
+    if (name.find('.') != keel::kInvalidIndex)
+        return keel::String::from(baseMsg);
 
     if (namespaceMode_ == NamespaceMode::Isolated) {
-        std::string modName;
-        auto range = shortNameIndex_.equal_range(name);
-        for (auto sit = range.first; sit != range.second; ++sit) {
-            auto dot = sit->second.find('.');
-            if (dot != std::string::npos) {
-                std::string topNs = sit->second.substr(0, dot);
-                if (pluginNamespaces_.count(topNs) > 0) {
-                    modName = topNs;
-                    break;
+        keel::String modName;
+        if (const auto *vec = shortNameIndex_.get(name)) {
+            for (const auto &full : *vec) {
+                const keel::usize dot = full.find('.');
+                if (dot != keel::kInvalidIndex) {
+                    keel::StringRef topNs = full.substr(0, dot);
+                    if (pluginNamespaces_.contains(topNs)) {
+                        modName.assign(topNs);
+                        break;
+                    }
                 }
             }
         }
@@ -2006,36 +2052,34 @@ std::string Engine::formatUndefinedFunctionError(const std::string &name,
             modName = const_cast<Engine *>(this)->pluginLoader().moduleProvidingFunction(name);
         }
         if (!modName.empty()) {
-            return baseMsg + " (isolated namespace mode: '" + name
-                   + "' is in module '" + modName + "' — use '"
-                   + modName + "." + name + "(...)' or 'import " + modName + ".*')";
+            return keel::format(
+                "{} (isolated namespace mode: '{}' is in module '{}' — use '{}.{}(...)' or 'import {}.*')",
+                baseMsg, name, modName, modName, name, modName);
         }
     } else {
-        auto range = shortNameIndex_.equal_range(name);
-        for (auto sit = range.first; sit != range.second; ++sit) {
-            auto dot = sit->second.find('.');
-            if (dot != std::string::npos) {
-                std::string topNs = sit->second.substr(0, dot);
-                if (isolatedPluginNamespaces_.count(topNs) > 0) {
-                    return baseMsg + " ('" + name + "' is loaded in isolated namespace '"
-                           + topNs + "' — use '" + topNs + "." + name
-                           + "(...)' or 'import " + topNs + ".*')";
+        if (const auto *vec = shortNameIndex_.get(name)) {
+            for (const auto &full : *vec) {
+                const keel::usize dot = full.find('.');
+                if (dot != keel::kInvalidIndex) {
+                    keel::StringRef topNs = full.substr(0, dot);
+                    if (isolatedPluginNamespaces_.contains(topNs)) {
+                        return keel::format(
+                            "{} ('{}' is loaded in isolated namespace '{}' — use '{}.{}(...)' or 'import {}.*')",
+                            baseMsg, name, topNs, topNs, name, topNs);
+                    }
                 }
             }
         }
     }
-    return baseMsg;
+    return keel::String::from(baseMsg);
 }
 
-const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
+const ExternalFunc *Engine::findExternal(keel::StringRef name,
                                          const Environment *env) const
 {
-    const std::string name(nameRef);
     // 1. Direct hit — covers core, promotions, and already-qualified names.
-    auto it = externalFuncs_.find(name);
-    if (it != externalFuncs_.end()) {
-        return &it->second;
-    }
+    if (const ExternalFunc *direct = externalFuncs_.get(name))
+        return direct;
 
     // 2. Walk active imports across env→parent → workspaceEnv fallback.
     //    The workspace fallback is a pragmatic relaxation so that REPL /
@@ -2044,16 +2088,14 @@ const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
     //    mode would scope imports to the declaring function only.
     const ExternalFunc *hit = nullptr;
     walkImportCandidates_(name, env, workspaceEnv_.get(), shortNameIndex_,
-        [&](const std::string &qualified) {
-            auto qit = externalFuncs_.find(qualified);
-            if (qit != externalFuncs_.end()) {
-                hit = &qit->second;
+        [&](keel::StringRef qualified) {
+            if (const ExternalFunc *q = externalFuncs_.get(qualified)) {
+                hit = q;
                 return true;
             }
             if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(qualified)) {
-                auto qit2 = externalFuncs_.find(qualified);
-                if (qit2 != externalFuncs_.end()) {
-                    hit = &qit2->second;
+                if (const ExternalFunc *q2 = externalFuncs_.get(qualified)) {
+                    hit = q2;
                     return true;
                 }
             }
@@ -2061,14 +2103,14 @@ const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
         });
     if (hit) return hit;
 
-    auto allowBareFromFull = [this](const std::string &full) -> bool {
-        auto dot = full.find('.');
-        if (dot == std::string::npos) return true;
-        std::string topNs = full.substr(0, dot);
-        if (isolatedPluginNamespaces_.count(topNs) > 0)
+    auto allowBareFromFull = [this](keel::StringRef full) -> bool {
+        const keel::usize dot = full.find('.');
+        if (dot == keel::kInvalidIndex) return true;
+        keel::StringRef topNs = full.substr(0, dot);
+        if (isolatedPluginNamespaces_.contains(topNs))
             return false;
         if (namespaceMode_ == NamespaceMode::Isolated
-            && pluginNamespaces_.count(topNs) > 0)
+            && pluginNamespaces_.contains(topNs))
             return false;
         return true;
     };
@@ -2077,43 +2119,42 @@ const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
     //    shortNameIndex_ maps leaf names to full qualified names.
     //    For the rare leaf-name collision across namespaces, pick by namespace
     //    registration order (namespaceOrder_), which is deterministic.
-    if (name.find('.') == std::string::npos) {
-        auto range = shortNameIndex_.equal_range(name);
-        if (range.first != range.second) {
+    const bool isQualified = (name.find('.') != keel::kInvalidIndex);
+    if (!isQualified) {
+        if (const auto *vec = shortNameIndex_.get(name); vec && !vec->empty()) {
             // Fast path: unique leaf name (99%+ of cases) — one lookup.
-            if (std::next(range.first) == range.second) {
-                if (allowBareFromFull(range.first->second)) {
-                    auto fit = externalFuncs_.find(range.first->second);
-                    if (fit != externalFuncs_.end())
-                        return &fit->second;
+            if (vec->size() == 1) {
+                if (allowBareFromFull((*vec)[0])) {
+                    if (const ExternalFunc *f = externalFuncs_.get((*vec)[0]))
+                        return f;
                 }
             } else {
                 // Collision: multiple namespaces have this leaf name.
                 // Pick the one whose top-level namespace registered first.
-                auto rankOf = [this](const std::string &full) {
-                    auto dot = full.find('.');
-                    std::string topNs = (dot != std::string::npos)
-                                          ? full.substr(0, dot) : full;
+                auto rankOf = [this](keel::StringRef full) {
+                    const keel::usize dot = full.find('.');
+                    keel::StringRef topNs = (dot != keel::kInvalidIndex)
+                                                ? full.substr(0, dot)
+                                                : full;
                     for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
                         if (namespaceOrder_[i] == topNs)
                             return static_cast<int>(i);
                     return static_cast<int>(namespaceOrder_.size());
                 };
-                const std::string *best = nullptr;
+                const keel::String *best = nullptr;
                 int bestRank = INT_MAX;
-                for (auto sit = range.first; sit != range.second; ++sit) {
-                    if (!allowBareFromFull(sit->second))
+                for (const auto &full : *vec) {
+                    if (!allowBareFromFull(full))
                         continue;
-                    int r = rankOf(sit->second);
+                    int r = rankOf(full);
                     if (r < bestRank) {
                         bestRank = r;
-                        best = &sit->second;
+                        best = &full;
                     }
                 }
                 if (best) {
-                    auto fit = externalFuncs_.find(*best);
-                    if (fit != externalFuncs_.end())
-                        return &fit->second;
+                    if (const ExternalFunc *f = externalFuncs_.get(*best))
+                        return f;
                 }
             }
         }
@@ -2124,18 +2165,18 @@ const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
     //    that has not been loaded yet, try to load it now on-demand.
     //    In Isolated mode, only qualified names (with '.') auto-load here;
     //    imported names were already handled in Step 2.
-    const bool isQualified = (name.find('.') != std::string::npos);
     if (isQualified || namespaceMode_ == NamespaceMode::Compat) {
         if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
-            auto it2 = externalFuncs_.find(name);
-            if (it2 != externalFuncs_.end()) return &it2->second;
+            if (const ExternalFunc *f = externalFuncs_.get(name))
+                return f;
             if (!isQualified) {
-                auto range2 = shortNameIndex_.equal_range(name);
-                for (auto sit = range2.first; sit != range2.second; ++sit) {
-                    if (!allowBareFromFull(sit->second))
-                        continue;
-                    auto fit = externalFuncs_.find(sit->second);
-                    if (fit != externalFuncs_.end()) return &fit->second;
+                if (const auto *vec2 = shortNameIndex_.get(name)) {
+                    for (const auto &full : *vec2) {
+                        if (!allowBareFromFull(full))
+                            continue;
+                        if (const ExternalFunc *f = externalFuncs_.get(full))
+                            return f;
+                    }
                 }
             }
         }
@@ -2144,55 +2185,56 @@ const ExternalFunc *Engine::findExternal(keel::StringRef nameRef,
     return nullptr;
 }
 
-std::string Engine::bareNameSource(const std::string &name) const
+keel::String Engine::bareNameSource(keel::StringRef name) const
 {
-    if (name.find('.') != std::string::npos)
+    if (name.find('.') != keel::kInvalidIndex)
         return {};
-    auto range = shortNameIndex_.equal_range(name);
-    if (range.first == range.second)
+    const auto *vec = shortNameIndex_.get(name);
+    if (!vec || vec->empty())
         return {};
 
-    auto allowBareFromFull = [this](const std::string &full) -> bool {
-        auto dot = full.find('.');
-        if (dot == std::string::npos) return true;
-        std::string topNs = full.substr(0, dot);
-        if (isolatedPluginNamespaces_.count(topNs) > 0)
+    auto allowBareFromFull = [this](keel::StringRef full) -> bool {
+        const keel::usize dot = full.find('.');
+        if (dot == keel::kInvalidIndex) return true;
+        keel::StringRef topNs = full.substr(0, dot);
+        if (isolatedPluginNamespaces_.contains(topNs))
             return false;
         if (namespaceMode_ == NamespaceMode::Isolated
-            && pluginNamespaces_.count(topNs) > 0)
+            && pluginNamespaces_.contains(topNs))
             return false;
         return true;
     };
 
     // Unique leaf: return directly if allowed.
-    if (std::next(range.first) == range.second) {
-        return allowBareFromFull(range.first->second) ? range.first->second : std::string{};
+    if (vec->size() == 1) {
+        return allowBareFromFull((*vec)[0]) ? (*vec)[0].clone() : keel::String{};
     }
     // Collision: same ranking as findExternal step 3.
-    auto rankOf = [this](const std::string &full) {
-        auto dot = full.find('.');
-        std::string topNs = (dot != std::string::npos)
-                              ? full.substr(0, dot) : full;
+    auto rankOf = [this](keel::StringRef full) {
+        const keel::usize dot = full.find('.');
+        keel::StringRef topNs = (dot != keel::kInvalidIndex)
+                                    ? full.substr(0, dot)
+                                    : full;
         for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
             if (namespaceOrder_[i] == topNs)
                 return static_cast<int>(i);
         return static_cast<int>(namespaceOrder_.size());
     };
-    const std::string *best = nullptr;
+    const keel::String *best = nullptr;
     int bestRank = INT_MAX;
-    for (auto sit = range.first; sit != range.second; ++sit) {
-        if (!allowBareFromFull(sit->second))
+    for (const auto &full : *vec) {
+        if (!allowBareFromFull(full))
             continue;
-        int r = rankOf(sit->second);
+        int r = rankOf(full);
         if (r < bestRank) {
             bestRank = r;
-            best = &sit->second;
+            best = &full;
         }
     }
-    return best ? *best : std::string{};
+    return best ? best->clone() : keel::String{};
 }
 
-bool Engine::isKnownLeafName(const std::string &name) const
+bool Engine::isKnownLeafName(keel::StringRef name) const
 {
     return findExternal(name, workspaceEnv_.get()) != nullptr;
 }
@@ -2200,7 +2242,7 @@ bool Engine::isKnownLeafName(const std::string &name) const
 PluginLoader &Engine::pluginLoader()
 {
     if (!pluginLoader_) {
-        pluginLoader_ = std::make_unique<PluginLoader>(*this);
+        pluginLoader_ = keel::make_unique<PluginLoader>(*this);
     }
     return *pluginLoader_;
 }
@@ -2208,16 +2250,16 @@ PluginLoader &Engine::pluginLoader()
 const PluginLoader &Engine::pluginLoader() const
 {
     if (!pluginLoader_) {
-        pluginLoader_ = std::make_unique<PluginLoader>(const_cast<Engine &>(*this));
+        pluginLoader_ = keel::make_unique<PluginLoader>(const_cast<Engine &>(*this));
     }
     return *pluginLoader_;
 }
 
-void Engine::setVariable(const std::string &name, Value val)
+void Engine::setVariable(keel::StringRef name, Value val)
 {
-    workspaceEnv_->set(name, std::move(val));
+    workspaceEnv_->set(name, keel::move(val));
 }
-Value *Engine::getVariable(const std::string &name)
+Value *Engine::getVariable(keel::StringRef name)
 {
     // Environment::get already routes a name the base workspace declared global
     // to globalsEnv_ (its isGlobal delegation), and resolves everything else
@@ -2234,8 +2276,14 @@ Value *Engine::getVariable(const std::string &name)
 
 void Engine::setOutputFunc(OutputFunc f)
 {
-    outputFunc_ = f;
-    figureManager_->setOutputFunc(std::move(f));
+    outputFunc_ = keel::move(f);
+}
+
+Engine::OutputFunc Engine::swapOutputFunc(OutputFunc f)
+{
+    OutputFunc old = keel::move(outputFunc_);
+    outputFunc_ = keel::move(f);
+    return old;
 }
 
 void Engine::setMaxRecursionDepth(int d)
@@ -2246,33 +2294,33 @@ void Engine::setMaxRecursionDepth(int d)
 
 void Engine::outputText(keel::StringRef s)
 {
-    if (outputFunc_)
-        outputFunc_(std::string(s));
-    else
-        std::cout.write(s.data(), static_cast<std::streamsize>(s.size()));
+    if (outputFunc_) {
+        outputFunc_(s);
+    } else {
+        std::fwrite(s.data(), 1, s.size(), stdout);
+        std::fflush(stdout);
+    }
 }
 
-bool Engine::hasFunction(const std::string &name) const
+bool Engine::hasFunction(keel::StringRef name) const
 {
-    return externalFuncs_.count(name) || hasUserFunction(name);
+    return externalFuncs_.contains(name) || hasUserFunction(name);
 }
 
-bool Engine::hasUserFunction(const std::string &name) const
+bool Engine::hasUserFunction(keel::StringRef name) const
 {
-    return scriptLocalUserFuncs_.count(name) > 0
-           || userFuncs_.count(name) > 0;
+    return scriptLocalUserFuncs_.contains(name)
+           || userFuncs_.contains(name);
 }
 
-const UserFunction *Engine::lookupUserFunctionLocal(const std::string &name) const
+const UserFunction *Engine::lookupUserFunctionLocal(keel::StringRef name) const
 {
-    auto it = scriptLocalUserFuncs_.find(name);
-    if (it != scriptLocalUserFuncs_.end())
-        return &it->second;
-    auto it2 = userFuncs_.find(name);
-    return it2 != userFuncs_.end() ? &it2->second : nullptr;
+    if (const UserFunction *f = scriptLocalUserFuncs_.get(name))
+        return f;
+    return userFuncs_.get(name);
 }
 
-const UserFunction *Engine::lookupUserFunction(const std::string &name,
+const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
                                                 const Environment *env)
 {
     if (auto *f = lookupUserFunctionLocal(name))
@@ -2295,7 +2343,7 @@ const UserFunction *Engine::lookupUserFunction(const std::string &name,
     // qualified key, so subsequent calls hit userFuncs_ directly.
     const UserFunction *hit = nullptr;
     walkImportCandidates_(name, env, workspaceEnv_.get(), shortNameIndex_,
-        [&](const std::string &qualified) {
+        [&](keel::StringRef qualified) {
             if (auto *f = lookupUserFunctionLocal(qualified)) {
                 hit = f;
                 return true;
@@ -2309,33 +2357,31 @@ const UserFunction *Engine::lookupUserFunction(const std::string &name,
     return hit;
 }
 
-void Engine::addPath(keel::StringRef dirRef)
+void Engine::addPath(keel::StringRef dir)
 {
-    const std::string dir(dirRef);
-    if (dir.find(';') != std::string::npos) {
+    if (dir.find(';') != keel::kInvalidIndex) {
         keel::usize start = 0;
         while (start <= dir.size()) {
             keel::usize pos = dir.find(';', start);
-            std::string part = (pos == std::string::npos)
+            keel::StringRef part = (pos == keel::kInvalidIndex)
                 ? dir.substr(start)
                 : dir.substr(start, pos - start);
             if (!part.empty()) addPath(part);
-            if (pos == std::string::npos) break;
+            if (pos == keel::kInvalidIndex) break;
             start = pos + 1;
         }
         return;
     }
     if (dir.empty() || dir == "-begin" || dir == "-end" || dir == "-frozen")
         return;
-    std::string effectiveDir = dir;
+    keel::String effectiveDir = keel::String::from(dir);
     try {
         ResolvedPath rp = fsCtx_.resolvePath(dir);
         if (rp.fs && rp.fs->exists(rp.path)) {
-            const std::string fsName(rp.fs->name().as_ref());
-            const std::string rpPath(rp.path.as_ref());
+            keel::String fsName = rp.fs->name();
             effectiveDir = (fsName != "native")
-                ? (fsName + ":" + rpPath)
-                : rpPath;
+                ? keel::format("{}:{}", fsName, rp.path)
+                : rp.path.clone();
         }
     } catch (...) {}
     // De-dup: ignore if already present.
@@ -2343,70 +2389,67 @@ void Engine::addPath(keel::StringRef dirRef)
         if (p == effectiveDir || p == dir) return;
     }
     mFileMissCache_.clear();
-    mPath_.push_back(effectiveDir);
+    mPath_.push_back(keel::move(effectiveDir));
     bumpCallCacheEpoch();
 }
 
-void Engine::rmPath(keel::StringRef dirRef)
+void Engine::rmPath(keel::StringRef dir)
 {
-    const std::string dir(dirRef);
-    if (dir.find(';') != std::string::npos) {
+    if (dir.find(';') != keel::kInvalidIndex) {
         keel::usize start = 0;
         while (start <= dir.size()) {
             keel::usize pos = dir.find(';', start);
-            std::string part = (pos == std::string::npos)
+            keel::StringRef part = (pos == keel::kInvalidIndex)
                 ? dir.substr(start)
                 : dir.substr(start, pos - start);
             if (!part.empty()) rmPath(part);
-            if (pos == std::string::npos) break;
+            if (pos == keel::kInvalidIndex) break;
             start = pos + 1;
         }
         return;
     }
-    std::string effectiveDir = dir;
+    keel::String effectiveDir = keel::String::from(dir);
     try {
         ResolvedPath rp = fsCtx_.resolvePath(dir);
         if (rp.fs) {
-            const std::string fsName(rp.fs->name().as_ref());
-            const std::string rpPath(rp.path.as_ref());
+            keel::String fsName = rp.fs->name();
             effectiveDir = (fsName != "native")
-                ? (fsName + ":" + rpPath)
-                : rpPath;
+                ? keel::format("{}:{}", fsName, rp.path)
+                : rp.path.clone();
         }
     } catch (...) {}
-    auto it = std::find_if(mPath_.begin(), mPath_.end(), [&](const std::string &p) {
-        return p == dir || p == effectiveDir;
-    });
-    if (it != mPath_.end()) {
-        mFileMissCache_.clear();
-        mPath_.erase(it);
-        bumpCallCacheEpoch();
+    for (keel::usize i = 0; i < mPath_.size(); ++i) {
+        if (mPath_[i] == dir || mPath_[i] == effectiveDir) {
+            mFileMissCache_.clear();
+            mPath_.remove_at(i);
+            bumpCallCacheEpoch();
+            break;
+        }
     }
 }
 
-void Engine::adoptUserFunction(const std::string &name,
+void Engine::adoptUserFunction(keel::StringRef name,
                                 UserFunction uf,
                                 bool scriptScope)
 {
     clearPersistentForFunc(name);
     if (scriptScope)
-        scriptLocalUserFuncs_[name] = std::move(uf);
+        scriptLocalUserFuncs_.put(keel::String::from(name), keel::move(uf));
     else
-        userFuncs_[name] = std::move(uf);
+        userFuncs_.put(keel::String::from(name), keel::move(uf));
     bumpCallCacheEpoch();
 }
 
-void Engine::registerBuiltinMSource(keel::StringRef srcRef)
+void Engine::registerBuiltinMSource(keel::StringRef src)
 {
-    std::string src(srcRef);
-    builtinMSourceTexts_.push_back(src);
+    builtinMSourceTexts_.push_back(keel::String::from(src));
     adoptBuiltinMSource_(src);
 }
 
 // Parse and register one startup m-source: the parse+adopt half of
 // registerBuiltinMSource, factored out so reinstallBuiltinSources() can
 // replay a retained text without re-appending it to the retention list.
-void Engine::adoptBuiltinMSource_(const std::string &src)
+void Engine::adoptBuiltinMSource_(keel::StringRef src)
 {
     Lexer lexer(src);
     Parser parser(lexer.tokenize());
@@ -2415,10 +2458,10 @@ void Engine::adoptBuiltinMSource_(const std::string &src)
     // loader): VM compiled chunk via registerFunctionAs + TW via userFuncs_.
     auto adopt = [this](const ASTNode *fd) {
         UserFunction func;
-        func.name = fd->strValue;
-        func.params = fd->paramNames;
-        func.returns = fd->returnNames;
-        func.body = std::shared_ptr<const ASTNode>(cloneNode(fd->children[0].get()));
+        func.name = fd->strValue.clone();
+        func.params = fd->paramNames.clone();
+        func.returns = fd->returnNames.clone();
+        func.body = keel::Arc<const ASTNode>(cloneNode(fd->children[0].get()));
         func.closureEnv = nullptr;
         if (compiler_) {
             try {
@@ -2428,7 +2471,8 @@ void Engine::adoptBuiltinMSource_(const std::string &src)
                 // VM call sites re-trigger compilation via ensureClassMethodChunk.
             }
         }
-        userFuncs_[func.name] = std::move(func);
+        keel::String key = func.name.clone();
+        userFuncs_.put(keel::move(key), keel::move(func));
         bumpCallCacheEpoch();
     };
     if (ast->type == NodeType::FUNCTION_DEF) {
@@ -2440,9 +2484,9 @@ void Engine::adoptBuiltinMSource_(const std::string &src)
     }
 }
 
-void Engine::registerBuiltinClassSource(const std::string &src)
+void Engine::registerBuiltinClassSource(keel::StringRef src)
 {
-    builtinClassSourceTexts_.push_back(src);
+    builtinClassSourceTexts_.push_back(keel::String::from(src));
     adoptBuiltinClassSource_(src);
 }
 
@@ -2450,7 +2494,7 @@ void Engine::registerBuiltinClassSource(const std::string &src)
 // the identical registerClassDef call the compiler makes for a classdef
 // statement, so direct registration is equivalent to evalSafe minus the
 // (codeless) run.
-void Engine::adoptBuiltinClassSource_(const std::string &src)
+void Engine::adoptBuiltinClassSource_(keel::StringRef src)
 {
     Lexer lexer(src);
     Parser parser(lexer.tokenize());
@@ -2486,13 +2530,13 @@ void Engine::rehashMFiles()
     // (qualified for +pkg/foo.m, bare for plain foo.m), so erase that exact
     // key — NOT clearCompiledFuncs(), which would also nuke script-defined
     // compiled functions (contradicting the "kept" promise above).
-    std::vector<std::string> unregisteredClasses;
-    for (const auto &[name, entry] : mFileCache_) {
-        userFuncs_.erase(name);
+    keel::Array<keel::String> unregisteredClasses;
+    for (auto [name, entry] : mFileCache_) {
+        userFuncs_.remove(name);
         clearPersistentForFunc(name);
         if (compiler_)
             compiler_->eraseCompiledFunc(name);
-        if (classDefs_.count(name)) {
+        if (classDefs_.contains(name)) {
             // A class loaded from `Name.m`: evicting the bare chunk above is not
             // enough — the class machinery (registry, descriptor, `Name>method`
             // chunks, qualified externals) and the bare constructor external all
@@ -2501,7 +2545,7 @@ void Engine::rehashMFiles()
             // populated here, so the ctor-external guard passes.)
             dropFileClassCtorExternal_(name);
             unregisterClassDef(name);
-            unregisteredClasses.push_back(name);
+            unregisteredClasses.push_back(name.clone());
         } else if (entry.hasExternal) {
             dropFileClassCtorExternal_(name);
         }
@@ -2522,18 +2566,18 @@ void Engine::refreshStaleMFiles()
     mFileMissCache_.clear();
     if (mFileCache_.empty())
         return;
-    std::vector<std::string> stale;
-    std::vector<std::string> evictedClasses;
-    for (const auto &[name, entry] : mFileCache_) {
+    keel::Array<keel::String> stale;
+    keel::Array<keel::String> evictedClasses;
+    for (auto [name, entry] : mFileCache_) {
         ResolvedPath rp;
         try {
             rp = resolvePath(entry.fullPath);
         } catch (...) {
-            stale.push_back(name);
+            stale.push_back(name.clone());
             continue;
         }
         if (!rp.fs || !rp.fs->exists(rp.path)) {
-            stale.push_back(name);
+            stale.push_back(name.clone());
             continue;
         }
         auto st = rp.fs->stat(rp.path);
@@ -2545,34 +2589,34 @@ void Engine::refreshStaleMFiles()
                 : (st->mtime == entry.mtime);
             const bool sameSize = (entry.fileSize < 0) || (st->size == entry.fileSize);
             if (!sameMtime || !sameSize)
-                stale.push_back(name);
+                stale.push_back(name.clone());
         } else {
             try {
                 keel::String content = rp.fs->readFile(rp.path);
-                if (entry.sourceCode && content.as_ref() != *entry.sourceCode)
-                    stale.push_back(name);
+                if (entry.sourceCode && content.as_ref() != entry.sourceCode->as_ref())
+                    stale.push_back(name.clone());
             } catch (...) {
-                stale.push_back(name);
+                stale.push_back(name.clone());
             }
         }
     }
     if (!stale.empty())
         bumpCallCacheEpoch();
     for (const auto &name : stale) {
-        auto it = mFileCache_.find(name);
-        if (it != mFileCache_.end()) {
-            userFuncs_.erase(name);
+        if (const auto *entry = mFileCache_.get(name)) {
+            const bool hadExternal = entry->hasExternal;
+            userFuncs_.remove(name);
             clearPersistentForFunc(name);
             if (compiler_)
                 compiler_->eraseCompiledFunc(name);
-            if (classDefs_.count(name)) {
+            if (classDefs_.contains(name)) {
                 dropFileClassCtorExternal_(name);
                 unregisterClassDef(name);
-                evictedClasses.push_back(name);
-            } else if (it->second.hasExternal) {
+                evictedClasses.push_back(name.clone());
+            } else if (hadExternal) {
                 dropFileClassCtorExternal_(name);
             }
-            mFileCache_.erase(it);
+            mFileCache_.remove(name);
         }
     }
     // Without this cascade an inline subclass of an evicted base keeps its
@@ -2581,31 +2625,53 @@ void Engine::refreshStaleMFiles()
     reloadEvictedClassBases_(evictedClasses);
 }
 
-void Engine::reloadEvictedClassBases_(const std::vector<std::string> &bases)
+void Engine::reloadEvictedClassBases_(keel::ArrayRef<keel::String> bases)
 {
     for (const auto &base : bases) {
         if (findClass(base))
             continue; // already pulled back in by an earlier base's reload
         bool hasLiveDependent = false;
-        for (const auto &[cn, desc] : classDefs_)
+        for (auto [cn, desc] : classDefs_) {
+            (void)cn;
             if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
                 != desc->superclasses.end()) {
                 hasLiveDependent = true;
                 break;
             }
+        }
         if (hasLiveDependent)
             resolveMFile_(base); // reload from the edited file + cascade to subclasses
     }
 }
 
-const UserFunction *Engine::resolveMFile_(const std::string &name)
+static keel::usize findLastPathSep(keel::StringRef s) noexcept
+{
+    for (keel::usize i = s.size(); i > 0; --i) {
+        if (s[i - 1] == '/' || s[i - 1] == '\\')
+            return i - 1;
+    }
+    return keel::kInvalidIndex;
+}
+
+static bool hasPathSepOrColon(keel::StringRef s) noexcept
+{
+    for (char c : s) {
+        if (c == '/' || c == '\\' || c == ':')
+            return true;
+    }
+    return false;
+}
+
+const UserFunction *Engine::resolveMFile_(keel::StringRef name)
 {
     // Negative-lookup fast path: avoid walking searchDirs and hitting OS
     // filesystem stat/exists on every builtin call inside a hot loop.
     const keel::String *curDir = currentScriptDir();
-    const std::string curDirStr = curDir ? std::string(curDir->as_ref()) : std::string();
-    std::string missKey = !curDirStr.empty() ? (curDirStr + '\n' + name) : name;
-    if (mFileMissCache_.count(missKey) > 0)
+    keel::StringRef curDirRef = curDir ? curDir->as_ref() : keel::StringRef{};
+    keel::String missKey = !curDirRef.empty()
+                               ? keel::format("{}\n{}", curDirRef, name)
+                               : keel::String::from(name);
+    if (mFileMissCache_.contains(missKey))
         return nullptr;
 
     // Build search-path list: script-dir first (if any), then mPath_.
@@ -2614,37 +2680,40 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
     // the directory the running script came from. Routes through the
     // script's FS via `resolvePath` (which also falls back to the
     // origin's fsName when the relative path has no scheme).
-    std::vector<std::string> searchDirs;
-    if (!curDirStr.empty())
-        searchDirs.push_back(curDirStr);
-    searchDirs.insert(searchDirs.end(), mPath_.begin(), mPath_.end());
+    keel::Array<keel::StringRef> searchDirs;
+    searchDirs.reserve(mPath_.size() + (curDirRef.empty() ? 0 : 1));
+    if (!curDirRef.empty())
+        searchDirs.push_back(curDirRef);
+    for (const auto &p : mPath_)
+        searchDirs.push_back(p.as_ref());
 
     // Decompose dotted name. "pkg.sub.foo" → +pkg/+sub/foo.m. The leaf
     // (last segment) is the function name and what we cache under; the
     // earlier segments become +<seg>/ directory components per
     // MATLAB's package-folder convention.
-    std::string leafName = name;
-    std::string nsPrefix;            // "+pkg/+sub/" form, empty for unqualified
+    keel::String leafName = keel::String::from(name);
+    keel::String nsPrefix;            // "+pkg/+sub/" form, empty for unqualified
     {
         keel::usize dot = name.find('.');
-        if (dot != std::string::npos) {
-            std::string tail = name;
-            while ((dot = tail.find('.')) != std::string::npos) {
-                nsPrefix += '+';
-                nsPrefix.append(tail, 0, dot);
-                nsPrefix += '/';
-                tail.erase(0, dot + 1);
+        if (dot != keel::kInvalidIndex) {
+            keel::StringRef tail = name;
+            while ((dot = tail.find('.')) != keel::kInvalidIndex) {
+                nsPrefix.push_back('+');
+                nsPrefix.append(tail.substr(0, dot));
+                nsPrefix.push_back('/');
+                tail = tail.substr(dot + 1);
             }
-            leafName = std::move(tail);
+            leafName.assign(tail);
         }
     }
 
-    for (const auto &dir : searchDirs) {
-        std::string userPath = dir;
+    for (keel::StringRef dir : searchDirs) {
+        keel::String userPath = keel::String::from(dir);
         if (!userPath.empty() && userPath.back() != '/' && userPath.back() != '\\')
-            userPath += '/';
-        userPath += nsPrefix;
-        userPath += leafName + ".m";
+            userPath.push_back('/');
+        userPath.append(nsPrefix);
+        userPath.append(leafName);
+        userPath.append(".m");
 
         ResolvedPath rp;
         try {
@@ -2654,12 +2723,14 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         }
         if (!rp.fs || !rp.fs->exists(rp.path))
             continue;
-        const std::string rpPath(rp.path.as_ref());
-        const std::string rpFsName(rp.fs->name().as_ref());
+        keel::StringRef rpPath = rp.path.as_ref();
+        keel::String rpFsName = rp.fs->name();
         {
-            const std::string wantFile = leafName + ".m";
-            auto slashPos = rpPath.find_last_of("/\\");
-            const std::string parentDir = (slashPos == std::string::npos) ? "." : rpPath.substr(0, slashPos);
+            keel::String wantFile = keel::format("{}.m", leafName);
+            const keel::usize slashPos = findLastPathSep(rpPath);
+            keel::StringRef parentDir = (slashPos == keel::kInvalidIndex)
+                                            ? keel::StringRef(".")
+                                            : rpPath.substr(0, slashPos);
             auto entries = rp.fs->listDir(parentDir);
             if (!entries.empty()) {
                 bool exactFound = false;
@@ -2674,34 +2745,34 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
             }
         }
 
-        const std::string cachePath = (rpFsName != "native")
-            ? (rpFsName + ":" + rpPath)
-            : rpPath;
+        const keel::String cachePath = (rpFsName != "native")
+            ? keel::format("{}:{}", rpFsName, rpPath)
+            : keel::String::from(rpPath);
 
         // Cache hit? Validate via mtime; re-parse if stale.
-        auto cit = mFileCache_.find(name);
-        if (cit != mFileCache_.end()
-            && (cit->second.fullPath == cachePath || cit->second.fullPath == userPath)) {
+        if (const auto *ce = mFileCache_.get(name);
+            ce && (ce->fullPath == cachePath || ce->fullPath == userPath)) {
             auto st = rp.fs->stat(rp.path);
-            const bool haveCachedStat = (cit->second.mtime != 0 || cit->second.mtimeNs != 0);
+            const bool haveCachedStat = (ce->mtime != 0 || ce->mtimeNs != 0);
             const bool haveCurStat = st.has_value() && (st->mtime != 0 || st->mtimeNs != 0);
             if (haveCachedStat && haveCurStat) {
-                const bool sameMtime = (cit->second.mtimeNs != 0 && st->mtimeNs != 0)
-                    ? (st->mtimeNs == cit->second.mtimeNs)
-                    : (st->mtime == cit->second.mtime);
-                const bool sameSize = (cit->second.fileSize < 0) || (st->size == cit->second.fileSize);
+                const bool sameMtime = (ce->mtimeNs != 0 && st->mtimeNs != 0)
+                    ? (st->mtimeNs == ce->mtimeNs)
+                    : (st->mtime == ce->mtime);
+                const bool sameSize = (ce->fileSize < 0) || (st->size == ce->fileSize);
                 if (sameMtime && sameSize) {
                     if (auto *uf = lookupUserFunctionLocal(name))
                         return uf;
-                    if (cit->second.hasExternal && externalFuncs_.count(name))
+                    if (ce->hasExternal && externalFuncs_.contains(name))
                         return nullptr;
                 }
             }
             // Stale or no mtime — drop and re-parse.
-            if (cit->second.hasExternal)
+            const bool hadExternal = ce->hasExternal;
+            if (hadExternal)
                 dropFileClassCtorExternal_(name);
-            mFileCache_.erase(cit);
-            userFuncs_.erase(name);
+            mFileCache_.remove(name);
+            userFuncs_.remove(name);
             bumpCallCacheEpoch();
         }
 
@@ -2711,24 +2782,24 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // search dir, which would mask a syntax error as "undefined function".
         // MATLAB likewise reports the first path-matched file's error.
         auto loadError = [&](const std::exception &e) -> Error {
-            return Error("error loading '" + userPath + "': " + e.what(),
+            return Error(keel::format("error loading '{}': {}", userPath, e.what()),
                          0, 0, "", "", "numkit:mfile:loadError");
         };
-        std::string content;
+        keel::String content;
         try {
-            content = std::string(rp.fs->readFile(rp.path).as_ref());
+            content = rp.fs->readFile(rp.path);
         } catch (const std::exception &e) {
             throw loadError(e);
         }
 
         Lexer lexer(content);
-        std::vector<Token> tokens;
+        keel::Array<Token> tokens;
         try {
             tokens = lexer.tokenize();
         } catch (const std::exception &e) {
             throw loadError(e);
         }
-        Parser parser(tokens);
+        Parser parser(keel::move(tokens));
         ASTNodePtr ast;
         try {
             ast = parser.parse();
@@ -2764,13 +2835,13 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // backs mfilename() inside the loaded code: file functions report
         // this file, classdef methods report the class file, and sibling
         // lookups keep working transitively through function calls.
-        std::string scriptDir;
+        keel::String scriptDir;
         {
-            keel::usize slash = rpPath.find_last_of("/\\");
+            const keel::usize slash = findLastPathSep(rpPath);
             if (slash == 0)
-                scriptDir.assign(1, rpPath[0]);
-            else if (slash != std::string::npos)
-                scriptDir = rpPath.substr(0, slash);
+                scriptDir.push_back(rpPath[0]);
+            else if (slash != keel::kInvalidIndex)
+                scriptDir.assign(rpPath.substr(0, slash));
         }
 
         if (!funcDef) {
@@ -2791,48 +2862,49 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // mFileCache_ key below already use the qualified `name`, so all
                 // three now agree (clear/rehash evict cleanly).
                 registerClassDefFrom(classDef, name, rpFsName, scriptDir, rpPath);
-                std::string cn = name;
-                registerFunction(name, [cn = std::move(cn)](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                keel::String cn = keel::String::from(name);
+                registerFunction(name, [cn = keel::move(cn)](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                                             CallContext &ctx) {
                     const BuiltinClass *c = ctx.engine->findClass(cn);
-                    if (!c || !c->construct)
-                        throw std::runtime_error("classdef '" + cn
-                                                 + "' has no constructor");
+                    if (!c || !c->construct) {
+                        auto msg = keel::format("classdef '{}' has no constructor", cn);
+                        throw std::runtime_error(msg.c_str());
+                    }
                     outs[0] = ctx.engine->constructChecked(c, args, ctx);
                 });
                 MFileCacheEntry ce;
-                ce.fullPath = cachePath;
+                ce.fullPath = cachePath.clone();
                 if (auto st = rp.fs->stat(rp.path)) {
                     ce.mtime = st->mtime;
                     ce.mtimeNs = st->mtimeNs;
                     ce.fileSize = st->size;
                 }
-                ce.sourceCode = std::make_shared<const std::string>(std::move(content));
+                ce.sourceCode = keel::make_arc<const keel::String>(keel::move(content));
                 ce.hasExternal = true;
-                mFileCache_[name] = std::move(ce);
+                mFileCache_.put(keel::String::from(name), keel::move(ce));
                 bumpCallCacheEpoch();
                 return nullptr; // class + ctor-external resolve the call
             }
             if (!hasExternalFunction(name) && !findExternal(name, nullptr)) {
-                std::string scriptName = leafName;
-                std::string fsName = rpFsName;
-                std::string sDir = scriptDir;
-                std::string sPath = rpPath;
-                auto srcPtr = std::make_shared<const std::string>(std::move(content));
-                registerFunction(name, [scriptName = std::move(scriptName),
-                                        fsName = std::move(fsName),
-                                        sDir = std::move(sDir),
-                                        sPath = std::move(sPath),
-                                        srcPtr = std::move(srcPtr)](
+                keel::String scriptName = leafName.clone();
+                keel::String fsName = keel::String::from(rpFsName);
+                keel::String sDir = scriptDir.clone();
+                keel::String sPath = keel::String::from(rpPath);
+                auto srcPtr = keel::make_arc<const keel::String>(keel::move(content));
+                registerFunction(name, [scriptName = keel::move(scriptName),
+                                        fsName = keel::move(fsName),
+                                        sDir = keel::move(sDir),
+                                        sPath = keel::move(sPath),
+                                        srcPtr](
                                            keel::ArrayRef<Value> args, keel::usize nargout,
                                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
                     if (!args.empty() || nargout > 0)
-                        throw Error("Attempt to execute SCRIPT " + scriptName + " as a function.",
+                        throw Error(keel::format("Attempt to execute SCRIPT {} as a function.", scriptName),
                                     0, 0, scriptName, "", "numkit:script:CalledAsFunction");
                     auto keepSrc = srcPtr;
-                    const std::string keepFs = fsName;
-                    const std::string keepDir = sDir;
-                    const std::string keepPath = sPath;
+                    const keel::String keepFs = fsName.clone();
+                    const keel::String keepDir = sDir.clone();
+                    const keel::String keepPath = sPath.clone();
                     Environment *scope = ctx.env ? ctx.env : &ctx.engine->workspaceEnv();
                     ctx.engine->pushScriptOrigin(keepFs, keepDir, keepPath);
                     try {
@@ -2850,15 +2922,15 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     }
                 });
                 MFileCacheEntry ce;
-                ce.fullPath = cachePath;
+                ce.fullPath = cachePath.clone();
                 if (auto st = rp.fs->stat(rp.path)) {
                     ce.mtime = st->mtime;
                     ce.mtimeNs = st->mtimeNs;
                     ce.fileSize = st->size;
                 }
-                ce.sourceCode = std::move(srcPtr);
+                ce.sourceCode = keel::move(srcPtr);
                 ce.hasExternal = true;
-                mFileCache_[name] = std::move(ce);
+                mFileCache_.put(keel::String::from(name), keel::move(ce));
                 bumpCallCacheEpoch();
                 return nullptr;
             }
@@ -2869,15 +2941,15 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
         // store under the QUALIFIED key (`name`) so multiple packages
         // can host functions with the same leaf without colliding.
         UserFunction func;
-        func.name = name;
-        func.params = funcDef->paramNames;
-        func.returns = funcDef->returnNames;
-        func.body = std::shared_ptr<const ASTNode>(cloneNode(funcDef->children[0].get()));
+        func.name = keel::String::from(name);
+        func.params = funcDef->paramNames.clone();
+        func.returns = funcDef->returnNames.clone();
+        func.body = keel::Arc<const ASTNode>(cloneNode(funcDef->children[0].get()));
         func.closureEnv = nullptr;
         func.originKnown = true;
-        func.sourceFs = rpFsName;
-        func.sourceDir = scriptDir;
-        func.sourceFile = rpPath;
+        func.sourceFs = keel::String::from(rpFsName);
+        func.sourceDir = scriptDir.clone();
+        func.sourceFile = keel::String::from(rpPath);
 
         // Register for VM dispatch (mirrors what execFunctionDef +
         // beginScript pre-compile pass do for in-script function defs).
@@ -2898,20 +2970,20 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                 // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
         }
-        userFuncs_[name] = std::move(func);
+        userFuncs_.put(keel::String::from(name), keel::move(func));
         if (compiler_)
             compiler_->setChunkOrigin(name, rpFsName, scriptDir, rpPath);
 
         // Cache stat metadata for mtime-based invalidation.
         MFileCacheEntry e;
-        e.fullPath = cachePath;
+        e.fullPath = cachePath.clone();
         if (auto st = rp.fs->stat(rp.path)) {
             e.mtime = st->mtime;
             e.mtimeNs = st->mtimeNs;
             e.fileSize = st->size;
         }
-        e.sourceCode = std::make_shared<const std::string>(std::move(content));
-        mFileCache_[name] = std::move(e);
+        e.sourceCode = keel::make_arc<const keel::String>(keel::move(content));
+        mFileCache_.put(keel::String::from(name), keel::move(e));
         bumpCallCacheEpoch();
 
         // Register the file's OTHER top-level functions as local
@@ -2927,10 +2999,10 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
             for (const auto &c : ast->children) {
                 if (!c || c->type != NodeType::FUNCTION_DEF || c.get() == funcDef)
                     continue;
-                const std::string &ln = c->strValue;
+                const keel::String &ln = c->strValue;
                 if (ln.empty() || ln == name || ln == leafName)
                     continue;
-                if (externalFuncs_.count(ln) || userFuncs_.count(ln))
+                if (externalFuncs_.contains(ln) || userFuncs_.contains(ln))
                     continue;
                 if (c->children.empty())
                     continue;
@@ -2942,40 +3014,40 @@ const UserFunction *Engine::resolveMFile_(const std::string &name)
                     catch (const std::exception &) { /* TW still dispatches via userFuncs_ */ }
                 }
                 UserFunction lf;
-                lf.name       = ln;
-                lf.params     = c->paramNames;
-                lf.returns    = c->returnNames;
-                lf.body       = std::shared_ptr<const ASTNode>(cloneNode(c->children[0].get()));
+                lf.name       = ln.clone();
+                lf.params     = c->paramNames.clone();
+                lf.returns    = c->returnNames.clone();
+                lf.body       = keel::Arc<const ASTNode>(cloneNode(c->children[0].get()));
                 lf.closureEnv = nullptr;
                 lf.originKnown = true;
-                lf.sourceFs   = rpFsName;
-                lf.sourceDir  = scriptDir;
-                lf.sourceFile = rpPath;
-                userFuncs_[ln] = std::move(lf);
+                lf.sourceFs   = keel::String::from(rpFsName);
+                lf.sourceDir  = scriptDir.clone();
+                lf.sourceFile = keel::String::from(rpPath);
+                userFuncs_.put(ln.clone(), keel::move(lf));
                 if (compiler_)
                     compiler_->setChunkOrigin(ln, rpFsName, scriptDir, rpPath);
             }
         }
 
-        return &userFuncs_[name];
+        return userFuncs_.get(name);
     }
-    mFileMissCache_.insert(std::move(missKey));
+    mFileMissCache_.insert(keel::move(missKey));
     return nullptr;
 }
 
-bool Engine::hasExternalFunction(const std::string &name) const
+bool Engine::hasExternalFunction(keel::StringRef name) const
 {
-    if (externalFuncs_.count(name) > 0)
+    if (externalFuncs_.contains(name))
         return true;
-    if (name.find('.') != std::string::npos) {
+    if (name.find('.') != keel::kInvalidIndex) {
         return findExternal(name, workspaceEnv_.get()) != nullptr;
     }
     return false;
 }
 
-bool Engine::hasCallableName(const std::string &name) const
+bool Engine::hasCallableName(keel::StringRef name) const
 {
-    return externalFuncs_.find(name) != externalFuncs_.end()
+    return externalFuncs_.contains(name)
         || !bareNameSource(name).empty()
         || lookupUserFunctionLocal(name) != nullptr;
 }
@@ -2996,27 +3068,20 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
     if (!handle.isFuncHandle())
         throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
     Environment *e = env ? env : workspaceEnv_.get();
-    auto toArray = [](std::vector<Value> &&vec) {
-        keel::Array<Value> arr;
-        arr.reserve(vec.size());
-        for (auto &v : vec)
-            arr.push_back(std::move(v));
-        return arr;
-    };
 
     // TreeWalker mode: dispatch strictly on TreeWalker (which unwraps
     // funcHandleCaptures, resolves externals/imports, and lazy-loads .m files).
     if (backend_ != Backend::VM) {
         if (!treeWalker_)
             throw std::runtime_error("callFunctionHandleMulti: TreeWalker backend is unavailable");
-        return toArray(treeWalker_->callHandleMultiPublic(handle, args, e, nout));
+        return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
     }
 
     // VM mode: dispatch strictly on VM (zero TreeWalker fallback).
     if (!vm_)
         throw std::runtime_error("callFunctionHandleMulti: VM backend is unavailable");
 
-    std::vector<Value> withCaptures;
+    keel::Array<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
         const keel::usize ncaps = handle.funcHandleCaptureCount();
         withCaptures.reserve(args.size() + ncaps);
@@ -3026,11 +3091,10 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
             withCaptures.push_back(handle.funcHandleCapture(i));
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
-    const std::string name(handle.funcHandleName().as_ref());
+    keel::String name = handle.funcHandleName();
 
     if (const ExternalFunc *fn = findExternal(name, e)) {
-        keel::Array<Value> out;
-        out.resize(nout);
+        keel::Array<Value> out(nout);
         CallContext ctx{this, e};
         (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
         return out;
@@ -3038,26 +3102,28 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
 
     if (compiler_) {
         if (const BytecodeChunk *fc = compiler_->findCompiled(name))
-            return toArray(vm_->callReentrant(*fc, args, nout));
+            return vm_->callReentrant(*fc, args, nout);
     }
 
     if (const UserFunction *uf = lookupUserFunction(name, e)) {
         const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
-        if (!cc)
-            throw std::runtime_error("Failed to compile function handle target '@" + name + "'");
-        return toArray(vm_->callReentrant(*cc, args, nout));
+        if (!cc) {
+            auto msg = keel::format("Failed to compile function handle target '@{}'", name);
+            throw std::runtime_error(msg.c_str());
+        }
+        return vm_->callReentrant(*cc, args, nout);
     }
 
     // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
     if (const ExternalFunc *fn = findExternal(name, e)) {
-        keel::Array<Value> out;
-        out.resize(nout);
+        keel::Array<Value> out(nout);
         CallContext ctx{this, e};
         (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
         return out;
     }
 
-    throw std::runtime_error("Undefined function in handle: @" + name);
+    auto msg = keel::format("Undefined function in handle: @{}", name);
+    throw std::runtime_error(msg.c_str());
 }
 
 bool Engine::isInsideFunctionCall() const
@@ -3094,23 +3160,22 @@ Environment *Engine::callerEnv(int n)
     return workspaceEnv_.get();
 }
 
-void Engine::assignToCaller(keel::i32 n, keel::StringRef nameRef, Value val)
+void Engine::assignToCaller(keel::i32 n, keel::StringRef name, Value val)
 {
-    const std::string name(nameRef);
     Environment *env = callerEnv(n);
     if (!env) env = workspaceEnv_.get();
     // Write-through to register if VM caller frame has the name in its
     // varMap (so static reads pick up the new value).
     if (vm_ && backend_ == Backend::VM)
         vm_->assignInCallerFrame(n, name, val);
-    env->set(name, std::move(val));
+    env->set(name, keel::move(val));
 }
 
-void Engine::assignInBase(const std::string &name, Value val)
+void Engine::assignInBase(keel::StringRef name, Value val)
 {
     if (vm_ && backend_ == Backend::VM)
         vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
-    workspaceEnv_->set(name, std::move(val));
+    workspaceEnv_->set(name, keel::move(val));
 }
 
 void Engine::syncFrameToEnv(Environment *env)
@@ -3125,28 +3190,25 @@ void Engine::syncEnvRemovalsToFrame(Environment *env)
         vm_->syncEnvRemovalsToFrame(env);
 }
 
-void Engine::clearPersistentForFunc(const std::string &funcName)
+void Engine::clearPersistentForFunc(keel::StringRef funcName)
 {
-    auto it = persistentStore_.find(funcName);
-    if (it != persistentStore_.end() && it->second)
-        it->second->clear();
-    const std::string prefix = funcName + ">";
-    for (auto &[key, bucket] : persistentStore_) {
-        if (bucket && key.rfind(prefix, 0) == 0)
+    if (auto *bp = persistentStore_.get(funcName); bp && *bp)
+        (*bp)->clear();
+    const keel::String prefix = keel::format("{}>", funcName);
+    for (auto [key, bucket] : persistentStore_) {
+        if (bucket && key.starts_with(prefix))
             bucket->clear();
     }
 }
 
-std::string Engine::getEnvVar(keel::StringRef nameRef) const
+keel::String Engine::getEnvVar(keel::StringRef name) const
 {
-    const std::string name(nameRef);
-    auto it = envOverlay_.find(name);
-    if (it != envOverlay_.end())
-        return it->second;
-    return std::string(numkit::envGet(name.c_str()).as_ref());
+    if (const auto *v = envOverlay_.get(name))
+        return v->clone();
+    return numkit::envGet(name);
 }
 
-std::string Engine::inputName(int k)
+keel::String Engine::inputName(int k)
 {
     if (k < 1)
         throw std::runtime_error("inputname: argument index must be >= 1");
@@ -3155,10 +3217,10 @@ std::string Engine::inputName(int k)
             "inputname: must be called from within a function");
 
     if (vm_ && backend_ == Backend::VM) {
-        const auto &names = vm_->currentFrameCallerArgNames();
+        const auto names = vm_->currentFrameCallerArgNames();
         if (k > static_cast<int>(names.size()))
             return {};  // beyond known names: arg wasn't recorded
-        return names[k - 1];
+        return names[k - 1].clone();
     }
     if (treeWalker_) {
         const auto &frames = treeWalker_->activeFrames();
@@ -3166,7 +3228,7 @@ std::string Engine::inputName(int k)
         const auto &names = frames.back().callerArgNames;
         if (k > static_cast<int>(names.size()))
             return {};
-        return names[k - 1];
+        return names[k - 1].clone();
     }
     return {};
 }
@@ -3182,7 +3244,7 @@ void Engine::clearUserFunctions()
 
 void Engine::beginScript(const ASTNode *ast)
 {
-    savedScriptLocalUserFuncs_.push_back(std::move(scriptLocalUserFuncs_));
+    savedScriptLocalUserFuncs_.push_back(keel::move(scriptLocalUserFuncs_));
     scriptLocalUserFuncs_.clear();
     if (compiler_)
         compiler_->beginScriptScope();
@@ -3204,12 +3266,13 @@ void Engine::beginScript(const ASTNode *ast)
             }
         }
         UserFunction uf;
-        uf.name = f->strValue;
-        uf.params = f->paramNames;
-        uf.returns = f->returnNames;
-        uf.body = std::shared_ptr<const ASTNode>(cloneNode(f->children[0].get()));
+        uf.name = f->strValue.clone();
+        uf.params = f->paramNames.clone();
+        uf.returns = f->returnNames.clone();
+        uf.body = keel::Arc<const ASTNode>(cloneNode(f->children[0].get()));
         uf.closureEnv = nullptr;
-        scriptLocalUserFuncs_[uf.name] = std::move(uf);
+        keel::String key = uf.name.clone();
+        scriptLocalUserFuncs_.put(keel::move(key), keel::move(uf));
     };
     if (ast->type == NodeType::BLOCK) {
         for (const auto &c : ast->children)
@@ -3228,16 +3291,16 @@ void Engine::endScript()
         scriptLocalUserFuncs_.clear();
         return;
     }
-    scriptLocalUserFuncs_ = std::move(savedScriptLocalUserFuncs_.back());
+    scriptLocalUserFuncs_ = keel::move(savedScriptLocalUserFuncs_.back());
     savedScriptLocalUserFuncs_.pop_back();
 }
 
 void Engine::promoteScriptLocalsToWorkspace()
 {
-    for (auto &entry : scriptLocalUserFuncs_) {
+    for (auto [k, v] : scriptLocalUserFuncs_) {
         if (backend_ != Backend::VM && compiler_)
-            compiler_->eraseCompiledFunc(entry.first);
-        userFuncs_[entry.first] = std::move(entry.second);
+            compiler_->eraseCompiledFunc(k);
+        userFuncs_.put(k.clone(), keel::move(v));
     }
     scriptLocalUserFuncs_.clear();
     if (compiler_)
@@ -3245,11 +3308,11 @@ void Engine::promoteScriptLocalsToWorkspace()
     bumpCallCacheEpoch();
 }
 
-void Engine::setDebugObserver(std::shared_ptr<DebugObserver> observer)
+void Engine::setDebugObserver(keel::Arc<DebugObserver> observer)
 {
-    debugObserver_ = std::move(observer);
+    debugObserver_ = keel::move(observer);
     if (debugObserver_)
-        debugController_ = std::make_unique<DebugController>(debugObserver_.get(), &breakpointManager_);
+        debugController_ = keel::make_unique<DebugController>(debugObserver_.get(), &breakpointManager_);
     else
         debugController_.reset();
 }
@@ -3261,7 +3324,7 @@ void Engine::setDebugObserver(std::shared_ptr<DebugObserver> observer)
 // Compile one AST subtree into a chunk and run it on the VM, syncing
 // modified registers to workspaceEnv before returning. Used by eval() when
 // executing a single statement (or a whole single-expression chunk).
-Value Engine::runOneChunk(const ASTNode *ast, std::shared_ptr<const std::string> src)
+Value Engine::runOneChunk(const ASTNode *ast, keel::Arc<const keel::String> src)
 {
     clearAllCalled_ = false;
     vm_->clearLastVarMap();
@@ -3333,7 +3396,7 @@ static void markTopLevelSuppressed(ASTNode *ast)
 void Engine::rewriteVarHeadedCommands(ASTNode *root)
 {
     if (!root) return;
-    std::vector<ASTNode *> stmts;
+    keel::Array<ASTNode *> stmts;
     if (root->type == NodeType::BLOCK) {
         for (auto &c : root->children)
             if (c) stmts.push_back(c.get());
@@ -3346,15 +3409,15 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         if (node->children.size() != 1
             || node->children[0]->type != NodeType::STRING_LITERAL)
             continue;
-        const std::string &name = node->strValue;
-        const std::string &arg = node->children[0]->strValue;
+        const keel::String &name = node->strValue;
+        const keel::String &arg = node->children[0]->strValue;
         if (arg.size() < 2 || (arg[0] != '-' && arg[0] != '/'))
             continue;
         if (!std::isalnum(static_cast<unsigned char>(arg[1])) && arg[1] != '.')
             continue;
         if (!getVariable(name) && !isReservedName(name))
             continue;
-        const std::string tail = arg.substr(1);
+        const keel::String tail = keel::String::from(arg.substr(1));
         char *endPtr = nullptr;
         errno = 0;
         double parsedNum = 0.0;
@@ -3373,16 +3436,16 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         if (!isNum && !isIdent) continue;
         const int ln = node->line, cl = node->col;
         const bool suppress = node->suppressOutput;
-        auto ident = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
-        ident->strValue = name;
+        auto ident = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
+        ident->strValue = name.clone();
         ident->line = ln; ident->col = cl;
-        std::unique_ptr<ASTNode> operand;
+        ASTNodePtr operand;
         if (isNum) {
-            operand = std::make_unique<ASTNode>(NodeType::NUMBER_LITERAL);
+            operand = keel::make_unique<ASTNode>(NodeType::NUMBER_LITERAL);
             operand->numValue = parsedNum;
         } else {
-            operand = std::make_unique<ASTNode>(NodeType::IDENTIFIER);
-            operand->strValue = tail;
+            operand = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
+            operand->strValue = tail.clone();
         }
         operand->line = ln; operand->col = cl;
         // Replicate parseExpressionStatement's shape: the statement
@@ -3390,29 +3453,28 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         // binds/displays/returns the value like any expression
         // statement (a bare BINARY_OP statement skips that path and
         // yields an empty chunk result).
-        auto bin = std::make_unique<ASTNode>(NodeType::BINARY_OP);
-        bin->strValue = (arg[0] == '-') ? "-" : "/";
+        auto bin = keel::make_unique<ASTNode>(NodeType::BINARY_OP);
+        bin->strValue.assign((arg[0] == '-') ? "-" : "/");
         bin->line = ln; bin->col = cl;
-        bin->children.push_back(std::move(ident));
-        bin->children.push_back(std::move(operand));
+        bin->children.push_back(keel::move(ident));
+        bin->children.push_back(keel::move(operand));
         node->type = NodeType::EXPR_STMT;
         node->strValue.clear();
         node->children.clear();
-        node->children.push_back(std::move(bin));
+        node->children.push_back(keel::move(bin));
         node->suppressOutput = suppress;
     }
 }
-Value Engine::eval(keel::StringRef codeRef, bool suppressTopLevelDisplay)
+Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
 {
-    const std::string code(codeRef);
-    auto src = std::make_shared<const std::string>(code);
+    auto src = keel::make_arc<const keel::String>(keel::String::from(code));
     refreshStaleMFiles();
     if (backend_ == Backend::VM && vm_)
         vm_->flushWorkspaceFrame();
 
     Lexer lexer(*src);
     auto tokens = lexer.tokenize();
-    Parser parser(tokens);
+    Parser parser(keel::move(tokens));
     auto ast = parser.parse();
     if (suppressTopLevelDisplay)
         markTopLevelSuppressed(ast.get());
@@ -3503,12 +3565,12 @@ Value Engine::eval(keel::StringRef codeRef, bool suppressTopLevelDisplay)
 }
 
 Value Engine::evalStatement(const ASTNode *stmt,
-                            std::shared_ptr<const std::string> src)
+                            keel::Arc<const keel::String> src)
 {
     if (!stmt)
         return Value();
     rewriteVarHeadedCommands(const_cast<ASTNode *>(stmt));
-    return runOneChunk(stmt, std::move(src));
+    return runOneChunk(stmt, keel::move(src));
 }
 
 // ============================================================
@@ -3524,18 +3586,18 @@ Engine::EvalResult Engine::evalSafe(keel::StringRef code)
         r.debugStop = true;
     } catch (const Error &e) {
         r.ok = false;
-        r.errorMessage = e.what();
-        r.errorId = std::string(e.identifier().as_ref());
+        r.errorMessage.assign(e.what());
+        r.errorId = e.identifier().clone();
         r.errorLine = e.line();
         r.errorCol = e.col();
-        r.errorFunc = std::string(e.funcName().as_ref());
-        r.errorContext = std::string(e.context().as_ref());
+        r.errorFunc = e.funcName().clone();
+        r.errorContext = e.context().clone();
     } catch (const std::exception &e) {
         r.ok = false;
-        r.errorMessage = e.what();
+        r.errorMessage.assign(e.what());
     } catch (...) {
         r.ok = false;
-        r.errorMessage = "Unknown exception";
+        r.errorMessage.assign("Unknown exception");
     }
     return r;
 }
@@ -3576,7 +3638,7 @@ void Engine::syncVMToWorkspace()
             vm_->syncEnvRemovalsToFrame(workspaceEnv_.get());
         clearAllCalled_ = false;
     }
-    for (auto &[name, val] : vm_->lastVarMap()) {
+    for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             workspaceEnv_->remove(name);
             if (vm_ && backend_ == Backend::VM)
@@ -3603,7 +3665,7 @@ void Engine::syncVMToScope(Environment *scope)
             vm_->syncEnvRemovalsToFrame(scope);
         clearAllCalled_ = false;
     }
-    for (auto &[name, val] : vm_->lastVarMap()) {
+    for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             scope->remove(name);
             if (vm_ && backend_ == Backend::VM)
@@ -3619,13 +3681,12 @@ void Engine::syncVMToScope(Environment *scope)
     }
 }
 
-Value Engine::eval(keel::StringRef codeRef, Environment *scope,
+Value Engine::eval(keel::StringRef code, Environment *scope,
                    bool suppressTopLevelDisplay)
 {
     if (!scope || scope == workspaceEnv_.get())
-        return eval(codeRef, suppressTopLevelDisplay);
+        return eval(code, suppressTopLevelDisplay);
 
-    const std::string code(codeRef);
     // Scoped re-entrant eval: inner script's imports go to scope, and
     // its top-level variable assignments are pushed back into scope on
     // exit (with VM register write-through where applicable). Used by
@@ -3633,9 +3694,9 @@ Value Engine::eval(keel::StringRef codeRef, Environment *scope,
     // (so script-defined vars stay scoped to the caller's frame).
     Lexer lexer(code);
     auto tokens = lexer.tokenize();
-    Parser parser(tokens);
+    Parser parser(keel::move(tokens));
     auto ast = parser.parse();
-    auto src = std::make_shared<const std::string>(code);
+    auto src = keel::make_arc<const keel::String>(keel::String::from(code));
     if (suppressTopLevelDisplay)
         markTopLevelSuppressed(ast.get());
 
@@ -3658,9 +3719,9 @@ Value Engine::eval(keel::StringRef codeRef, Environment *scope,
     // when the name wasn't in the caller's static varMap). Env values
     // lose to register values when both exist (registers are more
     // up-to-date for static caller writes).
-    scope->forEachLocal([&](const std::string &n, const Value &v) {
+    scope->forEachLocal([&](const keel::String &n, const Value &v) {
         if (v.isUnset() || v.isDeleted()) return;
-        callerSnapshot.try_emplace(n, v);
+        callerSnapshot.try_insert(n.clone(), v);
     });
     vm_->setNextFrameDynVars(callerSnapshot.empty() ? nullptr : &callerSnapshot);
 
@@ -3707,7 +3768,7 @@ Value Engine::eval(keel::StringRef codeRef, Environment *scope,
 // ============================================================
 // REPL helpers
 // ============================================================
-std::vector<std::string> Engine::workspaceVarNames() const
+keel::Array<keel::String> Engine::workspaceVarNames() const
 {
     // `localNames()` only returns variables that were written into the base
     // workspace — built-in constants live in `constantsEnv_` (a parent env)
@@ -3729,7 +3790,7 @@ std::vector<std::string> Engine::workspaceVarNames() const
 
 void Engine::registerVirtualFS(keel::UniquePtr<VirtualFS> fs)
 {
-    fsCtx_.registerVirtualFS(std::move(fs));
+    fsCtx_.registerVirtualFS(keel::move(fs));
     bumpCallCacheEpoch();
 }
 
@@ -3774,32 +3835,31 @@ const keel::String *Engine::currentScriptFile() const
     return fsCtx_.currentScriptFile();
 }
 
-Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPathRef) const
+Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPath) const
 {
     // FsContext throws std::runtime_error for unknown/unavailable
     // filesystems; rethrow as numkit::Error so the MATLAB-visible error type
     // (and message) is exactly what in-engine callers saw before.
-    const std::string userPath(userPathRef);
     try {
-        ResolvedPath rp = fsCtx_.resolvePath(userPathRef);
+        ResolvedPath rp = fsCtx_.resolvePath(userPath);
         if ((!rp.fs || !rp.fs->exists(rp.path)) &&
             !userPath.empty() &&
-            userPath.find_first_of("/\\:") == std::string::npos) {
-            if (rp.fs && rp.fs->exists(userPathRef)) {
-                rp.path = keel::String::from(userPathRef);
+            !hasPathSepOrColon(userPath)) {
+            if (rp.fs && rp.fs->exists(userPath)) {
+                rp.path = keel::String::from(userPath);
                 return rp;
             }
             for (const auto &dir : mPath_) {
                 if (dir.empty()) continue;
-                std::string candPath = dir;
+                keel::String candPath = dir.clone();
                 if (candPath.back() != '/' && candPath.back() != '\\')
-                    candPath += '/';
-                candPath += userPath;
+                    candPath.push_back('/');
+                candPath.append(userPath);
                 ResolvedPath cand = fsCtx_.resolvePath(candPath);
                 if (cand.fs && cand.fs->exists(cand.path))
                     return cand;
                 if (rp.fs && rp.fs->exists(candPath)) {
-                    rp.path = keel::String::from(candPath);
+                    rp.path = keel::move(candPath);
                     return rp;
                 }
             }

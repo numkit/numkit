@@ -1,15 +1,16 @@
 // src/compiler.cpp
 #include <keel/core.h>
+#include <keel/format.h>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
-#include <unordered_set>
 
 namespace numkit {
 
@@ -48,11 +49,11 @@ Compiler::Compiler(Engine &engine)
     : engine_(engine)
 {}
 
-BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::string> sourceCode)
+BytecodeChunk Compiler::compile(const ASTNode *ast, keel::Arc<const keel::String> sourceCode)
 {
     chunk_ = BytecodeChunk{};
-    chunk_.name = "<script>";
-    chunk_.sourceCode = std::move(sourceCode);
+    chunk_.name.assign("<script>");
+    chunk_.sourceCode = keel::move(sourceCode);
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();
@@ -83,7 +84,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     // membership (workspaceEnv_->globals_) is the single source of truth,
     // populated as each top-level `global X` runs on either engine.
     for (const auto &g : engine_.workspaceEnv().globalNames())
-        chunk_.globalNames.push_back(g);
+        chunk_.globalNames.push_back(g.clone());
 
     // Pre-import: scan AST for identifiers that exist in workspaceEnv,
     // allocate registers and emit LOAD_CONST before main code.
@@ -101,11 +102,11 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
     chunk_.numRegisters = static_cast<keel::u32>(peakReg_);
 
     // Save variable→register mapping for environment export
-    for (auto &[name, reg] : varRegisters_)
-        chunk_.varMap.push_back({name, reg});
+    for (auto [name, reg] : varRegisters_)
+        chunk_.varMap.push_back(VarRegEntry{name.clone(), reg});
 
     isTopLevel_ = false;
-    return std::move(chunk_);
+    return keel::move(chunk_);
 }
 
 // ============================================================
@@ -115,7 +116,7 @@ BytecodeChunk Compiler::compile(const ASTNode *ast, std::shared_ptr<const std::s
 void Compiler::preImportGlobals(const ASTNode *ast)
 {
     // Collect all identifiers referenced in the AST
-    std::unordered_set<std::string> identifiers;
+    keel::HashSet<keel::String> identifiers;
     collectAllIdentifiers(ast, identifiers);
 
     // Pre-allocate a register and emit LOAD_CONST for every identifier that
@@ -126,16 +127,15 @@ void Compiler::preImportGlobals(const ASTNode *ast)
     // a shadowed `i`, the backward JMP would land on that LOAD_CONST every
     // iteration and re-initialise the variable to its import value (infinite
     // loop).
-    for (auto &name : identifiers) {
-        if (varRegisters_.count(name))
+    for (const auto &name : identifiers) {
+        if (varRegisters_.contains(name))
             continue; // already allocated
 
         Value *existing = nullptr;
         if (engine_.vm_ && engine_.vm_->inheritedScope_) {
             if (auto *dv = engine_.vm_->nextFrameDynVars()) {
-                auto it = dv->find(name);
-                if (it != dv->end())
-                    existing = &it->second;
+                if (Value *v = dv->get(name))
+                    existing = v;
             }
             if (!existing)
                 existing = engine_.vm_->inheritedScope_->get(name);
@@ -151,7 +151,7 @@ void Compiler::preImportGlobals(const ASTNode *ast)
             keel::u16 r = static_cast<keel::u16>(nextReg_++);
             if (nextReg_ > peakReg_) peakReg_ = nextReg_;
             if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
-            varRegisters_[name] = r;
+            varRegisters_.put(name.clone(), r);
             keel::i32 idx = appendConstant(*existing);
             emitAD(OpCode::LOAD_CONST, r, idx);
             definedRegs_.set(r);
@@ -174,10 +174,10 @@ void Compiler::preImportGlobals(const ASTNode *ast)
 
 void Compiler::preallocateAssignedVars(const ASTNode *body)
 {
-    std::vector<std::string> assignedNames;
+    keel::Array<keel::String> assignedNames;
     collectAssignedNames(body, assignedNames);
-    for (auto &name : assignedNames) {
-        if (varRegisters_.count(name))
+    for (const auto &name : assignedNames) {
+        if (varRegisters_.contains(name))
             continue;
         if (engine_.isReservedName(name))
             continue; // reserved/pseudo-vars are looked up on demand
@@ -187,34 +187,46 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
         keel::u16 r = static_cast<keel::u16>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
-        varRegisters_[name] = r;
+        varRegisters_.put(name.clone(), r);
     }
 }
 
 namespace {
+[[nodiscard]] constexpr bool isSymsFlag(keel::StringRef s) noexcept
+{
+    return s == "real" || s == "positive" || s == "negative"
+        || s == "nonnegative" || s == "integer" || s == "clear";
+}
+
+[[nodiscard]] constexpr bool isClearFlag(keel::StringRef s) noexcept
+{
+    return s == "all" || s == "classes" || s == "functions"
+        || s == "global" || s == "-regexp" || s == "import";
+}
+
 void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
-                             bool &mayInjectVars, std::vector<double> &loopNums)
+                             bool &mayInjectVars, keel::Array<keel::f64> &loopNums)
 {
     if (!node)
         return;
     if (node->type == NodeType::FUNCTION_DEF || node->type == NodeType::ANON_FUNC)
         return;
     if (node->type == NodeType::IDENTIFIER || node->type == NodeType::COMMAND_CALL) {
-        const std::string &s = node->strValue;
+        const keel::String &s = node->strValue;
         if (s == "clear" || s == "clearvars" || s == "eval" || s == "evalin" || s == "run")
             mayClear = true;
         if (s == "load" || s == "eval" || s == "evalin" || s == "run")
             mayInjectVars = true;
     } else if (node->type == NodeType::CALL && !node->children.empty()
                && node->children[0]->type == NodeType::IDENTIFIER) {
-        const std::string &s = node->children[0]->strValue;
+        const keel::String &s = node->children[0]->strValue;
         if (s == "clear" || s == "clearvars" || s == "eval" || s == "evalin" || s == "run")
             mayClear = true;
         if (s == "load" || s == "eval" || s == "evalin" || s == "run")
             mayInjectVars = true;
     } else if (inLoop && node->type == NodeType::NUMBER_LITERAL && loopNums.size() < 16) {
         bool exists = false;
-        for (double v : loopNums) {
+        for (keel::f64 v : loopNums) {
             if (v == node->numValue && std::signbit(v) == std::signbit(node->numValue)) {
                 exists = true;
                 break;
@@ -230,9 +242,9 @@ void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
         scanAstForLoopsAndClear(child.get(), childInLoop, mayClear, mayInjectVars, loopNums);
     for (const auto &t : node->lhsTargets)
         scanAstForLoopsAndClear(t.get(), childInLoop, mayClear, mayInjectVars, loopNums);
-    for (const auto &[cond, body] : node->branches) {
-        scanAstForLoopsAndClear(cond.get(), childInLoop, mayClear, mayInjectVars, loopNums);
-        scanAstForLoopsAndClear(body.get(), childInLoop, mayClear, mayInjectVars, loopNums);
+    for (const auto &branch : node->branches) {
+        scanAstForLoopsAndClear(branch.cond.get(), childInLoop, mayClear, mayInjectVars, loopNums);
+        scanAstForLoopsAndClear(branch.body.get(), childInLoop, mayClear, mayInjectVars, loopNums);
     }
     if (node->elseBranch)
         scanAstForLoopsAndClear(node->elseBranch.get(), childInLoop, mayClear, mayInjectVars, loopNums);
@@ -241,25 +253,25 @@ void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
 
 void Compiler::preallocatePinnedConstants(const ASTNode *body)
 {
-    std::vector<double> loopNums;
+    keel::Array<keel::f64> loopNums;
     scanAstForLoopsAndClear(body, false, mayClear_, mayInjectVars_, loopNums);
     if (mayClear_)
         definedRegs_.reset();
-    for (double v : loopNums) {
+    for (keel::f64 v : loopNums) {
         if (nextReg_ >= 65000 || pinnedConstRegs_.size() >= 16)
             break;
         keel::i32 idx = addConstant(v);
-        if (pinnedConstRegs_.count(idx))
+        if (pinnedConstRegs_.contains(idx))
             continue;
         keel::u16 r = static_cast<keel::u16>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
         if (nextReg_ > maxVarReg_) maxVarReg_ = nextReg_;
         emitAD(OpCode::LOAD_CONST, r, idx);
-        pinnedConstRegs_[idx] = r;
+        pinnedConstRegs_.put(idx, r);
     }
 }
 
-void Compiler::collectAssignedNames(const ASTNode *node, std::vector<std::string> &out)
+void Compiler::collectAssignedNames(const ASTNode *node, keel::Array<keel::String> &out)
 {
     if (!node)
         return;
@@ -271,7 +283,7 @@ void Compiler::collectAssignedNames(const ASTNode *node, std::vector<std::string
     auto pushIdent = [&out](const ASTNode *target) {
         if (target && target->type == NodeType::IDENTIFIER
             && !target->strValue.empty())
-            out.push_back(target->strValue);
+            out.push_back(target->strValue.clone());
     };
 
     if (node->type == NodeType::ASSIGN && !node->children.empty()) {
@@ -289,100 +301,97 @@ void Compiler::collectAssignedNames(const ASTNode *node, std::vector<std::string
         }
     }
     if (node->type == NodeType::MULTI_ASSIGN) {
-        for (auto &name : node->returnNames)
+        for (const auto &name : node->returnNames)
             if (name != "~" && !name.empty())
-                out.push_back(name);
+                out.push_back(name.clone());
         // Complex targets ([s.f, a(i)] = ...) carry their lvalue here;
         // the mutated variable is the chain root.
-        for (auto &t : node->lhsTargets) {
+        for (const auto &t : node->lhsTargets) {
             const ASTNode *root = t.get();
             while (root && root->type != NodeType::IDENTIFIER
                    && !root->children.empty())
                 root = root->children[0].get();
             if (root && root->type == NodeType::IDENTIFIER)
-                out.push_back(root->strValue);
+                out.push_back(root->strValue.clone());
         }
     }
     if (node->type == NodeType::FOR_STMT && !node->strValue.empty())
-        out.push_back(node->strValue);
+        out.push_back(node->strValue.clone());
     if (node->type == NodeType::COMMAND_CALL && node->strValue == "syms") {
-        static const std::unordered_set<std::string> kSymsFlags = {
-            "real", "positive", "negative", "nonnegative", "integer", "clear"
-        };
         for (const auto &ch : node->children) {
-            if (!ch->strValue.empty() && !kSymsFlags.count(ch->strValue))
-                out.push_back(ch->strValue);
+            if (!ch->strValue.empty() && !isSymsFlag(ch->strValue))
+                out.push_back(ch->strValue.clone());
         }
     }
     if (node->type == NodeType::CALL && !node->children.empty()
         && node->children[0]->type == NodeType::IDENTIFIER
         && node->children[0]->strValue == "syms") {
-        static const std::unordered_set<std::string> kSymsFlags = {
-            "real", "positive", "negative", "nonnegative", "integer", "clear"
-        };
         for (keel::usize i = 1; i < node->children.size(); ++i) {
             const auto *ch = node->children[i].get();
             if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty()
-                && !kSymsFlags.count(ch->strValue))
-                out.push_back(ch->strValue);
+                && !isSymsFlag(ch->strValue))
+                out.push_back(ch->strValue.clone());
         }
     }
 
-    for (auto &child : node->children)
+    for (const auto &child : node->children)
         collectAssignedNames(child.get(), out);
-    for (auto &[cond, body] : node->branches) {
-        collectAssignedNames(cond.get(), out);
-        collectAssignedNames(body.get(), out);
+    for (const auto &branch : node->branches) {
+        collectAssignedNames(branch.cond.get(), out);
+        collectAssignedNames(branch.body.get(), out);
     }
     if (node->elseBranch)
         collectAssignedNames(node->elseBranch.get(), out);
 }
 
-void Compiler::collectAllIdentifiers(const ASTNode *node, std::unordered_set<std::string> &out)
+void Compiler::collectAllIdentifiers(const ASTNode *node, keel::HashSet<keel::String> &out)
 {
     if (!node)
         return;
     // Don't recurse into function definitions — they compile with separate scope
     if (node->type == NodeType::FUNCTION_DEF)
         return;
+    auto insertIdent = [&out](const keel::String &s) {
+        if (!out.contains(s))
+            out.insert(s.clone());
+    };
     if (node->type == NodeType::IDENTIFIER)
-        out.insert(node->strValue);
+        insertIdent(node->strValue);
     // Also collect from CALL target names
     if (node->type == NodeType::CALL && !node->children.empty()
         && node->children[0]->type == NodeType::IDENTIFIER)
-        out.insert(node->children[0]->strValue);
+        insertIdent(node->children[0]->strValue);
     // Recurse
-    for (auto &child : node->children)
+    for (const auto &child : node->children)
         collectAllIdentifiers(child.get(), out);
     // MULTI_ASSIGN complex targets ([a(i), s.(e)] = ...) read variables
     // (indices, dynamic field names) that live only under lhsTargets.
-    for (auto &t : node->lhsTargets)
+    for (const auto &t : node->lhsTargets)
         collectAllIdentifiers(t.get(), out);
-    for (auto &[cond, body] : node->branches) {
-        collectAllIdentifiers(cond.get(), out);
-        collectAllIdentifiers(body.get(), out);
+    for (const auto &branch : node->branches) {
+        collectAllIdentifiers(branch.cond.get(), out);
+        collectAllIdentifiers(branch.body.get(), out);
     }
     if (node->elseBranch)
         collectAllIdentifiers(node->elseBranch.get(), out);
     // Also strValue for for-loop variable, function names, etc.
     if (node->type == NodeType::FOR_STMT && !node->strValue.empty())
-        out.insert(node->strValue);
+        insertIdent(node->strValue);
 }
 
-keel::u16 Compiler::varRegWrite(const std::string &name)
+keel::u16 Compiler::varRegWrite(keel::StringRef name)
 {
-    chunk_.assignedVars.insert(name);
+    markAssigned(name);
     // A write target (param / assignment) gets its value from the call or the
     // assignment — never the reserved-constant pre-load (which would clobber a
     // param named `i`/`j` with the imaginary unit).
     return varRegLookup(name, /*preloadReserved=*/false);
 }
 
-keel::u16 Compiler::varRegLookup(const std::string &name, bool preloadReserved)
+keel::u16 Compiler::varRegLookup(keel::StringRef name, bool preloadReserved)
 {
-    auto it = varRegisters_.find(name);
-    if (it != varRegisters_.end())
-        return it->second;
+    if (const keel::u16 *found = varRegisters_.get(name))
+        return *found;
     int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
     if (allocReg >= static_cast<int>(kInvalidReg))
         throw std::runtime_error(
@@ -392,7 +401,7 @@ keel::u16 Compiler::varRegLookup(const std::string &name, bool preloadReserved)
     nextReg_ = allocReg + 1;
     if (nextReg_ > maxVarReg_)
         maxVarReg_ = nextReg_;
-    varRegisters_[name] = r;
+    varRegisters_.put(keel::String::from(name), r);
 
     // Pre-load a value from the engine for any reserved name that happens
     // to be resolvable — this handles both true built-in constants
@@ -429,20 +438,20 @@ keel::u16 Compiler::allocPinnedReg()
     return r;
 }
 
-void Compiler::emitUpvalLoadRawIfShared(const std::string &name, keel::u16 reg)
+void Compiler::emitUpvalLoadRawIfShared(keel::StringRef name, keel::u16 reg)
 {
-    auto it = upvalueRegs_.find(name);
-    if (it == upvalueRegs_.end())
+    const keel::u16 *uv = upvalueRegs_.get(name);
+    if (!uv)
         return;
-    emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, it->second, 1, 0, 0));
+    emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, *uv, 1, 0, 0));
 }
 
-void Compiler::emitUpvalStoreIfShared(const std::string &name, keel::u16 reg)
+void Compiler::emitUpvalStoreIfShared(keel::StringRef name, keel::u16 reg)
 {
-    auto it = upvalueRegs_.find(name);
-    if (it == upvalueRegs_.end())
+    const keel::u16 *uv = upvalueRegs_.get(name);
+    if (!uv)
         return;
-    emitAB(OpCode::UPVAL_STORE, it->second, reg);
+    emitAB(OpCode::UPVAL_STORE, *uv, reg);
 }
 
 keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
@@ -451,7 +460,7 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
         keel::u16 dst = tempReg();
         Value fh = Value::funcHandle(info.compiledName, engine_.allocator());
         fh.setFuncHandleSource(info.displaySource);
-        keel::i32 constIdx = appendConstant(std::move(fh));
+        keel::i32 constIdx = appendConstant(keel::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
@@ -460,7 +469,7 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
     keel::u16 fhReg = tempReg();
     Value fh = Value::funcHandle(info.compiledName, engine_.allocator());
     fh.setFuncHandleSource(info.displaySource);
-    keel::i32 constIdx = appendConstant(std::move(fh));
+    keel::i32 constIdx = appendConstant(keel::move(fh));
     emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
 
     keel::u16 base = static_cast<keel::u16>(nextReg_);
@@ -471,7 +480,10 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
     }
     for (const auto &uvName : info.upvalueNames) {
         keel::u16 slot = tempReg();
-        keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+        const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
+        if (!boxPtr)
+            throw std::runtime_error("Compiler: missing upvalue box register");
+        keel::u16 boxReg = *boxPtr;
         if (boxReg != slot)
             emitAB(OpCode::MOVE, slot, boxReg);
     }
@@ -480,46 +492,46 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
     return dst;
 }
 
-keel::u16 Compiler::varRegRead(const std::string &name)
+keel::u16 Compiler::varRegRead(keel::StringRef name)
 {
     // Shared lexical upvalue read (outer <-> nested function)
-    auto uvIt = upvalueRegs_.find(name);
-    if (uvIt != upvalueRegs_.end()) {
+    if (const keel::u16 *uv = upvalueRegs_.get(name)) {
         keel::u16 reg = varRegLookup(name, /*preloadReserved=*/false);
         keel::i32 nameIdx = addStringConstant(name);
-        emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, uvIt->second, 0, nameIdx, 0));
+        emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, *uv, 0, nameIdx, 0));
         scalarRegs_.reset(reg);
         return reg;
     }
 
     // Check if variable is already known (local scope)
-    auto it = varRegisters_.find(name);
-    if (it != varRegisters_.end()) {
+    if (const keel::u16 *vr = varRegisters_.get(name)) {
         if (!engine_.isReservedName(name)) {
-            if (mayClear_ || !definedRegs_.test(it->second)) {
+            if (mayClear_ || !definedRegs_.test(*vr)) {
                 keel::i32 nameIdx = addStringConstant(name);
-                emitAD(OpCode::ASSERT_DEF, it->second, nameIdx);
-                if (!mayClear_ && it->second < chunk_.numParams)
-                    definedRegs_.set(it->second);
+                emitAD(OpCode::ASSERT_DEF, *vr, nameIdx);
+                if (!mayClear_ && *vr < chunk_.numParams)
+                    definedRegs_.set(*vr);
             }
         }
-        return it->second;
+        return *vr;
     }
 
     // Zero-arg nested function call in expression context (`y = inner`)
-    auto nit = nestedFuncInfo_.find(name);
-    if (nit != nestedFuncInfo_.end()) {
+    if (const NestedFuncInfo *nit = nestedFuncInfo_.get(name)) {
         keel::u16 argBase = static_cast<keel::u16>(nextReg_);
-        for (const auto &uvName : nit->second.upvalueNames) {
+        for (const auto &uvName : nit->upvalueNames) {
             keel::u16 slot = tempReg();
-            keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+            const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
+            if (!boxPtr)
+                throw std::runtime_error("Compiler: missing upvalue box register");
+            keel::u16 boxReg = *boxPtr;
             if (boxReg != slot)
                 emitAB(OpCode::MOVE, slot, boxReg);
         }
         keel::u16 dst = tempReg();
-        keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
+        keel::i32 funcIdx = addStringConstant(nit->compiledName);
         emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                     static_cast<keel::u16>(nit->second.upvalueNames.size()),
+                                     static_cast<keel::u16>(nit->upvalueNames.size()),
                                      funcIdx, nargoutContext_));
         return dst;
     }
@@ -657,26 +669,26 @@ keel::i32 Compiler::appendConstant(Value v)
         throw std::runtime_error(
             "Compiler: constant pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = static_cast<keel::i32>(chunk_.constants.size());
-    chunk_.constants.push_back(std::move(v));
+    chunk_.constants.push_back(keel::move(v));
     return idx;
 }
 
-keel::i32 Compiler::appendString(const std::string &s)
+keel::i32 Compiler::appendString(keel::StringRef s)
 {
     if (chunk_.strings.size() >= static_cast<keel::usize>(INT32_MAX))
         throw std::runtime_error(
             "Compiler: string pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = static_cast<keel::i32>(chunk_.strings.size());
-    chunk_.strings.push_back(s);
+    chunk_.strings.push_back(keel::String::from(s));
     return idx;
 }
 
-keel::i32 Compiler::addConstant(double value)
+keel::i32 Compiler::addConstant(keel::f64 value)
 {
     // Check if constant already exists (preserve -0.0 vs +0.0 signbit)
     for (keel::usize i = 0; i < chunk_.constants.size(); ++i) {
         if (chunk_.constants[i].isScalar() && chunk_.constants[i].type() == ValueType::DOUBLE) {
-            double cv = chunk_.constants[i].toScalar();
+            keel::f64 cv = chunk_.constants[i].toScalar();
             if (cv == value && std::signbit(cv) == std::signbit(value))
                 return static_cast<keel::i32>(i);
         }
@@ -684,7 +696,7 @@ keel::i32 Compiler::addConstant(double value)
     return appendConstant(Value::scalar(value, engine_.allocator()));
 }
 
-keel::i32 Compiler::addStringConstant(const std::string &s)
+keel::i32 Compiler::addStringConstant(keel::StringRef s)
 {
     for (keel::usize i = 0; i < chunk_.strings.size(); ++i) {
         if (chunk_.strings[i] == s)
@@ -700,9 +712,8 @@ keel::i32 Compiler::addStringConstant(const std::string &s)
 keel::u16 Compiler::compileNode(const ASTNode *node)
 {
     if (node && !fusedOperandRegs_.empty()) {
-        auto it = fusedOperandRegs_.find(node);
-        if (it != fusedOperandRegs_.end())
-            return it->second;
+        if (const keel::u16 *r = fusedOperandRegs_.get(node))
+            return *r;
     }
     // Single-value sink: a brace cell-index c{sub} may produce a comma-separated list
     // once the producer emits one; collapse it in place so single-value contexts never
@@ -722,9 +733,8 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
     if (!node)
         return 0;
     if (!fusedOperandRegs_.empty()) {
-        auto it = fusedOperandRegs_.find(node);
-        if (it != fusedOperandRegs_.end())
-            return it->second;
+        if (const keel::u16 *r = fusedOperandRegs_.get(node))
+            return *r;
     }
 
     StackGuard::check("bytecode compilation");
@@ -822,9 +832,10 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
         return compileReturn(node);
     case NodeType::SUPERCLASS_REF: {
         keel::u16 msgReg = tempReg();
-        keel::i32 msgIdx = addStringConstant(
-            "superclass reference '" + node->strValue
-            + "' must be called: use lhs@" + node->strValue + "(...)");
+        keel::String msg = keel::format(
+            "superclass reference '{}' must be called: use lhs@{}(...)",
+            node->strValue, node->strValue);
+        keel::i32 msgIdx = addStringConstant(msg);
         emitAD(OpCode::LOAD_STRING, msgReg, msgIdx);
         emitA(OpCode::THROW, msgReg);
         return msgReg;
@@ -849,8 +860,9 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
     case NodeType::DELETE_ASSIGN:
         return compileDeleteAssign(node);
     default:
-        throw std::runtime_error("Compiler: unsupported node type "
-                                 + std::to_string(static_cast<int>(node->type)));
+        throw std::runtime_error(
+            keel::format("Compiler: unsupported node type {}",
+                         static_cast<int>(node->type)).c_str());
     }
 }
 
@@ -899,20 +911,18 @@ keel::u16 Compiler::compileBlock(const ASTNode *node)
 keel::u16 Compiler::compileNumber(const ASTNode *node)
 {
     keel::i32 idx = addConstant(node->numValue);
-    auto pit = pinnedConstRegs_.find(idx);
-    if (pit != pinnedConstRegs_.end()) {
-        scalarRegs_.set(pit->second);
-        return pit->second;
+    if (const keel::u16 *pr = pinnedConstRegs_.get(idx)) {
+        scalarRegs_.set(*pr);
+        return *pr;
     }
     // Reuse register if this constant was already loaded
-    auto it = constRegCache_.find(idx);
-    if (it != constRegCache_.end()) {
-        scalarRegs_.set(it->second);
-        return it->second;
+    if (const keel::u16 *cr = constRegCache_.get(idx)) {
+        scalarRegs_.set(*cr);
+        return *cr;
     }
     keel::u16 dst = tempReg();
     emitAD(OpCode::LOAD_CONST, dst, idx);
-    constRegCache_[idx] = dst;
+    constRegCache_.put(idx, dst);
     scalarRegs_.set(dst);
     return dst;
 }
@@ -959,7 +969,7 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
             && rhs->children[0]->children.size() == 2               // two elements
             && rhs->children[0]->children[0]->type == NodeType::IDENTIFIER
             && rhs->children[0]->children[0]->strValue == lhs->strValue
-            && varRegisters_.find(lhs->strValue) != varRegisters_.end()) {
+            && varRegisters_.contains(lhs->strValue)) {
             keel::u16 valReg = compileNode(rhs->children[0]->children[1].get());
             keel::u16 dst = varRegLookup(lhs->strValue);
             markAssigned(lhs->strValue);
@@ -979,7 +989,7 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
         keel::u16 src = compileNode(rhs);
 
         // MOVE elimination: redirect last instruction to write directly to var register
-        auto varIt = varRegisters_.find(lhs->strValue);
+        const keel::u16 *varPtr = varRegisters_.get(lhs->strValue);
         bool canEliminate = (src == nextReg_ - 1 && !chunk_.code.empty()
                              && chunk_.code.back().a == src);
         if (canEliminate) {
@@ -997,19 +1007,19 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
         markAssigned(lhs->strValue);
 
         keel::u16 dst;
-        if (canEliminate && varIt == varRegisters_.end()) {
+        if (canEliminate && !varPtr) {
             // First assignment: adopt temp register as the variable.
             // We MUST pin this slot in maxVarReg_ so the compileBlock
             // statement-boundary release does not later free a slot
             // that still holds the variable's value.
-            varRegisters_[lhs->strValue] = src;
+            varRegisters_.put(lhs->strValue.clone(), src);
             if (static_cast<int>(src) + 1 > maxVarReg_)
                 maxVarReg_ = static_cast<int>(src) + 1;
             dst = src;
             // No instruction emitted, no reclaim needed — src IS the variable now
-        } else if (canEliminate && varIt != varRegisters_.end()) {
+        } else if (canEliminate && varPtr) {
             // Existing variable: redirect last instruction to write to var register
-            dst = varIt->second;
+            dst = *varPtr;
             chunk_.code.back().a = dst;
             nextReg_--;  // reclaim temp
             scalarRegs_.reset(src);
@@ -1095,9 +1105,9 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
 
     // Allocate destination registers for outputs (simple path only; the
     // complex path materialises outputs at outBase then stores them).
-    std::vector<keel::u16> outRegs;
+    keel::Array<keel::u16> outRegs;
     if (!complex) {
-        for (auto &name : node->returnNames) {
+        for (const auto &name : node->returnNames) {
             if (name == "~")
                 outRegs.push_back(tempReg()); // throwaway
             else
@@ -1196,8 +1206,8 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             return outRegs.empty() ? 0 : outRegs[0];
         }
         if (nidx != 1)  // 3-D+ cell CSL multi-assign — mirror the TreeWalker refusal.
-            throw std::runtime_error("Cell CSL with " + std::to_string(nidx)
-                                     + " indices not supported");
+            throw std::runtime_error(
+                keel::format("Cell CSL with {} indices not supported", nidx).c_str());
 
         // 1-D subscript [a,b]=c{:} / c{vec}. Guard so `end` binds to the cell numel.
         IndexContextGuard guard(*this, cellReg, 1);
@@ -1239,12 +1249,12 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
     if (callNode->children[0]->type == NodeType::FIELD_ACCESS) {
         const ASTNode *fa = callNode->children[0].get();
         const ASTNode *rootIdent = nullptr;
-        std::string qualified = tryBuildQualifiedName(fa, &rootIdent);
+        keel::String qualified = tryBuildQualifiedName(fa, &rootIdent);
         bool rootIsVar = false;
         if (rootIdent) {
-            const std::string &root = rootIdent->strValue;
-            rootIsVar = varRegisters_.find(root) != varRegisters_.end()
-                        || upvalueRegs_.find(root) != upvalueRegs_.end()
+            const keel::String &root = rootIdent->strValue;
+            rootIsVar = varRegisters_.contains(root)
+                        || upvalueRegs_.contains(root)
                         || (isTopLevel_ && engine_.workspaceEnv().getLocal(root) != nullptr);
         }
         auto compileArgsBlock = [&](keel::u16 &argBaseOut, bool splatCsl) {
@@ -1259,7 +1269,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                         anyBrace = true;
                         break;
                     }
-            std::vector<keel::u16> ar;
+            keel::Array<keel::u16> ar;
             ar.reserve(callNode->children.size() - 1);
             for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 ar.push_back(anyBrace
@@ -1324,7 +1334,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                 anyBraceArg = true;
                 break;
             }
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         argRegs.reserve(callNode->children.size() - 1);
         for (keel::usize i = 1; i < callNode->children.size(); ++i) {
             argRegs.push_back(anyBraceArg
@@ -1372,18 +1382,22 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
         bool anyBraceArg = false;
         for (keel::usize i = 1; i < callNode->children.size(); ++i)
             if (callNode->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
-        const std::string &fname = callNode->children[0]->strValue;
-        const bool calleeIsVar = varRegisters_.find(fname) != varRegisters_.end()
-                                 || upvalueRegs_.find(fname) != upvalueRegs_.end()
+        const keel::String &fname = callNode->children[0]->strValue;
+        const bool calleeIsVar = varRegisters_.contains(fname)
+                                 || upvalueRegs_.contains(fname)
                                  || (isTopLevel_ && engine_.workspaceEnv().getLocal(fname) != nullptr);
         if (anyBraceArg && !calleeIsVar) {
-            std::vector<keel::u16> argRegs;
+            keel::Array<keel::u16> argRegs;
             for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(callNode->children[i].get()));
-            auto nit = nestedFuncInfo_.find(fname);
-            if (nit != nestedFuncInfo_.end()) {
-                for (const auto &uvName : nit->second.upvalueNames)
-                    argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+            const NestedFuncInfo *nit = nestedFuncInfo_.get(fname);
+            if (nit) {
+                for (const auto &uvName : nit->upvalueNames) {
+                    const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
+                    if (!boxPtr)
+                        throw std::runtime_error("Compiler: missing upvalue box register");
+                    argRegs.push_back(*boxPtr);
+                }
             }
             keel::u16 argBase = nextReg_;
             for (keel::usize i = 0; i < argRegs.size(); ++i) {
@@ -1393,7 +1407,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             }
             keel::u16 outBase = reserveRegs(nout);
             keel::i32 funcIdx = addStringConstant(
-                nit != nestedFuncInfo_.end() ? nit->second.compiledName : fname);
+                nit ? nit->compiledName.as_ref() : fname.as_ref());
             emit(Instruction::make_abcde(OpCode::CALL_FLATTEN_MULTI, outBase, argBase,
                                          static_cast<keel::u16>(argRegs.size()), funcIdx,
                                          static_cast<keel::u16>(nout)));
@@ -1403,7 +1417,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             return outRegs.empty() ? 0 : outRegs[0];
         }
         if (anyBraceArg && calleeIsVar) {
-            std::vector<keel::u16> flatRegs;
+            keel::Array<keel::u16> flatRegs;
             for (keel::usize i = 1; i < callNode->children.size(); ++i)
                 flatRegs.push_back(compileNodeExpand(callNode->children[i].get()));
             keel::u16 flatBase = nextReg_;
@@ -1414,9 +1428,8 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             }
             keel::u16 fhReg = varRegLookup(fname);
             keel::i32 nameIdx = addStringConstant(fname);
-            auto uvIt = upvalueRegs_.find(fname);
-            if (uvIt != upvalueRegs_.end())
-                emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+            if (const keel::u16 *uv = upvalueRegs_.get(fname))
+                emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, *uv, 0, nameIdx, 0));
             else
                 emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
             const keel::u16 noutF = static_cast<keel::u16>(std::max<keel::usize>(nout, 1));
@@ -1432,10 +1445,10 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
         }
     }
 
-    const std::string &funcName = callNode->children[0]->strValue;
+    const keel::String &funcName = callNode->children[0]->strValue;
 
-    bool calleeIsVar = (varRegisters_.find(funcName) != varRegisters_.end()
-                        || upvalueRegs_.find(funcName) != upvalueRegs_.end());
+    bool calleeIsVar = (varRegisters_.contains(funcName)
+                        || upvalueRegs_.contains(funcName));
     if (!calleeIsVar && isTopLevel_ && !engine_.isReservedName(funcName)) {
         Value *existing = engine_.getVariable(funcName);
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
@@ -1447,14 +1460,18 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
     }
 
     // Compile call arguments
-    std::vector<keel::u16> argRegs;
+    keel::Array<keel::u16> argRegs;
     for (keel::usize i = 1; i < callNode->children.size(); ++i)
         argRegs.push_back(compileNode(callNode->children[i].get()));
 
-    auto nestedIt = (!calleeIsVar) ? nestedFuncInfo_.find(funcName) : nestedFuncInfo_.end();
-    if (nestedIt != nestedFuncInfo_.end()) {
-        for (const auto &uvName : nestedIt->second.upvalueNames)
-            argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+    const NestedFuncInfo *nestedIt = (!calleeIsVar) ? nestedFuncInfo_.get(funcName) : nullptr;
+    if (nestedIt) {
+        for (const auto &uvName : nestedIt->upvalueNames) {
+            const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
+            if (!boxPtr)
+                throw std::runtime_error("Compiler: missing upvalue box register");
+            argRegs.push_back(*boxPtr);
+        }
     }
 
     keel::u16 argBase = nextReg_;
@@ -1469,10 +1486,9 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
 
     if (calleeIsVar) {
         keel::u16 fhReg = varRegLookup(funcName);
-        auto uvIt = upvalueRegs_.find(funcName);
-        if (uvIt != upvalueRegs_.end()) {
+        if (const keel::u16 *uv = upvalueRegs_.get(funcName)) {
             keel::i32 nameIdx = addStringConstant(funcName);
-            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, *uv, 0, nameIdx, 0));
         }
         keel::usize callIdx = chunk_.code.size();
         // CALL_INDIRECT_MULTI: a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
@@ -1488,7 +1504,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
     }
 
     keel::i32 funcIdx = addStringConstant(
-        nestedIt != nestedFuncInfo_.end() ? nestedIt->second.compiledName : funcName);
+        nestedIt ? nestedIt->compiledName.as_ref() : funcName.as_ref());
 
     // CALL_MULTI: a=outBase, d=funcIdx, b=argBase, c=nargs, e=nout
     keel::usize callMultiIdx = chunk_.code.size();
@@ -1509,7 +1525,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
 
 keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
 {
-    const std::string &op = node->strValue;
+    const keel::String &op = node->strValue;
 
     // Short-circuit: && and || need special handling
     // (right operand should not be evaluated if left decides result)
@@ -1522,21 +1538,21 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
         // The right operand is conditionally executed: whatever it
         // loads into the const cache is only valid when the jump was
         // NOT taken, so its cache entries must not survive past the
-        // merge. Save/restore via swap — the right operand compiles
+        // merge. Save/restore via move — the right operand compiles
         // against an empty cache (it may emit a duplicate LOAD_CONST,
         // always safe) instead of paying an O(n) map copy per
         // short-circuit op (PVS V836).
-        decltype(constRegCache_) savedConsts;
-        savedConsts.swap(constRegCache_);
-        auto savedScalars = scalarRegs_;
-        auto savedDefined = definedRegs_;
+        keel::HashMap<keel::i32, keel::u16> savedConsts = keel::move(constRegCache_);
+        constRegCache_.clear();
+        RegBitset savedScalars{scalarRegs_.words.clone()};
+        RegBitset savedDefined{definedRegs_.words.clone()};
         keel::u16 right = compileNode(node->children[1].get());
         emitAB(OpCode::TO_LOGICAL_SCALAR, dst, right);
         patchJump(jumpPos, static_cast<keel::i32>(currentPos()) - static_cast<keel::i32>(jumpPos));
-        constRegCache_.swap(savedConsts);
-        scalarRegs_ = savedScalars;
+        constRegCache_ = keel::move(savedConsts);
+        scalarRegs_ = keel::move(savedScalars);
         scalarRegs_.reset(dst);
-        definedRegs_ = savedDefined;
+        definedRegs_ = keel::move(savedDefined);
         return dst;
     }
 
@@ -1549,9 +1565,9 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
     // Constant folding: both operands are number literals → compute at compile time
     if (node->children[0]->type == NodeType::NUMBER_LITERAL
         && node->children[1]->type == NodeType::NUMBER_LITERAL) {
-        double lv = node->children[0]->numValue;
-        double rv = node->children[1]->numValue;
-        double result;
+        keel::f64 lv = node->children[0]->numValue;
+        keel::f64 rv = node->children[1]->numValue;
+        keel::f64 result;
         bool folded = true;
         if (op == "+")       result = lv + rv;
         else if (op == "-")  result = lv - rv;
@@ -1566,19 +1582,17 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
         else folded = false;
         if (folded) {
             keel::i32 idx = addConstant(result);
-            auto pit = pinnedConstRegs_.find(idx);
-            if (pit != pinnedConstRegs_.end()) {
-                scalarRegs_.set(pit->second);
-                return pit->second;
+            if (const keel::u16 *pr = pinnedConstRegs_.get(idx)) {
+                scalarRegs_.set(*pr);
+                return *pr;
             }
-            auto it = constRegCache_.find(idx);
-            if (it != constRegCache_.end()) {
-                scalarRegs_.set(it->second);
-                return it->second;
+            if (const keel::u16 *cr = constRegCache_.get(idx)) {
+                scalarRegs_.set(*cr);
+                return *cr;
             }
             keel::u16 dst = tempReg();
             emitAD(OpCode::LOAD_CONST, dst, idx);
-            constRegCache_[idx] = dst;
+            constRegCache_.put(idx, dst);
             scalarRegs_.set(dst);
             return dst;
         }
@@ -1598,22 +1612,22 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
     // MULADD fires per level with the accumulated left.
     // (bugs/closed/core/debug-compiler-overflow-crash.md)
     if (node->children[0]->type == NodeType::BINARY_OP) {
-        std::vector<const ASTNode *> levels;
+        keel::Array<const ASTNode *> levels;
         const ASTNode *n = node;
         while (n->type == NodeType::BINARY_OP && n->children.size() == 2
                && n->strValue != "&&" && n->strValue != "||"
-               && (n == node || fusedOperandRegs_.find(n) == fusedOperandRegs_.end())) {
+               && (n == node || !fusedOperandRegs_.contains(n))) {
             levels.push_back(n);
             n = n->children[0].get();
         }
         keel::u16 acc = compileNode(n);
-        for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
-            const ASTNode *lv = *it;
-            const std::string &lOp = lv->strValue;
+        for (keel::usize li = levels.size(); li > 0; --li) {
+            const ASTNode *lv = levels[li - 1];
+            const keel::String &lOp = lv->strValue;
             const ASTNode *rhs = lv->children[1].get();
             if ((lOp == "+" || lOp == "-") && rhs->type == NodeType::BINARY_OP
                 && (rhs->strValue == "*" || rhs->strValue == ".*")
-                && fusedOperandRegs_.find(rhs) == fusedOperandRegs_.end()) {
+                && !fusedOperandRegs_.contains(rhs)) {
                 acc = emitFusedMulAdd(lOp == "+", rhs, acc);
                 continue;
             }
@@ -1633,7 +1647,7 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
         const ASTNode *rhs = node->children[1].get();
         if (rhs->type == NodeType::BINARY_OP
             && (rhs->strValue == "*" || rhs->strValue == ".*")
-            && fusedOperandRegs_.find(rhs) == fusedOperandRegs_.end())
+            && !fusedOperandRegs_.contains(rhs))
             return emitFusedMulAdd(op == "+", rhs, compileNode(node->children[0].get()));
     }
 
@@ -1660,7 +1674,7 @@ keel::u16 Compiler::emitFusedMulAdd(bool isPlus, const ASTNode *rhs, keel::u16 a
 
 // The plain (unfused, unfolded) binary-op tail: opcode selection over
 // already-compiled operand registers, emit, scalar-result tracking.
-keel::u16 Compiler::emitPlainBinary(const std::string &op, keel::u16 left, keel::u16 right)
+keel::u16 Compiler::emitPlainBinary(keel::StringRef op, keel::u16 left, keel::u16 right)
 {
     keel::u16 dst = tempReg();
     bool bothScalar = scalarRegs_.test(left) && scalarRegs_.test(right);
@@ -1703,7 +1717,8 @@ keel::u16 Compiler::emitPlainBinary(const std::string &op, keel::u16 left, keel:
     else if (op == "|")
         opcode = OpCode::OR;
     else
-        throw std::runtime_error("Compiler: unsupported binary operator '" + op + "'");
+        throw std::runtime_error(
+            keel::format("Compiler: unsupported binary operator '{}'", op).c_str());
 
     emitABC(opcode, dst, left, right);
     // Scalar-specialized ops produce scalar results
@@ -1716,19 +1731,18 @@ keel::u16 Compiler::emitPlainBinary(const std::string &op, keel::u16 left, keel:
 
 keel::u16 Compiler::compileUnaryOp(const ASTNode *node)
 {
-    const std::string &op = node->strValue;
+    const keel::String &op = node->strValue;
 
     // Constant folding: -<number> → load negated constant directly
     if (op == "-" && node->children[0]->type == NodeType::NUMBER_LITERAL) {
         keel::i32 idx = addConstant(-node->children[0]->numValue);
-        auto it = constRegCache_.find(idx);
-        if (it != constRegCache_.end()) {
-            scalarRegs_.set(it->second);
-            return it->second;
+        if (const keel::u16 *cr = constRegCache_.get(idx)) {
+            scalarRegs_.set(*cr);
+            return *cr;
         }
         keel::u16 dst = tempReg();
         emitAD(OpCode::LOAD_CONST, dst, idx);
-        constRegCache_[idx] = dst;
+        constRegCache_.put(idx, dst);
         scalarRegs_.set(dst);
         return dst;
     }
@@ -1752,7 +1766,8 @@ keel::u16 Compiler::compileUnaryOp(const ASTNode *node)
     else if (op == ".'")
         emitAB(OpCode::TRANSPOSE, dst, src);
     else
-        throw std::runtime_error("Compiler: unsupported unary operator '" + op + "'");
+        throw std::runtime_error(
+            keel::format("Compiler: unsupported unary operator '{}'", op).c_str());
 
     return dst;
 }
@@ -1799,25 +1814,25 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
     //     constants; exclude the reserved names so pi/nargin/… still hit
     //     the ans path.
     bool bareUserVar = false;
-    std::string displayName;
+    keel::StringRef displayName;
     if (child->type == NodeType::IDENTIFIER) {
-        const std::string &name = child->strValue;
+        const keel::String &name = child->strValue;
         if (isTopLevel_) {
             Value *local = engine_.workspaceEnv().getLocal(name);
             if (local && !local->isUnset() && !local->isDeleted())
                 bareUserVar = true; // empty `[]` is a defined value: `x=[]; x` shows x, not ans
         } else {
-            if ((varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0)
-                && engine_.isReservedName(name) == 0)
+            if ((varRegisters_.contains(name) || upvalueRegs_.contains(name))
+                && !engine_.isReservedName(name))
                 bareUserVar = true;
         }
         if (bareUserVar)
-            displayName = name;
+            displayName = name.as_ref();
     }
 
     if (!bareUserVar && child->type == NodeType::IDENTIFIER) {
-        const std::string &name = child->strValue;
-        bool isKnownVar = varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0;
+        const keel::String &name = child->strValue;
+        bool isKnownVar = varRegisters_.contains(name) || upvalueRegs_.contains(name);
 
         // Also check workspaceEnv for variables from previous eval() calls
         if (!isKnownVar && isTopLevel_ && !engine_.isReservedName(name)) {
@@ -1827,19 +1842,21 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
         }
 
         if (!isKnownVar) {
-            auto nit = nestedFuncInfo_.find(name);
-            if (nit != nestedFuncInfo_.end()) {
+            if (const NestedFuncInfo *nit = nestedFuncInfo_.get(name)) {
                 keel::u16 argBase = static_cast<keel::u16>(nextReg_);
-                for (const auto &uvName : nit->second.upvalueNames) {
+                for (const auto &uvName : nit->upvalueNames) {
                     keel::u16 slot = tempReg();
-                    keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
+                    const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
+                    if (!boxPtr)
+                        throw std::runtime_error("Compiler: missing upvalue box register");
+                    keel::u16 boxReg = *boxPtr;
                     if (boxReg != slot)
                         emitAB(OpCode::MOVE, slot, boxReg);
                 }
                 keel::u16 dst = tempReg();
-                keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
+                keel::i32 funcIdx = addStringConstant(nit->compiledName);
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                             static_cast<keel::u16>(nit->second.upvalueNames.size()),
+                                             static_cast<keel::u16>(nit->upvalueNames.size()),
                                              funcIdx, 0));
                 keel::u16 ansReg = varRegWrite("ans");
                 if (ansReg != dst)
@@ -1867,8 +1884,8 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                     return tempReg();
                 }
                 if (name == "clear") {
-                    for (auto &[vname, reg] : varRegisters_) {
-                        if (engine_.isReservedName(vname) == 0) {
+                    for (auto [vname, reg] : varRegisters_) {
+                        if (!engine_.isReservedName(vname)) {
                             emitA(OpCode::CLEAR_VAR, reg);
                             emitUpvalStoreIfShared(vname, reg);
                         }
@@ -1880,8 +1897,8 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                     // exist (no args) — error, but let it go to CALL
                 }
             } else if (name == "clear") {
-                for (auto &[vname, reg] : varRegisters_) {
-                    if (engine_.isReservedName(vname) == 0) {
+                for (auto [vname, reg] : varRegisters_) {
+                    if (!engine_.isReservedName(vname)) {
                         emitA(OpCode::CLEAR_VAR, reg);
                         emitUpvalStoreIfShared(vname, reg);
                     }
@@ -1934,7 +1951,7 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
 keel::u16 Compiler::compileIf(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset(); // branches may skip LOAD_CONST
-    // branches: vector<pair<condition, body>>
+    // branches: Array<ASTBranch{cond, body}>
     // elseBranch: optional else body
     //
     // Compiled as:
@@ -1951,24 +1968,24 @@ keel::u16 Compiler::compileIf(const ASTNode *node)
     //   else body
     // L_end:
 
-    std::vector<keel::usize> endJumps; // positions of JMP → L_end
-    auto savedDefined = definedRegs_;
+    keel::Array<keel::usize> endJumps; // positions of JMP → L_end
+    RegBitset savedDefined{definedRegs_.words.clone()};
 
     for (keel::usize i = 0; i < node->branches.size(); ++i) {
-        auto &[cond, body] = node->branches[i];
+        const auto &branch = node->branches[i];
 
         // Clear cache: previous branch body may have been skipped
         constRegCache_.clear(); scalarRegs_.reset();
-        definedRegs_ = savedDefined;
+        definedRegs_.words = savedDefined.words.clone();
         // Compile condition
-        keel::u16 condReg = compileNode(cond.get());
+        keel::u16 condReg = compileNode(branch.cond.get());
 
         // JMP_FALSE to next branch (placeholder)
         keel::usize skipPos = currentPos();
         emitAD(OpCode::JMP_FALSE, condReg, 0);
 
         // Compile body
-        compileNode(body.get());
+        compileNode(branch.body.get());
 
         // JMP to end (skip remaining branches) — unless this is the last branch with no else
         if (i < node->branches.size() - 1 || node->elseBranch) {
@@ -1983,7 +2000,7 @@ keel::u16 Compiler::compileIf(const ASTNode *node)
     // Compile else branch if present
     if (node->elseBranch) {
         constRegCache_.clear(); scalarRegs_.reset();
-        definedRegs_ = savedDefined;
+        definedRegs_.words = savedDefined.words.clone();
         compileNode(node->elseBranch.get());
     }
 
@@ -2000,7 +2017,7 @@ keel::u16 Compiler::compileIf(const ASTNode *node)
     }
 
     constRegCache_.clear(); scalarRegs_.reset(); // don't know which branch ran
-    definedRegs_ = savedDefined;
+    definedRegs_ = keel::move(savedDefined);
     return 0;
 }
 
@@ -2011,7 +2028,7 @@ keel::u16 Compiler::compileSwitch(const ASTNode *node)
 {
     constRegCache_.clear(); scalarRegs_.reset();
     // AST: children[0] = switch expression
-    //      branches = vector<pair<case_expr, case_body>>
+    //      branches = Array<ASTBranch{case_expr, case_body}>
     //      elseBranch = otherwise body (optional)
     //
     // Compiled as chain of EQ + JMP_FALSE (like if/elseif):
@@ -2037,17 +2054,19 @@ keel::u16 Compiler::compileSwitch(const ASTNode *node)
     // Temp register for comparison result
     keel::u16 cmpReg = tempReg();
 
-    std::vector<keel::usize> endJumps;
-    auto savedDefined = definedRegs_;
+    keel::Array<keel::usize> endJumps;
+    RegBitset savedDefined{definedRegs_.words.clone()};
 
     for (keel::usize i = 0; i < node->branches.size(); ++i) {
-        auto &[caseExpr, caseBody] = node->branches[i];
-        definedRegs_ = savedDefined;
+        const auto &branch = node->branches[i];
+        const auto &caseExpr = branch.cond;
+        const auto &caseBody = branch.body;
+        definedRegs_.words = savedDefined.words.clone();
 
         if (caseExpr->type == NodeType::CELL_LITERAL) {
             // Cell case {val1, val2, ...}: match if switchReg == any element
             // Get cell elements: may be wrapped in a BLOCK child
-            const std::vector<ASTNodePtr> *elements = &caseExpr->children;
+            const keel::Array<ASTNodePtr> *elements = &caseExpr->children;
             if (caseExpr->children.size() == 1 && caseExpr->children[0]->type == NodeType::BLOCK) {
                 elements = &caseExpr->children[0]->children;
             }
@@ -2088,7 +2107,7 @@ keel::u16 Compiler::compileSwitch(const ASTNode *node)
 
     // Compile otherwise
     if (node->elseBranch) {
-        definedRegs_ = savedDefined;
+        definedRegs_.words = savedDefined.words.clone();
         compileNode(node->elseBranch.get());
     }
 
@@ -2104,7 +2123,7 @@ keel::u16 Compiler::compileSwitch(const ASTNode *node)
         patchJump(pos, endNopPos - pos);
     }
 
-    definedRegs_ = savedDefined;
+    definedRegs_ = keel::move(savedDefined);
     return 0;
 }
 
@@ -2122,18 +2141,18 @@ keel::u16 Compiler::compileGlobalPersistent(const ASTNode *node)
         emitA(OpCode::THROW, msgReg);
         return msgReg;
     }
-    for (auto &name : node->paramNames) {
+    for (const auto &name : node->paramNames) {
         varRegWrite(name); // allocate register, mark as assigned
         if (isGlobal) {
             if (std::find(chunk_.globalNames.begin(), chunk_.globalNames.end(), name)
                 == chunk_.globalNames.end()) {
-                chunk_.globalNames.push_back(name);
+                chunk_.globalNames.push_back(name.clone());
             }
-            chunk_.ownGlobalDecls.push_back(name);
+            chunk_.ownGlobalDecls.push_back(name.clone());
         } else {
             if (std::find(chunk_.persistentNames.begin(), chunk_.persistentNames.end(), name)
                 == chunk_.persistentNames.end()) {
-                chunk_.persistentNames.push_back(name);
+                chunk_.persistentNames.push_back(name.clone());
             }
         }
     }
@@ -2159,7 +2178,7 @@ keel::u16 Compiler::compileTryCatch(const ASTNode *node)
     //   ... catch body ...
     // L_end:
 
-    auto savedDefined = definedRegs_;
+    RegBitset savedDefined{definedRegs_.words.clone()};
 
     // Register for exception variable (if named)
     keel::u16 exReg = 0;
@@ -2194,7 +2213,7 @@ keel::u16 Compiler::compileTryCatch(const ASTNode *node)
     patchJump(tryBeginPos, currentPos() - tryBeginPos);
 
     // Compile catch body
-    definedRegs_ = savedDefined;
+    definedRegs_.words = savedDefined.words.clone();
     if (!node->strValue.empty()) {
         if (!mayClear_)
             definedRegs_.set(exReg);
@@ -2203,7 +2222,7 @@ keel::u16 Compiler::compileTryCatch(const ASTNode *node)
     if (node->children.size() > 1) {
         compileNode(node->children[1].get());
     }
-    definedRegs_ = savedDefined;
+    definedRegs_ = keel::move(savedDefined);
 
     // Emit NOP for the 'end' keyword so breakpoints on it fire
     keel::usize endNopPos = currentPos();
@@ -2247,9 +2266,9 @@ keel::u16 Compiler::compileWhile(const ASTNode *node)
         nextReg_ = condFloor;
 
     // Compile body
-    auto savedDefined = definedRegs_;
+    RegBitset savedDefined{definedRegs_.words.clone()};
     compileNode(node->children[1].get());
-    definedRegs_ = savedDefined;
+    definedRegs_ = keel::move(savedDefined);
 
     // Patch continue targets → jump to loopStart (re-evaluate condition)
     for (keel::usize pos : loopStack_.back().continuePatches) {
@@ -2372,11 +2391,11 @@ keel::u16 Compiler::compileFor(const ASTNode *node)
     emitUpvalStoreIfShared(node->strValue, vReg);
 
     // Compile body
-    auto savedDefined = definedRegs_;
+    RegBitset savedDefined{definedRegs_.words.clone()};
     if (!mayClear_)
         definedRegs_.set(vReg);
     compileNode(node->children[1].get());
-    definedRegs_ = savedDefined;
+    definedRegs_ = keel::move(savedDefined);
 
     // Patch continue targets -> jump to FOR_NEXT
     keel::usize forNextPos = currentPos();
@@ -2550,7 +2569,7 @@ keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
         }
 
         // Multi-element row: compile each, move into consecutive block, HORZCAT
-        std::vector<keel::u16> elemRegs;
+        keel::Array<keel::u16> elemRegs;
         for (auto &elem : row->children) {
             elemRegs.push_back(compileNode(elem.get()));
         }
@@ -2594,7 +2613,7 @@ keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
     }
 
     // Few rows: compile each, move into consecutive block, VERTCAT
-    std::vector<keel::u16> rowRegs;
+    keel::Array<keel::u16> rowRegs;
     for (auto &row : node->children)
         rowRegs.push_back(compileRow(row.get()));
 
@@ -2616,16 +2635,16 @@ keel::u16 Compiler::compileIndexExpr(const ASTNode *node)
     // For CALL nodes: children[0] = base identifier, children[1..] = index args
     // For INDEX nodes: strValue = name, children = index args
 
-    std::string name;
+    keel::StringRef name;
     keel::usize nargs;
     keel::usize argOffset; // first index arg in children[]
 
     if (node->type == NodeType::CALL) {
-        name = node->children[0]->strValue;
+        name = node->children[0]->strValue.as_ref();
         nargs = node->children.size() - 1;
         argOffset = 1;
     } else {
-        name = node->strValue;
+        name = node->strValue.as_ref();
         nargs = node->children.size();
         argOffset = 0;
     }
@@ -2653,7 +2672,7 @@ keel::u16 Compiler::compileIndexExpr(const ASTNode *node)
     // ND indexing (3D+): compile indices into consecutive registers
     {
         IndexContextGuard guard(*this, arr, static_cast<keel::u16>(nargs));
-        std::vector<keel::u16> idxRegs;
+        keel::Array<keel::u16> idxRegs;
         for (keel::usize i = 0; i < nargs; ++i) {
             idxRegs.push_back(compileNode(node->children[argOffset + i].get()));
             if (i + 1 < nargs)
@@ -2689,16 +2708,16 @@ keel::u16 Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
 
     // For CALL: children[0] = IDENTIFIER, children[1..] = indices
     // For INDEX: strValue = name, children = indices
-    std::string name;
+    keel::StringRef name;
     keel::usize nargs;
     keel::usize argOffset;
 
     if (lhs->type == NodeType::CALL) {
-        name = lhs->children[0]->strValue;
+        name = lhs->children[0]->strValue.as_ref();
         nargs = lhs->children.size() - 1;
         argOffset = 1;
     } else {
-        name = lhs->strValue;
+        name = lhs->strValue.as_ref();
         nargs = lhs->children.size();
         argOffset = 0;
     }
@@ -2720,7 +2739,7 @@ keel::u16 Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
             emit(Instruction::make_abcde(OpCode::INDEX_SET_2D, arr, row, col, 0, val));
         } else {
             // ND indexed assign (3D+)
-            std::vector<keel::u16> idxRegs;
+            keel::Array<keel::u16> idxRegs;
             for (keel::usize i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[argOffset + i].get()));
                 if (i + 1 < nargs)
@@ -2767,11 +2786,11 @@ keel::u16 Compiler::compileFieldAccess(const ASTNode *node)
     // classdef Constant properties read without parentheses.
     {
         const ASTNode *root = nullptr;
-        std::string qualified = tryBuildQualifiedName(node, &root);
+        keel::String qualified = tryBuildQualifiedName(node, &root);
         if (!qualified.empty() && root) {
-            const std::string &rootName = root->strValue;
-            const bool isLocalVar = varRegisters_.find(rootName) != varRegisters_.end()
-                                    || upvalueRegs_.find(rootName) != upvalueRegs_.end();
+            const keel::String &rootName = root->strValue;
+            const bool isLocalVar = varRegisters_.contains(rootName)
+                                    || upvalueRegs_.contains(rootName);
             const bool isWsVar = isTopLevel_ && engine_.workspaceEnv().getLocal(rootName) != nullptr;
             if (!isLocalVar && !isWsVar) {
                 // Split into dotted segments. Normally the whole name is one
@@ -2782,17 +2801,19 @@ keel::u16 Compiler::compileFieldAccess(const ASTNode *node)
                 // (`Weekday.Monday.num` → (Weekday.Monday).num). If nothing is
                 // registered, keep the single CALL — the runtime resolves it
                 // (an m-file qualified name loaded lazily).
-                std::vector<std::string> segs;
+                keel::Array<keel::StringRef> segs;
                 for (keel::usize s = 0, e; s < qualified.size(); s = e + 1) {
                     e = qualified.find('.', s);
-                    if (e == std::string::npos)
+                    if (e == keel::kInvalidIndex)
                         e = qualified.size();
                     segs.push_back(qualified.substr(s, e - s));
                 }
                 auto join = [&](keel::usize n) {
-                    std::string r = segs[0];
-                    for (keel::usize i = 1; i < n; ++i)
-                        r += "." + segs[i];
+                    keel::String r = keel::String::from(segs[0]);
+                    for (keel::usize i = 1; i < n; ++i) {
+                        r.push_back('.');
+                        r.append(segs[i]);
+                    }
                     return r;
                 };
                 keel::usize prefixLen = segs.size(); // default: the whole name
@@ -2872,10 +2893,10 @@ keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
 
     // Collect the field chain: s.a.b → ["b", "a"] (outermost first)
     // Walk from outermost FIELD_ACCESS inward to find root IDENTIFIER
-    std::vector<std::string> fieldChain;
+    keel::Array<keel::StringRef> fieldChain;
     const ASTNode *cur = lhs;
     while (cur->type == NodeType::FIELD_ACCESS) {
-        fieldChain.push_back(cur->strValue);
+        fieldChain.push_back(cur->strValue.as_ref());
         cur = cur->children[0].get();
     }
 
@@ -2888,7 +2909,7 @@ keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
     if (cur->type == NodeType::CALL && fieldChain.size() == 1
         && cur->children.size() == 2
         && cur->children[0]->type == NodeType::IDENTIFIER) {
-        const std::string &rootName = cur->children[0]->strValue;
+        const keel::String &rootName = cur->children[0]->strValue;
         keel::u16 rootReg = varRegWrite(rootName);
         emitUpvalLoadRawIfShared(rootName, rootReg);
         keel::u16 idxReg;
@@ -2931,7 +2952,7 @@ keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
         //   intermediates[0] = s (rootReg)
         //   intermediates[1] = FIELD_GET s."a" → t1
         //   For s.a.b.c: intermediates[2] = FIELD_GET t1."b" → t2
-        std::vector<keel::u16> intermediates;
+        keel::Array<keel::u16> intermediates;
         intermediates.push_back(rootReg);
 
         // Walk from deepest to shallowest: fieldChain reversed = ["a", "b"]
@@ -2999,7 +3020,7 @@ keel::u16 Compiler::compileCellLiteral(const ASTNode *node)
     // {a, b, c}    → 1 BLOCK child: BLOCK(a,b,c) → 1x3 cell
 
     // Compile each row into a cell row
-    std::vector<keel::u16> rowRegs;
+    keel::Array<keel::u16> rowRegs;
     for (auto &row : node->children) {
         if (row->children.empty()) {
             keel::u16 dst = tempReg();
@@ -3036,7 +3057,7 @@ keel::u16 Compiler::compileCellLiteral(const ASTNode *node)
         }
 
         // Compile row elements into consecutive registers → CELL_LITERAL
-        std::vector<keel::u16> elemRegs;
+        keel::Array<keel::u16> elemRegs;
         for (auto &elem : row->children)
             elemRegs.push_back(compileNode(elem.get()));
 
@@ -3094,7 +3115,7 @@ keel::u16 Compiler::compileCellIndex(const ASTNode *node)
     // ND cell indexing (3D+): use CELL_GET_ND — returns content, not sub-cell
     {
         IndexContextGuard guard(*this, cell, static_cast<keel::u16>(nidx));
-        std::vector<keel::u16> idxRegs;
+        keel::Array<keel::u16> idxRegs;
         for (keel::usize i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(node->children[1 + i].get()));
             if (i + 1 < nidx)
@@ -3149,7 +3170,7 @@ keel::u16 Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     } else {
         // ND cell assign
         IndexContextGuard guard(*this, cell, static_cast<keel::u16>(nidx));
-        std::vector<keel::u16> idxRegs;
+        keel::Array<keel::u16> idxRegs;
         for (keel::usize i = 0; i < nidx; ++i) {
             idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
             if (i + 1 < nidx)
@@ -3306,7 +3327,7 @@ keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNod
                                      int inValReg, bool suppress)
 {
     // ── Flatten the accessor chain (root → outermost) ──
-    std::vector<LvAcc> acc;
+    keel::Array<LvAcc> acc;
     const ASTNode *cur = lhs;
     for (;;) {
         if (cur->type == NodeType::FIELD_ACCESS)
@@ -3339,19 +3360,23 @@ keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNod
     emitUpvalLoadRawIfShared(cur->strValue, rootReg);
 
     // regs[k] = container that accessor k applies to (regs[0] = root).
-    std::vector<keel::u16> regs(n + 1, 0);
+    keel::Array<keel::u16> regs;
+    regs.resize(n + 1, 0);
     regs[0] = rootReg;
     // Per-accessor subscripts packed into a consecutive register block
     // [idxBase, idxBase+idxN) (for the (base, nargs) opcodes), or a
     // dynamic-field-name register. Computed once in the forward pass and
     // reused for write-back so `end` / side-effecting subscripts evaluate
     // exactly once.
-    std::vector<keel::u16> idxBase(n, 0), idxN(n, 0), nameReg(n, 0);
+    keel::Array<keel::u16> idxBase, idxN, nameReg;
+    idxBase.resize(n, 0);
+    idxN.resize(n, 0);
+    nameReg.resize(n, 0);
 
     auto compileIdxArgs = [&](keel::usize k) {
         const ASTNode *node = acc[k].node;
         keel::usize nargs = node->children.size() - 1; // children[0] is the object
-        std::vector<keel::u16> tmp;
+        keel::Array<keel::u16> tmp;
         {
             IndexContextGuard guard(*this, regs[k], static_cast<keel::u16>(nargs));
             for (keel::usize a = 0; a < nargs; ++a) {
@@ -3498,31 +3523,31 @@ void Compiler::recordCallArgNames(const ASTNode *callNode, keel::usize callInstr
 {
     if (!callNode || callNode->children.size() < 2)
         return;
-    std::vector<std::string> names;
+    keel::Array<keel::String> names;
     names.reserve(callNode->children.size() - 1);
     bool anyIdent = false;
     for (keel::usize i = 1; i < callNode->children.size(); ++i) {
         const auto &child = callNode->children[i];
         if (child && child->type == NodeType::IDENTIFIER
             && !engine_.isReservedName(child->strValue)) {
-            names.push_back(child->strValue);
+            names.push_back(child->strValue.clone());
             anyIdent = true;
         } else {
             names.emplace_back();
         }
     }
     if (anyIdent) {
-        chunk_.callSiteArgNames[static_cast<keel::u32>(callInstrIdx)]
-            = std::move(names);
+        chunk_.callSiteArgNames.put(static_cast<keel::u32>(callInstrIdx),
+                                    keel::move(names));
     }
 }
 
 keel::u16 Compiler::compileFused(const ASTNode *node, keel::usize ruleIdx,
-                               const std::vector<const ASTNode *> &operands)
+                               keel::ArrayRef<const ASTNode *> operands)
 {
     // 1. Compile the operand sub-exprs into a contiguous register block
     //    (same shape as call args) so the VM can read R[base..base+n).
-    std::vector<keel::u16> opRegs;
+    keel::Array<keel::u16> opRegs;
     opRegs.reserve(operands.size());
     for (const ASTNode *op : operands)
         opRegs.push_back(compileNode(op));
@@ -3542,26 +3567,26 @@ keel::u16 Compiler::compileFused(const ASTNode *node, keel::usize ruleIdx,
     //    exception-safe (compileNode may throw RegisterExhaustionError).
     keel::u16 fbDst;
     {
-        auto savedConstCache = constRegCache_;
-        auto savedScalars = scalarRegs_;
+        auto savedConstCache = constRegCache_.clone();
+        RegBitset savedScalars{scalarRegs_.words.clone()};
         struct Guard {
             bool &f;
-            std::unordered_map<const ASTNode *, keel::u16> &opMap;
-            std::unordered_map<const ASTNode *, keel::u16> savedOpMap;
-            Guard(bool &x, std::unordered_map<const ASTNode *, keel::u16> &m)
-                : f(x), opMap(m), savedOpMap(m)
+            keel::HashMap<const ASTNode *, keel::u16> &opMap;
+            keel::HashMap<const ASTNode *, keel::u16> savedOpMap;
+            Guard(bool &x, keel::HashMap<const ASTNode *, keel::u16> &m)
+                : f(x), opMap(m), savedOpMap(m.clone())
             {
                 f = true;
             }
             ~Guard()
             {
                 f = false;
-                opMap = std::move(savedOpMap);
+                opMap = keel::move(savedOpMap);
             }
         } guard(inFusionFallback_, fusedOperandRegs_);
         fusedOperandRegs_.clear();
         for (keel::usize i = 0; i < operands.size(); ++i)
-            fusedOperandRegs_[operands[i]] = static_cast<keel::u16>(opBase + i);
+            fusedOperandRegs_.put(operands[i], static_cast<keel::u16>(opBase + i));
         // Fall back to the node's OWN normal compile (the guard stops it from
         // re-attempting fusion, and fusedOperandRegs_ reuses the pre-evaluated
         // operand registers so side-effecting operands never evaluate twice).
@@ -3570,8 +3595,8 @@ keel::u16 Compiler::compileFused(const ASTNode *node, keel::usize ruleIdx,
             case NodeType::UNARY_OP:  fbDst = compileUnaryOp(node);  break;
             default:                  fbDst = compileCall(node);     break;
         }
-        constRegCache_ = std::move(savedConstCache);
-        scalarRegs_ = savedScalars;
+        constRegCache_ = keel::move(savedConstCache);
+        scalarRegs_ = keel::move(savedScalars);
     }
     // 4. Both paths write fbDst; on success FUSE_EWISE skips the fallback span.
     const keel::usize span = chunk_.code.size() - spanStart;
@@ -3603,8 +3628,8 @@ int Compiler::tryCompileFused(const ASTNode *node)
         }
         if (!op || op->type != NodeType::IDENTIFIER)
             return true;
-        const std::string &name = op->strValue;
-        if (varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0
+        const keel::String &name = op->strValue;
+        if (varRegisters_.contains(name) || upvalueRegs_.contains(name)
             || engine_.isReservedName(name))
             return true;
         if (isTopLevel_ && engine_.getVariable(name) != nullptr)
@@ -3625,7 +3650,7 @@ int Compiler::tryCompileFused(const ASTNode *node)
         }
         if (!allPure)
             return -1;
-        return compileFused(node, ri, *operands);
+        return compileFused(node, ri, operands->as_ref());
     }
     return -1;
 }
@@ -3674,11 +3699,11 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
         }
     if (funcNode->type == NodeType::FIELD_ACCESS && !argHasEnd) {
         const ASTNode *rootIdent = nullptr;
-        std::string qualified = tryBuildQualifiedName(funcNode, &rootIdent);
+        keel::String qualified = tryBuildQualifiedName(funcNode, &rootIdent);
         if (!qualified.empty()) {
-            const std::string &root = rootIdent->strValue;
-            const bool isLocalVar = varRegisters_.find(root) != varRegisters_.end()
-                                    || upvalueRegs_.find(root) != upvalueRegs_.end();
+            const keel::String &root = rootIdent->strValue;
+            const bool isLocalVar = varRegisters_.contains(root)
+                                    || upvalueRegs_.contains(root);
             const bool isWorkspaceVar =
                 isTopLevel_ && engine_.workspaceEnv().getLocal(root) != nullptr;
             if (!isLocalVar && !isWorkspaceVar
@@ -3708,7 +3733,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
                         anyBraceArg = true;
                         break;
                     }
-                std::vector<keel::u16> argRegs;
+                keel::Array<keel::u16> argRegs;
                 argRegs.reserve(nargs);
                 for (keel::usize i = 1; i < node->children.size(); ++i)
                     argRegs.push_back(anyBraceArg
@@ -3757,7 +3782,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
         for (keel::usize i = 1; i < node->children.size(); ++i)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { mAnyBrace = true; break; }
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         argRegs.reserve(nargs);
         if (mAnyBrace) {
             for (keel::usize i = 1; i < node->children.size(); ++i)
@@ -3803,7 +3828,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { faAnyBrace = true; break; }
         if (faAnyBrace) {
-            std::vector<keel::u16> argRegs;
+            keel::Array<keel::u16> argRegs;
             for (keel::usize i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
             keel::u16 argBase = nextReg_;
@@ -3819,7 +3844,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
                                          std::max<keel::usize>(nargoutContext_, 1)));
             return dst;
         }
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         argRegs.reserve(nargs);
         {
             IndexContextGuard guard(*this, fhReg, static_cast<keel::u16>(nargs));
@@ -3846,18 +3871,19 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
         return dst;
     }
 
-    const std::string &name = funcNode->strValue;
+    const keel::String &name = funcNode->strValue;
     keel::usize nargs = node->children.size() - 1;
 
     if (name == "syms") {
-        static const std::unordered_set<std::string> kSymsFlags = {
-            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        auto isSymsFlag = [](keel::StringRef s) noexcept {
+            return s == "real" || s == "positive" || s == "negative"
+                   || s == "nonnegative" || s == "integer" || s == "clear";
         };
         for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
-                const std::string &tok = argNode->strValue;
-                if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
+                const keel::String &tok = argNode->strValue;
+                if (!isSymsFlag(tok) && !engine_.isReservedName(tok)) {
                     keel::u16 reg = varRegWrite(tok);
                     if (!mayClear_)
                         definedRegs_.set(reg);
@@ -3884,15 +3910,15 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     // clear(expr) works both inside functions and at top-level
     if (name == "clear") {
         bool anyBrace = false;
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         argRegs.reserve(nargs);
         for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
-                auto it = varRegisters_.find(argNode->strValue);
-                if (it != varRegisters_.end() && engine_.isReservedName(argNode->strValue) == 0) {
-                    emitA(OpCode::CLEAR_VAR, it->second);
-                    emitUpvalStoreIfShared(argNode->strValue, it->second);
+                if (const keel::u16 *regp = varRegisters_.get(argNode->strValue);
+                    regp && engine_.isReservedName(argNode->strValue) == 0) {
+                    emitA(OpCode::CLEAR_VAR, *regp);
+                    emitUpvalStoreIfShared(argNode->strValue, *regp);
                 }
                 if (isTopLevel_ || mayInjectVars_)
                     argRegs.push_back(compileNode(argNode));
@@ -3907,7 +3933,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             }
         }
         if (nargs == 0) {
-            for (auto &[vname, reg] : varRegisters_) {
+            for (auto [vname, reg] : varRegisters_) {
                 if (engine_.isReservedName(vname) == 0) {
                     emitA(OpCode::CLEAR_VAR, reg);
                     emitUpvalStoreIfShared(vname, reg);
@@ -3943,7 +3969,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             if (nargs == 0) {
                 emitAB(op, 0, 0);
             } else {
-                std::vector<keel::u16> argRegs;
+                keel::Array<keel::u16> argRegs;
                 for (keel::usize i = 1; i <= nargs; ++i)
                     argRegs.push_back(compileNode(node->children[i].get()));
                 keel::u16 base = nextReg_;
@@ -3960,18 +3986,14 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     // Check if it's a known variable (local or from workspaceEnv)
     // → could be array indexing OR func handle call — emit CALL_INDIRECT
-    auto it = varRegisters_.find(name);
-    bool isKnownVar = (it != varRegisters_.end()) || (upvalueRegs_.find(name) != upvalueRegs_.end());
+    bool isKnownVar = varRegisters_.contains(name) || upvalueRegs_.contains(name);
 
     // Also check workspaceEnv (or scoped eval caller vars) for variables from previous eval() calls
     if (!isKnownVar && isTopLevel_ && !engine_.isReservedName(name)) {
         Value *existing = nullptr;
         if (engine_.vm_ && engine_.vm_->inheritedScope_) {
-            if (auto *dv = engine_.vm_->nextFrameDynVars()) {
-                auto it2 = dv->find(name);
-                if (it2 != dv->end())
-                    existing = &it2->second;
-            }
+            if (auto *dv = engine_.vm_->nextFrameDynVars())
+                existing = dv->get(name);
             if (!existing)
                 existing = engine_.vm_->inheritedScope_->get(name);
         } else {
@@ -3989,10 +4011,9 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     if (isKnownVar) {
         keel::u16 fhReg = varRegLookup(name);
-        auto uvIt = upvalueRegs_.find(name);
-        if (uvIt != upvalueRegs_.end()) {
+        if (const keel::u16 *uvReg = upvalueRegs_.get(name)) {
             keel::i32 nameIdx = addStringConstant(name);
-            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, uvIt->second, 0, nameIdx, 0));
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, *uvReg, 0, nameIdx, 0));
         }
 
         bool varAnyBrace = false;
@@ -4000,7 +4021,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             if (node->children[i]->type == NodeType::CELL_INDEX)
                 { varAnyBrace = true; break; }
         if (varAnyBrace) {
-            std::vector<keel::u16> argRegs;
+            keel::Array<keel::u16> argRegs;
             for (keel::usize i = 1; i < node->children.size(); ++i)
                 argRegs.push_back(compileNodeExpand(node->children[i].get()));
             keel::u16 argBase = nextReg_;
@@ -4019,7 +4040,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
         IndexContextGuard guard(*this, fhReg, static_cast<keel::u16>(nargs));
 
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         for (keel::usize i = 1; i < node->children.size(); ++i) {
             guard.setDim(static_cast<keel::u16>(i - 1));
             argRegs.push_back(compileNode(node->children[i].get()));
@@ -4045,20 +4066,21 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     // Nested function call in lexical scope: pass user args + hidden upvalue boxes
     {
-        auto nit = nestedFuncInfo_.find(name);
-        if (nit != nestedFuncInfo_.end()) {
+        if (const NestedFuncInfo *ninfo = nestedFuncInfo_.get(name)) {
             bool anyBraceArg = false;
             for (keel::usize i = 1; i < node->children.size(); ++i)
                 if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
-            std::vector<keel::u16> argRegs;
-            argRegs.reserve(nargs + nit->second.upvalueNames.size());
+            keel::Array<keel::u16> argRegs;
+            argRegs.reserve(nargs + ninfo->upvalueNames.size());
             for (keel::usize i = 1; i < node->children.size(); ++i) {
                 argRegs.push_back(anyBraceArg
                                       ? compileNodeExpand(node->children[i].get())
                                       : compileNode(node->children[i].get()));
             }
-            for (const auto &uvName : nit->second.upvalueNames)
-                argRegs.push_back(allScopeUpvalueBoxRegs_.at(uvName));
+            for (const auto &uvName : ninfo->upvalueNames) {
+                if (const keel::u16 *box = allScopeUpvalueBoxRegs_.get(uvName))
+                    argRegs.push_back(*box);
+            }
             keel::u16 argBase = static_cast<keel::u16>(nextReg_);
             for (keel::usize i = 0; i < argRegs.size(); ++i) {
                 keel::u16 slot = tempReg();
@@ -4066,7 +4088,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
             keel::u16 dst = tempReg();
-            keel::i32 funcIdx = addStringConstant(nit->second.compiledName);
+            keel::i32 funcIdx = addStringConstant(ninfo->compiledName);
             keel::usize callIdx = chunk_.code.size();
             emit(Instruction::make_abcde(anyBraceArg ? OpCode::CALL_FLATTEN : OpCode::CALL,
                                          dst,
@@ -4115,7 +4137,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     for (keel::usize i = 1; i < node->children.size(); ++i)
         if (node->children[i]->type == NodeType::CELL_INDEX) { anyBraceArg = true; break; }
     if (anyBraceArg) {
-        std::vector<keel::u16> argRegs;
+        keel::Array<keel::u16> argRegs;
         for (keel::usize i = 1; i < node->children.size(); ++i)
             argRegs.push_back(compileNodeExpand(node->children[i].get()));
         keel::u16 argBase = nextReg_;
@@ -4133,7 +4155,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     }
 
     // Compile arguments into consecutive registers
-    std::vector<keel::u16> argRegs;
+    keel::Array<keel::u16> argRegs;
     for (keel::usize i = 1; i < node->children.size(); ++i) {
         argRegs.push_back(compileNode(node->children[i].get()));
     }
@@ -4186,22 +4208,22 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
 keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 {
-    const std::string &name = node->strValue;
+    const keel::String &name = node->strValue;
     keel::usize nargs = node->children.size();
 
     // Variable-headed command-syntax misparse inside functions: `x -1`, `x /2`, `x -y`
     if (!isTopLevel_ && nargs == 1
         && name != "clear" && name != "who" && name != "whos"
         && name != "exist" && name != "syms"
-        && (varRegisters_.count(name) > 0 || upvalueRegs_.count(name) > 0
+        && (varRegisters_.contains(name) || upvalueRegs_.contains(name)
             || engine_.isReservedName(name) != 0)) {
-        const std::string &arg = node->children[0]->strValue;
+        const keel::String &arg = node->children[0]->strValue;
         if (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')) {
-            const std::string rest = arg.substr(1);
+            const keel::String rest = keel::String::from(arg.substr(1));
             char *endPtr = nullptr;
             double numVal = std::strtod(rest.c_str(), &endPtr);
             const bool isNum = (endPtr != rest.c_str() && *endPtr == '\0');
-            auto isIdent = [](const std::string &s) {
+            auto isIdent = [](keel::StringRef s) {
                 if (s.empty())
                     return false;
                 unsigned char c0 = static_cast<unsigned char>(s[0]);
@@ -4225,7 +4247,7 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
                 } else {
                     rhsReg = varRegRead(rest);
                 }
-                keel::u16 resReg = emitPlainBinary(std::string(1, arg[0]), lhsReg, rhsReg);
+                keel::u16 resReg = emitPlainBinary(arg.substr(0, 1), lhsReg, rhsReg);
                 keel::u16 ansReg = varRegWrite("ans");
                 if (ansReg != resReg)
                     emitAB(OpCode::MOVE, ansReg, resReg);
@@ -4241,10 +4263,12 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 
     if (name == "clear") {
         // Determine what kind of clear this is
-        static const std::unordered_set<std::string> kClearFlags
-            = {"all", "classes", "functions", "global", "-regexp", "import"};
+        auto isClearFlag = [](keel::StringRef s) noexcept {
+            return s == "all" || s == "classes" || s == "functions"
+                   || s == "global" || s == "-regexp" || s == "import";
+        };
 
-        bool isFlag = nargs > 0 && kClearFlags.count(node->children[0]->strValue);
+        bool isFlag = nargs > 0 && isClearFlag(node->children[0]->strValue);
         bool isClearAll = nargs == 0
                           || (nargs > 0
                               && (node->children[0]->strValue == "all"
@@ -4252,7 +4276,7 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 
         // Step 1: emit CLEAR_VAR opcodes for local registers
         if (isClearAll) {
-            for (auto &[vname, reg] : varRegisters_) {
+            for (auto [vname, reg] : varRegisters_) {
                 if (engine_.isReservedName(vname) == 0) {
                     emitA(OpCode::CLEAR_VAR, reg);
                     emitUpvalStoreIfShared(vname, reg);
@@ -4260,12 +4284,11 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
             }
         } else if (!isFlag) {
             for (keel::usize i = 0; i < nargs; ++i) {
-                const std::string &varName = node->children[i]->strValue;
+                const keel::String &varName = node->children[i]->strValue;
                 if (engine_.isReservedName(varName) == 0) {
-                    auto it = varRegisters_.find(varName);
-                    if (it != varRegisters_.end()) {
-                        emitA(OpCode::CLEAR_VAR, it->second);
-                        emitUpvalStoreIfShared(varName, it->second);
+                    if (const keel::u16 *regp = varRegisters_.get(varName)) {
+                        emitA(OpCode::CLEAR_VAR, *regp);
+                        emitUpvalStoreIfShared(varName, *regp);
                     }
                 }
             }
@@ -4335,12 +4358,13 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 
     // ── Generic command call ──
     if (name == "syms") {
-        static const std::unordered_set<std::string> kSymsFlags = {
-            "real", "positive", "negative", "nonnegative", "integer", "clear"
+        auto isSymsFlag = [](keel::StringRef s) noexcept {
+            return s == "real" || s == "positive" || s == "negative"
+                   || s == "nonnegative" || s == "integer" || s == "clear";
         };
         for (keel::usize i = 0; i < nargs; ++i) {
-            const std::string &tok = node->children[i]->strValue;
-            if (!kSymsFlags.count(tok) && !engine_.isReservedName(tok)) {
+            const keel::String &tok = node->children[i]->strValue;
+            if (!isSymsFlag(tok) && !engine_.isReservedName(tok)) {
                 keel::u16 reg = varRegWrite(tok);
                 if (!mayClear_)
                     definedRegs_.set(reg);
@@ -4349,10 +4373,10 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
     }
 
     // Compile arguments: each child is a STRING_LITERAL
-    auto nit = (varRegisters_.find(name) == varRegisters_.end()
-                && upvalueRegs_.find(name) == upvalueRegs_.end())
-                   ? nestedFuncInfo_.find(name)
-                   : nestedFuncInfo_.end();
+    const NestedFuncInfo *ninfo = (!varRegisters_.contains(name)
+                                   && !upvalueRegs_.contains(name))
+                                      ? nestedFuncInfo_.get(name)
+                                      : nullptr;
     keel::u16 argBase = nextReg_;
     for (keel::usize i = 0; i < nargs; ++i) {
         keel::u16 slot = tempReg();
@@ -4360,19 +4384,21 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
         emitAD(OpCode::LOAD_STRING, slot, strIdx);
     }
     keel::usize totalCallArgs = nargs;
-    if (nit != nestedFuncInfo_.end()) {
-        for (const auto &uvName : nit->second.upvalueNames) {
+    if (ninfo) {
+        for (const auto &uvName : ninfo->upvalueNames) {
             keel::u16 slot = tempReg();
-            keel::u16 boxReg = allScopeUpvalueBoxRegs_.at(uvName);
-            if (boxReg != slot)
-                emitAB(OpCode::MOVE, slot, boxReg);
+            if (const keel::u16 *box = allScopeUpvalueBoxRegs_.get(uvName)) {
+                keel::u16 boxReg = *box;
+                if (boxReg != slot)
+                    emitAB(OpCode::MOVE, slot, boxReg);
+            }
             ++totalCallArgs;
         }
     }
 
     keel::u16 dst = tempReg();
     keel::i32 funcIdx = addStringConstant(
-        nit != nestedFuncInfo_.end() ? nit->second.compiledName : name);
+        ninfo ? ninfo->compiledName.as_ref() : name.as_ref());
     emit(
         Instruction::make_abcde(OpCode::CALL, dst, argBase,
                                 static_cast<keel::u16>(totalCallArgs), funcIdx, 0));
@@ -4388,20 +4414,20 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 
 // Collect free variables in AST node — identifiers used but not in params/locals
 void Compiler::collectFreeVars(const ASTNode *node,
-                               const std::vector<std::string> &params,
-                               std::vector<std::string> &freeVars)
+                               keel::ArrayRef<keel::String> params,
+                               keel::Array<keel::String> &freeVars)
 {
     if (!node)
         return;
 
     if (node->type == NodeType::IDENTIFIER) {
-        const std::string &name = node->strValue;
+        const keel::String &name = node->strValue;
         // Skip if it's a parameter
-        for (auto &p : params)
+        for (const auto &p : params)
             if (p == name)
                 return;
         // Skip if already collected
-        for (auto &f : freeVars)
+        for (const auto &f : freeVars)
             if (f == name)
                 return;
         // Skip __result__ (synthetic return var)
@@ -4409,33 +4435,37 @@ void Compiler::collectFreeVars(const ASTNode *node,
             return;
         // Skip unshadowed built-in reserved constants (pi, eps, inf, nan, ...):
         // the anonymous function chunk resolves them directly from constantsEnv_.
-        if (engine_.isReservedName(name) && !chunk_.assignedVars.count(name)
+        if (engine_.isReservedName(name) && !chunk_.assignedVars.contains(name)
             && (!isTopLevel_ || !engine_.workspaceEnv().get(name)))
             return;
         // Check if exists in outer scope
-        if (varRegisters_.count(name) || upvalueRegs_.count(name) || nestedFuncInfo_.count(name)) {
-            freeVars.push_back(name);
+        if (varRegisters_.contains(name) || upvalueRegs_.contains(name) || nestedFuncInfo_.contains(name)) {
+            freeVars.push_back(name.clone());
         }
         return;
     }
 
     if (node->type == NodeType::ANON_FUNC) {
         if (!node->strValue.empty() && node->children.empty()) {
-            const std::string &fn = node->strValue;
-            for (auto &p : params)
+            const keel::String &fn = node->strValue;
+            for (const auto &p : params)
                 if (p == fn)
                     return;
-            for (auto &f : freeVars)
+            for (const auto &f : freeVars)
                 if (f == fn)
                     return;
-            if (nestedFuncInfo_.count(fn))
-                freeVars.push_back(fn);
+            if (nestedFuncInfo_.contains(fn))
+                freeVars.push_back(fn.clone());
             return;
         }
-        std::vector<std::string> mergedParams = params;
-        mergedParams.insert(mergedParams.end(), node->paramNames.begin(), node->paramNames.end());
+        keel::Array<keel::String> mergedParams;
+        mergedParams.reserve(params.size() + node->paramNames.size());
+        for (const auto &p : params)
+            mergedParams.push_back(p.clone());
+        for (const auto &p : node->paramNames)
+            mergedParams.push_back(p.clone());
         for (auto &child : node->children)
-            collectFreeVars(child.get(), mergedParams, freeVars);
+            collectFreeVars(child.get(), mergedParams.as_ref(), freeVars);
         return;
     }
 
@@ -4454,24 +4484,23 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
 {
     // Case 1: @funcname — handle to existing function
     if (!node->strValue.empty() && node->children.empty()) {
-        auto nit = nestedFuncInfo_.find(node->strValue);
-        if (nit != nestedFuncInfo_.end())
-            return emitNestedFuncHandle(nit->second);
+        if (const NestedFuncInfo *ninfo = nestedFuncInfo_.get(node->strValue))
+            return emitNestedFuncHandle(*ninfo);
         keel::u16 dst = tempReg();
         Value fh = Value::funcHandle(node->strValue, engine_.allocator());
-        keel::i32 constIdx = appendConstant(std::move(fh));
+        keel::i32 constIdx = appendConstant(keel::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
 
     // Case 2: @(params) expr — anonymous function with possible closure capture.
     int id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
-    std::string anonName = "__anon_" + std::to_string(id);
+    keel::String anonName = keel::format("__anon_{}", id);
 
     // Build a synthetic function AST node
     auto funcNode = makeNode(NodeType::FUNCTION_DEF);
-    funcNode->strValue = anonName;
-    funcNode->paramNames = node->paramNames;
+    funcNode->strValue = anonName.clone();
+    funcNode->paramNames = node->paramNames.clone();
     const ASTNode *bodyExpr = node->children[0].get();
     bool forwardVarargout =
         bodyExpr->type == NodeType::CALL
@@ -4479,11 +4508,11 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         && bodyExpr->children[0]->type == NodeType::IDENTIFIER
         && bodyExpr->children[0]->strValue != "__numkit_fwd_call__";
     if (forwardVarargout) {
-        const std::string &callee = bodyExpr->children[0]->strValue;
+        const keel::String &callee = bodyExpr->children[0]->strValue;
         bool calleeIsVar =
-            varRegisters_.find(callee) != varRegisters_.end()
-            || upvalueRegs_.find(callee) != upvalueRegs_.end()
-            || nestedFuncInfo_.find(callee) != nestedFuncInfo_.end();
+            varRegisters_.contains(callee)
+            || upvalueRegs_.contains(callee)
+            || nestedFuncInfo_.contains(callee);
         for (const auto &p : node->paramNames)
             if (p == callee) { calleeIsVar = true; break; }
         if (calleeIsVar)
@@ -4491,34 +4520,41 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     }
 
     auto rewriteNestedRefs = [&](auto &self, ASTNode *cur,
-                                 const std::vector<std::string> &boundParams,
+                                 keel::ArrayRef<keel::String> boundParams,
                                  bool isCallCallee) -> void {
         if (!cur || nestedFuncInfo_.empty())
             return;
-        auto isBound = [&](const std::string &nm) {
-            return std::find(boundParams.begin(), boundParams.end(), nm) != boundParams.end();
+        auto isBound = [&](keel::StringRef nm) {
+            for (const auto &bp : boundParams)
+                if (bp == nm)
+                    return true;
+            return false;
         };
         if (cur->type == NodeType::ANON_FUNC) {
             if (!cur->strValue.empty() && cur->children.empty()
-                && !isBound(cur->strValue) && nestedFuncInfo_.count(cur->strValue)) {
+                && !isBound(cur->strValue) && nestedFuncInfo_.contains(cur->strValue)) {
                 cur->type = NodeType::IDENTIFIER;
                 return;
             }
-            std::vector<std::string> merged = boundParams;
-            merged.insert(merged.end(), cur->paramNames.begin(), cur->paramNames.end());
+            keel::Array<keel::String> merged;
+            merged.reserve(boundParams.size() + cur->paramNames.size());
+            for (const auto &bp : boundParams)
+                merged.push_back(bp.clone());
+            for (const auto &p : cur->paramNames)
+                merged.push_back(p.clone());
             for (auto &ch : cur->children)
-                self(self, ch.get(), merged, false);
+                self(self, ch.get(), merged.as_ref(), false);
             return;
         }
         if (cur->type == NodeType::IDENTIFIER && !isCallCallee
-            && !isBound(cur->strValue) && nestedFuncInfo_.count(cur->strValue)
-            && !varRegisters_.count(cur->strValue) && !upvalueRegs_.count(cur->strValue)) {
-            std::string fn = cur->strValue;
+            && !isBound(cur->strValue) && nestedFuncInfo_.contains(cur->strValue)
+            && !varRegisters_.contains(cur->strValue) && !upvalueRegs_.contains(cur->strValue)) {
+            keel::String fn = keel::move(cur->strValue);
             cur->type = NodeType::CALL;
             cur->strValue.clear();
             auto calleeNode = makeNode(NodeType::IDENTIFIER);
-            calleeNode->strValue = std::move(fn);
-            cur->children.push_back(std::move(calleeNode));
+            calleeNode->strValue = keel::move(fn);
+            cur->children.push_back(keel::move(calleeNode));
             return;
         }
         for (keel::usize i = 0; i < cur->children.size(); ++i) {
@@ -4538,75 +4574,72 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     assignNode->suppressOutput = true;
 
     if (forwardVarargout) {
-        funcNode->returnNames = {"varargout"};
+        funcNode->returnNames.push_back(keel::String::from("varargout"));
         auto vaId = makeNode(NodeType::IDENTIFIER);
-        vaId->strValue = "varargout";
-        assignNode->children.push_back(std::move(vaId));
+        vaId->strValue.assign("varargout");
+        assignNode->children.push_back(keel::move(vaId));
         // RHS: __numkit_fwd_call__(nargout, 'g', args...)
         auto fwdCall = makeNode(NodeType::CALL);
         auto fwdId = makeNode(NodeType::IDENTIFIER);
-        fwdId->strValue = "__numkit_fwd_call__";
-        fwdCall->children.push_back(std::move(fwdId));
+        fwdId->strValue.assign("__numkit_fwd_call__");
+        fwdCall->children.push_back(keel::move(fwdId));
         auto nargoutId = makeNode(NodeType::IDENTIFIER);
-        nargoutId->strValue = "nargout";
-        fwdCall->children.push_back(std::move(nargoutId));
+        nargoutId->strValue.assign("nargout");
+        fwdCall->children.push_back(keel::move(nargoutId));
         auto fnameStr = makeNode(NodeType::STRING_LITERAL);
-        fnameStr->strValue = bodyExpr->children[0]->strValue;
-        fwdCall->children.push_back(std::move(fnameStr));
+        fnameStr->strValue = bodyExpr->children[0]->strValue.clone();
+        fwdCall->children.push_back(keel::move(fnameStr));
         for (keel::usize i = 1; i < bodyExpr->children.size(); ++i) {
             auto clonedArg = cloneNode(bodyExpr->children[i].get());
-            rewriteNestedRefs(rewriteNestedRefs, clonedArg.get(), node->paramNames, false);
-            fwdCall->children.push_back(std::move(clonedArg));
+            rewriteNestedRefs(rewriteNestedRefs, clonedArg.get(), node->paramNames.as_ref(), false);
+            fwdCall->children.push_back(keel::move(clonedArg));
         }
-        assignNode->children.push_back(std::move(fwdCall));
+        assignNode->children.push_back(keel::move(fwdCall));
     } else {
-        funcNode->returnNames = {"__result__"};
+        funcNode->returnNames.push_back(keel::String::from("__result__"));
         auto resultId = makeNode(NodeType::IDENTIFIER);
-        resultId->strValue = "__result__";
-        assignNode->children.push_back(std::move(resultId));
+        resultId->strValue.assign("__result__");
+        assignNode->children.push_back(keel::move(resultId));
         auto clonedExpr = cloneNode(node->children[0].get());
-        rewriteNestedRefs(rewriteNestedRefs, clonedExpr.get(), node->paramNames, false);
-        assignNode->children.push_back(std::move(clonedExpr));
+        rewriteNestedRefs(rewriteNestedRefs, clonedExpr.get(), node->paramNames.as_ref(), false);
+        assignNode->children.push_back(keel::move(clonedExpr));
     }
-    bodyBlock->children.push_back(std::move(assignNode));
-    funcNode->children.push_back(std::move(bodyBlock));
+    bodyBlock->children.push_back(keel::move(assignNode));
+    funcNode->children.push_back(keel::move(bodyBlock));
 
     // Find free variables in body that exist in outer scope but are not params
-    std::vector<std::string> capturedNames;
-    collectFreeVars(node->children[0].get(), node->paramNames, capturedNames);
+    keel::Array<keel::String> capturedNames;
+    collectFreeVars(node->children[0].get(), node->paramNames.as_ref(), capturedNames);
 
-    std::vector<std::string> activeCaptures;
+    keel::Array<keel::String> activeCaptures;
     for (auto &name : capturedNames) {
-        if (varRegisters_.count(name) || upvalueRegs_.count(name) || nestedFuncInfo_.count(name)) {
-            activeCaptures.push_back(name);
-            funcNode->paramNames.push_back(name);
+        if (varRegisters_.contains(name) || upvalueRegs_.contains(name) || nestedFuncInfo_.contains(name)) {
+            activeCaptures.push_back(name.clone());
+            funcNode->paramNames.push_back(name.clone());
         }
     }
 
     // Compile as separate chunk
     BytecodeChunk funcChunk = compileFunction(funcNode.get());
 
-    std::vector<keel::u16> capturedOuterRegs;
+    keel::Array<keel::u16> capturedOuterRegs;
     capturedOuterRegs.reserve(activeCaptures.size());
     for (const auto &name : activeCaptures) {
-        auto uvIt = upvalueRegs_.find(name);
-        if (uvIt != upvalueRegs_.end()) {
+        if (const keel::u16 *uvReg = upvalueRegs_.get(name)) {
             keel::u16 capReg = tempReg();
-            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, capReg, uvIt->second, 1, 0, 0));
+            emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, capReg, *uvReg, 1, 0, 0));
             capturedOuterRegs.push_back(capReg);
             continue;
         }
-        auto regIt = varRegisters_.find(name);
-        if (regIt != varRegisters_.end()) {
-            capturedOuterRegs.push_back(regIt->second);
+        if (const keel::u16 *regp = varRegisters_.get(name)) {
+            capturedOuterRegs.push_back(*regp);
             continue;
         }
-        auto nit = nestedFuncInfo_.find(name);
-        if (nit != nestedFuncInfo_.end()) {
-            capturedOuterRegs.push_back(emitNestedFuncHandle(nit->second));
+        if (const NestedFuncInfo *ninfo = nestedFuncInfo_.get(name)) {
+            capturedOuterRegs.push_back(emitNestedFuncHandle(*ninfo));
         }
     }
-    funcChunk.capturedRegisters = capturedOuterRegs;
+    funcChunk.capturedRegisters = capturedOuterRegs.clone();
     // Provenance is fixed at creation (reference rule). Compilation of a
     // NAMED function body carries that function's file explicitly (the
     // resolver compiles before the origin frame is active); everywhere
@@ -4616,18 +4649,18 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         UserFunction stamp;
         if (anonOriginKnown_) {
             stamp.originKnown = true;
-            stamp.sourceFs = anonOriginFs_;
-            stamp.sourceDir = anonOriginDir_;
-            stamp.sourceFile = anonOriginFile_;
+            stamp.sourceFs = anonOriginFs_.clone();
+            stamp.sourceDir = anonOriginDir_.clone();
+            stamp.sourceFile = anonOriginFile_.clone();
         } else {
             engine_.captureScriptOrigin(stamp);
         }
         funcChunk.originKnown = true;
-        funcChunk.originFs = std::move(stamp.sourceFs);
-        funcChunk.originDir = std::move(stamp.sourceDir);
-        funcChunk.originFile = std::move(stamp.sourceFile);
+        funcChunk.originFs = keel::move(stamp.sourceFs);
+        funcChunk.originDir = keel::move(stamp.sourceDir);
+        funcChunk.originFile = keel::move(stamp.sourceFile);
     }
-    compiledFuncs_[anonName] = std::move(funcChunk);
+    compiledFuncs_.put(anonName.clone(), keel::move(funcChunk));
 
     // Mirror-register the anon-fn into engine.userFuncs_ so that callbacks
     // routed through Engine::callFunctionHandle (TW-side) can find it
@@ -4638,13 +4671,13 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     // same layout VM uses for the cell→params mapping.
     {
         UserFunction uf;
-        uf.name = anonName;
-        uf.params = funcNode->paramNames;
-        uf.returns = funcNode->returnNames;   // {"__result__"} or {"varargout"}
-        uf.body = std::shared_ptr<const ASTNode>(cloneNode(funcNode->children[0].get()));
+        uf.name = anonName.clone();
+        uf.params = funcNode->paramNames.clone();
+        uf.returns = funcNode->returnNames.clone();   // {"__result__"} or {"varargout"}
+        uf.body = keel::Arc<const ASTNode>(cloneNode(funcNode->children[0].get()));
         uf.closureEnv = nullptr;
         engine_.captureScriptOrigin(uf);
-        engine_.adoptUserFunction(anonName, std::move(uf));
+        engine_.adoptUserFunction(anonName, keel::move(uf));
     }
 
     if (capturedOuterRegs.empty()) {
@@ -4652,7 +4685,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         keel::u16 dst = tempReg();
         Value fh = Value::funcHandle(anonName, engine_.allocator());
         fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-        keel::i32 constIdx = appendConstant(std::move(fh));
+        keel::i32 constIdx = appendConstant(keel::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
     }
@@ -4661,12 +4694,12 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     keel::usize totalSlots = 1 + capturedOuterRegs.size();
 
     // Compile elements: funcHandle, then captured values
-    std::vector<keel::u16> elemRegs;
+    keel::Array<keel::u16> elemRegs;
     // funcHandle constant
     keel::u16 fhReg = tempReg();
     Value fh = Value::funcHandle(anonName, engine_.allocator());
     fh.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
-    keel::i32 constIdx = appendConstant(std::move(fh));
+    keel::i32 constIdx = appendConstant(keel::move(fh));
     emitAD(OpCode::LOAD_CONST, fhReg, constIdx);
     elemRegs.push_back(fhReg);
 
@@ -4690,13 +4723,13 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
 keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
                                    int explicitOutBase, keel::u16 nout)
 {
-    const std::string &base = superRef->strValue;
+    const keel::String &base = superRef->strValue;
     const ASTNode *lhs = superRef->children[0].get();
     // `obj@Base(args)` (lhs is a local var/param) → super-constructor;
     // `method@Base(obj,…)` (lhs is a method-name identifier) → super-method.
     const bool isCtor = lhs->type == NodeType::IDENTIFIER
-                        && (varRegisters_.find(lhs->strValue) != varRegisters_.end()
-                            || upvalueRegs_.find(lhs->strValue) != upvalueRegs_.end());
+                        && (varRegisters_.contains(lhs->strValue)
+                            || upvalueRegs_.contains(lhs->strValue));
 
     // Constructor: the seed object comes from lhs; args are the ctor args.
     keel::u16 objReg = isCtor ? compileNode(lhs) : 0;
@@ -4711,7 +4744,7 @@ keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *sup
             anyBrace = true;
             break;
         }
-    std::vector<keel::u16> ar;
+    keel::Array<keel::u16> ar;
     for (keel::usize i = 1; i < callNode->children.size(); ++i)
         ar.push_back(anyBrace ? compileNodeExpand(callNode->children[i].get())
                               : compileNode(callNode->children[i].get()));
@@ -4748,7 +4781,7 @@ keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *sup
     } else {
         outBase = reserveRegs(std::max<keel::u16>(nout, 1));
     }
-    keel::i32 qualIdx = addStringConstant(base + ">" + lhs->strValue);
+    keel::i32 qualIdx = addStringConstant(keel::format("{}>{}", base, lhs->strValue));
     emit(Instruction::make_abcde(OpCode::CALL_SUPER_METHOD, outBase, argBase, nargs, qualIdx,
                                  nout));
     return outBase;
@@ -4769,18 +4802,18 @@ keel::u16 Compiler::compileFunctionDef(const ASTNode *node)
     BytecodeChunk funcChunk = compileFunction(node);
 
     UserFunction uf;
-    uf.name = node->strValue;
-    uf.params = node->paramNames;
-    uf.returns = node->returnNames;
-    uf.body = std::shared_ptr<const ASTNode>(cloneNode(node->children[0].get()));
+    uf.name = node->strValue.clone();
+    uf.params = node->paramNames.clone();
+    uf.returns = node->returnNames.clone();
+    uf.body = keel::Arc<const ASTNode>(cloneNode(node->children[0].get()));
     uf.closureEnv = nullptr;
 
     if (scriptDepth_ > 0) {
-        scriptLocalCompiledFuncs_[node->strValue] = std::move(funcChunk);
-        engine_.adoptUserFunction(node->strValue, std::move(uf), /*scriptScope=*/true);
+        scriptLocalCompiledFuncs_.put(node->strValue.clone(), keel::move(funcChunk));
+        engine_.adoptUserFunction(node->strValue, keel::move(uf), /*scriptScope=*/true);
     } else {
-        compiledFuncs_[node->strValue] = std::move(funcChunk);
-        engine_.adoptUserFunction(node->strValue, std::move(uf), /*scriptScope=*/false);
+        compiledFuncs_.put(node->strValue.clone(), keel::move(funcChunk));
+        engine_.adoptUserFunction(node->strValue, keel::move(uf), /*scriptScope=*/false);
     }
     return 0;
 }
@@ -4793,45 +4826,46 @@ void Compiler::registerFunction(const ASTNode *funcDef)
     compileFunctionDef(funcDef);
 }
 
-void Compiler::registerFunctionAs(const std::string &qualifiedName,
+void Compiler::registerFunctionAs(keel::StringRef qualifiedName,
                                    const ASTNode *funcDef)
 {
-    AnonOriginSentry sentry(*this, /*known=*/false, "", "", "");
+    AnonOriginSentry sentry(*this, /*known=*/false, keel::String{}, keel::String{}, keel::String{});
     registerFunctionAsImpl_(qualifiedName, funcDef);
 }
 
-void Compiler::registerFunctionAs(const std::string &qualifiedName,
-                                   const ASTNode *funcDef, const std::string &fsName,
-                                   const std::string &scriptDir,
-                                   const std::string &scriptFile)
+void Compiler::registerFunctionAs(keel::StringRef qualifiedName,
+                                   const ASTNode *funcDef, keel::StringRef fsName,
+                                   keel::StringRef scriptDir,
+                                   keel::StringRef scriptFile)
 {
-    AnonOriginSentry sentry(*this, /*known=*/true, fsName, scriptDir, scriptFile);
+    AnonOriginSentry sentry(*this, /*known=*/true, keel::String::from(fsName),
+                            keel::String::from(scriptDir), keel::String::from(scriptFile));
     registerFunctionAsImpl_(qualifiedName, funcDef);
 }
 
-Compiler::AnonOriginSentry::AnonOriginSentry(Compiler &c, bool known, std::string fs,
-                                             std::string dir, std::string file)
+Compiler::AnonOriginSentry::AnonOriginSentry(Compiler &c, bool known, keel::String fs,
+                                             keel::String dir, keel::String file)
     : c_(c)
     , known_(c.anonOriginKnown_)
-    , fs_(std::move(c.anonOriginFs_))
-    , dir_(std::move(c.anonOriginDir_))
-    , file_(std::move(c.anonOriginFile_))
+    , fs_(keel::move(c.anonOriginFs_))
+    , dir_(keel::move(c.anonOriginDir_))
+    , file_(keel::move(c.anonOriginFile_))
 {
     c_.anonOriginKnown_ = known;
-    c_.anonOriginFs_ = std::move(fs);
-    c_.anonOriginDir_ = std::move(dir);
-    c_.anonOriginFile_ = std::move(file);
+    c_.anonOriginFs_ = keel::move(fs);
+    c_.anonOriginDir_ = keel::move(dir);
+    c_.anonOriginFile_ = keel::move(file);
 }
 
 Compiler::AnonOriginSentry::~AnonOriginSentry()
 {
     c_.anonOriginKnown_ = known_;
-    c_.anonOriginFs_ = std::move(fs_);
-    c_.anonOriginDir_ = std::move(dir_);
-    c_.anonOriginFile_ = std::move(file_);
+    c_.anonOriginFs_ = keel::move(fs_);
+    c_.anonOriginDir_ = keel::move(dir_);
+    c_.anonOriginFile_ = keel::move(file_);
 }
 
-void Compiler::registerFunctionAsImpl_(const std::string &qualifiedName,
+void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
                                         const ASTNode *funcDef)
 {
     BytecodeChunk funcChunk;
@@ -4839,9 +4873,9 @@ void Compiler::registerFunctionAsImpl_(const std::string &qualifiedName,
         funcChunk = compileFunction(funcDef);
     } else {
         ASTNode fn(NodeType::FUNCTION_DEF);
-        fn.strValue = qualifiedName;
-        fn.paramNames = funcDef->paramNames;
-        fn.returnNames = funcDef->returnNames;
+        fn.strValue = keel::String::from(qualifiedName);
+        fn.paramNames = funcDef->paramNames.clone();
+        fn.returnNames = funcDef->returnNames.clone();
         fn.line = funcDef->line;
         fn.col = funcDef->col;
         fn.endLine = funcDef->endLine;
@@ -4851,34 +4885,34 @@ void Compiler::registerFunctionAsImpl_(const std::string &qualifiedName,
     }
 
     UserFunction uf;
-    uf.name = qualifiedName;
-    uf.params = funcDef->paramNames;
-    uf.returns = funcDef->returnNames;
-    uf.body = std::shared_ptr<const ASTNode>(cloneNode(funcDef->children[0].get()));
+    uf.name = keel::String::from(qualifiedName);
+    uf.params = funcDef->paramNames.clone();
+    uf.returns = funcDef->returnNames.clone();
+    uf.body = keel::Arc<const ASTNode>(cloneNode(funcDef->children[0].get()));
     uf.closureEnv = nullptr;
 
     if (scriptDepth_ > 0) {
-        scriptLocalCompiledFuncs_[qualifiedName] = std::move(funcChunk);
-        engine_.adoptUserFunction(qualifiedName, std::move(uf), /*scriptScope=*/true);
+        scriptLocalCompiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunk));
+        engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/true);
     } else {
-        compiledFuncs_[qualifiedName] = std::move(funcChunk);
-        engine_.adoptUserFunction(qualifiedName, std::move(uf), /*scriptScope=*/false);
+        compiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunk));
+        engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/false);
     }
 }
 
-void Compiler::setChunkOrigin(const std::string &qualifiedName,
-                              const std::string &fsName, const std::string &scriptDir,
-                              const std::string &scriptFile)
+void Compiler::setChunkOrigin(keel::StringRef qualifiedName,
+                              keel::StringRef fsName, keel::StringRef scriptDir,
+                              keel::StringRef scriptFile)
 {
-    auto stampMap = [&](std::unordered_map<std::string, BytecodeChunk> &tbl) {
-        const std::string prefix = qualifiedName + ">";
-        for (auto &[k, ch] : tbl) {
+    auto stampMap = [&](keel::HashMap<keel::String, BytecodeChunk> &tbl) {
+        const keel::String prefix = keel::format("{}>", qualifiedName);
+        for (auto [k, ch] : tbl) {
             if (k == qualifiedName
-                || (k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0)) {
+                || (k.size() > prefix.size() && k.starts_with(prefix))) {
                 ch.originKnown = true;
-                ch.originFs = fsName;
-                ch.originDir = scriptDir;
-                ch.originFile = scriptFile;
+                ch.originFs.assign(fsName);
+                ch.originDir.assign(scriptDir);
+                ch.originFile.assign(scriptFile);
             }
         }
     };
@@ -4886,31 +4920,34 @@ void Compiler::setChunkOrigin(const std::string &qualifiedName,
     stampMap(scriptLocalCompiledFuncs_);
 }
 
-void Compiler::eraseCompiledFunc(const std::string &name)
+void Compiler::eraseCompiledFunc(keel::StringRef name)
 {
-    compiledFuncs_.erase(name);
-    const std::string prefix = name + ">";
-    for (auto it = compiledFuncs_.begin(); it != compiledFuncs_.end();) {
-        if (it->first.size() > prefix.size() && it->first.compare(0, prefix.size(), prefix) == 0)
-            it = compiledFuncs_.erase(it);
-        else
-            ++it;
+    compiledFuncs_.remove(name);
+    const keel::String prefix = keel::format("{}>", name);
+    keel::Array<keel::String> toRemove;
+    for (auto [k, ch] : compiledFuncs_) {
+        if (k.size() > prefix.size() && k.starts_with(prefix))
+            toRemove.push_back(k.clone());
     }
+    for (const auto &k : toRemove)
+        compiledFuncs_.remove(k);
 }
 
-void Compiler::eraseCompiledFuncsForClass(const std::string &className)
+void Compiler::eraseCompiledFuncsForClass(keel::StringRef className)
 {
     // Method chunks are keyed by their fully-qualified name "ClassName>method"
     // (set in ensureClassMethodCompiled). Erase every such key so a redefined
     // class recompiles fresh bodies rather than serving the stale cache — the
     // root of "I rewrote the method but behaviour didn't change". Inherited
     // methods keep their own "Base>method" keys and are untouched.
-    const std::string prefix = className + ">";
-    auto matches = [&](const std::string &k) {
-        return k.size() > prefix.size() && k.compare(0, prefix.size(), prefix) == 0;
-    };
-    for (auto it = compiledFuncs_.begin(); it != compiledFuncs_.end();)
-        it = matches(it->first) ? compiledFuncs_.erase(it) : std::next(it);
+    const keel::String prefix = keel::format("{}>", className);
+    keel::Array<keel::String> toRemove;
+    for (auto [k, ch] : compiledFuncs_) {
+        if (k.size() > prefix.size() && k.starts_with(prefix))
+            toRemove.push_back(k.clone());
+    }
+    for (const auto &k : toRemove)
+        compiledFuncs_.remove(k);
 }
 
 const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
@@ -4918,42 +4955,40 @@ const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
     if (const BytecodeChunk *existing = findCompiled(uf.name))
         return existing;
     ASTNode fn(NodeType::FUNCTION_DEF);
-    fn.strValue = uf.name;
-    fn.paramNames = uf.params;
-    fn.returnNames = uf.returns;
+    fn.strValue = uf.name.clone();
+    fn.paramNames = uf.params.clone();
+    fn.returnNames = uf.returns.clone();
     if (uf.body)
         fn.children.push_back(cloneNode(uf.body.get()));
     BytecodeChunk chunk;
     {
-        AnonOriginSentry sentry(*this, uf.originKnown, uf.sourceFs,
-                                 uf.sourceDir, uf.sourceFile);
+        AnonOriginSentry sentry(*this, uf.originKnown, uf.sourceFs.clone(),
+                                 uf.sourceDir.clone(), uf.sourceFile.clone());
         chunk = compileFunction(&fn);
     }
-    chunk.name = uf.name;
+    chunk.name = uf.name.clone();
     // The method body runs under the classdef file's provenance —
     // mfilename() inside reports the class file (registerClassDef
     // stamped it on the UserFunction; inherited methods carry their
     // declaring class's file).
     chunk.originKnown = uf.originKnown;
-    chunk.originFs = uf.sourceFs;
-    chunk.originDir = uf.sourceDir;
-    chunk.originFile = uf.sourceFile;
-    auto ins = compiledFuncs_.emplace(uf.name, std::move(chunk));
-    return &ins.first->second;
+    chunk.originFs = uf.sourceFs.clone();
+    chunk.originDir = uf.sourceDir.clone();
+    chunk.originFile = uf.sourceFile.clone();
+    auto ins = compiledFuncs_.try_insert(uf.name.clone(), keel::move(chunk));
+    return ins.value;
 }
 
-const BytecodeChunk *Compiler::findCompiled(const std::string &name) const
+const BytecodeChunk *Compiler::findCompiled(keel::StringRef name) const
 {
-    auto it = scriptLocalCompiledFuncs_.find(name);
-    if (it != scriptLocalCompiledFuncs_.end())
-        return &it->second;
-    auto it2 = compiledFuncs_.find(name);
-    return it2 != compiledFuncs_.end() ? &it2->second : nullptr;
+    if (const BytecodeChunk *c = scriptLocalCompiledFuncs_.get(name))
+        return c;
+    return compiledFuncs_.get(name);
 }
 
 void Compiler::beginScriptScope()
 {
-    savedScriptLocalCompiledFuncs_.push_back(std::move(scriptLocalCompiledFuncs_));
+    savedScriptLocalCompiledFuncs_.push_back(keel::move(scriptLocalCompiledFuncs_));
     scriptLocalCompiledFuncs_.clear();
     ++scriptDepth_;
 }
@@ -4967,36 +5002,42 @@ void Compiler::endScriptScope()
         scriptLocalCompiledFuncs_.clear();
         return;
     }
-    scriptLocalCompiledFuncs_ = std::move(savedScriptLocalCompiledFuncs_.back());
+    scriptLocalCompiledFuncs_ = keel::move(savedScriptLocalCompiledFuncs_.back());
     savedScriptLocalCompiledFuncs_.pop_back();
 }
 
 void Compiler::promoteScriptLocalsToWorkspace()
 {
-    for (auto &entry : scriptLocalCompiledFuncs_)
-        compiledFuncs_[entry.first] = std::move(entry.second);
+    for (auto [k, ch] : scriptLocalCompiledFuncs_)
+        compiledFuncs_.put(k.clone(), keel::move(ch));
     scriptLocalCompiledFuncs_.clear();
 }
 
 namespace {
 
 void collectScopeGlobalPersistentDecls(const ASTNode *node,
-                                       std::vector<std::string> &globals,
-                                       std::vector<std::string> &persistents)
+                                       keel::Array<keel::String> &globals,
+                                       keel::Array<keel::String> &persistents)
 {
     if (!node || node->type == NodeType::FUNCTION_DEF || node->type == NodeType::ANON_FUNC)
         return;
     if (node->type == NodeType::GLOBAL_STMT) {
         for (const auto &nm : node->paramNames) {
-            if (std::find(globals.begin(), globals.end(), nm) == globals.end())
-                globals.push_back(nm);
+            bool found = false;
+            for (const auto &g : globals)
+                if (g == nm) { found = true; break; }
+            if (!found)
+                globals.push_back(nm.clone());
         }
         return;
     }
     if (node->type == NodeType::PERSISTENT_STMT) {
         for (const auto &nm : node->paramNames) {
-            if (std::find(persistents.begin(), persistents.end(), nm) == persistents.end())
-                persistents.push_back(nm);
+            bool found = false;
+            for (const auto &p : persistents)
+                if (p == nm) { found = true; break; }
+            if (!found)
+                persistents.push_back(nm.clone());
         }
         return;
     }
@@ -5010,7 +5051,7 @@ void collectScopeGlobalPersistentDecls(const ASTNode *node,
         collectScopeGlobalPersistentDecls(node->elseBranch.get(), globals, persistents);
 }
 
-void collectDirectNestedDefs(const ASTNode *node, std::vector<const ASTNode *> &out)
+void collectDirectNestedDefs(const ASTNode *node, keel::Array<const ASTNode *> &out)
 {
     if (!node || node->type == NodeType::ANON_FUNC)
         return;
@@ -5028,7 +5069,7 @@ void collectDirectNestedDefs(const ASTNode *node, std::vector<const ASTNode *> &
         collectDirectNestedDefs(node->elseBranch.get(), out);
 }
 
-bool isPseudoScopeVar(const std::string &name)
+bool isPseudoScopeVar(keel::StringRef name)
 {
     return name == "nargin" || name == "nargout" || name == "varargin" || name == "varargout";
 }
@@ -5036,23 +5077,23 @@ bool isPseudoScopeVar(const std::string &name)
 } // namespace
 
 BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
-                                        std::shared_ptr<const std::string> sourceCode)
+                                        keel::Arc<const keel::String> sourceCode)
 {
     struct FunctionCompileGuard
     {
         Compiler &c;
         BytecodeChunk savedChunk;
-        std::unordered_map<std::string, keel::u16> savedVarRegs;
-        std::vector<LoopContext> savedLoopStack;
-        std::unordered_map<keel::i32, keel::u16> savedConstCache;
-        std::unordered_map<keel::i32, keel::u16> savedPinnedConsts;
+        keel::HashMap<keel::String, keel::u16> savedVarRegs;
+        keel::Array<LoopContext> savedLoopStack;
+        keel::HashMap<keel::i32, keel::u16> savedConstCache;
+        keel::HashMap<keel::i32, keel::u16> savedPinnedConsts;
         RegBitset savedScalarRegs;
         RegBitset savedDefinedRegs;
         bool savedMayClear;
         bool savedMayInjectVars;
-        std::unordered_map<std::string, keel::u16> savedUpvalueRegs;
-        std::unordered_map<std::string, keel::u16> savedAllScopeUpvalBoxRegs;
-        std::unordered_map<std::string, NestedFuncInfo> savedNestedFuncInfo;
+        keel::HashMap<keel::String, keel::u16> savedUpvalueRegs;
+        keel::HashMap<keel::String, keel::u16> savedAllScopeUpvalBoxRegs;
+        keel::HashMap<keel::String, NestedFuncInfo> savedNestedFuncInfo;
         const EnclosingLexicalContext *savedPendingLexicalCtx;
         int savedNextReg;
         int savedPeakReg;
@@ -5069,18 +5110,18 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 
         explicit FunctionCompileGuard(Compiler &comp)
             : c(comp)
-            , savedChunk(std::move(comp.chunk_))
-            , savedVarRegs(std::move(comp.varRegisters_))
-            , savedLoopStack(std::move(comp.loopStack_))
-            , savedConstCache(std::move(comp.constRegCache_))
-            , savedPinnedConsts(std::move(comp.pinnedConstRegs_))
-            , savedScalarRegs(std::move(comp.scalarRegs_))
-            , savedDefinedRegs(std::move(comp.definedRegs_))
+            , savedChunk(keel::move(comp.chunk_))
+            , savedVarRegs(keel::move(comp.varRegisters_))
+            , savedLoopStack(keel::move(comp.loopStack_))
+            , savedConstCache(keel::move(comp.constRegCache_))
+            , savedPinnedConsts(keel::move(comp.pinnedConstRegs_))
+            , savedScalarRegs(keel::move(comp.scalarRegs_))
+            , savedDefinedRegs(keel::move(comp.definedRegs_))
             , savedMayClear(comp.mayClear_)
             , savedMayInjectVars(comp.mayInjectVars_)
-            , savedUpvalueRegs(std::move(comp.upvalueRegs_))
-            , savedAllScopeUpvalBoxRegs(std::move(comp.allScopeUpvalueBoxRegs_))
-            , savedNestedFuncInfo(std::move(comp.nestedFuncInfo_))
+            , savedUpvalueRegs(keel::move(comp.upvalueRegs_))
+            , savedAllScopeUpvalBoxRegs(keel::move(comp.allScopeUpvalueBoxRegs_))
+            , savedNestedFuncInfo(keel::move(comp.nestedFuncInfo_))
             , savedPendingLexicalCtx(comp.pendingLexicalCtx_)
             , savedNextReg(comp.nextReg_)
             , savedPeakReg(comp.peakReg_)
@@ -5098,18 +5139,18 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 
         ~FunctionCompileGuard()
         {
-            c.chunk_ = std::move(savedChunk);
-            c.varRegisters_ = std::move(savedVarRegs);
-            c.loopStack_ = std::move(savedLoopStack);
-            c.constRegCache_ = std::move(savedConstCache);
-            c.pinnedConstRegs_ = std::move(savedPinnedConsts);
-            c.scalarRegs_ = std::move(savedScalarRegs);
-            c.definedRegs_ = std::move(savedDefinedRegs);
+            c.chunk_ = keel::move(savedChunk);
+            c.varRegisters_ = keel::move(savedVarRegs);
+            c.loopStack_ = keel::move(savedLoopStack);
+            c.constRegCache_ = keel::move(savedConstCache);
+            c.pinnedConstRegs_ = keel::move(savedPinnedConsts);
+            c.scalarRegs_ = keel::move(savedScalarRegs);
+            c.definedRegs_ = keel::move(savedDefinedRegs);
             c.mayClear_ = savedMayClear;
             c.mayInjectVars_ = savedMayInjectVars;
-            c.upvalueRegs_ = std::move(savedUpvalueRegs);
-            c.allScopeUpvalueBoxRegs_ = std::move(savedAllScopeUpvalBoxRegs);
-            c.nestedFuncInfo_ = std::move(savedNestedFuncInfo);
+            c.upvalueRegs_ = keel::move(savedUpvalueRegs);
+            c.allScopeUpvalueBoxRegs_ = keel::move(savedAllScopeUpvalBoxRegs);
+            c.nestedFuncInfo_ = keel::move(savedNestedFuncInfo);
             c.pendingLexicalCtx_ = savedPendingLexicalCtx;
             c.nextReg_ = savedNextReg;
             c.peakReg_ = savedPeakReg;
@@ -5139,15 +5180,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     indexContextNdims_ = 1;
 
     chunk_ = BytecodeChunk{};
-    chunk_.name = funcDef->strValue;
-    chunk_.sourceCode = sourceCode ? std::move(sourceCode) : stateGuard.savedChunk.sourceCode;
-    chunk_.paramNames = funcDef->paramNames;
-    chunk_.returnNames = funcDef->returnNames;
+    chunk_.name = funcDef->strValue.clone();
+    chunk_.sourceCode = sourceCode ? keel::move(sourceCode) : stateGuard.savedChunk.sourceCode;
+    chunk_.paramNames = funcDef->paramNames.clone();
+    chunk_.returnNames = funcDef->returnNames.clone();
     if (funcDef->paramNames.size() >= static_cast<keel::usize>(kInvalidReg)
         || funcDef->returnNames.size() >= static_cast<keel::usize>(kInvalidReg))
         throw std::runtime_error(
-            "Compiler: function '" + funcDef->strValue
-            + "' declares more than 65534 parameters or returns");
+            keel::format("Compiler: function '{}' declares more than 65534 parameters or returns",
+                         funcDef->strValue)
+                .c_str());
     chunk_.numParams = static_cast<keel::u16>(funcDef->paramNames.size());
     chunk_.numReturns = static_cast<keel::u16>(funcDef->returnNames.size());
     varRegisters_.clear();
@@ -5193,108 +5235,112 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     keel::u16 nargoutReg = varRegLookup("nargout");
 
     // Collect direct nested function definitions and set up lexical upvalues.
-    std::vector<const ASTNode *> directNestedDefs;
+    keel::Array<const ASTNode *> directNestedDefs;
     if (bodyRoot)
         collectDirectNestedDefs(bodyRoot, directNestedDefs);
 
-    std::unordered_set<std::string> ownDeclaredShadow;
-    for (const auto &p : funcDef->paramNames) ownDeclaredShadow.insert(p);
-    for (const auto &r : funcDef->returnNames) ownDeclaredShadow.insert(r);
-    for (const auto &g : chunk_.globalNames) ownDeclaredShadow.insert(g);
-    for (const auto &p : chunk_.persistentNames) ownDeclaredShadow.insert(p);
+    keel::HashSet<keel::String> ownDeclaredShadow;
+    for (const auto &p : funcDef->paramNames) ownDeclaredShadow.insert(p.clone());
+    for (const auto &r : funcDef->returnNames) ownDeclaredShadow.insert(r.clone());
+    for (const auto &g : chunk_.globalNames) ownDeclaredShadow.insert(g.clone());
+    for (const auto &p : chunk_.persistentNames) ownDeclaredShadow.insert(p.clone());
 
-    std::vector<std::string> activeUpvalues;
+    keel::Array<keel::String> activeUpvalues;
     if (lexicalCtx) {
         for (const auto &u : lexicalCtx->inheritedUpvalueNames) {
             keel::u16 boxReg = allocPinnedReg();
             chunk_.upvalueParamRegs.push_back(boxReg);
-            allScopeUpvalueBoxRegs_[u] = boxReg;
-            activeUpvalues.push_back(u);
-            if (!ownDeclaredShadow.count(u) && !isPseudoScopeVar(u)) {
+            allScopeUpvalueBoxRegs_.put(u.clone(), boxReg);
+            activeUpvalues.push_back(u.clone());
+            if (!ownDeclaredShadow.contains(u) && !isPseudoScopeVar(u)) {
                 varRegLookup(u, /*preloadReserved=*/false);
-                upvalueRegs_[u] = boxReg;
-                chunk_.upvalueBoxRegs[u] = boxReg;
+                upvalueRegs_.put(u.clone(), boxReg);
+                chunk_.upvalueBoxRegs.put(u.clone(), boxReg);
             }
         }
-        for (const auto &[sibName, sibInfo] : lexicalCtx->siblingNestedFuncs)
-            nestedFuncInfo_[sibName] = sibInfo;
+        for (auto [sibName, sibInfo] : lexicalCtx->siblingNestedFuncs)
+            nestedFuncInfo_.put(sibName.clone(), sibInfo.clone());
     }
 
-    std::vector<std::string> assignedVec;
+    keel::Array<keel::String> assignedVec;
     if (bodyRoot)
         collectAssignedNames(bodyRoot, assignedVec);
-    std::unordered_set<std::string> assignedSet(assignedVec.begin(), assignedVec.end());
-    std::unordered_set<std::string> identifiers;
+    keel::HashSet<keel::String> assignedSet;
+    for (const auto &a : assignedVec)
+        assignedSet.insert(a.clone());
+    keel::HashSet<keel::String> identifiers;
     if (bodyRoot)
         collectAllIdentifiers(bodyRoot, identifiers);
 
     if (!directNestedDefs.empty()) {
-        std::unordered_set<std::string> directNestedNames;
+        keel::HashSet<keel::String> directNestedNames;
         for (const ASTNode *nd : directNestedDefs)
-            directNestedNames.insert(nd->strValue);
+            directNestedNames.insert(nd->strValue.clone());
 
         auto collectDescendantRefs = [&](auto &self, const ASTNode *nfn,
-                                         std::unordered_set<std::string> &allRefs,
-                                         std::unordered_set<std::string> &asgnRefs) -> void {
+                                         keel::HashSet<keel::String> &allRefs,
+                                         keel::HashSet<keel::String> &asgnRefs) -> void {
             if (!nfn || nfn->children.empty())
                 return;
             const ASTNode *nb = nfn->children[0].get();
-            std::unordered_set<std::string> shadow;
-            for (const auto &p : nfn->paramNames) shadow.insert(p);
-            for (const auto &r : nfn->returnNames) shadow.insert(r);
-            std::vector<std::string> ng, np;
+            keel::HashSet<keel::String> shadow;
+            for (const auto &p : nfn->paramNames) shadow.insert(p.clone());
+            for (const auto &r : nfn->returnNames) shadow.insert(r.clone());
+            keel::Array<keel::String> ng, np;
             collectScopeGlobalPersistentDecls(nb, ng, np);
-            for (const auto &g : ng) shadow.insert(g);
-            for (const auto &p : np) shadow.insert(p);
+            for (const auto &g : ng) shadow.insert(g.clone());
+            for (const auto &p : np) shadow.insert(p.clone());
 
-            std::unordered_set<std::string> nIds;
+            keel::HashSet<keel::String> nIds;
             collectAllIdentifiers(nb, nIds);
-            std::vector<std::string> nAsgnVec;
+            keel::Array<keel::String> nAsgnVec;
             collectAssignedNames(nb, nAsgnVec);
 
             for (const auto &id : nIds) {
-                if (!shadow.count(id) && !isPseudoScopeVar(id))
-                    allRefs.insert(id);
+                if (!shadow.contains(id) && !isPseudoScopeVar(id))
+                    allRefs.insert(id.clone());
             }
             for (const auto &asgn : nAsgnVec) {
-                if (!shadow.count(asgn) && !isPseudoScopeVar(asgn)) {
-                    allRefs.insert(asgn);
-                    asgnRefs.insert(asgn);
+                if (!shadow.contains(asgn) && !isPseudoScopeVar(asgn)) {
+                    allRefs.insert(asgn.clone());
+                    asgnRefs.insert(asgn.clone());
                 }
             }
 
-            std::vector<const ASTNode *> subDefs;
+            keel::Array<const ASTNode *> subDefs;
             collectDirectNestedDefs(nb, subDefs);
             for (const ASTNode *sd : subDefs)
-                shadow.insert(sd->strValue);
+                shadow.insert(sd->strValue.clone());
             for (const ASTNode *sd : subDefs) {
-                std::unordered_set<std::string> subAll, subAsgn;
+                keel::HashSet<keel::String> subAll, subAsgn;
                 self(self, sd, subAll, subAsgn);
                 for (const auto &id : subAll)
-                    if (!shadow.count(id) && !isPseudoScopeVar(id))
-                        allRefs.insert(id);
+                    if (!shadow.contains(id) && !isPseudoScopeVar(id))
+                        allRefs.insert(id.clone());
                 for (const auto &asgn : subAsgn)
-                    if (!shadow.count(asgn) && !isPseudoScopeVar(asgn))
-                        asgnRefs.insert(asgn);
+                    if (!shadow.contains(asgn) && !isPseudoScopeVar(asgn))
+                        asgnRefs.insert(asgn.clone());
             }
         };
 
-        std::unordered_set<std::string> descAllRefs, descAsgnRefs;
+        keel::HashSet<keel::String> descAllRefs, descAsgnRefs;
         for (const ASTNode *nd : directNestedDefs)
             collectDescendantRefs(collectDescendantRefs, nd, descAllRefs, descAsgnRefs);
 
-        std::unordered_set<std::string> ownDeclaredOrAssigned = ownDeclaredShadow;
+        keel::HashSet<keel::String> ownDeclaredOrAssigned = ownDeclaredShadow.clone();
         for (const auto &a : assignedVec)
-            ownDeclaredOrAssigned.insert(a);
+            ownDeclaredOrAssigned.insert(a.clone());
 
         // Deterministic order for newly boxed variables of this scope
-        std::vector<std::string> candidateVars;
-        auto addCandidate = [&](const std::string &nm) {
-            if (nm.empty() || isPseudoScopeVar(nm) || directNestedNames.count(nm)
-                || allScopeUpvalueBoxRegs_.count(nm))
+        keel::Array<keel::String> candidateVars;
+        auto addCandidate = [&](keel::StringRef nm) {
+            if (nm.empty() || isPseudoScopeVar(nm) || directNestedNames.contains(nm)
+                || allScopeUpvalueBoxRegs_.contains(nm))
                 return;
-            if (std::find(candidateVars.begin(), candidateVars.end(), nm) == candidateVars.end())
-                candidateVars.push_back(nm);
+            for (const auto &cv : candidateVars)
+                if (cv == nm)
+                    return;
+            candidateVars.push_back(keel::String::from(nm));
         };
         for (const auto &p : funcDef->paramNames) addCandidate(p);
         for (const auto &r : funcDef->returnNames) addCandidate(r);
@@ -5302,49 +5348,51 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         for (const auto &p : chunk_.persistentNames) addCandidate(p);
         for (const auto &a : assignedVec) addCandidate(a);
         for (const auto &id : identifiers) {
-            if (descAsgnRefs.count(id))
+            if (descAsgnRefs.contains(id))
                 addCandidate(id);
         }
 
-        std::unordered_set<std::string> preloadedOnEntry;
-        for (const auto &p : funcDef->paramNames) preloadedOnEntry.insert(p);
-        for (const auto &r : funcDef->returnNames) preloadedOnEntry.insert(r);
-        for (const auto &g : chunk_.globalNames) preloadedOnEntry.insert(g);
-        for (const auto &p : chunk_.persistentNames) preloadedOnEntry.insert(p);
+        keel::HashSet<keel::String> preloadedOnEntry;
+        for (const auto &p : funcDef->paramNames) preloadedOnEntry.insert(p.clone());
+        for (const auto &r : funcDef->returnNames) preloadedOnEntry.insert(r.clone());
+        for (const auto &g : chunk_.globalNames) preloadedOnEntry.insert(g.clone());
+        for (const auto &p : chunk_.persistentNames) preloadedOnEntry.insert(p.clone());
 
         for (const auto &nm : candidateVars) {
-            const bool shared = (ownDeclaredOrAssigned.count(nm) && descAllRefs.count(nm))
-                                || (identifiers.count(nm) && descAsgnRefs.count(nm));
+            const bool shared = (ownDeclaredOrAssigned.contains(nm) && descAllRefs.contains(nm))
+                                || (identifiers.contains(nm) && descAsgnRefs.contains(nm));
             if (!shared)
                 continue;
             keel::u16 mirrorReg = varRegLookup(nm, /*preloadReserved=*/false);
             keel::u16 boxReg = allocPinnedReg();
-            keel::u16 initSrc = preloadedOnEntry.count(nm) ? mirrorReg : kInvalidReg;
+            keel::u16 initSrc = preloadedOnEntry.contains(nm) ? mirrorReg : kInvalidReg;
             emitAB(OpCode::UPVAL_NEW, boxReg, initSrc);
-            upvalueRegs_[nm] = boxReg;
-            allScopeUpvalueBoxRegs_[nm] = boxReg;
-            chunk_.upvalueBoxRegs[nm] = boxReg;
-            activeUpvalues.push_back(nm);
-            chunk_.assignedVars.insert(nm);
+            upvalueRegs_.put(nm.clone(), boxReg);
+            allScopeUpvalueBoxRegs_.put(nm.clone(), boxReg);
+            chunk_.upvalueBoxRegs.put(nm.clone(), boxReg);
+            activeUpvalues.push_back(nm.clone());
+            chunk_.assignedVars.insert(nm.clone());
         }
 
         // Register all direct nested functions before compiling any of them so
         // mutual recursion between siblings and self-recursion resolve cleanly.
         for (const ASTNode *nd : directNestedDefs) {
-            std::string compiledName = chunk_.name + ">" + nd->strValue;
-            std::string dispSrc = compiledName;
-            std::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
-            nestedFuncInfo_[nd->strValue] = NestedFuncInfo{
-                compiledName, dispSrc, activeUpvalues};
+            keel::String compiledName = keel::format("{}>{}", chunk_.name, nd->strValue);
+            keel::String dispSrc = compiledName.clone();
+            for (keel::usize ci = 0; ci < dispSrc.size(); ++ci)
+                if (dispSrc[ci] == '>')
+                    dispSrc[ci] = '/';
+            nestedFuncInfo_.put(nd->strValue.clone(), NestedFuncInfo{
+                keel::move(compiledName), keel::move(dispSrc), activeUpvalues.clone()});
         }
 
-        EnclosingLexicalContext childLexCtx{activeUpvalues, nestedFuncInfo_};
+        EnclosingLexicalContext childLexCtx{activeUpvalues.clone(), nestedFuncInfo_.clone()};
         for (const ASTNode *nd : directNestedDefs) {
-            const NestedFuncInfo &info = nestedFuncInfo_.at(nd->strValue);
+            const NestedFuncInfo &info = *nestedFuncInfo_.get(nd->strValue);
             ASTNode nestedNode(NodeType::FUNCTION_DEF);
-            nestedNode.strValue = info.compiledName;
-            nestedNode.paramNames = nd->paramNames;
-            nestedNode.returnNames = nd->returnNames;
+            nestedNode.strValue = info.compiledName.clone();
+            nestedNode.paramNames = nd->paramNames.clone();
+            nestedNode.returnNames = nd->returnNames.clone();
             nestedNode.line = nd->line;
             nestedNode.col = nd->col;
             nestedNode.endLine = nd->endLine;
@@ -5355,30 +5403,30 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
             BytecodeChunk nestedChunk = compileFunction(&nestedNode, chunk_.sourceCode);
             pendingLexicalCtx_ = nullptr;
             nestedChunk.parentFuncName = chunk_.parentFuncName.empty()
-                                             ? chunk_.name
-                                             : chunk_.parentFuncName;
+                                             ? chunk_.name.clone()
+                                             : chunk_.parentFuncName.clone();
 
             UserFunction nuf;
-            nuf.name = info.compiledName;
-            nuf.params = nd->paramNames;
-            nuf.returns = nd->returnNames;
+            nuf.name = info.compiledName.clone();
+            nuf.params = nd->paramNames.clone();
+            nuf.returns = nd->returnNames.clone();
             if (!nd->children.empty())
-                nuf.body = std::shared_ptr<const ASTNode>(cloneNode(nd->children[0].get()));
+                nuf.body = keel::Arc<const ASTNode>(cloneNode(nd->children[0].get()));
             nuf.closureEnv = nullptr;
             nuf.numUpvalueCaptures = info.upvalueNames.size();
 
             if (scriptDepth_ > 0) {
-                scriptLocalCompiledFuncs_[info.compiledName] = std::move(nestedChunk);
-                engine_.adoptUserFunction(info.compiledName, std::move(nuf), /*scriptScope=*/true);
+                scriptLocalCompiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunk));
+                engine_.adoptUserFunction(info.compiledName, keel::move(nuf), /*scriptScope=*/true);
             } else {
-                compiledFuncs_[info.compiledName] = std::move(nestedChunk);
-                engine_.adoptUserFunction(info.compiledName, std::move(nuf), /*scriptScope=*/false);
+                compiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunk));
+                engine_.adoptUserFunction(info.compiledName, keel::move(nuf), /*scriptScope=*/false);
             }
         }
     }
 
     for (const auto &name : identifiers) {
-        if (varRegisters_.count(name) || assignedSet.count(name) || upvalueRegs_.count(name))
+        if (varRegisters_.contains(name) || assignedSet.contains(name) || upvalueRegs_.contains(name))
             continue;
         if (engine_.isReservedName(name)) {
             varRegLookup(name, /*preloadReserved=*/true);
@@ -5415,7 +5463,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         emitNone(OpCode::RET_EMPTY);
     } else {
         keel::usize nret = funcDef->returnNames.size();
-        std::vector<keel::u16> retRegs;
+        keel::Array<keel::u16> retRegs;
         for (auto &name : funcDef->returnNames) {
             keel::u16 r = varRegLookup(name);
             emitUpvalLoadRawIfShared(name, r);
@@ -5439,16 +5487,16 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
 
     chunk_.numRegisters = static_cast<keel::u32>(peakReg_);
 
-    for (auto &[name, reg] : varRegisters_)
-        chunk_.varMap.push_back({name, reg});
+    for (auto [name, reg] : varRegisters_)
+        chunk_.varMap.push_back(VarRegEntry{name.clone(), reg});
 
     chunk_.narginReg = narginReg;
     chunk_.nargoutReg = nargoutReg;
-    if (auto it = varRegisters_.find("varargin"); it != varRegisters_.end())
-        chunk_.vararginReg = it->second;
+    if (const keel::u16 *vaReg = varRegisters_.get("varargin"))
+        chunk_.vararginReg = *vaReg;
     if (!chunk_.returnNames.empty()) {
-        if (auto it = varRegisters_.find(chunk_.returnNames[0]); it != varRegisters_.end())
-            chunk_.firstReturnReg = it->second;
+        if (const keel::u16 *frReg = varRegisters_.get(chunk_.returnNames[0]))
+            chunk_.firstReturnReg = *frReg;
     }
     chunk_.mayUseInputname = mayInjectVars_;
     if (!chunk_.mayUseInputname) {
@@ -5460,7 +5508,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         }
     }
 
-    return std::move(chunk_);
+    return keel::move(chunk_);
 }
 
 void Compiler::emitVarargoutReturn()
@@ -5500,7 +5548,7 @@ keel::u16 Compiler::compileReturn(const ASTNode * /*node*/)
         }
     } else {
         keel::usize nret = chunk_.returnNames.size();
-        std::vector<keel::u16> retRegs;
+        keel::Array<keel::u16> retRegs;
         for (auto &name : chunk_.returnNames) {
             keel::u16 r = varRegLookup(name);
             emitUpvalLoadRawIfShared(name, r);
@@ -5550,7 +5598,7 @@ keel::u16 Compiler::compileDeleteAssign(const ASTNode *node)
             keel::u16 col = compileNode(lhs->children[2].get());
             emitABC(OpCode::INDEX_DELETE_2D, arr, row, col);
         } else {
-            std::vector<keel::u16> idxRegs;
+            keel::Array<keel::u16> idxRegs;
             for (keel::usize i = 0; i < nargs; ++i) {
                 idxRegs.push_back(compileNode(lhs->children[1 + i].get()));
                 if (i + 1 < nargs)
@@ -5575,7 +5623,7 @@ keel::u16 Compiler::compileDeleteAssign(const ASTNode *node)
 // ============================================================
 
 // Must match the switch in VM::execute CALL_BUILTIN handler
-keel::i8 Compiler::resolveBuiltinId(const std::string &name, keel::usize nargs)
+keel::i8 Compiler::resolveBuiltinId(keel::StringRef name, keel::usize nargs)
 {
     if (nargs == 1) {
         if (name == "abs")
@@ -5628,11 +5676,13 @@ keel::i8 Compiler::resolveBuiltinId(const std::string &name, keel::usize nargs)
     return -1; // not a known inline builtin
 }
 
-std::string Compiler::disassemble(const BytecodeChunk &chunk)
+keel::String Compiler::disassemble(const BytecodeChunk &chunk)
 {
-    std::ostringstream os;
-    os << "=== " << chunk.name << " (regs=" << (int) chunk.numRegisters
-       << " params=" << (int) chunk.numParams << " returns=" << (int) chunk.numReturns << ") ===\n";
+    keel::String os = keel::format("=== {} (regs={} params={} returns={}) ===\n",
+                                   chunk.name,
+                                   (int) chunk.numRegisters,
+                                   (int) chunk.numParams,
+                                   (int) chunk.numReturns);
 
     auto opName = [](OpCode op) -> const char * {
         switch (op) {
@@ -5878,27 +5928,33 @@ std::string Compiler::disassemble(const BytecodeChunk &chunk)
 
         // Show source location if available
         if (i < chunk.sourceMap.size() && chunk.sourceMap[i].line > 0) {
-            os << "  L" << chunk.sourceMap[i].line << ":" << chunk.sourceMap[i].col << "\t";
+            os.append(keel::format("  L{}:{}\t", chunk.sourceMap[i].line, chunk.sourceMap[i].col));
         } else {
-            os << "  \t";
+            os.append("  \t");
         }
 
-        os << "[" << i << "] " << opName(ins.op) << " a=" << (int) ins.a << " b=" << (int) ins.b
-           << " c=" << (int) ins.c << " d=" << ins.d << " e=" << (int) ins.e;
+        os.append(keel::format("[{}] {} a={} b={} c={} d={} e={}",
+                               i,
+                               opName(ins.op),
+                               (int) ins.a,
+                               (int) ins.b,
+                               (int) ins.c,
+                               ins.d,
+                               (int) ins.e));
 
         if (ins.op == OpCode::LOAD_CONST
             && ins.d >= 0
             && static_cast<keel::usize>(ins.d) < chunk.constants.size()) {
             auto &cv = chunk.constants[ins.d];
             if (cv.isDoubleScalar())
-                os << "  ; val=" << cv.scalarVal();
+                os.append(keel::format("  ; val={}", cv.scalarVal()));
             else
-                os << "  ; " << cv.debugString().c_str();
+                os.append(keel::format("  ; {}", cv.debugString()));
         }
-        os << "\n";
+        os.push_back('\n');
     }
 
-    return os.str();
+    return os;
 }
 
 } // namespace numkit

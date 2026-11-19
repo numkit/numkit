@@ -27,11 +27,11 @@
 
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
+#include <keel/string.h>
 #include <cstddef>
-#include <map>
-#include <string>
-#include <vector>
 
 namespace numkit {
 
@@ -53,7 +53,7 @@ struct ElemRegion
 struct VarRegions
 {
     bool all = false;
-    std::vector<ElemRegion> rects;
+    keel::Array<ElemRegion> rects;
 
     void setAll() { all = true; }
     void add(const ElemRegion &r)
@@ -72,10 +72,18 @@ struct VarRegions
         return false;
     }
     bool touchesAll() const { return all || !rects.empty(); }
+
+    VarRegions clone(keel::Allocator *alloc = nullptr) const
+    {
+        VarRegions cp;
+        cp.all = all;
+        cp.rects = rects.clone(alloc);
+        return cp;
+    }
 };
 
 /// Per-statement fine-grained access map: variable → regions.
 /// Empty map entry with all=false and no rects = no access.
-using ElemAccessMap = std::map<std::string, VarRegions>;
+using ElemAccessMap = keel::HashMap<keel::String, VarRegions>;
 
 }  // namespace numkit

@@ -2,16 +2,16 @@
 //
 // VM State-machine splitapply callback implementation.
 
+#include <keel/algo.h>
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/vm.hpp>
 #include <numkit/value/value.hpp>
-
-#include <map>
-#include <memory>
-#include <vector>
 
 namespace numkit::runtime {
 
@@ -19,8 +19,8 @@ namespace detail {
 
 struct SplitapplyCallbackBuiltin : CallbackBuiltin
 {
-    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
-                                             Value *dest, Engine &eng) override
+    keel::Arc<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
+                                       Value *dest, Engine &eng) override
     {
         if (args.size() < 3 || nargout > 1)
             return nullptr;
@@ -36,32 +36,46 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
                 return nullptr; // shape error -> synchronous path reports it
         auto *mr = eng.allocator();
         // Bucket indices by group id (sorted).
-        std::map<int, std::vector<keel::usize>> buckets;
+        keel::HashMap<int, keel::Array<keel::usize>> buckets;
         for (keel::usize i = 0; i < n; ++i)
-            buckets[(int)G.elemAsDouble(i)].push_back(i);
-        auto groups = std::make_shared<std::vector<std::vector<keel::usize>>>();
-        for (auto &kv : buckets)
-            groups->push_back(std::move(kv.second));
-        auto inputs = std::make_shared<std::vector<Value>>();
+            buckets.get_or_insert(static_cast<int>(G.elemAsDouble(i))).push_back(i);
+        keel::Array<int> gids;
+        gids.reserve(buckets.size());
+        for (auto [k, v] : buckets) {
+            (void)v;
+            gids.push_back(k);
+        }
+        keel::sort(gids);
+
+        auto groups = keel::make_arc<keel::Array<keel::Array<keel::usize>>>();
+        groups->reserve(gids.size());
+        for (int gid : gids) {
+            if (auto *arr = buckets.get(gid))
+                groups->push_back(keel::move(*arr));
+        }
+
+        auto inputs = keel::make_arc<keel::Array<Value>>();
+        inputs->reserve(nIn);
         for (keel::usize k = 0; k < nIn; ++k)
             inputs->push_back(args[1 + k]);
-        auto cont = std::make_shared<LoopContinuation>();
+
+        auto cont = keel::make_arc<LoopContinuation>();
         cont->handle = args[0];
         cont->n = groups->size();
         cont->dest = dest;
-        cont->makeArgs = [inputs, groups, mr](keel::usize i) -> std::vector<Value> {
+        cont->makeArgs = [inputs, groups, mr](keel::usize i) -> keel::Array<Value> {
             const auto &idxs = (*groups)[i];
-            std::vector<Value> callArgs(inputs->size());
+            keel::Array<Value> callArgs(inputs->size(), mr);
             for (keel::usize k = 0; k < inputs->size(); ++k) {
                 auto sub = Value::matrix(idxs.size(), 1, ValueType::DOUBLE, mr);
                 double *sd = sub.doubleDataMut();
                 for (keel::usize j = 0; j < idxs.size(); ++j)
                     sd[j] = (*inputs)[k].elemAsDouble(idxs[j]);
-                callArgs[k] = std::move(sub);
+                callArgs[k] = keel::move(sub);
             }
             return callArgs;
         };
-        cont->pack = [mr](std::vector<Value> &results) -> Value {
+        cont->pack = [mr](keel::Array<Value> &results) -> Value {
             auto out = Value::matrix(results.size(), 1, ValueType::DOUBLE, mr);
             double *d = out.doubleDataMut();
             for (keel::usize i = 0; i < results.size(); ++i)
@@ -78,7 +92,7 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
 void registerSplitapplyCallbackBuiltin(Engine &engine)
 {
     engine.registerCallbackBuiltin("splitapply",
-                                   std::make_shared<detail::SplitapplyCallbackBuiltin>());
+                                   keel::make_arc<detail::SplitapplyCallbackBuiltin>());
 }
 
 } // namespace numkit::runtime

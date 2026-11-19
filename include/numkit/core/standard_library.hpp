@@ -7,7 +7,7 @@
 #pragma once
 
 #include <keel/memory.h>
-#include <memory>
+#include <keel/smart_ptr.h>
 
 namespace numkit {
 
@@ -28,8 +28,8 @@ inline void installStandardLibrary(Engine &engine) {
 }
 
 // Convenience: construct an Engine on the heap with the standard library
-// already installed. Returned by unique_ptr because Engine is non-movable.
-std::unique_ptr<Engine> makeStandardEngine(keel::Allocator *mr = nullptr);
+// already installed. Returned by UniquePtr because Engine is non-movable.
+keel::UniquePtr<Engine> makeStandardEngine(keel::Allocator *mr = nullptr);
 
 
 /// @}

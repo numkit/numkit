@@ -11,7 +11,7 @@ protected:
         engine = makeStandardEngine();
     }
 
-    std::unique_ptr<Engine> engine;
+    keel::UniquePtr<Engine> engine;
 };
 
 TEST_F(OpsTest, BinaryArithmetic) {

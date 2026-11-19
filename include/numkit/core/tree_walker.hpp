@@ -1,13 +1,17 @@
 // include/tree_walker.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/small_array.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/types.hpp>
 
-#include <string>
-#include <vector>
+#include <stdexcept>
 
 namespace numkit {
 
@@ -34,9 +38,9 @@ public:
         Environment *env = nullptr;
         // Arg names from caller's CALL site (bare identifier or empty).
         // Read by inputname(k).
-        std::vector<std::string> callerArgNames;
+        keel::Array<keel::String> callerArgNames;
     };
-    const std::vector<ActiveFrame> &activeFrames() const { return activeFrames_; }
+    const keel::Array<ActiveFrame> &activeFrames() const { return activeFrames_; }
 
     // ── Public callback API ───────────────────────────────────
     // Used by Engine::callFunctionHandle so that builtins (e.g.
@@ -47,7 +51,7 @@ public:
     Value callHandlePublic(const Value &handle,
                             keel::ArrayRef<Value> args,
                             Environment *env);
-    std::vector<Value> callHandleMultiPublic(const Value &handle,
+    keel::Array<Value> callHandleMultiPublic(const Value &handle,
                                               keel::ArrayRef<Value> args,
                                               Environment *env,
                                               keel::usize nout);
@@ -58,7 +62,7 @@ public:
     // (the caller already prepends `self`). `runClassCtor` pre-seeds the
     // constructor's output variable with the default-constructed instance
     // (MATLAB's implicit `obj` initialisation), then returns it.
-    std::vector<Value> runClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+    keel::Array<Value> runClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
                                       keel::usize nout);
     Value runClassCtor(const UserFunction &ctor, const Value &seed,
                        keel::ArrayRef<Value> args);
@@ -72,7 +76,7 @@ public:
     Value callUserFunction(const UserFunction &func, keel::ArrayRef<Value> args,
                            Environment *env,
                            const ASTNode *callNode = nullptr);
-    std::vector<Value> callUserFunctionMulti(const UserFunction &func,
+    keel::Array<Value> callUserFunctionMulti(const UserFunction &func,
                                               keel::ArrayRef<Value> args,
                                               Environment *env,
                                               keel::usize nout,
@@ -91,37 +95,67 @@ private:
         int dimension = 0;
         int ndims = 1;
     };
-    std::vector<IndexContext> indexContextStack_;
+    keel::Array<IndexContext> indexContextStack_;
 
     // Parallel call stack of (localEnv, argNames) — pushed on entry to
     // callUserFunction(), popped on exit (RAII). Lifetime safe because
     // each localEnv lives on the C++ stack frame of the same call.
-    std::vector<ActiveFrame> activeFrames_;
+    keel::Array<ActiveFrame> activeFrames_;
+
+    // Active heap-allocated lexical Environments (`Arc<Environment>`), pushed
+    // when entering a function frame that may host nested functions so
+    // `UserFunction::rawClosureEnv` resolves without self-referencing cycles.
+    keel::SmallArray<keel::Arc<Environment>, 16> activeLexicalEnvs_;
+
+    class LexicalEnvGuard
+    {
+    public:
+        LexicalEnvGuard(keel::SmallArray<keel::Arc<Environment>, 16> &stack,
+                        keel::Arc<Environment> env)
+            : stack_(stack), pushed_(static_cast<bool>(env))
+        {
+            if (pushed_)
+                stack_.push_back(keel::move(env));
+        }
+        ~LexicalEnvGuard()
+        {
+            if (pushed_)
+                stack_.pop_back();
+        }
+        LexicalEnvGuard(const LexicalEnvGuard &) = delete;
+        LexicalEnvGuard &operator=(const LexicalEnvGuard &) = delete;
+
+    private:
+        keel::SmallArray<keel::Arc<Environment>, 16> &stack_;
+        bool pushed_;
+    };
+
+    keel::Arc<Environment> resolveClosureEnv(const UserFunction &uf) const;
 
     class FrameGuard
     {
     public:
-        FrameGuard(std::vector<ActiveFrame> &stack, Environment *env,
-                   std::vector<std::string> argNames = {})
+        FrameGuard(keel::Array<ActiveFrame> &stack, Environment *env,
+                   keel::Array<keel::String> argNames = {})
             : stack_(stack)
         {
             ActiveFrame f;
             f.env = env;
-            f.callerArgNames = std::move(argNames);
-            stack_.push_back(std::move(f));
+            f.callerArgNames = keel::move(argNames);
+            stack_.push_back(keel::move(f));
         }
         ~FrameGuard() { stack_.pop_back(); }
         FrameGuard(const FrameGuard &) = delete;
         FrameGuard &operator=(const FrameGuard &) = delete;
 
     private:
-        std::vector<ActiveFrame> &stack_;
+        keel::Array<ActiveFrame> &stack_;
     };
 
     class IndexContextGuard
     {
     public:
-        IndexContextGuard(std::vector<IndexContext> &stack, IndexContext ctx)
+        IndexContextGuard(keel::Array<IndexContext> &stack, IndexContext ctx)
             : stack_(stack)
         {
             stack_.push_back(ctx);
@@ -131,7 +165,7 @@ private:
         IndexContextGuard &operator=(const IndexContextGuard &) = delete;
 
     private:
-        std::vector<IndexContext> &stack_;
+        keel::Array<IndexContext> &stack_;
     };
 
     class RecursionGuard
@@ -140,9 +174,10 @@ private:
         RecursionGuard(int &depth, int maxDepth)
             : depth_(depth)
         {
-            if (++depth_ > maxDepth)
-                throw std::runtime_error("Maximum recursion depth (" + std::to_string(maxDepth)
-                                         + ") exceeded");
+            if (++depth_ > maxDepth) {
+                auto msg = keel::format("Maximum recursion depth ({}) exceeded", maxDepth);
+                throw std::runtime_error(msg.c_str());
+            }
         }
         ~RecursionGuard() { --depth_; }
         RecursionGuard(const RecursionGuard &) = delete;
@@ -153,8 +188,8 @@ private:
     };
 
     // Display helpers
-    void output(const std::string &s);
-    void displayValue(const std::string &name, const Value &val);
+    void output(keel::StringRef s);
+    void displayValue(keel::StringRef name, const Value &val);
 
     // Core dispatch
     // execNode is the single-value entry point: it collapses any comma-separated list
@@ -185,14 +220,14 @@ private:
     // (its children[1..] are the arguments). Disambiguates super-constructor
     // (`obj@Base(args)`, lhs is a variable) from super-method
     // (`method@Base(obj,...)`, lhs is a method-name identifier).
-    std::vector<Value> execSuperCall(const ASTNode *superRef, const ASTNode *callNode,
+    keel::Array<Value> execSuperCall(const ASTNode *superRef, const ASTNode *callNode,
                                      Environment *env, keel::usize nargout);
     Value execCellIndex(const ASTNode *node, Environment *env);
     // The SELECTED contents of a single-subscript cell brace-index node `c{sub}`
     // as a comma-separated list: c{:} -> all elements (column-major); c{vec} ->
     // the indexed elements; c{i} -> exactly one. Throws if the base is not a cell.
     // Shared by every CSL-consuming site (array literal, call args, cell literal).
-    std::vector<Value> cellBraceContents(const ASTNode *node, Environment *env);
+    keel::Array<Value> cellBraceContents(const ASTNode *node, Environment *env);
     Value execFieldAccess(const ASTNode *node, Environment *env);
     Value execMatrixLiteral(const ASTNode *node, Environment *env);
     Value execCellLiteral(const ASTNode *node, Environment *env);
@@ -229,8 +264,8 @@ private:
     Value &resolveFieldLValue(const ASTNode *node, Environment *env);
 
     // Object model (object_model.md): property access via class hooks.
-    Value objectPropGet(const Value &obj, const std::string &name, Environment *env);
-    void objectPropSet(Value &objSlot, const std::string &name, const Value &rhs,
+    Value objectPropGet(const Value &obj, keel::StringRef name, Environment *env);
+    void objectPropSet(Value &objSlot, keel::StringRef name, const Value &rhs,
                        Environment *env);
 
     // Indexing helpers
@@ -243,20 +278,20 @@ private:
     keel::Array<keel::usize> resolveIndex(
         const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env);
     Value execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env);
-    std::vector<Value> execCallMulti(const ASTNode *node, Environment *env, keel::usize nout);
+    keel::Array<Value> execCallMulti(const ASTNode *node, Environment *env, keel::usize nout);
     Value callFuncHandle(const Value &handle, keel::ArrayRef<Value> args, Environment *env,
                          const ASTNode *callNode = nullptr);
-    std::vector<Value> callFuncHandleMulti(const Value &handle,
+    keel::Array<Value> callFuncHandleMulti(const Value &handle,
                                             keel::ArrayRef<Value> args,
                                             Environment *env,
                                             keel::usize nout,
                                             const ASTNode *callNode = nullptr);
 
     // Utilities
-    bool isKnownFunction(const std::string &name) const;
+    bool isKnownFunction(keel::StringRef name) const;
 
     // ── Debugger ──────────────────────────────────────────
-    std::string topLevelName_{"<script>"};
+    keel::String topLevelName_ = keel::String::from("<script>");
     DebugController *debugCtl();
 };
 

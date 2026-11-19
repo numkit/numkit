@@ -1,9 +1,11 @@
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
 #include <numkit/core/parser.hpp>
-#include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstdlib>
 #include <stdexcept>
-#include <unordered_map>
 
 namespace numkit {
 
@@ -11,8 +13,26 @@ namespace numkit {
 // Конструктор
 // ============================================================
 
-Parser::Parser(const std::vector<Token> &tokens)
-    : tokens_(tokens)
+Parser::Parser(keel::ArrayRef<Token> tokens)
+{
+    tokens_.reserve(tokens.size() + 1);
+    for (const auto &tok : tokens)
+        tokens_.push_back(tok.clone());
+    if (tokens_.empty() || tokens_.back().type != TokenType::END_OF_INPUT) {
+        Token eof;
+        eof.type = TokenType::END_OF_INPUT;
+        eof.value.clear();
+        eof.line = tokens_.empty() ? 1 : tokens_.back().line;
+        eof.col = 0;
+        tokens_.push_back(keel::move(eof));
+    }
+    // Skip past any leading COMMENT tokens so current() never returns
+    // one. The advance() helper maintains this invariant from here on.
+    skipPastComments();
+}
+
+Parser::Parser(keel::Array<Token> &&tokens)
+    : tokens_(keel::move(tokens))
 {
     if (tokens_.empty() || tokens_.back().type != TokenType::END_OF_INPUT) {
         Token eof;
@@ -20,7 +40,7 @@ Parser::Parser(const std::vector<Token> &tokens)
         eof.value.clear();
         eof.line = tokens_.empty() ? 1 : tokens_.back().line;
         eof.col = 0;
-        tokens_.push_back(eof);
+        tokens_.push_back(keel::move(eof));
     }
     // Skip past any leading COMMENT tokens so current() never returns
     // one. The advance() helper maintains this invariant from here on.
@@ -101,18 +121,23 @@ bool Parser::match(TokenType t)
     return false;
 }
 
-Token Parser::consume(TokenType t, const std::string &msg)
+Token Parser::consume(TokenType t, keel::StringRef msg)
 {
     if (check(t)) {
-        Token result = tokens_[pos_];
+        Token result = tokens_[pos_].clone();
         advance();
         return result;
     }
-    std::string expected = msg.empty() ? ("token type " + std::to_string(static_cast<int>(t)))
-                                       : msg;
-    throw std::runtime_error("Parse error at line " + std::to_string(current().line) + " col "
-                             + std::to_string(current().col) + ": expected " + expected + ", got '"
-                             + current().value + "'");
+    if (msg.empty()) {
+        keel::String err = keel::format(
+            "Parse error at line {} col {}: expected token type {}, got '{}'",
+            current().line, current().col, static_cast<int>(t), current().value);
+        throw std::runtime_error(err.c_str());
+    }
+    keel::String err = keel::format(
+        "Parse error at line {} col {}: expected {}, got '{}'",
+        current().line, current().col, msg, current().value);
+    throw std::runtime_error(err.c_str());
 }
 
 void Parser::skipNewlines()
@@ -162,42 +187,64 @@ bool Parser::isTerminator(std::initializer_list<TokenType> terminators) const
 // Обрабатывает hex (0x), binary (0b), octal (0o), подчёркивания
 // ============================================================
 
-double Parser::parseDouble(const std::string &text, int line, int col)
+keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
 {
     // Убираем подчёркивания и суффикс i/j (для мнимых)
-    std::string clean;
+    keel::String clean;
     clean.reserve(text.size());
     for (char c : text) {
         if (c != '_')
-            clean += c;
+            clean.push_back(c);
     }
 
     // Убрать суффикс i/j (IMAG_LITERAL)
     if (!clean.empty() && (clean.back() == 'i' || clean.back() == 'j'))
         clean.pop_back();
 
+    auto throwInvalid = [&]() -> void {
+        keel::String err = keel::format(
+            "Invalid number literal '{}' at line {} col {}", text, line, col);
+        throw std::runtime_error(err.c_str());
+    };
+
     if (clean.empty()) {
-        throw std::runtime_error("Invalid number literal '" + text + "' at line "
-                                 + std::to_string(line) + " col " + std::to_string(col));
+        throwInvalid();
     }
 
-    try {
-        // Binary: 0b...
-        if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'b' || clean[1] == 'B')) {
-            return static_cast<double>(std::stoull(clean.substr(2), nullptr, 2));
-        }
-
-        // Octal: 0o...
-        if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'o' || clean[1] == 'O')) {
-            return static_cast<double>(std::stoull(clean.substr(2), nullptr, 8));
-        }
-
-        // Hex и decimal — std::stod обрабатывает оба
-        return std::stod(clean);
-    } catch (const std::exception &) {
-        throw std::runtime_error("Invalid number literal '" + text + "' at line "
-                                 + std::to_string(line) + " col " + std::to_string(col));
+    // Binary: 0b...
+    if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'b' || clean[1] == 'B')) {
+        const char *start = clean.c_str() + 2;
+        if (*start == '-' || *start == '+')
+            throwInvalid();
+        char *end = nullptr;
+        errno = 0;
+        unsigned long long val = std::strtoull(start, &end, 2);
+        if (end == start || *end != '\0' || errno == ERANGE)
+            throwInvalid();
+        return static_cast<keel::f64>(val);
     }
+
+    // Octal: 0o...
+    if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'o' || clean[1] == 'O')) {
+        const char *start = clean.c_str() + 2;
+        if (*start == '-' || *start == '+')
+            throwInvalid();
+        char *end = nullptr;
+        errno = 0;
+        unsigned long long val = std::strtoull(start, &end, 8);
+        if (end == start || *end != '\0' || errno == ERANGE)
+            throwInvalid();
+        return static_cast<keel::f64>(val);
+    }
+
+    // Hex и decimal — std::strtod обрабатывает оба
+    const char *start = clean.c_str();
+    char *end = nullptr;
+    errno = 0;
+    double val = std::strtod(start, &end);
+    if (end == start || *end != '\0' || errno == ERANGE)
+        throwInvalid();
+    return val;
 }
 
 // ============================================================
@@ -212,22 +259,21 @@ ASTNodePtr Parser::parse()
     while (!isAtEnd()) {
         auto stmt = parseStatement();
         if (stmt)
-            block->children.push_back(std::move(stmt));
+            block->children.push_back(keel::move(stmt));
         skipNewlines();
     }
 
     // Check for duplicate function definitions
-    std::unordered_map<std::string, int> funcNames;
+    keel::HashMap<keel::String, int> funcNames;
     for (auto &child : block->children) {
         if (child && child->type == NodeType::FUNCTION_DEF) {
-            auto it = funcNames.find(child->strValue);
-            if (it != funcNames.end()) {
-                throw std::runtime_error(
-                    "Duplicate function '" + child->strValue
-                    + "' (first defined at line " + std::to_string(it->second)
-                    + ", redefined at line " + std::to_string(child->line) + ")");
+            if (const int *firstLine = funcNames.get(child->strValue)) {
+                keel::String err = keel::format(
+                    "Duplicate function '{}' (first defined at line {}, redefined at line {})",
+                    child->strValue, *firstLine, child->line);
+                throw std::runtime_error(err.c_str());
             }
-            funcNames[child->strValue] = child->line;
+            funcNames.put(child->strValue.clone(), child->line);
         }
     }
 
@@ -254,9 +300,9 @@ ASTNodePtr Parser::parseStatement()
         // (bugs/opened/lang/classdef-mid-script-silent.md).
         if (!firstStatement) {
             auto [ln, cl] = loc();
-            throw std::runtime_error(
-                "Illegal use of reserved keyword \"classdef\" at line "
-                + std::to_string(ln) + " col " + std::to_string(cl));
+            keel::String err = keel::format(
+                "Illegal use of reserved keyword \"classdef\" at line {} col {}", ln, cl);
+            throw std::runtime_error(err.c_str());
         }
         return parseClassDef();
     }
@@ -448,11 +494,11 @@ ASTNodePtr Parser::parseCommandStyleCall()
     auto [ln, cl] = loc();
 
     // Имя функции
-    std::string funcName = current().value;
+    keel::String funcName = current().value.clone();
     advance();
 
     auto node = makeNode(NodeType::COMMAND_CALL, ln, cl);
-    node->strValue = std::move(funcName);
+    node->strValue = keel::move(funcName);
 
     // Собираем аргументы до конца statement (NEWLINE, SEMICOLON, EOF).
     // MATLAB semantics: everything after the command head up to the
@@ -463,7 +509,7 @@ ASTNodePtr Parser::parseCommandStyleCall()
     // token's start column reconstructs the space that splits arguments.
     int cmdLine = ln;
     bool haveArg = false;
-    std::string argStr;
+    keel::String argStr;
     int argLine = 0, argCol = 0;
     int prevEnd = -1; // col just past the source text of the previous token
 
@@ -480,8 +526,8 @@ ASTNodePtr Parser::parseCommandStyleCall()
         if (!haveArg)
             return;
         auto arg = makeNode(NodeType::STRING_LITERAL, argLine, argCol);
-        arg->strValue = std::move(argStr);
-        node->children.push_back(std::move(arg));
+        arg->strValue = keel::move(argStr);
+        node->children.push_back(keel::move(arg));
         haveArg = false;
         argStr.clear();
     };
@@ -497,7 +543,7 @@ ASTNodePtr Parser::parseCommandStyleCall()
             argCol = tok.col;
             haveArg = true;
         }
-        argStr += tok.value;
+        argStr.append(tok.value);
         prevEnd = tokenEndCol(tok) + 1;
         advance();
     }
@@ -547,7 +593,7 @@ ASTNodePtr Parser::parseExpressionStatement()
             if (it == NodeType::IDENTIFIER || it == NodeType::FIELD_ACCESS
                 || it == NodeType::CALL || it == NodeType::CELL_INDEX
                 || it == NodeType::DYNAMIC_FIELD_ACCESS) {
-                expr = std::move(expr->children[0]->children[0]);
+                expr = keel::move(expr->children[0]->children[0]);
             }
         }
 
@@ -565,7 +611,7 @@ ASTNodePtr Parser::parseExpressionStatement()
                 advance();  // [
                 advance();  // ]
                 auto node = makeNode(NodeType::DELETE_ASSIGN, startLine, startCol);
-                node->children.push_back(std::move(expr));
+                node->children.push_back(keel::move(expr));
                 node->suppressOutput = consumeStmtTerminator(*node);
                 skipNewlines();
                 return node;
@@ -573,15 +619,15 @@ ASTNodePtr Parser::parseExpressionStatement()
         }
         auto rhs = parseExpression();
         auto node = makeNode(NodeType::ASSIGN, startLine, startCol);
-        node->children.push_back(std::move(expr));
-        node->children.push_back(std::move(rhs));
+        node->children.push_back(keel::move(expr));
+        node->children.push_back(keel::move(rhs));
         node->suppressOutput = consumeStmtTerminator(*node);
         skipNewlines();
         return node;
     }
 
     auto stmt = makeNode(NodeType::EXPR_STMT, startLine, startCol);
-    stmt->children.push_back(std::move(expr));
+    stmt->children.push_back(keel::move(expr));
     stmt->suppressOutput = consumeStmtTerminator(*stmt);
     skipNewlines();
     return stmt;
@@ -597,8 +643,8 @@ ASTNodePtr Parser::tryMultiAssign()
     auto [startLine, startCol] = loc();
     advance();
 
-    std::vector<std::string> names;
-    std::vector<ASTNodePtr> targets;
+    keel::Array<keel::String> names;
+    keel::Array<ASTNodePtr> targets;
     bool anyComplex = false;
 
     // Разбор одного выходного элемента: ~ , bare identifier, или
@@ -608,7 +654,7 @@ ASTNodePtr Parser::tryMultiAssign()
     auto parseElem = [&]() -> bool {
         if (check(TokenType::TILDE)) {
             advance();
-            names.push_back("~");
+            names.push_back(keel::String::from("~"));
             targets.push_back(nullptr);
             return true;
         }
@@ -619,7 +665,7 @@ ASTNodePtr Parser::tryMultiAssign()
             return false;
         switch (expr->type) {
         case NodeType::IDENTIFIER:
-            names.push_back(expr->strValue);
+            names.push_back(expr->strValue.clone());
             break;
         case NodeType::FIELD_ACCESS:
         case NodeType::DYNAMIC_FIELD_ACCESS:
@@ -632,7 +678,7 @@ ASTNodePtr Parser::tryMultiAssign()
         default:
             return false; // not an assignable lvalue (e.g. a transpose / binop)
         }
-        targets.push_back(std::move(expr));
+        targets.push_back(keel::move(expr));
         return true;
     };
 
@@ -663,17 +709,17 @@ ASTNodePtr Parser::tryMultiAssign()
     auto rhs = parseExpression();
     if (names.size() > 1 && rhs && rhs->type == NodeType::IDENTIFIER) {
         auto callNode = makeNode(NodeType::CALL, rhs->line, rhs->col);
-        callNode->children.push_back(std::move(rhs));
-        rhs = std::move(callNode);
+        callNode->children.push_back(keel::move(rhs));
+        rhs = keel::move(callNode);
     }
     auto node = makeNode(NodeType::MULTI_ASSIGN, startLine, startCol);
-    node->returnNames = std::move(names);
+    node->returnNames = keel::move(names);
     // Прикрепляем полноценные lvalue-цели только когда есть хотя бы одна
     // сложная — простой путь (все идентификаторы / ~) остаётся на
     // returnNames без изменений (нулевой риск регрессии).
     if (anyComplex)
-        node->lhsTargets = std::move(targets);
-    node->children.push_back(std::move(rhs));
+        node->lhsTargets = keel::move(targets);
+    node->children.push_back(keel::move(rhs));
     node->suppressOutput = consumeStmtTerminator(*node);
     skipNewlines();
     return node;
@@ -689,11 +735,11 @@ void promoteCondShortCircuitAnd(ASTNode *node)
     if (!node || node->type != NodeType::BINARY_OP)
         return;
     if (node->strValue == "&" || node->strValue == "&&") {
-        node->strValue = "&&";
+        node->strValue.assign("&&");
         for (auto &ch : node->children)
             promoteCondShortCircuitAnd(ch.get());
     } else if (node->strValue == "|" || node->strValue == "||") {
-        node->strValue = "||";
+        node->strValue.assign("||");
         for (auto &ch : node->children)
             promoteCondShortCircuitAnd(ch.get());
     }
@@ -711,7 +757,7 @@ ASTNodePtr Parser::parseIf()
     promoteCondShortCircuitAnd(cond.get());
     skipTerminators();
     auto body = parseBlock({TokenType::KW_ELSEIF, TokenType::KW_ELSE, TokenType::KW_END});
-    node->branches.push_back({std::move(cond), std::move(body)});
+    node->branches.push_back(ASTBranch{keel::move(cond), keel::move(body)});
 
     while (check(TokenType::KW_ELSEIF)) {
         advance();
@@ -719,7 +765,7 @@ ASTNodePtr Parser::parseIf()
         promoteCondShortCircuitAnd(c.get());
         skipTerminators();
         auto b = parseBlock({TokenType::KW_ELSEIF, TokenType::KW_ELSE, TokenType::KW_END});
-        node->branches.push_back({std::move(c), std::move(b)});
+        node->branches.push_back(ASTBranch{keel::move(c), keel::move(b)});
     }
 
     if (match(TokenType::KW_ELSE)) {
@@ -771,7 +817,7 @@ ASTNodePtr Parser::parseWhile()
 
     auto cond = parseExpression();
     promoteCondShortCircuitAnd(cond.get());
-    node->children.push_back(std::move(cond));
+    node->children.push_back(keel::move(cond));
     skipTerminators();
 
     node->children.push_back(parseBlock({TokenType::KW_END}));
@@ -796,7 +842,7 @@ ASTNodePtr Parser::parseSwitch()
         auto ce = parseExpression();
         skipTerminators();
         auto b = parseBlock({TokenType::KW_CASE, TokenType::KW_OTHERWISE, TokenType::KW_END});
-        node->branches.push_back({std::move(ce), std::move(b)});
+        node->branches.push_back(ASTBranch{keel::move(ce), keel::move(b)});
     }
 
     if (match(TokenType::KW_OTHERWISE)) {
@@ -822,7 +868,7 @@ ASTNodePtr Parser::parseTryCatch()
 
     if (match(TokenType::KW_CATCH)) {
         if (check(TokenType::IDENTIFIER)) {
-            node->strValue = current().value;
+            node->strValue = current().value.clone();
             advance();
         }
         skipTerminators();
@@ -843,7 +889,7 @@ ASTNodePtr Parser::parseGlobalPersistent()
     advance();
 
     while (check(TokenType::IDENTIFIER)) {
-        node->paramNames.push_back(current().value);
+        node->paramNames.push_back(current().value.clone());
         advance();
     }
 
@@ -907,13 +953,15 @@ ASTNodePtr Parser::parseFunctionDef()
     // classdef property accessors carry a dotted name: `get.Prop` / `set.Prop`.
     if (check(TokenType::DOT)) {
         advance();
-        node->strValue += "." + consume(TokenType::IDENTIFIER, "accessor property").value;
+        Token propTok = consume(TokenType::IDENTIFIER, "accessor property");
+        node->strValue.push_back('.');
+        node->strValue.append(propTok.value);
     }
 
     if (match(TokenType::LPAREN)) {
-        auto consumeParam = [&]() -> std::string {
+        auto consumeParam = [&]() -> keel::String {
             if (match(TokenType::TILDE))
-                return "__unused_" + std::to_string(node->paramNames.size());
+                return keel::format("__unused_{}", node->paramNames.size());
             return consume(TokenType::IDENTIFIER, "param").value;
         };
         if (!check(TokenType::RPAREN)) {
@@ -931,8 +979,9 @@ ASTNodePtr Parser::parseFunctionDef()
         node->endLine = current().line;
         advance();
     } else if (!isAtEnd()) {
-        throw std::runtime_error("Expected 'end' for function '" + node->strValue
-                                 + "' defined at line " + std::to_string(node->line));
+        keel::String err = keel::format("Expected 'end' for function '{}' defined at line {}",
+                                        node->strValue, node->line);
+        throw std::runtime_error(err.c_str());
     }
 
     skipTerminators();
@@ -952,8 +1001,8 @@ ASTNodePtr Parser::parseClassDef()
     // Parse an optional attribute block `(Attr, Attr=val, ...)`, returning
     // the identifier tokens flattened (e.g. (Access=private) → {"Access",
     // "private"}; (Static) → {"Static"}). Non-identifier values are skipped.
-    auto parseAttrBlock = [&]() -> std::vector<std::string> {
-        std::vector<std::string> attrs;
+    auto parseAttrBlock = [&]() -> keel::Array<keel::String> {
+        keel::Array<keel::String> attrs;
         if (!check(TokenType::LPAREN))
             return attrs;
         advance(); // (
@@ -964,7 +1013,7 @@ ASTNodePtr Parser::parseClassDef()
             else if (check(TokenType::RPAREN))
                 --depth;
             else if (check(TokenType::IDENTIFIER))
-                attrs.push_back(current().value);
+                attrs.push_back(current().value.clone());
             advance();
         }
         return attrs;
@@ -977,12 +1026,13 @@ ASTNodePtr Parser::parseClassDef()
     // a package-qualified name (`< pkg.sub.Base`), so read a dotted run, not a
     // single identifier — otherwise the trailing `.Base` falls through to the
     // body parser and errors as a missing block.
-    auto parseSuperclassName = [&]() -> std::string {
-        std::string name = consume(TokenType::IDENTIFIER, "superclass").value;
+    auto parseSuperclassName = [&]() -> keel::String {
+        keel::String name = consume(TokenType::IDENTIFIER, "superclass").value;
         while (check(TokenType::DOT)) {
             advance();
-            name += '.';
-            name += consume(TokenType::IDENTIFIER, "superclass").value;
+            Token part = consume(TokenType::IDENTIFIER, "superclass");
+            name.push_back('.');
+            name.append(part.value);
         }
         return name;
     };
@@ -1002,13 +1052,14 @@ ASTNodePtr Parser::parseClassDef()
         const bool isProps = check(TokenType::IDENTIFIER) && current().value == "properties";
         const bool isMethods = check(TokenType::IDENTIFIER) && current().value == "methods";
         const bool isEnum = check(TokenType::IDENTIFIER) && current().value == "enumeration";
-        if (!isProps && !isMethods && !isEnum)
-            throw std::runtime_error(
-                "classdef '" + node->strValue
-                + "': expected 'properties', 'methods' or 'enumeration' block at line "
-                + std::to_string(current().line));
+        if (!isProps && !isMethods && !isEnum) {
+            keel::String err = keel::format(
+                "classdef '{}': expected 'properties', 'methods' or 'enumeration' block at line {}",
+                node->strValue, current().line);
+            throw std::runtime_error(err.c_str());
+        }
         advance();                              // consume the block keyword
-        std::vector<std::string> blockAttrs = parseAttrBlock();
+        keel::Array<keel::String> blockAttrs = parseAttrBlock();
         skipTerminators();
 
         while (!isAtEnd() && !check(TokenType::KW_END)) {
@@ -1039,8 +1090,8 @@ ASTNodePtr Parser::parseClassDef()
                 }
                 if (match(TokenType::ASSIGN))
                     prop->children.push_back(parseExpression());
-                prop->classAttrs = blockAttrs;
-                node->children.push_back(std::move(prop));
+                prop->classAttrs = blockAttrs.clone();
+                node->children.push_back(keel::move(prop));
             } else if (isEnum) {
                 // `Name` or `Name(arg, ...)` — a member, optionally with the
                 // constructor arguments that define its underlying value.
@@ -1055,14 +1106,14 @@ ASTNodePtr Parser::parseClassDef()
                     }
                     consume(TokenType::RPAREN, ")");
                 }
-                node->children.push_back(std::move(em));
+                node->children.push_back(keel::move(em));
                 match(TokenType::COMMA); // members may be comma-separated on a line
             } else if (!check(TokenType::KW_FUNCTION)) {
                 // Abstract method: a signature with no `function`/body —
                 // `[o1,o2] = name(p…)`, `o = name(p…)`, `name(p…)`, or `name`.
                 auto [fln, fcl] = loc();
                 auto fn = makeNode(NodeType::FUNCTION_DEF, fln, fcl);
-                fn->classAttrs = blockAttrs; // carries the `Abstract` attribute
+                fn->classAttrs = blockAttrs.clone(); // carries the `Abstract` attribute
                 if (check(TokenType::LBRACKET)) {
                     advance();
                     while (!check(TokenType::RBRACKET)) {
@@ -1075,12 +1126,12 @@ ASTNodePtr Parser::parseClassDef()
                     consume(TokenType::ASSIGN, "=");
                     fn->strValue = consume(TokenType::IDENTIFIER, "method name").value;
                 } else {
-                    std::string first = consume(TokenType::IDENTIFIER, "method name").value;
+                    keel::String first = consume(TokenType::IDENTIFIER, "method name").value;
                     if (match(TokenType::ASSIGN)) {
-                        fn->returnNames.push_back(first);
+                        fn->returnNames.push_back(keel::move(first));
                         fn->strValue = consume(TokenType::IDENTIFIER, "method name").value;
                     } else {
-                        fn->strValue = first;
+                        fn->strValue = keel::move(first);
                     }
                 }
                 if (match(TokenType::LPAREN)) {
@@ -1092,11 +1143,11 @@ ASTNodePtr Parser::parseClassDef()
                     }
                     consume(TokenType::RPAREN, ")");
                 }
-                node->children.push_back(std::move(fn)); // empty body → abstract
+                node->children.push_back(keel::move(fn)); // empty body → abstract
             } else {
                 auto fn = parseFunctionDef();
-                fn->classAttrs = blockAttrs;
-                node->children.push_back(std::move(fn));
+                fn->classAttrs = blockAttrs.clone();
+                node->children.push_back(keel::move(fn));
             }
             skipTerminators();
         }
@@ -1110,7 +1161,8 @@ ASTNodePtr Parser::parseClassDef()
         node->endLine = current().line;
         advance();
     } else if (!isAtEnd()) {
-        throw std::runtime_error("Expected 'end' for classdef '" + node->strValue + "'");
+        keel::String err = keel::format("Expected 'end' for classdef '{}'", node->strValue);
+        throw std::runtime_error(err.c_str());
     }
     skipTerminators();
     return node;
@@ -1131,12 +1183,12 @@ ASTNodePtr Parser::parseBlock(std::initializer_list<TokenType> terminators)
         keel::usize before = pos_;
         auto stmt = parseStatement();
         if (stmt)
-            block->children.push_back(std::move(stmt));
+            block->children.push_back(keel::move(stmt));
         skipNewlines();
         if (pos_ == before) {
-            throw std::runtime_error("Parse error: stuck in block at line "
-                                     + std::to_string(current().line) + " col "
-                                     + std::to_string(current().col));
+            keel::String err = keel::format("Parse error: stuck in block at line {} col {}",
+                                            current().line, current().col);
+            throw std::runtime_error(err.c_str());
         }
     }
     return block;
@@ -1161,13 +1213,13 @@ ASTNodePtr Parser::parseShortCircuitOr()
     auto left = parseShortCircuitAnd();
     while (check(TokenType::OR_SHORT)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseShortCircuitAnd());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1178,13 +1230,13 @@ ASTNodePtr Parser::parseShortCircuitAnd()
     auto left = parseElementOr();
     while (check(TokenType::AND_SHORT)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseElementOr());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1195,13 +1247,13 @@ ASTNodePtr Parser::parseElementOr()
     auto left = parseElementAnd();
     while (check(TokenType::OR)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseElementAnd());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1212,13 +1264,13 @@ ASTNodePtr Parser::parseElementAnd()
     auto left = parseComparison();
     while (check(TokenType::AND)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseComparison());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1229,13 +1281,13 @@ ASTNodePtr Parser::parseComparison()
     while (check(TokenType::EQ) || check(TokenType::NEQ) || check(TokenType::LT)
            || check(TokenType::GT) || check(TokenType::LEQ) || check(TokenType::GEQ)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseColon());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1250,14 +1302,14 @@ ASTNodePtr Parser::parseColon()
         if (check(TokenType::COLON)) {
             advance();
             auto n = makeNode(NodeType::COLON_EXPR, ln, cl);
-            n->children.push_back(std::move(start));
-            n->children.push_back(std::move(second));
+            n->children.push_back(keel::move(start));
+            n->children.push_back(keel::move(second));
             n->children.push_back(parseAddSub());
             return n;
         }
         auto n = makeNode(NodeType::COLON_EXPR, ln, cl);
-        n->children.push_back(std::move(start));
-        n->children.push_back(std::move(second));
+        n->children.push_back(keel::move(start));
+        n->children.push_back(keel::move(second));
         return n;
     }
     return start;
@@ -1268,13 +1320,13 @@ ASTNodePtr Parser::parseAddSub()
     auto left = parseMulDiv();
     while (check(TokenType::PLUS) || check(TokenType::MINUS)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseMulDiv());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1286,13 +1338,13 @@ ASTNodePtr Parser::parseMulDiv()
            || check(TokenType::DOT_BACKSLASH) || check(TokenType::DOT_STAR)
            || check(TokenType::DOT_SLASH)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseUnary());
-        left = std::move(n);
+        left = keel::move(n);
     }
     return left;
 }
@@ -1304,7 +1356,7 @@ ASTNodePtr Parser::parseUnary()
         auto [ln, cl] = loc();
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
-        n->strValue = "-";
+        n->strValue.assign("-");
         n->children.push_back(parseUnary());
         return n;
     }
@@ -1312,7 +1364,7 @@ ASTNodePtr Parser::parseUnary()
         auto [ln, cl] = loc();
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
-        n->strValue = "~";
+        n->strValue.assign("~");
         n->children.push_back(parseUnary());
         return n;
     }
@@ -1320,7 +1372,7 @@ ASTNodePtr Parser::parseUnary()
         auto [ln, cl] = loc();
         advance();
         auto n = makeNode(NodeType::UNARY_OP, ln, cl);
-        n->strValue = "+";
+        n->strValue.assign("+");
         n->children.push_back(parseUnary());
         return n;
     }
@@ -1332,11 +1384,11 @@ ASTNodePtr Parser::parsePower()
     auto left = parsePostfix();
     if (check(TokenType::CARET) || check(TokenType::DOT_CARET)) {
         auto [ln, cl] = loc();
-        std::string op = current().value;
+        keel::String op = current().value.clone();
         advance();
         auto n = makeNode(NodeType::BINARY_OP, ln, cl);
-        n->strValue = std::move(op);
-        n->children.push_back(std::move(left));
+        n->strValue = keel::move(op);
+        n->children.push_back(keel::move(left));
         n->children.push_back(parseUnary()); // правоассоциативность
         return n;
     }
@@ -1355,15 +1407,15 @@ ASTNodePtr Parser::parsePostfix()
             auto [ln, cl] = loc();
             advance();
             auto cn = makeNode(NodeType::CALL, ln, cl);
-            cn->children.push_back(std::move(node));
+            cn->children.push_back(keel::move(node));
             auto parseCallArg = [&]() {
                 if (check(TokenType::IDENTIFIER) && peekToken(1).type == TokenType::ASSIGN) {
                     auto [aln, acl] = loc();
                     auto k = makeNode(NodeType::STRING_LITERAL, aln, acl);
-                    k->strValue = current().value;
+                    k->strValue = current().value.clone();
                     advance(); // IDENT
                     advance(); // '='
-                    cn->children.push_back(std::move(k));
+                    cn->children.push_back(keel::move(k));
                 }
                 cn->children.push_back(parseExpression());
             };
@@ -1373,25 +1425,25 @@ ASTNodePtr Parser::parsePostfix()
                     parseCallArg();
             }
             consume(TokenType::RPAREN, ")");
-            node = std::move(cn);
+            node = keel::move(cn);
         } else if (check(TokenType::LBRACE)) {
             auto [ln, cl] = loc();
             advance();
             auto cn = makeNode(NodeType::CELL_INDEX, ln, cl);
-            cn->children.push_back(std::move(node));
+            cn->children.push_back(keel::move(node));
             cn->children.push_back(parseExpression());
             while (match(TokenType::COMMA))
                 cn->children.push_back(parseExpression());
             consume(TokenType::RBRACE, "}");
-            node = std::move(cn);
+            node = keel::move(cn);
         } else if (check(TokenType::AT) && peekToken(1).type == TokenType::IDENTIFIER) {
             // Superclass-qualified reference `lhs@Base` (classdef super-call).
             auto [ln, cl] = loc();
             advance(); // @
             auto sn = makeNode(NodeType::SUPERCLASS_REF, ln, cl);
             sn->strValue = consume(TokenType::IDENTIFIER, "superclass").value;
-            sn->children.push_back(std::move(node));
-            node = std::move(sn);
+            sn->children.push_back(keel::move(node));
+            node = keel::move(sn);
         } else if (check(TokenType::DOT)
                    && (peekToken(1).type == TokenType::IDENTIFIER
                        || (!peekToken(1).value.empty()
@@ -1399,34 +1451,34 @@ ASTNodePtr Parser::parsePostfix()
             auto [ln, cl] = loc();
             advance();
             auto fn = makeNode(NodeType::FIELD_ACCESS, ln, cl);
-            fn->strValue = current().value;
+            fn->strValue = current().value.clone();
             advance();
-            fn->children.push_back(std::move(node));
-            node = std::move(fn);
+            fn->children.push_back(keel::move(node));
+            node = keel::move(fn);
         } else if (check(TokenType::DOT) && peekToken(1).type == TokenType::LPAREN) {
             // s.(expr) — dynamic field access
             auto [ln, cl] = loc();
             advance(); // consume DOT
             advance(); // consume LPAREN
             auto fn = makeNode(NodeType::DYNAMIC_FIELD_ACCESS, ln, cl);
-            fn->children.push_back(std::move(node));   // child[0] = object
+            fn->children.push_back(keel::move(node));   // child[0] = object
             fn->children.push_back(parseExpression()); // child[1] = field name expr
             consume(TokenType::RPAREN, ")");
-            node = std::move(fn);
+            node = keel::move(fn);
         } else if (check(TokenType::APOSTROPHE)) {
             auto [ln, cl] = loc();
             advance();
             auto tn = makeNode(NodeType::UNARY_OP, ln, cl);
-            tn->strValue = "'";
-            tn->children.push_back(std::move(node));
-            node = std::move(tn);
+            tn->strValue.assign("'");
+            tn->children.push_back(keel::move(node));
+            node = keel::move(tn);
         } else if (check(TokenType::DOT_APOSTROPHE)) {
             auto [ln, cl] = loc();
             advance();
             auto tn = makeNode(NodeType::UNARY_OP, ln, cl);
-            tn->strValue = ".'";
-            tn->children.push_back(std::move(node));
-            node = std::move(tn);
+            tn->strValue.assign(".'");
+            tn->children.push_back(keel::move(node));
+            node = keel::move(tn);
         } else {
             break;
         }
@@ -1446,26 +1498,26 @@ ASTNodePtr Parser::parsePrimary()
     case TokenType::NUMBER: {
         auto n = makeNode(NodeType::NUMBER_LITERAL, ln, cl);
         n->numValue = parseDouble(current().value, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
     case TokenType::IMAG_NUMBER: {
         auto n = makeNode(NodeType::IMAG_LITERAL, ln, cl);
         n->numValue = parseDouble(current().value, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
     case TokenType::STRING: {
         auto n = makeNode(NodeType::STRING_LITERAL, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
     case TokenType::DQSTRING: {
         auto n = makeNode(NodeType::DQSTRING_LITERAL, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
@@ -1487,7 +1539,7 @@ ASTNodePtr Parser::parsePrimary()
     }
     case TokenType::IDENTIFIER: {
         auto n = makeNode(NodeType::IDENTIFIER, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
@@ -1502,8 +1554,8 @@ ASTNodePtr Parser::parsePrimary()
             advance();
             auto rhs = parseExpression();
             auto assignNode = makeNode(NodeType::ASSIGN, e->line, e->col);
-            assignNode->children.push_back(std::move(e));
-            assignNode->children.push_back(std::move(rhs));
+            assignNode->children.push_back(keel::move(e));
+            assignNode->children.push_back(keel::move(rhs));
             assignNode->suppressOutput = true;
             consume(TokenType::RPAREN, ")");
             return assignNode;
@@ -1519,9 +1571,11 @@ ASTNodePtr Parser::parsePrimary()
         advance();
         return makeNode(NodeType::COLON_EXPR, ln, cl);
     }
-    default:
-        throw std::runtime_error("Unexpected token '" + current().value + "' at line "
-                                 + std::to_string(ln) + " col " + std::to_string(cl));
+    default: {
+        keel::String err = keel::format("Unexpected token '{}' at line {} col {}",
+                                        current().value, ln, cl);
+        throw std::runtime_error(err.c_str());
+    }
     }
 }
 
@@ -1538,7 +1592,7 @@ ASTNodePtr Parser::parseAnonFunc()
     // @funcName — хэндл на существующую функцию
     if (check(TokenType::IDENTIFIER) && peekToken(1).type != TokenType::LPAREN) {
         auto n = makeNode(NodeType::ANON_FUNC, ln, cl);
-        n->strValue = current().value;
+        n->strValue = current().value.clone();
         advance();
         return n;
     }
@@ -1546,9 +1600,9 @@ ASTNodePtr Parser::parseAnonFunc()
     // @(params) expr — анонимная функция
     auto n = makeNode(NodeType::ANON_FUNC, ln, cl);
     consume(TokenType::LPAREN, "(");
-    auto consumeAnonParam = [&]() -> std::string {
+    auto consumeAnonParam = [&]() -> keel::String {
         if (match(TokenType::TILDE))
-            return "__unused_" + std::to_string(n->paramNames.size());
+            return keel::format("__unused_{}", n->paramNames.size());
         return consume(TokenType::IDENTIFIER, "param").value;
     };
     if (!check(TokenType::RPAREN)) {
@@ -1571,27 +1625,37 @@ ASTNodePtr Parser::parseAnonFunc()
 // char/string literals re-quoted (internal quotes doubled). This reproduces
 // MATLAB's func2str normalization (`@(x) x + 1` -> `@(x)x+1`, while
 // `' world'` keeps its interior space).
-std::string Parser::reconstructAnonSource(keel::usize from, keel::usize to) const
+keel::String Parser::reconstructAnonSource(keel::usize from, keel::usize to) const
 {
-    std::string s;
+    keel::String s;
     for (keel::usize i = from; i < to && i < tokens_.size(); ++i) {
         const Token &t = tokens_[i];
         switch (t.type) {
         case TokenType::STRING:           // 'char literal'
-            s += '\'';
-            for (char c : t.value) { if (c == '\'') s += "''"; else s += c; }
-            s += '\'';
+            s.push_back('\'');
+            for (char c : t.value) {
+                if (c == '\'')
+                    s.append("''");
+                else
+                    s.push_back(c);
+            }
+            s.push_back('\'');
             break;
         case TokenType::DQSTRING:         // "string literal"
-            s += '"';
-            for (char c : t.value) { if (c == '"') s += "\"\""; else s += c; }
-            s += '"';
+            s.push_back('"');
+            for (char c : t.value) {
+                if (c == '"')
+                    s.append("\"\"");
+                else
+                    s.push_back(c);
+            }
+            s.push_back('"');
             break;
         case TokenType::COMMENT:
         case TokenType::NEWLINE:
             break;                        // not part of the expression text
         default:
-            s += t.value;                 // operators / identifiers / numbers verbatim
+            s.append(t.value);            // operators / identifiers / numbers verbatim
         }
     }
     return s;
@@ -1623,7 +1687,7 @@ ASTNodePtr Parser::parseArrayLiteral(TokenType open, TokenType close, NodeType n
         keel::usize beforeIteration = pos_;
 
         if (check(TokenType::SEMICOLON) || check(TokenType::NEWLINE)) {
-            node->children.push_back(std::move(row));
+            node->children.push_back(keel::move(row));
             row = makeNode(NodeType::BLOCK, current().line, current().col);
             advance();
             while (!isAtEnd() && (check(TokenType::NEWLINE) || check(TokenType::SEMICOLON)))
@@ -1638,14 +1702,15 @@ ASTNodePtr Parser::parseArrayLiteral(TokenType open, TokenType close, NodeType n
             row->children.push_back(parseExpression());
 
         if (pos_ == beforeIteration) {
-            throw std::runtime_error("Parse error: stuck in array literal at line "
-                                     + std::to_string(current().line) + " col "
-                                     + std::to_string(current().col));
+            keel::String err = keel::format(
+                "Parse error: stuck in array literal at line {} col {}",
+                current().line, current().col);
+            throw std::runtime_error(err.c_str());
         }
     }
 
     if (!row->children.empty())
-        node->children.push_back(std::move(row));
+        node->children.push_back(keel::move(row));
 
     consume(close, closeStr);
     return node;

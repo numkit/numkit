@@ -11,9 +11,12 @@
 // formats (.pdf/.eps/.fig/.emf) throw a clear "not supported" — filed
 // in bugs/opened/graphics/figure-export-gaps.md, never silent.
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -24,19 +27,19 @@
 
 #include <algorithm>
 #include <cctype>
-#include <string>
-#include <vector>
+#include <cmath>
+#include <cstdlib>
 
 namespace numkit {
 
 namespace {
 
-std::string lowerExtOf(const std::string &path)
+keel::String lowerExtOf(keel::StringRef path)
 {
-    keel::usize dot = path.find_last_of('.');
-    if (dot == std::string::npos)
-        return "";
-    std::string e = path.substr(dot + 1);
+    keel::usize dot = path.rfind('.');
+    if (dot == keel::kInvalidIndex)
+        return keel::String{};
+    keel::String e = keel::String::from(path.substr(dot + 1));
     for (char &c : e)
         c = (char)std::tolower((unsigned char)c);
     return e;
@@ -51,7 +54,7 @@ const char kBase64[] =
 figrender::SvgImageEmbedder svgPngEmbedder(
     keel::Allocator *mr)
 {
-    return [mr](const std::vector<keel::u8> &rgb, int w, int h) {
+    return [mr](keel::ArrayRef<keel::u8> rgb, int w, int h) -> keel::String {
         const keel::usize Hp = (keel::usize)h, Wp = (keel::usize)w;
         Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
         keel::u8 *d = A.uint8DataMut();
@@ -61,7 +64,7 @@ figrender::SvgImageEmbedder svgPngEmbedder(
                     d[r + c * Hp + ch * Hp * Wp] =
                         rgb[(r * Wp + c) * 3 + ch];
         keel::String png = image::imwriteToBytes(A, "png", mr);
-        std::string b64 = "data:image/png;base64,";
+        keel::String b64 = keel::String::from("data:image/png;base64,");
         b64.reserve(b64.size() + (png.size() / 3 + 1) * 4);
         keel::usize i = 0;
         for (; i + 2 < png.size(); i += 3) {
@@ -71,23 +74,23 @@ figrender::SvgImageEmbedder svgPngEmbedder(
             keel::u32 v = ((keel::u32)(keel::u8)png[i] << 16)
                             | ((keel::u32)(keel::u8)png[i + 1] << 8)
                             | (keel::u8)png[i + 2];
-            b64 += kBase64[(v >> 18) & 63];
-            b64 += kBase64[(v >> 12) & 63];
-            b64 += kBase64[(v >> 6) & 63];
-            b64 += kBase64[v & 63];
+            b64.push_back(kBase64[(v >> 18) & 63]);
+            b64.push_back(kBase64[(v >> 12) & 63]);
+            b64.push_back(kBase64[(v >> 6) & 63]);
+            b64.push_back(kBase64[v & 63]);
         }
         keel::usize rem = png.size() - i;
         keel::u8 b0 = rem >= 1 ? (keel::u8)png[i] : 0;
         keel::u8 b1 = rem >= 2 ? (keel::u8)png[i + 1] : 0;
         if (rem == 1) {
-            b64 += kBase64[b0 >> 2];
-            b64 += kBase64[(b0 & 3) << 4];
-            b64 += "==";
+            b64.push_back(kBase64[b0 >> 2]);
+            b64.push_back(kBase64[(b0 & 3) << 4]);
+            b64.append("==");
         } else if (rem == 2) {
-            b64 += kBase64[b0 >> 2];
-            b64 += kBase64[((b0 & 3) << 4) | (b1 >> 4)];
-            b64 += kBase64[((b1 & 15) << 2)];
-            b64 += '=';
+            b64.push_back(kBase64[b0 >> 2]);
+            b64.push_back(kBase64[((b0 & 3) << 4) | (b1 >> 4)]);
+            b64.push_back(kBase64[((b1 & 15) << 2)]);
+            b64.push_back('=');
         }
         return b64;
     };
@@ -114,8 +117,8 @@ const FigureState *targetFigure(Engine &engine, const Value &v)
 
 struct ExportArgs {
     const FigureState *fig = nullptr;
-    std::string path;
-    std::string ext;        // from filename or explicit format
+    keel::String path;
+    keel::String ext;       // from filename or explicit format
     int dpi = 150;          // MATLAB png default; scales the 840×630 base
 };
 
@@ -133,22 +136,23 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             if (!haveTarget) {
                 out.fig = targetFigure(engine, a);
                 if (!out.fig)
-                    throw std::runtime_error(std::string(who)
-                        + ": first argument must be a graphics handle or figure number");
+                    throw std::runtime_error(keel::format(
+                        "{}: first argument must be a graphics handle or figure number",
+                        who).c_str());
                 haveTarget = true;
             }
             continue;
         }
         if (!a.isChar() && !a.isString())
             continue;   // numeric noise (e.g. ignored Name-Value values)
-        std::string s(a.toString().as_ref());
-        std::string sl = s;
+        keel::String s = a.toString();
+        keel::String sl = s.clone();
         for (char &c : sl)
             c = (char)std::tolower((unsigned char)c);
         if (!s.empty() && s[0] == '-') {
             // print-style flags: -dpng / -dsvg / -r150 / -ochr…
             if (sl.size() > 2 && sl[1] == 'd')
-                out.ext = sl.substr(2);
+                out.ext = keel::String::from(sl.substr(2));
             else if (sl.size() > 2 && sl[1] == 'r')
                 out.dpi = std::max(30, std::atoi(sl.c_str() + 2));
             // other print options (-painters, -opengl, -bestfit, …)
@@ -168,29 +172,28 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
                 break;
             }
         if (!havePath && !isBareFormat) {
-            out.path = s;
+            out.path = keel::move(s);
             havePath = true;
         } else if (isBareFormat) {
-            out.ext = sl;
+            out.ext = keel::move(sl);
         }
     }
     if (needTarget && !out.fig)
         out.fig = &engine.figureManager().current();
     if (!havePath)
-        throw std::runtime_error(std::string(who)
-            + ": a filename is required");
+        throw std::runtime_error(keel::format("{}: a filename is required", who).c_str());
     if (out.ext.empty())
         out.ext = lowerExtOf(out.path);
     if (out.ext.empty())
-        throw std::runtime_error(std::string(who)
-            + ": cannot infer the output format from '" + out.path + "'");
+        throw std::runtime_error(keel::format(
+            "{}: cannot infer the output format from '{}'", who, out.path).c_str());
     return out;
 }
 
 void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 {
     if (!ea.fig)
-        throw std::runtime_error(std::string(who) + ": no figure to export");
+        throw std::runtime_error(keel::format("{}: no figure to export", who).c_str());
     // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
     const int W = std::max(64, (int)(840.0 * ea.dpi / 150.0));
@@ -198,8 +201,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)
-        throw std::runtime_error(std::string(who) + ": cannot resolve '"
-                                 + ea.path + "'");
+        throw std::runtime_error(keel::format("{}: cannot resolve '{}'", who, ea.path).c_str());
 
     if (ea.ext == "svg") {
         rp.fs->writeFile(rp.path,
@@ -219,13 +221,13 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
         return;
     }
     if (ea.ext == "fig" || ea.ext == "emf" || ea.ext == "hdf") {
-        throw std::runtime_error(std::string(who) + ": format '."
-            + ea.ext + "' is not supported yet (supported: .png .svg .jpg "
-              ".bmp .tga .pnm .tif) — bugs/opened/graphics/"
-              "figure-export-gaps.md");
+        throw std::runtime_error(keel::format(
+            "{}: format '.{}' is not supported yet (supported: .png .svg .jpg "
+            ".bmp .tga .pnm .tif) — bugs/opened/graphics/figure-export-gaps.md",
+            who, ea.ext).c_str());
     }
     // Raster formats → RGB buffer → image toolbox encoder.
-    std::vector<keel::u8> rgb =
+    keel::Array<keel::u8> rgb =
         figrender::renderFigureRgb(*ea.fig, W, H);
     const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
     Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8,
@@ -319,7 +321,7 @@ void registerFigureExport(Engine &engine)
             if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
             if (!fig) fig = &ctx.engine->figureManager().current();
             const int W = 560, H = 420;
-            std::vector<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
+            keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
             const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
             Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
             keel::u8 *d = A.uint8DataMut();
@@ -416,10 +418,10 @@ void registerFigureExport(Engine &engine)
             "pink", "lines"
         };
         for (const char *cname : kCmapFns) {
-            std::string paletteName = cname;
-            ExternalFunc fn = [paletteName](keel::ArrayRef<Value> args, keel::usize,
-                                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
-                argcheck::checkNargin(args.size(), 0, 1, paletteName.c_str());
+            ExternalFunc fn = [cname](keel::ArrayRef<Value> args, keel::usize,
+                                      keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                const keel::StringRef paletteName(cname);
+                argcheck::checkNargin(args.size(), 0, 1, cname);
                 auto *mr = ctx.engine->allocator();
                 keel::usize m = 256;
                 if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {

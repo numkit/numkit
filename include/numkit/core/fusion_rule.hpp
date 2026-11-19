@@ -24,12 +24,12 @@
 
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
 #include <keel/memory.h>
+#include <keel/optional.h>
 #include <cstddef>
-#include <functional>
-#include <optional>
-#include <vector>
 
 namespace numkit {
 
@@ -39,14 +39,14 @@ class Value;
 struct FusionRule {
     const char *name = "";
 
-    // AST match → operand sub-expressions (executor order), or nullopt.
-    std::function<std::optional<std::vector<const ASTNode *>>(const ASTNode *)>
+    // AST match → operand sub-expressions (executor order), or kNullOpt.
+    keel::Function<keel::Optional<keel::Array<const ASTNode *>>(const ASTNode *)>
         match;
 
     // Evaluated operands → fused result. true = fused (out filled);
     // false = guard failed, caller must fall back to the per-op path.
-    std::function<bool(const Value *operands, keel::usize nOperands, Value &out,
-                       keel::Allocator *mr)>
+    keel::Function<bool(const Value *operands, keel::usize nOperands, Value &out,
+                        keel::Allocator *mr)>
         execute;
 };
 

@@ -5,11 +5,13 @@
 // (6c.8.4b / 6c.8.5) because they need the shared precision / size
 // helpers.
 
-#include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/io/file_io/fileio.hpp>
 
 #include <numkit/sys/fs_context.hpp>
@@ -17,10 +19,8 @@
 
 #include <numkit/ops/io_helpers.hpp>
 
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <string>
 
 namespace numkit::io {
 using namespace ::numkit::ops;
@@ -34,11 +34,11 @@ namespace {
 FsContext::OpenFile *requireReadFid(FsContext &fs, keel::ArrayRef<Value> args, const char *fn)
 {
     if (args.empty() || !args[0].isScalar())
-        throw Error(std::string(fn) + ": file identifier required");
+        throw Error(keel::format("{}: file identifier required", fn));
     int fid = static_cast<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
-        throw Error(std::string(fn) + ": invalid file identifier");
+        throw Error(keel::format("{}: invalid file identifier", fn));
     return f;
 }
 
@@ -65,18 +65,20 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
             double *d = row.doubleDataMut();
             for (keel::usize i = 0; i < ids.size(); ++i)
                 d[i] = static_cast<double>(ids[i]);
-            outs[0] = std::move(row);
+            outs[0] = keel::move(row);
         }
         return;
     }
 
-    std::string path(args[0].toString().as_ref());
-    std::string mode = (args.size() >= 2 && args[1].isChar()) ? std::string(args[1].toString().as_ref()) : std::string("r");
+    keel::String path = args[0].toString();
+    keel::String mode = (args.size() >= 2 && args[1].isChar())
+                            ? args[1].toString()
+                            : keel::String::from("r");
     bool be = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
-        be = numkit::ops::parseEndian(std::string(args[2].toString().as_ref()), "fopen");
+        be = numkit::ops::parseEndian(args[2].toString().as_ref(), "fopen");
     }
-    int fid = fs.openFile(path, mode);
+    int fid = fs.openFile(path.as_ref(), mode.as_ref());
     if (fid >= 0 && be) {
         if (auto *f = fs.findFile(fid))
             f->mode.append(";be");
@@ -116,14 +118,14 @@ void fgetl(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     }
     keel::usize start = f->cursor;
     keel::usize nl = f->buffer.find('\n', start);
-    keel::usize end = (nl == std::string::npos) ? f->buffer.size() : nl;
+    keel::usize end = (nl == keel::kInvalidIndex) ? f->buffer.size() : nl;
     // Strip trailing \r so CRLF files don't leak the carriage return —
     // MATLAB does the same.
     keel::usize trimEnd = end;
     if (trimEnd > start && f->buffer[trimEnd - 1] == '\r')
         --trimEnd;
     keel::StringRef line = f->buffer.substr(start, trimEnd - start);
-    f->cursor = (nl == std::string::npos) ? f->buffer.size() : nl + 1;
+    f->cursor = (nl == keel::kInvalidIndex) ? f->buffer.size() : nl + 1;
     outs[0] = Value::fromString(line, mr);
 }
 
@@ -143,10 +145,10 @@ void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
                        : remaining;
     keel::usize nlPos = f->buffer.find('\n', start);
     keel::usize end;
-    if (nlPos != std::string::npos && nlPos < start + nchar)
+    if (nlPos != keel::kInvalidIndex && nlPos < start + nchar)
         end = nlPos + 1; // include newline
     else
-        end = std::min(start + nchar, f->buffer.size());
+        end = keel::min(start + nchar, f->buffer.size());
     keel::StringRef line = f->buffer.substr(start, end - start);
     f->cursor = end;
     outs[0] = Value::fromString(line, mr);
@@ -173,11 +175,11 @@ void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel
         throw Error("ferror: invalid file identifier");
 
     bool clear = args.size() >= 2 && args[1].isChar() && args[1].toString() == "clear";
-    std::string msg(f->lastError.as_ref());
+    keel::String msg = f->lastError.clone(mr);
     if (clear)
         f->lastError.clear();
 
-    outs[0] = Value::fromString(msg, mr);
+    outs[0] = Value::fromString(msg.as_ref(), mr);
     if (nargout > 1)
         outs[1] = Value::scalar(msg.empty() ? 0.0 : -1.0, mr);
 }
@@ -217,7 +219,7 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     enum { BOF, COF, EOFO } origin = BOF;
     if (args.size() >= 3) {
         if (args[2].isChar()) {
-            std::string o(args[2].toString().as_ref());
+            keel::String o = args[2].toString();
             if (o == "bof") origin = BOF;
             else if (o == "cof") origin = COF;
             else if (o == "eof") origin = EOFO;
@@ -248,6 +250,7 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
 
 void frewind(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, keel::Allocator *mr)
 {
+    (void)mr;
     if (args.empty() || !args[0].isScalar())
         throw Error("frewind: file identifier required");
     int fid = static_cast<int>(args[0].toScalar());
@@ -272,26 +275,26 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     if (args.size() >= 2)
         sz = numkit::ops::parseReadSize(args[1], "fread");
 
-    std::string precStr = "uint8";
+    keel::String precStr = keel::String::from("uint8");
     if (args.size() >= 3) {
         if (!args[2].isChar())
             throw Error("fread: precision must be a char array");
         precStr = args[2].toString();
     }
-    auto precOpt = numkit::ops::parsePrecision(precStr);
+    auto precOpt = numkit::ops::parsePrecision(precStr.as_ref());
     if (!precOpt)
-        throw Error("fread: unsupported precision '" + precStr + "'");
+        throw Error(keel::format("fread: unsupported precision '{}'", precStr));
     int kind = precOpt->first;
     keel::usize bsize = precOpt->second;
 
     keel::usize skip = 0;
-    bool be = (f->mode.find(";be") != std::string::npos);
+    bool be = (f->mode.find(";be") != keel::kInvalidIndex);
     if (args.size() >= 4) {
         if (args[3].isChar() || args[3].isString()) {
-            be = numkit::ops::parseEndian(std::string(args[3].toString().as_ref()), "fread");
+            be = numkit::ops::parseEndian(args[3].toString().as_ref(), "fread");
         } else if (args[3].isScalar() || args[3].isEmpty()) {
             if (args[3].isScalar())
-                skip = static_cast<keel::usize>(std::max(0.0, args[3].toScalar()));
+                skip = static_cast<keel::usize>(keel::max(0.0, args[3].toScalar()));
         } else {
             throw Error("fread: machine format must be a char array");
         }
@@ -299,13 +302,13 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     if (args.size() >= 5) {
         if (!args[4].isChar() && !args[4].isString())
             throw Error("fread: machine format must be a char array");
-        be = numkit::ops::parseEndian(std::string(args[4].toString().as_ref()), "fread");
+        be = numkit::ops::parseEndian(args[4].toString().as_ref(), "fread");
     }
 
     keel::usize available = f->buffer.size() - f->cursor;
     keel::usize stride = bsize + skip;
     keel::usize maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
-    keel::usize n = std::min(sz.limit, maxElems);
+    keel::usize n = keel::min(sz.limit, maxElems);
     if (sz.limit != SIZE_MAX && n < sz.limit)
         f->lastError = keel::String::from("End of file reached.");
 
@@ -340,7 +343,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     }
     if (n > 0) {
         keel::usize adv = (n - 1) * stride + bsize;
-        f->cursor = std::min(f->buffer.size(), f->cursor + adv);
+        f->cursor = keel::min(f->buffer.size(), f->cursor + adv);
     }
     outs[0] = numkit::ops::shapeFreadOutput(values.data(), values.size(), sz, mr);
     if (nargout > 1)
@@ -356,23 +359,23 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     if (!f || !f->forWrite)
         throw Error("fwrite: invalid file identifier");
 
-    std::string precStr = "uint8";
+    keel::String precStr = keel::String::from("uint8");
     if (args.size() >= 3) {
         if (!args[2].isChar())
             throw Error("fwrite: precision must be a char array");
         precStr = args[2].toString();
     }
-    auto precOpt = numkit::ops::parsePrecision(precStr);
+    auto precOpt = numkit::ops::parsePrecision(precStr.as_ref());
     if (!precOpt)
-        throw Error("fwrite: unsupported precision '" + precStr + "'");
+        throw Error(keel::format("fwrite: unsupported precision '{}'", precStr));
     int kind = precOpt->first;
     keel::usize bsize = precOpt->second;
 
-    bool be = (f->mode.find(";be") != std::string::npos);
+    bool be = (f->mode.find(";be") != keel::kInvalidIndex);
     if (args.size() >= 4) {
         if (!args[3].isChar() && !args[3].isString())
             throw Error("fwrite: machine format must be a char array");
-        be = numkit::ops::parseEndian(std::string(args[3].toString().as_ref()), "fwrite");
+        be = numkit::ops::parseEndian(args[3].toString().as_ref(), "fwrite");
     }
 
     const Value &A = args[1];
@@ -385,7 +388,8 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     // DOUBLE/SINGLE/LOGICAL/CHAR/INT*/UINT* uniformly. The on-disk
     // precision is governed by `precStr`, not by the input dtype, so
     // MATLAB-style `fwrite(fid, uint8([...]), 'uint8')` works.
-    std::string bytes(numel * bsize, '\0');
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<char> bytes(numel * bsize, '\0', scratch.allocator());
     char *dst = bytes.data();
     for (keel::usize i = 0; i < numel; ++i) {
         double v = A.elemAsDouble(i);
@@ -417,7 +421,8 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     keel::usize writePos = f->appendOnly ? f->buffer.size() : f->cursor;
     if (writePos + bytes.size() > f->buffer.size())
         f->buffer.resize(writePos + bytes.size());
-    std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());
+    if (!bytes.empty())
+        std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());
     f->cursor = writePos + bytes.size();
     outs[0] = Value::scalar(static_cast<double>(numel), mr);
 }

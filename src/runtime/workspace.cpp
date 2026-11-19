@@ -7,10 +7,15 @@
 //
 // Cluster: clear / import / assignin / inputname / who / whos / exist / clearvars.
 // (clc / which stay in toolboxes/builtin — path/meta, not workspace runtime.)
+#include <keel/algo.h>
 #include <keel/arena.h>
-#include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
@@ -22,15 +27,9 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp> // mtypeName (whos)
 
-#include <algorithm>
 #include <cstdint>
-#include <iomanip>
 #include <regex>
-#include <set>
-#include <sstream>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 namespace numkit::runtime {
 
@@ -42,6 +41,26 @@ namespace detail {
 void save_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 void load_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 } // namespace detail
+
+namespace {
+
+keel::StringRef extractStem(keel::StringRef fname)
+{
+    keel::StringRef stem = fname;
+    for (keel::usize i = stem.size(); i > 0; --i) {
+        char ch = stem[i - 1];
+        if (ch == '/' || ch == '\\' || ch == ':') {
+            stem = stem.substr(i);
+            break;
+        }
+    }
+    keel::usize dot = stem.rfind('.');
+    if (dot != keel::kInvalidIndex && dot > 0)
+        stem = stem.substr(0, dot);
+    return stem;
+}
+
+} // namespace
 
 void registerWorkspaceRuntime(Engine &engine)
 {
@@ -62,30 +81,30 @@ void registerWorkspaceRuntime(Engine &engine)
                                     }
                                     ctx.engine->syncEnvRemovalsToFrame(env);
                                 } else {
-                                    std::string first = (args[0].isChar() || args[0].isString())
-                                                            ? std::string(args[0].toString().as_ref())
-                                                            : std::string("");
+                                    keel::String first = (args[0].isChar() || args[0].isString())
+                                                             ? args[0].toString()
+                                                             : keel::String();
 
                                     if (first == "-regexp") {
-                                        std::vector<std::regex> pats;
+                                        keel::Array<keel::UniquePtr<std::regex>> pats;
                                         for (keel::usize i = 1; i < args.size(); ++i) {
                                             if (!args[i].isChar() && !args[i].isString()) continue;
-                                            std::string patStr(args[i].toString().as_ref());
-                                            try { pats.emplace_back(patStr); }
-                                            catch (const std::regex_error &) {
+                                            keel::String patStr = args[i].toString();
+                                            try {
+                                                pats.push_back(keel::make_unique<std::regex>(patStr.c_str(), patStr.size()));
+                                            } catch (const std::regex_error &) {
                                                 throw std::runtime_error(
-                                                    "clear -regexp: invalid pattern '"
-                                                    + patStr + "'");
+                                                    keel::format("clear -regexp: invalid pattern '{}'", patStr).c_str());
                                             }
                                         }
                                         auto applyTo = [&](Environment *e) {
                                             if (!e) return;
-                                            std::vector<std::string> candidates = e->localNames();
-                                            for (const auto &g : e->globalNames()) candidates.push_back(g);
-                                            for (const auto &p : e->persistentNames()) candidates.push_back(p);
+                                            keel::Array<keel::String> candidates = e->localNames();
+                                            for (const auto &g : e->globalNames()) candidates.push_back(g.clone());
+                                            for (const auto &p : e->persistentNames()) candidates.push_back(p.clone());
                                             for (const auto &n : candidates) {
                                                 for (const auto &re : pats) {
-                                                    if (std::regex_search(n, re)) {
+                                                    if (std::regex_search(n.c_str(), *re)) {
                                                         e->remove(n);
                                                         break;
                                                     }
@@ -112,7 +131,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         } else {
                                             for (keel::usize i = 1; i < args.size(); ++i) {
                                                 if (args[i].isChar() || args[i].isString()) {
-                                                    std::string gname(args[i].toString().as_ref());
+                                                    keel::String gname = args[i].toString();
                                                     if (gs)
                                                         gs->remove(gname);
                                                     env->remove(gname);
@@ -160,7 +179,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     } else {
                                         for (auto &a : args) {
                                             if (a.isChar() || a.isString()) {
-                                                std::string vname(a.toString().as_ref());
+                                                keel::String vname = a.toString();
                                                 env->remove(vname);
                                                 if (!insideFunc)
                                                     ctx.engine->clearPersistentForFunc(vname);
@@ -182,34 +201,35 @@ void registerWorkspaceRuntime(Engine &engine)
     // Multiple args allowed: `import a.* b.*` pushes two imports.
     engine.registerFunction(
         "import", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            auto fail = [](const std::string &msg) {
-                throw std::runtime_error("import: " + msg);
+            auto fail = [](keel::StringRef msg) {
+                throw std::runtime_error(keel::format("import: {}", msg).c_str());
             };
-            auto asString = [&](const Value &v, keel::usize i) -> std::string {
+            auto asString = [&](const Value &v, keel::usize i) -> keel::String {
                 if (!v.isChar() && !v.isString())
-                    fail("argument " + std::to_string(i + 1) + " must be a string");
-                return std::string(v.toString().as_ref());
+                    fail(keel::format("argument {} must be a string", i + 1));
+                return v.toString();
             };
-            auto parseSpec = [&](const std::string &spec, Import &imp) {
+            auto parseSpec = [&](keel::StringRef spec, Import &imp) {
                 if (spec.empty()) fail("empty import specifier");
                 keel::usize pos = 0;
                 while (pos < spec.size()) {
                     keel::usize dot = spec.find('.', pos);
-                    std::string seg = spec.substr(pos, dot == std::string::npos ? std::string::npos
-                                                                                : dot - pos);
+                    keel::StringRef seg = (dot == keel::kInvalidIndex)
+                                              ? spec.substr(pos)
+                                              : spec.substr(pos, dot - pos);
                     if (seg == "*") {
-                        if (dot != std::string::npos)
-                            fail("'*' must be the last component in '" + spec + "'");
+                        if (dot != keel::kInvalidIndex)
+                            fail(keel::format("'*' must be the last component in '{}'", spec));
                         imp.wildcard = true;
                         return;
                     }
                     if (seg.empty())
-                        fail("empty path component in '" + spec + "'");
-                    imp.path.push_back(std::move(seg));
-                    if (dot == std::string::npos) break;
+                        fail(keel::format("empty path component in '{}'", spec));
+                    imp.path.push_back(keel::String::from(seg));
+                    if (dot == keel::kInvalidIndex) break;
                     pos = dot + 1;
                 }
-                if (imp.path.empty()) fail("missing path in '" + spec + "'");
+                if (imp.path.empty()) fail(keel::format("missing path in '{}'", spec));
             };
 
             if (args.empty()) fail("requires at least one argument");
@@ -218,26 +238,29 @@ void registerWorkspaceRuntime(Engine &engine)
             if (args.size() == 3 && (args[1].isChar() || args[1].isString())
                 && args[1].toString() == "as") {
                 Import imp;
-                parseSpec(asString(args[0], 0), imp);
+                keel::String s0 = asString(args[0], 0);
+                parseSpec(s0, imp);
                 if (imp.wildcard) fail("'as' alias is not allowed with wildcard import");
                 imp.alias = asString(args[2], 2);
                 if (imp.alias.empty()) fail("alias name must be non-empty");
                 if (!imp.path.empty()) {
-                    ctx.engine->pluginLoader().tryAutoLoadForFunction(imp.path[0] + ".");
+                    ctx.engine->pluginLoader().tryAutoLoadForFunction(
+                        keel::format("{}.", imp.path[0]));
                 }
-                ctx.env->pushImport(std::move(imp));
+                ctx.env->pushImport(keel::move(imp));
                 outs[0] = Value();
                 return;
             }
 
             for (keel::usize i = 0; i < args.size(); ++i) {
-                std::string spec = asString(args[i], i);
+                keel::String spec = asString(args[i], i);
                 Import imp;
                 parseSpec(spec, imp);
                 if (!imp.path.empty()) {
-                    ctx.engine->pluginLoader().tryAutoLoadForFunction(imp.path[0] + ".");
+                    ctx.engine->pluginLoader().tryAutoLoadForFunction(
+                        keel::format("{}.", imp.path[0]));
                 }
-                ctx.env->pushImport(std::move(imp));
+                ctx.env->pushImport(keel::move(imp));
             }
             outs[0] = Value();
         });
@@ -257,8 +280,8 @@ void registerWorkspaceRuntime(Engine &engine)
                 throw std::runtime_error("assignin: workspace must be 'base' or 'caller'");
             if (!args[1].isChar())
                 throw std::runtime_error("assignin: name must be a string");
-            std::string where(args[0].toString().as_ref());
-            std::string name(args[1].toString().as_ref());
+            keel::String where = args[0].toString();
+            keel::String name = args[1].toString();
             if (name.empty())
                 throw std::runtime_error("assignin: name must be non-empty");
             if (where == "base") {
@@ -278,7 +301,7 @@ void registerWorkspaceRuntime(Engine &engine)
                 ctx.engine->assignToCaller(1, name, args[2]);
             } else {
                 throw std::runtime_error(
-                    "assignin: workspace must be 'base' or 'caller', got '" + where + "'");
+                    keel::format("assignin: workspace must be 'base' or 'caller', got '{}'", where).c_str());
             }
             outs[0] = Value();
         });
@@ -296,7 +319,7 @@ void registerWorkspaceRuntime(Engine &engine)
             int k = static_cast<int>(kd);
             if (static_cast<double>(k) != kd || k < 1)
                 throw std::runtime_error("inputname: k must be a positive integer");
-            std::string name = ctx.engine->inputName(k);
+            keel::String name = ctx.engine->inputName(k);
             outs[0] = Value::fromString(name, ctx.engine->allocator());
         });
 
@@ -309,68 +332,68 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("who -file requires a filename");
-                                    std::string fname(args[1].toString().as_ref());
+                                    keel::String fname = args[1].toString();
                                     auto rp = ctx.engine->resolvePath(fname);
                                     if (!rp.fs || !rp.fs->exists(rp.path))
-                                        throw std::runtime_error("who -file: file not found: " + fname);
-                                    std::string stem = fname;
-                                    keel::usize sep = stem.find_last_of("/\\:");
-                                    if (sep != std::string::npos) stem = stem.substr(sep + 1);
-                                    keel::usize dot = stem.find_last_of('.');
-                                    if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
-                                    std::ostringstream os;
-                                    os << "\nYour variables are:\n\n" << stem << "  \n\n";
-                                    ctx.engine->outputText(os.str());
+                                        throw std::runtime_error(
+                                            keel::format("who -file: file not found: {}", fname).c_str());
+                                    keel::StringRef stem = extractStem(fname);
+                                    ctx.engine->outputText(
+                                        keel::format("\nYour variables are:\n\n{}  \n\n", stem));
                                     outs[0] = Value();
                                     return;
                                 }
 
-                                std::set<std::string> uniqNames;
-                                auto isPseudo = [](const std::string &n) {
+                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+                                keel::HashSet<keel::String> uniqNames(scratch.allocator());
+                                auto isPseudo = [](keel::StringRef n) {
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
                                     for (auto &n : env->localNames())
-                                        if (!isPseudo(n)) uniqNames.insert(n);
+                                        if (!isPseudo(n)) uniqNames.insert(n.clone(scratch.allocator()));
                                     for (const auto &g : env->globalNames())
-                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g);
+                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g.clone(scratch.allocator()));
                                     for (const auto &p : env->persistentNames())
-                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p);
+                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p.clone(scratch.allocator()));
                                 } else {
                                     for (auto &a : args) {
                                         if (a.isChar() || a.isString()) {
-                                            std::string varName(a.toString().as_ref());
+                                            keel::String varName = a.toString();
                                             if (!isPseudo(varName)
                                                 && (env->getLocal(varName)
                                                     || (env->isGlobal(varName) && env->get(varName))
                                                     || (env->isPersistent(varName) && env->get(varName)))) {
-                                                uniqNames.insert(varName);
+                                                uniqNames.insert(keel::String::from(varName, scratch.allocator()));
                                             }
                                         }
                                     }
                                 }
-                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
-                                keel::Array<std::string> names(scratch.allocator());
+                                keel::Array<keel::String> names(scratch.allocator());
+                                names.reserve(uniqNames.size());
                                 for (const auto &n : uniqNames)
-                                    names.push_back(n);
+                                    names.push_back(n.clone(scratch.allocator()));
+                                keel::sort(names);
 
                                 if (nargout > 0) {
                                     auto *mr = ctx.engine->allocator();
                                     Value c = Value::cell(names.size(), 1, mr);
                                     for (keel::usize i = 0; i < names.size(); ++i)
                                         c.cellAt(i) = Value::fromString(names[i], mr);
-                                    outs[0] = std::move(c);
+                                    outs[0] = keel::move(c);
                                     return;
                                 }
 
-                                std::ostringstream os;
+                                keel::String out(scratch.allocator());
                                 if (!names.empty()) {
-                                    os << "\nYour variables are:\n\n";
-                                    for (auto &n : names)
-                                        os << n << "  ";
-                                    os << "\n\n";
+                                    out.append("\nYour variables are:\n\n");
+                                    for (const auto &n : names) {
+                                        out.append(n);
+                                        out.append("  ");
+                                    }
+                                    out.append("\n\n");
                                 }
-                                ctx.engine->outputText(os.str());
+                                ctx.engine->outputText(out);
                                 outs[0] = Value();
                             });
 
@@ -383,128 +406,137 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
                                     if (args.size() < 2 || !args[1].isChar())
                                         throw std::runtime_error("whos -file requires a filename");
-                                    std::string fname(args[1].toString().as_ref());
+                                    keel::String fname = args[1].toString();
                                     auto rp = ctx.engine->resolvePath(fname);
                                     if (!rp.fs || !rp.fs->exists(rp.path))
-                                        throw std::runtime_error("whos -file: file not found: " + fname);
+                                        throw std::runtime_error(
+                                            keel::format("whos -file: file not found: {}", fname).c_str());
                                     auto st = rp.fs->stat(rp.path);
                                     keel::i64 bytes = st ? st->size : 0;
-                                    std::string stem = fname;
-                                    keel::usize sep = stem.find_last_of("/\\:");
-                                    if (sep != std::string::npos) stem = stem.substr(sep + 1);
-                                    keel::usize dot = stem.find_last_of('.');
-                                    if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
-                                    std::ostringstream os;
-                                    os << "  Name      Size    Bytes  Class\n";
-                                    os << "  " << std::left << std::setw(8) << stem
-                                       << "  ?       " << bytes << "  double\n";
-                                    ctx.engine->outputText(os.str());
+                                    keel::StringRef stem = extractStem(fname);
+                                    keel::String out;
+                                    out.append("  Name      Size    Bytes  Class\n  ");
+                                    out.append(stem);
+                                    for (keel::usize i = stem.size(); i < 8; ++i)
+                                        out.push_back(' ');
+                                    keel::format_into(out, "  ?       {}  double\n", bytes);
+                                    ctx.engine->outputText(out);
                                     outs[0] = Value();
                                     return;
                                 }
 
-                                std::set<std::string> uniqNames;
-                                auto isPseudo = [](const std::string &n) {
+                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+                                keel::HashSet<keel::String> uniqNames(scratch.allocator());
+                                auto isPseudo = [](keel::StringRef n) {
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
                                     for (auto &n : env->localNames())
-                                        if (!isPseudo(n)) uniqNames.insert(n);
+                                        if (!isPseudo(n)) uniqNames.insert(n.clone(scratch.allocator()));
                                     for (const auto &g : env->globalNames())
-                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g);
+                                        if (!isPseudo(g) && env->get(g)) uniqNames.insert(g.clone(scratch.allocator()));
                                     for (const auto &p : env->persistentNames())
-                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p);
+                                        if (!isPseudo(p) && env->get(p)) uniqNames.insert(p.clone(scratch.allocator()));
                                 } else {
                                     for (auto &a : args) {
                                         if (a.isChar() || a.isString()) {
-                                            std::string varName(a.toString().as_ref());
+                                            keel::String varName = a.toString();
                                             if (!isPseudo(varName)
                                                 && (env->getLocal(varName)
                                                     || (env->isGlobal(varName) && env->get(varName))
                                                     || (env->isPersistent(varName) && env->get(varName)))) {
-                                                uniqNames.insert(varName);
+                                                uniqNames.insert(keel::String::from(varName, scratch.allocator()));
                                             }
                                         }
                                     }
                                 }
-                                keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
-                                keel::Array<std::string> names(scratch.allocator());
+                                keel::Array<keel::String> names(scratch.allocator());
+                                names.reserve(uniqNames.size());
                                 for (const auto &n : uniqNames)
-                                    names.push_back(n);
+                                    names.push_back(n.clone(scratch.allocator()));
+                                keel::sort(names);
 
                                 if (nargout > 0) {
                                     auto *mr = ctx.engine->allocator();
-                                    std::vector<std::pair<std::string, const Value *>> valid;
+                                    struct ValidVar {
+                                        keel::StringRef name;
+                                        const Value *val;
+                                    };
+                                    keel::Array<ValidVar> valid(scratch.allocator());
                                     valid.reserve(names.size());
-                                    for (auto &n : names) {
+                                    for (const auto &n : names) {
                                         if (auto *val = env->get(n))
-                                            valid.emplace_back(n, val);
+                                            valid.push_back({n.as_ref(), val});
                                     }
                                     Value sa = Value::structArray(valid.size(), 1, mr);
                                     for (keel::usize idx = 0; idx < valid.size(); ++idx) {
-                                        const auto &[n, val] = valid[idx];
-                                        auto &d = val->dims();
-                                        const int nd = std::max(2, d.ndim());
+                                        const auto &entry = valid[idx];
+                                        const auto &d = entry.val->dims();
+                                        const int nd = keel::max(2, d.ndim());
                                         Value sz = Value::matrix(1, static_cast<keel::usize>(nd), ValueType::DOUBLE, mr);
                                         for (int k = 0; k < nd; ++k)
                                             sz.doubleDataMut()[k] = static_cast<double>(d.dim(k));
-                                        std::string classStr = val->isSingleComplex()
-                                            ? "single" : std::string(mtypeName(val->type()));
+                                        keel::StringRef classStr = entry.val->isSingleComplex()
+                                            ? keel::StringRef("single")
+                                            : keel::StringRef(mtypeName(entry.val->type()));
                                         Value nest = Value::structure(mr);
                                         nest.field("function") = Value::fromString("", mr);
                                         nest.field("level") = Value::scalar(0.0, mr);
-                                        sa.setField(idx, "name", Value::fromString(n, mr));
-                                        sa.setField(idx, "size", std::move(sz));
-                                        sa.setField(idx, "bytes", Value::scalar(static_cast<double>(val->deepBytes()), mr));
+                                        sa.setField(idx, "name", Value::fromString(entry.name, mr));
+                                        sa.setField(idx, "size", keel::move(sz));
+                                        sa.setField(idx, "bytes", Value::scalar(static_cast<double>(entry.val->deepBytes()), mr));
                                         sa.setField(idx, "class", Value::fromString(classStr, mr));
-                                        sa.setField(idx, "global", Value::logicalScalar(env->isGlobal(n), mr));
+                                        sa.setField(idx, "global", Value::logicalScalar(env->isGlobal(entry.name), mr));
                                         sa.setField(idx, "sparse", Value::logicalScalar(false, mr));
-                                        sa.setField(idx, "complex", Value::logicalScalar(val->isComplex() || val->isSingleComplex(), mr));
-                                        sa.setField(idx, "nesting", std::move(nest));
-                                        sa.setField(idx, "persistent", Value::logicalScalar(env->isPersistent(n), mr));
+                                        sa.setField(idx, "complex", Value::logicalScalar(entry.val->isComplex() || entry.val->isSingleComplex(), mr));
+                                        sa.setField(idx, "nesting", keel::move(nest));
+                                        sa.setField(idx, "persistent", Value::logicalScalar(env->isPersistent(entry.name), mr));
                                     }
-                                    outs[0] = std::move(sa);
+                                    outs[0] = keel::move(sa);
                                     return;
                                 }
 
-                                std::ostringstream os;
+                                keel::String out(scratch.allocator());
                                 if (!names.empty()) {
-                                    os << "  Name" << std::string(6, ' ') << "Size"
-                                       << std::string(13, ' ') << "Bytes  Class"
-                                       << std::string(5, ' ') << "Attributes\n\n";
-                                    for (auto &n : names) {
+                                    out.append("  Name      Size             Bytes  Class     Attributes\n\n");
+                                    for (const auto &n : names) {
                                         auto *val = env->get(n);
                                         if (!val)
                                             continue;
-                                        auto &d = val->dims();
-                                        std::string sizeStr = std::to_string(d.rows()) + "x"
-                                                              + std::to_string(d.cols());
-                                        if (d.is3D())
-                                            sizeStr += "x" + std::to_string(d.pages());
-                                        std::string bytesStr = std::to_string(val->deepBytes());
-                                        std::string classStr = val->isSingleComplex() ? "single" : std::string(mtypeName(val->type()));
-                                        std::string attrStr;
+                                        const auto &d = val->dims();
+                                        keel::String sizeStr = d.is3D()
+                                            ? keel::format("{}x{}x{}", d.rows(), d.cols(), d.pages())
+                                            : keel::format("{}x{}", d.rows(), d.cols());
+                                        keel::String bytesStr = keel::format("{}", val->deepBytes());
+                                        keel::StringRef classStr = val->isSingleComplex()
+                                            ? keel::StringRef("single")
+                                            : keel::StringRef(mtypeName(val->type()));
+                                        keel::StringRef attrStr;
                                         if (env->isGlobal(n))
                                             attrStr = "global";
                                         else if (env->isPersistent(n))
                                             attrStr = "persistent";
 
-                                        os << "  " << n;
+                                        out.append("  ");
+                                        out.append(n);
                                         for (keel::usize i = n.size(); i < 10; ++i)
-                                            os << " ";
-                                        os << sizeStr;
+                                            out.push_back(' ');
+                                        out.append(sizeStr);
                                         for (keel::usize i = sizeStr.size(); i < 17; ++i)
-                                            os << " ";
+                                            out.push_back(' ');
                                         for (keel::usize i = bytesStr.size(); i < 5; ++i)
-                                            os << " ";
-                                        os << bytesStr << "  " << classStr;
+                                            out.push_back(' ');
+                                        out.append(bytesStr);
+                                        out.append("  ");
+                                        out.append(classStr);
                                         for (keel::usize i = classStr.size(); i < 10; ++i)
-                                            os << " ";
-                                        os << attrStr << "\n";
+                                            out.push_back(' ');
+                                        out.append(attrStr);
+                                        out.push_back('\n');
                                     }
-                                    os << "\n";
+                                    out.push_back('\n');
                                 }
-                                ctx.engine->outputText(os.str());
+                                ctx.engine->outputText(out);
                                 outs[0] = Value();
                             });
 
@@ -513,11 +545,11 @@ void registerWorkspaceRuntime(Engine &engine)
                             [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                                 if (args.empty())
                                     throw std::runtime_error("exist requires a name argument");
-                                std::string varName(args[0].toString().as_ref());
+                                keel::String varName = args[0].toString();
                                 auto *env = ctx.env;
                                 ctx.engine->syncFrameToEnv(env);
 
-                                std::string typeFilter;
+                                keel::String typeFilter;
                                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
                                     typeFilter = args[1].toString();
 
@@ -529,13 +561,13 @@ void registerWorkspaceRuntime(Engine &engine)
                                     return;
                                 }
 
-                                auto vfsExists = [&](const std::string &p) -> bool {
+                                auto vfsExists = [&](keel::StringRef p) -> bool {
                                     try {
                                         auto rp = ctx.engine->resolvePath(p);
                                         return rp.fs && rp.fs->exists(rp.path);
                                     } catch (...) { return false; }
                                 };
-                                auto vfsIsDir = [&](const std::string &p) -> bool {
+                                auto vfsIsDir = [&](keel::StringRef p) -> bool {
                                     try {
                                         auto rp = ctx.engine->resolvePath(p);
                                         if (!rp.fs) return false;
@@ -559,9 +591,11 @@ void registerWorkspaceRuntime(Engine &engine)
 
                                 auto findMFile = [&]() -> bool {
                                     for (const auto &dir : ctx.engine->path()) {
-                                        std::string p = dir;
-                                        if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
-                                        p += varName + ".m";
+                                        keel::String p = dir.clone();
+                                        if (!p.empty() && p.back() != '/' && p.back() != '\\')
+                                            p.push_back('/');
+                                        p.append(varName);
+                                        p.append(".m");
                                         if (vfsExists(p)) return true;
                                     }
                                     return false;
@@ -598,8 +632,10 @@ void registerWorkspaceRuntime(Engine &engine)
             if (args.empty()) {
                 for (const auto &n : env->localNames())
                     env->remove(n);
-                std::vector<std::string> pnames(env->persistentNames().begin(),
-                                                env->persistentNames().end());
+                keel::Array<keel::String> pnames;
+                pnames.reserve(env->persistentNames().size());
+                for (const auto &p : env->persistentNames())
+                    pnames.push_back(p.clone());
                 for (const auto &n : pnames)
                     env->remove(n);
                 ctx.engine->syncEnvRemovalsToFrame(env);
@@ -607,22 +643,26 @@ void registerWorkspaceRuntime(Engine &engine)
                 return;
             }
             bool exceptMode = false;
-            std::vector<std::string> names;
+            keel::Array<keel::String> names;
             for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                const std::string s(args[i].toString().as_ref());
+                keel::String s = args[i].toString();
                 if (s == "-except") { exceptMode = true; continue; }
-                names.push_back(s);
+                names.push_back(keel::move(s));
             }
             if (exceptMode) {
-                std::set<std::string> keep(names.begin(), names.end());
+                keel::HashSet<keel::String> keep;
+                for (const auto &n : names)
+                    keep.insert(n.clone());
                 for (const auto &n : env->localNames()) {
-                    if (!keep.count(n)) env->remove(n);
+                    if (!keep.contains(n)) env->remove(n);
                 }
-                std::vector<std::string> pnames(env->persistentNames().begin(),
-                                                env->persistentNames().end());
+                keel::Array<keel::String> pnames;
+                pnames.reserve(env->persistentNames().size());
+                for (const auto &p : env->persistentNames())
+                    pnames.push_back(p.clone());
                 for (const auto &n : pnames) {
-                    if (!keep.count(n)) env->remove(n);
+                    if (!keep.contains(n)) env->remove(n);
                 }
             } else {
                 for (const auto &n : names) env->remove(n);

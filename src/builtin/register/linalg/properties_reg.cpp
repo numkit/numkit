@@ -11,6 +11,7 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/linalg/properties.hpp>
 #include <numkit/linalg/eig.hpp>     // eig_symmetric / eig_general_VD (condeig [V,D])
 
@@ -22,7 +23,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <utility>
 
 namespace numkit::linalg {

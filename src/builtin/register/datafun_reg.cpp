@@ -4,7 +4,9 @@
 #include <keel/arena.h>
 #include <keel/array.h>
 #include <keel/complex.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/string.h>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/core/engine.hpp>
@@ -21,8 +23,7 @@
 #include <cmath>
 #include <cctype>
 #include <stdexcept>
-#include <string>
-#include <vector>
+#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -116,16 +117,16 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
 keel::usize toSubIndex(double v, keel::usize maxAllowed, const char *fn)
 {
     if (!std::isfinite(v) || v < 1.0)
-        throw Error(std::string(fn) + ": subscripts must be positive integers",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":subRange");
+        throw Error(keel::format("{}: subscripts must be positive integers", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:subRange", fn));
     const double rounded = std::round(v);
     if (keel::abs(v - rounded) > 1e-9)
-        throw Error(std::string(fn) + ": subscripts must be integer-valued",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":subInt");
+        throw Error(keel::format("{}: subscripts must be integer-valued", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:subInt", fn));
     const keel::usize idx = static_cast<keel::usize>(rounded);
     if (maxAllowed > 0 && idx > maxAllowed)
-        throw Error(std::string(fn) + ": subscript exceeds output dimension",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":subOOB");
+        throw Error(keel::format("{}: subscript exceeds output dimension", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:subOOB", fn));
     return idx;
 }
 
@@ -138,8 +139,8 @@ keel::Array<keel::usize> resolveOutShape(const Value &subs, const keel::usize *u
     const keel::usize D = (d.ndim() <= 1) ? 1 : d.cols();
     if (nUserShape > 0) {
         if (nUserShape < D)
-            throw Error(std::string(fn) + ": sz length must be at least size(subs, 2)",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":sizeRank");
+            throw Error(keel::format("{}: sz length must be at least size(subs, 2)", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:sizeRank", fn));
         return keel::Array<keel::usize>(keel::ArrayRef<keel::usize>(userShape, nUserShape), mr);
     }
     keel::Array<keel::usize> shape(D, mr);
@@ -621,7 +622,8 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("fftn",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "fftn");
-            std::vector<keel::usize> sz;
+            auto *mr = ctx.engine->allocator();
+            keel::Array<keel::usize> sz(mr);
             if (args.size() >= 2 && !args[1].isEmpty()) {
                 const keel::usize n = args[1].numel();
                 sz.resize(n);
@@ -633,14 +635,14 @@ void register_datafun(Engine &engine) {
                     sz[i] = static_cast<keel::usize>(d);
                 }
             }
-            outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()),
-                                   ctx.engine->allocator());
+            outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
         });
 
     engine.registerFunction("ifftn",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "ifftn");
-            std::vector<keel::usize> sz;
+            auto *mr = ctx.engine->allocator();
+            keel::Array<keel::usize> sz(mr);
             if (args.size() >= 2 && !args[1].isEmpty()) {
                 const keel::usize n = args[1].numel();
                 sz.resize(n);
@@ -652,8 +654,7 @@ void register_datafun(Engine &engine) {
                     sz[i] = static_cast<keel::usize>(d);
                 }
             }
-            outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()),
-                                    ctx.engine->allocator());
+            outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
         });
 
     engine.registerFunction("nextpow2",
@@ -694,7 +695,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("conv",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "conv");
-            std::string shape = "full";
+            keel::String shape("full");
             if (args.size() >= 3 && !args[2].isEmpty()) {
                 if (!args[2].isChar() && !args[2].isString())
                     throw Error("conv: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
@@ -708,7 +709,7 @@ void register_datafun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 4, "conv2");
             auto *mr = ctx.engine->allocator();
-            std::string shape = "full";
+            keel::String shape("full");
             if (args.size() >= 3 && !args[2].isEmpty() &&
                 !(args[2].isChar() || args[2].isString())) {
                 // Separable form: conv2(u, v, A[, shape])
@@ -744,7 +745,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("convn",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "convn");
-            std::string shape = "full";
+            keel::String shape("full");
             if (args.size() >= 3 && !args[2].isEmpty()) {
                 if (!args[2].isChar() && !args[2].isString())
                     throw Error("convn: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
@@ -783,7 +784,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("filter2",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "filter2");
-            std::string shape = "same";
+            keel::String shape("same");
             if (args.size() >= 3 && !args[2].isEmpty()) {
                 if (!args[2].isChar() && !args[2].isString())
                     throw Error("filter2: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",

@@ -5,7 +5,9 @@
 //   [status, out] = runNative(script)→ run a .m via NUMKIT_INTERP  [native only]
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/sys/env.hpp>
@@ -15,8 +17,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <sstream>
-#include <string>
 
 namespace numkit::builtin {
 namespace detail {
@@ -85,12 +85,11 @@ void runNative_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
                     "of the native numkit interpreter (e.g. "
                     "setenv('NUMKIT_INTERP','numkit')).",
                     0, 0, "runNative", "", "numkit:runNative:nointerp");
-    const std::string script(charArg(args[0]).as_ref());
-    std::string cmd;
+    const keel::String script = charArg(args[0]);
 #ifdef _WIN32
-    cmd = "\"\"" + std::string(interp) + "\" \"" + script + "\"\"";
+    const keel::String cmd = keel::format("\"\"{}\" \"{}\"\"", interp, script);
 #else
-    cmd = "'" + std::string(interp) + "' '" + script + "'";
+    const keel::String cmd = keel::format("'{}' '{}'", interp, script);
 #endif
     const auto r = numkit::sys::runProcess(cmd);
     outs[0] = Value::scalar(static_cast<double>(r.exitCode), ctx.engine->allocator());

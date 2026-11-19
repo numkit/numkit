@@ -45,7 +45,7 @@ public:
     void SetUp() override
     {
         capturedOutput.clear();
-        engine.setOutputFunc([this](const std::string &s) { capturedOutput += s; });
+        engine.setOutputFunc([this](keel::StringRef s) { capturedOutput.append(s.data(), s.size()); });
 
         // Select backend
         if (GetParam() == BackendParam::TreeWalker)

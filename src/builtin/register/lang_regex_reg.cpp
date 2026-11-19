@@ -4,7 +4,9 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/strfun.hpp>
@@ -18,10 +20,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -35,24 +35,25 @@ inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
                            CallContext &ctx)
 {
     if (args.size() < 2)
-        throw Error(std::string(fn) + ": requires at least 2 arguments (s, pat)",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":nargin");
+        throw Error(keel::format("{}: requires at least 2 arguments (s, pat)", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:nargin", fn));
     auto *mr = ctx.engine->allocator();
     // Trailing option strings. 'once' is a modifier (match first occurrence,
     // return the scalarised form); the first non-'once' string selects the
     // output (as before). Additional output selectors are ignored, matching
     // the pre-existing single-option behaviour.
-    std::string opt;
+    keel::String opt(mr);
     bool once = false;
     for (keel::usize i = 2; i < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString())
-            throw Error(std::string(fn) + ": option must be a string",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
-        std::string o(args[i].toString().as_ref());
-        std::string lo = o;
-        for (auto &c : lo) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            throw Error(keel::format("{}: option must be a string", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:badOption", fn));
+        keel::String o = args[i].toString();
+        keel::String lo = o.clone();
+        for (keel::usize j = 0; j < lo.size(); ++j)
+            lo[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(lo[j])));
         if (lo == "once") { once = true; continue; }
-        if (opt.empty()) opt = o;
+        if (opt.empty()) opt = std::move(o);
     }
     if (once) {
         // 'once' forces a single scalarised output (opt may be "" → 'start').
@@ -90,8 +91,9 @@ void regexprep_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     bool once = false;
     for (keel::usize i = 3; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
-            std::string o(args[i].toString().as_ref());
-            for (auto &ch : o) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            keel::String o = args[i].toString();
+            for (keel::usize j = 0; j < o.size(); ++j)
+                o[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(o[j])));
             if      (o == "ignorecase") ignoreCase = true;
             else if (o == "once")       once = true;
         }

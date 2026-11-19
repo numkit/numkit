@@ -1,14 +1,15 @@
 // src/bundle/src/register/builtin/strfun_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 
-#include <stdexcept>
-#include <vector>
+#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -107,24 +108,25 @@ void register_strfun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 2, 3, "strmatch");
             auto *mr = ctx.engine->allocator();
-            std::string pat(args[0].toString().as_ref());
+            keel::String pat = args[0].toString();
             bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
-            std::vector<double> hits;
+            keel::Array<double> hits(mr);
             const Value &arr = args[1];
             if (arr.isCell() || arr.isString()) {
                 for (keel::usize i = 0; i < arr.numel(); ++i) {
-                    std::string s(arr.isCell() ? arr.cellAt(i).toString().as_ref() : arr.stringElem(i).as_ref());
-                    bool m = exact ? (s == pat) : (s.rfind(pat, 0) == 0);
+                    keel::String s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
+                    bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
                     if (m) hits.push_back(static_cast<double>(i + 1));
                 }
             } else if (arr.isChar()) {
                 keel::usize R = arr.dims().rows(), C = arr.dims().cols();
                 for (keel::usize r = 0; r < R; ++r) {
-                    std::string s;
+                    keel::String s(mr);
+                    s.reserve(C);
                     for (keel::usize c = 0; c < C; ++c)
                         s.push_back(static_cast<char>(arr.charData()[c * R + r]));
                     while (exact && !s.empty() && s.back() == ' ') s.pop_back();
-                    bool m = exact ? (s == pat) : (s.rfind(pat, 0) == 0);
+                    bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
                     if (m) hits.push_back(static_cast<double>(r + 1));
                 }
             }
@@ -212,7 +214,7 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("setstr",     &::numkit::builtin::detail::char_reg);
     engine.registerFunction("strvcat",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            std::vector<Value> nonEmpty;
+            keel::Array<Value> nonEmpty(ctx.engine->allocator());
             for (const auto &a : args) {
                 if (!a.isEmpty())
                     nonEmpty.push_back(a);

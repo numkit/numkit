@@ -1,9 +1,10 @@
 #include <keel/core.h>
+#include <keel/ref.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
 
-#include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace numkit {
 namespace depdetail {
@@ -33,6 +34,7 @@ static bool literalInt(const ASTNode *n, long long &out)
 AxisRange axisOf(const ASTNode *n)
 {
     AxisRange a;
+    (void)a;
     if (!n)
         return AxisRange{AxisRange::UNRESOLVED, 0, 0};
     if (n->type == NodeType::COLON_EXPR) {
@@ -58,10 +60,13 @@ AxisRange axisOf(const ASTNode *n)
 
 /// Record the element regions of ONE container access (`n` is the
 /// INDEX / CELL_INDEX node, `base` the container variable name).
-void recordAccess(ElemAccessMap &m, const std::string &base,
+void recordAccess(ElemAccessMap &m, keel::StringRef base,
                   const ASTNode *n)
 {
-    VarRegions &vr = m[base];
+    VarRegions *vrPtr = m.get(base);
+    if (!vrPtr)
+        vrPtr = m.try_insert(keel::String::from(base), VarRegions{}).value;
+    VarRegions &vr = *vrPtr;
     // Subscripts are children[1..]; children[0] is the base. Exactly 2
     // subscripts → rect; anything else (0, 1 = linear, 3+ = N-D) → ALL
     // (v1 tracks 2-D sheets/matrices only; linear A(7) depends on the
@@ -92,7 +97,7 @@ void recordAccess(ElemAccessMap &m, const std::string &base,
 
 /// size(A)/numel(A)/length(A)/ndims(A): a merge-write can GROW the
 /// variable (changing size/numel/end semantics) — these read ALL.
-bool isSizeCallee(const std::string &callee)
+bool isSizeCallee(keel::StringRef callee)
 {
     return callee == "size" || callee == "numel" || callee == "length"
            || callee == "ndims";

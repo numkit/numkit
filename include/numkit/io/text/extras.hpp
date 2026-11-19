@@ -4,11 +4,11 @@
 
 #pragma once
 
+#include <keel/function_ref.h>
 #include <keel/memory.h>
-#include <functional>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
-
-#include <string>
 
 #include <numkit/sys/fs_context.hpp>
 
@@ -19,8 +19,8 @@ using ::numkit::FsContext;
 /// @brief Read a file's entire content through the FsContext VFS — shared by
 /// fileread / readlines / readmatrix and by `type`. Engine-free.
 /// @throws Error  on a read failure (`fnName` names the calling builtin).
-std::string slurpFile(FsContext &fs, const std::string &filename,
-                      const char *fnName);
+keel::String slurpFile(FsContext &fs, keel::StringRef filename,
+                       const char *fnName);
 
 /// @file
 /// @brief Modern text-file helpers.
@@ -39,7 +39,7 @@ std::string slurpFile(FsContext &fs, const std::string &filename,
 /// @param content  Delimited text.
 /// @param mr       Memory resource (nullptr → process default).
 /// @return         DOUBLE matrix.
-Value readmatrixFromString(const std::string &content,
+Value readmatrixFromString(keel::StringRef content,
                            keel::Allocator *mr = nullptr);
 
 /// @brief Serialize a numeric matrix to CSV text — **Engine-free**.
@@ -50,7 +50,7 @@ Value readmatrixFromString(const std::string &content,
 /// @param m  Numeric (non-complex, ≤2-D) matrix.
 /// @return   CSV text, one row per line, trailing newline.
 /// @throws Error  Complex or 3-D input.
-std::string writematrixToString(const Value &m);
+keel::String writematrixToString(const Value &m);
 
 /// @brief Read entire file into a CHAR row (`s = fileread(filename)`).
 ///
@@ -60,7 +60,7 @@ std::string writematrixToString(const Value &m);
 /// @return          `1 × N` CHAR row containing the file contents.
 /// @throws Error    File not found / read error.
 /// @see readlines, readmatrix
-Value fileread(FsContext &fs, const std::string &filename,
+Value fileread(FsContext &fs, keel::StringRef filename,
                keel::Allocator *mr = nullptr);
 
 /// @brief Read file as STRING array (`L = readlines(filename)`).
@@ -72,7 +72,7 @@ Value fileread(FsContext &fs, const std::string &filename,
 /// @param mr        Memory resource (nullptr → process default).
 /// @return          STRING column array.
 /// @see fileread, writelines
-Value readlines(FsContext &fs, const std::string &filename,
+Value readlines(FsContext &fs, keel::StringRef filename,
                 keel::Allocator *mr = nullptr);
 
 /// @brief Write a STRING array as text lines (`writelines(lines, filename)`).
@@ -85,7 +85,7 @@ Value readlines(FsContext &fs, const std::string &filename,
 /// @param filename  Output path.
 /// @throws Error    Write failure / unsupported `lines` type.
 /// @see readlines
-void writelines(FsContext &fs, const Value &lines, const std::string &filename);
+void writelines(FsContext &fs, const Value &lines, keel::StringRef filename);
 
 /// @brief Read numeric matrix from text file (`M = readmatrix(filename)`).
 ///
@@ -98,7 +98,7 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename);
 /// @return          Numeric matrix (DOUBLE).
 /// @throws Error    File not found / parse failure.
 /// @see writematrix, fileread
-Value readmatrix(FsContext &fs, const std::string &filename,
+Value readmatrix(FsContext &fs, keel::StringRef filename,
                  keel::Allocator *mr = nullptr);
 
 /// @brief Write numeric matrix as CSV (`writematrix(M, filename)`).
@@ -111,7 +111,7 @@ Value readmatrix(FsContext &fs, const std::string &filename,
 /// @param filename  Output path.
 /// @throws Error    Write failure / non-numeric input.
 /// @see readmatrix
-void writematrix(FsContext &fs, const Value &m, const std::string &filename);
+void writematrix(FsContext &fs, const Value &m, keel::StringRef filename);
 
 /// @brief Print file content to a caller-provided output sink (`type(filename)`).
 ///
@@ -125,7 +125,7 @@ void writematrix(FsContext &fs, const Value &m, const std::string &filename);
 /// @param filename  Path to file.
 /// @throws Error    File not found (from slurpFile).
 void type(FsContext &fs,
-          const std::function<void(const std::string &)> &out,
-          const std::string &filename);
+          keel::FunctionRef<void(keel::StringRef)> out,
+          keel::StringRef filename);
 
 } // namespace numkit::io

@@ -1,14 +1,15 @@
 // include/environment.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function_ref.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace numkit {
 
@@ -18,11 +19,20 @@ struct UserFunction;
 // namespace_design.md Sections 3-4 for resolution semantics.
 struct Import
 {
-    std::vector<std::string> path;  // ["signal", "transforms"] for `import signal.transforms.*`
-    bool wildcard = false;          // true for `.*` form
-    std::string alias;              // for `import x.y as alias`; "" otherwise
+    keel::Array<keel::String> path;  // ["signal", "transforms"] for `import signal.transforms.*`
+    bool wildcard = false;           // true for `.*` form
+    keel::String alias;              // for `import x.y as alias`; "" otherwise
     // For non-wildcard, non-alias single-symbol form (`import a.b.c`),
     // path = [a, b, c] and the imported leaf name is path.back().
+
+    Import clone(keel::Allocator *alloc = nullptr) const
+    {
+        Import cp;
+        cp.path = path.clone(alloc);
+        cp.wildcard = wildcard;
+        cp.alias = alias.clone(alloc);
+        return cp;
+    }
 };
 
 class Environment
@@ -32,78 +42,79 @@ public:
     explicit Environment(Environment *parent = nullptr, Environment *globalsEnv = nullptr);
 
     // For snapshots/closures: owning parent
-    explicit Environment(std::shared_ptr<Environment> owningParent, Environment *globalsEnv);
+    explicit Environment(keel::Arc<Environment> owningParent, Environment *globalsEnv);
 
     ~Environment();
     Environment(Environment &&) noexcept;
     Environment &operator=(Environment &&) noexcept;
 
-    void set(const std::string &name, Value val);
-    Value *get(const std::string &name);
-    bool has(const std::string &name) const;
+    void set(keel::StringRef name, Value val);
+    Value *get(keel::StringRef name);
+    bool has(keel::StringRef name) const;
 
-    void setLocal(const std::string &name, Value val);
-    Value *getLocal(const std::string &name);
+    void setLocal(keel::StringRef name, Value val);
+    Value *getLocal(keel::StringRef name);
 
     // Fast path: get pointer for an existing variable, assign in-place.
     // Returns pointer to the Value if found locally (single hash lookup).
     // Returns nullptr if not found locally.
-    Value *getLocalFast(const std::string &name);
+    Value *getLocalFast(keel::StringRef name);
 
     // Fast path: set an existing local variable without hash lookup for globals.
     // Caller must ensure the variable already exists locally.
-    void setLocalFast(const std::string &name, Value val);
+    void setLocalFast(keel::StringRef name, Value val);
 
-    void declareGlobal(const std::string &name);
-    bool isGlobal(const std::string &name) const;
+    void declareGlobal(keel::StringRef name);
+    bool isGlobal(keel::StringRef name) const;
 
-    void bindPersistentBucket(std::shared_ptr<std::unordered_map<std::string, Value>> bucket) noexcept
+    void bindPersistentBucket(keel::Arc<keel::HashMap<keel::String, Value>> bucket) noexcept
     {
-        persistentBucket_ = std::move(bucket);
+        persistentBucket_ = keel::move(bucket);
     }
-    void declarePersistent(const std::string &name);
-    bool isPersistent(const std::string &name) const;
-    const std::unordered_set<std::string> &persistentNames() const { return persistents_; }
+    void declarePersistent(keel::StringRef name);
+    bool isPersistent(keel::StringRef name) const;
+    const keel::HashSet<keel::String> &persistentNames() const { return persistents_; }
 
     // Lexical scope support for nested functions in TreeWalker:
     void markLexicalScope(bool on = true) noexcept { isLexicalScope_ = on; }
     bool isLexicalScope() const noexcept { return isLexicalScope_; }
-    void declareLexicalVar(const std::string &name) { lexicalVars_.insert(name); }
-    bool hasLexicalVar(const std::string &name) const { return lexicalVars_.count(name) > 0; }
-    bool hasLocalSlot(const std::string &name) const;
-    void defineNestedFunc(const std::string &name, UserFunction uf);
-    const UserFunction *findNestedFunc(const std::string &name) const;
+    void declareLexicalVar(keel::StringRef name) { lexicalVars_.insert(keel::String::from(name)); }
+    bool hasLexicalVar(keel::StringRef name) const { return lexicalVars_.contains(name); }
+    bool hasLocalSlot(keel::StringRef name) const;
+    void defineNestedFunc(keel::StringRef name, UserFunction uf);
+    const UserFunction *findNestedFunc(keel::StringRef name) const;
+    const keel::Arc<Environment> &owningParentArc() const noexcept { return owningParent_; }
 
     // Names this environment has declared `global`. The VALUE of each lives in
     // globalsEnv_ (get/set delegate there), never in this env's local storage —
     // so localNames() and globalNames() are disjoint. This set IS the base
     // workspace's global membership when called on the engine's workspaceEnv.
-    const std::unordered_set<std::string> &globalNames() const { return globals_; }
+    const keel::HashSet<keel::String> &globalNames() const { return globals_; }
 
     Environment *globalsEnv() const { return globalsEnv_; }
 
     // Iterate over local variables only
-    void forEachLocal(const std::function<void(const std::string &, const Value &)> &fn) const;
+    void forEachLocal(keel::FunctionRef<void(const keel::String &, const Value &)> fn) const;
 
     // Create a deep snapshot of this environment and its parent chain
-    std::shared_ptr<Environment> snapshot(std::shared_ptr<Environment> newParent,
-                                          Environment *gs) const;
+    keel::Arc<Environment> snapshot(keel::Arc<Environment> newParent,
+                                    Environment *gs) const;
 
-    void remove(const std::string &name);
+    void remove(keel::StringRef name);
 
     void clearAll(bool keepImports = false);
 
     // Reset for reuse — clears all data and sets new parent/globalsEnv
     void reset(Environment *parent, Environment *gs);
 
-    std::vector<std::string> localNames() const;
+    keel::Array<keel::String> localNames() const;
     bool hasLocals() const noexcept { return sboCount_ > 0 || !vars_.empty(); }
 
     // ── Active imports (scope-local) ──────────────────────────
     // Imports added via `import` statements at this scope. Lookups
     // check this scope's imports first, then walk parent_ chain.
-    void pushImport(Import imp) { activeImports_.push_back(std::move(imp)); }
-    const std::vector<Import> &activeImports() const { return activeImports_; }
+    void pushImport(Import imp) { activeImports_.push_back(keel::move(imp)); }
+    const keel::Array<Import> &activeImports() const { return activeImports_; }
     void clearImports() { activeImports_.clear(); }
     Environment *parentForImports() const { return parent_; }
     bool hasAnyActiveImports() const noexcept
@@ -115,36 +126,36 @@ public:
     }
 
 private:
-    // Small buffer: inline storage for first N variables (avoids unordered_map for small scopes)
+    // Small buffer: inline storage for first N variables (avoids HashMap for small scopes)
     static constexpr keel::usize SBO_SLOTS = 8;
     struct Slot
     {
-        std::string name;
+        keel::String name;
         Value value;
     };
     Slot sbo_[SBO_SLOTS];
     keel::usize sboCount_ = 0;
 
     // Overflow map for large scopes
-    std::unordered_map<std::string, Value> vars_;
+    keel::HashMap<keel::String, Value> vars_;
 
-    std::unordered_set<std::string> globals_;
-    std::unordered_set<std::string> persistents_;
-    std::unordered_set<std::string> lexicalVars_;
-    std::unique_ptr<std::unordered_map<std::string, UserFunction>> nestedFuncs_;
-    std::vector<Import> activeImports_;
+    keel::HashSet<keel::String> globals_;
+    keel::HashSet<keel::String> persistents_;
+    keel::HashSet<keel::String> lexicalVars_;
+    keel::UniquePtr<keel::HashMap<keel::String, UserFunction>> nestedFuncs_;
+    keel::Array<Import> activeImports_;
     Environment *parent_ = nullptr;             // non-owning, for lookup
-    std::shared_ptr<Environment> owningParent_; // owning, for snapshots only
+    keel::Arc<Environment> owningParent_;       // owning, for snapshots only
     Environment *globalsEnv_ = nullptr;
-    std::shared_ptr<std::unordered_map<std::string, Value>> persistentBucket_;
+    keel::Arc<keel::HashMap<keel::String, Value>> persistentBucket_;
     bool hasGlobals_ = false;
     bool hasPersistents_ = false;
     bool isLexicalScope_ = false;
 
     // Internal helpers
-    Value *sboFind(const std::string &name);
-    const Value *sboFind(const std::string &name) const;
-    void sboSet(const std::string &name, Value val);
+    Value *sboFind(keel::StringRef name);
+    const Value *sboFind(keel::StringRef name) const;
+    void sboSet(keel::StringRef name, Value val);
 };
 
 } // namespace numkit

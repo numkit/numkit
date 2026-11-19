@@ -3,8 +3,11 @@
 // Registration adapters for group operations (findgroups, groupcounts,
 // groupsummary, grouptransform, groupfilter, splitapply).
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -16,9 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <map>
-#include <string>
-#include <vector>
+#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -37,6 +38,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, "splitapply");
+    auto *mr = ctx.engine->allocator();
 
     const Value &fn = args[0];
     if (!fn.isFuncHandle())
@@ -54,30 +56,41 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                         0, 0, "splitapply", "", "numkit:splitapply:shape");
     }
 
-    std::map<int, std::vector<keel::usize>> buckets;
+    keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
+    keel::Array<int> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         double gd = G.elemAsDouble(i);
         if (std::isnan(gd)) continue;
         int gid = static_cast<int>(gd);
         if (gid <= 0) continue;
-        buckets[gid].push_back(i);
+        auto *existing = buckets.get(gid);
+        if (!existing) {
+            gids.push_back(gid);
+            keel::Array<keel::usize> idxs(mr);
+            idxs.push_back(i);
+            buckets.put(gid, keel::move(idxs));
+        } else {
+            existing->push_back(i);
+        }
     }
 
     if (buckets.empty()) {
-        outs[0] = Value::matrix(0, 1, ValueType::DOUBLE, ctx.engine->allocator());
+        outs[0] = Value::matrix(0, 1, ValueType::DOUBLE, mr);
         return;
     }
 
-    keel::usize nGroups = buckets.size();
-    auto result = Value::matrix(nGroups, 1, ValueType::DOUBLE, ctx.engine->allocator());
+    std::sort(gids.begin(), gids.end());
+
+    keel::usize nGroups = gids.size();
+    auto result = Value::matrix(nGroups, 1, ValueType::DOUBLE, mr);
     double *rd = result.doubleDataMut();
 
     keel::usize gIdx = 0;
-    for (const auto &kv : buckets) {
-        const auto &idxs = kv.second;
-        std::vector<Value> callArgs(nIn);
+    for (int gid : gids) {
+        const auto &idxs = *buckets.get(gid);
+        keel::Array<Value> callArgs(nIn, mr);
         for (keel::usize k = 0; k < nIn; ++k) {
-            auto sub = Value::matrix(idxs.size(), 1, ValueType::DOUBLE, ctx.engine->allocator());
+            auto sub = Value::matrix(idxs.size(), 1, ValueType::DOUBLE, mr);
             double *sd = sub.doubleDataMut();
             for (keel::usize j = 0; j < idxs.size(); ++j)
                 sd[j] = args[1 + k].elemAsDouble(idxs[j]);
@@ -112,7 +125,7 @@ void groupsummary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (!m.isChar() && !m.isString())
         throw Error("groupsummary: method must be a string",
                     0, 0, "groupsummary", "", "numkit:groupsummary:badMethod");
-    std::string method(m.toString().as_ref());
+    keel::String method = m.toString();
 
     GroupsummaryResult r = groupsummary(args[0], args[1], method, ctx.engine->allocator());
     outs[0] = std::move(r.B);
@@ -143,21 +156,29 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             throw Error("grouptransform: method must be a string or function handle",
                         0, 0, "grouptransform", "",
                         "numkit:grouptransform:method");
-        std::string method(methodV.toString().as_ref());
+        keel::String method = methodV.toString();
         outs[0] = grouptransform(A, G, method, mr);
     } else {
         // Function handle callback form
-        std::vector<keel::usize> groups;
-        std::vector<double> uniqueVals;
         // Group rows using findgroups
         FindgroupsResult fg = findgroups(G, mr);
         const keel::usize n = G.numel();
-        std::map<int, std::vector<keel::usize>> buckets;
+        keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
+        keel::Array<int> gids(mr);
         for (keel::usize i = 0; i < n; ++i) {
             double v = fg.G.elemAsDouble(i);
             int gid = std::isnan(v) ? 0 : static_cast<int>(v);
-            buckets[gid].push_back(i);
+            auto *existing = buckets.get(gid);
+            if (!existing) {
+                gids.push_back(gid);
+                keel::Array<keel::usize> rows(mr);
+                rows.push_back(i);
+                buckets.put(gid, keel::move(rows));
+            } else {
+                existing->push_back(i);
+            }
         }
+        std::sort(gids.begin(), gids.end());
 
         auto B = (nCols == 1) ? Value::matrix(nRows, 1, ValueType::DOUBLE, mr)
                               : Value::matrix(nRows, nCols, ValueType::DOUBLE, mr);
@@ -170,8 +191,8 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         };
 
         for (keel::usize c = 0; c < nCols; ++c) {
-            for (const auto &kv : buckets) {
-                const auto &rows = kv.second;
+            for (int gid : gids) {
+                const auto &rows = *buckets.get(gid);
                 const keel::usize kn = rows.size();
                 if (kn == 0) continue;
                 auto sub = Value::matrix(kn, 1, ValueType::DOUBLE, mr);
@@ -230,20 +251,30 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     FindgroupsResult fg = findgroups(G, mr);
     const keel::usize n = G.numel();
-    std::map<int, std::vector<keel::usize>> buckets;
+    keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
+    keel::Array<int> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         double v = fg.G.elemAsDouble(i);
         int gid = std::isnan(v) ? 0 : static_cast<int>(v);
-        buckets[gid].push_back(i);
+        auto *existing = buckets.get(gid);
+        if (!existing) {
+            gids.push_back(gid);
+            keel::Array<keel::usize> rows(mr);
+            rows.push_back(i);
+            buckets.put(gid, keel::move(rows));
+        } else {
+            existing->push_back(i);
+        }
     }
+    std::sort(gids.begin(), gids.end());
 
-    std::vector<keel::u8> keep(nRows, 0);
+    keel::Array<keel::u8> keep(nRows, 0, mr);
     auto Aget = [&](keel::usize r, keel::usize c) {
         return A.elemAsDouble(r + c * nRows);
     };
 
-    for (const auto &kv : buckets) {
-        const auto &rows = kv.second;
+    for (int gid : gids) {
+        const auto &rows = *buckets.get(gid);
         const keel::usize kn = rows.size();
         if (kn == 0) continue;
         auto sub = (nCols == 1)
@@ -270,7 +301,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         }
     }
 
-    std::vector<keel::usize> kept_idx;
+    keel::Array<keel::usize> kept_idx(mr);
     kept_idx.reserve(nRows);
     for (keel::usize i = 0; i < nRows; ++i)
         if (keep[i]) kept_idx.push_back(i);

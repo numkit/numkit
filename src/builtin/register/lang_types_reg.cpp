@@ -22,10 +22,8 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -201,9 +199,9 @@ void cast_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
     // 'like' form: cast(x, 'like', y) — pull class name from y.
     if (args[1].toString() == "like") {
         argcheck::checkNargin(args.size(), 3, 3, "cast");
-        const std::string cname = args[2].isSingleComplex()
-                                      ? "single"
-                                      : std::string(mtypeName(args[2].type()));
+        const keel::StringRef cname = args[2].isSingleComplex()
+                                          ? keel::StringRef("single")
+                                          : keel::StringRef(mtypeName(args[2].type()));
         Value r = cast(args[0], cname, mr);
         if (args[2].isComplex() && !r.isComplex())
             r = complex(r, mr);

@@ -1,14 +1,14 @@
 // include/bytecode.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace numkit {
 
@@ -372,60 +372,71 @@ struct SourceLoc
     keel::u16 col = 0;
 };
 
+struct VarRegEntry
+{
+    keel::String name;
+    keel::u16 reg = 0;
+
+    VarRegEntry clone(keel::Allocator *alloc = nullptr) const
+    {
+        return VarRegEntry{name.clone(alloc), reg};
+    }
+};
+
 // ============================================================
 // BytecodeChunk: compiled function or script
 // ============================================================
 struct BytecodeChunk
 {
-    std::vector<Instruction> code;
+    keel::Array<Instruction> code;
 
     // Constant pools
-    std::vector<Value> constants;    // numeric/complex constants
-    std::vector<std::string> strings; // string constants + field/variable/function names
+    keel::Array<Value> constants;       // numeric/complex constants
+    keel::Array<keel::String> strings;  // string constants + field/variable/function names
 
     // Metadata
-    std::string name;         // function name or "<script>"
-    std::string parentFuncName; // enclosing function name for nested functions
-    keel::u32 numRegisters = 0; // total registers needed (0..65535)
+    keel::String name;           // function name or "<script>"
+    keel::String parentFuncName; // enclosing function name for nested functions
+    keel::u32 numRegisters = 0;  // total registers needed (0..65535)
     keel::u16 numParams = 0;
     keel::u16 numReturns = 0;
-    std::vector<std::string> paramNames;
-    std::vector<std::string> returnNames;
+    keel::Array<keel::String> paramNames;
+    keel::Array<keel::String> returnNames;
 
     // Closure support: indices of captured variables from parent scope
-    std::vector<keel::u16> capturedRegisters;
+    keel::Array<keel::u16> capturedRegisters;
 
     // Variable name → register mapping (for exporting to environment after execution)
-    std::vector<std::pair<std::string, keel::u16>> varMap;
+    keel::Array<VarRegEntry> varMap;
 
     // Names of variables the compiler emits a write for (STORE, param intro,
     // for-loop var, catch var, global/persistent decl, etc). Reads alone do
     // not populate this set. Used by DebugWorkspace::names() to decide if a
     // built-in (pi, eps, …) should be visible — MATLAB only lists built-ins
     // in `whos` once they've been shadowed by an assignment.
-    std::unordered_set<std::string> assignedVars;
+    keel::HashSet<keel::String> assignedVars;
 
     // Global variable names this chunk routes through globalsEnv_: this chunk's
     // own `global X` declarations PLUS the base workspace's inherited globals
     // (seeded at compile so `gv = 5` without a re-declaration still writes the
     // global). Used by the import/export paths.
-    std::vector<std::string> globalNames;
+    keel::Array<keel::String> globalNames;
 
     // Just this chunk's OWN top-level `global X` declarations (a subset of
     // globalNames, excluding the inherited seed). Engine::runOneChunk uses it to
     // record base-workspace membership and seed a freshly declared global as [].
     // Excluding the inherited seed is what keeps `clear global g` from being
     // resurrected by a later chunk that merely inherited g.
-    std::vector<std::string> ownGlobalDecls;
+    keel::Array<keel::String> ownGlobalDecls;
 
     // Function-scoped `persistent` variable names (isolated per function in
     // Engine::persistentStore_, completely separate from globalsEnv_).
-    std::vector<std::string> persistentNames;
+    keel::Array<keel::String> persistentNames;
 
     // Hidden trailing upvalue-box parameter registers for nested functions.
-    std::vector<keel::u16> upvalueParamRegs;
+    keel::Array<keel::u16> upvalueParamRegs;
     // Map of variable name -> register holding its shared UpvaluePayload box.
-    std::unordered_map<std::string, keel::u16> upvalueBoxRegs;
+    keel::HashMap<keel::String, keel::u16> upvalueBoxRegs;
 
     // Per-CALL-site arg names — populated by the compiler for each
     // CALL / CALL_MULTI it emits. Key = index into `code` of the CALL
@@ -434,13 +445,13 @@ struct BytecodeChunk
     // empty string otherwise. Used by `inputname(k)` to introspect
     // the caller's call site. Sparse on purpose — only populated for
     // calls that have at least one bare-identifier arg.
-    std::unordered_map<keel::u32, std::vector<std::string>> callSiteArgNames;
+    keel::HashMap<keel::u32, keel::Array<keel::String>> callSiteArgNames;
 
     // Source mapping (parallel to code, same size — one entry per instruction)
-    std::vector<SourceLoc> sourceMap;
+    keel::Array<SourceLoc> sourceMap;
 
     // Original source text (shared across chunks compiled from the same source)
-    std::shared_ptr<const std::string> sourceCode;
+    keel::Arc<const keel::String> sourceCode;
 
     // Precomputed special register slots for O(1) pushCallFrame setup
     keel::u16 narginReg = kInvalidReg;
@@ -457,9 +468,45 @@ struct BytecodeChunk
     // but EMPTY origin masks the caller's file (command-window-born
     // functions). Not known (in-script defs, REPL evals) → no push.
     bool originKnown = false;
-    std::string originFs;
-    std::string originDir;
-    std::string originFile;
+    keel::String originFs;
+    keel::String originDir;
+    keel::String originFile;
+
+    BytecodeChunk clone(keel::Allocator *alloc = nullptr) const
+    {
+        BytecodeChunk cp;
+        cp.code = code.clone(alloc);
+        cp.constants = constants.clone(alloc);
+        cp.strings = strings.clone(alloc);
+        cp.name = name.clone(alloc);
+        cp.parentFuncName = parentFuncName.clone(alloc);
+        cp.numRegisters = numRegisters;
+        cp.numParams = numParams;
+        cp.numReturns = numReturns;
+        cp.paramNames = paramNames.clone(alloc);
+        cp.returnNames = returnNames.clone(alloc);
+        cp.capturedRegisters = capturedRegisters.clone(alloc);
+        cp.varMap = varMap.clone(alloc);
+        cp.assignedVars = assignedVars.clone(alloc);
+        cp.globalNames = globalNames.clone(alloc);
+        cp.ownGlobalDecls = ownGlobalDecls.clone(alloc);
+        cp.persistentNames = persistentNames.clone(alloc);
+        cp.upvalueParamRegs = upvalueParamRegs.clone(alloc);
+        cp.upvalueBoxRegs = upvalueBoxRegs.clone(alloc);
+        cp.callSiteArgNames = callSiteArgNames.clone(alloc);
+        cp.sourceMap = sourceMap.clone(alloc);
+        cp.sourceCode = sourceCode;
+        cp.narginReg = narginReg;
+        cp.nargoutReg = nargoutReg;
+        cp.vararginReg = vararginReg;
+        cp.firstReturnReg = firstReturnReg;
+        cp.mayUseInputname = mayUseInputname;
+        cp.originKnown = originKnown;
+        cp.originFs = originFs.clone(alloc);
+        cp.originDir = originDir.clone(alloc);
+        cp.originFile = originFile.clone(alloc);
+        return cp;
+    }
 };
 
 } // namespace numkit

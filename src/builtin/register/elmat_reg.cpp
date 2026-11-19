@@ -1,8 +1,11 @@
 // src/bundle/src/register/builtin/elmat_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
@@ -10,9 +13,11 @@
 #include <numkit/value/argcheck.hpp>
 
 #include <algorithm>
-#include <memory>
+#include <cmath>
+#include <limits>
+#include <random>
 #include <stdexcept>
-#include <string>
+#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -101,21 +106,28 @@ struct BsxfunCallbackBuiltin : CallbackBuiltin
     // Single-shot: bsxfun forwards the WHOLE arrays to the handle in one
     // call (the pinned contract, debug_session_test BreakInsideBsxfunCallback
     // — one pausable frame). Lost when e95e6054 rewrote this per-element.
-    std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
-                                             Value *dest, Engine &eng) override
+    keel::Arc<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
+                                       Value *dest, Engine &eng) override
     {
         if (args.size() < 3 || nargout > 1)
             return nullptr;
         if (!eng.isUserCodeHandle(args[0]))
             return nullptr;
-        std::vector<Value> callArgs{args[1], args[2]};
-        auto cont = std::make_shared<LoopContinuation>();
+        Value arg1 = args[1];
+        Value arg2 = args[2];
+        auto cont = keel::make_arc<LoopContinuation>();
         cont->handle = args[0];
         cont->n = 1;
         cont->dest = dest;
-        cont->makeArgs = [callArgs](keel::usize) -> std::vector<Value> { return callArgs; };
-        cont->pack = [](std::vector<Value> &results) -> Value {
-            return results.empty() ? Value() : std::move(results[0]);
+        cont->makeArgs = [arg1, arg2](keel::usize) -> keel::Array<Value> {
+            keel::Array<Value> callArgs;
+            callArgs.reserve(2);
+            callArgs.push_back(arg1);
+            callArgs.push_back(arg2);
+            return callArgs;
+        };
+        cont->pack = [](keel::Array<Value> &results) -> Value {
+            return results.empty() ? Value() : keel::move(results[0]);
         };
         cont->results.reserve(1);
         return cont;
@@ -275,7 +287,7 @@ void register_elmat(Engine &engine) {
             outs[0] = std::move(res);
         });
 
-    engine.registerCallbackBuiltin("bsxfun", std::make_shared<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
+    engine.registerCallbackBuiltin("bsxfun", keel::make_arc<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
 
     engine.registerFunction("eps",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {

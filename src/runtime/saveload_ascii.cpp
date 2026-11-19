@@ -2,11 +2,13 @@
 //
 // Workspace-persistence ASCII backend (save -ascii / load ASCII matrices).
 
-#include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/saveload.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
@@ -15,78 +17,79 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
-#include <sstream>
-#include <string>
-#include <vector>
 
 namespace numkit::runtime {
 
 void saveAscii(Engine &engine, Environment &env,
-               const std::string &filename,
-               const std::vector<std::string> &varnames)
+               keel::StringRef filename,
+               keel::ArrayRef<keel::String> varnames)
 {
     if (varnames.empty())
         throw Error("save: at least one variable name is required");
 
-    std::ostringstream out;
+    keel::String out;
     for (keel::usize vi = 0; vi < varnames.size(); ++vi) {
-        Value *v = env.get(varnames[vi]);
+        Value *v = env.get(varnames[vi].as_ref());
         if (!v)
-            throw Error("save: variable '" + varnames[vi] + "' not found");
+            throw Error(keel::format("save: variable '{}' not found", varnames[vi]));
         if (v->type() != ValueType::DOUBLE)
             throw Error("save: only numeric (double) variables supported in ascii mode");
         auto d = v->dims();
         keel::usize rows = d.rows();
         keel::usize cols = d.cols();
-        if (vi > 0) out << "\n";
+        if (vi > 0) out.push_back('\n');
         if (rows == 0 || cols == 0) continue;
         for (keel::usize r = 0; r < rows; ++r) {
             for (keel::usize c = 0; c < cols; ++c) {
-                if (c > 0) out << " ";
+                if (c > 0) out.push_back(' ');
                 char buf[32];
-                std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
-                out << buf;
+                int len = std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
+                if (len > 0)
+                    out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
             }
-            out << "\n";
+            out.push_back('\n');
         }
     }
 
     auto resolved = engine.resolvePath(filename);
     try {
-        resolved.fs->writeFile(resolved.path, out.str());
+        resolved.fs->writeFile(resolved.path.as_ref(), out.as_ref());
     } catch (const std::exception &e) {
-        throw Error(std::string("save: ") + e.what());
+        throw Error(keel::format("save: {}", e.what()));
     }
 }
 
 void loadAscii(Engine &engine, Environment &env,
-               const std::string &filename,
+               keel::StringRef filename,
                keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
     keel::Allocator *mr = engine.allocator();
     auto resolved = engine.resolvePath(filename);
-    std::string content;
+    keel::String content;
     try {
-        content = resolved.fs->readFile(resolved.path);
+        content = resolved.fs->readFile(resolved.path.as_ref());
     } catch (const std::exception &e) {
-        throw Error(std::string("load: ") + e.what());
+        throw Error(keel::format("load: {}", e.what()));
     }
 
     // Parse each non-empty, non-comment line as whitespace-separated
     // doubles. MATLAB ignores '%' and '#' line comments.
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     keel::Array<keel::Array<double>> rows(scratch.allocator());
+    keel::String line(scratch.allocator());
     keel::usize p = 0;
     while (p <= content.size()) {
         keel::usize nl = content.find('\n', p);
-        keel::usize end = (nl == std::string::npos) ? content.size() : nl;
-        if (end == p && nl == std::string::npos) break;
-        std::string line = content.substr(p, end - p);
-        p = (nl == std::string::npos) ? content.size() + 1 : nl + 1;
+        keel::usize end = (nl == keel::kInvalidIndex) ? content.size() : nl;
+        if (end == p && nl == keel::kInvalidIndex) break;
+        line.assign(content.substr(p, end - p));
+        p = (nl == keel::kInvalidIndex) ? content.size() + 1 : nl + 1;
         if (!line.empty() && line.back() == '\r') line.pop_back();
 
-        keel::usize ws = line.find_first_not_of(" \t");
-        if (ws == std::string::npos) continue;
+        keel::usize ws = 0;
+        while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t'))
+            ++ws;
+        if (ws == line.size()) continue;
         if (line[ws] == '%' || line[ws] == '#') continue;
 
         keel::Array<double> row(scratch.allocator());
@@ -98,11 +101,11 @@ void loadAscii(Engine &engine, Environment &env,
             char *endp = nullptr;
             double v = std::strtod(start, &endp);
             if (endp == start)
-                throw Error("load: parse error near '" + line.substr(q) + "'");
+                throw Error(keel::format("load: parse error near '{}'", line.substr(q)));
             row.push_back(v);
             q = static_cast<keel::usize>(endp - line.c_str());
         }
-        rows.push_back(std::move(row));
+        rows.push_back(keel::move(row));
     }
 
     if (rows.empty())
@@ -126,21 +129,27 @@ void loadAscii(Engine &engine, Environment &env,
     }
 
     if (nargout > 0) {
-        outs[0] = std::move(M);
+        outs[0] = keel::move(M);
         return;
     }
 
     // No LHS — MATLAB assigns to a variable named after the file's
     // stem (basename without directory and extension).
-    std::string stem = filename;
-    keel::usize sep = stem.find_last_of("/\\:");
-    if (sep != std::string::npos) stem = stem.substr(sep + 1);
-    keel::usize dot = stem.find_last_of('.');
-    if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
+    keel::StringRef stem = filename;
+    for (keel::usize i = stem.size(); i > 0; --i) {
+        char c = stem[i - 1];
+        if (c == '/' || c == '\\' || c == ':') {
+            stem = stem.substr(i);
+            break;
+        }
+    }
+    keel::usize dot = stem.rfind('.');
+    if (dot != keel::kInvalidIndex && dot > 0)
+        stem = stem.substr(0, dot);
     if (stem.empty() || !(std::isalpha(static_cast<unsigned char>(stem[0])) || stem[0] == '_'))
         throw Error("load: cannot derive a valid variable name from filename");
     env.set(stem, M);
-    engine.assignToCaller(0, stem, std::move(M));
+    engine.assignToCaller(0, stem, keel::move(M));
 }
 
 } // namespace numkit::runtime

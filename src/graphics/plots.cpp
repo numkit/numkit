@@ -17,15 +17,14 @@
 //   plots/helpers.cpp  — pure JSON/parse helpers (numkit::detail)
 //   plots/shared.cpp   — plot bodies shared by more than one family (numkit::detail)
 
+#include <keel/array.h>
 #include <numkit/graphics/graphics_context.hpp>
 
 #include "plots/plot_internal.hpp"
 
-#include <vector>
-
 namespace numkit {
 
-void buildPlotTable(std::vector<PlotEntry> &table)
+void buildPlotTable(keel::Array<PlotEntry> &table)
 {
     buildLayoutPlots(table);
     buildLinePlots(table);

@@ -8,7 +8,7 @@ namespace numkit {
 // ============================================================
 // Environment — SBO helpers
 // ============================================================
-Value *Environment::sboFind(const std::string &name)
+Value *Environment::sboFind(keel::StringRef name)
 {
     for (keel::usize i = 0; i < sboCount_; ++i)
         if (sbo_[i].name == name)
@@ -16,7 +16,7 @@ Value *Environment::sboFind(const std::string &name)
     return nullptr;
 }
 
-const Value *Environment::sboFind(const std::string &name) const
+const Value *Environment::sboFind(keel::StringRef name) const
 {
     for (keel::usize i = 0; i < sboCount_; ++i)
         if (sbo_[i].name == name)
@@ -24,33 +24,36 @@ const Value *Environment::sboFind(const std::string &name) const
     return nullptr;
 }
 
-void Environment::sboSet(const std::string &name, Value val)
+void Environment::sboSet(keel::StringRef name, Value val)
 {
     // If already overflowed, use map directly
     if (!vars_.empty()) {
-        vars_[name] = std::move(val);
+        if (Value *existing = vars_.get(name))
+            *existing = keel::move(val);
+        else
+            vars_.put(keel::String::from(name), keel::move(val));
         return;
     }
     // Try to update existing slot
     for (keel::usize i = 0; i < sboCount_; ++i) {
         if (sbo_[i].name == name) {
-            sbo_[i].value = std::move(val);
+            sbo_[i].value = keel::move(val);
             return;
         }
     }
     // Try to add new slot
     if (sboCount_ < SBO_SLOTS) {
-        sbo_[sboCount_].name = name;
-        sbo_[sboCount_].value = std::move(val);
+        sbo_[sboCount_].name.assign(name);
+        sbo_[sboCount_].value = keel::move(val);
         sboCount_++;
         return;
     }
     // Overflow: migrate all SBO slots to map, then add new entry
     for (keel::usize i = 0; i < sboCount_; ++i) {
-        vars_[std::move(sbo_[i].name)] = std::move(sbo_[i].value);
+        vars_.put(keel::move(sbo_[i].name), keel::move(sbo_[i].value));
     }
     sboCount_ = 0;
-    vars_[name] = std::move(val);
+    vars_.put(keel::String::from(name), keel::move(val));
 }
 
 // ============================================================
@@ -61,9 +64,9 @@ Environment::Environment(Environment *parent, Environment *globalsEnv)
     , globalsEnv_(globalsEnv)
 {}
 
-Environment::Environment(std::shared_ptr<Environment> owningParent, Environment *globalsEnv)
+Environment::Environment(keel::Arc<Environment> owningParent, Environment *globalsEnv)
     : parent_(owningParent.get())
-    , owningParent_(std::move(owningParent))
+    , owningParent_(keel::move(owningParent))
     , globalsEnv_(globalsEnv)
 {}
 
@@ -71,54 +74,61 @@ Environment::~Environment() = default;
 Environment::Environment(Environment &&) noexcept = default;
 Environment &Environment::operator=(Environment &&) noexcept = default;
 
-bool Environment::hasLocalSlot(const std::string &name) const
+bool Environment::hasLocalSlot(keel::StringRef name) const
 {
     if (!vars_.empty())
-        return vars_.count(name) > 0;
+        return vars_.contains(name);
     return sboFind(name) != nullptr;
 }
 
-void Environment::set(const std::string &name, Value val)
+void Environment::set(keel::StringRef name, Value val)
 {
-    if (hasGlobals_ && globals_.count(name) && globalsEnv_) {
-        globalsEnv_->set(name, std::move(val));
+    if (hasGlobals_ && globals_.contains(name) && globalsEnv_) {
+        globalsEnv_->set(name, keel::move(val));
         return;
     }
-    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
-        (*persistentBucket_)[name] = std::move(val);
+    if (hasPersistents_ && persistents_.contains(name) && persistentBucket_) {
+        if (Value *existing = persistentBucket_->get(name))
+            *existing = keel::move(val);
+        else
+            persistentBucket_->put(keel::String::from(name), keel::move(val));
         return;
     }
     if (!hasLocalSlot(name) && !hasLexicalVar(name)) {
         for (Environment *p = parent_; p && p->isLexicalScope_; p = p->parent_) {
-            if (p->hasGlobals_ && p->globals_.count(name) && p->globalsEnv_) {
-                p->globalsEnv_->set(name, std::move(val));
+            if (p->hasGlobals_ && p->globals_.contains(name) && p->globalsEnv_) {
+                p->globalsEnv_->set(name, keel::move(val));
                 return;
             }
-            if (p->hasPersistents_ && p->persistents_.count(name) && p->persistentBucket_) {
-                (*p->persistentBucket_)[name] = std::move(val);
+            if (p->hasPersistents_ && p->persistents_.contains(name) && p->persistentBucket_) {
+                if (Value *existing = p->persistentBucket_->get(name))
+                    *existing = keel::move(val);
+                else
+                    p->persistentBucket_->put(keel::String::from(name), keel::move(val));
                 return;
             }
             if (p->hasLexicalVar(name) || p->hasLocalSlot(name)) {
-                p->setLocal(name, std::move(val));
+                p->setLocal(name, keel::move(val));
                 return;
             }
         }
     }
-    sboSet(name, std::move(val));
+    sboSet(name, keel::move(val));
 }
 
-Value *Environment::get(const std::string &name)
+Value *Environment::get(keel::StringRef name)
 {
-    if (hasGlobals_ && globals_.count(name) && globalsEnv_)
+    if (hasGlobals_ && globals_.contains(name) && globalsEnv_)
         return globalsEnv_->get(name);
-    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
-        auto [it, inserted] = persistentBucket_->emplace(name, Value::Empty);
-        return &it->second;
+    if (hasPersistents_ && persistents_.contains(name) && persistentBucket_) {
+        if (Value *existing = persistentBucket_->get(name))
+            return existing;
+        auto res = persistentBucket_->try_insert(keel::String::from(name), Value::Empty);
+        return res.value;
     }
     if (!vars_.empty()) {
-        auto it = vars_.find(name);
-        if (it != vars_.end())
-            return &it->second;
+        if (Value *v = vars_.get(name))
+            return v;
     } else if (sboCount_ > 0) {
         Value *v = sboFind(name);
         if (v)
@@ -129,14 +139,14 @@ Value *Environment::get(const std::string &name)
     return nullptr;
 }
 
-bool Environment::has(const std::string &name) const
+bool Environment::has(keel::StringRef name) const
 {
-    if (hasGlobals_ && globals_.count(name) && globalsEnv_)
+    if (hasGlobals_ && globals_.contains(name) && globalsEnv_)
         return globalsEnv_->get(name) != nullptr;
-    if (hasPersistents_ && persistents_.count(name) && persistentBucket_)
+    if (hasPersistents_ && persistents_.contains(name) && persistentBucket_)
         return true;
     if (!vars_.empty()) {
-        if (vars_.count(name))
+        if (vars_.contains(name))
             return true;
     } else if (sboFind(name)) {
         return true;
@@ -146,69 +156,68 @@ bool Environment::has(const std::string &name) const
     return false;
 }
 
-void Environment::setLocal(const std::string &name, Value val)
+void Environment::setLocal(keel::StringRef name, Value val)
 {
-    sboSet(name, std::move(val));
+    sboSet(name, keel::move(val));
 }
 
-Value *Environment::getLocal(const std::string &name)
+Value *Environment::getLocal(keel::StringRef name)
 {
-    if (!vars_.empty()) {
-        auto it = vars_.find(name);
-        return (it != vars_.end()) ? &it->second : nullptr;
-    }
+    if (!vars_.empty())
+        return vars_.get(name);
     return sboFind(name);
 }
 
-Value *Environment::getLocalFast(const std::string &name)
+Value *Environment::getLocalFast(keel::StringRef name)
 {
     return getLocal(name);
 }
 
-void Environment::setLocalFast(const std::string &name, Value val)
+void Environment::setLocalFast(keel::StringRef name, Value val)
 {
-    sboSet(name, std::move(val));
+    sboSet(name, keel::move(val));
 }
 
-void Environment::declareGlobal(const std::string &name)
+void Environment::declareGlobal(keel::StringRef name)
 {
-    globals_.insert(name);
+    if (!globals_.contains(name))
+        globals_.insert(keel::String::from(name));
     hasGlobals_ = true;
 }
 
-bool Environment::isGlobal(const std::string &name) const
+bool Environment::isGlobal(keel::StringRef name) const
 {
-    return hasGlobals_ && globals_.count(name) > 0;
+    return hasGlobals_ && globals_.contains(name);
 }
 
-void Environment::declarePersistent(const std::string &name)
+void Environment::declarePersistent(keel::StringRef name)
 {
-    persistents_.insert(name);
+    if (!persistents_.contains(name))
+        persistents_.insert(keel::String::from(name));
     hasPersistents_ = true;
-    if (persistentBucket_ && persistentBucket_->find(name) == persistentBucket_->end()) {
-        (*persistentBucket_)[name] = Value::Empty;
+    if (persistentBucket_ && !persistentBucket_->contains(name)) {
+        persistentBucket_->put(keel::String::from(name), Value::Empty);
     }
 }
 
-bool Environment::isPersistent(const std::string &name) const
+bool Environment::isPersistent(keel::StringRef name) const
 {
-    return hasPersistents_ && persistents_.count(name) > 0;
+    return hasPersistents_ && persistents_.contains(name);
 }
 
-void Environment::defineNestedFunc(const std::string &name, UserFunction uf)
+void Environment::defineNestedFunc(keel::StringRef name, UserFunction uf)
 {
     if (!nestedFuncs_) {
-        nestedFuncs_ = std::make_unique<std::unordered_map<std::string, UserFunction>>();
+        nestedFuncs_ = keel::make_unique<keel::HashMap<keel::String, UserFunction>>();
     }
-    (*nestedFuncs_)[name] = std::move(uf);
+    nestedFuncs_->put(keel::String::from(name), keel::move(uf));
 }
 
-const UserFunction *Environment::findNestedFunc(const std::string &name) const
+const UserFunction *Environment::findNestedFunc(keel::StringRef name) const
 {
     if (nestedFuncs_) {
-        auto it = nestedFuncs_->find(name);
-        if (it != nestedFuncs_->end())
-            return &it->second;
+        if (const UserFunction *uf = nestedFuncs_->get(name))
+            return uf;
     }
     if (parent_)
         return parent_->findNestedFunc(name);
@@ -216,78 +225,79 @@ const UserFunction *Environment::findNestedFunc(const std::string &name) const
 }
 
 void Environment::forEachLocal(
-    const std::function<void(const std::string &, const Value &)> &fn) const
+    keel::FunctionRef<void(const keel::String &, const Value &)> fn) const
 {
     for (keel::usize i = 0; i < sboCount_; ++i)
         fn(sbo_[i].name, sbo_[i].value);
-    for (auto &[k, v] : vars_)
+    for (auto [k, v] : vars_)
         fn(k, v);
 }
 
-std::shared_ptr<Environment> Environment::snapshot(std::shared_ptr<Environment> newParent,
-                                                   Environment *gs) const
+keel::Arc<Environment> Environment::snapshot(keel::Arc<Environment> newParent,
+                                             Environment *gs) const
 {
-    std::shared_ptr<Environment> snappedParent;
+    keel::Arc<Environment> snappedParent;
     if (parent_ && parent_->parent_) {
-        snappedParent = parent_->snapshot(newParent, gs);
+        snappedParent = parent_->snapshot(keel::move(newParent), gs);
     } else {
-        snappedParent = newParent;
+        snappedParent = keel::move(newParent);
     }
 
-    auto snap = std::make_shared<Environment>(std::move(snappedParent), gs);
+    auto snap = keel::make_arc<Environment>(keel::move(snappedParent), gs);
 
     for (keel::usize i = 0; i < sboCount_; ++i) {
-        snap->sbo_[snap->sboCount_].name = sbo_[i].name;
+        snap->sbo_[snap->sboCount_].name = sbo_[i].name.clone();
         snap->sbo_[snap->sboCount_].value = sbo_[i].value;
         snap->sboCount_++;
     }
 
-    for (auto &[k, v] : vars_)
-        snap->vars_[k] = v;
-
-    snap->globals_ = globals_;
+    snap->vars_ = vars_.clone();
+    snap->globals_ = globals_.clone();
     snap->hasGlobals_ = hasGlobals_;
-    snap->persistents_ = persistents_;
+    snap->persistents_ = persistents_.clone();
     snap->hasPersistents_ = hasPersistents_;
     snap->persistentBucket_ = persistentBucket_;
-    snap->lexicalVars_ = lexicalVars_;
+    snap->lexicalVars_ = lexicalVars_.clone();
     snap->isLexicalScope_ = isLexicalScope_;
     if (nestedFuncs_) {
-        snap->nestedFuncs_ = std::make_unique<std::unordered_map<std::string, UserFunction>>(*nestedFuncs_);
+        snap->nestedFuncs_ =
+            keel::make_unique<keel::HashMap<keel::String, UserFunction>>(nestedFuncs_->clone());
     }
 
     return snap;
 }
 
-void Environment::remove(const std::string &name)
+void Environment::remove(keel::StringRef name)
 {
     // If this is a global variable, also remove from globalsEnv
-    if (hasGlobals_ && globals_.count(name) && globalsEnv_) {
+    if (hasGlobals_ && globals_.contains(name) && globalsEnv_) {
         globalsEnv_->remove(name);
     }
-    if (hasPersistents_ && persistents_.count(name) && persistentBucket_) {
-        persistentBucket_->erase(name);
+    if (hasPersistents_ && persistents_.contains(name) && persistentBucket_) {
+        persistentBucket_->remove(name);
     }
 
     for (keel::usize i = 0; i < sboCount_; ++i) {
         if (sbo_[i].name == name) {
             if (i < sboCount_ - 1)
-                std::swap(sbo_[i], sbo_[sboCount_ - 1]);
+                keel::swap(sbo_[i], sbo_[sboCount_ - 1]);
+            sbo_[sboCount_ - 1].name.clear();
+            sbo_[sboCount_ - 1].value = Value();
             sboCount_--;
-            globals_.erase(name);
+            globals_.remove(name);
             if (globals_.empty())
                 hasGlobals_ = false;
-            persistents_.erase(name);
+            persistents_.remove(name);
             if (persistents_.empty())
                 hasPersistents_ = false;
             return;
         }
     }
-    vars_.erase(name);
-    globals_.erase(name);
+    vars_.remove(name);
+    globals_.remove(name);
     if (globals_.empty())
         hasGlobals_ = false;
-    persistents_.erase(name);
+    persistents_.remove(name);
     if (persistents_.empty())
         hasPersistents_ = false;
 }
@@ -296,7 +306,11 @@ void Environment::clearAll(bool keepImports)
 {
     if (hasPersistents_ && persistentBucket_) {
         for (const auto &pname : persistents_)
-            persistentBucket_->erase(pname);
+            persistentBucket_->remove(pname);
+    }
+    for (keel::usize i = 0; i < sboCount_; ++i) {
+        sbo_[i].name.clear();
+        sbo_[i].value = Value();
     }
     sboCount_ = 0;
     vars_.clear();
@@ -331,14 +345,16 @@ void Environment::reset(Environment *parent, Environment *gs)
     globalsEnv_ = gs;
 }
 
-std::vector<std::string> Environment::localNames() const
+keel::Array<keel::String> Environment::localNames() const
 {
-    std::vector<std::string> names;
+    keel::Array<keel::String> names;
     names.reserve(sboCount_ + vars_.size());
     for (keel::usize i = 0; i < sboCount_; ++i)
-        names.push_back(sbo_[i].name);
-    for (auto &[k, v] : vars_)
-        names.push_back(k);
+        names.push_back(sbo_[i].name.clone());
+    for (auto [k, v] : vars_) {
+        (void)v;
+        names.push_back(k.clone());
+    }
     return names;
 }
 

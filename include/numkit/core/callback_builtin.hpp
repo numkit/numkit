@@ -1,14 +1,14 @@
 // include/callback_builtin.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
 #include <numkit/value/value.hpp>
 
 #include <cstddef>
-#include <functional>
-#include <memory>
-#include <vector>
 
 // State-machine callbacks (vm_callbacks_plan.md).
 //
@@ -31,7 +31,7 @@ class VM;
 class Engine;
 
 // A suspended native computation driving user-code callbacks as VM frames.
-// Owned via shared_ptr: it lives on the awaited frame (CallFrame::cont) and is
+// Owned via Arc: it lives on the awaited frame (CallFrame::cont) and is
 // handed back to itself on each resume so it can re-attach to the next frame.
 struct VmContinuation
 {
@@ -47,7 +47,7 @@ struct VmContinuation
     // Returns false → finished; the final result has already been written to the
     //                 captured destination (no frame pushed).
     virtual bool step(VM &vm, Value *prevResult,
-                      const std::shared_ptr<VmContinuation> &self) = 0;
+                      const keel::Arc<VmContinuation> &self) = 0;
 };
 
 // A higher-order builtin that can run its callbacks on the VM. Registered on the
@@ -61,8 +61,8 @@ struct VmContinuation
 struct CallbackBuiltin
 {
     virtual ~CallbackBuiltin() = default;
-    virtual std::shared_ptr<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
-                                                     Value *dest, Engine &eng) = 0;
+    virtual keel::Arc<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
+                                               Value *dest, Engine &eng) = 0;
 };
 
 // Ready-made continuation for the common "apply a handle to each of N items,
@@ -82,11 +82,11 @@ struct LoopContinuation : VmContinuation
     keel::usize n = 0;
     keel::usize i = 0;
     Value *dest = nullptr;
-    std::function<std::vector<Value>(keel::usize)> makeArgs;
-    std::function<Value(std::vector<Value> &)> pack;
-    std::vector<Value> results;
+    keel::Function<keel::Array<Value>(keel::usize)> makeArgs;
+    keel::Function<Value(keel::Array<Value> &)> pack;
+    keel::Array<Value> results;
 
-    bool step(VM &vm, Value *prevResult, const std::shared_ptr<VmContinuation> &self) override;
+    bool step(VM &vm, Value *prevResult, const keel::Arc<VmContinuation> &self) override;
 };
 
 } // namespace numkit

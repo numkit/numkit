@@ -1,8 +1,14 @@
 // include/types.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
+#include <keel/hash_map.h>
 #include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/sys/plugin.hpp>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/environment.hpp>
@@ -10,12 +16,7 @@
 #include <numkit/value/value.hpp>
 
 #include <chrono>
-#include <functional>
-#include <memory>
 #include <stdexcept>
-#include <string>
-#include <unordered_set>
-#include <vector>
 
 namespace numkit {
 
@@ -28,8 +29,8 @@ using TimePoint = Clock::time_point;
 // ============================================================
 // Function types
 // ============================================================
-using BinaryOpFunc = std::function<Value(const Value &, const Value &)>;
-using UnaryOpFunc = std::function<Value(const Value &)>;
+using BinaryOpFunc = keel::Function<Value(const Value &, const Value &)>;
+using UnaryOpFunc = keel::Function<Value(const Value &)>;
 
 // ============================================================
 // Control flow signals
@@ -50,20 +51,31 @@ enum class FlowSignal : keel::u8 { NONE = 0, BREAK, CONTINUE, RETURN };
 // Numeric/logical constants served by `constantsEnv_` (parent of the
 // base workspace). Always defined at runtime. Assigning to one creates
 // a shadow local; `clear name` removes the shadow.
-extern const std::unordered_set<std::string> kBuiltinConstants;
+// (`true`/`false`/`nan`/`NaN`/`inf`/`Inf`/`eps` are built-in functions,
+// not constants — they support argument forms.)
+[[nodiscard]] constexpr bool isBuiltinConstant(keel::StringRef name) noexcept
+{
+    return name == "pi" || name == "i" || name == "j";
+}
 
 // Runtime pseudo-variables set by the VM / display pipeline, not by
 // user code. `nargin` / `nargout` are loaded on function entry; `ans`
 // is set by DISPLAY for bare expressions; `end` is the magic keyword
 // used in indexing. None of them live in any environment.
-extern const std::unordered_set<std::string> kPseudoVars;
+[[nodiscard]] constexpr bool isPseudoVar(keel::StringRef name) noexcept
+{
+    return name == "ans" || name == "nargin" || name == "nargout" || name == "end";
+}
 
 // Union of the above — "any name the compiler / debugger treats
 // specially and must not mistake for a plain user variable". Most
 // filter sites want this broad set; the narrower ones are for places
 // where we specifically need "true constant" semantics (e.g. deciding
 // whether to LOAD_CONST from `constantsEnv_`).
-extern const std::unordered_set<std::string> kBuiltinNames;
+[[nodiscard]] constexpr bool isBuiltinName(keel::StringRef name) noexcept
+{
+    return isBuiltinConstant(name) || isPseudoVar(name);
+}
 
 // numkit::Error (runtime error with source location) moved to an L0 header:
 // <nk/value/error.hpp>, included above. Kept out of this heavy core header
@@ -74,17 +86,20 @@ extern const std::unordered_set<std::string> kBuiltinNames;
 // ============================================================
 struct UserFunction
 {
-    std::string name;
-    std::vector<std::string> params;
-    std::vector<std::string> returns;
-    std::shared_ptr<const ASTNode> body;
-    std::shared_ptr<Environment> closureEnv;
-    std::weak_ptr<Environment> weakClosureEnv;
+    keel::String name;
+    keel::Array<keel::String> params;
+    keel::Array<keel::String> returns;
+    keel::Arc<const ASTNode> body;
+    keel::Arc<Environment> closureEnv;
+    // Non-owning pointer to enclosing lexical Environment for non-escaped nested
+    // functions (breaks self-cycle `heapEnv -> nestedFuncs_ -> UserFunction -> heapEnv`).
+    // Resolved against active lexical environments on escape/invocation.
+    Environment *rawClosureEnv = nullptr;
     mutable keel::i8 usesNarginNargout = -1;
     // classdef methods/constructors only: the class that declares this body.
     // Drives the member-access execution context (pushed while the body runs).
     // Empty for ordinary functions.
-    std::string ownerClass;
+    keel::String ownerClass;
     // m-file provenance — set by the m-file resolver (file functions),
     // captured at creation for anonymous functions and at registration for
     // classdef methods. When originKnown the call machinery pushes a
@@ -95,10 +110,29 @@ struct UserFunction
     // capture-at-creation semantics. Not known (in-script defs, closures)
     // → no push, the body runs under the caller's origin.
     bool originKnown = false;
-    std::string sourceFs;
-    std::string sourceDir;
-    std::string sourceFile;
+    keel::String sourceFs;
+    keel::String sourceDir;
+    keel::String sourceFile;
     keel::usize numUpvalueCaptures = 0;
+
+    UserFunction clone(keel::Allocator *alloc = nullptr) const
+    {
+        UserFunction cp;
+        cp.name = name.clone(alloc);
+        cp.params = params.clone(alloc);
+        cp.returns = returns.clone(alloc);
+        cp.body = body;
+        cp.closureEnv = closureEnv;
+        cp.rawClosureEnv = rawClosureEnv;
+        cp.usesNarginNargout = usesNarginNargout;
+        cp.ownerClass = ownerClass.clone(alloc);
+        cp.originKnown = originKnown;
+        cp.sourceFs = sourceFs.clone(alloc);
+        cp.sourceDir = sourceDir.clone(alloc);
+        cp.sourceFile = sourceFile.clone(alloc);
+        cp.numUpvalueCaptures = numUpvalueCaptures;
+        return cp;
+    }
 };
 
 // Shared mutable box for nested-function lexical variables (Upvalues).
@@ -107,11 +141,11 @@ struct UserFunction
 struct UpvaluePayload final : NativePayload
 {
     Value value;
-    std::shared_ptr<Environment> globalEnv;
-    std::shared_ptr<std::unordered_map<std::string, Value>> persistentBucket;
-    std::string backingName;
+    keel::Arc<Environment> globalEnv;
+    keel::Arc<keel::HashMap<keel::String, Value>> persistentBucket;
+    keel::String backingName;
 
-    explicit UpvaluePayload(Value v = Value()) : value(std::move(v)) {}
+    explicit UpvaluePayload(Value v = Value()) : value(keel::move(v)) {}
 
     Value read() const
     {
@@ -121,8 +155,9 @@ struct UpvaluePayload final : NativePayload
             return Value::Empty;
         }
         if (persistentBucket) {
-            auto it = persistentBucket->find(backingName);
-            return (it != persistentBucket->end()) ? it->second : Value::Empty;
+            if (const Value *pv = persistentBucket->get(backingName))
+                return *pv;
+            return Value::Empty;
         }
         return value;
     }
@@ -133,25 +168,26 @@ struct UpvaluePayload final : NativePayload
             if (v.isDeleted() || v.isUnset())
                 globalEnv->remove(backingName);
             else
-                globalEnv->set(backingName, std::move(v));
+                globalEnv->set(backingName, keel::move(v));
             return;
         }
         if (persistentBucket) {
             if (v.isDeleted() || v.isUnset())
-                persistentBucket->erase(backingName);
+                persistentBucket->remove(backingName);
             else
-                (*persistentBucket)[backingName] = std::move(v);
+                persistentBucket->put(backingName.clone(), keel::move(v));
             return;
         }
-        value = std::move(v);
+        value = keel::move(v);
     }
 
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
-        auto cp = keel::make_arc_in<UpvaluePayload>(alloc ? alloc : keel::default_allocator(), value);
+        auto *a = alloc ? alloc : keel::default_allocator();
+        auto cp = keel::make_arc_in<UpvaluePayload>(a, value);
         cp->globalEnv = globalEnv;
         cp->persistentBucket = persistentBucket;
-        cp->backingName = backingName;
+        cp->backingName = backingName.clone(a);
         return cp;
     }
 };

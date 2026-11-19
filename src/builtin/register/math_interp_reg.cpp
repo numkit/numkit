@@ -8,25 +8,24 @@
 #include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/core/engine.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
-#include <numkit/value/error.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
+#include <limits>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -40,7 +39,7 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     // Method may be a char ('linear') OR a string ("linear") — MATLAB
     // accepts both. Previously only isChar() was honored, so a double-quoted
     // method was silently ignored and fell back to linear.
-    std::string method = "linear";
+    keel::String method = keel::String::from("linear");
     if (args.size() >= 4 && (args[3].isChar() || args[3].isString()))
         method = args[3].toString();
 
@@ -285,13 +284,13 @@ void interp2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     // Form A: interp2(V, Xq, Yq[, method]) — first arg is the matrix.
     // Form B: interp2(X, Y, V, Xq, Yq[, method]) — 5 or 6 numeric args.
     if (args.size() == 3 || (args.size() == 4 && isMethodArg(args[3]))) {
-        std::string method = "linear";
+        keel::String method = keel::String::from("linear");
         if (args.size() == 4) method = args[3].toString();
         outs[0] = interp2(args[0], args[1], args[2], method, mr);
         return;
     }
     if (args.size() == 5 || (args.size() == 6 && isMethodArg(args[5]))) {
-        std::string method = "linear";
+        keel::String method = keel::String::from("linear");
         if (args.size() == 6) method = args[5].toString();
         outs[0] = interp2(args[0], args[1], args[2], args[3], args[4], method, mr);
         return;
@@ -309,14 +308,14 @@ void interp3_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     };
     // Form A: interp3(V, Xq, Yq, Zq[, method]).
     if (args.size() == 4 || (args.size() == 5 && isMethodArg(args[4]))) {
-        std::string method = "linear";
+        keel::String method = keel::String::from("linear");
         if (args.size() == 5) method = args[4].toString();
         outs[0] = interp3(args[0], args[1], args[2], args[3], method, mr);
         return;
     }
     // Form B: interp3(X, Y, Z, V, Xq, Yq, Zq[, method]) — 7 or 8 args.
     if (args.size() == 7 || (args.size() == 8 && isMethodArg(args[7]))) {
-        std::string method = "linear";
+        keel::String method = keel::String::from("linear");
         if (args.size() == 8) method = args[7].toString();
         outs[0] = interp3(args[0], args[1], args[2], args[3], args[4], args[5], args[6], method, mr);
         return;
@@ -420,19 +419,23 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const Value &V = hasGrids ? args[static_cast<keel::usize>(N)] : args[0];
     const keel::usize qStart = hasGrids ? static_cast<keel::usize>(N + 1) : 1;
 
-    std::string method = "linear";
+    keel::String method = keel::String::from("linear");
     if (L < args.size() && (args[L].isChar() || args[L].isString())) {
         method = args[L].toString();
-        for (auto &c : method) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char &c : method) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     const bool isNearest = (method == "nearest");
     if (!isNearest && method != "linear") {
-        throw Error("interpn: unsupported method '" + method + "' for 4+-D inputs",
+        throw Error(keel::format("interpn: unsupported method '{}' for 4+-D inputs", method),
                      0, 0, "interpn", "", "numkit:interpn:badMethod");
     }
 
-    std::vector<keel::usize> vShape(static_cast<keel::usize>(N));
-    std::vector<keel::usize> vStrides(static_cast<keel::usize>(N), 1);
+    auto *mr = ctx.engine->allocator();
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto *sa = scratch.allocator();
+
+    keel::Array<keel::usize> vShape(static_cast<keel::usize>(N), sa);
+    keel::Array<keel::usize> vStrides(static_cast<keel::usize>(N), keel::usize(1), sa);
     keel::usize strideAcc = 1;
     for (int d = 0; d < N; ++d) {
         const keel::usize sd = (d < V.dims().ndim()) ? static_cast<keel::usize>(V.dims().dim(d)) : 1;
@@ -445,38 +448,40 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
 
     // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
-    std::vector<std::vector<double>> grids(static_cast<keel::usize>(N));
+    keel::Array<keel::Array<double>> grids(sa);
+    grids.reserve(static_cast<keel::usize>(N));
     for (int d = 0; d < N; ++d) {
         const keel::usize sd = vShape[static_cast<keel::usize>(d)];
-        grids[static_cast<keel::usize>(d)].resize(sd);
+        keel::Array<double> gdVec(sd, sa);
         if (!hasGrids) {
             for (keel::usize k = 0; k < sd; ++k)
-                grids[static_cast<keel::usize>(d)][k] = static_cast<double>(k + 1);
+                gdVec[k] = static_cast<double>(k + 1);
         } else {
             const Value &Gd = args[static_cast<keel::usize>(d)];
             if (Gd.numel() == sd) {
                 for (keel::usize k = 0; k < sd; ++k)
-                    grids[static_cast<keel::usize>(d)][k] = Gd.elemAsDouble(k);
+                    gdVec[k] = Gd.elemAsDouble(k);
             } else {
                 // Full ndgrid tensor: step along axis d using vStrides[d].
                 const keel::usize st = vStrides[static_cast<keel::usize>(d)];
                 for (keel::usize k = 0; k < sd; ++k)
-                    grids[static_cast<keel::usize>(d)][k] = Gd.elemAsDouble(k * st);
+                    gdVec[k] = Gd.elemAsDouble(k * st);
             }
         }
+        grids.push_back(std::move(gdVec));
     }
 
     const Value &Xq0 = args[qStart];
     const keel::usize nQuery = Xq0.numel();
-    std::vector<keel::usize> outShape(static_cast<keel::usize>(Xq0.dims().ndim()));
+    keel::Array<keel::usize> outShape(static_cast<keel::usize>(Xq0.dims().ndim()), sa);
     for (int k = 0; k < Xq0.dims().ndim(); ++k)
         outShape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
-                                ctx.engine->allocator());
+                                mr);
     double *od = out.doubleDataMut();
 
-    std::vector<keel::usize> idx0(static_cast<keel::usize>(N));
-    std::vector<double> frac(static_cast<keel::usize>(N));
+    keel::Array<keel::usize> idx0(static_cast<keel::usize>(N), sa);
+    keel::Array<double> frac(static_cast<keel::usize>(N), sa);
     const keel::usize nCorners = static_cast<keel::usize>(1) << N;
 
     for (keel::usize q = 0; q < nQuery; ++q) {
@@ -485,12 +490,12 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             const Value &Xqd = args[qStart + static_cast<keel::usize>(d)];
             const double xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
             const auto &g = grids[static_cast<keel::usize>(d)];
-            if (std::isnan(xq) || xq < g.front() || xq > g.back()) {
+            if (std::isnan(xq) || xq < g[0] || xq > g[g.size() - 1]) {
                 outOfBounds = true;
                 break;
             }
             auto it = std::upper_bound(g.begin(), g.end(), xq);
-            keel::usize i0 = (it == g.begin()) ? 0 : static_cast<keel::usize>(std::distance(g.begin(), it) - 1);
+            keel::usize i0 = (it == g.begin()) ? 0 : static_cast<keel::usize>((it - g.begin()) - 1);
             if (i0 >= g.size() - 1) i0 = g.size() - 2;
             const double denom = g[i0 + 1] - g[i0];
             idx0[static_cast<keel::usize>(d)] = i0;

@@ -8,6 +8,9 @@
 #include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/builtin/datafun.hpp>
@@ -17,17 +20,13 @@
 #include <numkit/builtin/detail/datafun/discrete_detail.hpp>
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
-#include <keel/hash_map.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -134,16 +133,16 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         if (!a.isChar() && !a.isString())
             throw Error("unique: extra arguments must be string flags",
                          0, 0, "unique", "", "numkit:unique:badArg");
-        std::string s(a.toString().as_ref());
-        std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        keel::String s = a.toString();
+        for (char &c : s)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (s == "rows") useRows = true;
         else if (s == "stable") stable = true;
         else if (s == "sorted") stable = false;
         else if (s == "first") last = false;
         else if (s == "last")  last = true;
         else {
-            throw Error("unique: unknown flag '" + s + "'",
+            throw Error(keel::format("unique: unknown flag '{}'", s),
                          0, 0, "unique", "", "numkit:unique:badFlag");
         }
     }
@@ -152,55 +151,63 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         const Value &in = args[0];
         const keel::usize n = in.numel();
         const bool isRow = !in.dims().is3D() && in.dims().rows() == 1 && in.dims().cols() > 1;
-        auto getElemStr = [&](keel::usize idx) -> std::string {
+        keel::ArenaTemp scratch = keel::get_scratch(mr);
+        auto *sa = scratch.allocator();
+        auto getElemStr = [&](keel::usize idx) -> keel::String {
             if (origType == ValueType::STRING)
-                return std::string(in.stringElem(idx));
+                return in.stringElem(idx);
             const Value &el = in.cellAt(idx);
             if (el.isChar() || el.isString())
-                return std::string(el.toString().as_ref());
+                return el.toString();
             throw Error("unique: cell array elements must be character vectors",
                         0, 0, "unique", "", "numkit:unique:cellNotChar");
         };
-        std::vector<std::string> uniqStrs;
-        std::vector<keel::usize> iaVec;
-        std::vector<double> icVec(n, 0.0);
+        keel::Array<keel::String> uniqStrs(sa);
+        keel::Array<keel::usize> iaVec(sa);
+        keel::Array<double> icVec(n, 0.0, sa);
         if (stable) {
-            std::unordered_map<std::string, keel::usize> seen;
+            keel::HashMap<keel::String, keel::usize> seen(sa);
             for (keel::usize i = 0; i < n; ++i) {
-                std::string s = getElemStr(i);
-                auto it = seen.find(s);
-                if (it == seen.end()) {
+                keel::String s = getElemStr(i);
+                if (const keel::usize *found = seen.get(s.as_ref())) {
+                    if (last) iaVec[*found] = i;
+                    icVec[i] = static_cast<double>(*found + 1);
+                } else {
                     keel::usize pos = uniqStrs.size();
-                    seen.emplace(s, pos);
+                    seen.put(s.clone(sa), pos);
                     uniqStrs.push_back(std::move(s));
                     iaVec.push_back(i);
                     icVec[i] = static_cast<double>(pos + 1);
-                } else {
-                    if (last) iaVec[it->second] = i;
-                    icVec[i] = static_cast<double>(it->second + 1);
                 }
             }
         } else {
-            std::unordered_map<std::string, keel::usize> idxMap;
+            keel::HashMap<keel::String, keel::usize> idxMap(sa);
             for (keel::usize i = 0; i < n; ++i) {
-                std::string s = getElemStr(i);
-                if (last) idxMap[s] = i;
-                else idxMap.try_emplace(s, i);
+                keel::String s = getElemStr(i);
+                if (last) idxMap.put(std::move(s), i);
+                else idxMap.try_insert(std::move(s), i);
             }
-            std::vector<std::pair<std::string, keel::usize>> sorted;
+            struct StrIdxPair {
+                keel::String str;
+                keel::usize idx;
+            };
+            keel::Array<StrIdxPair> sorted(sa);
             sorted.reserve(idxMap.size());
-            for (const auto &kv : idxMap)
-                sorted.push_back(kv);
+            for (auto [k, v] : idxMap)
+                sorted.push_back(StrIdxPair{k.clone(sa), v});
             std::sort(sorted.begin(), sorted.end(),
-                      [](const auto &a, const auto &b) { return a.first < b.first; });
-            std::unordered_map<std::string, keel::usize> rankMap;
+                      [](const StrIdxPair &a, const StrIdxPair &b) { return a.str.as_ref() < b.str.as_ref(); });
+            keel::HashMap<keel::String, keel::usize> rankMap(sa);
             for (keel::usize k = 0; k < sorted.size(); ++k) {
-                rankMap[sorted[k].first] = k;
-                uniqStrs.push_back(sorted[k].first);
-                iaVec.push_back(sorted[k].second);
+                rankMap.put(sorted[k].str.clone(sa), k);
+                uniqStrs.push_back(std::move(sorted[k].str));
+                iaVec.push_back(sorted[k].idx);
             }
-            for (keel::usize i = 0; i < n; ++i)
-                icVec[i] = static_cast<double>(rankMap[getElemStr(i)] + 1);
+            for (keel::usize i = 0; i < n; ++i) {
+                keel::String s = getElemStr(i);
+                const keel::usize *rk = rankMap.get(s.as_ref());
+                icVec[i] = static_cast<double>((rk ? *rk : 0) + 1);
+            }
         }
         const keel::usize k = uniqStrs.size();
         const keel::usize outR = (n == 0) ? 0 : (isRow ? 1 : k);
@@ -285,9 +292,9 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     HistBinSpec spec;   // method = Auto by default
 
     auto lower = [](keel::StringRef sv) {
-        std::string s(sv);
-        std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        keel::String s(sv);
+        for (char &c : s)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
     };
     auto requireNumBins = [](double v) {
@@ -314,12 +321,12 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (args[i].type() != ValueType::CHAR) continue;
-        std::string key = lower(args[i].toString());
+        keel::String key = lower(args[i].toString());
         if (key == "normalization") {
             if (args[i + 1].type() != ValueType::CHAR)
                 throw Error("histcounts: 'Normalization' value must be a string",
                              0, 0, "histcounts", "", "numkit:histcounts:badNorm");
-            std::string m = lower(args[i + 1].toString());
+            keel::String m = lower(args[i + 1].toString());
             if      (m == "count")        norm = HistNorm::Count;
             else if (m == "probability")  norm = HistNorm::Probability;
             else if (m == "countdensity") norm = HistNorm::CountDensity;
@@ -327,7 +334,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             else if (m == "cumcount")     norm = HistNorm::CumCount;
             else if (m == "cdf")          norm = HistNorm::Cdf;
             else
-                throw Error("histcounts: unknown Normalization '" + m + "'",
+                throw Error(keel::format("histcounts: unknown Normalization '{}'", m),
                              0, 0, "histcounts", "", "numkit:histcounts:badNorm");
             ++i;
         } else if (key == "binedges") {
@@ -360,7 +367,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             if (args[i + 1].type() != ValueType::CHAR)
                 throw Error("histcounts: 'BinMethod' value must be a string",
                              0, 0, "histcounts", "", "numkit:histcounts:badBinMethod");
-            std::string m = lower(args[i + 1].toString());
+            keel::String m = lower(args[i + 1].toString());
             if      (m == "auto")     spec.method = HistBinMethod::Auto;
             else if (m == "scott")    spec.method = HistBinMethod::Scott;
             else if (m == "fd")       spec.method = HistBinMethod::Fd;
@@ -368,7 +375,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             else if (m == "sturges")  spec.method = HistBinMethod::Sturges;
             else if (m == "sqrt")     spec.method = HistBinMethod::Sqrt;
             else
-                throw Error("histcounts: 'BinMethod' '" + m + "' not supported",
+                throw Error(keel::format("histcounts: 'BinMethod' '{}' not supported", m),
                              0, 0, "histcounts", "", "numkit:histcounts:badBinMethod");
             ++i;
         } else {
@@ -596,9 +603,9 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
                       keel::Allocator *mr, const char *fn)
 {
     if (A.type() == ValueType::COMPLEX || B.type() == ValueType::COMPLEX)
-        throw Error(std::string(fn) + ": index outputs are not supported for "
-                    "complex inputs", 0, 0, fn, "",
-                    std::string("numkit:") + fn + ":complexIdx");
+        throw Error(keel::format("{}: index outputs are not supported for "
+                    "complex inputs", fn), 0, 0, fn, "",
+                    keel::format("numkit:{}:complexIdx", fn));
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     keel::HashMap<double, keel::usize, DoubleHashEq0> mapA(scratch.allocator());
@@ -669,11 +676,11 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
     const keel::usize ar = A.dims().rows(), ac = A.dims().cols();
     const keel::usize br = B.dims().rows(), bc = B.dims().cols();
     if (ar > 0 && br > 0 && ac != bc)
-        throw Error(std::string(fn) + ": 'rows' inputs must have the same "
-                    "number of columns", 0, 0, fn, "",
-                    std::string("numkit:") + fn + ":rowsCols");
+        throw Error(keel::format("{}: 'rows' inputs must have the same "
+                    "number of columns", fn), 0, 0, fn, "",
+                    keel::format("numkit:{}:rowsCols", fn));
     const keel::usize cols = (ar > 0) ? ac : bc;
-    auto makeColVec = [&](const std::vector<double> &v) {
+    auto makeColVec = [&](keel::ArrayRef<double> v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
         if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
         return col;
@@ -698,7 +705,8 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
         if (nargout <= 1) return uniqueRows(combined, mr);
         auto [uRows, iaAll, icAll] = uniqueRowsWithIndices(combined, /*stable=*/false, /*last=*/false, mr);
         (void)icAll;
-        std::vector<double> iaVec, ibVec;
+        keel::ArenaTemp scratchU = keel::get_scratch(mr);
+        keel::Array<double> iaVec(scratchU.allocator()), ibVec(scratchU.allocator());
         for (keel::usize i = 0; i < iaAll.numel(); ++i) {
             const keel::usize idx1 = static_cast<keel::usize>(iaAll.elemAsDouble(i));
             if (idx1 <= ar) iaVec.push_back(static_cast<double>(idx1));
@@ -741,13 +749,13 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
               [ad, ac, ar](keel::usize a, keel::usize b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
     nonNan.append(nanIdx);
     if (nargout >= 2) {
-        std::vector<double> iaVec(nonNan.size());
+        keel::Array<double> iaVec(nonNan.size(), scratch.allocator());
         for (keel::usize i = 0; i < nonNan.size(); ++i)
             iaVec[i] = static_cast<double>(nonNan[i] + 1);
         outs[1] = makeColVec(iaVec);
     }
     if (wantInB && nargout >= 3) {
-        std::vector<double> ibVec(nonNan.size());
+        keel::Array<double> ibVec(nonNan.size(), scratch.allocator());
         for (keel::usize i = 0; i < nonNan.size(); ++i) {
             RowKey key = extractRow(ad, ac, ar, nonNan[i], scratch.allocator());
             ibVec[i] = static_cast<double>(*bset.get(key));
@@ -769,12 +777,12 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
     const keel::usize ar = A.dims().rows(), ac = A.dims().cols();
     const keel::usize br = B.dims().rows(), bc = B.dims().cols();
     if (ar > 0 && br > 0 && ac != bc)
-        throw Error(std::string(fn) + ": 'rows' inputs must have the same "
-                    "number of columns", 0, 0, fn, "",
-                    std::string("numkit:") + fn + ":rowsCols");
+        throw Error(keel::format("{}: 'rows' inputs must have the same "
+                    "number of columns", fn), 0, 0, fn, "",
+                    keel::format("numkit:{}:rowsCols", fn));
     const keel::usize cols = (ar > 0) ? ac : bc;
     const keel::usize nr = ar + br;
-    auto makeColVec = [&](const std::vector<double> &v) {
+    auto makeColVec = [&](keel::ArrayRef<double> v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
         if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
         return col;
@@ -819,7 +827,7 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
               [cdp, cols, nr](keel::usize a, keel::usize b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
     nonNan.append(nanIdx);
     if (nargout >= 2) {
-        std::vector<double> iaVec, ibVec;
+        keel::Array<double> iaVec(scratch.allocator()), ibVec(scratch.allocator());
         for (keel::usize ci : nonNan) {
             if (ci < ar) iaVec.push_back(static_cast<double>(ci + 1));
             else         ibVec.push_back(static_cast<double>(ci - ar + 1));

@@ -9,11 +9,15 @@
 // The public, ENGINE-FREE C++ API (numkit::containers::map/dictionary/
 // set/get/...) is the single source of truth; the interpreter's registry
 // hooks (construct/subsref/subsasgn/methods) are thin adapters over it.
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
-#include <keel/math.h>
+#include <keel/string.h>
 #include <numkit/runtime/containers.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
@@ -27,16 +31,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
-#include <iomanip>
-#include <memory>
+#include <limits>
 #include <numeric>
-#include <sstream>
 #include <stdexcept>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
 
 namespace numkit::runtime {
 namespace {
@@ -45,17 +44,33 @@ namespace {
 struct KVPayload : NativePayload
 {
     enum KeyKind { None, Str, Num } keyKind = None;
-    std::vector<std::string> skeys; // when keyKind == Str
-    std::vector<double>      nkeys;  // when keyKind == Num
-    std::vector<Value>       vals;   // parallel to the active key vector
-    bool        configured = false;
-    std::string keyType = "char";   // MATLAB KeyType label (containers.Map)
-    std::string valType = "any";    // MATLAB ValueType label
+    keel::Array<keel::String> skeys; // when keyKind == Str
+    keel::Array<double>       nkeys; // when keyKind == Num
+    keel::Array<Value>        vals;  // parallel to the active key vector
+    bool         configured = false;
+    keel::String keyType;            // KeyType label (containers.Map)
+    keel::String valType;            // ValueType label
+
+    explicit KVPayload(keel::Allocator *alloc = keel::default_allocator())
+        : skeys(alloc)
+        , nkeys(alloc)
+        , vals(alloc)
+        , keyType(keel::String::from("char", alloc))
+        , valType(keel::String::from("any", alloc))
+    {}
 
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
         auto *res = alloc ? alloc : keel::default_allocator();
-        return keel::make_arc_in<KVPayload>(res, *this); // deep copy → value semantics
+        auto copy = keel::make_arc_in<KVPayload>(res, res);
+        copy->keyKind = keyKind;
+        copy->skeys = skeys.clone(res);
+        copy->nkeys = nkeys.clone(res);
+        copy->vals = vals.clone(res);
+        copy->configured = configured;
+        copy->keyType = keyType.clone(res);
+        copy->valType = valType.clone(res);
+        return copy; // deep copy → value semantics
     }
 
     keel::usize count() const { return vals.size(); }
@@ -63,7 +78,7 @@ struct KVPayload : NativePayload
     int find(const Value &key) const
     {
         if (keyKind == Str) {
-            std::string s(key.toString().as_ref());
+            keel::String s = key.toString();
             for (keel::usize i = 0; i < skeys.size(); ++i)
                 if (skeys[i] == s)
                     return static_cast<int>(i);
@@ -80,7 +95,7 @@ struct KVPayload : NativePayload
     {
         if (keyKind == None) {
             keyKind = key.isNumeric() ? Num : Str;
-            keyType = (keyKind == Num) ? "double" : "char";
+            keyType.assign((keyKind == Num) ? "double" : "char");
         }
         int idx = find(key);
         if (idx >= 0) {
@@ -88,12 +103,12 @@ struct KVPayload : NativePayload
             return;
         }
         if (keyKind == Str)
-            skeys.emplace_back(key.toString().as_ref());
+            skeys.push_back(key.toString());
         else
             nkeys.push_back(key.toScalar());
         vals.push_back(val);
         configured = true;
-        valType = mtypeName(val.type());
+        valType.assign(mtypeName(val.type()));
     }
 };
 
@@ -115,7 +130,7 @@ const KVPayload *require(const Value &m)
     return p;
 }
 
-void extractKeys(const Value &k, std::vector<Value> &out, keel::Allocator *mr)
+void extractKeys(const Value &k, keel::Array<Value> &out, keel::Allocator *mr)
 {
     if (k.isCell())
         for (keel::usize i = 0; i < k.numel(); ++i)
@@ -129,7 +144,7 @@ void extractKeys(const Value &k, std::vector<Value> &out, keel::Allocator *mr)
         for (keel::usize i = 0; i < k.numel(); ++i)
             out.push_back(k.elemAt(i, mr));
 }
-void extractVals(const Value &v, std::vector<Value> &out, keel::Allocator *mr)
+void extractVals(const Value &v, keel::Array<Value> &out, keel::Allocator *mr)
 {
     if (v.isCell())
         for (keel::usize i = 0; i < v.numel(); ++i)
@@ -139,12 +154,14 @@ void extractVals(const Value &v, std::vector<Value> &out, keel::Allocator *mr)
             out.push_back(v.elemAt(i, mr));
 }
 
-// Output order for keys()/values(). MATLAB containers.Map iterates its
+// Output order for keys()/values(). containers.Map iterates its
 // keys SORTED; dictionary preserves insertion order. We store insertion
 // order in the payload and apply the Map sort only at output.
-std::vector<keel::usize> outputOrder(const Value &m, const KVPayload *p)
+keel::Array<keel::usize> outputOrder(const Value &m, const KVPayload *p,
+                                     keel::Allocator *mr = keel::default_allocator())
 {
-    std::vector<keel::usize> idx(p->count());
+    keel::Array<keel::usize> idx(mr);
+    idx.resize(p->count());
     std::iota(idx.begin(), idx.end(), keel::usize{0});
     if (m.objectClassName() == "containers.Map") {
         if (p->keyKind == KVPayload::Num)
@@ -162,7 +179,7 @@ Value makeContainer(keel::StringRef cls, bool isHandle, keel::Allocator *mr)
     if (!mr)
         mr = keel::default_allocator();
     auto st = keel::make_arc_in<ObjectState>(mr, mr);
-    st->native = keel::make_arc_in<KVPayload>(mr);
+    st->native = keel::make_arc_in<KVPayload>(mr, mr);
     return Value::object(cls, std::move(st), isHandle, mr);
 }
 
@@ -211,11 +228,12 @@ void remove(Value &m, const Value &key)
     int idx = p->find(key);
     if (idx < 0)
         return;
+    const auto uidx = static_cast<keel::usize>(idx);
     if (p->keyKind == KVPayload::Num)
-        p->nkeys.erase(p->nkeys.begin() + idx);
+        p->nkeys.remove_at(uidx);
     else
-        p->skeys.erase(p->skeys.begin() + idx);
-    p->vals.erase(p->vals.begin() + idx);
+        p->skeys.remove_at(uidx);
+    p->vals.remove_at(uidx);
 }
 
 Value keys(const Value &m, keel::Allocator *mr)
@@ -223,7 +241,7 @@ Value keys(const Value &m, keel::Allocator *mr)
     if (!mr)
         mr = keel::default_allocator();
     const KVPayload *p = require(m);
-    const std::vector<keel::usize> ord = outputOrder(m, p);
+    const keel::Array<keel::usize> ord = outputOrder(m, p, mr);
     // containers.Map → cell row (sorted); dictionary → key-typed column.
     if (m.objectClassName() == "containers.Map") {
         Value c = Value::cell(1, p->count(), mr);
@@ -250,7 +268,7 @@ Value values(const Value &m, keel::Allocator *mr)
     if (!mr)
         mr = keel::default_allocator();
     const KVPayload *p = require(m);
-    const std::vector<keel::usize> ord = outputOrder(m, p);
+    const keel::Array<keel::usize> ord = outputOrder(m, p, mr);
     if (m.objectClassName() == "containers.Map") {
         Value c = Value::cell(1, p->count(), mr);
         for (keel::usize i = 0; i < ord.size(); ++i)
@@ -292,7 +310,7 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             Value d = containers::dictionary(mr);
             if (args.size() >= 2) {
-                std::vector<Value> ks, vs;
+                keel::Array<Value> ks(mr), vs(mr);
                 extractKeys(args[0], ks, mr);
                 extractVals(args[1], vs, mr);
                 if (ks.size() != vs.size())
@@ -351,25 +369,25 @@ void registerContainersRuntime(Engine &engine)
             });
         dict.dispText = [](const Value &self) -> keel::String {
             const KVPayload *p = require(self);
-            std::ostringstream os;
+            keel::String os;
             const char *kt = (p->keyKind == KVPayload::Num) ? "double" : "string";
-            os << "  dictionary (" << kt << " --> " << p->valType << ") with " << p->count()
-               << " entries:\n";
+            keel::format_into(os, "  dictionary ({} --> {}) with {} entries:\n",
+                              kt, p->valType, p->count());
             for (keel::usize i = 0; i < p->count(); ++i) {
-                os << "    ";
+                os.append("    ");
                 if (p->keyKind == KVPayload::Num)
-                    os << p->nkeys[i];
+                    keel::format_into(os, "%g", p->nkeys[i]);
                 else
-                    os << '"' << p->skeys[i] << '"';
-                os << " --> ";
+                    keel::format_into(os, "\"{}\"", p->skeys[i]);
+                os.append(" --> ");
                 const Value &v = p->vals[i];
                 if (v.isScalar() && v.type() == ValueType::DOUBLE)
-                    os << v.toScalar();
+                    keel::format_into(os, "%g", v.toScalar());
                 else
-                    os << mtypeName(v.type());
-                os << "\n";
+                    os.append(mtypeName(v.type()));
+                os.push_back('\n');
             }
-            return keel::String::from(os.str());
+            return os;
         };
         engine.registerClass(std::move(dict));
     }
@@ -387,7 +405,7 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             Value m = containers::map(mr);
             if (args.size() >= 2 && !args[0].isChar() && !args[0].isString()) {
-                std::vector<Value> ks, vs;
+                keel::Array<Value> ks(mr), vs(mr);
                 extractKeys(args[0], ks, mr);
                 extractVals(args[1], vs, mr);
                 for (keel::usize i = 0; i < ks.size() && i < vs.size(); ++i)
@@ -395,11 +413,11 @@ void registerContainersRuntime(Engine &engine)
             } else if (args.size() >= 2 && (args[0].isChar() || args[0].isString())) {
                 KVPayload *p = mut(m); // configure KeyType/ValueType options
                 for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
-                    std::string opt(args[i].toString().as_ref());
+                    keel::String opt = args[i].toString();
                     if (opt == "KeyType")
-                        p->keyType = std::string(args[i + 1].toString().as_ref());
+                        p->keyType = args[i + 1].toString();
                     else if (opt == "ValueType")
-                        p->valType = std::string(args[i + 1].toString().as_ref());
+                        p->valType = args[i + 1].toString();
                 }
             }
             return m;
@@ -451,7 +469,7 @@ void registerContainersRuntime(Engine &engine)
                     throw std::runtime_error("containers.Map.remove: key argument required");
                 containers::remove(self, a[0]);
                 if (!out.empty())
-                    out[0] = self; // MATLAB returns the (mutated) map
+                    out[0] = self; // returns the (mutated) map
             });
         cm.propGet = [](const Value &self, keel::StringRef name, Value &out,
                         CallContext &ctx) -> bool {
@@ -473,12 +491,12 @@ void registerContainersRuntime(Engine &engine)
         };
         cm.dispText = [](const Value &self) -> keel::String {
             const KVPayload *p = require(self);
-            std::ostringstream os;
-            os << "  Map with properties:\n\n"
-               << "        Count: " << p->count() << "\n"
-               << "      KeyType: " << p->keyType << "\n"
-               << "    ValueType: " << p->valType << "\n";
-            return keel::String::from(os.str());
+            return keel::format(
+                "  Map with properties:\n\n"
+                "        Count: {}\n"
+                "      KeyType: {}\n"
+                "    ValueType: {}\n",
+                p->count(), p->keyType, p->valType);
         };
         engine.registerClass(std::move(cm));
     }
@@ -487,104 +505,133 @@ void registerContainersRuntime(Engine &engine)
     struct TablePayload : NativePayload
     {
         keel::usize nrows = 0;
-        std::vector<std::string> varNames;
-        std::vector<Value> cols;
-        std::vector<std::string> rowNames;
-        std::vector<std::string> dimNames = {"Row", "Variables"};
-        std::string description;
-        std::vector<std::string> varUnits;
-        std::vector<std::string> varDescriptions;
+        keel::Array<keel::String> varNames;
+        keel::Array<Value> cols;
+        keel::Array<keel::String> rowNames;
+        keel::Array<keel::String> dimNames;
+        keel::String description;
+        keel::Array<keel::String> varUnits;
+        keel::Array<keel::String> varDescriptions;
         bool isTimetable = false;
         Value rowTimes;
-        std::string rowTimesName = "Time";
+        keel::String rowTimesName;
+
+        explicit TablePayload(keel::Allocator *alloc = keel::default_allocator())
+            : varNames(alloc)
+            , cols(alloc)
+            , rowNames(alloc)
+            , dimNames(alloc)
+            , description(alloc)
+            , varUnits(alloc)
+            , varDescriptions(alloc)
+            , rowTimesName(keel::String::from("Time", alloc))
+        {
+            dimNames.push_back(keel::String::from("Row", alloc));
+            dimNames.push_back(keel::String::from("Variables", alloc));
+        }
+
+        keel::Arc<TablePayload> cloneTable(keel::Allocator *alloc = nullptr) const
+        {
+            auto *res = alloc ? alloc : keel::default_allocator();
+            auto copy = keel::make_arc_in<TablePayload>(res, res);
+            copy->nrows = nrows;
+            copy->varNames = varNames.clone(res);
+            copy->cols = cols.clone(res);
+            copy->rowNames = rowNames.clone(res);
+            copy->dimNames = dimNames.clone(res);
+            copy->description = description.clone(res);
+            copy->varUnits = varUnits.clone(res);
+            copy->varDescriptions = varDescriptions.clone(res);
+            copy->isTimetable = isTimetable;
+            copy->rowTimes = rowTimes;
+            copy->rowTimesName = rowTimesName.clone(res);
+            return copy;
+        }
 
         keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
         {
-            auto *res = alloc ? alloc : keel::default_allocator();
-            return keel::make_arc_in<TablePayload>(res, *this);
+            return cloneTable(alloc);
         }
 
         keel::usize width() const { return cols.size(); }
 
         int findVar(keel::StringRef name) const
         {
-            std::string_view nv(name);
             for (keel::usize i = 0; i < varNames.size(); ++i)
-                if (varNames[i] == nv)
+                if (varNames[i] == name)
                     return static_cast<int>(i);
             return -1;
         }
 
         int findRow(keel::StringRef name) const
         {
-            std::string_view nv(name);
             for (keel::usize i = 0; i < rowNames.size(); ++i)
-                if (rowNames[i] == nv)
+                if (rowNames[i] == name)
                     return static_cast<int>(i);
             return -1;
         }
 
-        static std::vector<std::string> extractNames(const Value &v, const char *fn, const char *argName)
+        static keel::Array<keel::String> extractNames(const Value &v, const char *fn, const char *argName,
+                                                      keel::Allocator *alloc = keel::default_allocator())
         {
-            std::vector<std::string> out;
+            keel::Array<keel::String> out(alloc);
             if (v.isEmpty() && !v.isChar() && !v.isString())
                 return out;
             if (v.isChar()) {
                 if (v.dims().rows() <= 1) {
                     if (v.numel() > 0)
-                        out.emplace_back(v.toString().as_ref());
+                        out.push_back(keel::String::from(v.toString().as_ref(), alloc));
                 } else {
                     const char *cd = v.charData();
                     keel::usize r = v.dims().rows(), c = v.dims().cols();
                     for (keel::usize i = 0; i < r; ++i) {
-                        std::string s;
+                        keel::String s(alloc);
                         for (keel::usize j = 0; j < c; ++j)
                             s.push_back(cd[i + j * r]);
-                        while (!s.empty() && s.back() == ' ')
+                        while (!s.empty() && s[s.size() - 1] == ' ')
                             s.pop_back();
-                        out.push_back(s);
+                        out.push_back(std::move(s));
                     }
                 }
                 return out;
             }
             if (v.isString()) {
                 for (keel::usize i = 0; i < v.numel(); ++i)
-                    out.emplace_back(v.stringElem(i).as_ref());
+                    out.push_back(keel::String::from(v.stringElem(i).as_ref(), alloc));
                 return out;
             }
             if (v.isCell()) {
                 for (keel::usize i = 0; i < v.numel(); ++i) {
                     const Value &el = v.cellAt(i);
                     if (!el.isChar() && !el.isString())
-                        throw Error(std::string(fn) + ": '" + argName + "' must contain text strings",
-                                    0, 0, fn, "", std::string("numkit:") + fn + ":invalidNames");
-                    out.emplace_back(el.toString().as_ref());
+                        throw Error(keel::format("{}: '{}' must contain text strings", fn, argName),
+                                    0, 0, fn, "", keel::format("numkit:{}:invalidNames", fn));
+                    out.push_back(keel::String::from(el.toString().as_ref(), alloc));
                 }
                 return out;
             }
-            throw Error(std::string(fn) + ": '" + argName + "' must be a cell array of char vectors or string array",
-                        0, 0, fn, "", std::string("numkit:") + fn + ":invalidNames");
+            throw Error(keel::format("{}: '{}' must be a cell array of char vectors or string array", fn, argName),
+                        0, 0, fn, "", keel::format("numkit:{}:invalidNames", fn));
         }
 
-        static void validateUniqueNames(const std::vector<std::string> &names,
+        static void validateUniqueNames(const keel::Array<keel::String> &names,
                                         keel::usize expectedCount,
                                         const char *fn,
                                         const char *kind)
         {
             if (names.size() != expectedCount) {
-                throw Error(std::string(fn) + ": number of " + kind + " ("
-                            + std::to_string(names.size()) + ") must match expected count ("
-                            + std::to_string(expectedCount) + ")",
-                            0, 0, fn, "", std::string("numkit:") + fn + ":nameCountMismatch");
+                throw Error(keel::format("{}: number of {} ({}) must match expected count ({})",
+                                         fn, kind, names.size(), expectedCount),
+                            0, 0, fn, "", keel::format("numkit:{}:nameCountMismatch", fn));
             }
             for (keel::usize i = 0; i < names.size(); ++i) {
                 if (names[i].empty())
-                    throw Error(std::string(fn) + ": " + kind + " cannot be empty",
-                                0, 0, fn, "", std::string("numkit:") + fn + ":emptyName");
+                    throw Error(keel::format("{}: {} cannot be empty", fn, kind),
+                                0, 0, fn, "", keel::format("numkit:{}:emptyName", fn));
                 for (keel::usize j = i + 1; j < names.size(); ++j) {
                     if (names[i] == names[j])
-                        throw Error(std::string(fn) + ": duplicate name '" + names[i] + "' in " + kind,
-                                    0, 0, fn, "", std::string("numkit:") + fn + ":duplicateName");
+                        throw Error(keel::format("{}: duplicate name '{}' in {}", fn, names[i], kind),
+                                    0, 0, fn, "", keel::format("numkit:{}:duplicateName", fn));
                 }
             }
         }
@@ -607,8 +654,8 @@ void registerContainersRuntime(Engine &engine)
             }
 
             Value dn = Value::cell(1, 2, mr);
-            dn.cellAt(0) = Value::fromString(dimNames.size() > 0 ? dimNames[0] : "Row", mr);
-            dn.cellAt(1) = Value::fromString(dimNames.size() > 1 ? dimNames[1] : "Variables", mr);
+            dn.cellAt(0) = Value::fromString(dimNames.size() > 0 ? dimNames[0].as_ref() : keel::StringRef("Row"), mr);
+            dn.cellAt(1) = Value::fromString(dimNames.size() > 1 ? dimNames[1].as_ref() : keel::StringRef("Variables"), mr);
             st.field("DimensionNames") = std::move(dn);
 
             st.field("Description") = Value::fromString(description, mr);
@@ -659,7 +706,7 @@ void registerContainersRuntime(Engine &engine)
                 dimNames = std::move(dn);
             }
             if (st.hasField("Description")) {
-                description = std::string(st.field("Description").toString().as_ref());
+                description.assign(st.field("Description").toString().as_ref());
             }
             if (st.hasField("VariableUnits")) {
                 const Value &vuv = st.field("VariableUnits");
@@ -737,27 +784,29 @@ void registerContainersRuntime(Engine &engine)
     };
 
     static auto sliceColumnRows = [](const Value &col,
-                                     const std::vector<keel::usize> &rIdx,
+                                     keel::ArrayRef<keel::usize> rIdx,
                                      keel::Allocator *mr) -> Value {
         keel::usize nc = col.dims().cols();
-        std::vector<keel::usize> cIdx(nc);
-        std::iota(cIdx.begin(), cIdx.end(), 0);
+        keel::Array<keel::usize> cIdx(mr ? mr : keel::default_allocator());
+        cIdx.resize(nc);
+        std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
         return col.indexGet2D(rIdx.data(), rIdx.size(), cIdx.data(), cIdx.size(), mr);
     };
 
     static auto resolveTableSubscript = [](const Value &sub,
                                            keel::usize limit,
-                                           const std::vector<std::string> &names,
+                                           const keel::Array<keel::String> &names,
                                            bool isColDim,
-                                           const char *fn) -> std::vector<keel::usize> {
+                                           const char *fn) -> keel::Array<keel::usize> {
         if (sub.isChar() && sub.toString() == ":") {
-            std::vector<keel::usize> idx(limit);
-            std::iota(idx.begin(), idx.end(), 0);
+            keel::Array<keel::usize> idx;
+            idx.resize(limit);
+            std::iota(idx.begin(), idx.end(), keel::usize{0});
             return idx;
         }
         if (sub.isChar() || sub.isString() || sub.isCell()) {
             auto wanted = TablePayload::extractNames(sub, fn, isColDim ? "VariableNames" : "RowNames");
-            std::vector<keel::usize> idx;
+            keel::Array<keel::usize> idx;
             idx.reserve(wanted.size());
             for (const auto &nm : wanted) {
                 int found = -1;
@@ -768,28 +817,27 @@ void registerContainersRuntime(Engine &engine)
                     }
                 }
                 if (found < 0) {
-                    throw Error(std::string(fn) + ": unrecognized "
-                                + (isColDim ? "table variable" : "row") + " name '" + nm + "'",
-                                0, 0, fn, "", std::string("numkit:") + fn + ":unrecognizedName");
+                    throw Error(keel::format("{}: unrecognized {} name '{}'",
+                                             fn, (isColDim ? "table variable" : "row"), nm),
+                                0, 0, fn, "", keel::format("numkit:{}:unrecognizedName", fn));
                 }
                 idx.push_back(static_cast<keel::usize>(found));
             }
             return idx;
         }
-        auto kIdx = Value::resolveIndices(sub, limit);
-        return std::vector<keel::usize>(kIdx.data(), kIdx.data() + kIdx.size());
+        return Value::resolveIndices(sub, limit);
     };
 
     static auto extractBraceArray = [](const TablePayload *p,
-                                       const std::vector<keel::usize> &rIdx,
-                                       const std::vector<keel::usize> &cIdx,
+                                       keel::ArrayRef<keel::usize> rIdx,
+                                       keel::ArrayRef<keel::usize> cIdx,
                                        keel::Allocator *mr) -> Value {
         if (cIdx.empty())
             return Value::matrix(rIdx.size(), 0, ValueType::DOUBLE, mr);
         if (cIdx.size() == 1)
             return sliceColumnRows(p->cols[cIdx[0]], rIdx, mr);
 
-        std::vector<Value> sliced;
+        keel::Array<Value> sliced(mr ? mr : keel::default_allocator());
         sliced.reserve(cIdx.size());
         keel::usize totalCols = 0;
         bool allCell = true, allString = true, allLogical = true, allNumeric = true;
@@ -858,70 +906,69 @@ void registerContainersRuntime(Engine &engine)
                     0, 0, "table", "", "numkit:table:incompatibleBraceTypes");
     };
 
-    static auto formatTableCell = [](const Value &col, keel::usize row) -> std::string {
+    static auto formatTableCell = [](const Value &col, keel::usize row) -> keel::String {
         keel::usize nr = col.dims().rows();
         keel::usize nc = col.dims().cols();
         if (nc == 0 || row >= nr)
-            return "[]";
+            return keel::String::from("[]");
         if (col.isCell()) {
             if (nc > 1)
-                return "{1x" + std::to_string(nc) + " cell}";
+                return keel::format("{1x{} cell}", nc);
             const Value &el = col.cellAt(row);
             if (el.isChar())
-                return "'" + std::string(el.toString().as_ref()) + "'";
+                return keel::format("'{}'", el.toString());
             if (el.isString() && el.numel() == 1)
-                return "\"" + std::string(el.stringElem(0).as_ref()) + "\"";
+                return keel::format("\"{}\"", el.stringElem(0));
             if (el.isScalar() && (el.isNumeric() || el.isLogical())) {
-                std::ostringstream os;
                 if (el.isLogical())
-                    os << (el.toBool() ? "true" : "false");
-                else
-                    os << el.toScalar();
-                return os.str();
+                    return keel::String::from(el.toBool() ? "true" : "false");
+                return keel::format("%g", el.toScalar());
             }
-            return "[" + std::to_string(el.dims().rows()) + "x"
-                 + std::to_string(el.dims().cols()) + " " + mtypeName(el.type()) + "]";
+            return keel::format("[{}x{} {}]", el.dims().rows(), el.dims().cols(), mtypeName(el.type()));
         }
         if (col.isString()) {
             if (nc == 1)
-                return "\"" + std::string(col.stringElem(row).as_ref()) + "\"";
-            return std::to_string(nc) + "-D string";
+                return keel::format("\"{}\"", col.stringElem(row));
+            return keel::format("{}-D string", nc);
         }
         if (col.isChar()) {
-            std::string s;
+            keel::String s;
+            s.reserve(nc + 2);
+            s.push_back('\'');
             const char *cd = col.charData();
             for (keel::usize j = 0; j < nc; ++j)
                 s.push_back(cd[row + j * nr]);
-            return "'" + s + "'";
+            s.push_back('\'');
+            return s;
         }
         if (col.isLogical()) {
             if (nc == 1)
-                return col.logicalData()[row] ? "true" : "false";
-            std::ostringstream os;
+                return keel::String::from(col.logicalData()[row] ? "true" : "false");
+            keel::String os;
             for (keel::usize j = 0; j < nc; ++j) {
-                if (j > 0) os << "  ";
-                os << (col.logicalData()[row + j * nr] ? "true" : "false");
+                if (j > 0) os.append("  ");
+                os.append(col.logicalData()[row + j * nr] ? "true" : "false");
             }
-            return os.str();
+            return os;
         }
         if (col.isNumeric()) {
-            std::ostringstream os;
+            keel::String os;
             for (keel::usize j = 0; j < nc; ++j) {
-                if (j > 0) os << "  ";
+                if (j > 0) os.append("  ");
                 double d = col.elemAsDouble(row + j * nr);
-                if (std::isnan(d)) os << "NaN";
-                else if (std::isinf(d)) os << (d < 0 ? "-Inf" : "Inf");
+                if (std::isnan(d)) os.append("NaN");
+                else if (std::isinf(d)) os.append(d < 0 ? "-Inf" : "Inf");
                 else {
                     if (d == 0.0) d = 0.0;
-                    os << d;
+                    keel::format_into(os, "%g", d);
                 }
             }
-            return os.str();
+            return os;
         }
         if (col.isObject()) {
-            return "<" + std::string(col.objectClassName().as_ref()) + ">";
+            return keel::format("<{}>", col.objectClassName());
         }
-        return "<" + std::string(mtypeName(col.type())) + ">";
+        return keel::format("<{}>", mtypeName(col.type()));
     };
 
     static auto compareColumnRows = [](const Value &col, keel::usize r1, keel::usize r2) -> int {
@@ -936,7 +983,7 @@ void registerContainersRuntime(Engine &engine)
         if (col.isString()) {
             keel::String a = col.stringElem(r1);
             keel::String b = col.stringElem(r2);
-            return std::string_view(a) < std::string_view(b) ? -1 : (std::string_view(a) > std::string_view(b) ? 1 : 0);
+            return a.as_ref() < b.as_ref() ? -1 : (a.as_ref() > b.as_ref() ? 1 : 0);
         }
         if (col.isCell()) {
             const Value &ca = col.cellAt(r1);
@@ -944,7 +991,7 @@ void registerContainersRuntime(Engine &engine)
             if ((ca.isChar() || ca.isString()) && (cb.isChar() || cb.isString())) {
                 keel::String a = ca.toString();
                 keel::String b = cb.toString();
-                return std::string_view(a) < std::string_view(b) ? -1 : (std::string_view(a) > std::string_view(b) ? 1 : 0);
+                return a.as_ref() < b.as_ref() ? -1 : (a.as_ref() > b.as_ref() ? 1 : 0);
             }
             if ((ca.isNumeric() || ca.isLogical()) && (cb.isNumeric() || cb.isLogical())) {
                 double a = ca.toScalar();
@@ -966,8 +1013,8 @@ void registerContainersRuntime(Engine &engine)
                 } catch (...) {}
             }
         }
-        std::string sa = formatTableCell(col, r1);
-        std::string sb = formatTableCell(col, r2);
+        keel::String sa = formatTableCell(col, r1);
+        keel::String sb = formatTableCell(col, r2);
         return sa < sb ? -1 : (sa > sb ? 1 : 0);
     };
 
@@ -978,7 +1025,7 @@ void registerContainersRuntime(Engine &engine)
         tbl.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             if (args.empty())
                 return makeTableValue(std::move(p), mr);
 
@@ -992,29 +1039,29 @@ void registerContainersRuntime(Engine &engine)
                 keel::usize nr = static_cast<keel::usize>(std::max(0.0, std::round(szVal.elemAsDouble(0))));
                 keel::usize nc = static_cast<keel::usize>(std::max(0.0, std::round(szVal.elemAsDouble(1))));
                 p->nrows = nr;
-                std::vector<std::string> vtypes;
-                std::vector<std::string> vnames;
-                std::vector<std::string> rnames;
-                std::vector<std::string> dnames;
+                keel::Array<keel::String> vtypes(alloc);
+                keel::Array<keel::String> vnames(alloc);
+                keel::Array<keel::String> rnames(alloc);
+                keel::Array<keel::String> dnames(alloc);
                 for (keel::usize i = 2; i + 1 < args.size(); i += 2) {
-                    std::string key(args[i].toString().as_ref());
+                    keel::String key = args[i].toString();
                     if (iequalsTableOpt(key, "VariableTypes"))
-                        vtypes = TablePayload::extractNames(args[i + 1], "table", "VariableTypes");
+                        vtypes = TablePayload::extractNames(args[i + 1], "table", "VariableTypes", alloc);
                     else if (iequalsTableOpt(key, "VariableNames"))
-                        vnames = TablePayload::extractNames(args[i + 1], "table", "VariableNames");
+                        vnames = TablePayload::extractNames(args[i + 1], "table", "VariableNames", alloc);
                     else if (iequalsTableOpt(key, "RowNames"))
-                        rnames = TablePayload::extractNames(args[i + 1], "table", "RowNames");
+                        rnames = TablePayload::extractNames(args[i + 1], "table", "RowNames", alloc);
                     else if (iequalsTableOpt(key, "DimensionNames"))
-                        dnames = TablePayload::extractNames(args[i + 1], "table", "DimensionNames");
+                        dnames = TablePayload::extractNames(args[i + 1], "table", "DimensionNames", alloc);
                     else
-                        throw Error("table: unrecognized parameter name '" + key + "'",
+                        throw Error(keel::format("table: unrecognized parameter name '{}'", key),
                                     0, 0, "table", "", "numkit:table:unknownOption");
                 }
                 if (vtypes.size() != nc)
                     throw Error("table: 'VariableTypes' must specify one type per variable",
                                 0, 0, "table", "", "numkit:table:invalidVariableTypes");
                 for (keel::usize j = 0; j < nc; ++j) {
-                    const std::string &vt = vtypes[j];
+                    const keel::String &vt = vtypes[j];
                     if (iequalsTableOpt(vt, "double") || iequalsTableOpt(vt, "doublenan")) {
                         Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
                         if (iequalsTableOpt(vt, "doublenan"))
@@ -1034,7 +1081,7 @@ void registerContainersRuntime(Engine &engine)
                     } else {
                         p->cols.push_back(Value::matrix(nr, 1, ValueType::DOUBLE, mr));
                     }
-                    p->varNames.push_back("Var" + std::to_string(j + 1));
+                    p->varNames.push_back(keel::format_alloc(alloc, "Var{}", j + 1));
                 }
                 if (!vnames.empty()) {
                     TablePayload::validateUniqueNames(vnames, nc, "table", "VariableNames");
@@ -1065,15 +1112,14 @@ void registerContainersRuntime(Engine &engine)
                 if (j == 0) {
                     p->nrows = r;
                 } else if (r != p->nrows) {
-                    throw Error("table: all input variables must have the same number of rows (expected "
-                                + std::to_string(p->nrows) + ", got " + std::to_string(r)
-                                + " for argument " + std::to_string(j + 1) + ")",
+                    throw Error(keel::format("table: all input variables must have the same number of rows (expected {}, got {} for argument {})",
+                                             p->nrows, r, j + 1),
                                 0, 0, "table", "", "numkit:table:rowCountMismatch");
                 }
                 p->cols.push_back(col);
-                std::string inferredName;
+                keel::String inferredName(alloc);
                 if (caller) {
-                    caller->forEachLocal([&](const std::string &vname, const Value &vval) {
+                    caller->forEachLocal([&](const keel::String &vname, const Value &vval) {
                         if (!inferredName.empty() || vname == "ans")
                             return;
                         bool samePtr = false;
@@ -1085,36 +1131,36 @@ void registerContainersRuntime(Engine &engine)
                         } else if (col.isObject() && col.objectStateConst() != nullptr && vval.isObject()) {
                             samePtr = (vval.objectStateConst() == col.objectStateConst());
                         }
-                        if (samePtr && std::find(p->varNames.begin(), p->varNames.end(), vname) == p->varNames.end())
-                            inferredName = vname;
+                        if (samePtr && p->findVar(vname) < 0)
+                            inferredName.assign(vname.as_ref());
                     });
                 }
-                p->varNames.push_back(inferredName.empty() ? ("Var" + std::to_string(j + 1)) : inferredName);
+                p->varNames.push_back(inferredName.empty() ? keel::format_alloc(alloc, "Var{}", j + 1) : std::move(inferredName));
             }
 
             for (keel::usize i = dataEnd; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 const Value &val = args[i + 1];
                 if (iequalsTableOpt(key, "VariableNames")) {
-                    auto vn = TablePayload::extractNames(val, "table", "VariableNames");
+                    auto vn = TablePayload::extractNames(val, "table", "VariableNames", alloc);
                     TablePayload::validateUniqueNames(vn, p->cols.size(), "table", "VariableNames");
                     p->varNames = std::move(vn);
                 } else if (iequalsTableOpt(key, "RowNames")) {
                     if (val.isEmpty()) {
                         p->rowNames.clear();
                     } else {
-                        auto rn = TablePayload::extractNames(val, "table", "RowNames");
+                        auto rn = TablePayload::extractNames(val, "table", "RowNames", alloc);
                         TablePayload::validateUniqueNames(rn, p->nrows, "table", "RowNames");
                         p->rowNames = std::move(rn);
                     }
                 } else if (iequalsTableOpt(key, "DimensionNames")) {
-                    auto dn = TablePayload::extractNames(val, "table", "DimensionNames");
+                    auto dn = TablePayload::extractNames(val, "table", "DimensionNames", alloc);
                     TablePayload::validateUniqueNames(dn, 2, "table", "DimensionNames");
                     p->dimNames = std::move(dn);
                 } else if (iequalsTableOpt(key, "VariableUnits")) {
-                    p->varUnits = TablePayload::extractNames(val, "table", "VariableUnits");
+                    p->varUnits = TablePayload::extractNames(val, "table", "VariableUnits", alloc);
                 } else if (iequalsTableOpt(key, "VariableDescriptions")) {
-                    p->varDescriptions = TablePayload::extractNames(val, "table", "VariableDescriptions");
+                    p->varDescriptions = TablePayload::extractNames(val, "table", "VariableDescriptions", alloc);
                 }
             }
 
@@ -1130,17 +1176,16 @@ void registerContainersRuntime(Engine &engine)
             const TablePayload *p = tableCst(self);
             if (!p)
                 return false;
-            std::string_view nv(name);
             auto *mr = ctx.engine->allocator();
-            if (nv == "Properties") {
+            if (name == "Properties") {
                 out = p->buildProperties(mr);
                 return true;
             }
-            if (p->isTimetable && (nv == p->rowTimesName || nv == "Time")) {
+            if (p->isTimetable && (name == p->rowTimesName || name == "Time")) {
                 out = p->rowTimes;
                 return true;
             }
-            if (!p->dimNames.empty() && nv == p->dimNames[0]) {
+            if (!p->dimNames.empty() && name == p->dimNames[0]) {
                 if (p->rowNames.empty()) {
                     out = Value::cell(0, 0, mr);
                 } else {
@@ -1150,16 +1195,14 @@ void registerContainersRuntime(Engine &engine)
                 }
                 return true;
             }
-            if (p->dimNames.size() > 1 && nv == p->dimNames[1]) {
-                out = extractBraceArray(p, [&]() {
-                    std::vector<keel::usize> r(p->nrows);
-                    std::iota(r.begin(), r.end(), 0);
-                    return r;
-                }(), [&]() {
-                    std::vector<keel::usize> colIdx(p->width());
-                    std::iota(colIdx.begin(), colIdx.end(), 0);
-                    return colIdx;
-                }(), mr);
+            if (p->dimNames.size() > 1 && name == p->dimNames[1]) {
+                keel::Array<keel::usize> rIdx(mr ? mr : keel::default_allocator());
+                rIdx.resize(p->nrows);
+                std::iota(rIdx.begin(), rIdx.end(), keel::usize{0});
+                keel::Array<keel::usize> colIdx(mr ? mr : keel::default_allocator());
+                colIdx.resize(p->width());
+                std::iota(colIdx.begin(), colIdx.end(), keel::usize{0});
+                out = extractBraceArray(p, rIdx.as_ref(), colIdx.as_ref(), mr);
                 return true;
             }
             int idx = p->findVar(name);
@@ -1168,9 +1211,10 @@ void registerContainersRuntime(Engine &engine)
                 return true;
             }
             if (p->isTimetable) {
-                std::string low(nv);
-                for (auto &ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                if (low.find("date") != std::string::npos || low.find("time") != std::string::npos) {
+                keel::String low = keel::String::from(name);
+                for (keel::usize i = 0; i < low.size(); ++i)
+                    low[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(low[i])));
+                if (low.find("date") != keel::kInvalidIndex || low.find("time") != keel::kInvalidIndex) {
                     out = p->rowTimes;
                     return true;
                 }
@@ -1187,16 +1231,15 @@ void registerContainersRuntime(Engine &engine)
             TablePayload *p = tableMut(self);
             if (!p)
                 return false;
-            std::string_view nv(name);
-            if (nv == "Properties") {
+            if (name == "Properties") {
                 p->applyProperties(val);
                 return true;
             }
-            if (p->isTimetable && (nv == p->rowTimesName || nv == "Time")) {
+            if (p->isTimetable && (name == p->rowTimesName || name == "Time")) {
                 p->rowTimes = val;
                 return true;
             }
-            if (!p->dimNames.empty() && nv == p->dimNames[0]) {
+            if (!p->dimNames.empty() && name == p->dimNames[0]) {
                 if (val.isEmpty()) {
                     p->rowNames.clear();
                 } else {
@@ -1210,12 +1253,13 @@ void registerContainersRuntime(Engine &engine)
             // Deleting a column via `t.Var = []` when the table has rows
             if (idx >= 0 && val.isEmpty() && !val.isObject()
                 && val.dims().rows() == 0 && val.dims().cols() == 0 && p->nrows > 0) {
-                p->varNames.erase(p->varNames.begin() + idx);
-                p->cols.erase(p->cols.begin() + idx);
-                if (static_cast<keel::usize>(idx) < p->varUnits.size())
-                    p->varUnits.erase(p->varUnits.begin() + idx);
-                if (static_cast<keel::usize>(idx) < p->varDescriptions.size())
-                    p->varDescriptions.erase(p->varDescriptions.begin() + idx);
+                const auto uidx = static_cast<keel::usize>(idx);
+                p->varNames.remove_at(uidx);
+                p->cols.remove_at(uidx);
+                if (uidx < p->varUnits.size())
+                    p->varUnits.remove_at(uidx);
+                if (uidx < p->varDescriptions.size())
+                    p->varDescriptions.remove_at(uidx);
                 if (p->cols.empty() && p->rowNames.empty())
                     p->nrows = 0;
                 return true;
@@ -1223,15 +1267,14 @@ void registerContainersRuntime(Engine &engine)
             if (p->cols.empty() && p->nrows == 0) {
                 p->nrows = val.dims().rows();
             } else if (val.dims().rows() != p->nrows) {
-                throw Error("table: assigned variable '" + std::string(nv) + "' must have "
-                            + std::to_string(p->nrows) + " rows (got "
-                            + std::to_string(val.dims().rows()) + ")",
+                throw Error(keel::format("table: assigned variable '{}' must have {} rows (got {})",
+                                         name, p->nrows, val.dims().rows()),
                             0, 0, "table", "", "numkit:table:rowCountMismatch");
             }
             if (idx >= 0) {
                 p->cols[static_cast<keel::usize>(idx)] = val;
             } else {
-                p->varNames.emplace_back(nv);
+                p->varNames.push_back(keel::String::from(name));
                 p->cols.push_back(val);
             }
             return true;
@@ -1247,34 +1290,34 @@ void registerContainersRuntime(Engine &engine)
             if (args.empty() || args.size() > 2)
                 throw Error("table: parenthesis indexing requires 1 or 2 subscripts",
                             0, 0, "table", "", "numkit:table:invalidIndexing");
-            std::vector<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
-            std::vector<keel::usize> cIdx;
+            keel::Array<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
+            keel::Array<keel::usize> cIdx;
             if (args.size() == 1) {
                 cIdx.resize(p->width());
-                std::iota(cIdx.begin(), cIdx.end(), 0);
+                std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
             } else {
                 cIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "table");
             }
 
-            auto sub = keel::make_arc_in<TablePayload>(alloc);
+            auto sub = keel::make_arc_in<TablePayload>(alloc, alloc);
             sub->nrows = rIdx.size();
-            sub->dimNames = p->dimNames;
-            sub->description = p->description;
+            sub->dimNames = p->dimNames.clone(alloc);
+            sub->description = p->description.clone(alloc);
             sub->isTimetable = p->isTimetable;
-            sub->rowTimesName = p->rowTimesName;
+            sub->rowTimesName = p->rowTimesName.clone(alloc);
             if (!p->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx.as_ref(), mr);
             for (keel::usize ci : cIdx) {
-                sub->varNames.push_back(p->varNames[ci]);
-                sub->cols.push_back(sliceColumnRows(p->cols[ci], rIdx, mr));
+                sub->varNames.push_back(p->varNames[ci].clone(alloc));
+                sub->cols.push_back(sliceColumnRows(p->cols[ci], rIdx.as_ref(), mr));
                 if (ci < p->varUnits.size())
-                    sub->varUnits.push_back(p->varUnits[ci]);
+                    sub->varUnits.push_back(p->varUnits[ci].clone(alloc));
                 if (ci < p->varDescriptions.size())
-                    sub->varDescriptions.push_back(p->varDescriptions[ci]);
+                    sub->varDescriptions.push_back(p->varDescriptions[ci].clone(alloc));
             }
             if (!p->rowNames.empty()) {
                 for (keel::usize ri : rIdx)
-                    sub->rowNames.push_back(p->rowNames[ri]);
+                    sub->rowNames.push_back(p->rowNames[ri].clone(alloc));
             }
             if (!out.empty())
                 out[0] = makeTableValue(std::move(sub), mr);
@@ -1286,6 +1329,7 @@ void registerContainersRuntime(Engine &engine)
             if (!p)
                 throw std::runtime_error("table: invalid table payload");
             auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
             if (args.size() < 2 || args.size() > 3)
                 throw Error("table: parenthesis assignment requires 1 or 2 subscripts",
                             0, 0, "table", "", "numkit:table:invalidIndexing");
@@ -1295,11 +1339,11 @@ void registerContainersRuntime(Engine &engine)
             bool cIsAll = (args.size() == 2)
                        || (args[1].isChar() && args[1].toString() == ":");
 
-            std::vector<keel::usize> rIdx = resolveTableSubscript(rSub, p->nrows, p->rowNames, false, "table");
-            std::vector<keel::usize> cIdx;
+            keel::Array<keel::usize> rIdx = resolveTableSubscript(rSub, p->nrows, p->rowNames, false, "table");
+            keel::Array<keel::usize> cIdx;
             if (args.size() == 2) {
                 cIdx.resize(p->width());
-                std::iota(cIdx.begin(), cIdx.end(), 0);
+                std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
             } else {
                 cIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "table");
             }
@@ -1307,31 +1351,33 @@ void registerContainersRuntime(Engine &engine)
             // Deletion: t(r, :) = [] or t(:, c) = []
             if (rhs.isEmpty() && !rhs.isObject() && rhs.dims().rows() == 0 && rhs.dims().cols() == 0) {
                 if (cIsAll && !rIsAll) {
-                    std::vector<keel::u8> drop(p->nrows, 0);
+                    keel::Array<keel::u8> drop(alloc);
+                    drop.assign(p->nrows, 0);
                     for (keel::usize ri : rIdx)
                         if (ri < p->nrows) drop[ri] = 1;
-                    std::vector<keel::usize> keep;
+                    keel::Array<keel::usize> keep(alloc);
                     for (keel::usize i = 0; i < p->nrows; ++i)
                         if (!drop[i]) keep.push_back(i);
                     for (auto &col : p->cols)
-                        col = sliceColumnRows(col, keep, mr);
+                        col = sliceColumnRows(col, keep.as_ref(), mr);
                     if (!p->rowNames.empty()) {
-                        std::vector<std::string> nrn;
-                        for (keel::usize i : keep) nrn.push_back(p->rowNames[i]);
+                        keel::Array<keel::String> nrn(alloc);
+                        for (keel::usize i : keep) nrn.push_back(p->rowNames[i].clone(alloc));
                         p->rowNames = std::move(nrn);
                     }
                     p->nrows = keep.size();
                     return;
                 }
                 if (rIsAll && !cIsAll) {
-                    std::vector<keel::u8> drop(p->width(), 0);
+                    keel::Array<keel::u8> drop(alloc);
+                    drop.assign(p->width(), 0);
                     for (keel::usize ci : cIdx)
                         if (ci < p->width()) drop[ci] = 1;
-                    std::vector<std::string> nvn;
-                    std::vector<Value> ncols;
+                    keel::Array<keel::String> nvn(alloc);
+                    keel::Array<Value> ncols(alloc);
                     for (keel::usize j = 0; j < p->width(); ++j) {
                         if (!drop[j]) {
-                            nvn.push_back(p->varNames[j]);
+                            nvn.push_back(p->varNames[j].clone(alloc));
                             ncols.push_back(p->cols[j]);
                         }
                     }
@@ -1351,8 +1397,9 @@ void registerContainersRuntime(Engine &engine)
                 for (keel::usize k = 0; k < cIdx.size(); ++k) {
                     Value &col = p->cols[cIdx[k]];
                     keel::usize nc = col.dims().cols();
-                    std::vector<keel::usize> allC(nc);
-                    std::iota(allC.begin(), allC.end(), 0);
+                    keel::Array<keel::usize> allC(alloc);
+                    allC.resize(nc);
+                    std::iota(allC.begin(), allC.end(), keel::usize{0});
                     col.indexSet2D(rIdx.data(), rIdx.size(), allC.data(), allC.size(), rp->cols[k]);
                 }
                 return;
@@ -1387,15 +1434,15 @@ void registerContainersRuntime(Engine &engine)
             if (args.empty() || args.size() > 2)
                 throw Error("table: brace indexing requires 1 or 2 subscripts",
                             0, 0, "table", "", "numkit:table:invalidBraceIndexing");
-            std::vector<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
-            std::vector<keel::usize> cIdx;
+            keel::Array<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
+            keel::Array<keel::usize> cIdx;
             if (args.size() == 1) {
                 cIdx.resize(p->width());
-                std::iota(cIdx.begin(), cIdx.end(), 0);
+                std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
             } else {
                 cIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "table");
             }
-            out[0] = extractBraceArray(p, rIdx, cIdx, mr);
+            out[0] = extractBraceArray(p, rIdx.as_ref(), cIdx.as_ref(), mr);
         });
 
         c.methods.put(keel::String::from("__brace_set"),
@@ -1406,32 +1453,35 @@ void registerContainersRuntime(Engine &engine)
                 throw Error("table: brace assignment requires 1 or 2 subscripts",
                             0, 0, "table", "", "numkit:table:invalidBraceIndexing");
             const Value &rhs = args[args.size() - 1];
-            std::vector<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
-            std::vector<keel::usize> cIdx;
+            keel::Array<keel::usize> rIdx = resolveTableSubscript(args[0], p->nrows, p->rowNames, false, "table");
+            keel::Array<keel::usize> cIdx;
             if (args.size() == 2) {
                 cIdx.resize(p->width());
-                std::iota(cIdx.begin(), cIdx.end(), 0);
+                std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
             } else {
                 cIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "table");
             }
             if (cIdx.size() == 1) {
                 Value &col = p->cols[cIdx[0]];
                 keel::usize nc = col.dims().cols();
-                std::vector<keel::usize> allC(nc);
-                std::iota(allC.begin(), allC.end(), 0);
+                keel::Array<keel::usize> allC;
+                allC.resize(nc);
+                std::iota(allC.begin(), allC.end(), keel::usize{0});
                 col.indexSet2D(rIdx.data(), rIdx.size(), allC.data(), allC.size(), rhs);
                 return;
             }
             for (keel::usize k = 0; k < cIdx.size(); ++k) {
                 Value &col = p->cols[cIdx[k]];
                 keel::usize nc = col.dims().cols();
-                std::vector<keel::usize> allC(nc);
-                std::iota(allC.begin(), allC.end(), 0);
+                keel::Array<keel::usize> allC;
+                allC.resize(nc);
+                std::iota(allC.begin(), allC.end(), keel::usize{0});
                 if (rhs.isScalar()) {
                     col.indexSet2D(rIdx.data(), rIdx.size(), allC.data(), allC.size(), rhs);
                 } else {
-                    std::vector<keel::usize> rhsRows(rIdx.size());
-                    std::iota(rhsRows.begin(), rhsRows.end(), 0);
+                    keel::Array<keel::usize> rhsRows;
+                    rhsRows.resize(rIdx.size());
+                    std::iota(rhsRows.begin(), rhsRows.end(), keel::usize{0});
                     Value colSlice = rhs.indexGet2D(rhsRows.data(), rhsRows.size(), &k, 1, nullptr);
                     col.indexSet2D(rIdx.data(), rIdx.size(), allC.data(), allC.size(), colSlice);
                 }
@@ -1527,14 +1577,15 @@ void registerContainersRuntime(Engine &engine)
             auto *alloc = mr ? mr : keel::default_allocator();
             keel::usize k = args.empty() ? 8 : static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
             keel::usize take = std::min(k, p->nrows);
-            std::vector<keel::usize> rIdx(take);
-            std::iota(rIdx.begin(), rIdx.end(), 0);
-            auto sub = keel::make_arc_in<TablePayload>(alloc, *p);
+            keel::Array<keel::usize> rIdx(alloc);
+            rIdx.resize(take);
+            std::iota(rIdx.begin(), rIdx.end(), keel::usize{0});
+            auto sub = p->cloneTable(alloc);
             sub->nrows = take;
             for (keel::usize j = 0; j < sub->cols.size(); ++j)
-                sub->cols[j] = sliceColumnRows(p->cols[j], rIdx, mr);
+                sub->cols[j] = sliceColumnRows(p->cols[j], rIdx.as_ref(), mr);
             if (!sub->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx.as_ref(), mr);
             if (!sub->rowNames.empty())
                 sub->rowNames.resize(take);
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1549,17 +1600,18 @@ void registerContainersRuntime(Engine &engine)
             keel::usize k = args.empty() ? 8 : static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
             keel::usize take = std::min(k, p->nrows);
             keel::usize start = p->nrows - take;
-            std::vector<keel::usize> rIdx(take);
+            keel::Array<keel::usize> rIdx(alloc);
+            rIdx.resize(take);
             std::iota(rIdx.begin(), rIdx.end(), start);
-            auto sub = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto sub = p->cloneTable(alloc);
             sub->nrows = take;
             for (keel::usize j = 0; j < sub->cols.size(); ++j)
-                sub->cols[j] = sliceColumnRows(p->cols[j], rIdx, mr);
+                sub->cols[j] = sliceColumnRows(p->cols[j], rIdx.as_ref(), mr);
             if (!sub->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx.as_ref(), mr);
             if (!sub->rowNames.empty()) {
-                std::vector<std::string> nrn;
-                for (keel::usize r : rIdx) nrn.push_back(p->rowNames[r]);
+                keel::Array<keel::String> nrn(alloc);
+                for (keel::usize r : rIdx) nrn.push_back(p->rowNames[r].clone(alloc));
                 sub->rowNames = std::move(nrn);
             }
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1570,6 +1622,7 @@ void registerContainersRuntime(Engine &engine)
                keel::MutArrayRef<Value> out, CallContext &ctx) {
             const TablePayload *p = tableCst(self);
             auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
             Value s = Value::structure(mr);
             for (keel::usize j = 0; j < p->width(); ++j) {
                 const Value &col = p->cols[j];
@@ -1584,7 +1637,7 @@ void registerContainersRuntime(Engine &engine)
                 if (col.isNumeric() && col.numel() > 0) {
                     double mn = std::numeric_limits<double>::infinity();
                     double mx = -std::numeric_limits<double>::infinity();
-                    std::vector<double> vals;
+                    keel::Array<double> vals(alloc);
                     vals.reserve(col.numel());
                     for (keel::usize i = 0; i < col.numel(); ++i) {
                         double d = col.elemAsDouble(i);
@@ -1617,11 +1670,11 @@ void registerContainersRuntime(Engine &engine)
             const TablePayload *p = tableCst(self);
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            std::vector<keel::usize> sortCols;
-            std::vector<bool> descend;
+            keel::Array<keel::usize> sortCols(alloc);
+            keel::Array<keel::u8> descend(alloc);
             if (args.empty()) {
                 sortCols.resize(p->width());
-                std::iota(sortCols.begin(), sortCols.end(), 0);
+                std::iota(sortCols.begin(), sortCols.end(), keel::usize{0});
             } else if ((args[0].isChar() || args[0].isString())
                        && iequalsTableOpt(args[0].toString(), "RowNames")) {
                 // Sort by rowNames
@@ -1633,19 +1686,20 @@ void registerContainersRuntime(Engine &engine)
             if (args.size() >= 2) {
                 const Value &dirVal = args[1];
                 if (dirVal.isChar() || (dirVal.isString() && dirVal.numel() == 1)) {
-                    std::string d(dirVal.toString().as_ref());
+                    keel::String d = dirVal.toString();
                     defaultDesc = iequalsTableOpt(d, "descend");
                 } else if (dirVal.isCell() || dirVal.isString()) {
-                    auto dirs = TablePayload::extractNames(dirVal, "sortrows", "direction");
+                    auto dirs = TablePayload::extractNames(dirVal, "sortrows", "direction", alloc);
                     for (const auto &d : dirs)
-                        descend.push_back(iequalsTableOpt(d, "descend"));
+                        descend.push_back(iequalsTableOpt(d, "descend") ? 1u : 0u);
                 }
             }
             while (descend.size() < sortCols.size())
-                descend.push_back(defaultDesc);
+                descend.push_back(defaultDesc ? 1u : 0u);
 
-            std::vector<keel::usize> ord(p->nrows);
-            std::iota(ord.begin(), ord.end(), 0);
+            keel::Array<keel::usize> ord(alloc);
+            ord.resize(p->nrows);
+            std::iota(ord.begin(), ord.end(), keel::usize{0});
             std::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
                 if (sortCols.empty() && !p->rowNames.empty()) {
                     int cmp = p->rowNames[a] < p->rowNames[b] ? -1
@@ -1660,14 +1714,14 @@ void registerContainersRuntime(Engine &engine)
                 return false;
             });
 
-            auto sub = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto sub = p->cloneTable(alloc);
             for (keel::usize j = 0; j < sub->cols.size(); ++j)
-                sub->cols[j] = sliceColumnRows(p->cols[j], ord, mr);
+                sub->cols[j] = sliceColumnRows(p->cols[j], ord.as_ref(), mr);
             if (!sub->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, ord, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, ord.as_ref(), mr);
             if (!sub->rowNames.empty()) {
-                std::vector<std::string> nrn;
-                for (keel::usize r : ord) nrn.push_back(p->rowNames[r]);
+                keel::Array<keel::String> nrn(alloc);
+                for (keel::usize r : ord) nrn.push_back(p->rowNames[r].clone(alloc));
                 sub->rowNames = std::move(nrn);
             }
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1694,14 +1748,14 @@ void registerContainersRuntime(Engine &engine)
                             0, 0, "topkrows", "", "numkit:topkrows:badK");
             const keel::usize kTake = std::min(static_cast<keel::usize>(kd), p->nrows);
 
-            std::vector<keel::usize> sortCols;
-            std::vector<bool> descend;
+            keel::Array<keel::usize> sortCols(alloc);
+            keel::Array<keel::u8> descend(alloc);
             bool defaultDesc = true; // topkrows defaults to 'descend'
             keel::usize i = 1;
             if (i < args.size()) {
                 bool isDirOnly = false;
                 if (args[i].isChar() || (args[i].isString() && args[i].numel() == 1)) {
-                    std::string s(args[i].toString().as_ref());
+                    keel::String s = args[i].toString();
                     if (iequalsTableOpt(s, "ascend") || iequalsTableOpt(s, "descend"))
                         isDirOnly = true;
                 }
@@ -1719,25 +1773,26 @@ void registerContainersRuntime(Engine &engine)
                 || !((args[1].isChar() || args[1].isString())
                      && iequalsTableOpt(args[1].toString(), "RowNames")))) {
                 sortCols.resize(p->width());
-                std::iota(sortCols.begin(), sortCols.end(), 0);
+                std::iota(sortCols.begin(), sortCols.end(), keel::usize{0});
             }
             if (i < args.size()) {
                 const Value &dirVal = args[i];
                 if (dirVal.isChar() || (dirVal.isString() && dirVal.numel() == 1)) {
-                    std::string d(dirVal.toString().as_ref());
+                    keel::String d = dirVal.toString();
                     if (!iequalsTableOpt(d, "ComparisonMethod"))
                         defaultDesc = iequalsTableOpt(d, "descend");
                 } else if (dirVal.isCell() || dirVal.isString()) {
-                    auto dirs = TablePayload::extractNames(dirVal, "topkrows", "direction");
+                    auto dirs = TablePayload::extractNames(dirVal, "topkrows", "direction", alloc);
                     for (const auto &d : dirs)
-                        descend.push_back(iequalsTableOpt(d, "descend"));
+                        descend.push_back(iequalsTableOpt(d, "descend") ? 1u : 0u);
                 }
             }
             while (descend.size() < sortCols.size())
-                descend.push_back(defaultDesc);
+                descend.push_back(defaultDesc ? 1u : 0u);
 
-            std::vector<keel::usize> ord(p->nrows);
-            std::iota(ord.begin(), ord.end(), 0);
+            keel::Array<keel::usize> ord(alloc);
+            ord.resize(p->nrows);
+            std::iota(ord.begin(), ord.end(), keel::usize{0});
             std::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
                 if (sortCols.empty() && !p->rowNames.empty()) {
                     int cmp = p->rowNames[a] < p->rowNames[b] ? -1
@@ -1753,15 +1808,15 @@ void registerContainersRuntime(Engine &engine)
             });
             ord.resize(kTake);
 
-            auto sub = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto sub = p->cloneTable(alloc);
             sub->nrows = kTake;
             for (keel::usize j = 0; j < sub->cols.size(); ++j)
-                sub->cols[j] = sliceColumnRows(p->cols[j], ord, mr);
+                sub->cols[j] = sliceColumnRows(p->cols[j], ord.as_ref(), mr);
             if (!sub->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, ord, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, ord.as_ref(), mr);
             if (!sub->rowNames.empty()) {
-                std::vector<std::string> nrn;
-                for (keel::usize r : ord) nrn.push_back(p->rowNames[r]);
+                keel::Array<keel::String> nrn(alloc);
+                for (keel::usize r : ord) nrn.push_back(p->rowNames[r].clone(alloc));
                 sub->rowNames = std::move(nrn);
             }
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1779,12 +1834,12 @@ void registerContainersRuntime(Engine &engine)
             const TablePayload *p = tableCst(self);
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            std::vector<keel::usize> checkCols;
+            keel::Array<keel::usize> checkCols(alloc);
             keel::usize minNumMissing = 1;
             for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString())
                     continue;
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 if (iequalsTableOpt(key, "DataVariables")) {
                     checkCols = resolveTableSubscript(args[i + 1], p->width(), p->varNames, true, "rmmissing");
                 } else if (iequalsTableOpt(key, "MinNumMissing")) {
@@ -1793,7 +1848,7 @@ void registerContainersRuntime(Engine &engine)
             }
             if (checkCols.empty()) {
                 checkCols.resize(p->width());
-                std::iota(checkCols.begin(), checkCols.end(), 0);
+                std::iota(checkCols.begin(), checkCols.end(), keel::usize{0});
             }
             auto isCellElemMissing = [&](const Value &col, keel::usize r) -> bool {
                 keel::usize nr = col.dims().rows();
@@ -1826,7 +1881,7 @@ void registerContainersRuntime(Engine &engine)
                 }
                 return false;
             };
-            std::vector<keel::usize> keepRows;
+            keel::Array<keel::usize> keepRows(alloc);
             keepRows.reserve(p->nrows);
             Value tfRemoved = Value::matrix(p->nrows, 1, ValueType::LOGICAL, mr);
             for (keel::usize r = 0; r < p->nrows; ++r) {
@@ -1842,15 +1897,15 @@ void registerContainersRuntime(Engine &engine)
                     keepRows.push_back(r);
                 }
             }
-            auto sub = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto sub = p->cloneTable(alloc);
             sub->nrows = keepRows.size();
             for (keel::usize j = 0; j < sub->cols.size(); ++j)
-                sub->cols[j] = sliceColumnRows(p->cols[j], keepRows, mr);
+                sub->cols[j] = sliceColumnRows(p->cols[j], keepRows.as_ref(), mr);
             if (!sub->rowTimes.isEmpty())
-                sub->rowTimes = sliceColumnRows(p->rowTimes, keepRows, mr);
+                sub->rowTimes = sliceColumnRows(p->rowTimes, keepRows.as_ref(), mr);
             if (!sub->rowNames.empty()) {
-                std::vector<std::string> nrn;
-                for (keel::usize r : keepRows) nrn.push_back(p->rowNames[r]);
+                keel::Array<keel::String> nrn(alloc);
+                for (keel::usize r : keepRows) nrn.push_back(p->rowNames[r].clone(alloc));
                 sub->rowNames = std::move(nrn);
             }
             out[0] = makeTableValue(std::move(sub), mr);
@@ -1867,22 +1922,23 @@ void registerContainersRuntime(Engine &engine)
             if (args.empty())
                 throw Error("groupsummary: requires at least groupvars argument",
                             0, 0, "groupsummary", "", "numkit:groupsummary:minrhs");
-            std::vector<keel::usize> groupCols =
+            keel::Array<keel::usize> groupCols =
                 resolveTableSubscript(args[0], p->width(), p->varNames, true, "groupsummary");
-            std::vector<std::string> methods;
+            keel::Array<keel::String> methods(alloc);
             if (args.size() >= 2) {
                 if (args[1].isChar() || (args[1].isString() && args[1].numel() == 1))
-                    methods.emplace_back(args[1].toString().as_ref());
+                    methods.push_back(keel::String::from(args[1].toString().as_ref(), alloc));
                 else if (args[1].isCell() || args[1].isString())
-                    methods = TablePayload::extractNames(args[1], "groupsummary", "method");
+                    methods = TablePayload::extractNames(args[1], "groupsummary", "method", alloc);
             }
             if (methods.empty())
-                methods.push_back("mean");
-            std::vector<keel::usize> dataCols;
+                methods.push_back(keel::String::from("mean", alloc));
+            keel::Array<keel::usize> dataCols(alloc);
             if (args.size() >= 3) {
                 dataCols = resolveTableSubscript(args[2], p->width(), p->varNames, true, "groupsummary");
             } else {
-                std::vector<keel::u8> isGrp(p->width(), 0);
+                keel::Array<keel::u8> isGrp(alloc);
+                isGrp.assign(p->width(), 0);
                 for (keel::usize gi : groupCols)
                     if (gi < p->width()) isGrp[gi] = 1;
                 for (keel::usize j = 0; j < p->width(); ++j)
@@ -1890,8 +1946,9 @@ void registerContainersRuntime(Engine &engine)
                         dataCols.push_back(j);
             }
 
-            std::vector<keel::usize> ord(p->nrows);
-            std::iota(ord.begin(), ord.end(), 0);
+            keel::Array<keel::usize> ord(alloc);
+            ord.resize(p->nrows);
+            std::iota(ord.begin(), ord.end(), keel::usize{0});
             std::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
                 for (keel::usize gc : groupCols) {
                     int cmp = compareColumnRows(p->cols[gc], a, b);
@@ -1901,12 +1958,14 @@ void registerContainersRuntime(Engine &engine)
                 return false;
             });
 
-            std::vector<keel::usize> repRows;
-            std::vector<std::vector<keel::usize>> groupMembers;
+            keel::Array<keel::usize> repRows(alloc);
+            keel::Array<keel::Array<keel::usize>> groupMembers(alloc);
             for (keel::usize idx : ord) {
                 if (repRows.empty()) {
                     repRows.push_back(idx);
-                    groupMembers.push_back({idx});
+                    keel::Array<keel::usize> g(alloc);
+                    g.push_back(idx);
+                    groupMembers.push_back(std::move(g));
                 } else {
                     keel::usize prev = repRows.back();
                     bool same = true;
@@ -1920,32 +1979,34 @@ void registerContainersRuntime(Engine &engine)
                         groupMembers.back().push_back(idx);
                     } else {
                         repRows.push_back(idx);
-                        groupMembers.push_back({idx});
+                        keel::Array<keel::usize> g(alloc);
+                        g.push_back(idx);
+                        groupMembers.push_back(std::move(g));
                     }
                 }
             }
 
             keel::usize ng = repRows.size();
-            auto res = keel::make_arc_in<TablePayload>(alloc);
+            auto res = keel::make_arc_in<TablePayload>(alloc, alloc);
             res->nrows = ng;
             for (keel::usize gc : groupCols) {
-                res->varNames.push_back(p->varNames[gc]);
-                res->cols.push_back(sliceColumnRows(p->cols[gc], repRows, mr));
+                res->varNames.push_back(p->varNames[gc].clone(alloc));
+                res->cols.push_back(sliceColumnRows(p->cols[gc], repRows.as_ref(), mr));
             }
             Value gcCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
             for (keel::usize g = 0; g < ng; ++g)
                 gcCol.doubleDataMut()[g] = static_cast<double>(groupMembers[g].size());
-            res->varNames.push_back("GroupCount");
+            res->varNames.push_back(keel::String::from("GroupCount", alloc));
             res->cols.push_back(std::move(gcCol));
 
-            for (const std::string &m : methods) {
+            for (const keel::String &m : methods) {
                 for (keel::usize dc : dataCols) {
                     const Value &col = p->cols[dc];
                     Value statCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
                     double *dst = statCol.doubleDataMut();
                     for (keel::usize g = 0; g < ng; ++g) {
                         const auto &rows = groupMembers[g];
-                        std::vector<double> vals;
+                        keel::Array<double> vals(alloc);
                         vals.reserve(rows.size());
                         for (keel::usize r : rows) {
                             if (col.isNumeric() && r < col.numel()) {
@@ -1988,7 +2049,7 @@ void registerContainersRuntime(Engine &engine)
                         }
                         dst[g] = val;
                     }
-                    res->varNames.push_back(m + "_" + p->varNames[dc]);
+                    res->varNames.push_back(keel::format_alloc(alloc, "{}_{}", m, p->varNames[dc]));
                     res->cols.push_back(std::move(statCol));
                 }
             }
@@ -2003,7 +2064,7 @@ void registerContainersRuntime(Engine &engine)
             if (!lp)
                 throw Error("table: horzcat requires table operands",
                             0, 0, "horzcat", "", "numkit:table:horzcatType");
-            auto out = keel::make_arc_in<TablePayload>(alloc, *lp);
+            auto out = lp->cloneTable(alloc);
             for (keel::usize k = 0; k < args.size(); ++k) {
                 const TablePayload *rp = tableCst(args[k]);
                 if (!rp)
@@ -2017,13 +2078,13 @@ void registerContainersRuntime(Engine &engine)
                     out->nrows = rp->nrows;
                 for (keel::usize j = 0; j < rp->width(); ++j) {
                     if (out->findVar(rp->varNames[j]) >= 0)
-                        throw Error("table: duplicate variable name '" + rp->varNames[j] + "' in horzcat",
+                        throw Error(keel::format("table: duplicate variable name '{}' in horzcat", rp->varNames[j]),
                                     0, 0, "horzcat", "", "numkit:table:duplicateVarName");
-                    out->varNames.push_back(rp->varNames[j]);
+                    out->varNames.push_back(rp->varNames[j].clone(alloc));
                     out->cols.push_back(rp->cols[j]);
                 }
                 if (out->rowNames.empty() && !rp->rowNames.empty())
-                    out->rowNames = rp->rowNames;
+                    out->rowNames = rp->rowNames.clone(alloc);
             }
             outs[0] = makeTableValue(std::move(out), mr);
         };
@@ -2038,14 +2099,14 @@ void registerContainersRuntime(Engine &engine)
             if (!lp)
                 throw Error("table: vertcat requires table operands",
                             0, 0, "vertcat", "", "numkit:table:vertcatType");
-            auto out = keel::make_arc_in<TablePayload>(alloc, *lp);
+            auto out = lp->cloneTable(alloc);
             for (keel::usize k = 0; k < args.size(); ++k) {
                 const TablePayload *rp = tableCst(args[k]);
                 if (!rp)
                     throw Error("table: vertcat requires table operands",
                                 0, 0, "vertcat", "", "numkit:table:vertcatType");
                 if (out->nrows == 0 && out->width() == 0) {
-                    *out = *rp;
+                    out = rp->cloneTable(alloc);
                     continue;
                 }
                 if (rp->nrows == 0 && rp->width() == 0)
@@ -2058,7 +2119,7 @@ void registerContainersRuntime(Engine &engine)
                 for (keel::usize j = 0; j < out->width(); ++j) {
                     int rj = rp->findVar(out->varNames[j]);
                     if (rj < 0)
-                        throw Error("table: variable '" + out->varNames[j] + "' not found in second table during vertcat",
+                        throw Error(keel::format("table: variable '{}' not found in second table during vertcat", out->varNames[j]),
                                     0, 0, "vertcat", "", "numkit:table:vertcatVarMismatch");
                     const Value &c1 = out->cols[j];
                     const Value &c2 = rp->cols[static_cast<keel::usize>(rj)];
@@ -2107,7 +2168,8 @@ void registerContainersRuntime(Engine &engine)
                     }
                 }
                 if (!out->rowNames.empty() && !rp->rowNames.empty()) {
-                    out->rowNames.insert(out->rowNames.end(), rp->rowNames.begin(), rp->rowNames.end());
+                    for (const auto &rn : rp->rowNames)
+                        out->rowNames.push_back(rn.clone(alloc));
                 } else {
                     out->rowNames.clear();
                 }
@@ -2121,10 +2183,20 @@ void registerContainersRuntime(Engine &engine)
             const TablePayload *p = tableCst(self);
             if (!p)
                 return keel::String::from("  empty table\n");
-            std::ostringstream os;
-            os << "  " << p->nrows << "x" << p->width() << " table\n";
+            keel::String os;
+            keel::format_into(os, "  {}x{} table\n", p->nrows, p->width());
             if (p->nrows == 0 || p->width() == 0)
-                return keel::String::from(os.str());
+                return os;
+
+            auto appendRight = [](keel::String &dst, keel::StringRef text, keel::usize width) {
+                for (keel::usize pad = text.size(); pad < width; ++pad)
+                    dst.push_back(' ');
+                dst.append(text);
+            };
+            auto appendRepeat = [](keel::String &dst, char ch, keel::usize count) {
+                for (keel::usize k = 0; k < count; ++k)
+                    dst.push_back(ch);
+            };
 
             const keel::usize ncols = p->width();
             const bool hasRowNames = !p->rowNames.empty();
@@ -2134,8 +2206,15 @@ void registerContainersRuntime(Engine &engine)
                     rowNameWidth = std::max(rowNameWidth, rn.size());
             }
 
-            std::vector<keel::usize> colWidths(ncols);
-            std::vector<std::vector<std::string>> cells(p->nrows, std::vector<std::string>(ncols));
+            keel::Array<keel::usize> colWidths;
+            colWidths.resize(ncols);
+            keel::Array<keel::Array<keel::String>> cells;
+            cells.reserve(p->nrows);
+            for (keel::usize i = 0; i < p->nrows; ++i) {
+                keel::Array<keel::String> row;
+                row.resize(ncols);
+                cells.push_back(std::move(row));
+            }
             for (keel::usize j = 0; j < ncols; ++j) {
                 colWidths[j] = std::max<keel::usize>(4, p->varNames[j].size());
                 for (keel::usize i = 0; i < p->nrows; ++i) {
@@ -2144,39 +2223,48 @@ void registerContainersRuntime(Engine &engine)
                 }
             }
 
-            os << "\n";
-            if (hasRowNames)
-                os << "    " << std::setw(static_cast<int>(rowNameWidth)) << " " << "  ";
-            else
-                os << "    ";
-            for (keel::usize j = 0; j < ncols; ++j) {
-                if (j > 0) os << "    ";
-                os << std::setw(static_cast<int>(colWidths[j])) << p->varNames[j];
+            os.push_back('\n');
+            if (hasRowNames) {
+                os.append("    ");
+                appendRight(os, " ", rowNameWidth);
+                os.append("  ");
+            } else {
+                os.append("    ");
             }
-            os << "\n";
+            for (keel::usize j = 0; j < ncols; ++j) {
+                if (j > 0) os.append("    ");
+                appendRight(os, p->varNames[j].as_ref(), colWidths[j]);
+            }
+            os.push_back('\n');
 
-            if (hasRowNames)
-                os << "    " << std::setw(static_cast<int>(rowNameWidth)) << " " << "  ";
-            else
-                os << "    ";
-            for (keel::usize j = 0; j < ncols; ++j) {
-                if (j > 0) os << "    ";
-                os << std::string(colWidths[j], '_');
+            if (hasRowNames) {
+                os.append("    ");
+                appendRight(os, " ", rowNameWidth);
+                os.append("  ");
+            } else {
+                os.append("    ");
             }
-            os << "\n\n";
+            for (keel::usize j = 0; j < ncols; ++j) {
+                if (j > 0) os.append("    ");
+                appendRepeat(os, '_', colWidths[j]);
+            }
+            os.append("\n\n");
 
             for (keel::usize i = 0; i < p->nrows; ++i) {
-                if (hasRowNames)
-                    os << "    " << std::setw(static_cast<int>(rowNameWidth)) << p->rowNames[i] << "  ";
-                else
-                    os << "    ";
-                for (keel::usize j = 0; j < ncols; ++j) {
-                    if (j > 0) os << "    ";
-                    os << std::setw(static_cast<int>(colWidths[j])) << cells[i][j];
+                if (hasRowNames) {
+                    os.append("    ");
+                    appendRight(os, p->rowNames[i].as_ref(), rowNameWidth);
+                    os.append("  ");
+                } else {
+                    os.append("    ");
                 }
-                os << "\n";
+                for (keel::usize j = 0; j < ncols; ++j) {
+                    if (j > 0) os.append("    ");
+                    appendRight(os, cells[i][j].as_ref(), colWidths[j]);
+                }
+                os.push_back('\n');
             }
-            return keel::String::from(os.str());
+            return os;
         };
         }; // end initTableCommon
 
@@ -2191,29 +2279,29 @@ void registerContainersRuntime(Engine &engine)
                                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            std::vector<std::string> leftKeys, rightKeys;
+            keel::Array<keel::String> leftKeys(alloc), rightKeys(alloc);
             for (keel::usize i = 0; i + 1 < optArgs.size(); i += 2) {
                 if (!optArgs[i].isChar() && !optArgs[i].isString())
                     continue;
-                std::string k(optArgs[i].toString().as_ref());
+                keel::String k = optArgs[i].toString();
                 if (iequalsTableOpt(k, "Keys")) {
-                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "Keys");
-                    rightKeys = leftKeys;
+                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "Keys", alloc);
+                    rightKeys = leftKeys.clone(alloc);
                 } else if (iequalsTableOpt(k, "LeftKeys")) {
-                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "LeftKeys");
+                    leftKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "LeftKeys", alloc);
                 } else if (iequalsTableOpt(k, "RightKeys")) {
-                    rightKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "RightKeys");
+                    rightKeys = TablePayload::extractNames(optArgs[i + 1], "innerjoin", "RightKeys", alloc);
                 }
             }
             if (leftKeys.empty()) {
                 for (const auto &vn : lp->varNames) {
                     if (rp->findVar(vn) >= 0) {
-                        leftKeys.push_back(vn);
-                        rightKeys.push_back(vn);
+                        leftKeys.push_back(vn.clone(alloc));
+                        rightKeys.push_back(vn.clone(alloc));
                     }
                 }
             }
-            std::vector<keel::usize> lKeyCols, rKeyCols;
+            keel::Array<keel::usize> lKeyCols(alloc), rKeyCols(alloc);
             for (const auto &kn : leftKeys) {
                 int idx = lp->findVar(kn);
                 if (idx >= 0) lKeyCols.push_back(static_cast<keel::usize>(idx));
@@ -2250,7 +2338,7 @@ void registerContainersRuntime(Engine &engine)
                 }
                 return true;
             };
-            std::vector<keel::usize> lMatch, rMatch;
+            keel::Array<keel::usize> lMatch(alloc), rMatch(alloc);
             for (keel::usize lr = 0; lr < lp->nrows; ++lr) {
                 for (keel::usize rr = 0; rr < rp->nrows; ++rr) {
                     if (rowsMatch(lr, rr)) {
@@ -2259,25 +2347,25 @@ void registerContainersRuntime(Engine &engine)
                     }
                 }
             }
-            auto res = keel::make_arc_in<TablePayload>(alloc);
+            auto res = keel::make_arc_in<TablePayload>(alloc, alloc);
             res->nrows = lMatch.size();
             res->isTimetable = lp->isTimetable;
-            res->rowTimesName = lp->rowTimesName;
+            res->rowTimesName = lp->rowTimesName.clone(alloc);
             if (!lp->rowTimes.isEmpty())
-                res->rowTimes = sliceColumnRows(lp->rowTimes, lMatch, mr);
+                res->rowTimes = sliceColumnRows(lp->rowTimes, lMatch.as_ref(), mr);
             for (keel::usize j = 0; j < lp->width(); ++j) {
-                res->varNames.push_back(lp->varNames[j]);
-                res->cols.push_back(sliceColumnRows(lp->cols[j], lMatch, mr));
+                res->varNames.push_back(lp->varNames[j].clone(alloc));
+                res->cols.push_back(sliceColumnRows(lp->cols[j], lMatch.as_ref(), mr));
             }
             for (keel::usize j = 0; j < rp->width(); ++j) {
                 bool isKey = std::find(rKeyCols.begin(), rKeyCols.end(), j) != rKeyCols.end();
                 if (isKey)
                     continue;
-                std::string vn = rp->varNames[j];
+                keel::String vn = rp->varNames[j].clone(alloc);
                 if (res->findVar(vn) >= 0)
-                    vn += "_right";
+                    vn.append("_right");
                 res->varNames.push_back(std::move(vn));
-                res->cols.push_back(sliceColumnRows(rp->cols[j], rMatch, mr));
+                res->cols.push_back(sliceColumnRows(rp->cols[j], rMatch.as_ref(), mr));
             }
             outs[0] = makeTableValue(std::move(res), mr);
             if (nargout >= 2 && outs.size() >= 2) {
@@ -2310,7 +2398,7 @@ void registerContainersRuntime(Engine &engine)
         tt.construct = [](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             p->isTimetable = true;
             if (args.empty())
                 return makeTableValue(std::move(p), mr);
@@ -2334,30 +2422,30 @@ void registerContainersRuntime(Engine &engine)
                 if (j == startCol && p->rowTimes.isEmpty())
                     p->nrows = r;
                 p->cols.push_back(col);
-                p->varNames.push_back("Var" + std::to_string(j - startCol + 1));
+                p->varNames.push_back(keel::format_alloc(alloc, "Var{}", j - startCol + 1));
             }
             for (keel::usize i = dataEnd; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 const Value &val = args[i + 1];
                 if (iequalsTableOpt(key, "VariableNames")) {
-                    p->varNames = TablePayload::extractNames(val, "timetable", "VariableNames");
+                    p->varNames = TablePayload::extractNames(val, "timetable", "VariableNames", alloc);
                 } else if (iequalsTableOpt(key, "RowTimes")) {
                     p->rowTimes = val;
                     p->nrows = val.numel();
                 } else if (iequalsTableOpt(key, "DimensionNames")) {
-                    p->dimNames = TablePayload::extractNames(val, "timetable", "DimensionNames");
+                    p->dimNames = TablePayload::extractNames(val, "timetable", "DimensionNames", alloc);
                     if (!p->dimNames.empty())
-                        p->rowTimesName = p->dimNames[0];
+                        p->rowTimesName = p->dimNames[0].clone(alloc);
                 }
             }
             return makeTableValue(std::move(p), mr);
         };
 
-        auto retimeOne = [](const TablePayload *p, const std::string &newTimeBasis,
-                            const std::string &method, keel::Allocator *mr) -> keel::Arc<TablePayload> {
+        auto retimeOne = [](const TablePayload *p, keel::StringRef newTimeBasis,
+                            keel::StringRef method, keel::Allocator *mr) -> keel::Arc<TablePayload> {
             auto *alloc = mr ? mr : keel::default_allocator();
             if (!p || p->rowTimes.isEmpty() || !p->rowTimes.isObject())
-                return keel::make_arc_in<TablePayload>(alloc, *p);
+                return p ? p->cloneTable(alloc) : keel::make_arc_in<TablePayload>(alloc, alloc);
             keel::usize nr = p->nrows;
             auto getYMD = [&](keel::usize r, int &y, int &m, int &q) {
                 const auto *st = p->rowTimes.objectStateAt(r);
@@ -2400,27 +2488,30 @@ void registerContainersRuntime(Engine &engine)
             bool quarterly = iequalsTableOpt(newTimeBasis, "quarterly");
             bool yearly = iequalsTableOpt(newTimeBasis, "yearly") || iequalsTableOpt(newTimeBasis, "annual");
             if (!quarterly && !yearly)
-                return keel::make_arc_in<TablePayload>(alloc, *p);
+                return p->cloneTable(alloc);
 
-            struct Bucket { int y; int b; std::vector<keel::usize> rows; };
-            std::vector<Bucket> buckets;
+            struct Bucket { int y; int b; keel::Array<keel::usize> rows; };
+            keel::Array<Bucket> buckets(alloc);
             for (keel::usize r = 0; r < nr; ++r) {
                 int y = 0, m = 0, q = 0;
                 getYMD(r, y, m, q);
                 int bKey = quarterly ? q : 1;
-                if (buckets.empty() || buckets.back().y != y || buckets.back().b != bKey)
-                    buckets.push_back({y, bKey, {r}});
-                else
+                if (buckets.empty() || buckets.back().y != y || buckets.back().b != bKey) {
+                    keel::Array<keel::usize> bRows(alloc);
+                    bRows.push_back(r);
+                    buckets.push_back(Bucket{y, bKey, std::move(bRows)});
+                } else {
                     buckets.back().rows.push_back(r);
+                }
             }
             keel::usize nb = buckets.size();
-            auto res = keel::make_arc_in<TablePayload>(alloc);
+            auto res = keel::make_arc_in<TablePayload>(alloc, alloc);
             res->isTimetable = true;
-            res->rowTimesName = p->rowTimesName;
-            res->dimNames = p->dimNames;
-            res->varNames = p->varNames;
+            res->rowTimesName = p->rowTimesName.clone(alloc);
+            res->dimNames = p->dimNames.clone(alloc);
+            res->varNames = p->varNames.clone(alloc);
             res->nrows = nb;
-            std::vector<Value> rtElems;
+            keel::Array<Value> rtElems(alloc);
             rtElems.reserve(nb);
             for (keel::usize g = 0; g < nb; ++g)
                 rtElems.push_back(makeQuarterStart(buckets[g].y, quarterly ? buckets[g].b : 1));
@@ -2431,7 +2522,7 @@ void registerContainersRuntime(Engine &engine)
                 Value outCol = Value::matrix(nb, 1, ValueType::DOUBLE, mr);
                 double *dst = outCol.doubleDataMut();
                 for (keel::usize g = 0; g < nb; ++g) {
-                    std::vector<double> vals;
+                    keel::Array<double> vals(alloc);
                     for (keel::usize r : buckets[g].rows) {
                         if (col.isNumeric() && r < col.numel()) {
                             double v = col.elemAsDouble(r);
@@ -2458,15 +2549,15 @@ void registerContainersRuntime(Engine &engine)
             [retimeOne](Value &self, keel::ArrayRef<Value> args, keel::usize,
                         keel::MutArrayRef<Value> outs, CallContext &ctx) {
             const TablePayload *p = tableCst(self);
-            std::string basis = args.size() >= 1 ? std::string(args[0].toString().as_ref()) : std::string("quarterly");
-            std::string method = args.size() >= 2 ? std::string(args[1].toString().as_ref()) : std::string("mean");
+            keel::String basis = args.size() >= 1 ? args[0].toString() : keel::String::from("quarterly");
+            keel::String method = args.size() >= 2 ? args[1].toString() : keel::String::from("mean");
             outs[0] = makeTableValue(retimeOne(p, basis, method, ctx.engine->allocator()), ctx.engine->allocator());
         });
 
         auto syncImpl = [](keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            std::vector<const TablePayload *> tables;
+            keel::Array<const TablePayload *> tables(alloc);
             bool intersectMode = false;
             for (const auto &a : allArgs) {
                 if (const TablePayload *tp = tableCst(a)) {
@@ -2482,8 +2573,8 @@ void registerContainersRuntime(Engine &engine)
                 const auto *st = rt.objectStateAt(r);
                 return (st && st->native) ? st->native->asDouble() : std::numeric_limits<double>::quiet_NaN();
             };
-            std::vector<double> allSd;
-            std::vector<Value> allDt;
+            keel::Array<double> allSd(alloc);
+            keel::Array<Value> allDt(alloc);
             auto addTimes = [&](const Value &rt, keel::usize n) {
                 for (keel::usize r = 0; r < n; ++r) {
                     double sd = getSd(rt, r);
@@ -2494,16 +2585,15 @@ void registerContainersRuntime(Engine &engine)
                     }
                     if (!found) {
                         allSd.push_back(sd);
-                        std::vector<keel::usize> ri = {r};
-                        allDt.push_back(sliceColumnRows(rt, ri, mr));
+                        allDt.push_back(sliceColumnRows(rt, keel::ArrayRef<keel::usize>(&r, 1), mr));
                     }
                 }
             };
             for (const auto *tp : tables)
                 addTimes(tp->rowTimes, tp->nrows);
             if (intersectMode) {
-                std::vector<double> filtSd;
-                std::vector<Value> filtDt;
+                keel::Array<double> filtSd(alloc);
+                keel::Array<Value> filtDt(alloc);
                 for (keel::usize k = 0; k < allSd.size(); ++k) {
                     double sd = allSd[k];
                     bool inAll = true;
@@ -2526,17 +2616,20 @@ void registerContainersRuntime(Engine &engine)
                 allSd = std::move(filtSd);
                 allDt = std::move(filtDt);
             }
-            std::vector<keel::usize> ord(allSd.size());
-            std::iota(ord.begin(), ord.end(), 0);
+            keel::Array<keel::usize> ord(alloc);
+            ord.resize(allSd.size());
+            std::iota(ord.begin(), ord.end(), keel::usize{0});
             std::sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) { return allSd[a] < allSd[b]; });
 
             keel::usize nr = ord.size();
-            auto res = keel::make_arc_in<TablePayload>(alloc);
+            auto res = keel::make_arc_in<TablePayload>(alloc, alloc);
             res->isTimetable = true;
-            res->rowTimesName = tables[0]->rowTimesName;
+            res->rowTimesName = tables[0]->rowTimesName.clone(alloc);
             res->nrows = nr;
-            std::vector<Value> sortedDt(nr);
-            std::vector<double> sortedSd(nr);
+            keel::Array<Value> sortedDt(alloc);
+            sortedDt.resize(nr);
+            keel::Array<double> sortedSd(alloc);
+            sortedSd.resize(nr);
             for (keel::usize i = 0; i < nr; ++i) {
                 sortedDt[i] = allDt[ord[i]];
                 sortedSd[i] = allSd[ord[i]];
@@ -2544,7 +2637,8 @@ void registerContainersRuntime(Engine &engine)
             res->rowTimes = Value::vertcat(sortedDt.data(), sortedDt.size(), mr);
 
             auto appendTableCols = [&](const TablePayload *tp) {
-                std::vector<int> rowMap(nr, -1);
+                keel::Array<int> rowMap(alloc);
+                rowMap.assign(nr, -1);
                 for (keel::usize r = 0; r < tp->nrows; ++r) {
                     double sd = getSd(tp->rowTimes, r);
                     for (keel::usize i = 0; i < nr; ++i) {
@@ -2555,8 +2649,8 @@ void registerContainersRuntime(Engine &engine)
                     }
                 }
                 for (keel::usize j = 0; j < tp->width(); ++j) {
-                    std::string vn = tp->varNames[j];
-                    if (res->findVar(vn) >= 0) vn += "_2";
+                    keel::String vn = tp->varNames[j].clone(alloc);
+                    if (res->findVar(vn) >= 0) vn.append("_2");
                     res->varNames.push_back(std::move(vn));
                     const Value &src = tp->cols[j];
                     Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
@@ -2577,10 +2671,11 @@ void registerContainersRuntime(Engine &engine)
         tt.methods.put(keel::String::from("synchronize"),
             [syncImpl](Value &self, keel::ArrayRef<Value> args, keel::usize,
                        keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            std::vector<Value> all;
+            auto *mr = ctx.engine->allocator();
+            keel::Array<Value> all(mr ? mr : keel::default_allocator());
             all.reserve(args.size() + 1);
             all.push_back(self);
-            all.insert(all.end(), args.begin(), args.end());
+            for (const auto &a : args) all.push_back(a);
             syncImpl(keel::ArrayRef<Value>(all.data(), all.size()), outs, ctx);
         });
 
@@ -2624,8 +2719,8 @@ void registerContainersRuntime(Engine &engine)
             [retimeOne](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 argcheck::checkNargin(args.size(), 2, 8, "retime");
                 const TablePayload *p = tableCst(args[0]);
-                std::string basis(args[1].toString().as_ref());
-                std::string method = args.size() >= 3 ? std::string(args[2].toString().as_ref()) : std::string("mean");
+                keel::String basis = args[1].toString();
+                keel::String method = args.size() >= 3 ? args[2].toString() : keel::String::from("mean");
                 outs[0] = makeTableValue(retimeOne(p, basis, method, ctx.engine->allocator()), ctx.engine->allocator());
             });
         engine.registerFunction("synchronize",
@@ -2639,20 +2734,21 @@ void registerContainersRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 12, "adftest");
             auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
             const Value &yIn = args[0];
-            std::vector<double> y;
+            keel::Array<double> y(alloc);
             for (keel::usize i = 0; i < yIn.numel(); ++i) {
                 double v = yIn.elemAsDouble(i);
                 if (!std::isnan(v))
                     y.push_back(v);
             }
-            std::string model = "AR";
+            keel::String model = keel::String::from("AR", alloc);
             int lags = 0;
             double alpha = 0.05;
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                std::string k(args[i].toString().as_ref());
-                if (iequalsTableOpt(k, "Model")) model = std::string(args[i + 1].toString().as_ref());
+                keel::String k = args[i].toString();
+                if (iequalsTableOpt(k, "Model")) model = args[i + 1].toString();
                 else if (iequalsTableOpt(k, "Lags")) lags = static_cast<int>(args[i + 1].elemAsDouble(0));
                 else if (iequalsTableOpt(k, "Alpha")) alpha = args[i + 1].elemAsDouble(0);
             }
@@ -2668,8 +2764,10 @@ void registerContainersRuntime(Engine &engine)
             keel::usize aIdx = numNonDelta - 1;
 
             // Build X (T x numParams) and testY (T x 1) for t = p+1 .. N-1 (0-based)
-            std::vector<double> X(T * numParams, 0.0);
-            std::vector<double> testY(T, 0.0);
+            keel::Array<double> X(alloc);
+            X.assign(T * numParams, 0.0);
+            keel::Array<double> testY(alloc);
+            testY.assign(T, 0.0);
             for (keel::usize r = 0; r < T; ++r) {
                 keel::usize t = (p + 1) + r;
                 testY[r] = y[t];
@@ -2681,8 +2779,10 @@ void registerContainersRuntime(Engine &engine)
                     X[r + (col++) * T] = y[t - k] - y[t - k - 1];
             }
             // Solve normal equations (X'*X) * beta = X'*testY and invert X'*X
-            std::vector<double> XtX(numParams * numParams, 0.0);
-            std::vector<double> Xty(numParams, 0.0);
+            keel::Array<double> XtX(alloc);
+            XtX.assign(numParams * numParams, 0.0);
+            keel::Array<double> Xty(alloc);
+            Xty.assign(numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize r = 0; r < T; ++r)
                     Xty[i] += X[r + i * T] * testY[r];
@@ -2694,7 +2794,8 @@ void registerContainersRuntime(Engine &engine)
                 }
             }
             // Gauss-Jordan to get inv(XtX) and beta
-            std::vector<double> aug(numParams * 2 * numParams, 0.0);
+            keel::Array<double> aug(alloc);
+            aug.assign(numParams * 2 * numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize j = 0; j < numParams; ++j)
                     aug[i * (2 * numParams) + j] = XtX[i + j * numParams];
@@ -2719,7 +2820,8 @@ void registerContainersRuntime(Engine &engine)
                         aug[i * 2 * numParams + j] -= f * aug[k * 2 * numParams + j];
                 }
             }
-            std::vector<double> beta(numParams, 0.0);
+            keel::Array<double> beta(alloc);
+            beta.assign(numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize j = 0; j < numParams; ++j)
                     beta[i] += aug[i * (2 * numParams) + numParams + j] * Xty[j];
@@ -2858,10 +2960,14 @@ void registerContainersRuntime(Engine &engine)
             if (!p)
                 throw Error("table2array: first argument must be a table",
                             0, 0, "table2array", "", "numkit:table2array:notATable");
-            std::vector<keel::usize> rIdx(p->nrows), cIdx(p->width());
-            std::iota(rIdx.begin(), rIdx.end(), 0);
-            std::iota(cIdx.begin(), cIdx.end(), 0);
-            outs[0] = extractBraceArray(p, rIdx, cIdx, ctx.engine->allocator());
+            auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
+            keel::Array<keel::usize> rIdx(alloc), cIdx(alloc);
+            rIdx.resize(p->nrows);
+            cIdx.resize(p->width());
+            std::iota(rIdx.begin(), rIdx.end(), keel::usize{0});
+            std::iota(cIdx.begin(), cIdx.end(), keel::usize{0});
+            outs[0] = extractBraceArray(p, rIdx.as_ref(), cIdx.as_ref(), mr);
         });
 
     engine.registerFunction("array2table",
@@ -2874,31 +2980,32 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             keel::usize nr = A.dims().rows(), nc = A.dims().cols();
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             p->nrows = nr;
-            std::vector<keel::usize> rIdx(nr);
-            std::iota(rIdx.begin(), rIdx.end(), 0);
+            keel::Array<keel::usize> rIdx(alloc);
+            rIdx.resize(nr);
+            std::iota(rIdx.begin(), rIdx.end(), keel::usize{0});
             for (keel::usize j = 0; j < nc; ++j) {
                 p->cols.push_back(A.indexGet2D(rIdx.data(), nr, &j, 1, mr));
-                p->varNames.push_back("Var" + std::to_string(j + 1));
+                p->varNames.push_back(keel::format_alloc(alloc, "Var{}", j + 1));
             }
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 const Value &val = args[i + 1];
                 if (iequalsTableOpt(key, "VariableNames")) {
-                    auto vn = TablePayload::extractNames(val, "array2table", "VariableNames");
+                    auto vn = TablePayload::extractNames(val, "array2table", "VariableNames", alloc);
                     TablePayload::validateUniqueNames(vn, nc, "array2table", "VariableNames");
                     p->varNames = std::move(vn);
                 } else if (iequalsTableOpt(key, "RowNames")) {
-                    auto rn = TablePayload::extractNames(val, "array2table", "RowNames");
+                    auto rn = TablePayload::extractNames(val, "array2table", "RowNames", alloc);
                     TablePayload::validateUniqueNames(rn, nr, "array2table", "RowNames");
                     p->rowNames = std::move(rn);
                 } else if (iequalsTableOpt(key, "DimensionNames")) {
-                    auto dn = TablePayload::extractNames(val, "array2table", "DimensionNames");
+                    auto dn = TablePayload::extractNames(val, "array2table", "DimensionNames", alloc);
                     TablePayload::validateUniqueNames(dn, 2, "array2table", "DimensionNames");
                     p->dimNames = std::move(dn);
                 } else {
-                    throw Error("array2table: unrecognized parameter '" + key + "'",
+                    throw Error(keel::format("array2table: unrecognized parameter '{}'", key),
                                 0, 0, "array2table", "", "numkit:array2table:unknownOption");
                 }
             }
@@ -2915,7 +3022,7 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             keel::usize nr = C.dims().rows(), nc = C.dims().cols();
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             p->nrows = nr;
             for (keel::usize j = 0; j < nc; ++j) {
                 bool allDoubleScalar = nr > 0;
@@ -2948,25 +3055,25 @@ void registerContainersRuntime(Engine &engine)
                         col.cellAt(i) = C.cellAt(i + j * nr);
                     p->cols.push_back(std::move(col));
                 }
-                p->varNames.push_back("Var" + std::to_string(j + 1));
+                p->varNames.push_back(keel::format_alloc(alloc, "Var{}", j + 1));
             }
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 const Value &val = args[i + 1];
                 if (iequalsTableOpt(key, "VariableNames")) {
-                    auto vn = TablePayload::extractNames(val, "cell2table", "VariableNames");
+                    auto vn = TablePayload::extractNames(val, "cell2table", "VariableNames", alloc);
                     TablePayload::validateUniqueNames(vn, nc, "cell2table", "VariableNames");
                     p->varNames = std::move(vn);
                 } else if (iequalsTableOpt(key, "RowNames")) {
-                    auto rn = TablePayload::extractNames(val, "cell2table", "RowNames");
+                    auto rn = TablePayload::extractNames(val, "cell2table", "RowNames", alloc);
                     TablePayload::validateUniqueNames(rn, nr, "cell2table", "RowNames");
                     p->rowNames = std::move(rn);
                 } else if (iequalsTableOpt(key, "DimensionNames")) {
-                    auto dn = TablePayload::extractNames(val, "cell2table", "DimensionNames");
+                    auto dn = TablePayload::extractNames(val, "cell2table", "DimensionNames", alloc);
                     TablePayload::validateUniqueNames(dn, 2, "cell2table", "DimensionNames");
                     p->dimNames = std::move(dn);
                 } else {
-                    throw Error("cell2table: unrecognized parameter '" + key + "'",
+                    throw Error(keel::format("cell2table: unrecognized parameter '{}'", key),
                                 0, 0, "cell2table", "", "numkit:cell2table:unknownOption");
                 }
             }
@@ -2988,8 +3095,7 @@ void registerContainersRuntime(Engine &engine)
                     if (col.isCell() && col.dims().cols() == 1) {
                         out.cellAt(i + j * p->nrows) = col.cellAt(i);
                     } else {
-                        std::vector<keel::usize> r1 = {i};
-                        out.cellAt(i + j * p->nrows) = sliceColumnRows(col, r1, mr);
+                        out.cellAt(i + j * p->nrows) = sliceColumnRows(col, keel::ArrayRef<keel::usize>(&i, 1), mr);
                     }
                 }
             }
@@ -3006,23 +3112,23 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             bool asArray = false;
-            std::vector<std::string> rnames;
+            keel::Array<keel::String> rnames(alloc);
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 const Value &val = args[i + 1];
                 if (iequalsTableOpt(key, "AsArray"))
                     asArray = val.toBool();
                 else if (iequalsTableOpt(key, "RowNames"))
-                    rnames = TablePayload::extractNames(val, "struct2table", "RowNames");
+                    rnames = TablePayload::extractNames(val, "struct2table", "RowNames", alloc);
                 else
-                    throw Error("struct2table: unrecognized parameter '" + key + "'",
+                    throw Error(keel::format("struct2table: unrecognized parameter '{}'", key),
                                 0, 0, "struct2table", "", "numkit:struct2table:unknownOption");
             }
             auto fnames = S.fieldNamesInOrder();
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             p->varNames.reserve(fnames.size());
             for (keel::usize j = 0; j < fnames.size(); ++j)
-                p->varNames.emplace_back(fnames[j].as_ref());
+                p->varNames.push_back(keel::String::from(fnames[j].as_ref(), alloc));
             if (!S.isStructArray() && !asArray) {
                 for (keel::usize j = 0; j < fnames.size(); ++j) {
                     const Value &fv = S.field(fnames[j]);
@@ -3103,11 +3209,11 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             bool toScalar = false;
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 if (iequalsTableOpt(key, "ToScalar"))
                     toScalar = args[i + 1].toBool();
                 else
-                    throw Error("table2struct: unrecognized parameter '" + key + "'",
+                    throw Error(keel::format("table2struct: unrecognized parameter '{}'", key),
                                 0, 0, "table2struct", "", "numkit:table2struct:unknownOption");
             }
             if (toScalar) {
@@ -3119,13 +3225,13 @@ void registerContainersRuntime(Engine &engine)
             }
             if (p->nrows == 1) {
                 Value s = Value::structure(mr);
-                std::vector<keel::usize> r0 = {0};
+                keel::usize r0 = 0;
                 for (keel::usize j = 0; j < p->width(); ++j) {
                     const Value &col = p->cols[j];
                     if (col.isCell() && col.dims().cols() == 1)
                         s.field(p->varNames[j]) = col.cellAt(0);
                     else
-                        s.field(p->varNames[j]) = sliceColumnRows(col, r0, mr);
+                        s.field(p->varNames[j]) = sliceColumnRows(col, keel::ArrayRef<keel::usize>(&r0, 1), mr);
                 }
                 outs[0] = std::move(s);
                 return;
@@ -3134,13 +3240,12 @@ void registerContainersRuntime(Engine &engine)
             for (keel::usize j = 0; j < p->width(); ++j)
                 sa.setFieldAll(p->varNames[j], Value::Empty);
             for (keel::usize i = 0; i < p->nrows; ++i) {
-                std::vector<keel::usize> ri = {i};
                 for (keel::usize j = 0; j < p->width(); ++j) {
                     const Value &col = p->cols[j];
                     if (col.isCell() && col.dims().cols() == 1)
                         sa.setField(i, p->varNames[j], col.cellAt(i));
                     else
-                        sa.setField(i, p->varNames[j], sliceColumnRows(col, ri, mr));
+                        sa.setField(i, p->varNames[j], sliceColumnRows(col, keel::ArrayRef<keel::usize>(&i, 1), mr));
                 }
             }
             outs[0] = std::move(sa);
@@ -3155,24 +3260,24 @@ void registerContainersRuntime(Engine &engine)
                             0, 0, "addvars", "", "numkit:addvars:notATable");
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            auto out = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto out = p->cloneTable(alloc);
 
             keel::usize dataEnd = args.size();
-            int insertPos = static_cast<int>(out->width());
-            std::vector<std::string> newNames;
+            keel::usize insertPos = out->width();
+            keel::Array<keel::String> newNames(alloc);
             while (dataEnd >= 3 && (args[dataEnd - 2].isChar() || args[dataEnd - 2].isString())) {
-                std::string key(args[dataEnd - 2].toString().as_ref());
+                keel::String key = args[dataEnd - 2].toString();
                 const Value &val = args[dataEnd - 1];
                 if (iequalsTableOpt(key, "NewVariableNames")) {
-                    newNames = TablePayload::extractNames(val, "addvars", "NewVariableNames");
+                    newNames = TablePayload::extractNames(val, "addvars", "NewVariableNames", alloc);
                     dataEnd -= 2;
                 } else if (iequalsTableOpt(key, "Before")) {
                     auto idx = resolveTableSubscript(val, out->width(), out->varNames, true, "addvars");
-                    if (!idx.empty()) insertPos = static_cast<int>(idx[0]);
+                    if (!idx.empty()) insertPos = idx[0];
                     dataEnd -= 2;
                 } else if (iequalsTableOpt(key, "After")) {
                     auto idx = resolveTableSubscript(val, out->width(), out->varNames, true, "addvars");
-                    if (!idx.empty()) insertPos = static_cast<int>(idx[0]) + 1;
+                    if (!idx.empty()) insertPos = idx[0] + 1;
                     dataEnd -= 2;
                 } else {
                     break;
@@ -3187,20 +3292,25 @@ void registerContainersRuntime(Engine &engine)
                 else if (col.dims().rows() != out->nrows)
                     throw Error("addvars: new variable must match table height",
                                 0, 0, "addvars", "", "numkit:addvars:rowCountMismatch");
-                std::string nm;
+                keel::String nm(alloc);
                 if (k < newNames.size()) {
-                    nm = newNames[k];
+                    nm = newNames[k].clone(alloc);
                 } else {
                     keel::usize num = out->width() + 1;
-                    while (out->findVar("Var" + std::to_string(num)) >= 0)
+                    while (out->findVar(keel::format("Var{}", num)) >= 0)
                         ++num;
-                    nm = "Var" + std::to_string(num);
+                    nm = keel::format_alloc(alloc, "Var{}", num);
                 }
                 if (out->findVar(nm) >= 0)
-                    throw Error("addvars: duplicate variable name '" + nm + "'",
+                    throw Error(keel::format("addvars: duplicate variable name '{}'", nm),
                                 0, 0, "addvars", "", "numkit:addvars:duplicateName");
-                out->varNames.insert(out->varNames.begin() + insertPos + static_cast<int>(k), nm);
-                out->cols.insert(out->cols.begin() + insertPos + static_cast<int>(k), col);
+                const keel::usize pos = std::min(insertPos + k, out->varNames.size());
+                out->varNames.push_back(std::move(nm));
+                for (keel::usize idx = out->varNames.size() - 1; idx > pos; --idx)
+                    std::swap(out->varNames[idx], out->varNames[idx - 1]);
+                out->cols.push_back(col);
+                for (keel::usize idx = out->cols.size() - 1; idx > pos; --idx)
+                    std::swap(out->cols[idx], out->cols[idx - 1]);
             }
             outs[0] = makeTableValue(std::move(out), mr);
         });
@@ -3213,17 +3323,18 @@ void registerContainersRuntime(Engine &engine)
                 throw Error("removevars: first argument must be a table",
                             0, 0, "removevars", "", "numkit:removevars:notATable");
             auto dropIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "removevars");
-            std::vector<keel::u8> drop(p->width(), 0);
-            for (keel::usize ci : dropIdx)
-                if (ci < p->width()) drop[ci] = 1;
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            auto out = keel::make_arc_in<TablePayload>(alloc, *p);
+            keel::Array<keel::u8> drop(alloc);
+            drop.assign(p->width(), 0);
+            for (keel::usize ci : dropIdx)
+                if (ci < p->width()) drop[ci] = 1;
+            auto out = p->cloneTable(alloc);
             out->varNames.clear();
             out->cols.clear();
             for (keel::usize j = 0; j < p->width(); ++j) {
                 if (!drop[j]) {
-                    out->varNames.push_back(p->varNames[j]);
+                    out->varNames.push_back(p->varNames[j].clone(alloc));
                     out->cols.push_back(p->cols[j]);
                 }
             }
@@ -3239,16 +3350,16 @@ void registerContainersRuntime(Engine &engine)
             if (!p)
                 throw Error("renamevars: first argument must be a table",
                             0, 0, "renamevars", "", "numkit:renamevars:notATable");
+            auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
             auto targetIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "renamevars");
-            auto newNames = TablePayload::extractNames(args[2], "renamevars", "newNames");
+            auto newNames = TablePayload::extractNames(args[2], "renamevars", "newNames", alloc);
             if (newNames.size() != targetIdx.size())
                 throw Error("renamevars: number of new names must match number of specified variables",
                             0, 0, "renamevars", "", "numkit:renamevars:countMismatch");
-            auto *mr = ctx.engine->allocator();
-            auto *alloc = mr ? mr : keel::default_allocator();
-            auto out = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto out = p->cloneTable(alloc);
             for (keel::usize k = 0; k < targetIdx.size(); ++k)
-                out->varNames[targetIdx[k]] = newNames[k];
+                out->varNames[targetIdx[k]] = std::move(newNames[k]);
             TablePayload::validateUniqueNames(out->varNames, out->width(), "renamevars", "VariableNames");
             outs[0] = makeTableValue(std::move(out), mr);
         });
@@ -3260,8 +3371,10 @@ void registerContainersRuntime(Engine &engine)
             if (!p)
                 throw Error("movevars: first argument must be a table",
                             0, 0, "movevars", "", "numkit:movevars:notATable");
+            auto *mr = ctx.engine->allocator();
+            auto *alloc = mr ? mr : keel::default_allocator();
             auto moveIdx = resolveTableSubscript(args[1], p->width(), p->varNames, true, "movevars");
-            std::string where(args[2].toString().as_ref());
+            keel::String where = args[2].toString();
             bool after = iequalsTableOpt(where, "After");
             if (!after && !iequalsTableOpt(where, "Before"))
                 throw Error("movevars: third argument must be 'Before' or 'After'",
@@ -3272,11 +3385,12 @@ void registerContainersRuntime(Engine &engine)
                             0, 0, "movevars", "", "numkit:movevars:invalidLocation");
             keel::usize anchor = locIdx[0];
 
-            std::vector<keel::u8> moving(p->width(), 0);
+            keel::Array<keel::u8> moving(alloc);
+            moving.assign(p->width(), 0);
             for (keel::usize mi : moveIdx)
                 moving[mi] = 1;
 
-            std::vector<keel::usize> newOrder;
+            keel::Array<keel::usize> newOrder(alloc);
             for (keel::usize j = 0; j < p->width(); ++j) {
                 if (j == anchor && !after) {
                     for (keel::usize mi : moveIdx)
@@ -3289,25 +3403,23 @@ void registerContainersRuntime(Engine &engine)
                         newOrder.push_back(mi);
                 }
             }
-            auto *mr = ctx.engine->allocator();
-            auto *alloc = mr ? mr : keel::default_allocator();
-            auto out = keel::make_arc_in<TablePayload>(alloc, *p);
+            auto out = p->cloneTable(alloc);
             out->varNames.clear();
             out->cols.clear();
             for (keel::usize j : newOrder) {
-                out->varNames.push_back(p->varNames[j]);
+                out->varNames.push_back(p->varNames[j].clone(alloc));
                 out->cols.push_back(p->cols[j]);
             }
             outs[0] = makeTableValue(std::move(out), mr);
         });
 
     // ── Identifier sanitization + Spreadsheet / Delimited Table I/O ──────────
-    static auto makeValidIdStr = [](const std::string &raw) -> std::string {
+    static auto makeValidIdStr = [](keel::StringRef raw) -> keel::String {
         keel::usize a = 0, b = raw.size();
         while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) ++a;
         while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) --b;
-        std::string s;
-        s.reserve(b - a);
+        keel::String s;
+        s.reserve(b - a + 1);
         for (keel::usize i = a; i < b; ++i) {
             unsigned char ch = static_cast<unsigned char>(raw[i]);
             if (std::isalnum(ch) || ch == '_')
@@ -3315,8 +3427,13 @@ void registerContainersRuntime(Engine &engine)
             else
                 s.push_back('_');
         }
-        if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0])))
-            s = "x" + s;
+        if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0]))) {
+            keel::String prefixed;
+            prefixed.reserve(s.size() + 1);
+            prefixed.push_back('x');
+            prefixed.append(s.as_ref());
+            return prefixed;
+        }
         return s;
     };
 
@@ -3325,10 +3442,9 @@ void registerContainersRuntime(Engine &engine)
         auto *mr = ctx.engine->allocator();
         const Value &in = args[0];
         bool modified = false;
-        auto convOne = [&](keel::StringRef sr) -> std::string {
-            std::string s(sr);
-            std::string v = makeValidIdStr(s);
-            if (v != s) modified = true;
+        auto convOne = [&](keel::StringRef sr) -> keel::String {
+            keel::String v = makeValidIdStr(sr);
+            if (v != sr) modified = true;
             return v;
         };
         if (in.isChar()) {
@@ -3356,27 +3472,30 @@ void registerContainersRuntime(Engine &engine)
     struct GridCell {
         bool present = false;
         bool isStr = false;
-        std::string text;
+        keel::String text;
     };
 
-    static auto unescapeXmlStr = [](const std::string &s) -> std::string {
-        std::string out;
+    static auto unescapeXmlStr = [](keel::StringRef s) -> keel::String {
+        keel::String out;
         out.reserve(s.size());
+        auto matchAt = [&](keel::usize pos, keel::StringRef tok) -> bool {
+            return pos + tok.size() <= s.size() && s.substr(pos, tok.size()) == tok;
+        };
         for (keel::usize i = 0; i < s.size(); ++i) {
             if (s[i] == '&') {
-                if (s.compare(i, 5, "&amp;") == 0) { out.push_back('&'); i += 4; continue; }
-                if (s.compare(i, 4, "&lt;") == 0) { out.push_back('<'); i += 3; continue; }
-                if (s.compare(i, 4, "&gt;") == 0) { out.push_back('>'); i += 3; continue; }
-                if (s.compare(i, 6, "&quot;") == 0) { out.push_back('"'); i += 5; continue; }
-                if (s.compare(i, 6, "&apos;") == 0) { out.push_back('\''); i += 5; continue; }
+                if (matchAt(i, "&amp;"))  { out.push_back('&');  i += 4; continue; }
+                if (matchAt(i, "&lt;"))   { out.push_back('<');  i += 3; continue; }
+                if (matchAt(i, "&gt;"))   { out.push_back('>');  i += 3; continue; }
+                if (matchAt(i, "&quot;")) { out.push_back('"');  i += 5; continue; }
+                if (matchAt(i, "&apos;")) { out.push_back('\''); i += 5; continue; }
             }
             out.push_back(s[i]);
         }
         return out;
     };
 
-    static auto parseXlsxGrid = [](const std::string &bytes, const std::string &sheetSpec,
-                                   int sheetNumSpec) -> std::vector<std::vector<GridCell>> {
+    static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
+                                   int sheetNumSpec) -> keel::Array<keel::Array<GridCell>> {
         auto u16 = [&](keel::usize off) -> keel::u16 {
             if (off + 2 > bytes.size()) return 0;
             const auto *p = reinterpret_cast<const keel::u8 *>(bytes.data() + off);
@@ -3389,7 +3508,7 @@ void registerContainersRuntime(Engine &engine)
         };
         if (bytes.size() < 22)
             return {};
-        keel::usize eocd = std::string::npos;
+        keel::usize eocd = keel::kInvalidIndex;
         keel::usize minOff = (bytes.size() > 65557) ? (bytes.size() - 65557) : 0;
         for (keel::usize pos = bytes.size() - 22; ; --pos) {
             if (u32(pos) == 0x06054b50u) {
@@ -3398,12 +3517,12 @@ void registerContainersRuntime(Engine &engine)
             }
             if (pos == minOff) break;
         }
-        if (eocd == std::string::npos)
+        if (eocd == keel::kInvalidIndex)
             return {};
         keel::u16 numEntries = u16(eocd + 10);
         keel::u32 cdPos = u32(eocd + 16);
         struct ZipEntry { keel::u16 method; keel::u32 compSz, uncompSz, localOff; };
-        std::unordered_map<std::string, ZipEntry> entries;
+        keel::HashMap<keel::String, ZipEntry> entries;
         for (keel::u16 idx = 0; idx < numEntries && cdPos + 46 <= bytes.size(); ++idx) {
             if (u32(cdPos) != 0x02014b50u) break;
             keel::u16 method = u16(cdPos + 10);
@@ -3414,60 +3533,60 @@ void registerContainersRuntime(Engine &engine)
             keel::u16 commentLen = u16(cdPos + 32);
             keel::u32 localOff = u32(cdPos + 42);
             if (cdPos + 46 + nameLen <= bytes.size()) {
-                std::string name = bytes.substr(cdPos + 46, nameLen);
-                entries[name] = {method, compSz, uncompSz, localOff};
+                keel::String name = keel::String::from(bytes.substr(cdPos + 46, nameLen));
+                entries.put(std::move(name), ZipEntry{method, compSz, uncompSz, localOff});
             }
             cdPos += 46 + nameLen + extraLen + commentLen;
         }
-        auto readEntry = [&](const std::string &name) -> std::string {
-            auto it = entries.find(name);
-            if (it == entries.end()) return {};
-            const auto &e = it->second;
-            if (e.localOff + 30 > bytes.size() || u32(e.localOff) != 0x04034b50u) return {};
-            keel::u16 ln = u16(e.localOff + 26);
-            keel::u16 le = u16(e.localOff + 28);
-            keel::usize dataOff = e.localOff + 30 + ln + le;
-            if (dataOff + e.compSz > bytes.size()) return {};
-            if (e.method == 0)
-                return bytes.substr(dataOff, e.compSz);
-            if (e.method == 8) {
+        auto readEntry = [&](keel::StringRef name) -> keel::String {
+            const ZipEntry *e = entries.get(name);
+            if (!e) return {};
+            if (e->localOff + 30 > bytes.size() || u32(e->localOff) != 0x04034b50u) return {};
+            keel::u16 ln = u16(e->localOff + 26);
+            keel::u16 le = u16(e->localOff + 28);
+            keel::usize dataOff = e->localOff + 30 + ln + le;
+            if (dataOff + e->compSz > bytes.size()) return {};
+            if (e->method == 0)
+                return keel::String::from(bytes.substr(dataOff, e->compSz));
+            if (e->method == 8) {
                 auto dec = numkit::ops::inflateRaw(
                     reinterpret_cast<const keel::u8 *>(bytes.data() + dataOff),
-                    e.compSz, e.uncompSz);
-                return std::string(reinterpret_cast<const char *>(dec.data()), dec.size());
+                    e->compSz, e->uncompSz);
+                return keel::String::from(keel::StringRef(
+                    reinterpret_cast<const char *>(dec.data()), dec.size()));
             }
             return {};
         };
 
-        std::vector<std::string> sst;
-        std::string sstXml = readEntry("xl/sharedStrings.xml");
+        keel::Array<keel::String> sst;
+        keel::String sstXml = readEntry("xl/sharedStrings.xml");
         if (!sstXml.empty()) {
             keel::usize pos = 0;
             while (pos < sstXml.size()) {
                 keel::usize siStart = sstXml.find("<si", pos);
-                if (siStart == std::string::npos) break;
+                if (siStart == keel::kInvalidIndex) break;
                 keel::usize siOpenEnd = sstXml.find('>', siStart);
                 keel::usize siClose = sstXml.find("</si>", siStart);
-                if (siOpenEnd == std::string::npos || siClose == std::string::npos) break;
-                std::string accum;
+                if (siOpenEnd == keel::kInvalidIndex || siClose == keel::kInvalidIndex) break;
+                keel::String accum;
                 keel::usize tPos = siOpenEnd + 1;
                 while (tPos < siClose) {
                     keel::usize tStart = sstXml.find("<t", tPos);
-                    if (tStart == std::string::npos || tStart >= siClose) break;
+                    if (tStart == keel::kInvalidIndex || tStart >= siClose) break;
                     char nextCh = (tStart + 2 < sstXml.size()) ? sstXml[tStart + 2] : '\0';
                     if (nextCh != '>' && nextCh != ' ' && nextCh != '/') {
                         tPos = tStart + 2;
                         continue;
                     }
                     keel::usize tOpenEnd = sstXml.find('>', tStart);
-                    if (tOpenEnd == std::string::npos || tOpenEnd >= siClose) break;
+                    if (tOpenEnd == keel::kInvalidIndex || tOpenEnd >= siClose) break;
                     if (sstXml[tOpenEnd - 1] == '/') {
                         tPos = tOpenEnd + 1;
                         continue;
                     }
                     keel::usize tClose = sstXml.find("</t>", tOpenEnd + 1);
-                    if (tClose == std::string::npos || tClose > siClose) break;
-                    accum += unescapeXmlStr(sstXml.substr(tOpenEnd + 1, tClose - (tOpenEnd + 1)));
+                    if (tClose == keel::kInvalidIndex || tClose > siClose) break;
+                    accum.append(unescapeXmlStr(sstXml.substr(tOpenEnd + 1, tClose - (tOpenEnd + 1))).as_ref());
                     tPos = tClose + 4;
                 }
                 sst.push_back(std::move(accum));
@@ -3477,20 +3596,20 @@ void registerContainersRuntime(Engine &engine)
 
         int sheetIdx = (sheetNumSpec >= 1) ? sheetNumSpec : 1;
         if (!sheetSpec.empty()) {
-            std::string wbXml = readEntry("xl/workbook.xml");
+            keel::String wbXml = readEntry("xl/workbook.xml");
             keel::usize pos = 0;
             int idx = 1;
             while (pos < wbXml.size()) {
                 keel::usize shStart = wbXml.find("<sheet ", pos);
-                if (shStart == std::string::npos) break;
+                if (shStart == keel::kInvalidIndex) break;
                 keel::usize shEnd = wbXml.find('>', shStart);
-                if (shEnd == std::string::npos) break;
-                std::string tag = wbXml.substr(shStart, shEnd - shStart);
+                if (shEnd == keel::kInvalidIndex) break;
+                keel::StringRef tag = wbXml.substr(shStart, shEnd - shStart);
                 keel::usize nmPos = tag.find("name=\"");
-                if (nmPos != std::string::npos) {
+                if (nmPos != keel::kInvalidIndex) {
                     keel::usize nmEnd = tag.find('"', nmPos + 6);
-                    if (nmEnd != std::string::npos) {
-                        std::string nm = unescapeXmlStr(tag.substr(nmPos + 6, nmEnd - (nmPos + 6)));
+                    if (nmEnd != keel::kInvalidIndex) {
+                        keel::String nm = unescapeXmlStr(tag.substr(nmPos + 6, nmEnd - (nmPos + 6)));
                         if (nm == sheetSpec) {
                             sheetIdx = idx;
                             break;
@@ -3502,41 +3621,41 @@ void registerContainersRuntime(Engine &engine)
             }
         }
 
-        std::string wsXml = readEntry("xl/worksheets/sheet" + std::to_string(sheetIdx) + ".xml");
+        keel::String wsXml = readEntry(keel::format("xl/worksheets/sheet{}.xml", sheetIdx));
         if (wsXml.empty() && sheetIdx != 1)
             wsXml = readEntry("xl/worksheets/sheet1.xml");
         if (wsXml.empty())
             return {};
 
-        struct RawCell { keel::usize r, c; bool isStr; std::string text; };
-        std::vector<RawCell> cells;
+        struct RawCell { keel::usize r, c; bool isStr; keel::String text; };
+        keel::Array<RawCell> cells;
         keel::usize maxR = 0, maxC = 0;
         keel::usize pos = 0;
         while (pos < wsXml.size()) {
             keel::usize cStart = wsXml.find("<c ", pos);
-            if (cStart == std::string::npos) break;
+            if (cStart == keel::kInvalidIndex) break;
             keel::usize cOpenEnd = wsXml.find('>', cStart);
-            if (cOpenEnd == std::string::npos) break;
+            if (cOpenEnd == keel::kInvalidIndex) break;
             if (wsXml[cOpenEnd - 1] == '/') {
                 pos = cOpenEnd + 1;
                 continue;
             }
             keel::usize cClose = wsXml.find("</c>", cOpenEnd + 1);
-            if (cClose == std::string::npos) break;
-            std::string openTag = wsXml.substr(cStart, cOpenEnd - cStart);
-            std::string body = wsXml.substr(cOpenEnd + 1, cClose - (cOpenEnd + 1));
+            if (cClose == keel::kInvalidIndex) break;
+            keel::StringRef openTag = wsXml.substr(cStart, cOpenEnd - cStart);
+            keel::StringRef body = wsXml.substr(cOpenEnd + 1, cClose - (cOpenEnd + 1));
             pos = cClose + 4;
 
-            auto getAttr = [&](const char *attr) -> std::string {
-                std::string key = std::string(" ") + attr + "=\"";
-                keel::usize p = openTag.find(key);
-                if (p == std::string::npos) return {};
+            auto getAttr = [&](const char *attr) -> keel::StringRef {
+                keel::String key = keel::format(" {}=\"", attr);
+                keel::usize p = openTag.find(key.as_ref());
+                if (p == keel::kInvalidIndex) return {};
                 p += key.size();
                 keel::usize e = openTag.find('"', p);
-                return (e == std::string::npos) ? std::string{} : openTag.substr(p, e - p);
+                return (e == keel::kInvalidIndex) ? keel::StringRef{} : openTag.substr(p, e - p);
             };
-            std::string ref = getAttr("r");
-            std::string tAttr = getAttr("t");
+            keel::StringRef ref = getAttr("r");
+            keel::StringRef tAttr = getAttr("t");
             if (ref.empty() || tAttr == "e")
                 continue;
 
@@ -3552,86 +3671,93 @@ void registerContainersRuntime(Engine &engine)
             if (colNum == 0 || rowNum == 0)
                 continue;
 
-            std::string valText;
+            keel::String valText;
             bool isStr = false;
             if (tAttr == "inlineStr") {
                 keel::usize tOpen = body.find("<t");
-                if (tOpen != std::string::npos) {
+                if (tOpen != keel::kInvalidIndex) {
                     keel::usize tGt = body.find('>', tOpen);
-                    keel::usize tEnd = body.find("</t>", tGt);
-                    if (tGt != std::string::npos && tEnd != std::string::npos) {
+                    keel::usize tEnd = (tGt != keel::kInvalidIndex) ? body.find("</t>", tGt) : keel::kInvalidIndex;
+                    if (tGt != keel::kInvalidIndex && tEnd != keel::kInvalidIndex) {
                         valText = unescapeXmlStr(body.substr(tGt + 1, tEnd - (tGt + 1)));
                         isStr = true;
                     }
                 }
             } else {
                 keel::usize vOpen = body.find("<v>");
-                keel::usize vBodyStart = (vOpen != std::string::npos) ? (vOpen + 3) : std::string::npos;
-                if (vBodyStart == std::string::npos) {
+                keel::usize vBodyStart = (vOpen != keel::kInvalidIndex) ? (vOpen + 3) : keel::kInvalidIndex;
+                if (vBodyStart == keel::kInvalidIndex) {
                     keel::usize vTag = body.find("<v ");
-                    if (vTag != std::string::npos) {
+                    if (vTag != keel::kInvalidIndex) {
                         keel::usize vGt = body.find('>', vTag);
-                        if (vGt != std::string::npos && body[vGt - 1] != '/')
+                        if (vGt != keel::kInvalidIndex && body[vGt - 1] != '/')
                             vBodyStart = vGt + 1;
                     }
                 }
-                if (vBodyStart == std::string::npos)
+                if (vBodyStart == keel::kInvalidIndex)
                     continue;
                 keel::usize vClose = body.find("</v>", vBodyStart);
-                if (vClose == std::string::npos)
+                if (vClose == keel::kInvalidIndex)
                     continue;
-                std::string rawV = body.substr(vBodyStart, vClose - vBodyStart);
+                keel::String rawV = keel::String::from(body.substr(vBodyStart, vClose - vBodyStart));
                 if (rawV.empty())
                     continue;
                 if (tAttr == "s") {
-                    int sidx = -1;
-                    try { sidx = std::stoi(rawV); } catch (...) {}
+                    char *ep = nullptr;
+                    long parsed = std::strtol(rawV.c_str(), &ep, 10);
+                    int sidx = (ep != rawV.c_str()) ? static_cast<int>(parsed) : -1;
                     if (sidx >= 0 && static_cast<keel::usize>(sidx) < sst.size())
-                        valText = sst[static_cast<keel::usize>(sidx)];
+                        valText = sst[static_cast<keel::usize>(sidx)].clone();
                     isStr = true;
                 } else {
-                    valText = unescapeXmlStr(rawV);
+                    valText = unescapeXmlStr(rawV.as_ref());
                     isStr = (tAttr == "str");
                 }
             }
             keel::usize r0 = rowNum - 1, c0 = colNum - 1;
-            cells.push_back({r0, c0, isStr, std::move(valText)});
+            cells.push_back(RawCell{r0, c0, isStr, std::move(valText)});
             if (r0 + 1 > maxR) maxR = r0 + 1;
             if (c0 + 1 > maxC) maxC = c0 + 1;
         }
-        std::vector<std::vector<GridCell>> grid(maxR, std::vector<GridCell>(maxC));
+        keel::Array<keel::Array<GridCell>> grid;
+        grid.reserve(maxR);
+        for (keel::usize r = 0; r < maxR; ++r) {
+            keel::Array<GridCell> row;
+            row.resize(maxC);
+            grid.push_back(std::move(row));
+        }
         for (auto &cell : cells)
-            grid[cell.r][cell.c] = {true, cell.isStr, std::move(cell.text)};
+            grid[cell.r][cell.c] = GridCell{true, cell.isStr, std::move(cell.text)};
         return grid;
     };
 
-    static auto parseCsvGrid = [](const std::string &content) -> std::vector<std::vector<GridCell>> {
-        std::vector<std::vector<GridCell>> rows;
+    static auto parseCsvGrid = [](keel::StringRef content) -> keel::Array<keel::Array<GridCell>> {
+        keel::Array<keel::Array<GridCell>> rows;
         keel::usize maxC = 0;
         keel::usize pos = 0;
         while (pos < content.size()) {
             keel::usize nl = content.find('\n', pos);
-            keel::usize end = (nl == std::string::npos) ? content.size() : nl;
-            std::string line = content.substr(pos, end - pos);
-            if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-            pos = (nl == std::string::npos) ? content.size() : (nl + 1);
+            keel::usize end = (nl == keel::kInvalidIndex) ? content.size() : nl;
+            keel::StringRef line = content.substr(pos, end - pos);
+            if (!line.empty() && line[line.size() - 1] == '\r')
+                line = line.substr(0, line.size() - 1);
+            pos = (nl == keel::kInvalidIndex) ? content.size() : (nl + 1);
             bool allWs = true;
-            for (char ch : line)
-                if (!std::isspace(static_cast<unsigned char>(ch))) { allWs = false; break; }
+            for (keel::usize ci = 0; ci < line.size(); ++ci)
+                if (!std::isspace(static_cast<unsigned char>(line[ci]))) { allWs = false; break; }
             if (allWs)
                 continue;
 
-            std::vector<GridCell> row;
+            keel::Array<GridCell> row;
             keel::usize i = 0;
             while (i <= line.size()) {
                 if (i == line.size()) {
-                    if (! line.empty() && (line.back() == ',' || line.back() == '\t'))
-                        row.push_back({false, false, ""});
+                    if (!line.empty() && (line[line.size() - 1] == ',' || line[line.size() - 1] == '\t'))
+                        row.push_back(GridCell{false, false, keel::String()});
                     break;
                 }
                 if (line[i] == '"') {
-                    std::string tok;
+                    keel::String tok;
                     ++i;
                     while (i < line.size()) {
                         if (line[i] == '"') {
@@ -3649,17 +3775,19 @@ void registerContainersRuntime(Engine &engine)
                     while (i < line.size() && line[i] != ',' && line[i] != '\t')
                         ++i;
                     if (i < line.size()) ++i;
-                    row.push_back({!tok.empty(), true, std::move(tok)});
+                    bool present = !tok.empty();
+                    row.push_back(GridCell{present, true, std::move(tok)});
                 } else {
                     keel::usize nextSep = i;
                     while (nextSep < line.size() && line[nextSep] != ',' && line[nextSep] != '\t')
                         ++nextSep;
-                    std::string tok = line.substr(i, nextSep - i);
-                    keel::usize a = 0, b = tok.size();
-                    while (a < b && std::isspace(static_cast<unsigned char>(tok[a]))) ++a;
-                    while (b > a && std::isspace(static_cast<unsigned char>(tok[b - 1]))) --b;
-                    tok = tok.substr(a, b - a);
-                    row.push_back({!tok.empty(), false, std::move(tok)});
+                    keel::StringRef rawTok = line.substr(i, nextSep - i);
+                    keel::usize a = 0, b = rawTok.size();
+                    while (a < b && std::isspace(static_cast<unsigned char>(rawTok[a]))) ++a;
+                    while (b > a && std::isspace(static_cast<unsigned char>(rawTok[b - 1]))) --b;
+                    keel::String tok = keel::String::from(rawTok.substr(a, b - a));
+                    bool present = !tok.empty();
+                    row.push_back(GridCell{present, false, std::move(tok)});
                     if (nextSep == line.size())
                         break;
                     i = nextSep + 1;
@@ -3673,7 +3801,7 @@ void registerContainersRuntime(Engine &engine)
         return rows;
     };
 
-    static auto tryParseCellDouble = [](const std::string &s, double &out) -> bool {
+    static auto tryParseCellDouble = [](const keel::String &s, double &out) -> bool {
         if (s.empty()) return false;
         const char *cs = s.c_str();
         char *end = nullptr;
@@ -3686,8 +3814,8 @@ void registerContainersRuntime(Engine &engine)
         return true;
     };
 
-    static auto readRawFileBytes = [](CallContext &ctx, const std::string &filename,
-                                      const char *fnName) -> std::string {
+    static auto readRawFileBytes = [](CallContext &ctx, keel::StringRef filename,
+                                      const char *fnName) -> keel::String {
         FsContext::ResolvedPath resolved{};
         try {
             resolved = ctx.engine->resolvePath(filename);
@@ -3695,13 +3823,13 @@ void registerContainersRuntime(Engine &engine)
             throw Error(e.what());
         }
         if (!resolved.fs)
-            throw Error(std::string(fnName) + ": cannot resolve '" + filename + "'",
-                        0, 0, fnName, "", std::string("numkit:") + fnName + ":noFs");
+            throw Error(keel::format("{}: cannot resolve '{}'", fnName, filename),
+                        0, 0, fnName, "", keel::format("numkit:{}:noFs", fnName));
         try {
-            return std::string(resolved.fs->readFile(resolved.path).as_ref());
+            return resolved.fs->readFile(resolved.path);
         } catch (const std::exception &e) {
-            throw Error(std::string(fnName) + ": " + e.what(),
-                        0, 0, fnName, "", std::string("numkit:") + fnName + ":readFailed");
+            throw Error(keel::format("{}: {}", fnName, e.what()),
+                        0, 0, fnName, "", keel::format("numkit:{}:readFailed", fnName));
         }
     };
 
@@ -3709,35 +3837,41 @@ void registerContainersRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 15, "detectImportOptions");
             auto *mr = ctx.engine->allocator();
-            std::string filename(args[0].toString().as_ref());
-            std::string sheetName;
+            auto *alloc = mr ? mr : keel::default_allocator();
+            keel::String filename = args[0].toString();
+            keel::String sheetName(alloc);
             int sheetNum = 1;
             bool preserveNames = false;
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                std::string k(args[i].toString().as_ref());
+                keel::String k = args[i].toString();
                 if (iequalsTableOpt(k, "Sheet")) {
                     if (args[i + 1].isNumeric()) sheetNum = static_cast<int>(args[i + 1].elemAsDouble(0));
-                    else sheetName = std::string(args[i + 1].toString().as_ref());
+                    else sheetName = args[i + 1].toString();
                 } else if (iequalsTableOpt(k, "VariableNamingRule")) {
                     preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
                 }
             }
-            std::string raw = readRawFileBytes(ctx, filename, "detectImportOptions");
+            keel::String raw = readRawFileBytes(ctx, filename, "detectImportOptions");
             bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
                       && raw[2] == '\x03' && raw[3] == '\x04';
-            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
-                              : parseCsvGrid(raw);
-            std::vector<std::string> varNames;
+            auto grid = isZip ? parseXlsxGrid(raw.as_ref(), sheetName.as_ref(), sheetNum)
+                              : parseCsvGrid(raw.as_ref());
+            keel::Array<keel::String> varNames(alloc);
+            auto hasVarName = [&](keel::StringRef nm) -> bool {
+                for (const auto &v : varNames)
+                    if (v == nm) return true;
+                return false;
+            };
             if (!grid.empty()) {
                 for (keel::usize c = 0; c < grid[0].size(); ++c) {
-                    std::string nm = grid[0][c].text;
-                    if (!preserveNames && !nm.empty()) nm = makeValidIdStr(nm);
-                    if (nm.empty()) nm = "Var" + std::to_string(c + 1);
-                    std::string base = nm;
+                    keel::String nm = grid[0][c].text.clone(alloc);
+                    if (!preserveNames && !nm.empty()) nm = makeValidIdStr(nm.as_ref());
+                    if (nm.empty()) nm = keel::format_alloc(alloc, "Var{}", c + 1);
+                    keel::String base = nm.clone(alloc);
                     int suffix = 1;
-                    while (std::find(varNames.begin(), varNames.end(), nm) != varNames.end())
-                        nm = base + "_" + std::to_string(suffix++);
+                    while (hasVarName(nm.as_ref()))
+                        nm = keel::format_alloc(alloc, "{}_{}", base, suffix++);
                     varNames.push_back(std::move(nm));
                 }
             }
@@ -3779,7 +3913,7 @@ void registerContainersRuntime(Engine &engine)
                 kvStart = 2;
             for (keel::usize i = kvStart; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                std::string k(args[i].toString().as_ref());
+                keel::String k = args[i].toString();
                 if (iequalsTableOpt(k, "TreatAsMissing")) {
                     auto tokens = TablePayload::extractNames(args[i + 1], "setvaropts", "TreatAsMissing");
                     Value c = Value::cell(1, tokens.size(), mr);
@@ -3799,16 +3933,16 @@ void registerContainersRuntime(Engine &engine)
                             0, 0, "readtable", "", "numkit:readtable:invalidFilename");
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            std::string filename(args[0].toString().as_ref());
-            std::string sheetName;
+            keel::String filename = args[0].toString();
+            keel::String sheetName(alloc);
             int sheetNum = 1;
             bool preserveNames = false;
-            std::vector<std::string> treatAsMissing;
+            keel::Array<keel::String> treatAsMissing(alloc);
             keel::usize kvStart = 1;
             if (args.size() >= 2 && args[1].isStruct()) {
                 const Value &opts = args[1];
                 if (opts.hasField("Sheet") && !opts.field("Sheet").toString().empty())
-                    sheetName = std::string(opts.field("Sheet").toString().as_ref());
+                    sheetName = opts.field("Sheet").toString();
                 if (opts.hasField("SheetNum") && opts.field("SheetNum").isNumeric())
                     sheetNum = static_cast<int>(opts.field("SheetNum").elemAsDouble(0));
                 if (opts.hasField("PreserveVariableNames") && opts.field("PreserveVariableNames").toBool())
@@ -3817,36 +3951,36 @@ void registerContainersRuntime(Engine &engine)
                     && iequalsTableOpt(opts.field("VariableNamingRule").toString(), "preserve"))
                     preserveNames = true;
                 if (opts.hasField("TreatAsMissing") && !opts.field("TreatAsMissing").isEmpty())
-                    treatAsMissing = TablePayload::extractNames(opts.field("TreatAsMissing"), "readtable", "TreatAsMissing");
+                    treatAsMissing = TablePayload::extractNames(opts.field("TreatAsMissing"), "readtable", "TreatAsMissing", alloc);
                 kvStart = 2;
             }
             for (keel::usize i = kvStart; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString())
                     continue;
-                std::string k(args[i].toString().as_ref());
+                keel::String k = args[i].toString();
                 if (iequalsTableOpt(k, "Sheet")) {
                     if (args[i + 1].isNumeric())
                         sheetNum = static_cast<int>(args[i + 1].elemAsDouble(0));
                     else
-                        sheetName = std::string(args[i + 1].toString().as_ref());
+                        sheetName = args[i + 1].toString();
                 } else if (iequalsTableOpt(k, "VariableNamingRule")) {
                     preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
                 } else if (iequalsTableOpt(k, "TreatAsMissing")) {
-                    treatAsMissing = TablePayload::extractNames(args[i + 1], "readtable", "TreatAsMissing");
+                    treatAsMissing = TablePayload::extractNames(args[i + 1], "readtable", "TreatAsMissing", alloc);
                 }
             }
-            auto isMissingToken = [&](const std::string &tok) -> bool {
+            auto isMissingToken = [&](keel::StringRef tok) -> bool {
                 for (const auto &m : treatAsMissing)
                     if (tok == m) return true;
                 return false;
             };
 
-            std::string raw = readRawFileBytes(ctx, filename, "readtable");
+            keel::String raw = readRawFileBytes(ctx, filename, "readtable");
             bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
                       && raw[2] == '\x03' && raw[3] == '\x04';
-            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
-                              : parseCsvGrid(raw);
-            auto p = keel::make_arc_in<TablePayload>(alloc);
+            auto grid = isZip ? parseXlsxGrid(raw.as_ref(), sheetName.as_ref(), sheetNum)
+                              : parseCsvGrid(raw.as_ref());
+            auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             if (grid.empty()) {
                 outs[0] = makeTableValue(std::move(p), mr);
                 return;
@@ -3857,15 +3991,15 @@ void registerContainersRuntime(Engine &engine)
             p->nrows = nrows;
 
             for (keel::usize c = 0; c < maxC; ++c) {
-                std::string nm = grid[0][c].text;
+                keel::String nm = grid[0][c].text.clone(alloc);
                 if (!preserveNames && !nm.empty())
-                    nm = makeValidIdStr(nm);
+                    nm = makeValidIdStr(nm.as_ref());
                 if (nm.empty())
-                    nm = "Var" + std::to_string(c + 1);
-                std::string base = nm;
+                    nm = keel::format_alloc(alloc, "Var{}", c + 1);
+                keel::String base = nm.clone(alloc);
                 int suffix = 1;
                 while (p->findVar(nm) >= 0) {
-                    nm = base + "_" + std::to_string(suffix++);
+                    nm = keel::format_alloc(alloc, "{}_{}", base, suffix++);
                 }
                 p->varNames.push_back(std::move(nm));
 
@@ -3916,28 +4050,28 @@ void registerContainersRuntime(Engine &engine)
                 auto cnames = TablePayload::extractNames(args[2], "categorical", "catnames");
                 keel::usize nset = std::min(vset.numel(), cnames.size());
                 for (keel::usize i = 0; i < A.numel(); ++i) {
-                    std::string mapped;
+                    keel::String mapped;
                     if (A.isNumeric() || A.isLogical()) {
                         double av = A.elemAsDouble(i);
                         for (keel::usize k = 0; k < nset; ++k) {
                             if (vset.elemAsDouble(k) == av) {
-                                mapped = cnames[k];
+                                mapped = cnames[k].clone();
                                 break;
                             }
                         }
                     } else {
-                        std::string as = A.isString() ? std::string(A.stringElem(i).as_ref())
-                                       : (A.isCell() ? std::string(A.cellAt(i).toString().as_ref())
-                                                     : std::string(A.toString().as_ref()));
+                        keel::String as = A.isString() ? A.stringElem(i)
+                                        : (A.isCell() ? A.cellAt(i).toString()
+                                                      : A.toString());
                         auto vnames = TablePayload::extractNames(vset, "categorical", "valueset");
                         for (keel::usize k = 0; k < std::min(vnames.size(), cnames.size()); ++k) {
                             if (vnames[k] == as) {
-                                mapped = cnames[k];
+                                mapped = cnames[k].clone();
                                 break;
                             }
                         }
                     }
-                    out.stringElemSet(i, std::move(mapped));
+                    out.stringElemSet(i, mapped);
                 }
             } else {
                 for (keel::usize i = 0; i < A.numel(); ++i) {
@@ -3948,142 +4082,153 @@ void registerContainersRuntime(Engine &engine)
                     else if (A.isLogical())
                         out.stringElemSet(i, A.logicalData()[i] ? "true" : "false");
                     else if (A.isNumeric()) {
-                        std::ostringstream os;
-                        os << A.elemAsDouble(i);
-                        out.stringElemSet(i, os.str());
+                        out.stringElemSet(i, keel::format("%g", A.elemAsDouble(i)));
                     }
                 }
             }
             outs[0] = std::move(out);
         });
 
-    static auto buildXlsxBytes = [](const TablePayload *p) -> std::string {
-        auto xmlEsc = [](const std::string &s) -> std::string {
-            std::string r;
+    static auto buildXlsxBytes = [](const TablePayload *p) -> keel::String {
+        auto xmlEsc = [](keel::StringRef s) -> keel::String {
+            keel::String r;
             r.reserve(s.size());
-            for (char c : s) {
-                if (c == '&') r += "&amp;";
-                else if (c == '<') r += "&lt;";
-                else if (c == '>') r += "&gt;";
-                else if (c == '"') r += "&quot;";
+            for (keel::usize i = 0; i < s.size(); ++i) {
+                char c = s[i];
+                if (c == '&') r.append("&amp;");
+                else if (c == '<') r.append("&lt;");
+                else if (c == '>') r.append("&gt;");
+                else if (c == '"') r.append("&quot;");
                 else r.push_back(c);
             }
             return r;
         };
-        auto colLetters = [](keel::usize c) -> std::string {
-            std::string s;
+        auto colLetters = [](keel::usize c) -> keel::String {
+            keel::String s;
             keel::usize n = c + 1;
             while (n > 0) {
                 keel::usize rem = (n - 1) % 26;
-                s.insert(s.begin(), static_cast<char>('A' + rem));
+                s.push_back(static_cast<char>('A' + rem));
                 n = (n - 1) / 26;
             }
+            std::reverse(s.begin(), s.end());
             return s;
         };
-        std::vector<std::string> shared;
-        auto addShared = [&](const std::string &s) -> keel::usize {
+        keel::Array<keel::String> shared;
+        auto addShared = [&](keel::StringRef s) -> keel::usize {
             keel::usize idx = shared.size();
-            shared.push_back(s);
+            shared.push_back(keel::String::from(s));
             return idx;
         };
-        std::ostringstream sh;
-        sh.precision(15);
-        sh << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-           << "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
-           << "<sheetData>";
+        keel::String sh;
+        sh.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                  "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                  "<sheetData>");
         const keel::usize nc = p->width();
-        sh << "<row r=\"1\">";
+        sh.append("<row r=\"1\">");
         for (keel::usize j = 0; j < nc; ++j) {
             keel::usize si = addShared(p->varNames[j]);
-            sh << "<c r=\"" << colLetters(j) << "1\" t=\"s\"><v>" << si << "</v></c>";
+            keel::format_into(sh, "<c r=\"{}1\" t=\"s\"><v>{}</v></c>", colLetters(j), si);
         }
-        sh << "</row>";
+        sh.append("</row>");
         for (keel::usize r = 0; r < p->nrows; ++r) {
             keel::usize rowNum = r + 2;
-            sh << "<row r=\"" << rowNum << "\">";
+            keel::format_into(sh, "<row r=\"{}\">", rowNum);
             for (keel::usize j = 0; j < nc; ++j) {
                 const Value &col = p->cols[j];
-                std::string ref = colLetters(j) + std::to_string(rowNum);
+                keel::String ref = keel::format("{}{}", colLetters(j), rowNum);
                 if (col.isNumeric()) {
                     double d = col.elemAsDouble(r);
                     if (std::isfinite(d))
-                        sh << "<c r=\"" << ref << "\"><v>" << d << "</v></c>";
+                        keel::format_into(sh, "<c r=\"{}\"><v>%.15g</v></c>", ref, d);
                 } else {
-                    std::string sv;
-                    if (col.isString()) sv = std::string(col.stringElem(r).as_ref());
+                    keel::String sv;
+                    if (col.isString()) sv = col.stringElem(r);
                     else if (col.isCell()) {
                         const Value &el = col.cellAt(r);
-                        if (el.isChar() || el.isString()) sv = std::string(el.toString().as_ref());
+                        if (el.isChar() || el.isString()) sv = el.toString();
                     } else sv = formatTableCell(col, r);
                     if (!sv.empty()) {
                         keel::usize si = addShared(sv);
-                        sh << "<c r=\"" << ref << "\" t=\"s\"><v>" << si << "</v></c>";
+                        keel::format_into(sh, "<c r=\"{}\" t=\"s\"><v>{}</v></c>", ref, si);
                     }
                 }
             }
-            sh << "</row>";
+            sh.append("</row>");
         }
-        sh << "</sheetData></worksheet>";
+        sh.append("</sheetData></worksheet>");
 
-        std::ostringstream ss;
-        ss << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-           << "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\""
-           << shared.size() << "\" uniqueCount=\"" << shared.size() << "\">";
+        keel::String ss;
+        keel::format_into(ss,
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{}\" uniqueCount=\"{}\">",
+            shared.size(), shared.size());
         for (const auto &s : shared)
-            ss << "<si><t>" << xmlEsc(s) << "</t></si>";
-        ss << "</sst>";
+            keel::format_into(ss, "<si><t>{}</t></si>", xmlEsc(s));
+        ss.append("</sst>");
 
-        struct Entry { std::string name; std::string data; };
-        std::vector<Entry> files = {
-            {"[Content_Types].xml",
-             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-             "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
-             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
-             "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
-             "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
-             "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
-             "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
-             "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>"
-             "</Types>"},
-            {"_rels/.rels",
-             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
-             "</Relationships>"},
-            {"xl/workbook.xml",
-             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-             "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
-             "<sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"},
-            {"xl/_rels/workbook.xml.rels",
-             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
-             "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
-             "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/>"
-             "</Relationships>"},
-            {"xl/styles.xml",
-             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-             "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
-             "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>"
-             "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>"
-             "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
-             "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
-             "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>"
-             "</styleSheet>"},
-            {"xl/sharedStrings.xml", ss.str()},
-            {"xl/worksheets/sheet1.xml", sh.str()}
-        };
+        struct Entry { keel::String name; keel::String data; };
+        keel::Array<Entry> files;
+        files.reserve(7);
+        files.push_back(Entry{
+            keel::String::from("[Content_Types].xml"),
+            keel::String::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+                "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
+                "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>"
+                "</Types>")});
+        files.push_back(Entry{
+            keel::String::from("_rels/.rels"),
+            keel::String::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+                "</Relationships>")});
+        files.push_back(Entry{
+            keel::String::from("xl/workbook.xml"),
+            keel::String::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                "<sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>")});
+        files.push_back(Entry{
+            keel::String::from("xl/_rels/workbook.xml.rels"),
+            keel::String::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+                "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
+                "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/>"
+                "</Relationships>")});
+        files.push_back(Entry{
+            keel::String::from("xl/styles.xml"),
+            keel::String::from(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>"
+                "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>"
+                "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
+                "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
+                "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>"
+                "</styleSheet>")});
+        files.push_back(Entry{keel::String::from("xl/sharedStrings.xml"), std::move(ss)});
+        files.push_back(Entry{keel::String::from("xl/worksheets/sheet1.xml"), std::move(sh)});
 
-        auto crc32Buf = [](const std::string &buf) -> keel::u32 {
+        auto crc32Buf = [](keel::StringRef buf) -> keel::u32 {
             keel::u32 crc = 0xFFFFFFFFu;
-            for (unsigned char b : buf) {
+            for (keel::usize i = 0; i < buf.size(); ++i) {
+                unsigned char b = static_cast<unsigned char>(buf[i]);
                 crc ^= b;
                 for (int k = 0; k < 8; ++k)
                     crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
             }
             return ~crc;
         };
-        std::string zip;
+        keel::String zip;
         auto put16 = [&](keel::u16 v) {
             zip.push_back(static_cast<char>(v & 0xFF));
             zip.push_back(static_cast<char>((v >> 8) & 0xFF));
@@ -4094,7 +4239,7 @@ void registerContainersRuntime(Engine &engine)
             zip.push_back(static_cast<char>((v >> 16) & 0xFF));
             zip.push_back(static_cast<char>((v >> 24) & 0xFF));
         };
-        std::vector<keel::u32> offsets, crcs;
+        keel::Array<keel::u32> offsets, crcs;
         for (const auto &f : files) {
             offsets.push_back(static_cast<keel::u32>(zip.size()));
             keel::u32 crc = crc32Buf(f.data);
@@ -4104,8 +4249,8 @@ void registerContainersRuntime(Engine &engine)
             put16(20); put16(0); put16(0); put16(0); put16(0);
             put32(crc); put32(sz); put32(sz);
             put16(static_cast<keel::u16>(f.name.size())); put16(0);
-            zip += f.name;
-            zip += f.data;
+            zip.append(f.name.as_ref());
+            zip.append(f.data.as_ref());
         }
         keel::u32 cdOffset = static_cast<keel::u32>(zip.size());
         for (keel::usize i = 0; i < files.size(); ++i) {
@@ -4116,7 +4261,7 @@ void registerContainersRuntime(Engine &engine)
             put32(crcs[i]); put32(sz); put32(sz);
             put16(static_cast<keel::u16>(f.name.size())); put16(0); put16(0);
             put16(0); put16(0); put32(0); put32(offsets[i]);
-            zip += f.name;
+            zip.append(f.name.as_ref());
         }
         keel::u32 cdSize = static_cast<keel::u32>(zip.size()) - cdOffset;
         put32(0x06054b50u);
@@ -4134,44 +4279,43 @@ void registerContainersRuntime(Engine &engine)
             if (!p)
                 throw Error("writetable: first argument must be a table",
                             0, 0, "writetable", "", "numkit:writetable:notATable");
-            std::string filename = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
-                                 ? std::string(args[1].toString().as_ref())
-                                 : std::string("table.txt");
+            keel::String filename = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                                  ? args[1].toString()
+                                  : keel::String::from("table.txt");
             bool isXlsx = filename.size() >= 5
                        && iequalsTableOpt(filename.substr(filename.size() - 5), ".xlsx");
-            std::string payload;
+            keel::String payload;
             if (isXlsx) {
                 payload = buildXlsxBytes(p);
             } else {
-                std::ostringstream os;
-                os.precision(15);
+                keel::String os;
                 const keel::usize nc = p->width();
                 for (keel::usize j = 0; j < nc; ++j) {
-                    if (j > 0) os << ',';
-                    os << p->varNames[j];
+                    if (j > 0) os.push_back(',');
+                    os.append(p->varNames[j].as_ref());
                 }
-                os << '\n';
+                os.push_back('\n');
                 for (keel::usize r = 0; r < p->nrows; ++r) {
                     for (keel::usize j = 0; j < nc; ++j) {
-                        if (j > 0) os << ',';
+                        if (j > 0) os.push_back(',');
                         const Value &col = p->cols[j];
                         if (col.isNumeric()) {
                             double d = col.elemAsDouble(r);
-                            if (!std::isnan(d)) os << d;
+                            if (!std::isnan(d)) keel::format_into(os, "%.15g", d);
                         } else if (col.isString()) {
-                            os << std::string_view(col.stringElem(r));
+                            os.append(col.stringElem(r).as_ref());
                         } else if (col.isCell()) {
                             const Value &el = col.cellAt(r);
-                            if (el.isChar() || el.isString()) os << std::string_view(el.toString());
+                            if (el.isChar() || el.isString()) os.append(el.toString().as_ref());
                             else if (el.isNumeric() && el.isScalar() && !std::isnan(el.toScalar()))
-                                os << el.toScalar();
+                                keel::format_into(os, "%.15g", el.toScalar());
                         } else {
-                            os << formatTableCell(col, r);
+                            os.append(formatTableCell(col, r).as_ref());
                         }
                     }
-                    os << '\n';
+                    os.push_back('\n');
                 }
-                payload = os.str();
+                payload = std::move(os);
             }
             FsContext::ResolvedPath resolved{};
             try {
@@ -4179,7 +4323,7 @@ void registerContainersRuntime(Engine &engine)
                 if (resolved.fs)
                     resolved.fs->writeFile(resolved.path, payload);
             } catch (const std::exception &e) {
-                throw Error(std::string("writetable: ") + e.what(),
+                throw Error(keel::format("writetable: {}", e.what()),
                             0, 0, "writetable", "", "numkit:writetable:writeFailed");
             }
             outs[0] = Value();
@@ -4192,20 +4336,20 @@ void registerContainersRuntime(Engine &engine)
                 throw Error("xlsread: first argument must be a filename",
                             0, 0, "xlsread", "", "numkit:xlsread:invalidFilename");
             auto *mr = ctx.engine->allocator();
-            std::string filename(args[0].toString().as_ref());
-            std::string sheetName;
+            keel::String filename = args[0].toString();
+            keel::String sheetName;
             int sheetNum = 1;
             if (args.size() >= 2) {
                 if (args[1].isNumeric() && !args[1].isEmpty())
                     sheetNum = static_cast<int>(args[1].elemAsDouble(0));
                 else if (args[1].isChar() || args[1].isString())
-                    sheetName = std::string(args[1].toString().as_ref());
+                    sheetName = args[1].toString();
             }
-            std::string raw = readRawFileBytes(ctx, filename, "xlsread");
+            keel::String raw = readRawFileBytes(ctx, filename, "xlsread");
             bool isZip = raw.size() >= 4 && raw[0] == 'P' && raw[1] == 'K'
                       && raw[2] == '\x03' && raw[3] == '\x04';
-            auto grid = isZip ? parseXlsxGrid(raw, sheetName, sheetNum)
-                              : parseCsvGrid(raw);
+            auto grid = isZip ? parseXlsxGrid(raw.as_ref(), sheetName.as_ref(), sheetNum)
+                              : parseCsvGrid(raw.as_ref());
             const keel::usize maxR = grid.size();
             const keel::usize maxC = maxR > 0 ? grid[0].size() : 0;
             keel::usize rMin = maxR, rMax = 0, cMin = maxC, cMax = 0;
@@ -4247,7 +4391,7 @@ void registerContainersRuntime(Engine &engine)
                         bool isNum = grid[r][c].present && !grid[r][c].isStr
                                   && tryParseCellDouble(grid[r][c].text, d);
                         txt.cellAt(c * maxR + r) = Value::fromString(
-                            (grid[r][c].present && !isNum) ? grid[r][c].text : "", mr);
+                            (grid[r][c].present && !isNum) ? grid[r][c].text.as_ref() : keel::StringRef(""), mr);
                     }
                 outs[1] = std::move(txt);
             }
@@ -4270,7 +4414,7 @@ void registerContainersRuntime(Engine &engine)
         });
 
     // ── Linear regression model: fitlm + predict ─────────────────────────────
-    static auto trimStr = [](const std::string &s) -> std::string {
+    static auto trimStr = [](keel::StringRef s) -> keel::StringRef {
         keel::usize a = 0, b = s.size();
         while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
         while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
@@ -4281,33 +4425,34 @@ void registerContainersRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 8, "fitlm");
             auto *mr = ctx.engine->allocator();
-            std::vector<std::vector<double>> Xcols;
-            std::vector<double> yvec;
-            std::vector<std::string> predNames;
+            auto *alloc = mr ? mr : keel::default_allocator();
+            keel::Array<keel::Array<double>> Xcols(alloc);
+            keel::Array<double> yvec(alloc);
+            keel::Array<keel::String> predNames(alloc);
             keel::usize N = 0;
 
             if (const TablePayload *tp = tableCst(args[0])) {
                 N = tp->nrows;
                 int respIdx = static_cast<int>(tp->width()) - 1;
-                std::vector<int> pIdx;
+                keel::Array<int> pIdx(alloc);
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
-                    std::string f(args[1].toString().as_ref());
+                    keel::String f = args[1].toString();
                     keel::usize tilde = f.find('~');
-                    if (tilde != std::string::npos) {
-                        std::string rName = trimStr(f.substr(0, tilde));
+                    if (tilde != keel::kInvalidIndex) {
+                        keel::StringRef rName = trimStr(f.substr(0, tilde));
                         int ri = tp->findVar(rName);
                         if (ri >= 0) respIdx = ri;
-                        std::string rhs = f.substr(tilde + 1);
+                        keel::StringRef rhs = f.substr(tilde + 1);
                         keel::usize pos = 0;
                         while (pos <= rhs.size()) {
                             keel::usize plus = rhs.find('+', pos);
-                            std::string tok = trimStr(rhs.substr(
-                                pos, (plus == std::string::npos) ? std::string::npos : (plus - pos)));
+                            keel::StringRef tok = trimStr(rhs.substr(
+                                pos, (plus == keel::kInvalidIndex) ? keel::kInvalidIndex : (plus - pos)));
                             if (!tok.empty() && tok != "1") {
                                 int pi = tp->findVar(tok);
                                 if (pi >= 0) pIdx.push_back(pi);
                             }
-                            if (plus == std::string::npos) break;
+                            if (plus == keel::kInvalidIndex) break;
                             pos = plus + 1;
                         }
                     }
@@ -4317,16 +4462,17 @@ void registerContainersRuntime(Engine &engine)
                         if (static_cast<int>(j) != respIdx && tp->cols[j].isNumeric())
                             pIdx.push_back(static_cast<int>(j));
                 }
-                yvec.resize(N, 0.0);
+                yvec.assign(N, 0.0);
                 if (respIdx >= 0 && static_cast<keel::usize>(respIdx) < tp->width()) {
                     const Value &yc = tp->cols[static_cast<keel::usize>(respIdx)];
                     for (keel::usize i = 0; i < N && i < yc.numel(); ++i)
                         yvec[i] = yc.elemAsDouble(i);
                 }
                 for (int pi : pIdx) {
-                    predNames.push_back(tp->varNames[static_cast<keel::usize>(pi)]);
+                    predNames.push_back(tp->varNames[static_cast<keel::usize>(pi)].clone(alloc));
                     const Value &xc = tp->cols[static_cast<keel::usize>(pi)];
-                    std::vector<double> col(N, 0.0);
+                    keel::Array<double> col(alloc);
+                    col.assign(N, 0.0);
                     for (keel::usize i = 0; i < N && i < xc.numel(); ++i)
                         col[i] = xc.elemAsDouble(i);
                     Xcols.push_back(std::move(col));
@@ -4341,26 +4487,30 @@ void registerContainersRuntime(Engine &engine)
                     yvec[i] = Y.elemAsDouble(i);
                 keel::usize xr = X.dims().rows(), xc = X.dims().cols();
                 if (xr == 1 && xc == N && N > 1) {
-                    std::vector<double> col(N);
+                    keel::Array<double> col(alloc);
+                    col.resize(N);
                     for (keel::usize i = 0; i < N; ++i)
                         col[i] = X.elemAsDouble(i);
                     Xcols.push_back(std::move(col));
-                    predNames.push_back("x1");
+                    predNames.push_back(keel::String::from("x1", alloc));
                 } else {
                     for (keel::usize j = 0; j < xc; ++j) {
-                        std::vector<double> col(N, 0.0);
+                        keel::Array<double> col(alloc);
+                        col.assign(N, 0.0);
                         for (keel::usize i = 0; i < N && i < xr; ++i)
                             col[i] = X.elemAsDouble(j * xr + i);
                         Xcols.push_back(std::move(col));
-                        predNames.push_back("x" + std::to_string(j + 1));
+                        predNames.push_back(keel::format_alloc(alloc, "x{}", j + 1));
                     }
                 }
             }
 
             const keel::usize P = Xcols.size();
             const keel::usize K = P + 1;
-            std::vector<double> XtX(K * K, 0.0);
-            std::vector<double> Xty(K, 0.0);
+            keel::Array<double> XtX(alloc);
+            XtX.assign(K * K, 0.0);
+            keel::Array<double> Xty(alloc);
+            Xty.assign(K, 0.0);
             for (keel::usize i = 0; i < N; ++i) {
                 double yi = yvec[i];
                 if (!std::isfinite(yi)) continue;
@@ -4379,7 +4529,8 @@ void registerContainersRuntime(Engine &engine)
             }
             // Augment [XtX | I | Xty] to solve for beta and (XtX)^-1 simultaneously
             const keel::usize W = 2 * K + 1;
-            std::vector<double> aug(K * W, 0.0);
+            keel::Array<double> aug(alloc);
+            aug.assign(K * W, 0.0);
             for (keel::usize r = 0; r < K; ++r) {
                 for (keel::usize c = 0; c < K; ++c)
                     aug[r * W + c] = XtX[r * K + c];
@@ -4409,7 +4560,9 @@ void registerContainersRuntime(Engine &engine)
                         aug[r * W + c] -= f * aug[p * W + c];
                 }
             }
-            std::vector<double> beta(K, 0.0), invDiag(K, 0.0);
+            keel::Array<double> beta(alloc), invDiag(alloc);
+            beta.assign(K, 0.0);
+            invDiag.assign(K, 0.0);
             for (keel::usize r = 0; r < K; ++r) {
                 beta[r] = aug[r * W + 2 * K];
                 invDiag[r] = std::max(0.0, aug[r * W + K + r]);

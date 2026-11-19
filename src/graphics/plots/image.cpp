@@ -3,8 +3,10 @@
 // graphics.image.* builders (imagesc / pcolor / imshow), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -19,35 +21,34 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildImagePlots(std::vector<PlotEntry> &table)
+void buildImagePlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
 
     // Shared body for any heatmap-like builtin (imagesc / pcolor).
     // The data-emission path is identical; only the `type` field
     // differs (renderer uses it to pick cell-centre vs cell-vertex
-    // alignment). Body kept as a captured lambda + std::bind to avoid
-    // duplicating ~200 lines of quantization logic.
-    using namespace std::placeholders;
+    // alignment).
     // imagesc auto-applies MATLAB axis ij (yDir='reverse', matrix-row-1
     // at top). pcolor stays on axis xy. histogram2 (delegates separately)
     // also stays on axis xy. The axis-ij flag is the second positional
     // arg of heatmapImpl now — it's set AFTER prepareForPlot inside.
-    reg("image", "imagesc", std::bind(heatmapImpl, "imagesc", true,  _1, _2, _3, _4));
-    reg("image", "pcolor",  std::bind(heatmapImpl, "pcolor",  false, _1, _2, _3, _4));
+    reg("image", "imagesc",
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            heatmapImpl("imagesc", true, args, nargout, outs, gc);
+        });
+    reg("image", "pcolor",
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+            heatmapImpl("pcolor", false, args, nargout, outs, gc);
+        });
     // ────────────────────────────────────────────────────────────────
     // imshow — display image. MATLAB:
     //   imshow(I)            — grayscale, range = type-default
@@ -118,7 +119,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         const Value *rangeArg = nullptr;       // [] / [lo hi] / null
         const Value *xDataArg = nullptr;
         const Value *yDataArg = nullptr;
-        std::string colormapArg;               // 'Colormap', 'gray' / 'jet' / ...
+        keel::String colormapArg;              // 'Colormap', 'gray' / 'jet' / ...
         keel::usize nvStart = 1;
         if (args.size() >= 2 && !args[1].isChar()) {
             rangeArg = &args[1];
@@ -126,7 +127,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         }
         for (keel::usize i = nvStart; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar()) continue;
-            std::string key(args[i].toString().as_ref());
+            keel::String key = args[i].toString();
             for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (key == "displayrange")    rangeArg = &args[i + 1];
             else if (key == "xdata")      xDataArg = &args[i + 1];
@@ -145,32 +146,32 @@ void buildImagePlots(std::vector<PlotEntry> &table)
         }
 
         // Helper: emit "[v1,v2,...,vN]" JSON from a Value (numeric vec).
-        auto vecJson = [](const Value &v) -> std::string {
-            std::ostringstream os; os << "[";
+        auto vecJson = [](const Value &v) -> keel::String {
+            StrBuf os; os << "[";
             const keel::usize n = v.numel();
             for (keel::usize i = 0; i < n; ++i) {
                 if (i) os << ",";
                 os << v.elemAsDouble(i);
             }
             os << "]";
-            return os.str();
+            return os.take();
         };
         // X/Y span. By default 1..C / 1..R; XData/YData override.
-        std::string xJson, yJson;
+        keel::String xJson, yJson;
         if (xDataArg && xDataArg->numel() >= 2) {
             xJson = vecJson(*xDataArg);
         } else {
-            std::ostringstream xs; xs << "[1," << C << "]"; xJson = xs.str();
+            StrBuf xs; xs << "[1," << C << "]"; xJson = xs.take();
         }
         if (yDataArg && yDataArg->numel() >= 2) {
             yJson = vecJson(*yDataArg);
         } else {
-            std::ostringstream ys; ys << "[1," << R << "]"; yJson = ys.str();
+            StrBuf ys; ys << "[1," << R << "]"; yJson = ys.take();
         }
 
         if (isRGB) {
             DatasetInfo ds;
-            ds.type = "image-rgb";
+            ds.type.assign("image-rgb");
             ds.originalRows = R;
             ds.originalCols = C;
             // Cast to uint8. uint8/uint16 etc. as-is (clamped); float
@@ -205,7 +206,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             // [[[r,g,b,a],...],...]  (always 4-tuple, alpha=255 for RGB).
             constexpr keel::usize MAX_INLINE_PIXELS = 2'000'000;
             const keel::usize totalPixels = R * C;
-            std::ostringstream zs;
+            StrBuf zs;
             zs << "[";
             if (totalPixels <= MAX_INLINE_PIXELS) {
                 for (keel::usize r = 0; r < R; ++r) {
@@ -258,10 +259,10 @@ void buildImagePlots(std::vector<PlotEntry> &table)
                 ds.downsampled = true;
             }
             zs << "]";
-            ds.rgbJson = zs.str();
-            ds.xJson = xJson;
-            ds.yJson = yJson;
-            fm.pushDataset(std::move(ds));
+            ds.rgbJson = zs.take();
+            ds.xJson = keel::move(xJson);
+            ds.yJson = keel::move(yJson);
+            fm.pushDataset(keel::move(ds));
         } else {
             // Grayscale path. Pick [cmin, cmax] from class default unless
             // overridden by `imshow(I, [lo hi])` (positional or
@@ -294,7 +295,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             // Quantize with FORCED [cmin, cmax]. Doesn't reuse heatmapImpl
             // because that one always derives the range from data extent.
             DatasetInfo ds;
-            ds.type = "imagesc";
+            ds.type.assign("imagesc");
             ds.originalRows = R;
             ds.originalCols = C;
             ds.cminOrig = cmin;
@@ -315,7 +316,7 @@ void buildImagePlots(std::vector<PlotEntry> &table)
             }
             constexpr keel::usize MAX_INLINE_CELLS = 2'000'000;
             const keel::usize totalCells = R * C;
-            std::ostringstream zs;
+            StrBuf zs;
             zs << "[";
             if (totalCells <= MAX_INLINE_CELLS) {
                 for (keel::usize r = 0; r < R; ++r) {
@@ -356,24 +357,24 @@ void buildImagePlots(std::vector<PlotEntry> &table)
                 ds.downsampled = true;
             }
             zs << "]";
-            ds.zJson = zs.str();
-            ds.xJson = xJson;
-            ds.yJson = yJson;
-            fm.pushDataset(std::move(ds));
+            ds.zJson = zs.take();
+            ds.xJson = keel::move(xJson);
+            ds.yJson = keel::move(yJson);
+            fm.pushDataset(keel::move(ds));
             // Grayscale-only colormap. 'Colormap' N-V wins; otherwise
             // default to 'gray' if axis hasn't seen one yet. RGB
             // ignores colormap so we don't touch it on the RGB branch.
-            if (!colormapArg.empty()) ax.colormapName = colormapArg;
-            else if (ax.colormapName.empty()) ax.colormapName = "gray";
+            if (!colormapArg.empty()) ax.colormapName = keel::move(colormapArg);
+            else if (ax.colormapName.empty()) ax.colormapName.assign("gray");
         }
 
         // Common imshow axes config. axisMode='image' iff not already set
         // (tests want 'image' on default, but a user-set 'square' or
         // 'tight' should win). axisVisible and yDir are unconditional —
         // imshow's defining trait is "no axes, image orientation".
-        if (ax.axisMode.empty()) ax.axisMode = "image";
+        if (ax.axisMode.empty()) ax.axisMode.assign("image");
         ax.axisVisible = false;
-        ax.yDir = "reverse";
+        ax.yDir.assign("reverse");
 
         fm.current().modified = true;
         fm.emitModified();

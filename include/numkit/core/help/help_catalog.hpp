@@ -1,28 +1,39 @@
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <string>
-#include <vector>
-#include <unordered_map>
+#include <keel/hash_map.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 
 namespace numkit::bundle {
 
 struct HelpEntry {
-    std::string name;
-    std::string summary;
-    std::string signature;
-    std::string doc;
+    keel::String name;
+    keel::String summary;
+    keel::String signature;
+    keel::String doc;
+
+    HelpEntry clone(keel::Allocator *alloc = nullptr) const
+    {
+        HelpEntry cp;
+        cp.name = name.clone(alloc);
+        cp.summary = summary.clone(alloc);
+        cp.signature = signature.clone(alloc);
+        cp.doc = doc.clone(alloc);
+        return cp;
+    }
 };
 
 struct HelpSection {
-    std::string title;
-    std::vector<HelpEntry> entries;
+    keel::String title;
+    keel::Array<HelpEntry> entries;
 };
 
 struct HelpCategory {
-    std::string name;        // e.g. "elmat", "elfun", "images", "signal"
-    std::string title;       // e.g. "Elementary matrices and matrix manipulation."
-    std::vector<HelpSection> sections;
+    keel::String name;        // e.g. "elmat", "elfun", "images", "signal"
+    keel::String title;       // e.g. "Elementary matrices and matrix manipulation."
+    keel::Array<HelpSection> sections;
 };
 
 class HelpCatalog {
@@ -30,36 +41,36 @@ public:
     static const HelpCatalog &instance();
 
     // List all registered categories in order
-    const std::vector<HelpCategory> &categories() const { return categories_; }
+    const keel::Array<HelpCategory> &categories() const { return categories_; }
 
     // Find category by name (case-insensitive, alias-aware e.g. "images" -> "image")
-    const HelpCategory *findCategory(std::string name) const;
+    const HelpCategory *findCategory(keel::StringRef name) const;
 
     // Find function help by name (case-insensitive)
-    const HelpEntry *findFunction(std::string name) const;
+    const HelpEntry *findFunction(keel::StringRef name) const;
 
     // Generate formatted MATLAB-style help overview of all categories
-    std::string formatAllCategories() const;
+    keel::String formatAllCategories() const;
 
     // Generate formatted MATLAB-style help for a specific category (e.g. "help elmat")
-    std::string formatCategory(const std::string &catName) const;
+    keel::String formatCategory(keel::StringRef catName) const;
 
     // Generate formatted help for a specific function (e.g. "help sin")
-    std::string formatFunction(const std::string &funcName) const;
+    keel::String formatFunction(keel::StringRef funcName) const;
 
     // Return list of function names in a given category
-    std::vector<std::string> getCategoryFunctions(const std::string &catName) const;
+    keel::Array<keel::String> getCategoryFunctions(keel::StringRef catName) const;
 
     // Return list of all function names across all categories
-    std::vector<std::string> getAllFunctions() const;
+    keel::Array<keel::String> getAllFunctions() const;
 
 private:
     HelpCatalog();
     void initCategories();
 
-    std::vector<HelpCategory> categories_;
-    std::unordered_map<std::string, keel::usize> categoryIndex_;
-    std::unordered_map<std::string, HelpEntry> functionIndex_;
+    keel::Array<HelpCategory> categories_;
+    keel::HashMap<keel::String, keel::usize> categoryIndex_;
+    keel::HashMap<keel::String, HelpEntry> functionIndex_;
 };
 
 } // namespace numkit::bundle

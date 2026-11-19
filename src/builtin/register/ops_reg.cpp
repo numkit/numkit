@@ -1,15 +1,19 @@
 // src/bundle/src/register/builtin/ops_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
-#include <keel/math.h>
 #include <numkit/builtin/ops.hpp>
 #include <numkit/builtin/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
+
+#include <algorithm>
+#include <utility>
 
 // Each registered adapter in ops/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
@@ -69,8 +73,8 @@ bool isTfStruct(const Value &v) {
 }
 
 struct TfPoly {
-    std::vector<double> num;
-    std::vector<double> den;
+    keel::Array<double> num;
+    keel::Array<double> den;
     double Ts = 0.0;
 };
 
@@ -96,25 +100,25 @@ bool toTfPoly(const Value &v, TfPoly &out) {
     return false;
 }
 
-std::vector<double> polyStrip(const std::vector<double> &p) {
+keel::Array<double> polyStrip(keel::ArrayRef<double> p) {
     keel::usize i = 0;
     while (i + 1 < p.size() && p[i] == 0.0) ++i;
     if (i >= p.size()) return {0.0};
-    return std::vector<double>(p.begin() + i, p.end());
+    return keel::Array<double>(p.slice(i));
 }
 
-std::vector<double> polyMul(const std::vector<double> &a, const std::vector<double> &b) {
+keel::Array<double> polyMul(keel::ArrayRef<double> a, keel::ArrayRef<double> b) {
     if (a.empty() || b.empty()) return {0.0};
-    std::vector<double> c(a.size() + b.size() - 1, 0.0);
+    keel::Array<double> c(a.size() + b.size() - 1, 0.0);
     for (keel::usize i = 0; i < a.size(); ++i)
         for (keel::usize j = 0; j < b.size(); ++j)
             c[i + j] += a[i] * b[j];
     return polyStrip(c);
 }
 
-std::vector<double> polyAdd(const std::vector<double> &a, const std::vector<double> &b, double sign) {
+keel::Array<double> polyAdd(keel::ArrayRef<double> a, keel::ArrayRef<double> b, double sign) {
     const keel::usize n = std::max(a.size(), b.size());
-    std::vector<double> c(n, 0.0);
+    keel::Array<double> c(n, 0.0);
     for (keel::usize i = 0; i < a.size(); ++i)
         c[n - a.size() + i] += a[i];
     for (keel::usize i = 0; i < b.size(); ++i)
@@ -122,10 +126,10 @@ std::vector<double> polyAdd(const std::vector<double> &a, const std::vector<doub
     return polyStrip(c);
 }
 
-Value buildTfValue(const std::vector<double> &num, const std::vector<double> &den,
+Value buildTfValue(keel::ArrayRef<double> num, keel::ArrayRef<double> den,
                    double Ts, keel::Allocator *mr) {
-    std::vector<double> ns = polyStrip(num);
-    std::vector<double> ds = polyStrip(den);
+    keel::Array<double> ns = polyStrip(num);
+    keel::Array<double> ds = polyStrip(den);
     const keel::usize len = std::max(ns.size(), ds.size());
     Value nv = Value::matrix(1, len, ValueType::DOUBLE, mr);
     Value dv = Value::matrix(1, len, ValueType::DOUBLE, mr);
@@ -154,7 +158,7 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
         const double expVal = b.toScalar();
         const int k = static_cast<int>(expVal);
         if (static_cast<double>(k) != expVal) return false;
-        std::vector<double> num = {1.0}, den = {1.0};
+        keel::Array<double> num = {1.0}, den = {1.0};
         const int ak = keel::abs(k);
         const auto &baseN = (k >= 0) ? pa.num : pa.den;
         const auto &baseD = (k >= 0) ? pa.den : pa.num;

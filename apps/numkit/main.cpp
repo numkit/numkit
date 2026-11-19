@@ -7,8 +7,12 @@
 //   numkit -h | --help      display usage help
 //   numkit -v | --version   display version info
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/fs.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
@@ -18,10 +22,9 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/build_info.hpp>
 
+#include <cstdio>
 #include <cstdlib>
-#include <iostream>
-#include <string>
-#include <vector>
+#include <cstring>
 
 namespace {
 
@@ -31,7 +34,7 @@ using numkit::StandardEngine;
 using numkit::TokenType;
 
 // Decide whether the accumulated buffer is still waiting for more input.
-bool isIncompleteInput(const std::string &src)
+bool isIncompleteInput(keel::StringRef src)
 {
     int bracket = 0;
     int blockOpen = 0;
@@ -78,33 +81,30 @@ bool isIncompleteInput(const std::string &src)
     while (i > 0 && (src[i - 1] == ' ' || src[i - 1] == '\t' ||
                      src[i - 1] == '\r' || src[i - 1] == '\n'))
         --i;
-    if (i >= 3 && src.compare(i - 3, 3, "...") == 0)
+    if (i >= 3 && src.substr(i - 3, 3) == "...")
         return true;
 
     return false;
 }
 
-void reportError(const Engine::EvalResult &r, const std::string &prefix)
+void reportError(const Engine::EvalResult &r, keel::StringRef prefix)
 {
-    std::string ctx = r.errorContext.empty() ? "" : " (" + r.errorContext + ")";
-    std::string id = r.errorId.empty() ? "" : " [" + r.errorId + "]";
+    keel::String ctx = r.errorContext.empty() ? keel::String{} : keel::format(" ({})", r.errorContext);
+    keel::String id = r.errorId.empty() ? keel::String{} : keel::format(" [{}]", r.errorId);
     if (r.errorLine > 0)
-        std::cerr << prefix << "line " << r.errorLine << ", column " << r.errorCol
-                  << ": " << r.errorMessage << ctx << id << "\n";
+        keel::eprint("{}line {}, column {}: {}{}{}\n",
+                     prefix, r.errorLine, r.errorCol, r.errorMessage, ctx, id);
     else
-        std::cerr << prefix << r.errorMessage << ctx << id << "\n";
+        keel::eprint("{}{}{}{}\n", prefix, r.errorMessage, ctx, id);
 }
 
-int runEval(const std::string &code)
+int runEval(keel::StringRef code)
 {
     StandardEngine engine;
     {
         auto cwd = keel::fs_current_dir();
         if (cwd.is_ok()) {
-            engine.pushScriptOrigin(
-                "native",
-                std::string(cwd->data(), cwd->size()),
-                "");
+            engine.pushScriptOrigin("native", *cwd, "");
         }
     }
     auto r = engine.evalSafe(code);
@@ -116,58 +116,79 @@ int runEval(const std::string &code)
     return 0;
 }
 
-int runScript(const std::string &path)
+int runScript(keel::StringRef path)
 {
     StandardEngine engine;
     auto textRes = keel::fs_read_text(path);
     if (!textRes.is_ok()) {
-        std::cerr << "numkit: cannot open '" << path << "'\n";
+        keel::eprint("numkit: cannot open '{}'\n", path);
         return 1;
     }
-    const std::string src(textRes->data(), textRes->size());
+    const keel::String &src = *textRes;
 
     {
         auto abs = keel::fs_absolute(path);
         if (abs.is_ok()) {
             const keel::StringRef dirRef = keel::path_dirname(*abs);
-            engine.pushScriptOrigin(
-                "native",
-                std::string(dirRef.data(), dirRef.size()),
-                std::string(abs->data(), abs->size()));
+            engine.pushScriptOrigin("native", dirRef, *abs);
         }
     }
 
+    keel::String errPrefix = keel::format("{}: ", path);
     auto r = engine.evalSafe(src);
     if (!r.ok) {
-        reportError(r, path + ": ");
+        reportError(r, errPrefix);
         return 1;
     }
     engine.popScriptOrigin();
 
-    std::string primaryFn;
+    keel::String primaryFn;
     if (numkit::runtime::primaryFunctionOfFile(src, primaryFn)) {
-        auto r2 = engine.evalSafe(primaryFn + ";");
+        keel::String callCode = keel::format("{};", primaryFn);
+        auto r2 = engine.evalSafe(callCode);
         if (!r2.ok) {
-            reportError(r2, path + ": ");
+            reportError(r2, errPrefix);
             return 1;
         }
     }
     return 0;
 }
 
+bool readStdinLine(keel::String &line)
+{
+    line.clear();
+    char buf[512];
+    bool any = false;
+    while (std::fgets(buf, sizeof(buf), stdin) != nullptr) {
+        any = true;
+        keel::usize len = std::strlen(buf);
+        bool hasNewline = (len > 0 && buf[len - 1] == '\n');
+        if (hasNewline) {
+            --len;
+            if (len > 0 && buf[len - 1] == '\r')
+                --len;
+        }
+        line.append(keel::StringRef(buf, len));
+        if (hasNewline)
+            break;
+    }
+    return any;
+}
+
 int runRepl()
 {
     StandardEngine engine;
 
-    std::cout << "NumKit 1.0.0 (interactive REPL)\n"
-              << "Type 'help' for info, 'quit' or 'exit' to leave.\n\n";
+    keel::print("NumKit 1.0.0 (interactive REPL)\n"
+                "Type 'help' for info, 'quit' or 'exit' to leave.\n\n");
 
-    std::string accum;
-    std::string line;
+    keel::String accum;
+    keel::String line;
     while (true) {
-        std::cout << (accum.empty() ? ">> " : "... ");
-        std::cout.flush();
-        if (!std::getline(std::cin, line))
+        const char *prompt = accum.empty() ? ">> " : "... ";
+        std::fwrite(prompt, 1, std::strlen(prompt), stdout);
+        std::fflush(stdout);
+        if (!readStdinLine(line))
             break;
 
         if (accum.empty()) {
@@ -177,8 +198,8 @@ int runRepl()
                 continue;
         }
 
-        accum += line;
-        accum += '\n';
+        accum.append(line);
+        accum.push_back('\n');
 
         if (isIncompleteInput(accum))
             continue;
@@ -189,39 +210,40 @@ int runRepl()
         accum.clear();
     }
 
-    std::cout << "\nGoodbye!\n";
+    keel::print("\nGoodbye!\n");
     return 0;
 }
 
 void printUsage(const char *prog)
 {
-    std::cout << "Usage: " << prog << " [options] [script.m]\n"
-              << "       " << prog << " build <script.m> [-o <out.exe>] [--ops-kernels] [--run]\n"
-              << "       " << prog << " codegen <script.m> [options]\n"
-              << "       " << prog << " pkg <command> [arguments]\n\n"
-              << "Options:\n"
-              << "  -e, --eval <code>    evaluate inline MATLAB code and exit\n"
-              << "  --aot                AOT-compile and run script.m via numkit-codegen\n"
-              << "  --ops-kernels        use Highway SIMD numkit::ops kernels during AOT compilation\n"
-              << "  --isolated           strict namespace mode (modules require qualified calls or import)\n"
-              << "  --compat             MATLAB compatibility mode (default: global bare module calls)\n"
-              << "  --cwd=<path>         set working directory\n"
-              << "  -v, --version        print version and build timestamp\n"
-              << "  -h, --help           show this help message\n\n"
-              << "AOT Compilation & Transpilation:\n"
-              << "  build <file.m>       compile a .m script/function into a native executable\n"
-              << "  codegen <file.m>     transpile .m to C++ (or run/build via numkit-codegen)\n\n"
-              << "Package Management:\n"
-              << "  pkg install <pkg...> install one or more packages (or --all, --head)\n"
-              << "  pkg update [pkg...]  update installed packages to latest release/commit\n"
-              << "  pkg avail            list official NumKit toolboxes and installation status\n"
-              << "  pkg list             list installed packages and their versions\n"
-              << "  pkg build [dir]      build a module in the specified directory\n"
-              << "  pkg remove <pkg...>  remove one or more installed packages\n\n"
-              << "If no script or --eval is provided, starts an interactive REPL.\n";
+    keel::print("Usage: {} [options] [script.m]\n"
+                "       {} build <script.m> [-o <out.exe>] [--ops-kernels] [--run]\n"
+                "       {} codegen <script.m> [options]\n"
+                "       {} pkg <command> [arguments]\n\n"
+                "Options:\n"
+                "  -e, --eval <code>    evaluate inline NumKit code and exit\n"
+                "  --aot                AOT-compile and run script.m via numkit-codegen\n"
+                "  --ops-kernels        use Highway SIMD numkit::ops kernels during AOT compilation\n"
+                "  --isolated           strict namespace mode (modules require qualified calls or import)\n"
+                "  --compat             compatibility mode (default: global bare module calls)\n"
+                "  --cwd=<path>         set working directory\n"
+                "  -v, --version        print version and build timestamp\n"
+                "  -h, --help           show this help message\n\n"
+                "AOT Compilation & Transpilation:\n"
+                "  build <file.m>       compile a .m script/function into a native executable\n"
+                "  codegen <file.m>     transpile .m to C++ (or run/build via numkit-codegen)\n\n"
+                "Package Management:\n"
+                "  pkg install <pkg...> install one or more packages (or --all, --head)\n"
+                "  pkg update [pkg...]  update installed packages to latest release/commit\n"
+                "  pkg avail            list official NumKit toolboxes and installation status\n"
+                "  pkg list             list installed packages and their versions\n"
+                "  pkg build [dir]      build a module in the specified directory\n"
+                "  pkg remove <pkg...>  remove one or more installed packages\n\n"
+                "If no script or --eval is provided, starts an interactive REPL.\n",
+                prog, prog, prog, prog);
 }
 
-std::string findCodegenBinary(const char *argv0)
+keel::String findCodegenBinary(const char *argv0)
 {
 #ifdef _WIN32
     const char *binName = "numkit-codegen.exe";
@@ -234,7 +256,7 @@ std::string findCodegenBinary(const char *argv0)
             const keel::StringRef selfDir = keel::path_dirname(*absSelf);
             if (!selfDir.empty()) {
                 keel::String sibling = keel::path_join(selfDir, binName);
-                if (keel::fs_exists(sibling)) return std::string(sibling.data(), sibling.size());
+                if (keel::fs_exists(sibling)) return sibling;
             }
         }
     }
@@ -245,55 +267,64 @@ std::string findCodegenBinary(const char *argv0)
 #endif
     if (!home.empty()) {
         keel::String p = keel::path_join(home, ".numkit", "bin", binName);
-        if (keel::fs_exists(p)) return std::string(p.data(), p.size());
+        if (keel::fs_exists(p)) return p;
     }
-    return binName;
+    return keel::String::from(binName);
 }
 
-std::string quoteShellArg(const std::string &s)
+keel::String quoteShellArg(keel::StringRef s)
 {
-    if (s.find_first_of(" \t\"") == std::string::npos) return s;
-    std::string out = "\"";
+    bool needsQuote = false;
     for (char c : s) {
-        if (c == '"') out += "\\\"";
-        else out += c;
+        if (c == ' ' || c == '\t' || c == '"') {
+            needsQuote = true;
+            break;
+        }
     }
-    out += "\"";
+    if (!needsQuote) return keel::String::from(s);
+    keel::String out = keel::String::from("\"");
+    for (char c : s) {
+        if (c == '"') out.append("\\\"");
+        else out.push_back(c);
+    }
+    out.push_back('"');
     return out;
 }
 
-int runCodegenSubcommand(const char *argv0, const std::vector<std::string> &args)
+int runCodegenSubcommand(const char *argv0, keel::ArrayRef<keel::String> args)
 {
-    const std::string cgBin = findCodegenBinary(argv0);
-    std::string cmd = "\"" + cgBin + "\"";
+    const keel::String cgBin = findCodegenBinary(argv0);
+    keel::String cmd = keel::format("\"{}\"", cgBin);
     for (const auto &a : args) {
-        cmd += " " + quoteShellArg(a);
+        cmd.push_back(' ');
+        cmd.append(quoteShellArg(a));
     }
 #ifdef _WIN32
-    cmd = "\"" + cmd + "\"";
+    cmd = keel::format("\"{}\"", cmd);
 #endif
     return std::system(cmd.c_str());
 }
 
 void printPkgUsage(const char *prog)
 {
-    std::cout << "Usage: " << prog << " pkg <command> [arguments]\n\n"
-              << "Commands:\n"
-              << "  install <pkg...> [--all] [--head]\n"
-              << "                     install one or more packages (e.g. signal, signal@v1.0.0, user/repo, --all)\n"
-              << "  update [pkg...] [--head]\n"
-              << "                     update installed packages (all installed if none specified)\n"
-              << "  avail              list all official NumKit toolboxes and their installation status\n"
-              << "  list               list installed packages, versions, and library paths\n"
-              << "  build [dir]        build a module from source in the specified directory (default: .)\n"
-              << "  remove <pkg...>    remove one or more installed packages\n"
-              << "  help               show this help message\n\n"
-              << "Examples:\n"
-              << "  " << prog << " pkg avail\n"
-              << "  " << prog << " pkg install signal wavelet\n"
-              << "  " << prog << " pkg install --all\n"
-              << "  " << prog << " pkg install signal@v1.0.0\n"
-              << "  " << prog << " pkg update\n";
+    keel::print("Usage: {} pkg <command> [arguments]\n\n"
+                "Commands:\n"
+                "  install <pkg...> [--all] [--head]\n"
+                "                     install one or more packages (e.g. signal, signal@v1.0.0, user/repo, --all)\n"
+                "  update [pkg...] [--head]\n"
+                "                     update installed packages (all installed if none specified)\n"
+                "  avail              list all official NumKit toolboxes and their installation status\n"
+                "  list               list installed packages, versions, and library paths\n"
+                "  build [dir]        build a module from source in the specified directory (default: .)\n"
+                "  remove <pkg...>    remove one or more installed packages\n"
+                "  help               show this help message\n\n"
+                "Examples:\n"
+                "  {} pkg avail\n"
+                "  {} pkg install signal wavelet\n"
+                "  {} pkg install --all\n"
+                "  {} pkg install signal@v1.0.0\n"
+                "  {} pkg update\n",
+                prog, prog, prog, prog, prog, prog);
 }
 
 int runPkgCommand(int argc, char **argv)
@@ -302,53 +333,53 @@ int runPkgCommand(int argc, char **argv)
         printPkgUsage(argv[0]);
         return 1;
     }
-    std::string subcmd = argv[2];
+    keel::StringRef subcmd = argv[2];
     numkit::pkg::PackageManager pm;
 
     if (subcmd == "install") {
         bool installAll = false;
         bool forceHead = false;
-        std::vector<std::string> targets;
+        keel::Array<keel::String> targets;
         for (int i = 3; i < argc; ++i) {
-            std::string arg = argv[i];
+            keel::StringRef arg = argv[i];
             if (arg == "--all" || arg == "-a") {
                 installAll = true;
             } else if (arg == "--head") {
                 forceHead = true;
             } else {
-                targets.push_back(std::move(arg));
+                targets.push_back(keel::String::from(arg));
             }
         }
         if (targets.empty() && !installAll) {
-            std::cerr << "Error: 'pkg install' requires at least one package target or '--all'.\n"
-                      << "Example: " << argv[0] << " pkg install signal\n";
+            keel::eprint("Error: 'pkg install' requires at least one package target or '--all'.\n"
+                         "Example: {} pkg install signal\n", argv[0]);
             return 1;
         }
         return pm.installMany(targets, installAll, /*verbose=*/true, forceHead);
     } else if (subcmd == "update" || subcmd == "upgrade") {
         bool forceHead = false;
-        std::vector<std::string> names;
+        keel::Array<keel::String> names;
         for (int i = 3; i < argc; ++i) {
-            std::string arg = argv[i];
+            keel::StringRef arg = argv[i];
             if (arg == "--all" || arg == "-a") {
                 continue;
             } else if (arg == "--head") {
                 forceHead = true;
             } else {
-                names.push_back(std::move(arg));
+                names.push_back(keel::String::from(arg));
             }
         }
         return pm.update(names, /*verbose=*/true, forceHead);
     } else if (subcmd == "avail" || subcmd == "available" || subcmd == "catalog" || subcmd == "search") {
-        return pm.avail(std::cout);
+        return pm.avail(stdout);
     } else if (subcmd == "list" || subcmd == "status") {
-        return pm.list(std::cout);
+        return pm.list(stdout);
     } else if (subcmd == "build") {
-        std::string dir = (argc >= 4) ? argv[3] : ".";
+        keel::StringRef dir = (argc >= 4) ? keel::StringRef(argv[3]) : keel::StringRef(".");
         return pm.build(dir);
     } else if (subcmd == "remove" || subcmd == "uninstall") {
         if (argc < 4) {
-            std::cerr << "Error: 'pkg remove' requires at least one package name.\n";
+            keel::eprint("Error: 'pkg remove' requires at least one package name.\n");
             return 1;
         }
         int failures = 0;
@@ -360,43 +391,45 @@ int runPkgCommand(int argc, char **argv)
         printPkgUsage(argv[0]);
         return 0;
     } else {
-        std::cerr << "Unknown pkg command: '" << subcmd << "'. Type '" << argv[0] << " pkg help'.\n";
+        keel::eprint("Unknown pkg command: '{}'. Type '{} pkg help'.\n", subcmd, argv[0]);
         return 1;
     }
 }
 
 void printVersion()
 {
-    std::cout << "NumKit 1.0.0 (" << numkit::buildTimestamp() << ")\n"
-              << "High-performance MATLAB-compatible runtime\n"
-              << "License: BSD Zero Clause (0BSD)\n";
+    keel::print("NumKit 1.0.0 ({})\n"
+                "High-performance numerical computing runtime\n"
+                "License: BSD Zero Clause (0BSD)\n",
+                numkit::buildTimestamp());
 }
 
 } // namespace
 
 int main(int argc, char **argv)
 {
-    if (argc >= 2 && std::string(argv[1]) == "pkg") {
+    if (argc >= 2 && keel::StringRef(argv[1]) == "pkg") {
         return runPkgCommand(argc, argv);
     }
-    if (argc >= 2 && std::string(argv[1]) == "codegen") {
-        std::vector<std::string> args;
-        for (int i = 2; i < argc; ++i) args.emplace_back(argv[i]);
+    if (argc >= 2 && keel::StringRef(argv[1]) == "codegen") {
+        keel::Array<keel::String> args;
+        for (int i = 2; i < argc; ++i) args.push_back(keel::String::from(argv[i]));
         return runCodegenSubcommand(argv[0], args);
     }
-    if (argc >= 2 && std::string(argv[1]) == "build") {
-        std::vector<std::string> args = {"--build"};
-        for (int i = 2; i < argc; ++i) args.emplace_back(argv[i]);
+    if (argc >= 2 && keel::StringRef(argv[1]) == "build") {
+        keel::Array<keel::String> args;
+        args.push_back(keel::String::from("--build"));
+        for (int i = 2; i < argc; ++i) args.push_back(keel::String::from(argv[i]));
         return runCodegenSubcommand(argv[0], args);
     }
 
-    std::string target;
-    std::string evalCode;
+    keel::String target;
+    keel::String evalCode;
     bool aotRun = false;
     bool opsKernels = false;
 
     for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+        keel::StringRef arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             printUsage(argv[0]);
             return 0;
@@ -413,17 +446,17 @@ int main(int argc, char **argv)
             numkit::envSet("NUMKIT_MODE", "compat");
         } else if (arg == "-e" || arg == "--eval") {
             if (i + 1 < argc) {
-                evalCode = argv[++i];
+                evalCode = keel::String::from(argv[++i]);
             } else {
-                std::cerr << "Error: " << arg << " requires a code string argument\n";
+                keel::eprint("Error: {} requires a code string argument\n", arg);
                 return 1;
             }
-        } else if (arg.rfind("--cwd=", 0) == 0) {
+        } else if (arg.starts_with("--cwd=")) {
             numkit::envSet("NUMKIT_CWD", arg.substr(6));
         } else if (arg == "--cwd" && i + 1 < argc) {
             numkit::envSet("NUMKIT_CWD", argv[++i]);
-        } else if (arg.length() > 0 && arg[0] != '-') {
-            target = arg;
+        } else if (!arg.empty() && arg[0] != '-') {
+            target = keel::String::from(arg);
         }
     }
 
@@ -434,9 +467,10 @@ int main(int argc, char **argv)
         return runRepl();
 
     if (aotRun) {
-        std::vector<std::string> cgArgs = {"--run"};
-        if (opsKernels) cgArgs.push_back("--ops-kernels");
-        cgArgs.push_back(target);
+        keel::Array<keel::String> cgArgs;
+        cgArgs.push_back(keel::String::from("--run"));
+        if (opsKernels) cgArgs.push_back(keel::String::from("--ops-kernels"));
+        cgArgs.push_back(keel::move(target));
         return runCodegenSubcommand(argv[0], cgArgs);
     }
 

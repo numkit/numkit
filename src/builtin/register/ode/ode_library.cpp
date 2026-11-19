@@ -4,6 +4,7 @@
 // compat.<name> alias.
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
 #include <numkit/ode/library.hpp>
 
@@ -32,7 +33,7 @@ namespace numkit {
 void OdeLibrary::install(Engine &engine)
 {
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
-        engine.registerFunction(std::string("ode.") + sub, name, keel::move(fn));
+        engine.registerFunction(keel::format_small<64>("ode.{}", sub), name, keel::move(fn));
         // compat.* registration removed — bare-name resolver replaces it
     };
 

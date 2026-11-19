@@ -5,8 +5,8 @@
 
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
-#include <string>
 
 namespace numkit {
 class Engine;
@@ -48,8 +48,8 @@ void warning(Engine &engine, keel::ArrayRef<Value> args);  // lint: engine-io
 
 /// @brief Snapshot of the most-recent warning.
 struct LastWarn {
-    std::string msg;  ///< Last warning's formatted message.
-    std::string id;   ///< Last warning's identifier (`""` if unset).
+    keel::String msg;  ///< Last warning's formatted message.
+    keel::String id;   ///< Last warning's identifier (`""` if unset).
 };
 
 /// @brief Read most-recent warning state (`[msg, id] = lastwarn()`).
@@ -69,7 +69,7 @@ LastWarn lastwarnGet();
 /// @param msg  New message.
 /// @param id   New identifier.
 /// @see lastwarnGet
-void lastwarnSet(const std::string &msg, const std::string &id);
+void lastwarnSet(keel::StringRef msg, keel::StringRef id);
 
 /// @brief Build an MException-like struct (`me = MException(id, msg, args...)`).
 ///

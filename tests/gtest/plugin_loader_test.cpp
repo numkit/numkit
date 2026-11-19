@@ -12,7 +12,8 @@ using namespace m_test;
 class PluginLoaderTest : public DualEngineTest {
 protected:
     std::string findPluginLib(const std::string &pkgName) {
-        std::string found = engine.pluginLoader().findPackageLibrary(pkgName);
+        keel::String foundK = engine.pluginLoader().findPackageLibrary(pkgName);
+        std::string found(foundK.data(), foundK.size());
         if (!found.empty() && keel::fs_exists(found))
             return found;
         const std::vector<std::string> candidates = {

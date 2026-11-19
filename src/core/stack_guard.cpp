@@ -1,4 +1,5 @@
 #include <keel/core.h>
+#include <keel/format.h>
 #include <numkit/core/stack_guard.hpp>
 #include <stdexcept>
 #include <cstdint>
@@ -20,8 +21,9 @@ void StackGuard::check(const char *stage)
     volatile char dummy = 0;
     ULONG_PTR currentStack = reinterpret_cast<ULONG_PTR>(&dummy);
     if (lowLimit != 0 && currentStack < lowLimit + SAFETY_MARGIN_BYTES) {
-        throw std::runtime_error("Stack exhaustion limit reached during " +
-                                 std::string(stage ? stage : "operation"));
+        auto msg = keel::format("Stack exhaustion limit reached during {}",
+                                stage ? stage : "operation");
+        throw std::runtime_error(msg.c_str());
     }
 }
 
@@ -36,8 +38,9 @@ void StackGuard::check(const char *stage)
 {
     uintptr_t freeStack = emscripten_stack_get_free();
     if (freeStack < SAFETY_MARGIN_BYTES) {
-        throw std::runtime_error("Stack exhaustion limit reached during " +
-                                 std::string(stage ? stage : "operation"));
+        auto msg = keel::format("Stack exhaustion limit reached during {}",
+                                stage ? stage : "operation");
+        throw std::runtime_error(msg.c_str());
     }
 }
 
@@ -57,8 +60,9 @@ void StackGuard::check(const char *stage)
     volatile char dummy = 0;
     uintptr_t currentStack = reinterpret_cast<uintptr_t>(&dummy);
     if (currentStack < lowLimit + SAFETY_MARGIN_BYTES) {
-        throw std::runtime_error("Stack exhaustion limit reached during " +
-                                 std::string(stage ? stage : "operation"));
+        auto msg = keel::format("Stack exhaustion limit reached during {}",
+                                stage ? stage : "operation");
+        throw std::runtime_error(msg.c_str());
     }
 }
 
@@ -90,8 +94,9 @@ void StackGuard::check(const char *stage)
     volatile char dummy = 0;
     uintptr_t currentStack = reinterpret_cast<uintptr_t>(&dummy);
     if (cachedLow != 0 && currentStack < cachedLow + SAFETY_MARGIN_BYTES) {
-        throw std::runtime_error("Stack exhaustion limit reached during " +
-                                 std::string(stage ? stage : "operation"));
+        auto msg = keel::format("Stack exhaustion limit reached during {}",
+                                stage ? stage : "operation");
+        throw std::runtime_error(msg.c_str());
     }
 }
 

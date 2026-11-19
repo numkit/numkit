@@ -10,9 +10,12 @@
 //
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <keel/complex.h>
 #include <keel/math.h>
 #include <numkit/linalg/eig.hpp>
@@ -27,11 +30,10 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
-#include <string>
 #include <tuple>
-#include <vector>
 
 namespace numkit::linalg {
 namespace detail {
@@ -131,14 +133,18 @@ static Value leftEigenvectors(const Value &M, const Value &D,
 
     auto [VL, DL] = eigVDAuto(Mt, mr);
 
-    std::vector<double> d(n), dl(n);
+    keel::Array<double> d(mr);
+    d.resize(n, 0.0);
+    keel::Array<double> dl(mr);
+    dl.resize(n, 0.0);
     for (keel::usize k = 0; k < n; ++k) d[k]  = D.elemAsDouble(k + k * n);
     for (keel::usize k = 0; k < n; ++k) dl[k] = DL.elemAsDouble(k + k * n);
 
     const double *vld = VL.doubleData();
     Value W = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *wd = W.doubleDataMut();
-    std::vector<bool> used(n, false);
+    keel::Array<keel::u8> used(mr);
+    used.resize(n, 0);
     for (keel::usize k = 0; k < n; ++k) {
         // Match D's k-th eigenvalue to the nearest unused eigenvalue of Mᵀ.
         keel::usize best = n;
@@ -148,7 +154,7 @@ static Value leftEigenvectors(const Value &M, const Value &D,
             const double e = std::fabs(dl[j] - d[k]);
             if (e < bestErr) { bestErr = e; best = j; }
         }
-        used[best] = true;
+        used[best] = 1;
         double nrm = 0.0;
         for (keel::usize i = 0; i < n; ++i)
             nrm += vld[i + best * n] * vld[i + best * n];
@@ -169,14 +175,13 @@ void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     bool wantMatrix = false;
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].type() == ValueType::CHAR) {
-            std::string s(args[i].toString().as_ref());
-            std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            keel::String s = args[i].toString();
+            for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (s == "matrix") wantMatrix = true;
             else if (s == "vector") { /* default for the 1-output form */ }
             else if (s == "chol" || s == "qz" || s == "nobalance") { /* accept */ }
             else
-                throw Error("eig: unknown option '" + s + "'",
+                throw Error(keel::format("eig: unknown option '{}'", s),
                             0, 0, "eig", "", "numkit:eig:badOption");
         } else {
             if (B)

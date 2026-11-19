@@ -369,7 +369,7 @@ TEST(Wave3MultiEngineIsolation, ParallelEnginesIndependentState)
         workers.emplace_back([tid, &failures]() {
             try {
                 StandardEngine eng;
-                eng.setOutputFunc([](const std::string &) {});
+                eng.setOutputFunc([](keel::StringRef) {});
                 eng.setBackend((tid % 2 == 0) ? Engine::Backend::VM
                                               : Engine::Backend::TreeWalker);
 

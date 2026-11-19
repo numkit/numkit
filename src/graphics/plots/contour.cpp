@@ -3,9 +3,11 @@
 // graphics.contour.* builders (contour / contourf), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -20,21 +22,16 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildContourPlots(std::vector<PlotEntry> &table)
+void buildContourPlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
 
     // ── Contour — marching squares over Z(R, C) ────────────────────────
@@ -47,7 +44,6 @@ void buildContourPlots(std::vector<PlotEntry> &table)
     // the existing line renderer can draw them as one path.
     auto contourImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
-        (void)nargout;
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
@@ -76,7 +72,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             return Z_arg->elemAsDouble(c * R + r);   // column-major
         };
 
-        std::vector<double> Xs(C), Ys(R);
+        keel::Array<double> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
             for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
             for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
@@ -95,7 +91,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             }
         }
 
-        std::vector<double> levels;
+        keel::Array<double> levels;
         int n = 10;
         if (levels_arg) {
             if (levels_arg->numel() == 1) {
@@ -141,16 +137,16 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             const int R8 = (int)((r1 + m) * 255);
             const int G8 = (int)((g1 + m) * 255);
             const int B8 = (int)((b1 + m) * 255);
-            char buf[16];
+            char buf[24];
             std::snprintf(buf, sizeof buf, "color=#%02x%02x%02x", R8, G8, B8);
-            return std::string(buf);
+            return keel::String::from(buf);
         };
 
         // Marching squares per level. Each cell's 4-bit code (TL, TR, BR, BL)
         // maps to 0/1/2 segments on the cell's edges.
         struct Pt { double x, y; };
         for (double L : levels) {
-            std::ostringstream xs, ys;
+            StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
             for (keel::usize r = 0; r + 1 < R; ++r) {
@@ -199,18 +195,18 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             if (first) continue;   // no segments at this level
 
             DatasetInfo ds;
-            ds.type = "line";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
+            ds.type.assign("line");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
             ds.style = colorForLevel(L);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
         }
         fm.emitModified();
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
         if (nargout >= 2 && outs.size() >= 2) {
             Value h = Value::structure();
             h.setField(0, "LineWidth", Value::scalar(0.5));
-            outs[1] = std::move(h);
+            outs[1] = keel::move(h);
         }
     };
     reg("contour", "contour", contourImpl);
@@ -235,7 +231,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             if (nargout >= 2 && outs.size() >= 2) {
                 Value h = Value::structure();
                 h.setField(0, "LineWidth", Value::scalar(0.5));
-                outs[1] = std::move(h);
+                outs[1] = keel::move(h);
             }
         };
         auto &fm = gc.fm;
@@ -261,7 +257,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);
         };
-        std::vector<double> Xs(C), Ys(R);
+        keel::Array<double> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
             for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
             for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
@@ -280,7 +276,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             }
         }
 
-        std::vector<double> levels;
+        keel::Array<double> levels;
         int n = 10;
         if (levels_arg) {
             if (levels_arg->numel() == 1) {
@@ -327,26 +323,26 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             const int R8 = (int)((r1 + m) * 255);
             const int G8 = (int)((g1 + m) * 255);
             const int B8 = (int)((b1 + m) * 255);
-            char buf[40];
+            char buf[48];
             std::snprintf(buf, sizeof buf, "color=#%02x%02x%02x;fillOpacity=1.0", R8, G8, B8);
-            return std::string(buf);
+            return keel::String::from(buf);
         };
 
         // Bottom layer — full extent — coloured at the lowest band so
         // any cell whose minimum corner is below the smallest level
         // gets a colour. Drawn first (lowest stack position).
         {
-            std::ostringstream xs, ys;
+            StrBuf xs, ys;
             xs << '[' << Xs[0] << ',' << Xs[C - 1] << ',' << Xs[C - 1]
                << ',' << Xs[0] << ']';
             ys << '[' << Ys[0] << ',' << Ys[0] << ',' << Ys[R - 1]
                << ',' << Ys[R - 1] << ']';
             DatasetInfo ds;
-            ds.type = "polygon";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
+            ds.type.assign("polygon");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
             ds.style = colorForLevel(zmn);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
         }
 
         // For each level (ascending), draw the closed region "Z >= L"
@@ -354,7 +350,7 @@ void buildContourPlots(std::vector<PlotEntry> &table)
         // cell contributes 0..6 vertices depending on its 4-bit code.
         struct Pt { double x, y; };
         for (double L : levels) {
-            std::ostringstream xs, ys;
+            StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
             const auto pushPt = [&](const Pt &p) {
@@ -426,11 +422,11 @@ void buildContourPlots(std::vector<PlotEntry> &table)
             xs << ']'; ys << ']';
             if (first) continue;
             DatasetInfo ds;
-            ds.type = "polygon";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
+            ds.type.assign("polygon");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
             ds.style = colorForLevel(L);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
         }
         fm.emitModified();
         setOutputs();

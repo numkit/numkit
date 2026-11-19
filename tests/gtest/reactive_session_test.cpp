@@ -15,7 +15,7 @@ using namespace numkit;
 
 namespace {
 
-std::vector<StatementFacts> factsOf(const std::string &src)
+keel::Array<StatementFacts> factsOf(const std::string &src)
 {
     Lexer lexer(src);
     Parser p(lexer.tokenize());
@@ -29,11 +29,11 @@ TEST(DepGraph, AssignmentFacts)
 {
     auto f = factsOf("y = a + b * sin(t);\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_EQ(f[0].writes.count("y"), 1u);
-    EXPECT_EQ(f[0].reads.count("a"), 1u);
-    EXPECT_EQ(f[0].reads.count("b"), 1u);
-    EXPECT_EQ(f[0].reads.count("t"), 1u);
-    EXPECT_EQ(f[0].reads.count("sin"), 1u);   // callee is a name read
+    EXPECT_TRUE(f[0].writes.contains("y"));
+    EXPECT_TRUE(f[0].reads.contains("a"));
+    EXPECT_TRUE(f[0].reads.contains("b"));
+    EXPECT_TRUE(f[0].reads.contains("t"));
+    EXPECT_TRUE(f[0].reads.contains("sin"));   // callee is a name read
     EXPECT_FALSE(f[0].wildcardReads);
 }
 
@@ -42,25 +42,25 @@ TEST(DepGraph, MergeWriteIndexAssign)
     // A(i) = v: A is read AND written (merge-write semantics).
     auto f = factsOf("A(2) = 5;\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_EQ(f[0].writes.count("A"), 1u);
-    EXPECT_EQ(f[0].reads.count("A"), 1u);
+    EXPECT_TRUE(f[0].writes.contains("A"));
+    EXPECT_TRUE(f[0].reads.contains("A"));
 }
 
 TEST(DepGraph, MultiOutputAssign)
 {
     auto f = factsOf("[u, s, v] = svd(A, 0);\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_EQ(f[0].writes.count("u"), 1u);
-    EXPECT_EQ(f[0].writes.count("s"), 1u);
-    EXPECT_EQ(f[0].writes.count("v"), 1u);
-    EXPECT_EQ(f[0].reads.count("A"), 1u);
+    EXPECT_TRUE(f[0].writes.contains("u"));
+    EXPECT_TRUE(f[0].writes.contains("s"));
+    EXPECT_TRUE(f[0].writes.contains("v"));
+    EXPECT_TRUE(f[0].reads.contains("A"));
 }
 
 TEST(DepGraph, LocalFunctionDefinition)
 {
     auto f = factsOf("function y = af(n, d)\n  y = n + d;\nend\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_EQ(f[0].writes.count("af"), 1u);
+    EXPECT_TRUE(f[0].writes.contains("af"));
     EXPECT_TRUE(f[0].reads.empty());
     EXPECT_FALSE(f[0].wildcardReads);
 }
@@ -156,10 +156,10 @@ TEST(DepGraph, AnonymousFunctionCaptures)
 {
     auto f = factsOf("f = @(t) A * sin(w * t);\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_EQ(f[0].writes.count("f"), 1u);
-    EXPECT_EQ(f[0].reads.count("A"), 1u);
-    EXPECT_EQ(f[0].reads.count("w"), 1u);
-    EXPECT_EQ(f[0].reads.count("t"), 0u);   // parameter, not captured
+    EXPECT_TRUE(f[0].writes.contains("f"));
+    EXPECT_TRUE(f[0].reads.contains("A"));
+    EXPECT_TRUE(f[0].reads.contains("w"));
+    EXPECT_FALSE(f[0].reads.contains("t"));   // parameter, not captured
 }
 
 // ── Portion B1: element regions + index-aware dirty sets ────────────
@@ -175,41 +175,47 @@ TEST(ElemRegions, LiteralExtractionForms)
         "h = C(7);\n"            // linear → ALL
         "k = size(C);\n");       // size probe → ALL
     ASSERT_EQ(f.size(), 7u);
-    EXPECT_TRUE(f[0].elemReads.at("C").rects.size() == 1u);
-    ElemRegion r0 = f[0].elemReads.at("C").rects[0];
-    EXPECT_FALSE(f[0].elemReads.at("C").all);
+    ASSERT_NE(f[0].elemReads.get("C"), nullptr);
+    EXPECT_TRUE(f[0].elemReads.get("C")->rects.size() == 1u);
+    ElemRegion r0 = f[0].elemReads.get("C")->rects[0];
+    EXPECT_FALSE(f[0].elemReads.get("C")->all);
     EXPECT_EQ(r0.r0, 5u); EXPECT_EQ(r0.r1, 5u);
     EXPECT_EQ(r0.c0, 2u); EXPECT_EQ(r0.c1, 2u);
     // rows 1..5 × col 3
-    ElemRegion r1 = f[1].elemReads.at("C").rects[0];
+    ASSERT_NE(f[1].elemReads.get("C"), nullptr);
+    ElemRegion r1 = f[1].elemReads.get("C")->rects[0];
     EXPECT_EQ(r1.r0, 1u); EXPECT_EQ(r1.r1, 5u);
     EXPECT_EQ(r1.c0, 3u); EXPECT_EQ(r1.c1, 3u);
     // stepped covers 1..9
-    ElemRegion r2 = f[2].elemReads.at("C").rects[0];
+    ASSERT_NE(f[2].elemReads.get("C"), nullptr);
+    ElemRegion r2 = f[2].elemReads.get("C")->rects[0];
     EXPECT_EQ(r2.r1, 9u);
     // full rows: r1 == SIZE_MAX
-    ElemRegion r3 = f[3].elemReads.at("C").rects[0];
+    ASSERT_NE(f[3].elemReads.get("C"), nullptr);
+    ElemRegion r3 = f[3].elemReads.get("C")->rects[0];
     EXPECT_EQ(r3.r1, (keel::usize)-1);
     EXPECT_EQ(r3.c0, 2u);
     // Paren forms without end/colon args are AST-ambiguous with
     // function calls (C(7) ≡ foo(3)): NO region entry — the coarse
     // read makes them whole-var readers (conservative, same dirty
     // behaviour as entry.all).
-    EXPECT_EQ(f[4].elemReads.count("C"), 0u);  // C(i,1)
-    EXPECT_EQ(f[5].elemReads.count("C"), 0u);  // C(7)
-    EXPECT_TRUE(f[6].elemReads.at("C").all);   // size(C)
+    EXPECT_FALSE(f[4].elemReads.contains("C"));  // C(i,1)
+    EXPECT_FALSE(f[5].elemReads.contains("C"));  // C(7)
+    ASSERT_NE(f[6].elemReads.get("C"), nullptr);
+    EXPECT_TRUE(f[6].elemReads.get("C")->all);   // size(C)
 }
 
 TEST(ElemRegions, MergeWriteRecordsWriteRegionOnly)
 {
     auto f = factsOf("C{5,2} = x + 1;\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_FALSE(f[0].elemWrites.at("C").all);
-    ElemRegion w = f[0].elemWrites.at("C").rects[0];
+    ASSERT_NE(f[0].elemWrites.get("C"), nullptr);
+    EXPECT_FALSE(f[0].elemWrites.get("C")->all);
+    ElemRegion w = f[0].elemWrites.get("C")->rects[0];
     EXPECT_EQ(w.r0, 5u); EXPECT_EQ(w.c0, 2u);
     // The LHS is NOT an rvalue read: no elemReads entry.
-    EXPECT_EQ(f[0].elemReads.count("C"), 0u);
-    EXPECT_EQ(f[0].lhsMergeBases.count("C"), 1u);
+    EXPECT_FALSE(f[0].elemReads.contains("C"));
+    EXPECT_TRUE(f[0].lhsMergeBases.contains("C"));
 }
 
 TEST(ElemRegions, SheetDirtySetElement)
@@ -263,7 +269,8 @@ TEST(ElemRegions, EndIndexIsAll)
 {
     auto f = factsOf("x = C(end, 1);\n");
     ASSERT_EQ(f.size(), 1u);
-    EXPECT_TRUE(f[0].elemReads.at("C").all);
+    ASSERT_NE(f[0].elemReads.get("C"), nullptr);
+    EXPECT_TRUE(f[0].elemReads.get("C")->all);
 }
 
 TEST(DepGraph, BareCallChainsThroughFigureState)
@@ -281,10 +288,10 @@ TEST(DepGraph, BareCallChainsThroughFigureState)
         "title('envelope');\n"                      // 4
         "grid on;\n");                              // 5
     ASSERT_EQ(f.size(), 6u);
-    EXPECT_EQ(f[0].reads.count(kFigureStateVar), 0u);
+    EXPECT_FALSE(f[0].reads.contains(kFigureStateVar));
     for (keel::usize i = 1; i < 6; ++i) {
-        EXPECT_EQ(f[i].reads.count(kFigureStateVar), 1u) << "stmt " << i;
-        EXPECT_EQ(f[i].writes.count(kFigureStateVar), 1u) << "stmt " << i;
+        EXPECT_TRUE(f[i].reads.contains(kFigureStateVar)) << "stmt " << i;
+        EXPECT_TRUE(f[i].writes.contains(kFigureStateVar)) << "stmt " << i;
     }
 
     DependencyGraph g(std::move(f));
@@ -372,7 +379,7 @@ TEST_F(ReactiveTest, DirtySkippingMatchesFullRerun)
     // theta0 change → theta stays cached; the for-loop is a wildcard,
     // so the tail from `ph` re-runs.
     s.setParam("theta0", Value::scalar(-10.0, engine.allocator()));
-    EXPECT_TRUE(s.lastError().empty()) << "setParam error: " << s.lastError();
+    EXPECT_TRUE(s.lastError().empty()) << "setParam error: " << s.lastError().c_str();
     EXPECT_TRUE(s.hasDirty());
     keel::usize ran = s.evalDirty();
     EXPECT_GT(ran, 0u);
@@ -403,7 +410,7 @@ TEST_F(ReactiveTest, ElementWriteOnlyRecalcsTouchingFormulas)
 
     s.setParamElement("C", 1, 1, Value::scalar(7.0, engine.allocator()));
     EXPECT_TRUE(s.lastError().empty()) << "setParamElement error: "
-                                       << s.lastError();
+                                       << s.lastError().c_str();
     keel::usize ran = s.evalDirty();
     // Only formula (2,1) re-runs — NOT (2,2), NOT the other defs.
     EXPECT_EQ(ran, 1u);

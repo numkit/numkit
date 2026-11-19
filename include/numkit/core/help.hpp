@@ -2,13 +2,12 @@
 /// @ingroup group_lang
 #pragma once
 
+#include <keel/array.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/help/help_catalog.hpp>
 #include <numkit/value/value.hpp>
-
-#include <string>
-#include <vector>
 
 namespace numkit {
 class Engine;
@@ -40,7 +39,7 @@ inline void registerHelpLibrary(Engine &engine)
 /// @param query Function, category, or empty string to display root catalog index.
 /// @return Formatted help string.
 /// @see what, builtins, categories
-std::string help(const std::string &query = "");
+keel::String help(keel::StringRef query = "");
 
 /// @brief MATLAB script engine wrapper for `help`.
 /// @param args Command-line arguments.
@@ -50,9 +49,9 @@ Value help(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all functions in specified category (`what category`).
 /// @param category Category name (e.g. `"elmat"`, `"signal"`, `"stats"`).
-/// @return Vector of function names in category.
+/// @return Array of function names in category.
 /// @see help, builtins, categories
-std::vector<std::string> what(const std::string &category = "elmat");
+keel::Array<keel::String> what(keel::StringRef category = "elmat");
 
 /// @brief MATLAB script engine wrapper for `what`.
 /// @param args Category argument.
@@ -62,9 +61,9 @@ Value what(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all built-in functions registered in the system or specified category (`builtins`).
 /// @param category Category name (or empty string for all built-ins).
-/// @return Vector of registered builtin function names.
+/// @return Array of registered builtin function names.
 /// @see help, what, categories
-std::vector<std::string> builtins(const std::string &category = "");
+keel::Array<keel::String> builtins(keel::StringRef category = "");
 
 /// @brief MATLAB script engine wrapper for `builtins`.
 /// @param args Category argument.
@@ -73,9 +72,9 @@ std::vector<std::string> builtins(const std::string &category = "");
 Value builtins(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 
 /// @brief Lists all registered documentation categories (`categories`).
-/// @return Vector of category identifiers (e.g. `"elmat"`, `"elfun"`, `"signal"`, ...).
+/// @return Array of category identifiers (e.g. `"elmat"`, `"elfun"`, `"signal"`, ...).
 /// @see help, what, builtins
-std::vector<std::string> categories();
+keel::Array<keel::String> categories();
 
 /// @brief Returns all registered categories as a cell array of strings.
 /// @param mr Memory resource for output allocation.

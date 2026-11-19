@@ -4,9 +4,11 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -21,10 +23,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -213,7 +213,7 @@ void sub2ind_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
 // paddata / trimdata / resize adapters.
 struct ResizeOpts {
     int dim = 0;
-    std::string side = "trailing";
+    keel::String side{"trailing"};
     double fillValue = 0.0;
 };
 
@@ -230,13 +230,13 @@ ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const cha
             const keel::usize sideIdx = argcheck::expectedChoice(
                 args[3], {"trailing", "leading", "both", "right", "left"},
                 4, "Side", fn);
-            opts.side = kSides[sideIdx];
+            opts.side.assign(kSides[sideIdx]);
         }
         return opts;
     }
     if (((args.size() - 2) % 2) != 0) {
-        throw Error(std::string(fn) + ": Name-Value arguments must occur in pairs",
-                    0, 0, fn, "", std::string("numkit:") + fn + ":unpairedNameValue");
+        throw Error(keel::format("{}: Name-Value arguments must occur in pairs", fn),
+                    0, 0, fn, "", keel::format("numkit:{}:unpairedNameValue", fn));
     }
     for (keel::usize i = 2; i < args.size(); i += 2) {
         const keel::usize keyIdx = allowFill
@@ -260,7 +260,7 @@ ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const cha
             const keel::usize sideIdx = argcheck::expectedChoice(
                 val, {"trailing", "leading", "both", "right", "left"},
                 static_cast<int>(i + 2), "Side", fn);
-            opts.side = kSides[sideIdx];
+            opts.side.assign(kSides[sideIdx]);
         } else if (keyIdx == 2) {
             opts.fillValue = argcheck::expectedReal(val, static_cast<int>(i + 2), "FillValue", fn);
         }

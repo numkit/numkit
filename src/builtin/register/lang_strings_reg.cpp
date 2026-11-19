@@ -6,6 +6,7 @@
 #include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/strfun.hpp>
@@ -23,10 +24,8 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -100,7 +99,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         }
         if (!ok) {
             try {
-                std::string expr = "[";
+                keel::String expr = keel::String::from("[", mr);
                 if (s.isChar() && !s.dims().is3D() && rows > 1) {
                     const char *cd = s.charData();
                     expr.reserve(rows * (cols + 1) + 2);
@@ -111,7 +110,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                     }
                 } else {
                     const keel::String ts = s.toString();
-                    expr.append(ts.data(), ts.size());
+                    expr.append(ts.as_ref());
                 }
                 expr.push_back(']');
                 Value v = ctx.engine->eval(expr, /*suppressTopLevelDisplay=*/true);
@@ -675,9 +674,9 @@ void rats_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
 void strtok_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "strtok");
-    const std::string delim = (args.size() >= 2)
-                                  ? std::string(args[1].toString().as_ref())
-                                  : std::string(" \t\r\n\f\v");
+    const keel::String delim = (args.size() >= 2)
+                                   ? args[1].toString()
+                                   : keel::String::from(" \t\r\n\f\v");
     auto [tok, rem] = numkit::builtin::strtok(args[0], delim,
                                               ctx.engine->allocator());
     outs[0] = std::move(tok);

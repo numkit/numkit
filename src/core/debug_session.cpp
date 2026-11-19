@@ -17,19 +17,20 @@
 //                  var, otherwise lands in the overlay.
 //
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
 #include <numkit/core/debug_session.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
 
-#include <unordered_set>
-
 namespace numkit {
 
 DebugSession::DebugSession(Engine &engine)
     : engine_(engine)
-    , observer_(std::make_shared<SessionObserver>())
+    , observer_(keel::make_arc<SessionObserver>())
 {
 }
 
@@ -38,7 +39,7 @@ DebugSession::~DebugSession()
     stop();
 }
 
-void DebugSession::setBreakpoints(const std::vector<keel::u16> &lines)
+void DebugSession::setBreakpoints(keel::ArrayRef<keel::u16> lines)
 {
     auto &bpm = engine_.debug().breakpoints();
     bpm.clearAll();
@@ -47,7 +48,7 @@ void DebugSession::setBreakpoints(const std::vector<keel::u16> &lines)
             bpm.addBreakpoint(line);
 }
 
-ExecStatus DebugSession::start(const std::string &code)
+ExecStatus DebugSession::start(keel::StringRef code)
 {
     stop(); // clean up any previous session
 
@@ -56,8 +57,7 @@ ExecStatus DebugSession::start(const std::string &code)
     outputBuf_.clear();
     ws_.reset();
 
-    savedOutputFunc_ = engine_.outputFunc();
-    engine_.setOutputFunc([this](const std::string &s) { outputBuf_ += s; });
+    savedOutputFunc_ = engine_.swapOutputFunc([this](keel::StringRef s) { outputBuf_.append(s); });
     engine_.debug().setObserver(observer_);
 
     active_ = true;
@@ -74,7 +74,7 @@ ExecStatus DebugSession::start(const std::string &code)
 
         Lexer lexer(code);
         auto tokens = lexer.tokenize();
-        Parser parser(tokens);
+        Parser parser(keel::move(tokens));
         ast_ = parser.parse();
 
         // Enter the engine's script scope: pointers into ast_ land in
@@ -85,7 +85,7 @@ ExecStatus DebugSession::start(const std::string &code)
 
         engine_.vm_->clearLastVarMap();
 
-        auto src = std::make_shared<const std::string>(code);
+        auto src = keel::make_arc<const keel::String>(keel::String::from(code));
         auto *compiler = engine_.compilerPtr();
         chunk_ = compiler->compile(ast_.get(), src);
         engine_.vm_->setCompiledFuncs(&compiler->compiledFuncs(),
@@ -112,13 +112,13 @@ ExecStatus DebugSession::start(const std::string &code)
         return status;
     } catch (const Error &e) {
         engine_.syncVMToWorkspace();
-        errorMsg_ = e.what();
+        errorMsg_.assign(e.what());
         errorLine_ = e.line();
         deactivate();
         return ExecStatus::Completed;
     } catch (const std::exception &e) {
         engine_.syncVMToWorkspace();
-        errorMsg_ = e.what();
+        errorMsg_.assign(e.what());
         deactivate();
         return ExecStatus::Completed;
     }
@@ -154,13 +154,13 @@ ExecStatus DebugSession::resume(DebugAction action)
         return status;
     } catch (const Error &e) {
         engine_.syncVMToWorkspace();
-        errorMsg_ = e.what();
+        errorMsg_.assign(e.what());
         errorLine_ = e.line();
         deactivate();
         return ExecStatus::Completed;
     } catch (const std::exception &e) {
         engine_.syncVMToWorkspace();
-        errorMsg_ = e.what();
+        errorMsg_.assign(e.what());
         deactivate();
         return ExecStatus::Completed;
     }
@@ -193,9 +193,9 @@ bool DebugSession::atErrorPause() const
     return active_ && engine_.vm_ && engine_.vm_->atErrorPause();
 }
 
-std::string DebugSession::errorPauseMessage() const
+keel::String DebugSession::errorPauseMessage() const
 {
-    return engine_.vm_ ? engine_.vm_->errorPauseMessage() : std::string();
+    return engine_.vm_ ? engine_.vm_->errorPauseMessage().clone() : keel::String{};
 }
 
 bool DebugSession::frameUp()
@@ -220,46 +220,46 @@ bool DebugSession::frameDown()
     return true;
 }
 
-std::string DebugSession::frameFocusLine() const
+keel::String DebugSession::frameFocusLine() const
 {
     auto *ctl = engine_.debug().controller();
     if (!ctl || ctl->callStack().empty())
-        return "";
-    auto &stack = ctl->callStack();
+        return {};
+    const auto &stack = ctl->callStack();
     keel::usize depth = selectedDepth_ < stack.size() ? selectedDepth_ : stack.size() - 1;
     const auto &sf = stack[stack.size() - 1 - depth];
-    std::string fn = sf.functionName.empty() ? "<script>" : sf.functionName;
-    return "In " + fn + " (line " + std::to_string(sf.line) + ")";
+    keel::StringRef fn = sf.functionName.empty() ? keel::StringRef("<script>") : sf.functionName.as_ref();
+    return keel::format("In {} (line {})", fn, sf.line);
 }
 
-std::string DebugSession::formatDbStack() const
+keel::String DebugSession::formatDbStack() const
 {
     auto *ctl = engine_.debug().controller();
     if (!ctl)
-        return "";
-    auto &stack = ctl->callStack();
-    std::string out;
+        return {};
+    const auto &stack = ctl->callStack();
+    keel::String out;
     // Deepest frame first (MATLAB order); '>' marks the dbup/dbdown focus.
     for (keel::usize i = 0; i < stack.size(); ++i) {
         const auto &sf = stack[stack.size() - 1 - i];
-        out += (i == selectedDepth_) ? "> " : "  ";
-        std::string fn = sf.functionName.empty() ? "<script>" : sf.functionName;
-        out += "In " + fn + " (line " + std::to_string(sf.line) + ")\n";
+        out.append((i == selectedDepth_) ? "> " : "  ");
+        keel::StringRef fn = sf.functionName.empty() ? keel::StringRef("<script>") : sf.functionName.as_ref();
+        keel::format_into(out, "In {} (line {})\n", fn, sf.line);
     }
     if (!out.empty() && out.back() == '\n')
         out.pop_back();
     return out;
 }
 
-void DebugSession::addWatch(const std::string &expr)
+void DebugSession::addWatch(keel::StringRef expr)
 {
-    watches_.push_back(expr);
+    watches_.push_back(keel::String::from(expr));
 }
 
 void DebugSession::removeWatch(keel::usize index)
 {
     if (index < watches_.size())
-        watches_.erase(watches_.begin() + static_cast<keel::isize>(index));
+        watches_.remove_at(index);
 }
 
 void DebugSession::clearWatches()
@@ -267,17 +267,17 @@ void DebugSession::clearWatches()
     watches_.clear();
 }
 
-std::vector<DebugSession::WatchResult> DebugSession::evalWatches()
+keel::Array<DebugSession::WatchResult> DebugSession::evalWatches()
 {
-    std::vector<WatchResult> out;
+    keel::Array<WatchResult> out;
     out.reserve(watches_.size());
     // Each watch is evaluated in the currently focused frame via the same
     // inject/eval path as the console — so it sees the live (possibly edited)
     // values and dbup/dbdown focus. eval() already turns failures into
     // "Error: ..." strings, so a bad watch never throws here.
-    for (auto &expr : watches_)
-        out.push_back({expr, active_ ? runInDebugScope(expr, /*applyChanges=*/false)
-                                     : std::string()});
+    for (const auto &expr : watches_)
+        out.push_back({expr.clone(), active_ ? runInDebugScope(expr, /*applyChanges=*/false)
+                                             : keel::String{}});
     return out;
 }
 
@@ -293,7 +293,7 @@ ExecStatus DebugSession::skipFalseConditionalBreakpoints(ExecStatus status, bool
         if (!ctl || ctl->callStack().empty())
             break;
         keel::u16 line = ctl->currentFrame()->line;
-        std::string cond = engine_.debug().breakpoints().conditionForLine(line);
+        keel::String cond = engine_.debug().breakpoints().conditionForLine(line);
         if (cond.empty())
             break; // unconditional breakpoint → genuine stop
 
@@ -329,7 +329,7 @@ void DebugSession::deactivate()
         engine_.vm_->setStopOnError(false); // don't affect later non-debug runs
     // Pair with the beginScript() at the start of this session.
     engine_.endScript();
-    engine_.setOutputFunc(savedOutputFunc_);
+    engine_.setOutputFunc(keel::move(savedOutputFunc_));
     savedOutputFunc_ = nullptr;
     ast_.reset();
 }
@@ -342,7 +342,7 @@ DebugSession::Snapshot DebugSession::snapshot() const
     if (!ctl)
         return snap;
 
-    auto &stack = ctl->callStack();
+    const auto &stack = ctl->callStack();
     if (stack.empty())
         return snap;
 
@@ -351,10 +351,10 @@ DebugSession::Snapshot DebugSession::snapshot() const
     keel::usize depth = selectedDepth_;
     if (depth >= stack.size())
         depth = stack.size() - 1;
-    auto &frame = stack[stack.size() - 1 - depth];
+    const auto &frame = stack[stack.size() - 1 - depth];
     snap.line = frame.line;
     snap.col = frame.col;
-    snap.functionName = frame.functionName;
+    snap.functionName = frame.functionName.clone();
 
     // Build the variables list from the DebugWorkspace (live frame pointers +
     // overlay; deleted/unset slots are filtered out by names()). Each value is
@@ -363,36 +363,38 @@ DebugSession::Snapshot DebugSession::snapshot() const
     // registers. The vector is reserved up-front so push_back never reallocates
     // and the &back() pointers stay valid.
     auto names = ws_.names();
-    snap.ownedValues = std::make_shared<std::vector<Value>>();
+    snap.ownedValues = keel::make_arc<keel::Array<Value>>();
     snap.ownedValues->reserve(names.size());
     for (auto &name : names) {
         auto *val = ws_.get(name);
         if (val) {
             snap.ownedValues->push_back(*val);
-            snap.variables.push_back({name, &snap.ownedValues->back()});
+            snap.variables.push_back({keel::move(name), &snap.ownedValues->back()});
         }
     }
 
-    snap.callStack = stack;
+    snap.callStack = stack.clone();
     return snap;
 }
 
-std::string DebugSession::eval(const std::string &code)
+keel::String DebugSession::eval(keel::StringRef code)
 {
     if (!active_)
-        return "Error: no active debug session";
+        return keel::String::from("Error: no active debug session");
 
     // Debugger meta-commands (dbup / dbdown / dbstack) move the inspection
     // focus or report the call stack — they are NOT workspace evaluations, so
     // intercept them here (MATLAB handles them the same way at K>>).
     {
-        keel::usize b = code.find_first_not_of(" \t\r\n");
-        keel::usize e = code.find_last_not_of(" \t\r\n;");
-        std::string cmd = (b == std::string::npos) ? "" : code.substr(b, e - b + 1);
+        keel::StringRef cmd = code.trim_left();
+        while (!cmd.empty() && (cmd.back() == ' ' || cmd.back() == '\t'
+                                || cmd.back() == '\r' || cmd.back() == '\n'
+                                || cmd.back() == ';'))
+            cmd.remove_suffix(1);
         if (cmd == "dbup")
-            return frameUp() ? frameFocusLine() : "Already at the top of the stack.";
+            return frameUp() ? frameFocusLine() : keel::String::from("Already at the top of the stack.");
         if (cmd == "dbdown")
-            return frameDown() ? frameFocusLine() : "Already at the bottom of the stack.";
+            return frameDown() ? frameFocusLine() : keel::String::from("Already at the bottom of the stack.");
         if (cmd == "dbstack")
             return formatDbStack();
     }
@@ -401,15 +403,15 @@ std::string DebugSession::eval(const std::string &code)
     return runInDebugScope(code, /*applyChanges=*/true);
 }
 
-std::string DebugSession::runInDebugScope(const std::string &code, bool applyChanges)
+keel::String DebugSession::runInDebugScope(keel::StringRef code, bool applyChanges)
 {
     // 1. Save debug controller + paused VM state. The inner engine.eval()
     //    runs a full VM pass and stomps both.
     auto *ctl = engine_.debug().controller();
-    std::vector<StackFrame> savedCallStack;
+    keel::Array<StackFrame> savedCallStack;
     keel::u16 savedLine = 0;
     if (ctl) {
-        savedCallStack = ctl->callStack();
+        savedCallStack = ctl->callStack().clone();
         if (ctl->currentFrame())
             savedLine = ctl->currentFrame()->line;
     }
@@ -418,18 +420,17 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
     // 2. Snapshot the base workspace by value. engine.eval() may clearAll or
     //    add variables to workspaceEnv; we restore it completely afterwards.
     auto &genv = engine_.workspaceEnv();
-    std::unordered_map<std::string, Value> preEvalEnv;
+    keel::HashMap<keel::String, Value> preEvalEnv;
     for (auto &n : genv.localNames()) {
         if (auto *v = genv.getLocal(n))
-            preEvalEnv.emplace(n, *v);
+            preEvalEnv.put(keel::move(n), *v);
     }
     // Global membership lives in workspaceEnv_->globals_, NOT local storage, so
     // localNames() misses it. clearAll() below wipes it — capture it so step 9
     // can restore it (the value is in globalsEnv_, untouched). Without this a
     // pre-existing base global would vanish after any debug-console eval.
-    std::unordered_set<std::string> preEvalGlobals(genv.globalNames().begin(),
-                                                   genv.globalNames().end());
-    std::vector<Import> preEvalImports = genv.activeImports();
+    keel::HashSet<keel::String> preEvalGlobals = genv.globalNames().clone();
+    keel::Array<Import> preEvalImports = genv.activeImports().clone();
 
     // 3. Detach the observer so the inner eval doesn't trigger debug hooks.
     engine_.debug().setObserver(nullptr);
@@ -437,12 +438,12 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
     // 4. Inject current debug-workspace contents into workspaceEnv so the
     //    eval sees them like normal base-workspace variables. Value copy
     //    is tagged-pointer + COW, so this is cheap even for large matrices.
-    std::unordered_set<std::string> injectedNames;
+    keel::HashSet<keel::String> injectedNames;
     // Start from a clean slate so `clear` in the console doesn't race with
     // unrelated REPL variables.
     genv.clearAll();
     for (const auto &imp : preEvalImports)
-        genv.pushImport(imp);
+        genv.pushImport(imp.clone());
 
     // Inject ALL live names, including built-ins and pseudo-vars like nargin
     // — the console eval needs them reachable even though they won't appear
@@ -451,18 +452,19 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
         auto *val = ws_.get(name);
         if (val) {
             genv.set(name, *val);
-            injectedNames.insert(name);
+            injectedNames.insert(keel::move(name));
         }
     }
 
     // 5. Execute expression.
-    std::string evalOutput;
-    engine_.setOutputFunc([&evalOutput](const std::string &s) { evalOutput += s; });
+    keel::String evalOutput;
+    auto prevEvalOut = engine_.swapOutputFunc(
+        [&evalOutput](keel::StringRef s) { evalOutput.append(s); });
     lastEvalValue_ = Value();
     try {
         lastEvalValue_ = engine_.eval(code);
     } catch (const std::exception &e) {
-        evalOutput = std::string("Error: ") + e.what();
+        evalOutput = keel::format("Error: {}", e.what());
     }
 
     // Snapshot what the inner eval actually *wrote*. vm_->lastVarMap() only
@@ -470,15 +472,15 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
     // drives this set), so it's the authoritative list of "what did the
     // console code change?" — untouched pass-through names don't show up
     // here and therefore won't get incorrectly tagged as shadowed.
-    std::unordered_map<std::string, Value> innerAssigned;
-    for (auto &[n, v] : engine_.vm_->lastVarMap())
-        innerAssigned[n] = v;
+    keel::HashMap<keel::String, Value> innerAssigned;
+    for (const auto &[n, v] : engine_.vm_->lastVarMap())
+        innerAssigned.put(n.clone(), v);
 
     // 6. Restore paused VM state BEFORE diffing back so ws_'s frame pointers
     //    are pointing at the user's registers again. restorePausedState is a
     //    move-assign (does not throw); the rebind + diff-back below are guarded
     //    by doRestore so a throw there can't leave the engine inconsistent.
-    engine_.vm_->restorePausedState(std::move(savedVMState));
+    engine_.vm_->restorePausedState(keel::move(savedVMState));
 
     // Return the base workspace + engine I/O / observer / controller to their
     // pre-eval state. Defined as a lambda so it runs on the normal path AND if
@@ -491,18 +493,21 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
         // Global membership (wiped by clearAll, values still in globalsEnv_) is
         // re-declared so base globals don't vanish.
         genv.clearAll();
-        for (auto &[n, v] : preEvalEnv)
+        for (auto [n, v] : preEvalEnv)
             genv.set(n, v);
-        for (auto &g : preEvalGlobals)
+        for (const auto &g : preEvalGlobals)
             genv.declareGlobal(g);
         for (const auto &imp : preEvalImports)
-            genv.pushImport(imp);
+            genv.pushImport(imp.clone());
         engine_.clearAllCalled_ = false;
 
-        engine_.setOutputFunc([this](const std::string &s) { outputBuf_ += s; });
+        if (prevEvalOut)
+            engine_.setOutputFunc(keel::move(prevEvalOut));
+        else
+            engine_.setOutputFunc([this](keel::StringRef s) { outputBuf_.append(s); });
         engine_.debug().setObserver(observer_);
         if (auto *c = engine_.debug().controller()) {
-            c->callStack() = savedCallStack;
+            c->callStack() = savedCallStack.clone();
             c->setLastLine(savedLine);
         }
     };
@@ -528,31 +533,32 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
         ws_.bindVMFrame(*engine_.vm_, engine_, selectedDepth_);
 
         auto wsNames = genv.localNames();
-        std::unordered_set<std::string> nowNames(wsNames.begin(), wsNames.end());
+        keel::HashSet<keel::String> nowNames;
+        nowNames.reserve(wsNames.size());
+        for (auto &wn : wsNames)
+            nowNames.insert(keel::move(wn));
 
         // nargin/nargout are pseudo-vars bound per-function-call; don't
         // propagate them to the overlay where they'd masquerade as
         // persistent workspace state.
-        auto isTransientPseudo = [](const std::string &n) {
+        auto isTransientPseudo = [](keel::StringRef n) {
             return n == "nargin" || n == "nargout";
         };
 
-        for (auto &name : injectedNames) {
-            auto it = innerAssigned.find(name);
-            if (it != innerAssigned.end()) {
-                const Value &v = it->second;
-                if (v.isUnset() || v.isDeleted())
+        for (const auto &name : injectedNames) {
+            if (const Value *vp = innerAssigned.get(name)) {
+                if (vp->isUnset() || vp->isDeleted())
                     ws_.remove(name);
                 else
-                    ws_.set(name, v);
-            } else if (!nowNames.count(name)) {
+                    ws_.set(name, *vp);
+            } else if (!nowNames.contains(name)) {
                 // Injected but now missing → cleared by the inner eval.
                 ws_.remove(name);
             }
             // else: untouched, pass through.
         }
-        for (auto &[name, val] : innerAssigned) {
-            if (injectedNames.count(name))
+        for (auto [name, val] : innerAssigned) {
+            if (injectedNames.contains(name))
                 continue; // already handled above
             if (isTransientPseudo(name))
                 continue;
@@ -567,8 +573,8 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
         // pre-existing base global (in preEvalGlobals) is left alone — it's
         // restored as-is by doRestore.
         if (auto *gs = genv.globalsEnv()) {
-            for (auto &g : genv.globalNames()) {
-                if (preEvalGlobals.count(g) || injectedNames.count(g))
+            for (const auto &g : genv.globalNames()) {
+                if (preEvalGlobals.contains(g) || injectedNames.contains(g))
                     continue;
                 if (auto *gv = gs->get(g))
                     if (!gv->isUnset() && !gv->isDeleted())
@@ -577,7 +583,7 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
         }
     } catch (const std::exception &e) {
         doRestore();
-        return std::string("Error: applying console changes: ") + e.what();
+        return keel::format("Error: applying console changes: {}", e.what());
     }
 
     // 8-9. Restore engine state on the normal path.
@@ -590,9 +596,9 @@ std::string DebugSession::runInDebugScope(const std::string &code, bool applyCha
     return evalOutput;
 }
 
-std::string DebugSession::takeOutput()
+keel::String DebugSession::takeOutput()
 {
-    std::string out = std::move(outputBuf_);
+    keel::String out = keel::move(outputBuf_);
     outputBuf_.clear();
     return out;
 }

@@ -2,14 +2,16 @@
 //
 // Runtime binding for the `pkg` builtin function.
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/value/error.hpp>
 
-#include <iostream>
-#include <string>
+#include <cstdio>
 
 namespace numkit::runtime {
 namespace detail {
@@ -20,7 +22,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     pkg::PackageManager pm;
 
     if (args.empty()) {
-        pm.list(std::cout);
+        pm.list(stdout);
         return;
     }
 
@@ -28,20 +30,20 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         throw Error("pkg: action must be a string (e.g. 'install', 'list', 'load', 'remove', 'mode')");
     }
 
-    std::string action(args[0].toString().as_ref());
+    keel::String action = args[0].toString();
     if (action == "list" || action == "status") {
-        pm.list(std::cout);
+        pm.list(stdout);
     } else if (action == "avail" || action == "available" || action == "catalog" || action == "search") {
-        pm.avail(std::cout, ctx.engine);
+        pm.avail(stdout, ctx.engine);
     } else if (action == "update" || action == "upgrade") {
-        std::vector<std::string> names;
+        keel::Array<keel::String> names;
         for (keel::usize i = 1; i < args.size(); ++i) {
             if (args[i].isChar() || args[i].isString()) {
-                std::string s(args[i].toString().as_ref());
-                if (s != "--all" && s != "-a") names.push_back(std::move(s));
+                keel::String s = args[i].toString();
+                if (s != "--all" && s != "-a") names.push_back(keel::move(s));
             }
         }
-        int rc = pm.update(names);
+        int rc = pm.update(names.as_ref());
         if (rc != 0) {
             throw Error("pkg update failed");
         }
@@ -50,13 +52,13 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             if (!args[1].isChar() && !args[1].isString()) {
                 throw Error("pkg mode: argument must be 'compat' or 'isolated'");
             }
-            std::string m(args[1].toString().as_ref());
+            keel::String m = args[1].toString();
             if (m == "isolated" || m == "strict") {
                 ctx.engine->setNamespaceMode(NamespaceMode::Isolated);
             } else if (m == "compat" || m == "matlab") {
                 ctx.engine->setNamespaceMode(NamespaceMode::Compat);
             } else {
-                throw Error("pkg mode: unknown mode '" + m + "' (expected 'compat' or 'isolated')");
+                throw Error(keel::format("pkg mode: unknown mode '{}' (expected 'compat' or 'isolated')", m));
             }
         }
         const char *cur = (ctx.engine->namespaceMode() == NamespaceMode::Isolated)
@@ -70,14 +72,14 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             throw Error("pkg install: requires a package name argument (e.g. pkg install signal)");
         }
         bool installAll = false;
-        std::vector<std::string> targets;
+        keel::Array<keel::String> targets;
         for (keel::usize i = 1; i < args.size(); ++i) {
             if (!args[i].isChar() && !args[i].isString()) continue;
-            std::string s(args[i].toString().as_ref());
+            keel::String s = args[i].toString();
             if (s == "--all" || s == "-a") installAll = true;
-            else targets.push_back(std::move(s));
+            else targets.push_back(keel::move(s));
         }
-        int rc = pm.installMany(targets, installAll);
+        int rc = pm.installMany(targets.as_ref(), installAll);
         if (rc != 0) {
             throw Error("pkg install failed");
         }
@@ -85,8 +87,8 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (args.size() < 2 || (!args[1].isChar() && !args[1].isString())) {
             throw Error("pkg load: requires a package name argument (e.g. pkg load signal)");
         }
-        std::string name(args[1].toString().as_ref());
-        std::string targetNs;
+        keel::String name = args[1].toString();
+        keel::String targetNs;
         if (args.size() == 3) {
             if (!args[2].isChar() && !args[2].isString()) {
                 throw Error("pkg load: target namespace must be a string");
@@ -101,27 +103,31 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         } else if (args.size() > 4) {
             throw Error("pkg load: too many arguments");
         }
-        int rc = pm.load(name, *ctx.engine, targetNs);
+        int rc = pm.load(name.as_ref(), *ctx.engine, targetNs.as_ref());
         if (rc != 0) {
-            throw Error("pkg load failed for '" + name + "'");
+            throw Error(keel::format("pkg load failed for '{}'", name));
         }
     } else if (action == "remove" || action == "uninstall") {
         if (args.size() < 2 || (!args[1].isChar() && !args[1].isString())) {
             throw Error("pkg remove: requires a package name argument");
         }
-        std::string name(args[1].toString().as_ref());
-        int rc = pm.remove(name);
+        keel::String name = args[1].toString();
+        int rc = pm.remove(name.as_ref());
         if (rc != 0) {
-            throw Error("pkg remove failed for '" + name + "'");
+            throw Error(keel::format("pkg remove failed for '{}'", name));
         }
     } else if (action == "build") {
-        std::string dir = (args.size() >= 2 && (args[1].isChar() || args[1].isString())) ? std::string(args[1].toString().as_ref()) : std::string(".");
-        int rc = pm.build(dir);
+        keel::String dir = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                               ? args[1].toString()
+                               : keel::String::from(".");
+        int rc = pm.build(dir.as_ref());
         if (rc != 0) {
-            throw Error("pkg build failed for directory '" + dir + "'");
+            throw Error(keel::format("pkg build failed for directory '{}'", dir));
         }
     } else {
-        throw Error("pkg: unknown action '" + action + "'. Supported: 'install', 'list', 'load', 'remove', 'build', 'mode'");
+        throw Error(keel::format(
+            "pkg: unknown action '{}'. Supported: 'install', 'list', 'load', 'remove', 'build', 'mode'",
+            action));
     }
 }
 

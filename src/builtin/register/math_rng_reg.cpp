@@ -7,6 +7,8 @@
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/ops/rng.hpp>
@@ -14,16 +16,14 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
-#include <numkit/value/error.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;
@@ -417,28 +417,32 @@ void register_randstream(Engine &engine)
         }
     });
     rs.methods.put(keel::String("rand", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-        std::vector<Value> fullArgs;
+        keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+        keel::Array<Value> fullArgs(scratch.allocator());
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         rand_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     });
     rs.methods.put(keel::String("randn", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-        std::vector<Value> fullArgs;
+        keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+        keel::Array<Value> fullArgs(scratch.allocator());
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         randn_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     });
     rs.methods.put(keel::String("randi", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-        std::vector<Value> fullArgs;
+        keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+        keel::Array<Value> fullArgs(scratch.allocator());
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);
         randi_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     });
     rs.methods.put(keel::String("randperm", clsAlloc), [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-        std::vector<Value> fullArgs;
+        keel::ArenaTemp scratch = keel::get_scratch(ctx.engine->allocator());
+        keel::Array<Value> fullArgs(scratch.allocator());
         fullArgs.reserve(args.size() + 1);
         fullArgs.push_back(self);
         for (const auto &a : args) fullArgs.push_back(a);

@@ -1,4 +1,5 @@
 #include <keel/core.h>
+#include <keel/format.h>
 #include <numkit/core/reactive_session.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -6,6 +7,7 @@
 #include <numkit/core/parser.hpp>
 
 #include <algorithm>
+#include <utility>
 
 namespace numkit {
 
@@ -18,12 +20,12 @@ constexpr const char *kParamCarrier = "__numkit_reactive_param__";
 
 ReactiveSession::ReactiveSession(Engine &engine) : engine_(engine) {}
 
-bool ReactiveSession::load(const std::string &source)
+bool ReactiveSession::load(keel::StringRef source)
 {
     lastError_.clear();
     dirty_.clear();
     statements_.clear();
-    src_ = std::make_shared<const std::string>(source);
+    src_ = keel::make_arc<const keel::String>(keel::String::from(source));
     try {
         Lexer lexer(source);
         Parser parser(lexer.tokenize());
@@ -34,13 +36,13 @@ bool ReactiveSession::load(const std::string &source)
         // moving them out beforehand would leave the walker with an
         // empty program and the graph silently dead (the exact bug the
         // first B2 run hit: every dirty set came back empty).
-        graph_ = std::make_unique<DependencyGraph>(
+        graph_ = keel::make_unique<DependencyGraph>(
             computeStatementFacts(program.get()));
-        statements_ = std::move(program->children);
+        statements_ = keel::move(program->children);
         // The program node itself is discarded here; the statement
         // nodes stay alive in statements_ (moved-out unique_ptrs).
     } catch (const std::exception &e) {
-        lastError_ = std::string("parse: ") + e.what();
+        lastError_ = keel::format("parse: {}", e.what());
         return false;
     }
     // Initial FULL pass — per-statement through the SAME seam the
@@ -49,7 +51,8 @@ bool ReactiveSession::load(const std::string &source)
     // (promotion parity with whole-source eval). A checkpoint of the
     // figure state is captured after every statement — evalDirty's
     // rollback depends on them.
-    checkpoints_.assign(statements_.size(), {});
+    checkpoints_.clear();
+    checkpoints_.resize(statements_.size());
     // State that preceded the script (figures of a PREVIOUS script in
     // the same engine session): the rollback target when the dirty
     // set starts at statement 0 (wildcard-prefix pull).
@@ -69,80 +72,95 @@ bool ReactiveSession::load(const std::string &source)
             runStatement(i);
         }
     } catch (const std::exception &e) {
-        lastError_ = std::string("initial run: ") + e.what();
+        lastError_ = keel::format("initial run: {}", e.what());
         return false;
     }
     ++generation_;
     return true;
 }
 
-void ReactiveSession::setParam(const std::string &var, Value value)
+void ReactiveSession::setParam(keel::StringRef var, Value value)
 {
     lastError_.clear();
-    engine_.setVariable(kParamCarrier, std::move(value));
+    engine_.setVariable(kParamCarrier, keel::move(value));
     try {
-        engine_.eval(var + " = " + kParamCarrier + ";");
+        auto assignStmt = keel::format("{} = {};", var, kParamCarrier);
+        engine_.eval(assignStmt);
     } catch (const std::exception &e) {
-        lastError_ = e.what();
+        lastError_.assign(e.what());
         return;
     }
-    params_.insert(var);
-    markDirty(graph_->dirtySetFor(var, params_));
+    if (!params_.contains(var))
+        params_.insert(keel::String::from(var));
+    auto ds = graph_->dirtySetFor(var, params_);
+    markDirty(ds.as_ref());
     ++generation_;
 }
 
-void ReactiveSession::setParamElement(const std::string &var, keel::usize r,
+void ReactiveSession::setParamElement(keel::StringRef var, keel::usize r,
                                       keel::usize c, Value value)
 {
     lastError_.clear();
-    engine_.setVariable(kParamCarrier, std::move(value));
+    engine_.setVariable(kParamCarrier, keel::move(value));
     try {
-        engine_.eval(var + "{" + std::to_string(r) + ","
-                   + std::to_string(c) + "} = " + kParamCarrier + ";");
+        auto assignStmt = keel::format("{}{{{},{}}} = {};", var, r, c, kParamCarrier);
+        engine_.eval(assignStmt);
     } catch (const std::exception &e) {
-        lastError_ = e.what();
+        lastError_.assign(e.what());
         return;
     }
-    params_.insert(var);
-    markDirty(graph_->dirtySetForElement(var, r, c, params_));
+    if (!params_.contains(var))
+        params_.insert(keel::String::from(var));
+    auto ds = graph_->dirtySetForElement(var, r, c, params_);
+    markDirty(ds.as_ref());
     ++generation_;
 }
 
 keel::usize ReactiveSession::evalDirty()
 {
+    if (dirty_.empty())
+        return 0;
+
     keel::usize ran = 0;
-    std::vector<keel::usize> order(dirty_.begin(), dirty_.end());
-    std::sort(order.begin(), order.end());
+    keel::usize firstDirty = keel::kInvalidIndex;
+    for (keel::usize i = 0; i < statements_.size(); ++i) {
+        if (dirty_.contains(i)) {
+            firstDirty = i;
+            break;
+        }
+    }
     // Roll the figure state back to the last CLEAN statement before
     // the dirty set: re-run plots under a persisted `hold on` would
     // otherwise APPEND lines on every tick (figure-state equivalence).
-    if (!order.empty()) {
-        if (order.front() == 0) {
+    if (firstDirty != keel::kInvalidIndex) {
+        if (firstDirty == 0) {
             // The wildcard-prefix rule pulls the whole prefix (pure
             // defs of NON-params included) — roll back to the state
             // that preceded the script itself.
             engine_.figureManager().restoreFigures(preScriptCp_);
-        } else if (order.front() - 1 < checkpoints_.size()) {
+        } else if (firstDirty - 1 < checkpoints_.size()) {
             engine_.figureManager().restoreFigures(
-                checkpoints_[order.front() - 1]);
+                checkpoints_[firstDirty - 1]);
         }
-    }
-    for (keel::usize idx : order) {
-        if (idx >= statements_.size() || !statements_[idx])
-            continue;
-        if (statements_[idx]->type == NodeType::FUNCTION_DEF) {
-            dirty_.erase(idx);   // definitions never re-run reactively
-            continue;
-        }
-        try {
-            runStatement(idx);
-            ++ran;
-            dirty_.erase(idx);
-        } catch (const std::exception &e) {
-            // Stop on first error; keep the remaining dirty set so a
-            // later evalDirty (after a corrected param) resumes.
-            lastError_ = e.what();
-            break;
+        for (keel::usize idx = firstDirty; idx < statements_.size(); ++idx) {
+            if (!dirty_.contains(idx))
+                continue;
+            if (!statements_[idx])
+                continue;
+            if (statements_[idx]->type == NodeType::FUNCTION_DEF) {
+                dirty_.remove(idx);   // definitions never re-run reactively
+                continue;
+            }
+            try {
+                runStatement(idx);
+                ++ran;
+                dirty_.remove(idx);
+            } catch (const std::exception &e) {
+                // Stop on first error; keep the remaining dirty set so a
+                // later evalDirty (after a corrected param) resumes.
+                lastError_.assign(e.what());
+                break;
+            }
         }
     }
     if (ran)
@@ -169,27 +187,27 @@ Value ReactiveSession::runStatement(keel::usize index)
     return out;
 }
 
-void ReactiveSession::markDirty(const std::vector<keel::usize> &indices)
+void ReactiveSession::markDirty(keel::ArrayRef<keel::usize> indices)
 {
     for (keel::usize i : indices)
         if (i < statements_.size())
             dirty_.insert(i);
 }
 
-std::vector<std::vector<keel::usize>> ReactiveSession::detectCycles() const
+keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
 {
     // Tarjan SCC over downstream edges. Edges are strictly forward
     // (writer i → dependent j with j > i), so multi-node SCCs are
     // structurally impossible — this runs as an invariant guard for
     // future cell-level graphs.
     const keel::usize n = graph_ ? graph_->size() : 0;
-    std::vector<std::vector<keel::usize>> sccs;
+    keel::Array<keel::Array<keel::usize>> sccs;
     if (!n)
         return sccs;
-    std::vector<int> idx(n, -1), low(n, 0);
-    std::vector<char> on(n, 0);
-    std::vector<keel::usize> st;
-    std::vector<std::pair<keel::usize, keel::usize>> frames;   // {v, next-child}
+    keel::Array<int> idx(n, -1), low(n, 0);
+    keel::Array<char> on(n, 0);
+    keel::Array<keel::usize> st;
+    keel::Array<std::pair<keel::usize, keel::usize>> frames;   // {v, next-child}
     int ctr = 0;
     for (keel::usize r = 0; r < n; ++r) {
         if (idx[r] != -1)
@@ -212,7 +230,7 @@ std::vector<std::vector<keel::usize>> ReactiveSession::detectCycles() const
                 continue;
             }
             if (low[v] == idx[v]) {
-                std::vector<keel::usize> comp;
+                keel::Array<keel::usize> comp;
                 while (true) {
                     keel::usize w = st.back();
                     st.pop_back();
@@ -222,14 +240,13 @@ std::vector<std::vector<keel::usize>> ReactiveSession::detectCycles() const
                         break;
                 }
                 if (comp.size() > 1)
-                    sccs.push_back(std::move(comp));
+                    sccs.push_back(keel::move(comp));
             }
-            keel::usize lv = low[v];
+            keel::usize lv = (keel::usize)low[v];
             frames.pop_back();
             if (!frames.empty())
                 low[frames.back().first] =
-                    (keel::usize)std::min((int)low[frames.back().first],
-                                     (int)lv);
+                    std::min(low[frames.back().first], (int)lv);
         }
     }
     return sccs;

@@ -7,7 +7,9 @@
 #include <keel/arena.h>
 #include <keel/array.h>
 #include <keel/complex.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>  // poly_of_matrix
 #include <numkit/builtin/polyfun.hpp>
@@ -17,18 +19,16 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/poly_helpers.hpp>
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
-#include <numkit/value/error.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -425,7 +425,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const bool secondIsStr = hasSecond && (args[1].isChar() || args[1].isString());
     const bool hasLadder = hasSecond && !secondIsStr;
 
-    std::string mode = "fir";
+    keel::String mode = keel::String::from("fir");
     if (secondIsStr) {
         mode = args[1].toString();
         for (char &c : mode)
@@ -458,33 +458,35 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     //   B^{(m-1)} = conj(flip(J^{(m-1)}))
     //   J^{(m)}   = [J^{(m-1)}, 0] + K_m * [0, B^{(m-1)}]
     // For ladder V, row m (0..M) of the lower-triangular reverse matrix is B^{(m)}.
-    std::vector<keel::c64> J(1, keel::c64(1.0, 0.0));
-    std::vector<std::vector<keel::c64>> Brows;
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto *sa = scratch.allocator();
+    keel::Array<keel::c64> J(1, keel::c64(1.0, 0.0), sa);
+    keel::Array<keel::Array<keel::c64>> Brows(sa);
     if (hasLadder) {
         Brows.reserve(M + 1);
-        Brows.push_back(J); // B^{(0)} = [1]
+        Brows.push_back(J.clone(sa)); // B^{(0)} = [1]
     }
 
     for (keel::usize m = 1; m <= M; ++m) {
         const keel::c64 km = (m - 1 < nK_in) ? readCx(K, m - 1) : keel::c64(0.0, 0.0);
-        std::vector<keel::c64> Bprev(m);
+        keel::Array<keel::c64> Bprev(m, sa);
         for (keel::usize j = 0; j < m; ++j)
             Bprev[j] = keel::conj(J[m - 1 - j]);
-        std::vector<keel::c64> Jnext(m + 1, keel::c64(0.0, 0.0));
+        keel::Array<keel::c64> Jnext(m + 1, keel::c64(0.0, 0.0), sa);
         for (keel::usize j = 0; j < m; ++j)
             Jnext[j] += J[j];
         for (keel::usize j = 0; j < m; ++j)
             Jnext[j + 1] += km * Bprev[j];
         J = std::move(Jnext);
         if (hasLadder) {
-            std::vector<keel::c64> Bm(m + 1);
+            keel::Array<keel::c64> Bm(m + 1, sa);
             for (keel::usize j = 0; j <= m; ++j)
                 Bm[j] = keel::conj(J[m - j]);
             Brows.push_back(std::move(Bm));
         }
     }
 
-    auto makeRow = [&](const std::vector<keel::c64> &vec) -> Value {
+    auto makeRow = [&](keel::ArrayRef<keel::c64> vec) -> Value {
         if (isCx) {
             Value out = Value::matrix(1, vec.size(), ValueType::COMPLEX, mr);
             std::copy(vec.begin(), vec.end(), out.complexDataMut());
@@ -498,7 +500,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     if (hasLadder) {
         const Value &V = args[1];
-        std::vector<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0));
+        keel::Array<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0), sa);
         for (keel::usize m = 0; m <= M; ++m) {
             const keel::c64 vm = (m < nV_in) ? readCx(V, m) : keel::c64(0.0, 0.0);
             const auto &row = Brows[m];
@@ -510,12 +512,12 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         return;
     }
 
-    std::vector<keel::c64> Jrev(M + 1);
+    keel::Array<keel::c64> Jrev(M + 1, sa);
     for (keel::usize j = 0; j <= M; ++j)
         Jrev[j] = keel::conj(J[M - j]);
 
     if (mode == "allpole" || mode == "iir") {
-        std::vector<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0));
+        keel::Array<keel::c64> numVec(M + 1, keel::c64(0.0, 0.0), sa);
         numVec[0] = keel::c64(1.0, 0.0);
         outs[0] = makeRow(numVec);
         if (nargout > 1) outs[1] = makeRow(J);

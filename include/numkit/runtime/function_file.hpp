@@ -14,51 +14,49 @@
 #pragma once
 
 #include <keel/core.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <cctype>
-#include <string>
 
 namespace numkit::runtime {
 
 // Returns true and fills `name` with the PRIMARY function's identifier if
 // `src` is a function file (first non-comment, non-blank construct is a
 // function definition). Returns false for scripts.
-inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
+inline bool primaryFunctionOfFile(keel::StringRef src, keel::String &name)
 {
-    std::string line;
+    keel::String line;
     bool haveFirst = false;
     keel::usize i = 0;
     const keel::usize n = src.size();
-    auto trim = [](std::string &s) {
-        keel::usize a = 0, b = s.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-        while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
-        s = s.substr(a, b - a);
+    auto trimInPlace = [](keel::String &s) {
+        keel::StringRef tr = s.trim();
+        s.assign(tr);
     };
     while (i < n && !haveFirst) {
         // read one physical line
         line.clear();
-        while (i < n && src[i] != '\n') line += src[i++];
+        while (i < n && src[i] != '\n') line.push_back(src[i++]);
         if (i < n) ++i;
         while (!line.empty() && (line.back() == '\r')) line.pop_back();
         // strip a trailing comment (naive: first '%' — function signature
         // lines do not carry literal % in strings in practice)
         keel::usize pct = line.find('%');
-        if (pct != std::string::npos) line.resize(pct);
-        trim(line);
+        if (pct != keel::kInvalidIndex) line.resize(pct);
+        trimInPlace(line);
         if (line.empty()) continue;
-        if (line.rfind("function", 0) == 0
+        if (line.starts_with("function")
             && (line.size() == 8 || std::isspace(static_cast<unsigned char>(line[8])))) {
             haveFirst = true;
             // join continuations ("...") of the signature line
-            while (line.size() >= 3 && line.compare(line.size() - 3, 3, "...") == 0 && i < n) {
+            while (line.ends_with("...") && i < n) {
                 line.resize(line.size() - 3);
-                std::string more;
-                while (i < n && src[i] != '\n') more += src[i++];
+                keel::String more;
+                while (i < n && src[i] != '\n') more.push_back(src[i++]);
                 if (i < n) ++i;
                 keel::usize p = more.find('%');
-                if (p != std::string::npos) more.resize(p);
-                trim(more);
-                line += more;
+                if (p != keel::kInvalidIndex) more.resize(p);
+                line.append(more.trim());
             }
         } else {
             return false; // first code construct is not a function → script
@@ -69,13 +67,13 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
 
     // Parse the signature:  function [out] = name(args)   |   function name(args)
     keel::usize eq = line.find('=');
-    keel::usize namePos = std::string::npos;
-    if (eq != std::string::npos) {
+    keel::usize namePos = keel::kInvalidIndex;
+    if (eq != keel::kInvalidIndex) {
         // ensure the '=' is before any '(' (output-list form)
         keel::usize lp = line.find('(');
-        if (lp != std::string::npos && lp < eq) eq = std::string::npos;
+        if (lp != keel::kInvalidIndex && lp < eq) eq = keel::kInvalidIndex;
     }
-    if (eq != std::string::npos) {
+    if (eq != keel::kInvalidIndex) {
         namePos = eq + 1;
     } else {
         namePos = 8; // past "function"
@@ -89,7 +87,7 @@ inline bool primaryFunctionOfFile(const std::string &src, std::string &name)
     while (end < line.size()
            && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
         ++end;
-    name = line.substr(namePos, end - namePos);
+    name.assign(line.substr(namePos, end - namePos));
     return !name.empty();
 }
 

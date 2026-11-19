@@ -1,24 +1,44 @@
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/help/help_catalog.hpp>
 
 #include <algorithm>
 #include <cctype>
-#include <iomanip>
-#include <sstream>
+#include <initializer_list>
 
 namespace numkit::bundle {
 
 namespace {
-std::string toLowerStr(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return s;
+keel::String toLowerStr(keel::StringRef s) {
+    keel::String out;
+    out.reserve(s.size());
+    for (char c : s) {
+        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    return out;
 }
 
-std::string padRight(const std::string &s, keel::usize width) {
-    if (s.length() >= width) return s + " ";
-    return s + std::string(width - s.length(), ' ');
+keel::String toUpperStr(keel::StringRef s) {
+    keel::String out;
+    out.reserve(s.size());
+    for (char c : s) {
+        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
+void appendPadRight(keel::String &out, keel::StringRef s, keel::usize width) {
+    out.append(s);
+    if (s.size() >= width) {
+        out.push_back(' ');
+    } else {
+        for (keel::usize i = s.size(); i < width; ++i)
+            out.push_back(' ');
+    }
 }
 } // namespace
 
@@ -31,100 +51,104 @@ HelpCatalog::HelpCatalog() {
     initCategories();
 }
 
-const HelpCategory *HelpCatalog::findCategory(std::string name) const {
-    name = toLowerStr(name);
-    if (name == "images" || name == "image_processing") name = "image";
-    if (name == "signals" || name == "signal_processing") name = "signal";
-    if (name == "optimization") name = "optim";
-    if (name == "statistics") name = "stats";
-    if (name == "linalg") name = "matfun";
-    if (name == "matrix") name = "elmat";
-    if (name == "math") name = "elfun";
-    if (name == "strings") name = "strfun";
-    if (name == "time" || name == "dates") name = "timefun";
-    if (name == "io" || name == "file" || name == "files") name = "iofun";
-    if (name == "plots" || name == "plot") name = "graphics";
-    if (name == "operators" || name == "operator" || name == "arithmetic") name = "ops";
-    if (name == "general" || name == "language" || name == "errors" || name == "diag" || name == "diagnostics") name = "lang";
-    if (name == "communications" || name == "comms") name = "comm";
-    if (name == "wavelets") name = "wavelet";
-    if (name == "sound" || name == "sounds") name = "audio";
+const HelpCategory *HelpCatalog::findCategory(keel::StringRef nameRef) const {
+    keel::String name = toLowerStr(nameRef);
+    if (name == "images" || name == "image_processing") name.assign("image");
+    if (name == "signals" || name == "signal_processing") name.assign("signal");
+    if (name == "optimization") name.assign("optim");
+    if (name == "statistics") name.assign("stats");
+    if (name == "linalg") name.assign("matfun");
+    if (name == "matrix") name.assign("elmat");
+    if (name == "math") name.assign("elfun");
+    if (name == "strings") name.assign("strfun");
+    if (name == "time" || name == "dates") name.assign("timefun");
+    if (name == "io" || name == "file" || name == "files") name.assign("iofun");
+    if (name == "plots" || name == "plot") name.assign("graphics");
+    if (name == "operators" || name == "operator" || name == "arithmetic") name.assign("ops");
+    if (name == "general" || name == "language" || name == "errors" || name == "diag" || name == "diagnostics") name.assign("lang");
+    if (name == "communications" || name == "comms") name.assign("comm");
+    if (name == "wavelets") name.assign("wavelet");
+    if (name == "sound" || name == "sounds") name.assign("audio");
 
-    auto it = categoryIndex_.find(name);
-    if (it != categoryIndex_.end() && it->second < categories_.size()) {
-        return &categories_[it->second];
+    if (const auto *idx = categoryIndex_.get(name); idx && *idx < categories_.size()) {
+        return &categories_[*idx];
     }
     return nullptr;
 }
 
-const HelpEntry *HelpCatalog::findFunction(std::string name) const {
-    name = toLowerStr(name);
-    auto it = functionIndex_.find(name);
-    if (it != functionIndex_.end()) {
-        return &it->second;
-    }
-    return nullptr;
+const HelpEntry *HelpCatalog::findFunction(keel::StringRef nameRef) const {
+    keel::String name = toLowerStr(nameRef);
+    return functionIndex_.get(name);
 }
 
-std::string HelpCatalog::formatAllCategories() const {
-    std::ostringstream os;
-    os << "NK Help Topics:\n\n";
-    os << "  Fundamentals:\n";
+keel::String HelpCatalog::formatAllCategories() const {
+    keel::String out;
+    out.append("NK Help Topics:\n\n");
+    out.append("  Fundamentals:\n");
     for (keel::usize i = 0; i < 12 && i < categories_.size(); ++i) {
-        os << "    " << padRight(categories_[i].name, 14) << "- " << categories_[i].title << "\n";
+        out.append("    ");
+        appendPadRight(out, categories_[i].name, 14);
+        out.append("- ");
+        out.append(categories_[i].title);
+        out.push_back('\n');
     }
-    os << "\n  Toolboxes:\n";
+    out.append("\n  Toolboxes:\n");
     for (keel::usize i = 12; i < categories_.size(); ++i) {
-        os << "    " << padRight(categories_[i].name, 14) << "- " << categories_[i].title << "\n";
+        out.append("    ");
+        appendPadRight(out, categories_[i].name, 14);
+        out.append("- ");
+        out.append(categories_[i].title);
+        out.push_back('\n');
     }
-    os << "\nType \"help <topic>\" for a list of functions in that topic.\n";
-    os << "Type \"help <function>\" for documentation on a specific function.\n";
-    return os.str();
+    out.append("\nType \"help <topic>\" for a list of functions in that topic.\n");
+    out.append("Type \"help <function>\" for documentation on a specific function.\n");
+    return out;
 }
 
-std::string HelpCatalog::formatCategory(const std::string &catName) const {
+keel::String HelpCatalog::formatCategory(keel::StringRef catName) const {
     const HelpCategory *cat = findCategory(catName);
     if (!cat) {
-        return "Topic '" + catName + "' not found. Type 'help' for a list of available topics.\n";
+        return keel::format("Topic '{}' not found. Type 'help' for a list of available topics.\n", catName);
     }
 
-    std::ostringstream os;
-    os << "  " << cat->title << "\n\n";
+    keel::String out;
+    out.append("  ");
+    out.append(cat->title);
+    out.append("\n\n");
     for (const auto &sec : cat->sections) {
-        os << "  " << sec.title << "\n";
+        out.append("  ");
+        out.append(sec.title);
+        out.push_back('\n');
         for (const auto &entry : sec.entries) {
-            os << "    " << padRight(entry.name, 14) << "- " << entry.summary << "\n";
+            out.append("    ");
+            appendPadRight(out, entry.name, 14);
+            out.append("- ");
+            out.append(entry.summary);
+            out.push_back('\n');
         }
-        os << "\n";
+        out.push_back('\n');
     }
-    return os.str();
+    return out;
 }
 
-std::string HelpCatalog::formatFunction(const std::string &funcName) const {
+keel::String HelpCatalog::formatFunction(keel::StringRef funcName) const {
     const HelpEntry *entry = findFunction(funcName);
     if (!entry) {
-        return "'" + funcName + "' not found. Type 'help' for a list of topics.\n";
+        return keel::format("'{}' not found. Type 'help' for a list of topics.\n", funcName);
     }
 
-    std::ostringstream os;
-    std::string upperName = entry->name;
-    std::transform(upperName.begin(), upperName.end(), upperName.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-
-    os << " " << upperName << " " << entry->summary << "\n\n";
-    os << "    " << entry->signature << "\n\n";
-    os << "    " << entry->doc << "\n";
-    return os.str();
+    keel::String upperName = toUpperStr(entry->name);
+    return keel::format(" {} {}\n\n    {}\n\n    {}\n",
+                        upperName, entry->summary, entry->signature, entry->doc);
 }
 
-std::vector<std::string> HelpCatalog::getCategoryFunctions(const std::string &catName) const {
-    std::vector<std::string> list;
+keel::Array<keel::String> HelpCatalog::getCategoryFunctions(keel::StringRef catName) const {
+    keel::Array<keel::String> list;
     const HelpCategory *cat = findCategory(catName);
     if (cat) {
         for (const auto &sec : cat->sections) {
             for (const auto &entry : sec.entries) {
-                list.push_back(entry.name);
+                list.push_back(entry.name.clone());
             }
         }
     }
@@ -132,18 +156,34 @@ std::vector<std::string> HelpCatalog::getCategoryFunctions(const std::string &ca
     return list;
 }
 
-std::vector<std::string> HelpCatalog::getAllFunctions() const {
-    std::vector<std::string> list;
+keel::Array<keel::String> HelpCatalog::getAllFunctions() const {
+    keel::Array<keel::String> list;
     list.reserve(functionIndex_.size());
-    for (const auto &[name, _] : functionIndex_) {
-        list.push_back(name);
+    for (auto [name, _] : functionIndex_) {
+        list.push_back(name.clone());
     }
     std::sort(list.begin(), list.end());
     return list;
 }
 
 void HelpCatalog::initCategories() {
-    categories_ = {
+    struct RawEntry {
+        const char *name;
+        const char *summary;
+        const char *signature;
+        const char *doc;
+    };
+    struct RawSection {
+        const char *title;
+        std::initializer_list<RawEntry> entries;
+    };
+    struct RawCategory {
+        const char *name;
+        const char *title;
+        std::initializer_list<RawSection> sections;
+    };
+
+    const std::initializer_list<RawCategory> rawCategories = {
         // ── 1. elmat: Elementary matrices and matrix manipulation ────────
         {
             "elmat",
@@ -1064,16 +1104,40 @@ void HelpCatalog::initCategories() {
         }
     };
 
+    categories_.clear();
+    categories_.reserve(rawCategories.size());
+    for (const auto &rc : rawCategories) {
+        HelpCategory hc;
+        hc.name = keel::String::from(rc.name);
+        hc.title = keel::String::from(rc.title);
+        hc.sections.reserve(rc.sections.size());
+        for (const auto &rs : rc.sections) {
+            HelpSection hs;
+            hs.title = keel::String::from(rs.title);
+            hs.entries.reserve(rs.entries.size());
+            for (const auto &re : rs.entries) {
+                HelpEntry he;
+                he.name = keel::String::from(re.name);
+                he.summary = keel::String::from(re.summary);
+                he.signature = keel::String::from(re.signature);
+                he.doc = keel::String::from(re.doc);
+                hs.entries.push_back(keel::move(he));
+            }
+            hc.sections.push_back(keel::move(hs));
+        }
+        categories_.push_back(keel::move(hc));
+    }
+
     categoryIndex_.clear();
     functionIndex_.clear();
 
     for (keel::usize i = 0; i < categories_.size(); ++i) {
         const auto &cat = categories_[i];
-        categoryIndex_[toLowerStr(cat.name)] = i;
+        categoryIndex_.put(toLowerStr(cat.name), i);
 
         for (const auto &sec : cat.sections) {
             for (const auto &entry : sec.entries) {
-                functionIndex_[toLowerStr(entry.name)] = entry;
+                functionIndex_.put(toLowerStr(entry.name), entry.clone());
             }
         }
     }

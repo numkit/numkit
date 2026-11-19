@@ -12,9 +12,9 @@ namespace numkit {
 // StackFrame::variables
 // ============================================================
 
-std::vector<StackFrame::VarEntry> StackFrame::variables() const
+keel::Array<StackFrame::VarEntry> StackFrame::variables() const
 {
-    std::vector<VarEntry> result;
+    keel::Array<VarEntry> result;
 
     if (env) {
         // TW frame — read from Environment. Use the same predicate as the VM
@@ -23,15 +23,15 @@ std::vector<StackFrame::VarEntry> StackFrame::variables() const
         for (auto &name : env->localNames()) {
             auto *val = env->getLocal(name);
             if (val && !val->isUnset() && !val->isDeleted())
-                result.push_back({name, val});
+                result.push_back({keel::move(name), val});
         }
     } else if (chunk && registers) {
         // VM frame — read from registers via varMap
-        for (auto &[name, reg] : chunk->varMap) {
+        for (const auto &[name, reg] : chunk->varMap) {
             if (reg < chunk->numRegisters) {
                 const Value &val = registers[reg];
                 if (!val.isUnset() && !val.isDeleted())
-                    result.push_back({name, &val});
+                    result.push_back({name.clone(), &val});
             }
         }
     }
@@ -43,28 +43,28 @@ std::vector<StackFrame::VarEntry> StackFrame::variables() const
 // DebugContext
 // ============================================================
 
-const Value *DebugContext::getVariable(const std::string &name) const
+const Value *DebugContext::getVariable(keel::StringRef name) const
 {
     auto *frame = currentFrame();
     if (!frame)
         return nullptr;
 
     auto vars = frame->variables();
-    for (auto &v : vars)
+    for (const auto &v : vars)
         if (v.name == name)
             return v.value;
     return nullptr;
 }
 
-std::vector<std::string> DebugContext::variableNames() const
+keel::Array<keel::String> DebugContext::variableNames() const
 {
-    std::vector<std::string> result;
+    keel::Array<keel::String> result;
     auto *frame = currentFrame();
     if (!frame)
         return result;
 
     for (auto &v : frame->variables())
-        result.push_back(v.name);
+        result.push_back(keel::move(v.name));
 
     std::sort(result.begin(), result.end());
     return result;
@@ -76,35 +76,35 @@ std::vector<std::string> DebugContext::variableNames() const
 
 int BreakpointManager::addBreakpoint(keel::u16 line)
 {
-    return addBreakpoint(line, std::string());
+    return addBreakpoint(line, keel::StringRef{});
 }
 
-int BreakpointManager::addBreakpoint(keel::u16 line, const std::string &condition)
+int BreakpointManager::addBreakpoint(keel::u16 line, keel::StringRef condition)
 {
     int id = nextId_++;
-    breakpoints_.push_back({id, line, true, condition});
+    breakpoints_.push_back({id, line, true, keel::String::from(condition)});
     indexDirty_ = true;
     return id;
 }
 
-std::string BreakpointManager::conditionForLine(keel::u16 line) const
+keel::String BreakpointManager::conditionForLine(keel::u16 line) const
 {
     if (breakpoints_.empty())
-        return std::string();
+        return {};
     if (indexDirty_)
         rebuildIndex();
-    auto it = lineIndex_.find(line);
-    if (it == lineIndex_.end())
-        return std::string();
-    return breakpoints_[it->second].condition;
+    const keel::usize *idx = lineIndex_.get(line);
+    if (!idx)
+        return {};
+    return breakpoints_[*idx].condition.clone();
 }
 
 void BreakpointManager::removeBreakpoint(int id)
 {
-    breakpoints_.erase(std::remove_if(breakpoints_.begin(),
-                                      breakpoints_.end(),
-                                      [id](const Breakpoint &bp) { return bp.id == id; }),
-                       breakpoints_.end());
+    for (keel::usize i = breakpoints_.size(); i-- > 0;) {
+        if (breakpoints_[i].id == id)
+            breakpoints_.remove_at(i);
+    }
     indexDirty_ = true;
 }
 
@@ -132,8 +132,7 @@ bool BreakpointManager::shouldBreak(keel::u16 line) const
         return false;
     if (indexDirty_)
         rebuildIndex();
-    auto it = lineIndex_.find(line);
-    return it != lineIndex_.end();
+    return lineIndex_.contains(line);
 }
 
 void BreakpointManager::rebuildIndex() const
@@ -141,7 +140,7 @@ void BreakpointManager::rebuildIndex() const
     lineIndex_.clear();
     for (keel::usize i = 0; i < breakpoints_.size(); ++i)
         if (breakpoints_[i].enabled)
-            lineIndex_[breakpoints_[i].line] = i;
+            lineIndex_.put(breakpoints_[i].line, i);
     indexDirty_ = false;
 }
 
@@ -202,7 +201,7 @@ bool DebugController::checkLine(keel::u16 line, keel::u16 col, int callDepth)
 
 void DebugController::pushFrame(StackFrame frame)
 {
-    callStack_.push_back(std::move(frame));
+    callStack_.push_back(keel::move(frame));
 
     DebugContext ctx = makeContext();
     observer_->onFunctionEntry(ctx);
@@ -241,7 +240,7 @@ DebugContext DebugController::makeContext() const
 {
     if (callStack_.empty())
         return makeContext(0, 0);
-    auto &frame = callStack_.back();
+    const auto &frame = callStack_.back();
     return makeContext(frame.line, frame.col);
 }
 

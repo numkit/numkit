@@ -1,8 +1,9 @@
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <string>
-#include <vector>
+#include <keel/ref.h>
+#include <keel/string.h>
 
 namespace numkit {
 
@@ -82,26 +83,38 @@ enum class TokenType {
 struct Token
 {
     TokenType type = TokenType::END_OF_INPUT;
-    std::string value;
+    keel::String value;
     int line = 0;
     int col = 0;
     int endLine = 0;
     int endCol = 0;
+
+    Token clone(keel::Allocator *alloc = nullptr) const
+    {
+        Token cp;
+        cp.type = type;
+        cp.value = value.clone(alloc);
+        cp.line = line;
+        cp.col = col;
+        cp.endLine = endLine;
+        cp.endCol = endCol;
+        return cp;
+    }
 };
 
 class Lexer
 {
 public:
-    explicit Lexer(const std::string &source);
-    std::vector<Token> tokenize();
+    explicit Lexer(keel::StringRef source);
+    keel::Array<Token> tokenize();
 
 private:
-    std::string src_;
+    keel::String src_;
     keel::usize pos_ = 0;
     int line_ = 1;
     int col_ = 1;
-    std::vector<Token> tokens_;
-    std::vector<char> bracketStack_;
+    keel::Array<Token> tokens_;
+    keel::Array<char> bracketStack_;
 
     char peek() const;
     char peek(int offset) const;
@@ -117,7 +130,7 @@ private:
 
     void skipSpacesAndComments();
     void skipBlockComment();
-    void addToken(TokenType type, const std::string &val, int line, int col);
+    void addToken(TokenType type, keel::StringRef val, int line, int col);
     bool isValueToken(TokenType t) const;
     bool isTransposeContext() const;
 
@@ -130,8 +143,8 @@ private:
 
     void insertImplicitComma();
 
-    [[noreturn]] void error(const std::string &msg);
-    [[noreturn]] void error(const std::string &msg, int line, int col);
+    [[noreturn]] void error(keel::StringRef msg);
+    [[noreturn]] void error(keel::StringRef msg, int line, int col);
 
     static bool isDigit(char c);
     static bool isAlpha(char c);

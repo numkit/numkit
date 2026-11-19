@@ -14,11 +14,11 @@ namespace numkit {
 // `Engine::registerConstant`. They all end up in the chunk's varMap, but
 // the debug snapshot only lists them once the user has actually shadowed
 // them — matching MATLAB's `whos` at K>>.
-bool DebugWorkspace::isHiddenName(const std::string &name) const
+bool DebugWorkspace::isHiddenName(keel::StringRef name) const
 {
     if (engine_ && engine_->isReservedName(name))
         return true;
-    return kBuiltinNames.count(name) > 0;
+    return isBuiltinName(name);
 }
 
 void DebugWorkspace::bindVMFrame(VM &vm, Engine &engine, keel::usize depthFromTop)
@@ -34,15 +34,15 @@ void DebugWorkspace::bindVMFrame(VM &vm, Engine &engine, keel::usize depthFromTo
     // Bind all names in varMap — including pseudo-vars (nargin, nargout) and
     // constants (pi, eps, …). They must be reachable by debug-console eval
     // even if we don't show them in the snapshot.
-    for (auto &[name, reg] : frame.chunk->varMap) {
+    for (const auto &[name, reg] : frame.chunk->varMap) {
         if (reg < frame.chunk->numRegisters)
-            framePtrs_[name] = &frame.registers[reg];
+            framePtrs_.put(name.clone(), &frame.registers[reg]);
     }
 
     // Copy the chunk's "assigned" set — the compiler records every name it
     // emits a write for. Built-ins gain visibility only when this set (or
     // the runtime shadow set) contains them.
-    assignedInFrame_ = frame.chunk->assignedVars;
+    assignedInFrame_ = frame.chunk->assignedVars.clone();
 }
 
 void DebugWorkspace::unbindFrame()
@@ -59,60 +59,61 @@ void DebugWorkspace::reset()
     shadowedBuiltins_.clear();
 }
 
-const Value *DebugWorkspace::get(const std::string &name) const
+const Value *DebugWorkspace::get(keel::StringRef name) const
 {
-    auto it = framePtrs_.find(name);
-    if (it != framePtrs_.end()) {
-        const Value *p = it->second;
+    if (Value *const *pp = framePtrs_.get(name)) {
+        const Value *p = *pp;
         if (p && !p->isUnset() && !p->isDeleted())
             return p;
         // Frame slot is cleared — fall through to overlay in case the
         // console later recreated it. (Usually overlay won't hold it, but
         // this keeps the API symmetric.)
     }
-    auto ov = overlay_.find(name);
-    if (ov != overlay_.end() && !ov->second.isUnset() && !ov->second.isDeleted())
-        return &ov->second;
+    if (const Value *ov = overlay_.get(name)) {
+        if (!ov->isUnset() && !ov->isDeleted())
+            return ov;
+    }
     return nullptr;
 }
 
-void DebugWorkspace::set(const std::string &name, const Value &val)
+void DebugWorkspace::set(keel::StringRef name, const Value &val)
 {
     // Console write to a built-in name is an explicit user-level shadow —
     // MATLAB shows it in `whos` after this point.
-    if (isHiddenName(name))
-        shadowedBuiltins_.insert(name);
+    if (isHiddenName(name) && !shadowedBuiltins_.contains(name))
+        shadowedBuiltins_.insert(keel::String::from(name));
 
-    auto it = framePtrs_.find(name);
-    if (it != framePtrs_.end()) {
-        *it->second = val;
+    if (Value **pp = framePtrs_.get(name)) {
+        **pp = val;
         // Writing through a frame slot shadows any same-named overlay entry.
-        overlay_.erase(name);
+        overlay_.remove(name);
         return;
     }
-    overlay_[name] = val;
+    if (Value *ov = overlay_.get(name))
+        *ov = val;
+    else
+        overlay_.put(keel::String::from(name), val);
 }
 
-void DebugWorkspace::remove(const std::string &name)
+void DebugWorkspace::remove(keel::StringRef name)
 {
-    auto it = framePtrs_.find(name);
-    if (it != framePtrs_.end())
-        *it->second = Value::deleted();
-    overlay_.erase(name);
+    if (Value **pp = framePtrs_.get(name))
+        **pp = Value::deleted();
+    overlay_.remove(name);
     // Symmetry with set(): removing a built-in via the console un-shadows it.
-    shadowedBuiltins_.erase(name);
+    shadowedBuiltins_.remove(name);
 }
 
 void DebugWorkspace::clearAll()
 {
-    for (auto &[name, ptr] : framePtrs_)
+    for (auto [name, ptr] : framePtrs_)
         *ptr = Value::deleted();
     overlay_.clear();
 }
 
-std::vector<std::string> DebugWorkspace::names() const
+keel::Array<keel::String> DebugWorkspace::names() const
 {
-    std::vector<std::string> result;
+    keel::Array<keel::String> result;
     result.reserve(framePtrs_.size() + overlay_.size());
 
     // MATLAB-matched visibility rule:
@@ -120,41 +121,41 @@ std::vector<std::string> DebugWorkspace::names() const
     //   - built-in names (pi, nargin, …) are shown only if they have been
     //     shadowed by either the script (tracked via assignedInFrame_) or
     //     by the debug console (tracked via shadowedBuiltins_).
-    auto builtinVisible = [&](const std::string &name) {
-        return assignedInFrame_.count(name) > 0 || shadowedBuiltins_.count(name) > 0;
+    auto builtinVisible = [&](keel::StringRef name) {
+        return assignedInFrame_.contains(name) || shadowedBuiltins_.contains(name);
     };
 
-    for (auto &[name, ptr] : framePtrs_) {
+    for (auto [name, ptr] : framePtrs_) {
         if (!ptr || ptr->isUnset() || ptr->isDeleted())
             continue;
         if (isHiddenName(name) && !builtinVisible(name))
             continue;
-        result.push_back(name);
+        result.push_back(name.clone());
     }
 
-    for (auto &[name, val] : overlay_) {
-        if (val.isUnset() || val.isDeleted() || framePtrs_.count(name))
+    for (auto [name, val] : overlay_) {
+        if (val.isUnset() || val.isDeleted() || framePtrs_.contains(name))
             continue;
         if (isHiddenName(name) && !builtinVisible(name))
             continue;
-        result.push_back(name);
+        result.push_back(name.clone());
     }
 
     return result;
 }
 
-std::vector<std::string> DebugWorkspace::allNames() const
+keel::Array<keel::String> DebugWorkspace::allNames() const
 {
-    std::vector<std::string> result;
+    keel::Array<keel::String> result;
     result.reserve(framePtrs_.size() + overlay_.size());
 
-    for (auto &[name, ptr] : framePtrs_)
+    for (auto [name, ptr] : framePtrs_)
         if (ptr && !ptr->isUnset() && !ptr->isDeleted())
-            result.push_back(name);
+            result.push_back(name.clone());
 
-    for (auto &[name, val] : overlay_)
-        if (!val.isUnset() && !val.isDeleted() && !framePtrs_.count(name))
-            result.push_back(name);
+    for (auto [name, val] : overlay_)
+        if (!val.isUnset() && !val.isDeleted() && !framePtrs_.contains(name))
+            result.push_back(name.clone());
 
     return result;
 }

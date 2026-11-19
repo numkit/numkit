@@ -15,6 +15,7 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/linalg/library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -172,7 +173,9 @@ void LinalgLibrary::install(Engine &engine)
                            keel::MutArrayRef<Value>, CallContext &);
     auto reg = [&](const char *sub, const char *name, RegFn fn) {
         engine.registerFunction(name, ExternalFunc(fn));                                    // 1
-        engine.registerFunction(std::string("linalg.") + sub, name, ExternalFunc(fn));      // 2
+        keel::SmallString<64> ns("linalg.");
+        ns.append(sub);
+        engine.registerFunction(ns, name, ExternalFunc(fn));                                // 2
         // compat.* registration removed — bare-name resolver replaces it                          // 3
     };
 

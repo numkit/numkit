@@ -6,9 +6,11 @@
 // matching MATLAB's defaults (binary .mat unless `-ascii` is given).
 
 #include <keel/arena.h>
-#include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/saveload.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -16,35 +18,32 @@
 #include <numkit/core/types.hpp>
 #include <numkit/sys/vfs.hpp>
 
-#include <algorithm>
 #include <cctype>
-#include <string>
-#include <vector>
 
 namespace numkit::runtime {
 
 // ── Backends ─────────────────────────────────────────────────────────
 
 void saveAscii(Engine &engine, Environment &env,
-               const std::string &filename,
-               const std::vector<std::string> &varnames);
+               keel::StringRef filename,
+               keel::ArrayRef<keel::String> varnames);
 
 void loadAscii(Engine &engine, Environment &env,
-               const std::string &filename,
+               keel::StringRef filename,
                keel::usize nargout, keel::MutArrayRef<Value> outs);
 
 void saveMat(Engine &engine, Environment &env,
-             const std::string &filename,
-             const std::vector<std::string> &varnames,
+             keel::StringRef filename,
+             keel::ArrayRef<keel::String> varnames,
              int matVersion);
 
 void loadMat(Engine &engine, Environment &env,
-             const std::string &filename,
+             keel::StringRef filename,
              keel::usize nargout, keel::MutArrayRef<Value> outs);
 
 namespace {
 
-bool endsWithIgnoreCase(const std::string &s, const std::string &suffix)
+bool endsWithIgnoreCase(keel::StringRef s, keel::StringRef suffix)
 {
     if (s.size() < suffix.size()) return false;
     for (keel::usize i = 0; i < suffix.size(); ++i) {
@@ -68,7 +67,7 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
     if (args.empty() || !args[0].isChar())
         throw Error("save: filename required");
     engine.syncFrameToEnv(&env);
-    std::string filename(args[0].toString().as_ref());
+    keel::String filename = args[0].toString();
 
     // Three-way mode pick: explicit flag wins; otherwise extension hint;
     // otherwise MATLAB default (binary mat).
@@ -80,11 +79,11 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
     int matVersion = 5;
 
     keel::ArenaTemp scratch = keel::get_scratch(engine.allocator());
-    keel::Array<std::string> varnames(scratch.allocator());
+    keel::Array<keel::String> varnames(scratch.allocator());
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar())
             continue;
-        std::string s(args[i].toString().as_ref());
+        keel::String s = args[i].toString();
         if (s == "-ascii") { mode = Mode::Ascii; continue; }
         if (s == "-mat") { mode = Mode::Mat; continue; }
         if (s == "-v4") { mode = Mode::Mat; matVersion = 4; continue; }
@@ -98,26 +97,25 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
             continue;
         }
         if (!s.empty() && s.front() == '-')
-            throw Error("save: unsupported flag '" + s + "'");
-        varnames.push_back(s);
+            throw Error(keel::format("save: unsupported flag '{}'", s));
+        varnames.push_back(keel::move(s));
     }
 
     if (mode == Mode::Auto) {
-        if (endsWithIgnoreCase(filename, ".mat")) {
+        if (endsWithIgnoreCase(filename.as_ref(), ".mat")) {
             mode = Mode::Mat;
-        } else if (filename.find('.') == std::string::npos) {
-            filename += ".mat";
+        } else if (filename.find('.') == keel::kInvalidIndex) {
+            filename.append(".mat");
             mode = Mode::Mat;
         } else {
             mode = Mode::Ascii;
         }
     }
 
-    std::vector<std::string> names(varnames.begin(), varnames.end());
     if (mode == Mode::Mat) {
-        saveMat(engine, env, filename, names, matVersion);
+        saveMat(engine, env, filename.as_ref(), varnames.as_ref(), matVersion);
     } else {
-        saveAscii(engine, env, filename, names);
+        saveAscii(engine, env, filename.as_ref(), varnames.as_ref());
     }
 }
 
@@ -126,13 +124,13 @@ void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
 {
     if (args.empty() || !args[0].isChar())
         throw Error("load: filename required");
-    std::string filename(args[0].toString().as_ref());
+    keel::String filename = args[0].toString();
 
     enum class Mode { Auto, Ascii, Mat };
     Mode mode = Mode::Auto;
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (!args[i].isChar()) continue;
-        std::string s(args[i].toString().as_ref());
+        keel::String s = args[i].toString();
         if (s == "-ascii") { mode = Mode::Ascii; continue; }
         if (s == "-mat" || s == "-v4" || s == "-v6" || s == "-v7") {
             mode = Mode::Mat; continue;
@@ -140,37 +138,42 @@ void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
         if (s == "-v7.3")
             throw Error("load: -v7.3 (HDF5) is not supported in this build");
         if (!s.empty() && s.front() == '-')
-            throw Error("load: unsupported flag '" + s + "'");
+            throw Error(keel::format("load: unsupported flag '{}'", s));
     }
 
-    auto fileExists = [&](const std::string &cand) -> bool {
+    auto fileExists = [&](keel::StringRef cand) -> bool {
         try {
             auto rp = engine.resolvePath(cand);
-            if (!rp.fs || !rp.fs->exists(rp.path)) return false;
-            auto st = rp.fs->stat(rp.path);
+            if (!rp.fs || !rp.fs->exists(rp.path.as_ref())) return false;
+            auto st = rp.fs->stat(rp.path.as_ref());
             return st && st->kind == FileStat::Kind::File;
         } catch (...) {
             return false;
         }
     };
 
-    const bool hasExt = filename.find('.') != std::string::npos;
-    if (!hasExt && fileExists(filename + ".mat")) {
-        filename += ".mat";
-    } else if (!fileExists(filename)) {
-        if (!endsWithIgnoreCase(filename, ".mat") && fileExists(filename + ".mat")) {
-            filename += ".mat";
+    const bool hasExt = filename.find('.') != keel::kInvalidIndex;
+    keel::String withMat = keel::format("{}.mat", filename);
+    if (!hasExt && fileExists(withMat.as_ref())) {
+        filename = keel::move(withMat);
+    } else if (!fileExists(filename.as_ref())) {
+        if (!endsWithIgnoreCase(filename.as_ref(), ".mat") && fileExists(withMat.as_ref())) {
+            filename = keel::move(withMat);
         } else {
             for (const auto &dir : engine.path()) {
-                std::string prefix = dir;
+                keel::String prefix = dir.clone();
                 if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\')
-                    prefix += '/';
-                if (!endsWithIgnoreCase(filename, ".mat") && fileExists(prefix + filename + ".mat")) {
-                    filename = prefix + filename + ".mat";
-                    break;
+                    prefix.push_back('/');
+                if (!endsWithIgnoreCase(filename.as_ref(), ".mat")) {
+                    keel::String candMat = keel::format("{}{}.mat", prefix, filename);
+                    if (fileExists(candMat.as_ref())) {
+                        filename = keel::move(candMat);
+                        break;
+                    }
                 }
-                if (fileExists(prefix + filename)) {
-                    filename = prefix + filename;
+                keel::String cand = keel::format("{}{}", prefix, filename);
+                if (fileExists(cand.as_ref())) {
+                    filename = keel::move(cand);
                     break;
                 }
             }
@@ -178,12 +181,12 @@ void load(Engine &engine, Environment &env, keel::ArrayRef<Value> args,
     }
 
     if (mode == Mode::Auto)
-        mode = endsWithIgnoreCase(filename, ".mat") ? Mode::Mat : Mode::Ascii;
+        mode = endsWithIgnoreCase(filename.as_ref(), ".mat") ? Mode::Mat : Mode::Ascii;
 
     if (mode == Mode::Mat) {
-        loadMat(engine, env, filename, nargout, outs);
+        loadMat(engine, env, filename.as_ref(), nargout, outs);
     } else {
-        loadAscii(engine, env, filename, nargout, outs);
+        loadAscii(engine, env, filename.as_ref(), nargout, outs);
     }
 }
 

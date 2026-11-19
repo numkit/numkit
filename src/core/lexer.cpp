@@ -1,10 +1,87 @@
 #include <keel/core.h>
+#include <keel/format.h>
 #include <numkit/core/lexer.hpp>
 
+#include <cctype>
 #include <stdexcept>
-#include <unordered_map>
 
 namespace numkit {
+
+namespace {
+
+TokenType lookupKeyword(keel::StringRef word) noexcept
+{
+    // Note: `true` and `false` are NOT keywords. MATLAB treats them
+    // as built-in functions (registered in toolboxes/builtin), so the
+    // lexer emits IDENTIFIER for them. Bare `true` resolves to a
+    // 0-arg function call → logical scalar 1; `true(M, N)` is a
+    // proper function call → MxN logical array. See BUGS.md #30.
+    //
+    // `classdef` is reserved in MATLAB. `properties`/`methods`/`events`/
+    // `enumeration` are NOT keywords (they're introspection builtins);
+    // the classdef parser recognises them contextually as section heads.
+    switch (word.size()) {
+    case 2:
+        if (word == "if")
+            return TokenType::KW_IF;
+        break;
+    case 3:
+        if (word == "end")
+            return TokenType::KW_END;
+        if (word == "for")
+            return TokenType::KW_FOR;
+        if (word == "try")
+            return TokenType::KW_TRY;
+        break;
+    case 4:
+        if (word == "else")
+            return TokenType::KW_ELSE;
+        if (word == "case")
+            return TokenType::KW_CASE;
+        break;
+    case 5:
+        if (word == "while")
+            return TokenType::KW_WHILE;
+        if (word == "break")
+            return TokenType::KW_BREAK;
+        if (word == "catch")
+            return TokenType::KW_CATCH;
+        break;
+    case 6:
+        if (word == "elseif")
+            return TokenType::KW_ELSEIF;
+        if (word == "parfor")
+            return TokenType::KW_FOR;
+        if (word == "return")
+            return TokenType::KW_RETURN;
+        if (word == "switch")
+            return TokenType::KW_SWITCH;
+        if (word == "global")
+            return TokenType::KW_GLOBAL;
+        break;
+    case 8:
+        if (word == "continue")
+            return TokenType::KW_CONTINUE;
+        if (word == "function")
+            return TokenType::KW_FUNCTION;
+        if (word == "classdef")
+            return TokenType::KW_CLASSDEF;
+        break;
+    case 9:
+        if (word == "otherwise")
+            return TokenType::KW_OTHERWISE;
+        break;
+    case 10:
+        if (word == "persistent")
+            return TokenType::KW_PERSISTENT;
+        break;
+    default:
+        break;
+    }
+    return TokenType::IDENTIFIER;
+}
+
+} // namespace
 
 // ─── safe ctype wrappers ────────────────────────────────────────────────
 
@@ -30,42 +107,40 @@ bool Lexer::isXDigit(char c)
 
 // ─── error helpers ──────────────────────────────────────────────────────
 
-void Lexer::error(const std::string &msg)
+void Lexer::error(keel::StringRef msg)
 {
-    throw std::runtime_error(msg + " at line " + std::to_string(line_) + " col "
-                             + std::to_string(col_));
+    error(msg, line_, col_);
 }
 
-void Lexer::error(const std::string &msg, int line, int col)
+void Lexer::error(keel::StringRef msg, int line, int col)
 {
-    throw std::runtime_error(msg + " at line " + std::to_string(line) + " col "
-                             + std::to_string(col));
+    keel::String err = keel::format("{} at line {} col {}", msg, line, col);
+    throw std::runtime_error(err.c_str());
 }
 
 // ─── constructor / basic methods ────────────────────────────────────────
 
-Lexer::Lexer(const std::string &source)
-    : src_(source)
+Lexer::Lexer(keel::StringRef source)
 {
-    if (src_.size() >= 3
-        && static_cast<unsigned char>(src_[0]) == 0xEF
-        && static_cast<unsigned char>(src_[1]) == 0xBB
-        && static_cast<unsigned char>(src_[2]) == 0xBF) {
-        src_.erase(0, 3);
+    if (source.size() >= 3
+        && static_cast<unsigned char>(source[0]) == 0xEF
+        && static_cast<unsigned char>(source[1]) == 0xBB
+        && static_cast<unsigned char>(source[2]) == 0xBF) {
+        source = source.substr(3);
     }
-    if (src_.find('\r') != std::string::npos) {
-        std::string norm;
-        norm.reserve(src_.size());
-        for (keel::usize i = 0; i < src_.size(); ++i) {
-            if (src_[i] == '\r') {
-                norm.push_back('\n');
-                if (i + 1 < src_.size() && src_[i + 1] == '\n')
+    if (source.find('\r') != keel::kInvalidIndex) {
+        src_.reserve(source.size());
+        for (keel::usize i = 0; i < source.size(); ++i) {
+            if (source[i] == '\r') {
+                src_.push_back('\n');
+                if (i + 1 < source.size() && source[i + 1] == '\n')
                     ++i;
             } else {
-                norm.push_back(src_[i]);
+                src_.push_back(source[i]);
             }
         }
-        src_ = std::move(norm);
+    } else {
+        src_.assign(source);
     }
 }
 
@@ -96,9 +171,9 @@ char Lexer::advance()
     return c;
 }
 
-void Lexer::addToken(TokenType type, const std::string &val, int line, int col)
+void Lexer::addToken(TokenType type, keel::StringRef val, int line, int col)
 {
-    tokens_.push_back({type, val, line, col, line_, col_});
+    tokens_.push_back(Token{type, keel::String::from(val), line, col, line_, col_});
 }
 
 // ─── bracket tracking ──────────────────────────────────────────────────
@@ -135,13 +210,15 @@ void Lexer::pushBracket(char open)
 void Lexer::popBracket(char expected)
 {
     if (bracketStack_.empty()) {
-        error("Unexpected closing '" + std::string(1, expected) + "' without matching open");
+        keel::String msg = keel::format("Unexpected closing '{}' without matching open", expected);
+        error(msg);
     }
     char open = bracketStack_.back();
     char expectedClosing = closingFor(open);
     if (expected != expectedClosing) {
-        error("Mismatched bracket: expected '" + std::string(1, expectedClosing) + "' but found '"
-              + std::string(1, expected) + "'");
+        keel::String msg = keel::format("Mismatched bracket: expected '{}' but found '{}'",
+                                        expectedClosing, expected);
+        error(msg);
     }
     bracketStack_.pop_back();
 }
@@ -555,11 +632,11 @@ void Lexer::readNumber()
 void Lexer::readString(int startLine, int startCol)
 {
     advance();
-    std::string s;
+    keel::String s;
     while (pos_ < src_.size()) {
         if (peek() == '\'') {
             if (peek(1) == '\'') {
-                s += '\'';
+                s.push_back('\'');
                 advance();
                 advance();
             } else {
@@ -570,7 +647,7 @@ void Lexer::readString(int startLine, int startCol)
         } else if (peek() == '\n') {
             error("Unterminated string literal", startLine, startCol);
         } else {
-            s += advance();
+            s.push_back(advance());
         }
     }
     error("Unterminated string literal", startLine, startCol);
@@ -581,11 +658,11 @@ void Lexer::readString(int startLine, int startCol)
 void Lexer::readDoubleQuotedString(int startLine, int startCol)
 {
     advance();
-    std::string s;
+    keel::String s;
     while (pos_ < src_.size()) {
         if (peek() == '"') {
             if (peek(1) == '"') {
-                s += '"';
+                s.push_back('"');
                 advance();
                 advance();
             } else {
@@ -600,44 +677,44 @@ void Lexer::readDoubleQuotedString(int startLine, int startCol)
             char esc = advance();
             switch (esc) {
             case 'n':
-                s += '\n';
+                s.push_back('\n');
                 break;
             case 't':
-                s += '\t';
+                s.push_back('\t');
                 break;
             case 'r':
-                s += '\r';
+                s.push_back('\r');
                 break;
             case '\\':
-                s += '\\';
+                s.push_back('\\');
                 break;
             case '"':
-                s += '"';
+                s.push_back('"');
                 break;
             case '0':
-                s += '\0';
+                s.push_back('\0');
                 break;
             case 'a':
-                s += '\a';
+                s.push_back('\a');
                 break;
             case 'b':
-                s += '\b';
+                s.push_back('\b');
                 break;
             case 'f':
-                s += '\f';
+                s.push_back('\f');
                 break;
             case 'v':
-                s += '\v';
+                s.push_back('\v');
                 break;
             default:
-                s += '\\';
-                s += esc;
+                s.push_back('\\');
+                s.push_back(esc);
                 break;
             }
         } else if (peek() == '\n') {
             error("Unterminated string literal", startLine, startCol);
         } else {
-            s += advance();
+            s.push_back(advance());
         }
     }
     error("Unterminated string literal", startLine, startCol);
@@ -654,43 +731,8 @@ void Lexer::readIdentifier()
     while (pos_ < src_.size() && (isAlnum(peek()) || peek() == '_'))
         advance();
 
-    std::string word = src_.substr(start, pos_ - start);
-
-    static const std::unordered_map<std::string, TokenType> keywords = {
-        {"if", TokenType::KW_IF},
-        {"elseif", TokenType::KW_ELSEIF},
-        {"else", TokenType::KW_ELSE},
-        {"end", TokenType::KW_END},
-        {"for", TokenType::KW_FOR},
-        {"parfor", TokenType::KW_FOR},
-        {"while", TokenType::KW_WHILE},
-        {"break", TokenType::KW_BREAK},
-        {"continue", TokenType::KW_CONTINUE},
-        {"return", TokenType::KW_RETURN},
-        {"function", TokenType::KW_FUNCTION},
-        // Note: `true` and `false` are NOT keywords. MATLAB treats them
-        // as built-in functions (registered in toolboxes/builtin), so the
-        // lexer emits IDENTIFIER for them. Bare `true` resolves to a
-        // 0-arg function call → logical scalar 1; `true(M, N)` is a
-        // proper function call → MxN logical array. See BUGS.md #30.
-        {"switch", TokenType::KW_SWITCH},
-        {"case", TokenType::KW_CASE},
-        {"otherwise", TokenType::KW_OTHERWISE},
-        {"try", TokenType::KW_TRY},
-        {"catch", TokenType::KW_CATCH},
-        {"global", TokenType::KW_GLOBAL},
-        {"persistent", TokenType::KW_PERSISTENT},
-        // `classdef` is reserved in MATLAB. `properties`/`methods`/`events`/
-        // `enumeration` are NOT keywords (they're introspection builtins);
-        // the classdef parser recognises them contextually as section heads.
-        {"classdef", TokenType::KW_CLASSDEF},
-    };
-
-    auto it = keywords.find(word);
-    if (it != keywords.end())
-        addToken(it->second, word, startLine, startCol);
-    else
-        addToken(TokenType::IDENTIFIER, word, startLine, startCol);
+    keel::StringRef word = src_.substr(start, pos_ - start);
+    addToken(lookupKeyword(word), word, startLine, startCol);
 }
 
 // ─── read operators / punctuation ───────────────────────────────────────
@@ -797,7 +839,7 @@ bool Lexer::readOperator()
 
 // ─── main tokenization loop ────────────────────────────────────────────
 
-std::vector<Token> Lexer::tokenize()
+keel::Array<Token> Lexer::tokenize()
 {
     tokens_.clear();
     bracketStack_.clear();
@@ -863,15 +905,17 @@ std::vector<Token> Lexer::tokenize()
         if (readOperator())
             continue;
 
-        error("Unexpected character '" + std::string(1, c) + "'");
+        keel::String msg = keel::format("Unexpected character '{}'", c);
+        error(msg);
     }
 
     if (!bracketStack_.empty()) {
-        error("Unclosed bracket '" + std::string(1, bracketStack_.back()) + "'");
+        keel::String msg = keel::format("Unclosed bracket '{}'", bracketStack_.back());
+        error(msg);
     }
 
     addToken(TokenType::END_OF_INPUT, "", line_, col_);
-    return tokens_;
+    return keel::move(tokens_);
 }
 
 } // namespace numkit

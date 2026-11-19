@@ -2,16 +2,15 @@
 /// @ingroup group_graphics
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/function.h>
+#include <keel/hash_map.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <cstdio>
-#include <functional>
-#include <iostream>
-#include <map>
-#include <sstream>
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
@@ -30,7 +29,7 @@ namespace figdetail {
 
 // Count top-level elements in a flat JSON number array "[a,b,c]" cheaply
 // (commas + 1) — gates the expensive parse on series size.
-inline keel::usize countFlatElements(const std::string &j) {
+inline keel::usize countFlatElements(keel::StringRef j) {
     keel::usize commas = 0;
     bool any = false;
     for (char c : j) {
@@ -42,8 +41,8 @@ inline keel::usize countFlatElements(const std::string &j) {
 
 // Parse a flat JSON number array → doubles. "null" → NaN; bare/quoted
 // Inf/NaN handled by strtod. The figure xJson is engine-built (well-formed).
-inline std::vector<keel::f64> parseFlatDoubles(const std::string &j) {
-    std::vector<keel::f64> out;
+inline keel::Array<keel::f64> parseFlatDoubles(const keel::String &j) {
+    keel::Array<keel::f64> out;
     const char *p = j.c_str();
     const char *end = p + j.size();
     while (p < end && *p != '[') ++p;
@@ -67,32 +66,53 @@ inline std::vector<keel::f64> parseFlatDoubles(const std::string &j) {
 }
 
 // Serialize doubles → flat JSON array. NaN → null, ±Inf → "Inf"/"-Inf".
-inline std::string serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
-    std::ostringstream os;
-    os << "[";
-    os.precision(17);
+inline keel::String serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
+    keel::String out;
+    out.push_back('[');
+    char buf[64];
     for (keel::usize i = 0; i < v.size(); ++i) {
-        if (i) os << ",";
+        if (i) out.push_back(',');
         keel::f64 x = v[i];
-        if (std::isnan(x)) os << "null";
-        else if (std::isinf(x)) os << (x > 0 ? "\"Inf\"" : "\"-Inf\"");
-        else os << x;
+        if (std::isnan(x)) out.append("null");
+        else if (std::isinf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
+        else {
+            int n = std::snprintf(buf, sizeof(buf), "%.17g", x);
+            if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+        }
     }
-    os << "]";
-    return os.str();
+    out.push_back(']');
+    return out;
 }
 
-inline std::string serializeFlatDoubles(const std::vector<keel::f64> &v) {
-    return serializeFlatDoubles(keel::ArrayRef<keel::f64>(v.data(), v.size()));
+inline keel::String serializeFlatDoubles(const keel::Array<keel::f64> &v) {
+    return serializeFlatDoubles(v.as_ref());
+}
+
+inline void appendDouble(keel::String &out, keel::f64 v) {
+    char buf[64];
+    int n = std::snprintf(buf, sizeof(buf), "%.6g", v);
+    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+}
+
+inline void appendInt(keel::String &out, int v) {
+    char buf[32];
+    int n = std::snprintf(buf, sizeof(buf), "%d", v);
+    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+}
+
+inline void appendUsize(keel::String &out, keel::usize v) {
+    char buf[32];
+    int n = std::snprintf(buf, sizeof(buf), "%zu", static_cast<std::size_t>(v));
+    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
 }
 
 }  // namespace figdetail
 
 struct DatasetInfo
 {
-    std::string xJson;
-    std::string yJson;
-    std::string zJson;     // 2D matrix for imagesc, e.g. [[1,2],[3,4]]
+    keel::String xJson;
+    keel::String yJson;
+    keel::String zJson;     // 2D matrix for imagesc, e.g. [[1,2],[3,4]]
     // Per-point auxiliary columns. Decoupled from xJson/yJson/zJson
     // because they carry semantically different data — overloading
     // zJson for marker sizes (as the original Phase 2e polar work
@@ -104,11 +124,11 @@ struct DatasetInfo
     //                "[[r,g,b]]" or N rows "[[r,g,b],...]". Renderer
     //                falls back to the dataset's `style.color` when
     //                empty.
-    std::string sizeJson;
-    std::string colorJson;
-    std::string type;      // "line", "bar", "scatter", "stem", "stairs", "imagesc", "errorbar", …
-    std::string label;     // for legend
-    std::string style;     // MATLAB style hint, e.g. "r--o", "b:", "g-."
+    keel::String sizeJson;
+    keel::String colorJson;
+    keel::String type;      // "line", "bar", "scatter", "stem", "stairs", "imagesc", "errorbar", …
+    keel::String label;     // for legend
+    keel::String style;     // MATLAB style hint, e.g. "r--o", "b:", "g-."
     keel::f64 lineWidth = 0;  // 0 = default
     keel::f64 markerSize = 0; // 0 = default
     // set(h,'Visible','off') — emitted as "visible":false only when off
@@ -119,22 +139,22 @@ struct DatasetInfo
     // yyaxis('right') and then plots, FigureManager::pushDataset stamps
     // 'right' here so the renderer can route the layer through the
     // secondary Y mapping. Emitted in JSON only when non-empty.
-    std::string yside;
+    keel::String yside;
 
     // ── Errorbar — symmetric (eJson) or asymmetric (eNegJson + ePosJson) ──
     // For symmetric: errorbar(x, y, e) → eJson is non-empty, eNeg/ePos empty.
     // For asymmetric: errorbar(x, y, neg, pos) → eNegJson + ePosJson non-empty.
     // The renderer derives bar bounds as y - eNeg .. y + ePos (with eJson
     // doubled-up when symmetric). Empty for non-errorbar datasets.
-    std::string eJson;
-    std::string eNegJson;
-    std::string ePosJson;
+    keel::String eJson;
+    keel::String eNegJson;
+    keel::String ePosJson;
 
     // ── Quiver — vector field (per-point u/v components) ────────────────
     // quiver(x, y, u, v) → N arrows starting at (x, y) pointing
     // in direction (u, v). Empty for non-quiver datasets.
-    std::string uJson;
-    std::string vJson;
+    keel::String uJson;
+    keel::String vJson;
 
     // ── Imagesc storage (uint8 quantized) ──────────────────────────────
     // Display path is fundamentally indexed: each pixel is a colormap
@@ -153,7 +173,7 @@ struct DatasetInfo
     // — toggling color scale post-imagesc requires re-emitting the figure.
     // Hover values reconstruct via cminOrig + (idx/254) * range; the
     // 256-level resolution gives ≤0.4% step on a typical [cmin..cmax].
-    std::vector<keel::u8> zQuantized;
+    keel::Array<keel::u8> zQuantized;
     keel::f64 cminOrig = 0.0;
     keel::f64 cmaxOrig = 1.0;
     bool   colorScaleBaked = false;   // log10 applied before quantization?
@@ -172,14 +192,14 @@ struct DatasetInfo
     // frontend receives O(previewCols) points instead of O(N).
     // getSeriesDisplayTile decimates xRaw/yRaw over a viewport for zoom
     // detail. Empty for small series (which keep their full inline JSON).
-    std::vector<keel::f64> xRaw, yRaw;
+    keel::Array<keel::f64> xRaw, yRaw;
     bool   seriesDownsampled = false;
     keel::usize seriesN = 0;
     keel::f64 sxLo = 0, sxHi = 0, syLo = 0, syHi = 0;   // x/y data ranges
     // Lazy LOD pyramid (coarser levels only — xRaw/yRaw is the finest level)
     // built on the first getSeriesDisplayTile so every viewport tile is
     // O(width), not O(visible), even when fully zoomed out.
-    mutable std::vector<DecimatedSeries> seriesPyramid;
+    mutable keel::Array<DecimatedSeries> seriesPyramid;
 
     // ── Lazy LOD pyramid ───────────────────────────────────────────────
     // L0 is zQuantized itself (originalRows × originalCols, column-major).
@@ -193,8 +213,8 @@ struct DatasetInfo
     //
     // Memory cost: 4/3× original (geometric series). For 16k×42k uint8 =
     // 670 MB → pyramid total ~890 MB.
-    mutable std::vector<std::vector<keel::u8>> lodLevels;
-    mutable std::vector<std::pair<keel::usize, keel::usize>> lodDims;
+    mutable keel::Array<keel::Array<keel::u8>> lodLevels;
+    mutable keel::Array<std::pair<keel::usize, keel::usize>> lodDims;
 
     // ── Per-vertex colours for fill3 / polygon3d datasets.
     // Layout: parallel to xJson/yJson/zJson — for each finite (x, y, z)
@@ -203,14 +223,14 @@ struct DatasetInfo
     // colour entries (the renderer skips them when walking xRaw/yRaw).
     // Empty for datasets that should fall back to the single-colour
     // `style` material.
-    std::string vertexColorsJson;
+    keel::String vertexColorsJson;
 
     // ── animatedline storage. When type=="line" and the dataset was
     // created via animatedline / addpoints, these vectors hold the
     // raw point data; xJson/yJson are rebuilt from them on every
     // emit. Empty for non-animated datasets.
-    std::vector<keel::f64> animatedX;
-    std::vector<keel::f64> animatedY;
+    keel::Array<keel::f64> animatedX;
+    keel::Array<keel::f64> animatedY;
     bool isAnimated = false;
 
     // ── Image-RGB (truecolor, set by imshow with M×N×3 input) ──────────
@@ -223,28 +243,72 @@ struct DatasetInfo
     // rgbJson is the inline preview: "[[r,g,b],[r,g,b],...]" row-major,
     // mean-pooled if pixel count > 2M (same cap as imagesc). Empty for
     // non-RGB datasets. type == "image-rgb" gates the renderer.
-    std::vector<keel::u8> rgbBytes;
-    std::string rgbJson;
+    keel::Array<keel::u8> rgbBytes;
+    keel::String rgbJson;
+
+    DatasetInfo clone(keel::Allocator *alloc = nullptr) const
+    {
+        DatasetInfo cp;
+        cp.xJson = xJson.clone(alloc);
+        cp.yJson = yJson.clone(alloc);
+        cp.zJson = zJson.clone(alloc);
+        cp.sizeJson = sizeJson.clone(alloc);
+        cp.colorJson = colorJson.clone(alloc);
+        cp.type = type.clone(alloc);
+        cp.label = label.clone(alloc);
+        cp.style = style.clone(alloc);
+        cp.lineWidth = lineWidth;
+        cp.markerSize = markerSize;
+        cp.visible = visible;
+        cp.yside = yside.clone(alloc);
+        cp.eJson = eJson.clone(alloc);
+        cp.eNegJson = eNegJson.clone(alloc);
+        cp.ePosJson = ePosJson.clone(alloc);
+        cp.uJson = uJson.clone(alloc);
+        cp.vJson = vJson.clone(alloc);
+        cp.zQuantized = zQuantized.clone(alloc);
+        cp.cminOrig = cminOrig;
+        cp.cmaxOrig = cmaxOrig;
+        cp.colorScaleBaked = colorScaleBaked;
+        cp.downsampled = downsampled;
+        cp.originalRows = originalRows;
+        cp.originalCols = originalCols;
+        cp.xRaw = xRaw.clone(alloc);
+        cp.yRaw = yRaw.clone(alloc);
+        cp.seriesDownsampled = seriesDownsampled;
+        cp.seriesN = seriesN;
+        cp.sxLo = sxLo; cp.sxHi = sxHi; cp.syLo = syLo; cp.syHi = syHi;
+        cp.seriesPyramid = seriesPyramid.clone(alloc);
+        cp.lodLevels = lodLevels.clone(alloc);
+        cp.lodDims = lodDims.clone(alloc);
+        cp.vertexColorsJson = vertexColorsJson.clone(alloc);
+        cp.animatedX = animatedX.clone(alloc);
+        cp.animatedY = animatedY.clone(alloc);
+        cp.isAnimated = isAnimated;
+        cp.rgbBytes = rgbBytes.clone(alloc);
+        cp.rgbJson = rgbJson.clone(alloc);
+        return cp;
+    }
 };
 
 /** Per-axes state — one subplot panel has one AxesState */
 struct AxesState
 {
-    std::vector<DatasetInfo> datasets;
-    std::string title;
-    std::string subtitle;
-    std::string xlabel;
-    std::string ylabel;
-    std::string xlimJson;
-    std::string ylimJson;
-    std::string rlimJson;
-    std::string thetalimJson;
-    std::string climJson;     // color limits for imagesc, e.g. "[0,1]"
-    std::string colormapName; // "parula","jet","hot","cool","gray","viridis","turbo","hsv"
+    keel::Array<DatasetInfo> datasets;
+    keel::String title;
+    keel::String subtitle;
+    keel::String xlabel;
+    keel::String ylabel;
+    keel::String xlimJson;
+    keel::String ylimJson;
+    keel::String rlimJson;
+    keel::String thetalimJson;
+    keel::String climJson;     // color limits for imagesc, e.g. "[0,1]"
+    keel::String colormapName; // "parula","jet","hot","cool","gray","viridis","turbo","hsv"
     // Custom palette via `colormap(M)` with M an N×3 RGB matrix. JSON
     // array string "[[r,g,b],[r,g,b],...]" with values in [0, 1]. When
     // non-empty, overrides colormapName.
-    std::string customColormapJson;
+    keel::String customColormapJson;
     bool polar = false;
     bool holdOn = false;
     // Major / minor grid as two independent booleans, matching MATLAB
@@ -259,12 +323,12 @@ struct AxesState
     bool gridMajor = false;
     bool gridMinor = false;
     bool gridUserTouched = false;
-    std::vector<std::string> legendLabels;
+    keel::Array<keel::String> legendLabels;
     // Legend placement. MATLAB Location values: best (default), north,
     // south, east, west, northeast, northwest, southeast, southwest, and
     // the *outside variants. We normalise to lowercase. Empty = renderer
     // picks a default. Outside positions have a `outside` suffix.
-    std::string legendLocation;
+    keel::String legendLocation;
     // legendBoxOn — `legend boxoff` toggles the legend frame off.
     // Default true (MATLAB default). JSON emits only when off.
     bool legendBoxOn = true;
@@ -274,19 +338,19 @@ struct AxesState
     bool legendHidden = false;
     // Colorbar placement. MATLAB: east (default), west, north, south,
     // and *outside variants. Same lowercase normalisation.
-    std::string colorbarLocation;
+    keel::String colorbarLocation;
 
-    std::string xscale = "linear";
-    std::string yscale = "linear";
-    std::string colorScale = "linear";  // 'linear' | 'log' — survives prepareForPlot
-    std::string axisMode;
+    keel::String xscale = keel::String::from("linear");
+    keel::String yscale = keel::String::from("linear");
+    keel::String colorScale = keel::String::from("linear");  // 'linear' | 'log' — survives prepareForPlot
+    keel::String axisMode;
     // Custom tick positions / labels. Empty = renderer auto-generates
     // (`niceTicks`). Non-empty values override the auto-generated set
     // for the corresponding axis. Labels override only when their length
     // matches the corresponding ticks count.
-    std::string xTicksJson;
-    std::string yTicksJson;
-    std::string zTicksJson;
+    keel::String xTicksJson;
+    keel::String yTicksJson;
+    keel::String zTicksJson;
     // Tick MODE (MATLAB XTickMode semantics, probe-verified R2025b):
     // 'auto' until any explicit tick assignment (set(gca,'XTick',v) /
     // xticks(v)); the renderer then generates ticks itself (empty json).
@@ -296,9 +360,9 @@ struct AxesState
     bool xTicksAuto = true;
     bool yTicksAuto = true;
     bool zTicksAuto = true;
-    std::string xTickLabelsJson;   // ["lo","mid","hi"] format
-    std::string yTickLabelsJson;
-    std::string zTickLabelsJson;
+    keel::String xTickLabelsJson;   // ["lo","mid","hi"] format
+    keel::String yTickLabelsJson;
+    keel::String zTickLabelsJson;
 
     // ── Axes font / frame (portion 34; MATLAB R2025b probe-verified) ──
     // FontSize/Weight/Name apply to tick labels AND propagate to the
@@ -306,16 +370,16 @@ struct AxesState
     // setting the axes font RESETS even an explicitly-set Text font —
     // MATLAB behaviour, not a default-tracking inheritance).
     keel::f64 fontSize = 10.0;
-    std::string fontWeight = "normal";   // normal | bold
-    std::string fontName = "Helvetica";
+    keel::String fontWeight = keel::String::from("normal");   // normal | bold
+    keel::String fontName = keel::String::from("Helvetica");
     // Axes frame (box + tick marks) stroke width.
     keel::f64 lineWidth = 0.5;
     // sprintf-style format string for tick labels (e.g. "%.2f").
     // Empty = renderer's auto format. Honoured only when no explicit
     // tick labels are set.
-    std::string xTickFormat;
-    std::string yTickFormat;
-    std::string zTickFormat;
+    keel::String xTickFormat;
+    keel::String yTickFormat;
+    keel::String zTickFormat;
     // Tick-label rotation in degrees. 0 = horizontal (default).
     keel::f64 xTickAngle = 0.0;
     keel::f64 yTickAngle = 0.0;
@@ -338,8 +402,8 @@ struct AxesState
     // Axis direction. MATLAB: set(gca, 'XDir'/'YDir', 'normal'|'reverse').
     // 'normal' (default) is left-to-right / bottom-to-top. 'reverse'
     // flips. axis('ij') is shorthand for yDir='reverse'.
-    std::string xDir = "normal";
-    std::string yDir = "normal";
+    keel::String xDir = keel::String::from("normal");
+    keel::String yDir = keel::String::from("normal");
 
     // ── yyaxis (dual Y) ────────────────────────────────────────────
     // MATLAB:
@@ -350,39 +414,39 @@ struct AxesState
     // existing axes. yyEnabled stays false until the first yyaxis call,
     // so single-axis plots keep their current JSON shape.
     bool yyEnabled = false;
-    std::string activeYside = "left";  // "left" | "right"
-    std::string ylabel2;
-    std::string ylim2Json;
-    std::string yscale2 = "linear";
+    keel::String activeYside = keel::String::from("left");  // "left" | "right"
+    keel::String ylabel2;
+    keel::String ylim2Json;
+    keel::String yscale2 = keel::String::from("linear");
 
     // 3-D camera view set by view(az, el); empty = renderer default
     // (-37.5°, 30°). Wire format: "[az,el]" with degrees.
-    std::string viewJson;
+    keel::String viewJson;
 
     // Z-axis label / limits (3-D figures). Empty = auto-derived from
     // data extent, mirroring xlim/ylim semantics.
-    std::string zlabel;
-    std::string zlimJson;
+    keel::String zlabel;
+    keel::String zlimJson;
 
     // 3-D lighting / material state. Empty strings = renderer default
     // (gouraud + plain Lambert + 1 ambient + 1 directional key).
     //   lightingMode: "flat" | "gouraud" | "phong" | "none"
     //   materialPreset: "shiny" | "metal" | "dull" | ""
     //   camlight: "left" | "right" | "headlight" | ""
-    std::string lightingMode;
-    std::string materialPreset;
-    std::string camlightPos;
+    keel::String lightingMode;
+    keel::String materialPreset;
+    keel::String camlightPos;
 
     // Interaction toggles for 3-D figures (rotate3d / pan3d / zoom3d).
     // "" = default (all enabled when interactive). "off" = disable
     // that specific axis of interaction. The renderer reads these and
     // updates OrbitControls accordingly.
-    std::string rotate3dMode;
-    std::string pan3dMode;
-    std::string zoom3dMode;
+    keel::String rotate3dMode;
+    keel::String pan3dMode;
+    keel::String zoom3dMode;
 
-    std::string thetaDir = "counterclockwise";
-    std::string thetaZeroLocation = "right";
+    keel::String thetaDir = keel::String::from("counterclockwise");
+    keel::String thetaZeroLocation = keel::String::from("right");
     // Custom polar tick positions + labels — MATLAB thetaticks(),
     // rticks(), thetaticklabels(), rticklabels(). Empty JSON arrays
     // = renderer falls back to its auto-generated nice ticks.
@@ -391,15 +455,93 @@ struct AxesState
     //   *ticklabels: array of strings, one per corresponding tick;
     //                length must match the tick array for it to take
     //                effect (renderer drops to auto when mismatched).
-    std::string thetaticksJson;
-    std::string rticksJson;
-    std::string thetaticklabelsJson;
-    std::string rticklabelsJson;
+    keel::String thetaticksJson;
+    keel::String rticksJson;
+    keel::String thetaticklabelsJson;
+    keel::String rticklabelsJson;
 
     // Position in subplot grid (1-based), 0 = not a subplot
     int subplotIndex = 0;
     int subplotRows = 0;
     int subplotCols = 0;
+
+    AxesState clone(keel::Allocator *alloc = nullptr) const
+    {
+        AxesState cp;
+        cp.datasets = datasets.clone(alloc);
+        cp.title = title.clone(alloc);
+        cp.subtitle = subtitle.clone(alloc);
+        cp.xlabel = xlabel.clone(alloc);
+        cp.ylabel = ylabel.clone(alloc);
+        cp.xlimJson = xlimJson.clone(alloc);
+        cp.ylimJson = ylimJson.clone(alloc);
+        cp.rlimJson = rlimJson.clone(alloc);
+        cp.thetalimJson = thetalimJson.clone(alloc);
+        cp.climJson = climJson.clone(alloc);
+        cp.colormapName = colormapName.clone(alloc);
+        cp.customColormapJson = customColormapJson.clone(alloc);
+        cp.polar = polar;
+        cp.holdOn = holdOn;
+        cp.gridMajor = gridMajor;
+        cp.gridMinor = gridMinor;
+        cp.gridUserTouched = gridUserTouched;
+        cp.legendLabels = legendLabels.clone(alloc);
+        cp.legendLocation = legendLocation.clone(alloc);
+        cp.legendBoxOn = legendBoxOn;
+        cp.legendHidden = legendHidden;
+        cp.colorbarLocation = colorbarLocation.clone(alloc);
+        cp.xscale = xscale.clone(alloc);
+        cp.yscale = yscale.clone(alloc);
+        cp.colorScale = colorScale.clone(alloc);
+        cp.axisMode = axisMode.clone(alloc);
+        cp.xTicksJson = xTicksJson.clone(alloc);
+        cp.yTicksJson = yTicksJson.clone(alloc);
+        cp.zTicksJson = zTicksJson.clone(alloc);
+        cp.xTicksAuto = xTicksAuto;
+        cp.yTicksAuto = yTicksAuto;
+        cp.zTicksAuto = zTicksAuto;
+        cp.xTickLabelsJson = xTickLabelsJson.clone(alloc);
+        cp.yTickLabelsJson = yTickLabelsJson.clone(alloc);
+        cp.zTickLabelsJson = zTickLabelsJson.clone(alloc);
+        cp.fontSize = fontSize;
+        cp.fontWeight = fontWeight.clone(alloc);
+        cp.fontName = fontName.clone(alloc);
+        cp.lineWidth = lineWidth;
+        cp.xTickFormat = xTickFormat.clone(alloc);
+        cp.yTickFormat = yTickFormat.clone(alloc);
+        cp.zTickFormat = zTickFormat.clone(alloc);
+        cp.xTickAngle = xTickAngle;
+        cp.yTickAngle = yTickAngle;
+        cp.axisVisible = axisVisible;
+        cp.boxOn = boxOn;
+        cp.animatedDatasetIdx = animatedDatasetIdx;
+        cp.xDir = xDir.clone(alloc);
+        cp.yDir = yDir.clone(alloc);
+        cp.yyEnabled = yyEnabled;
+        cp.activeYside = activeYside.clone(alloc);
+        cp.ylabel2 = ylabel2.clone(alloc);
+        cp.ylim2Json = ylim2Json.clone(alloc);
+        cp.yscale2 = yscale2.clone(alloc);
+        cp.viewJson = viewJson.clone(alloc);
+        cp.zlabel = zlabel.clone(alloc);
+        cp.zlimJson = zlimJson.clone(alloc);
+        cp.lightingMode = lightingMode.clone(alloc);
+        cp.materialPreset = materialPreset.clone(alloc);
+        cp.camlightPos = camlightPos.clone(alloc);
+        cp.rotate3dMode = rotate3dMode.clone(alloc);
+        cp.pan3dMode = pan3dMode.clone(alloc);
+        cp.zoom3dMode = zoom3dMode.clone(alloc);
+        cp.thetaDir = thetaDir.clone(alloc);
+        cp.thetaZeroLocation = thetaZeroLocation.clone(alloc);
+        cp.thetaticksJson = thetaticksJson.clone(alloc);
+        cp.rticksJson = rticksJson.clone(alloc);
+        cp.thetaticklabelsJson = thetaticklabelsJson.clone(alloc);
+        cp.rticklabelsJson = rticklabelsJson.clone(alloc);
+        cp.subplotIndex = subplotIndex;
+        cp.subplotRows = subplotRows;
+        cp.subplotCols = subplotCols;
+        return cp;
+    }
 };
 
 struct FigureState
@@ -412,7 +554,7 @@ struct FigureState
     int subplotCols = 0;
 
     // All axes in this figure; for non-subplot figures, size == 1
-    std::vector<AxesState> axes;
+    keel::Array<AxesState> axes;
     int currentAxes = 0; // index into axes[]
 
     // linkaxes mode for the figure's subplot cells. Empty / "off" = no
@@ -420,12 +562,12 @@ struct FigureState
     // those axes. We model this at the figure level — handles aren't
     // a thing in nk's graphics layer yet, so calling linkaxes(...)
     // unconditionally links every subplot cell in the current figure.
-    std::string linkMode;
+    keel::String linkMode;
 
     // Figure-level "super title" set via sgtitle(...). MATLAB renders
     // it above the entire subplot grid, separate from per-axes
     // Title.String. Empty = no super-title (no header strip drawn).
-    std::string superTitle;
+    keel::String superTitle;
 
     // ── annotation() overlays (portion 41). Coordinates are NORMALIZED
     // FIGURE units [0,1] (MATLAB convention), independent of axes.
@@ -434,37 +576,75 @@ struct FigureState
     // height. MATLAB defaults probed R2025b: Color (0.1294)^3 gray,
     // HeadSize 10, LineWidth 0.5, textarrow text at the TAIL.
     struct Annotation {
-        std::string type;       // line|arrow|textarrow|ellipse|rectangle|textbox
+        keel::String type;       // line|arrow|textarrow|ellipse|rectangle|textbox
         keel::f64 x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-        std::string text;       // textarrow/textbox String
-        std::string colorHex;   // "" = default gray
-        std::string faceHex;    // "" = none
+        keel::String text;       // textarrow/textbox String
+        keel::String colorHex;   // "" = default gray
+        keel::String faceHex;    // "" = none
         keel::f64 fontSize = 10;
+
+        Annotation clone(keel::Allocator *alloc = nullptr) const
+        {
+            Annotation cp;
+            cp.type = type.clone(alloc);
+            cp.x1 = x1; cp.y1 = y1; cp.x2 = x2; cp.y2 = y2;
+            cp.text = text.clone(alloc);
+            cp.colorHex = colorHex.clone(alloc);
+            cp.faceHex = faceHex.clone(alloc);
+            cp.fontSize = fontSize;
+            return cp;
+        }
     };
-    std::vector<Annotation> annotations;
+    keel::Array<Annotation> annotations;
 
     /** Get the current axes, creating if needed */
     AxesState &cur()
     {
         if (axes.empty())
             axes.push_back(AxesState{});
-        return axes[currentAxes];
+        return axes[static_cast<keel::usize>(currentAxes)];
+    }
+
+    FigureState clone(keel::Allocator *alloc = nullptr) const
+    {
+        FigureState cp;
+        cp.id = id;
+        cp.modified = modified;
+        cp.subplotRows = subplotRows;
+        cp.subplotCols = subplotCols;
+        cp.axes = axes.clone(alloc);
+        cp.currentAxes = currentAxes;
+        cp.linkMode = linkMode.clone(alloc);
+        cp.superTitle = superTitle.clone(alloc);
+        cp.annotations = annotations.clone(alloc);
+        return cp;
     }
 };
 
-inline std::string jsonEscapeFig(const std::string &s)
+struct FigureEntry
 {
-    std::string out;
+    int id = 0;
+    FigureState state;
+
+    FigureEntry clone(keel::Allocator *alloc = nullptr) const
+    {
+        return FigureEntry{id, state.clone(alloc)};
+    }
+};
+
+inline keel::String jsonEscapeFig(keel::StringRef s)
+{
+    keel::String out;
     out.reserve(s.size());
     for (char c : s) {
         if (c == '"')
-            out += "\\\"";
+            out.append("\\\"");
         else if (c == '\\')
-            out += "\\\\";
+            out.append("\\\\");
         else if (c == '\n')
-            out += "\\n";
+            out.append("\\n");
         else
-            out += c;
+            out.push_back(c);
     }
     return out;
 }
@@ -472,7 +652,7 @@ inline std::string jsonEscapeFig(const std::string &s)
 class FigureManager
 {
 public:
-    using OutputFunc = std::function<void(const std::string &)>;
+    using OutputFunc = keel::Function<void(keel::StringRef)>;
 
     // ── Graphics handle registry (bugs/closed/graphics/plot-family-no-
     // return-value.md) ────────────────────────────────────────────────
@@ -485,9 +665,9 @@ public:
     // accessor layer).
     struct HandleRecord
     {
-        std::string type;       // "line", "stem", … | "axes" | "figure"
+        keel::String type;      // "line", "stem", … | "axes" | "figure"
                                 // | "text" | "legend" | "root"
-        std::string className;  // "matlab.graphics.chart.primitive.Line"
+        keel::String className; // "matlab.graphics.chart.primitive.Line"
         int figureId = 0;
         // kNoAxes marks figure-scoped records (sgtitle Text) — scoped
         // axes sweeps (prepareForPlot) leave them alone; full-figure
@@ -500,82 +680,98 @@ public:
         keel::usize datasetIndex = kNoDataset;
         // Text records: which label slot this Text writes to
         // ("title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel").
-        std::string slot;
+        keel::String slot;
         // Property name → JSON-encoded value. The figure layer stays
         // core-free (no Value); the adapter (which has Value access)
         // encodes/decodes.
-        std::map<std::string, std::string> props;
+        keel::HashMap<keel::String, keel::String> props;
         bool deleted = false;
 
         bool isChart() const { return datasetIndex != kNoDataset; }
+
+        HandleRecord clone(keel::Allocator *alloc = nullptr) const
+        {
+            HandleRecord cp;
+            cp.type = type.clone(alloc);
+            cp.className = className.clone(alloc);
+            cp.figureId = figureId;
+            cp.axesIndex = axesIndex;
+            cp.datasetIndex = datasetIndex;
+            cp.slot = slot.clone(alloc);
+            cp.props = props.clone(alloc);
+            cp.deleted = deleted;
+            return cp;
+        }
     };
 
     // Chart record for the dataset just pushed at `datasetIndex` of the
     // CURRENT axes; non-chart records of the current figure/axes.
-    int createHandle(std::string type, std::string className,
+    int createHandle(keel::StringRef type, keel::StringRef className,
                      keel::usize datasetIndex = HandleRecord::kNoDataset,
-                     std::string slot = "")
+                     keel::StringRef slot = "")
     {
         auto &fig = current();
         return createHandleAt(currentFigure_,
                               static_cast<keel::usize>(fig.currentAxes),
-                              std::move(type), std::move(className),
-                              std::move(slot), datasetIndex);
+                              type, className, slot, datasetIndex);
     }
 
     // Fully-explicit form (root records pass figureId 0 + kNoAxes;
     // sgtitle passes the figure + kNoAxes; gcf.Children addresses
     // non-current axes).
-    int createHandleAt(int figureId, keel::usize axesIndex, std::string type,
-                       std::string className, std::string slot = "",
+    int createHandleAt(int figureId, keel::usize axesIndex, keel::StringRef type,
+                       keel::StringRef className, keel::StringRef slot = "",
                        keel::usize datasetIndex = HandleRecord::kNoDataset)
     {
         const int id = nextHandleId_++;
         HandleRecord rec;
-        rec.type = std::move(type);
-        rec.className = std::move(className);
+        rec.type = keel::String::from(type);
+        rec.className = keel::String::from(className);
         rec.figureId = figureId;
         rec.axesIndex = axesIndex;
-        rec.slot = std::move(slot);
+        rec.slot = keel::String::from(slot);
         rec.datasetIndex = datasetIndex;
-        handleRegistry_[id] = std::move(rec);
+        handleRegistry_.put(id, keel::move(rec));
         return id;
     }
 
     HandleRecord *findHandle(int id)
     {
-        auto it = handleRegistry_.find(id);
-        if (it == handleRegistry_.end() || it->second.deleted)
+        HandleRecord *rec = handleRegistry_.get(id);
+        if (!rec || rec->deleted)
             return nullptr;
-        return &it->second;
+        return rec;
     }
 
     void deleteHandle(int id)
     {
-        auto it = handleRegistry_.find(id);
-        if (it == handleRegistry_.end() || it->second.deleted)
+        HandleRecord *recPtr = handleRegistry_.get(id);
+        if (!recPtr || recPtr->deleted)
             return;
-        it->second.deleted = true;
-        if (!it->second.isChart())
+        recPtr->deleted = true;
+        if (!recPtr->isChart())
             return;
         // Remove the dataset from its axes so the render no longer
         // carries it; reindex the surviving chart handles of that axes
         // (their dataset slots shift down by one).
-        DatasetInfo *ds = datasetOf(it->second);
+        const int figId = recPtr->figureId;
+        const keel::usize axIdx = recPtr->axesIndex;
+        const keel::usize dsIdx = recPtr->datasetIndex;
+        DatasetInfo *ds = datasetOf(*recPtr);
         if (!ds)
             return;
-        auto fit = figures_.find(it->second.figureId);
-        if (fit == figures_.end() || it->second.axesIndex >= fit->second.axes.size())
+        FigureState *fig = findFigure_(figId);
+        if (!fig || axIdx >= fig->axes.size())
             return;
-        auto &ax = fit->second.axes[it->second.axesIndex];
-        if (it->second.datasetIndex >= ax.datasets.size())
+        auto &ax = fig->axes[axIdx];
+        if (dsIdx >= ax.datasets.size())
             return;
-        ax.datasets.erase(ax.datasets.begin() + it->second.datasetIndex);
-        fit->second.modified = true;
-        for (auto &[hid, rec] : handleRegistry_) {
-            if (!rec.deleted && rec.figureId == it->second.figureId
-                && rec.axesIndex == it->second.axesIndex
-                && rec.datasetIndex > it->second.datasetIndex)
+        ax.datasets.remove_at(dsIdx);
+        fig->modified = true;
+        for (auto [hid, rec] : handleRegistry_) {
+            if (!rec.deleted && rec.figureId == figId
+                && rec.axesIndex == axIdx
+                && rec.datasetIndex > dsIdx)
                 --rec.datasetIndex;
         }
     }
@@ -584,23 +780,23 @@ public:
     // surviving records' axesIndex; marks the figure modified.
     void removeAxes(int figureId, keel::usize axesIndex)
     {
-        auto fit = figures_.find(figureId);
-        if (fit == figures_.end() || axesIndex >= fit->second.axes.size())
+        FigureState *fig = findFigure_(figureId);
+        if (!fig || axesIndex >= fig->axes.size())
             return;
-        for (auto &[hid, rec] : handleRegistry_)
+        for (auto [hid, rec] : handleRegistry_)
             if (!rec.deleted && rec.figureId == figureId
                 && rec.axesIndex == axesIndex)
                 rec.deleted = true;
-        fit->second.axes.erase(fit->second.axes.begin() + axesIndex);
-        if (fit->second.currentAxes >= (int)axesIndex
-            && fit->second.currentAxes > 0)
-            --fit->second.currentAxes;
-        for (auto &[hid, rec] : handleRegistry_) {
+        fig->axes.remove_at(axesIndex);
+        if (fig->currentAxes >= static_cast<int>(axesIndex)
+            && fig->currentAxes > 0)
+            --fig->currentAxes;
+        for (auto [hid, rec] : handleRegistry_) {
             if (!rec.deleted && rec.figureId == figureId
                 && rec.axesIndex > axesIndex)
                 --rec.axesIndex;
         }
-        fit->second.modified = true;
+        fig->modified = true;
     }
 
     // Live dataset behind a chart record (nullptr when the axes or the
@@ -609,10 +805,10 @@ public:
     {
         if (!rec.isChart())
             return nullptr;
-        auto fit = figures_.find(rec.figureId);
-        if (fit == figures_.end() || rec.axesIndex >= fit->second.axes.size())
+        FigureState *fig = findFigure_(rec.figureId);
+        if (!fig || rec.axesIndex >= fig->axes.size())
             return nullptr;
-        auto &ax = fit->second.axes[rec.axesIndex];
+        auto &ax = fig->axes[rec.axesIndex];
         if (rec.datasetIndex >= ax.datasets.size())
             return nullptr;
         return &ax.datasets[rec.datasetIndex];
@@ -620,23 +816,21 @@ public:
 
     AxesState *axesOf(const HandleRecord &rec)
     {
-        auto fit = figures_.find(rec.figureId);
-        if (fit == figures_.end() || rec.axesIndex >= fit->second.axes.size())
+        FigureState *fig = findFigure_(rec.figureId);
+        if (!fig || rec.axesIndex >= fig->axes.size())
             return nullptr;
-        return &fit->second.axes[rec.axesIndex];
+        return &fig->axes[rec.axesIndex];
     }
 
     FigureState *figureOf(int figureId)
     {
-        auto it = figures_.find(figureId);
-        return it == figures_.end() ? nullptr : &it->second;
+        return findFigure_(figureId);
     }
 
     void markFigureModified(int figureId)
     {
-        auto fit = figures_.find(figureId);
-        if (fit != figures_.end())
-            fit->second.modified = true;
+        if (FigureState *fig = findFigure_(figureId))
+            fig->modified = true;
     }
 
     // Invalidate handle records whose backing state died wholesale.
@@ -652,10 +846,10 @@ public:
     void invalidateHandles(int figureId, int axesIdx,
                            bool includeAxesRecord, bool includeFigureRecord)
     {
-        for (auto &[hid, rec] : handleRegistry_) {
+        for (auto [hid, rec] : handleRegistry_) {
             if (rec.figureId != figureId || rec.deleted)
                 continue;
-            if (axesIdx >= 0 && rec.axesIndex != (keel::usize)axesIdx)
+            if (axesIdx >= 0 && rec.axesIndex != static_cast<keel::usize>(axesIdx))
                 continue;
             if (!includeFigureRecord && rec.type == "figure")
                 continue;
@@ -665,23 +859,17 @@ public:
         }
     }
 
-    std::unordered_map<int, HandleRecord> &handles() { return handleRegistry_; }
+    keel::HashMap<int, HandleRecord> &handles() { return handleRegistry_; }
 
 
     /** Set the output callback for figure/close markers.
      *  When set, emitModified() and close notifications route through this
-     *  instead of std::cout, so debug and normal paths share the same channel. */
-    void setOutputFunc(OutputFunc f) { outputFunc_ = std::move(f); }
+     *  instead of stdout, so debug and normal paths share the same channel. */
+    void setOutputFunc(OutputFunc f) { outputFunc_ = keel::move(f); }
 
     FigureState &current()
     {
-        if (figures_.find(currentFigure_) == figures_.end()) {
-            FigureState fs;
-            fs.id = currentFigure_;
-            fs.axes.push_back(AxesState{});
-            figures_[currentFigure_] = fs;
-        }
-        return figures_[currentFigure_];
+        return getOrCreateFigure_(currentFigure_);
     }
 
     /** Convenience: current axes of current figure */
@@ -704,9 +892,9 @@ public:
     {
         auto &ax = currentAxes();
         if (ax.yyEnabled && ds.yside.empty())
-            ds.yside = ax.activeYside;
+            ds.yside = ax.activeYside.clone();
         maybeDownsampleSeries(ds);
-        ax.datasets.push_back(std::move(ds));
+        ax.datasets.push_back(keel::move(ds));
     }
 
     // For a huge line/stairs series with ascending x, retain raw x/y for
@@ -734,8 +922,8 @@ public:
         auto prev = decimateM4(xr.data(), yr.data(), n, xlo, xhi, kSeriesPreviewCols);
         ds.xJson = figdetail::serializeFlatDoubles(prev.x);
         ds.yJson = figdetail::serializeFlatDoubles(prev.y);
-        ds.xRaw = std::move(xr);
-        ds.yRaw = std::move(yr);
+        ds.xRaw = keel::move(xr);
+        ds.yRaw = keel::move(yr);
         ds.seriesDownsampled = true;
         ds.seriesN = n;
         ds.sxLo = xlo; ds.sxHi = xhi; ds.syLo = ylo; ds.syHi = yhi;
@@ -744,25 +932,17 @@ public:
     int newFigure()
     {
         int id = 1;
-        while (figures_.find(id) != figures_.end())
+        while (findFigure_(id) != nullptr)
             id++;
         currentFigure_ = id;
-        FigureState fs;
-        fs.id = id;
-        fs.axes.push_back(AxesState{});
-        figures_[id] = fs;
+        (void)getOrCreateFigure_(id);
         return id;
     }
 
     int setFigure(int n)
     {
         currentFigure_ = n;
-        if (figures_.find(n) == figures_.end()) {
-            FigureState fs;
-            fs.id = n;
-            fs.axes.push_back(AxesState{});
-            figures_[n] = fs;
-        }
+        (void)getOrCreateFigure_(n);
         return n;
     }
 
@@ -777,9 +957,10 @@ public:
 
         // Find the axes for this subplot position
         for (int i = 0; i < static_cast<int>(fig.axes.size()); ++i) {
-            if (fig.axes[i].subplotIndex == p
-                && (fig.axes[i].subplotRows == 0
-                    || (fig.axes[i].subplotRows == m && fig.axes[i].subplotCols == n))) {
+            auto &cand = fig.axes[static_cast<keel::usize>(i)];
+            if (cand.subplotIndex == p
+                && (cand.subplotRows == 0
+                    || (cand.subplotRows == m && cand.subplotCols == n))) {
                 fig.currentAxes = i;
                 return;
             }
@@ -790,13 +971,14 @@ public:
         // gcf.Children counts match MATLAB
         // (bugs/closed/graphics/subplot-replaces-default-axes.md).
         for (int i = 0; i < static_cast<int>(fig.axes.size()); ++i) {
-            if (fig.axes[i].subplotIndex == 0) {
+            auto &cand = fig.axes[static_cast<keel::usize>(i)];
+            if (cand.subplotIndex == 0) {
                 invalidateHandles(fig.id, i,
                                   /*axes records*/ true, /*figure rec*/ false);
-                fig.axes[i] = AxesState{};
-                fig.axes[i].subplotIndex = p;
-                fig.axes[i].subplotRows = m;
-                fig.axes[i].subplotCols = n;
+                cand = AxesState{};
+                cand.subplotIndex = p;
+                cand.subplotRows = m;
+                cand.subplotCols = n;
                 fig.currentAxes = i;
                 fig.modified = true;
                 return;
@@ -807,7 +989,7 @@ public:
         ax.subplotIndex = p;
         ax.subplotRows = m;
         ax.subplotCols = n;
-        fig.axes.push_back(ax);
+        fig.axes.push_back(keel::move(ax));
         fig.currentAxes = static_cast<int>(fig.axes.size()) - 1;
     }
 
@@ -817,13 +999,15 @@ public:
         auto &ax = fig.cur();
         if (!ax.holdOn) {
             if (ax.yyEnabled) {
-                const std::string side = ax.activeYside.empty() ? "left" : ax.activeYside;
+                const keel::StringRef side = ax.activeYside.empty()
+                                                 ? keel::StringRef("left")
+                                                 : ax.activeYside.as_ref();
                 for (keel::usize idx = ax.datasets.size(); idx-- > 0;) {
-                    const std::string dsSide = ax.datasets[idx].yside.empty()
-                                                   ? "left"
-                                                   : ax.datasets[idx].yside;
+                    const keel::StringRef dsSide = ax.datasets[idx].yside.empty()
+                                                       ? keel::StringRef("left")
+                                                       : ax.datasets[idx].yside.as_ref();
                     if (dsSide == side) {
-                        for (auto &[hid, rec] : handleRegistry_) {
+                        for (auto [hid, rec] : handleRegistry_) {
                             if (rec.deleted || rec.figureId != fig.id
                                 || rec.axesIndex != static_cast<keel::usize>(fig.currentAxes)
                                 || !rec.isChart())
@@ -833,7 +1017,7 @@ public:
                             else if (rec.datasetIndex > idx)
                                 --rec.datasetIndex;
                         }
-                        ax.datasets.erase(ax.datasets.begin() + static_cast<keel::isize>(idx));
+                        ax.datasets.remove_at(idx);
                     }
                 }
                 if (side == "right") {
@@ -859,12 +1043,12 @@ public:
             int savedSubplot = ax.subplotIndex;
             int savedSubplotRows = ax.subplotRows;
             int savedSubplotCols = ax.subplotCols;
-            std::string savedColorScale = ax.colorScale;
+            keel::String savedColorScale = keel::move(ax.colorScale);
             ax = AxesState{};
             ax.subplotIndex = savedSubplot;
             ax.subplotRows = savedSubplotRows;
             ax.subplotCols = savedSubplotCols;
-            ax.colorScale = savedColorScale;
+            ax.colorScale = keel::move(savedColorScale);
         }
         fig.modified = true;
     }
@@ -901,259 +1085,456 @@ public:
             if (skipIncrementalEmit)
                 continue;
 
-            std::ostringstream os;
-            os << "__FIGURE_DATA__:{\"id\":" << fig.id;
+            keel::String os;
+            os.reserve(1024);
+            os.append("__FIGURE_DATA__:{\"id\":");
+            figdetail::appendInt(os, fig.id);
 
             // Subplot grid info
             if (fig.subplotRows > 0) {
-                os << ",\"subplotGrid\":[" << fig.subplotRows << "," << fig.subplotCols << "]";
+                os.append(",\"subplotGrid\":[");
+                figdetail::appendInt(os, fig.subplotRows);
+                os.push_back(',');
+                figdetail::appendInt(os, fig.subplotCols);
+                os.push_back(']');
             }
-            if (!fig.linkMode.empty())
-                os << ",\"linkMode\":\"" << fig.linkMode << "\"";
-            if (!fig.superTitle.empty())
-                os << ",\"superTitle\":\"" << jsonEscapeFig(fig.superTitle) << "\"";
+            if (!fig.linkMode.empty()) {
+                os.append(",\"linkMode\":\"");
+                os.append(fig.linkMode);
+                os.push_back('"');
+            }
+            if (!fig.superTitle.empty()) {
+                os.append(",\"superTitle\":\"");
+                os.append(jsonEscapeFig(fig.superTitle));
+                os.push_back('"');
+            }
             if (!fig.annotations.empty()) {
-                os << ",\"annotations\":[";
+                os.append(",\"annotations\":[");
                 for (keel::usize ai = 0; ai < fig.annotations.size(); ++ai) {
                     const auto &an = fig.annotations[ai];
-                    if (ai) os << ',';
-                    os << "{\"type\":\"" << an.type << "\""
-                       << ",\"x\":[" << an.x1 << ',' << an.x2 << "]"
-                       << ",\"y\":[" << an.y1 << ',' << an.y2 << "]"
-                       << ",\"text\":\"" << jsonEscapeFig(an.text) << "\"";
-                    if (!an.colorHex.empty())
-                        os << ",\"color\":\"" << an.colorHex << "\"";
-                    if (!an.faceHex.empty())
-                        os << ",\"face\":\"" << an.faceHex << "\"";
-                    if (an.fontSize != 10)
-                        os << ",\"fontSize\":" << an.fontSize;
-                    os << '}';
+                    if (ai) os.push_back(',');
+                    os.append("{\"type\":\"");
+                    os.append(an.type);
+                    os.append("\",\"x\":[");
+                    figdetail::appendDouble(os, an.x1);
+                    os.push_back(',');
+                    figdetail::appendDouble(os, an.x2);
+                    os.append("],\"y\":[");
+                    figdetail::appendDouble(os, an.y1);
+                    os.push_back(',');
+                    figdetail::appendDouble(os, an.y2);
+                    os.append("],\"text\":\"");
+                    os.append(jsonEscapeFig(an.text));
+                    os.push_back('"');
+                    if (!an.colorHex.empty()) {
+                        os.append(",\"color\":\"");
+                        os.append(an.colorHex);
+                        os.push_back('"');
+                    }
+                    if (!an.faceHex.empty()) {
+                        os.append(",\"face\":\"");
+                        os.append(an.faceHex);
+                        os.push_back('"');
+                    }
+                    if (an.fontSize != 10) {
+                        os.append(",\"fontSize\":");
+                        figdetail::appendDouble(os, an.fontSize);
+                    }
+                    os.push_back('}');
                 }
-                os << ']';
+                os.push_back(']');
             }
 
-            os << ",\"axes\":[";
+            os.append(",\"axes\":[");
             for (keel::usize ai = 0; ai < fig.axes.size(); ++ai) {
                 if (ai)
-                    os << ",";
+                    os.push_back(',');
                 auto &ax = fig.axes[ai];
-                os << "{";
-                if (ax.subplotIndex > 0)
-                    os << "\"subplotIndex\":" << ax.subplotIndex << ",";
-                os << "\"datasets\":[";
+                os.push_back('{');
+                if (ax.subplotIndex > 0) {
+                    os.append("\"subplotIndex\":");
+                    figdetail::appendInt(os, ax.subplotIndex);
+                    os.push_back(',');
+                }
+                os.append("\"datasets\":[");
                 for (keel::usize i = 0; i < ax.datasets.size(); ++i) {
                     if (i)
-                        os << ",";
+                        os.push_back(',');
                     auto &ds = ax.datasets[i];
-                    os << "{\"x\":" << ds.xJson << ",\"y\":" << ds.yJson << ",\"type\":\""
-                       << ds.type << "\"";
-                    if (ds.seriesDownsampled)
-                        os << ",\"seriesDownsampled\":true,\"n\":" << ds.seriesN
-                           << ",\"xRange\":[" << ds.sxLo << "," << ds.sxHi << "]"
-                           << ",\"yRange\":[" << ds.syLo << "," << ds.syHi << "]";
-                    if (!ds.label.empty())
-                        os << ",\"label\":\"" << jsonEscapeFig(ds.label) << "\"";
-                    if (!ds.style.empty())
-                        os << ",\"style\":\"" << ds.style << "\"";
-                    if (ds.lineWidth > 0)
-                        os << ",\"lineWidth\":" << ds.lineWidth;
-                    if (ds.markerSize > 0)
-                        os << ",\"markerSize\":" << ds.markerSize;
+                    os.append("{\"x\":");
+                    os.append(ds.xJson);
+                    os.append(",\"y\":");
+                    os.append(ds.yJson);
+                    os.append(",\"type\":\"");
+                    os.append(ds.type);
+                    os.push_back('"');
+                    if (ds.seriesDownsampled) {
+                        os.append(",\"seriesDownsampled\":true,\"n\":");
+                        figdetail::appendUsize(os, ds.seriesN);
+                        os.append(",\"xRange\":[");
+                        figdetail::appendDouble(os, ds.sxLo);
+                        os.push_back(',');
+                        figdetail::appendDouble(os, ds.sxHi);
+                        os.append("],\"yRange\":[");
+                        figdetail::appendDouble(os, ds.syLo);
+                        os.push_back(',');
+                        figdetail::appendDouble(os, ds.syHi);
+                        os.push_back(']');
+                    }
+                    if (!ds.label.empty()) {
+                        os.append(",\"label\":\"");
+                        os.append(jsonEscapeFig(ds.label));
+                        os.push_back('"');
+                    }
+                    if (!ds.style.empty()) {
+                        os.append(",\"style\":\"");
+                        os.append(ds.style);
+                        os.push_back('"');
+                    }
+                    if (ds.lineWidth > 0) {
+                        os.append(",\"lineWidth\":");
+                        figdetail::appendDouble(os, ds.lineWidth);
+                    }
+                    if (ds.markerSize > 0) {
+                        os.append(",\"markerSize\":");
+                        figdetail::appendDouble(os, ds.markerSize);
+                    }
                     if (!ds.visible)
-                        os << ",\"visible\":false";
+                        os.append(",\"visible\":false");
                     // Per-point size / colour columns — used by
                     // polarbubblechart and (future) bubblechart on
                     // cartesian axes. Emitted as `size` / `pointColor`
                     // to avoid colliding with the dataset-level
                     // `color` style attribute.
-                    if (!ds.sizeJson.empty())
-                        os << ",\"size\":"       << ds.sizeJson;
-                    if (!ds.colorJson.empty())
-                        os << ",\"pointColor\":" << ds.colorJson;
-                    if (!ds.eJson.empty())
-                        os << ",\"e\":" << ds.eJson;
-                    if (!ds.eNegJson.empty())
-                        os << ",\"eNeg\":" << ds.eNegJson;
-                    if (!ds.ePosJson.empty())
-                        os << ",\"ePos\":" << ds.ePosJson;
-                    if (!ds.uJson.empty())
-                        os << ",\"u\":" << ds.uJson;
-                    if (!ds.vJson.empty())
-                        os << ",\"v\":" << ds.vJson;
-                    if (!ds.yside.empty())
-                        os << ",\"yside\":\"" << ds.yside << "\"";
-                    if (!ds.zJson.empty())
-                        os << ",\"z\":" << ds.zJson;
-                    if (!ds.vertexColorsJson.empty())
-                        os << ",\"vertexColors\":" << ds.vertexColorsJson;
+                    if (!ds.sizeJson.empty()) {
+                        os.append(",\"size\":");
+                        os.append(ds.sizeJson);
+                    }
+                    if (!ds.colorJson.empty()) {
+                        os.append(",\"pointColor\":");
+                        os.append(ds.colorJson);
+                    }
+                    if (!ds.eJson.empty()) {
+                        os.append(",\"e\":");
+                        os.append(ds.eJson);
+                    }
+                    if (!ds.eNegJson.empty()) {
+                        os.append(",\"eNeg\":");
+                        os.append(ds.eNegJson);
+                    }
+                    if (!ds.ePosJson.empty()) {
+                        os.append(",\"ePos\":");
+                        os.append(ds.ePosJson);
+                    }
+                    if (!ds.uJson.empty()) {
+                        os.append(",\"u\":");
+                        os.append(ds.uJson);
+                    }
+                    if (!ds.vJson.empty()) {
+                        os.append(",\"v\":");
+                        os.append(ds.vJson);
+                    }
+                    if (!ds.yside.empty()) {
+                        os.append(",\"yside\":\"");
+                        os.append(ds.yside);
+                        os.push_back('"');
+                    }
+                    if (!ds.zJson.empty()) {
+                        os.append(",\"z\":");
+                        os.append(ds.zJson);
+                    }
+                    if (!ds.vertexColorsJson.empty()) {
+                        os.append(",\"vertexColors\":");
+                        os.append(ds.vertexColorsJson);
+                    }
                     if (!ds.rgbJson.empty()) {
-                        os << ",\"rgb\":" << ds.rgbJson;
-                        os << ",\"originalRows\":" << ds.originalRows
-                           << ",\"originalCols\":" << ds.originalCols;
+                        os.append(",\"rgb\":");
+                        os.append(ds.rgbJson);
+                        os.append(",\"originalRows\":");
+                        figdetail::appendUsize(os, ds.originalRows);
+                        os.append(",\"originalCols\":");
+                        figdetail::appendUsize(os, ds.originalCols);
                         if (ds.downsampled)
-                            os << ",\"downsampled\":true";
+                            os.append(",\"downsampled\":true");
                     }
                     if (!ds.zQuantized.empty()) {
-                        os << ",\"cminOrig\":" << ds.cminOrig
-                           << ",\"cmaxOrig\":" << ds.cmaxOrig;
+                        os.append(",\"cminOrig\":");
+                        figdetail::appendDouble(os, ds.cminOrig);
+                        os.append(",\"cmaxOrig\":");
+                        figdetail::appendDouble(os, ds.cmaxOrig);
                         if (ds.colorScaleBaked)
-                            os << ",\"colorScaleBaked\":\"log\"";
-                        os << ",\"originalRows\":" << ds.originalRows
-                           << ",\"originalCols\":" << ds.originalCols;
+                            os.append(",\"colorScaleBaked\":\"log\"");
+                        os.append(",\"originalRows\":");
+                        figdetail::appendUsize(os, ds.originalRows);
+                        os.append(",\"originalCols\":");
+                        figdetail::appendUsize(os, ds.originalCols);
                         if (ds.downsampled)
-                            os << ",\"downsampled\":true";
+                            os.append(",\"downsampled\":true");
                     }
-                    os << "}";
+                    os.push_back('}');
                 }
-                os << "],\"config\":{";
-                os << "\"title\":\"" << jsonEscapeFig(ax.title) << "\"";
-                if (!ax.subtitle.empty())
-                    os << ",\"subtitle\":\"" << jsonEscapeFig(ax.subtitle) << "\"";
-                os << ",\"xlabel\":\"" << jsonEscapeFig(ax.xlabel) << "\"";
-                os << ",\"ylabel\":\"" << jsonEscapeFig(ax.ylabel) << "\"";
-                if (!ax.xlimJson.empty())
-                    os << ",\"xlim\":" << ax.xlimJson;
-                if (!ax.ylimJson.empty())
-                    os << ",\"ylim\":" << ax.ylimJson;
-                if (!ax.rlimJson.empty())
-                    os << ",\"rlim\":" << ax.rlimJson;
-                if (!ax.thetalimJson.empty())
-                    os << ",\"thetalim\":" << ax.thetalimJson;
-                if (!ax.climJson.empty())
-                    os << ",\"clim\":" << ax.climJson;
-                if (!ax.colormapName.empty())
-                    os << ",\"colormap\":\"" << ax.colormapName << "\"";
-                if (!ax.customColormapJson.empty())
-                    os << ",\"customColormap\":" << ax.customColormapJson;
+                os.append("],\"config\":{");
+                os.append("\"title\":\"");
+                os.append(jsonEscapeFig(ax.title));
+                os.push_back('"');
+                if (!ax.subtitle.empty()) {
+                    os.append(",\"subtitle\":\"");
+                    os.append(jsonEscapeFig(ax.subtitle));
+                    os.push_back('"');
+                }
+                os.append(",\"xlabel\":\"");
+                os.append(jsonEscapeFig(ax.xlabel));
+                os.push_back('"');
+                os.append(",\"ylabel\":\"");
+                os.append(jsonEscapeFig(ax.ylabel));
+                os.push_back('"');
+                if (!ax.xlimJson.empty()) {
+                    os.append(",\"xlim\":");
+                    os.append(ax.xlimJson);
+                }
+                if (!ax.ylimJson.empty()) {
+                    os.append(",\"ylim\":");
+                    os.append(ax.ylimJson);
+                }
+                if (!ax.rlimJson.empty()) {
+                    os.append(",\"rlim\":");
+                    os.append(ax.rlimJson);
+                }
+                if (!ax.thetalimJson.empty()) {
+                    os.append(",\"thetalim\":");
+                    os.append(ax.thetalimJson);
+                }
+                if (!ax.climJson.empty()) {
+                    os.append(",\"clim\":");
+                    os.append(ax.climJson);
+                }
+                if (!ax.colormapName.empty()) {
+                    os.append(",\"colormap\":\"");
+                    os.append(ax.colormapName);
+                    os.push_back('"');
+                }
+                if (!ax.customColormapJson.empty()) {
+                    os.append(",\"customColormap\":");
+                    os.append(ax.customColormapJson);
+                }
                 // Emit "grid" only when the user explicitly called
                 // grid(...). Field absence means "script never asked";
                 // the JS adapter then picks a type-appropriate default
                 // (2-D off, 3-D on, mirroring MATLAB).
                 if (ax.gridUserTouched)
-                    os << ",\"grid\":\"" << (ax.gridMajor ? "on" : "off") << "\"";
+                    os.append(ax.gridMajor ? ",\"grid\":\"on\"" : ",\"grid\":\"off\"");
                 if (ax.gridMinor)
-                    os << ",\"gridMinor\":\"on\"";
-                os << ",\"polar\":" << (ax.polar ? "true" : "false");
-                os << ",\"xscale\":\"" << ax.xscale << "\"";
-                os << ",\"yscale\":\"" << ax.yscale << "\"";
-                if (!ax.axisMode.empty())
-                    os << ",\"axisMode\":\"" << ax.axisMode << "\"";
-                if (!ax.xTicksJson.empty())
-                    os << ",\"xticks\":" << ax.xTicksJson;
-                if (!ax.yTicksJson.empty())
-                    os << ",\"yticks\":" << ax.yTicksJson;
-                if (!ax.zTicksJson.empty())
-                    os << ",\"zticks\":" << ax.zTicksJson;
-                if (!ax.xTickLabelsJson.empty())
-                    os << ",\"xticklabels\":" << ax.xTickLabelsJson;
-                if (!ax.yTickLabelsJson.empty())
-                    os << ",\"yticklabels\":" << ax.yTickLabelsJson;
-                if (!ax.zTickLabelsJson.empty())
-                    os << ",\"zticklabels\":" << ax.zTickLabelsJson;
-                if (!ax.xTickFormat.empty())
-                    os << ",\"xtickformat\":\"" << jsonEscapeFig(ax.xTickFormat) << "\"";
-                if (!ax.yTickFormat.empty())
-                    os << ",\"ytickformat\":\"" << jsonEscapeFig(ax.yTickFormat) << "\"";
-                if (!ax.zTickFormat.empty())
-                    os << ",\"ztickformat\":\"" << jsonEscapeFig(ax.zTickFormat) << "\"";
-                if (ax.xTickAngle != 0.0)
-                    os << ",\"xtickangle\":" << ax.xTickAngle;
-                if (ax.yTickAngle != 0.0)
-                    os << ",\"ytickangle\":" << ax.yTickAngle;
+                    os.append(",\"gridMinor\":\"on\"");
+                os.append(ax.polar ? ",\"polar\":true" : ",\"polar\":false");
+                os.append(",\"xscale\":\"");
+                os.append(ax.xscale);
+                os.append("\",\"yscale\":\"");
+                os.append(ax.yscale);
+                os.push_back('"');
+                if (!ax.axisMode.empty()) {
+                    os.append(",\"axisMode\":\"");
+                    os.append(ax.axisMode);
+                    os.push_back('"');
+                }
+                if (!ax.xTicksJson.empty()) {
+                    os.append(",\"xticks\":");
+                    os.append(ax.xTicksJson);
+                }
+                if (!ax.yTicksJson.empty()) {
+                    os.append(",\"yticks\":");
+                    os.append(ax.yTicksJson);
+                }
+                if (!ax.zTicksJson.empty()) {
+                    os.append(",\"zticks\":");
+                    os.append(ax.zTicksJson);
+                }
+                if (!ax.xTickLabelsJson.empty()) {
+                    os.append(",\"xticklabels\":");
+                    os.append(ax.xTickLabelsJson);
+                }
+                if (!ax.yTickLabelsJson.empty()) {
+                    os.append(",\"yticklabels\":");
+                    os.append(ax.yTickLabelsJson);
+                }
+                if (!ax.zTickLabelsJson.empty()) {
+                    os.append(",\"zticklabels\":");
+                    os.append(ax.zTickLabelsJson);
+                }
+                if (!ax.xTickFormat.empty()) {
+                    os.append(",\"xtickformat\":\"");
+                    os.append(jsonEscapeFig(ax.xTickFormat));
+                    os.push_back('"');
+                }
+                if (!ax.yTickFormat.empty()) {
+                    os.append(",\"ytickformat\":\"");
+                    os.append(jsonEscapeFig(ax.yTickFormat));
+                    os.push_back('"');
+                }
+                if (!ax.zTickFormat.empty()) {
+                    os.append(",\"ztickformat\":\"");
+                    os.append(jsonEscapeFig(ax.zTickFormat));
+                    os.push_back('"');
+                }
+                if (ax.xTickAngle != 0.0) {
+                    os.append(",\"xtickangle\":");
+                    figdetail::appendDouble(os, ax.xTickAngle);
+                }
+                if (ax.yTickAngle != 0.0) {
+                    os.append(",\"ytickangle\":");
+                    figdetail::appendDouble(os, ax.yTickAngle);
+                }
                 // Axes font / frame (portion 34). Emitted only when
                 // non-default so untouched figures keep the wire shape.
-                if (ax.fontSize != 10.0)
-                    os << ",\"fontSize\":" << ax.fontSize;
-                if (ax.fontWeight != "normal")
-                    os << ",\"fontWeight\":\"" << ax.fontWeight << "\"";
-                if (ax.fontName != "Helvetica")
-                    os << ",\"fontName\":\"" << jsonEscapeFig(ax.fontName) << "\"";
-                if (ax.lineWidth != 0.5)
-                    os << ",\"axesLineWidth\":" << ax.lineWidth;
+                if (ax.fontSize != 10.0) {
+                    os.append(",\"fontSize\":");
+                    figdetail::appendDouble(os, ax.fontSize);
+                }
+                if (ax.fontWeight != "normal") {
+                    os.append(",\"fontWeight\":\"");
+                    os.append(ax.fontWeight);
+                    os.push_back('"');
+                }
+                if (ax.fontName != "Helvetica") {
+                    os.append(",\"fontName\":\"");
+                    os.append(jsonEscapeFig(ax.fontName));
+                    os.push_back('"');
+                }
+                if (ax.lineWidth != 0.5) {
+                    os.append(",\"axesLineWidth\":");
+                    figdetail::appendDouble(os, ax.lineWidth);
+                }
                 // axisVisible default = true; emit only when off
                 // (imshow / `axis off` set this).
                 if (!ax.axisVisible)
-                    os << ",\"axisVisible\":false";
+                    os.append(",\"axisVisible\":false");
                 if (!ax.boxOn)
-                    os << ",\"box\":\"off\"";
+                    os.append(",\"box\":\"off\"");
                 if (ax.xDir == "reverse")
-                    os << ",\"xDir\":\"reverse\"";
+                    os.append(",\"xDir\":\"reverse\"");
                 if (ax.yDir == "reverse")
-                    os << ",\"yDir\":\"reverse\"";
+                    os.append(",\"yDir\":\"reverse\"");
                 if (ax.polar) {
-                    os << ",\"thetaDir\":\"" << ax.thetaDir << "\"";
-                    os << ",\"thetaZeroLocation\":\"" << ax.thetaZeroLocation << "\"";
-                    if (!ax.thetaticksJson.empty())
-                        os << ",\"thetaticks\":"      << ax.thetaticksJson;
-                    if (!ax.rticksJson.empty())
-                        os << ",\"rticks\":"          << ax.rticksJson;
-                    if (!ax.thetaticklabelsJson.empty())
-                        os << ",\"thetaticklabels\":" << ax.thetaticklabelsJson;
-                    if (!ax.rticklabelsJson.empty())
-                        os << ",\"rticklabels\":"     << ax.rticklabelsJson;
+                    os.append(",\"thetaDir\":\"");
+                    os.append(ax.thetaDir);
+                    os.append("\",\"thetaZeroLocation\":\"");
+                    os.append(ax.thetaZeroLocation);
+                    os.push_back('"');
+                    if (!ax.thetaticksJson.empty()) {
+                        os.append(",\"thetaticks\":");
+                        os.append(ax.thetaticksJson);
+                    }
+                    if (!ax.rticksJson.empty()) {
+                        os.append(",\"rticks\":");
+                        os.append(ax.rticksJson);
+                    }
+                    if (!ax.thetaticklabelsJson.empty()) {
+                        os.append(",\"thetaticklabels\":");
+                        os.append(ax.thetaticklabelsJson);
+                    }
+                    if (!ax.rticklabelsJson.empty()) {
+                        os.append(",\"rticklabels\":");
+                        os.append(ax.rticklabelsJson);
+                    }
                 }
                 if (!ax.legendLabels.empty()) {
-                    os << ",\"legend\":[";
+                    os.append(",\"legend\":[");
                     for (keel::usize i = 0; i < ax.legendLabels.size(); ++i) {
                         if (i)
-                            os << ",";
-                        os << "\"" << jsonEscapeFig(ax.legendLabels[i]) << "\"";
+                            os.push_back(',');
+                        os.push_back('"');
+                        os.append(jsonEscapeFig(ax.legendLabels[i]));
+                        os.push_back('"');
                     }
-                    os << "]";
+                    os.push_back(']');
                 }
                 if (ax.legendHidden)
-                    os << ",\"legendHidden\":true";
-                if (!ax.legendLocation.empty())
-                    os << ",\"legendLocation\":\"" << ax.legendLocation << "\"";
-                if (!ax.legendBoxOn)
-                    os << ",\"legendBox\":\"off\"";
-                if (!ax.colorbarLocation.empty())
-                    os << ",\"colorbarLocation\":\"" << ax.colorbarLocation << "\"";
-                if (ax.yyEnabled) {
-                    os << ",\"yyEnabled\":true";
-                    if (!ax.ylabel2.empty())
-                        os << ",\"ylabel2\":\"" << jsonEscapeFig(ax.ylabel2) << "\"";
-                    if (!ax.ylim2Json.empty())
-                        os << ",\"ylim2\":" << ax.ylim2Json;
-                    if (ax.yscale2 != "linear")
-                        os << ",\"yscale2\":\"" << ax.yscale2 << "\"";
+                    os.append(",\"legendHidden\":true");
+                if (!ax.legendLocation.empty()) {
+                    os.append(",\"legendLocation\":\"");
+                    os.append(ax.legendLocation);
+                    os.push_back('"');
                 }
-                if (!ax.viewJson.empty())
-                    os << ",\"view\":" << ax.viewJson;
-                if (!ax.zlabel.empty())
-                    os << ",\"zlabel\":\"" << jsonEscapeFig(ax.zlabel) << "\"";
-                if (!ax.zlimJson.empty())
-                    os << ",\"zlim\":" << ax.zlimJson;
-                if (!ax.lightingMode.empty())
-                    os << ",\"lighting\":\"" << ax.lightingMode << "\"";
-                if (!ax.materialPreset.empty())
-                    os << ",\"material\":\"" << ax.materialPreset << "\"";
-                if (!ax.camlightPos.empty())
-                    os << ",\"camlight\":\"" << ax.camlightPos << "\"";
-                if (!ax.rotate3dMode.empty())
-                    os << ",\"rotate3d\":\"" << ax.rotate3dMode << "\"";
-                if (!ax.pan3dMode.empty())
-                    os << ",\"pan3d\":\"" << ax.pan3dMode << "\"";
-                if (!ax.zoom3dMode.empty())
-                    os << ",\"zoom3d\":\"" << ax.zoom3dMode << "\"";
-                os << "}}";
+                if (!ax.legendBoxOn)
+                    os.append(",\"legendBox\":\"off\"");
+                if (!ax.colorbarLocation.empty()) {
+                    os.append(",\"colorbarLocation\":\"");
+                    os.append(ax.colorbarLocation);
+                    os.push_back('"');
+                }
+                if (ax.yyEnabled) {
+                    os.append(",\"yyEnabled\":true");
+                    if (!ax.ylabel2.empty()) {
+                        os.append(",\"ylabel2\":\"");
+                        os.append(jsonEscapeFig(ax.ylabel2));
+                        os.push_back('"');
+                    }
+                    if (!ax.ylim2Json.empty()) {
+                        os.append(",\"ylim2\":");
+                        os.append(ax.ylim2Json);
+                    }
+                    if (ax.yscale2 != "linear") {
+                        os.append(",\"yscale2\":\"");
+                        os.append(ax.yscale2);
+                        os.push_back('"');
+                    }
+                }
+                if (!ax.viewJson.empty()) {
+                    os.append(",\"view\":");
+                    os.append(ax.viewJson);
+                }
+                if (!ax.zlabel.empty()) {
+                    os.append(",\"zlabel\":\"");
+                    os.append(jsonEscapeFig(ax.zlabel));
+                    os.push_back('"');
+                }
+                if (!ax.zlimJson.empty()) {
+                    os.append(",\"zlim\":");
+                    os.append(ax.zlimJson);
+                }
+                if (!ax.lightingMode.empty()) {
+                    os.append(",\"lighting\":\"");
+                    os.append(ax.lightingMode);
+                    os.push_back('"');
+                }
+                if (!ax.materialPreset.empty()) {
+                    os.append(",\"material\":\"");
+                    os.append(ax.materialPreset);
+                    os.push_back('"');
+                }
+                if (!ax.camlightPos.empty()) {
+                    os.append(",\"camlight\":\"");
+                    os.append(ax.camlightPos);
+                    os.push_back('"');
+                }
+                if (!ax.rotate3dMode.empty()) {
+                    os.append(",\"rotate3d\":\"");
+                    os.append(ax.rotate3dMode);
+                    os.push_back('"');
+                }
+                if (!ax.pan3dMode.empty()) {
+                    os.append(",\"pan3d\":\"");
+                    os.append(ax.pan3dMode);
+                    os.push_back('"');
+                }
+                if (!ax.zoom3dMode.empty()) {
+                    os.append(",\"zoom3d\":\"");
+                    os.append(ax.zoom3dMode);
+                    os.push_back('"');
+                }
+                os.append("}}");
             }
-            os << "]}";
-            std::string line = os.str() + "\n";
-            if (outputFunc_)
-                outputFunc_(line);
-            else
-                std::cout << line;
+            os.append("]}\n");
+            emitRawOutput_(os);
         }
     }
 
     void closeFigure(int id)
     {
         invalidateHandles(id, -1, /*axes records*/ true, /*figure record*/ true);
-        figures_.erase(id);
+        eraseFigure_(id);
         if (currentFigure_ == id) {
             if (!figures_.empty())
-                currentFigure_ = figures_.rbegin()->first;
+                currentFigure_ = figures_.back().id;
             else
                 currentFigure_ = 1;
         }
@@ -1163,8 +1544,8 @@ public:
     void closeFigureNotify(int id)
     {
         closeFigure(id);
-        std::string marker = "__FIGURE_CLOSE__:" + std::to_string(id) + "\n";
-        if (outputFunc_) outputFunc_(marker); else std::cout << marker;
+        keel::String marker = keel::format("__FIGURE_CLOSE__:{}\n", id);
+        emitRawOutput_(marker);
     }
 
     void closeCurrent() { closeFigure(currentFigure_); }
@@ -1173,13 +1554,13 @@ public:
     {
         int id = currentFigure_;
         closeCurrent();
-        std::string marker = "__FIGURE_CLOSE__:" + std::to_string(id) + "\n";
-        if (outputFunc_) outputFunc_(marker); else std::cout << marker;
+        keel::String marker = keel::format("__FIGURE_CLOSE__:{}\n", id);
+        emitRawOutput_(marker);
     }
 
     void closeAll()
     {
-        for (auto &[hid, rec] : handleRegistry_)
+        for (auto [hid, rec] : handleRegistry_)
             rec.deleted = true;
         figures_.clear();
         currentFigure_ = 1;
@@ -1188,11 +1569,10 @@ public:
     void closeAllNotify()
     {
         closeAll();
-        std::string marker = "__FIGURE_CLOSE_ALL__\n";
-        if (outputFunc_) outputFunc_(marker); else std::cout << marker;
+        emitRawOutput_("__FIGURE_CLOSE_ALL__\n");
     }
 
-    const std::map<int, FigureState> &figures() const { return figures_; }
+    const keel::Array<FigureEntry> &figures() const { return figures_; }
 
     // ── Reactive-session checkpoints ─────────────────────────────
     // Rollback point for incremental re-runs (ReactiveSession). A
@@ -1205,11 +1585,25 @@ public:
         bool holdOn = false;
         keel::usize datasetCount = 0;
     };
+    struct FigureAxesCheckpoint {
+        int id = 0;
+        keel::Array<AxesCheckpoint> axes;
+
+        FigureAxesCheckpoint clone(keel::Allocator *alloc = nullptr) const
+        {
+            return FigureAxesCheckpoint{id, axes.clone(alloc)};
+        }
+    };
     struct FigureCheckpoint {
         // figure id → per-axes snapshot (sized to the axes vector at
         // capture time; figures absent here are treated as "created
         // after the checkpoint" on restore).
-        std::vector<std::pair<int, std::vector<AxesCheckpoint>>> figures;
+        keel::Array<FigureAxesCheckpoint> figures;
+
+        FigureCheckpoint clone(keel::Allocator *alloc = nullptr) const
+        {
+            return FigureCheckpoint{figures.clone(alloc)};
+        }
     };
     FigureCheckpoint checkpointFigures() const;
     void restoreFigures(const FigureCheckpoint &cp);
@@ -1249,13 +1643,12 @@ public:
                                          keel::f64 x0, keel::f64 x1, int width, int algo) const
     {
         DecimatedSeries out;
-        auto it = figures_.find(figId);
-        if (it == figures_.end()) return out;
-        const auto &fig = it->second;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig.axes.size())) return out;
-        const auto &ax = fig.axes[axIdx];
+        const FigureState *fig = findFigure_(figId);
+        if (!fig) return out;
+        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return out;
+        const auto &ax = fig->axes[static_cast<keel::usize>(axIdx)];
         if (dsIdx < 0 || dsIdx >= static_cast<int>(ax.datasets.size())) return out;
-        const auto &ds = ax.datasets[dsIdx];
+        const auto &ds = ax.datasets[static_cast<keel::usize>(dsIdx)];
         if (ds.xRaw.empty() || ds.xRaw.size() != ds.yRaw.size()) return out;
         // Build the coarse LOD levels once, then pick the cheapest level for
         // this viewport so the decimation is O(width) even fully zoomed out.
@@ -1263,13 +1656,13 @@ public:
             auto pyr = buildPyramid(ds.xRaw.data(), ds.yRaw.data(), ds.xRaw.size());
             ds.seriesPyramid.reserve(pyr.size());
             for (auto &lvl : pyr)
-                ds.seriesPyramid.push_back(std::move(lvl));
+                ds.seriesPyramid.push_back(keel::move(lvl));
         }
         DecimAlgo a = (algo == 1) ? DecimAlgo::LTTB
                     : (algo == 2) ? DecimAlgo::None
                     : (algo == 3) ? DecimAlgo::M2 : DecimAlgo::M4;
         return decimateLOD(ds.xRaw.data(), ds.yRaw.data(), ds.xRaw.size(),
-                           keel::ArrayRef<DecimatedSeries>(ds.seriesPyramid.data(), ds.seriesPyramid.size()),
+                           ds.seriesPyramid.as_ref(),
                            x0, x1, width, a);
     }
 
@@ -1282,13 +1675,12 @@ public:
     {
         if (!out || displayH <= 0 || displayW <= 0) return false;
 
-        auto figIt = figures_.find(figId);
-        if (figIt == figures_.end()) return false;
-        const auto &fig = figIt->second;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig.axes.size())) return false;
-        const auto &axState = fig.axes[axIdx];
+        const FigureState *fig = findFigure_(figId);
+        if (!fig) return false;
+        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return false;
+        const auto &axState = fig->axes[static_cast<keel::usize>(axIdx)];
         if (dsIdx < 0 || dsIdx >= static_cast<int>(axState.datasets.size())) return false;
-        const auto &ds = axState.datasets[dsIdx];
+        const auto &ds = axState.datasets[static_cast<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
         const keel::usize fullRows = ds.originalRows;
@@ -1331,9 +1723,9 @@ public:
             lvlRows = fullRows;
             lvlCols = fullCols;
         } else if (level <= static_cast<int>(ds.lodLevels.size())) {
-            lvlData = ds.lodLevels[level - 1].data();
-            lvlRows = ds.lodDims[level - 1].first;
-            lvlCols = ds.lodDims[level - 1].second;
+            lvlData = ds.lodLevels[static_cast<keel::usize>(level - 1)].data();
+            lvlRows = ds.lodDims[static_cast<keel::usize>(level - 1)].first;
+            lvlCols = ds.lodDims[static_cast<keel::usize>(level - 1)].second;
         } else {
             // ensureLOD couldn't build (e.g. dataset too small) — fall back to L0.
             lvlData = ds.zQuantized.data();
@@ -1374,7 +1766,7 @@ public:
                 int sum = 0, n = 0;
                 for (int cc = cA; cc < cB; ++cc) {
                     for (int rr = rA; rr < rB; ++rr) {
-                        const keel::u8 q = lvlData[cc * lvlRows + rr];
+                        const keel::u8 q = lvlData[static_cast<keel::usize>(cc) * lvlRows + static_cast<keel::usize>(rr)];
                         if (q != 255) { sum += q; ++n; }
                     }
                 }
@@ -1413,7 +1805,8 @@ public:
             const keel::usize cCols = (pCols + 1) / 2;
             if (cRows < 32 || cCols < 32) break;       // stop refining
 
-            std::vector<keel::u8> child(cRows * cCols);
+            keel::Array<keel::u8> child;
+            child.resize(cRows * cCols);
             for (keel::usize cc = 0; cc < cCols; ++cc) {
                 const keel::usize pc0 = 2 * cc;
                 const keel::usize pc1 = std::min(pCols, pc0 + 2);
@@ -1432,7 +1825,7 @@ public:
                         : keel::u8{255};
                 }
             }
-            ds.lodLevels.push_back(std::move(child));
+            ds.lodLevels.push_back(keel::move(child));
             ds.lodDims.emplace_back(cRows, cCols);
         }
     }
@@ -1446,20 +1839,19 @@ public:
      */
     bool getFigureTile(int figId, int axIdx, int dsIdx,
                        int r0, int c0, int h, int w, int lod,
-                       std::vector<keel::u8> &out,
+                       keel::Array<keel::u8> &out,
                        keel::usize &outRows, keel::usize &outCols) const
     {
         outRows = 0;
         outCols = 0;
         out.clear();
 
-        auto figIt = figures_.find(figId);
-        if (figIt == figures_.end()) return false;
-        const auto &fig = figIt->second;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig.axes.size())) return false;
-        const auto &axState = fig.axes[axIdx];
+        const FigureState *fig = findFigure_(figId);
+        if (!fig) return false;
+        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return false;
+        const auto &axState = fig->axes[static_cast<keel::usize>(axIdx)];
         if (dsIdx < 0 || dsIdx >= static_cast<int>(axState.datasets.size())) return false;
-        const auto &ds = axState.datasets[dsIdx];
+        const auto &ds = axState.datasets[static_cast<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
         const keel::usize fullRows = ds.originalRows;
@@ -1518,11 +1910,65 @@ public:
     }
 
 private:
-    std::map<int, FigureState> figures_;
+    FigureState *findFigure_(int id)
+    {
+        for (auto &entry : figures_)
+            if (entry.id == id)
+                return &entry.state;
+        return nullptr;
+    }
+
+    const FigureState *findFigure_(int id) const
+    {
+        for (const auto &entry : figures_)
+            if (entry.id == id)
+                return &entry.state;
+        return nullptr;
+    }
+
+    FigureState &getOrCreateFigure_(int id)
+    {
+        keel::usize pos = 0;
+        while (pos < figures_.size() && figures_[pos].id < id)
+            ++pos;
+        if (pos < figures_.size() && figures_[pos].id == id)
+            return figures_[pos].state;
+        FigureState fs;
+        fs.id = id;
+        fs.axes.push_back(AxesState{});
+        figures_.push_back(FigureEntry{});
+        for (keel::usize k = figures_.size() - 1; k > pos; --k)
+            figures_[k] = keel::move(figures_[k - 1]);
+        figures_[pos].id = id;
+        figures_[pos].state = keel::move(fs);
+        return figures_[pos].state;
+    }
+
+    void eraseFigure_(int id)
+    {
+        for (keel::usize i = 0; i < figures_.size(); ++i) {
+            if (figures_[i].id == id) {
+                figures_.remove_at(i);
+                return;
+            }
+        }
+    }
+
+    void emitRawOutput_(keel::StringRef text) const
+    {
+        if (outputFunc_) {
+            outputFunc_(text);
+        } else if (!text.empty()) {
+            std::fwrite(text.data(), 1, text.size(), stdout);
+            std::fflush(stdout);
+        }
+    }
+
+    keel::Array<FigureEntry> figures_;
     int currentFigure_ = 1;
     OutputFunc outputFunc_;
     int nextHandleId_ = 1;
-    std::unordered_map<int, HandleRecord> handleRegistry_;
+    keel::HashMap<int, HandleRecord> handleRegistry_;
     keel::usize chartCallBase_ = 0;
 };
 

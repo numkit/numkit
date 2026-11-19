@@ -8,7 +8,9 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/linalg/balance.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
 
@@ -18,7 +20,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <string>
 #include <utility>
 
 namespace numkit::linalg {

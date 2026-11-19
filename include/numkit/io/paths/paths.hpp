@@ -6,9 +6,9 @@
 
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
 
-#include <string>
 #include <tuple>
 
 #include <numkit/sys/fs_context.hpp>
@@ -44,7 +44,9 @@ Value filesep(keel::Allocator *mr = nullptr);
 /// @param mr     Memory resource (nullptr → process default).
 /// @return       CHAR path.
 /// @see filesep, fileparts
-Value fullfile(keel::ArrayRef<std::string> parts,
+Value fullfile(keel::ArrayRef<keel::String> parts,
+               keel::Allocator *mr = nullptr);
+Value fullfile(keel::ArrayRef<keel::StringRef> parts,
                keel::Allocator *mr = nullptr);
 
 /// @brief Split a path into folder / name / ext
@@ -57,7 +59,7 @@ Value fullfile(keel::ArrayRef<std::string> parts,
 /// @return      `(folder, name, ext)` triple of CHAR values.
 /// @see fullfile
 std::tuple<Value, Value, Value>
-fileparts(const std::string &path,
+fileparts(keel::StringRef path,
           keel::Allocator *mr = nullptr);
 
 /// @brief Host temp directory (`d = tempdir()`).

@@ -34,13 +34,13 @@
 
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
-
-#include <set>
-#include <string>
-#include <vector>
 
 namespace numkit {
 
@@ -58,8 +58,8 @@ inline constexpr char kFigureStateVar[] = "__numkit_figstate__";
 struct StatementFacts
 {
     bool wildcardReads = false;      // Reads = * (opaque statement)
-    std::set<std::string> reads;
-    std::set<std::string> writes;
+    keel::HashSet<keel::String> reads;
+    keel::HashSet<keel::String> writes;
 
     // Fine-grained element access (portion B1): variable → regions
     // touched on the READ side / WRITE side. All accesses that are not
@@ -72,12 +72,12 @@ struct StatementFacts
     // LHS (`C{5,2} = v` — the LHS does NOT read the old value; the
     // coarse read exists for portion-A dirtySetFor compatibility).
     // Element-level dirty sets use this to skip cell definitions.
-    std::set<std::string> lhsMergeBases;
+    keel::HashSet<keel::String> lhsMergeBases;
 };
 
 /// Compute facts for every top-level statement of a parsed program
 /// (Parser::parse() result — node children are the statements).
-std::vector<StatementFacts> computeStatementFacts(const ASTNode *program);
+keel::Array<StatementFacts> computeStatementFacts(const ASTNode *program);
 
 /// Dependency DAG over statement indices. Edge i → j means "j must
 /// re-run when i re-runs" (j reads the nearest def i provides, or j is
@@ -88,22 +88,22 @@ public:
     /// Build from facts. Nearest-definition edges for reads; wildcard
     /// statements depend on all prior statements AND every later
     /// statement depends on them.
-    explicit DependencyGraph(std::vector<StatementFacts> facts);
+    explicit DependencyGraph(keel::Array<StatementFacts> facts);
 
     /// Indices that must re-run when `var` is assigned externally.
     /// A PURE DEFINITION of var (`var = literal` — writes, never
     /// reads) is SKIPPED: setParam replaces it (re-running would reset
     /// the slider). Affected = readers + merge-writers + wildcard
     /// statements that may invisibly write var + transitive closure.
-    std::vector<keel::usize> dirtySetFor(const std::string &var) const;
+    keel::Array<keel::usize> dirtySetFor(keel::StringRef var) const;
 
     /// With the set of EXTERNALLY-DEFINED params (ReactiveSession):
     /// the wildcard-prefix rule additionally skips the pure defs of
     /// EVERY param in the set (a prefix re-run must not clobber other
     /// sliders' values back to script defaults).
-    std::vector<keel::usize> dirtySetFor(
-        const std::string &var,
-        const std::set<std::string> &externalDefs) const;
+    keel::Array<keel::usize> dirtySetFor(
+        keel::StringRef var,
+        const keel::HashSet<keel::String> &externalDefs) const;
 
     /// Element-level variant: external write of ONE CELL (the table
     /// editor's setParamElement). Affected = statements whose READ
@@ -111,24 +111,24 @@ public:
     /// merge-write var while also reading it + transitive closure.
     /// Statements that only WRITE regions of var (definitions of other
     /// cells) stay clean — their inputs did not change.
-    std::vector<keel::usize> dirtySetForElement(const std::string &var,
-                                           keel::usize r, keel::usize c) const;
-    std::vector<keel::usize> dirtySetForElement(
-        const std::string &var, keel::usize r, keel::usize c,
-        const std::set<std::string> &externalDefs) const;
+    keel::Array<keel::usize> dirtySetForElement(keel::StringRef var,
+                                                keel::usize r, keel::usize c) const;
+    keel::Array<keel::usize> dirtySetForElement(
+        keel::StringRef var, keel::usize r, keel::usize c,
+        const keel::HashSet<keel::String> &externalDefs) const;
 
-    const std::vector<StatementFacts> &facts() const { return facts_; }
+    const keel::Array<StatementFacts> &facts() const { return facts_; }
     keel::usize size() const { return facts_.size(); }
     /// Direct dependents of statement i (edges i → j). Const accessor
     /// for cycle detection / debug tooling.
-    const std::vector<keel::usize> &downstreamOf(keel::usize i) const
+    const keel::Array<keel::usize> &downstreamOf(keel::usize i) const
     {
         return downstream_[i];
     }
 
 private:
-    std::vector<StatementFacts> facts_;
-    std::vector<std::vector<keel::usize>> downstream_;   // i → dependents
+    keel::Array<StatementFacts> facts_;
+    keel::Array<keel::Array<keel::usize>> downstream_;   // i → dependents
 };
 
 }  // namespace numkit

@@ -54,10 +54,10 @@ TEST(PackageManagerTest, ListEmptyModulesDirectory)
     ASSERT_TRUE(tmpBase.is_ok());
     keel::String tmpDir = keel::path_join(tmpBase.value(), "numkit_empty_modules_test_dir");
     (void)keel::fs_remove_all(tmpDir);
-    PackageManager pm(std::string(tmpDir.data(), tmpDir.size()));
-    std::ostringstream ss;
-    int rc = pm.list(ss);
+    PackageManager pm(tmpDir.as_ref());
+    keel::String out;
+    int rc = pm.list(out);
     (void)keel::fs_remove_all(tmpDir);
     EXPECT_EQ(rc, 0);
-    EXPECT_NE(ss.str().find("no packages installed"), std::string::npos);
+    EXPECT_NE(std::string(out.data(), out.size()).find("no packages installed"), std::string::npos);
 }

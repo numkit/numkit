@@ -9,6 +9,7 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <keel/complex.h>
 #include <numkit/linalg/page_ops.hpp>
 #include <numkit/linalg/detail/linalg_detail.hpp>
@@ -21,7 +22,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <string>
 #include <utility>
 
 namespace numkit::linalg {

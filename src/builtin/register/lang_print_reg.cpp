@@ -1,5 +1,6 @@
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/runtime/io.hpp>
@@ -13,10 +14,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;
@@ -36,9 +35,9 @@ void disp_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
 void display_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "display");
-    std::string name = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
-                           ? std::string(args[1].toString().as_ref())
-                           : std::string("ans");
+    keel::String name = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                            ? args[1].toString()
+                            : keel::String("ans", ctx.engine->allocator());
     if (args[0].isObject()) {
         ctx.engine->displayObject(name, args[0]);
         return;

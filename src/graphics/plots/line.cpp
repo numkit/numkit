@@ -3,9 +3,11 @@
 // graphics.line.* builders (plot / plot3 / stem / stairs / area / errorbar / semilog* / fplot / comet / geoplot / xline), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -20,21 +22,16 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildLinePlots(std::vector<PlotEntry> &table)
+void buildLinePlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
 
     reg("line", "plot",
@@ -55,11 +52,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // starts an N/V pair ('LineWidth', 2, …).
             auto isSpec = [](const Value &v) {
                 if (!v.isChar()) return false;
-                static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-                std::string s(v.toString().as_ref());
+                static constexpr keel::StringRef alpha("-:.o+*xsd^v<>phrgbcymwk");
+                keel::String s = v.toString();
                 if (s.empty()) return false;
                 for (char c : s)
-                    if (alpha.find(c) == std::string::npos) return false;
+                    if (alpha.find(c) == keel::kInvalidIndex) return false;
                 return true;
             };
             auto isData = [](const Value &v) {
@@ -68,7 +65,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             keel::usize i = 0;
             while (i < args.size()) {
                 DatasetInfo ds;
-                ds.type = "line";
+                ds.type.assign("line");
                 const Value *xArg = nullptr;
                 const Value *yArg = nullptr;
                 if (i + 1 < args.size() && isData(args[i]) && isData(args[i + 1])) {
@@ -91,7 +88,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 }
                 while (i + 1 < args.size() && args[i].isChar()
                        && !isSpec(args[i])) {
-                    std::string key(args[i].toString().as_ref());
+                    keel::String key = args[i].toString();
                     for (auto &c : key)
                         c = (char)std::tolower((unsigned char)c);
                     if (key == "linewidth")
@@ -109,35 +106,35 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     const keel::usize Yc = yArg->dims().cols();
                     if (Yr == Nx) {
                         for (keel::usize c = 0; c < Yc; ++c) {
-                            DatasetInfo colDs = ds;
-                            std::ostringstream ys;
+                            DatasetInfo colDs = ds.clone();
+                            StrBuf ys;
                             ys << '[';
                             for (keel::usize r = 0; r < Yr; ++r) {
                                 if (r > 0) ys << ',';
                                 ys << yArg->elemAsDouble(c * Yr + r);
                             }
                             ys << ']';
-                            colDs.yJson = ys.str();
-                            fm.pushDataset(std::move(colDs));
+                            colDs.yJson = ys.take();
+                            fm.pushDataset(keel::move(colDs));
                         }
                         continue;
                     } else if (Yc == Nx) {
                         for (keel::usize r = 0; r < Yr; ++r) {
-                            DatasetInfo rowDs = ds;
-                            std::ostringstream ys;
+                            DatasetInfo rowDs = ds.clone();
+                            StrBuf ys;
                             ys << '[';
                             for (keel::usize c = 0; c < Yc; ++c) {
                                 if (c > 0) ys << ',';
                                 ys << yArg->elemAsDouble(c * Yr + r);
                             }
                             ys << ']';
-                            rowDs.yJson = ys.str();
-                            fm.pushDataset(std::move(rowDs));
+                            rowDs.yJson = ys.take();
+                            fm.pushDataset(keel::move(rowDs));
                         }
                         continue;
                     }
                 }
-                fm.pushDataset(std::move(ds));
+                fm.pushDataset(keel::move(ds));
             }
             fm.emitModified();
             outs[0] = Value();
@@ -163,11 +160,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         // [, N/V…])* — same spec/N/V discriminator as plot().
         auto isSpec = [](const Value &v) {
             if (!v.isChar()) return false;
-            static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-            std::string s(v.toString().as_ref());
+            static constexpr keel::StringRef alpha("-:.o+*xsd^v<>phrgbcymwk");
+            keel::String s = v.toString();
             if (s.empty()) return false;
             for (char c : s)
-                if (alpha.find(c) == std::string::npos) return false;
+                if (alpha.find(c) == keel::kInvalidIndex) return false;
             return true;
         };
         auto isData = [](const Value &v) {
@@ -179,7 +176,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                   && isData(args[i + 2])))
                 break;
             DatasetInfo ds;
-            ds.type = typeName;
+            ds.type.assign(typeName);
             ds.xJson = vecToJson(args[i]);
             ds.yJson = vecToJson(args[i + 1]);
             ds.zJson = vecToJson(args[i + 2]);   // 1-D vector here, distinct
@@ -193,7 +190,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             while (i + 1 < args.size() && args[i].isChar()
                    && !isSpec(args[i])) {
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 for (auto &c : key)
                     c = (char)std::tolower((unsigned char)c);
                 if (key == "linewidth")
@@ -202,16 +199,19 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     ds.markerSize = args[i + 1].toScalar();
                 i += 2;
             }
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
         }
         fm.emitModified();
         outs[0] = Value();
     };
-    {
-        using namespace std::placeholders;
-        reg("line", "plot3",    std::bind(plot3Impl, "plot3",    _1, _2, _3, _4));
-        reg("line", "scatter3", std::bind(plot3Impl, "scatter3", _1, _2, _3, _4));
-    }
+    reg("line", "plot3",
+        [plot3Impl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
+            plot3Impl("plot3", a, n, o, gc);
+        });
+    reg("line", "scatter3",
+        [plot3Impl](keel::ArrayRef<Value> a, keel::usize n, keel::MutArrayRef<Value> o, GraphicsContext &gc) {
+            plot3Impl("scatter3", a, n, o, gc);
+        });
     // stem3(x, y, z) — vertical 3D stems from the z=0 plane up to
     // each (x, y, z) point + marker at the tip. Shares the cabinet
     // projection with plot3/scatter3. Emits two datasets:
@@ -232,7 +232,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // Stems: 2 points per stem with null between stems. elemAsDouble:
             // MATLAB's plot family converts any numeric input (logical,
             // integer classes, single) to double at the boundary.
-            std::ostringstream sx, sy, sz;
+            StrBuf sx, sy, sz;
             sx << '['; sy << '['; sz << '[';
             for (keel::usize i = 0; i < N; ++i) {
                 const double x = X.elemAsDouble(i);
@@ -245,15 +245,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             sx << ']'; sy << ']'; sz << ']';
             DatasetInfo dsLine;
-            dsLine.type = "plot3";
-            dsLine.xJson = sx.str();
-            dsLine.yJson = sy.str();
-            dsLine.zJson = sz.str();
-            dsLine.style = "color=#1f77b4";
-            fm.pushDataset(std::move(dsLine));
+            dsLine.type.assign("plot3");
+            dsLine.xJson = sx.take();
+            dsLine.yJson = sy.take();
+            dsLine.zJson = sz.take();
+            dsLine.style.assign("color=#1f77b4");
+            fm.pushDataset(keel::move(dsLine));
 
             // Tip markers via scatter3.
-            std::ostringstream mx, my, mz;
+            StrBuf mx, my, mz;
             mx << '['; my << '['; mz << '[';
             for (keel::usize i = 0; i < N; ++i) {
                 if (i) { mx << ','; my << ','; mz << ','; }
@@ -263,13 +263,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             mx << ']'; my << ']'; mz << ']';
             DatasetInfo dsDot;
-            dsDot.type = "scatter3";
-            dsDot.xJson = mx.str();
-            dsDot.yJson = my.str();
-            dsDot.zJson = mz.str();
-            dsDot.style = "color=#1f77b4";
+            dsDot.type.assign("scatter3");
+            dsDot.xJson = mx.take();
+            dsDot.yJson = my.take();
+            dsDot.zJson = mz.take();
+            dsDot.style.assign("color=#1f77b4");
             dsDot.markerSize = 4;
-            fm.pushDataset(std::move(dsDot));
+            fm.pushDataset(keel::move(dsDot));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -288,17 +288,17 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "quiver";
+            ds.type.assign("quiver");
             ds.xJson = vecToJson(args[0]);
             ds.yJson = vecToJson(args[1]);
             ds.uJson = vecToJson(args[2]);
             ds.vJson = vecToJson(args[3]);
             if (args.size() >= 5 && args[4].numel() == 1 && !args[4].isChar()) {
-                std::ostringstream os;
+                StrBuf os;
                 os << "scale=" << args[4].toScalar();
-                ds.style = os.str();
+                ds.style = os.take();
             }
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -314,7 +314,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const auto &V = args[1];
             const keel::usize N = std::min(U.numel(), V.numel());
             if (N == 0) { outs[0] = Value(); return; }
-            std::ostringstream xs, ys, us, vs;
+            StrBuf xs, ys, us, vs;
             xs << '['; ys << '['; us << '['; vs << '[';
             for (keel::usize i = 0; i < N; ++i) {
                 if (i) { xs << ','; ys << ','; us << ','; vs << ','; }
@@ -325,13 +325,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
             xs << ']'; ys << ']'; us << ']'; vs << ']';
             DatasetInfo ds;
-            ds.type = "quiver";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.uJson = us.str();
-            ds.vJson = vs.str();
-            ds.style = "scale=1";
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("quiver");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.uJson = us.take();
+            ds.vJson = vs.take();
+            ds.style.assign("scale=1");
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -396,7 +396,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 // Single-series path — backwards-compatible with the
                 // previous wire format.
                 DatasetInfo ds;
-                ds.type = "area";
+                ds.type.assign("area");
                 if (nData == 1) {
                     ds.xJson = makeIndexJson(yData->numel());
                     ds.yJson = vecToJson(*yData);
@@ -406,12 +406,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 }
                 parsePlotArgs(args, nData, ds);
                 if (hasBase) {
-                    std::ostringstream os;
+                    StrBuf os;
                     if (!ds.style.empty()) os << ds.style << ";";
                     os << "base=" << baseline;
-                    ds.style = os.str();
+                    ds.style = os.take();
                 }
-                fm.pushDataset(std::move(ds));
+                fm.pushDataset(keel::move(ds));
                 fm.emitModified();
                 outs[0] = Value();
                 return;
@@ -424,19 +424,21 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // the topmost band (largest cumulative) is drawn first
             // and gets overdrawn from below — yielding visible bands
             // for c = Yc-1, Yc-2, ..., 0.
-            std::vector<std::vector<double>> S(Yr, std::vector<double>(Yc, 0.0));
-            std::vector<double> Ybuf(yData->numel());
+            keel::Array<double> S;
+            S.resize(Yr * Yc, 0.0);
+            keel::Array<double> Ybuf;
+            Ybuf.resize(yData->numel());
             for (keel::usize i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yData->elemAsDouble(i);
             const double *Yp = Ybuf.data();
             for (keel::usize r = 0; r < Yr; ++r) {
                 double acc = 0;
                 for (keel::usize c = 0; c < Yc; ++c) {
                     acc += Yp[c * Yr + r];   // column-major
-                    S[r][c] = acc;
+                    S[r * Yc + c] = acc;
                 }
             }
             // X vector — explicit when given, else 1..Yr.
-            std::ostringstream xs;
+            StrBuf xs;
             xs << '[';
             if (xData) {
                 for (keel::usize r = 0; r < Yr; ++r) {
@@ -450,26 +452,26 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 }
             }
             xs << ']';
-            const std::string xJsonStr = xs.str();
+            const keel::String xJsonStr = xs.take();
 
             // Emit datasets c = Yc-1 down to 0 (topmost band first).
             for (long long cc = (long long)Yc - 1; cc >= 0; --cc) {
                 DatasetInfo ds;
-                ds.type = "area";
-                ds.xJson = xJsonStr;
-                std::ostringstream ys;
+                ds.type.assign("area");
+                ds.xJson = xJsonStr.clone();
+                StrBuf ys;
                 ys << '[';
                 for (keel::usize r = 0; r < Yr; ++r) {
                     if (r) ys << ',';
-                    ys << S[r][(keel::usize)cc];
+                    ys << S[r * Yc + (keel::usize)cc];
                 }
                 ys << ']';
-                ds.yJson = ys.str();
-                std::ostringstream sty;
+                ds.yJson = ys.take();
+                StrBuf sty;
                 sty << "color=" << kStackPalette[(keel::usize)cc % 8];
                 if (hasBase) sty << ";base=" << baseline;
-                ds.style = sty.str();
-                fm.pushDataset(std::move(ds));
+                ds.style = sty.take();
+                fm.pushDataset(keel::move(ds));
             }
             fm.emitModified();
             outs[0] = Value();
@@ -484,7 +486,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "quiver3";
+            ds.type.assign("quiver3");
             ds.xJson = vecToJson(args[0]);
             ds.yJson = vecToJson(args[1]);
             ds.zJson = vecToJson(args[2]);
@@ -494,13 +496,13 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // vJson (2-D quiver) so we tuck w into style as scale-style
             // extras for now: encode as `w=[...]`. Cleaner would be a
             // dedicated wJson field on DatasetInfo; deferred.
-            std::string wjson = vecToJson(args[5]);
-            std::ostringstream sty;
+            keel::String wjson = vecToJson(args[5]);
+            StrBuf sty;
             sty << "wJson=" << wjson;
             if (args.size() >= 7 && args[6].numel() == 1)
                 sty << ";scale=" << args[6].toScalar();
-            ds.style = sty.str();
-            fm.pushDataset(std::move(ds));
+            ds.style = sty.take();
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -525,7 +527,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         const int N = 200;
         auto *mr = gc.mr;
 
-        std::ostringstream xs, ys;
+        StrBuf xs, ys;
         xs << '['; ys << '[';
         for (int i = 0; i < N; ++i) {
             const double x = a + (b - a) * i / (double)(N - 1);
@@ -550,11 +552,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         fm.prepareForPlot();
         DatasetInfo ds;
-        ds.type = "line";
-        ds.xJson = xs.str();
-        ds.yJson = ys.str();
-        ds.style = "color=#1f77b4";
-        fm.pushDataset(std::move(ds));
+        ds.type.assign("line");
+        ds.xJson = xs.take();
+        ds.yJson = ys.take();
+        ds.style.assign("color=#1f77b4");
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
@@ -563,10 +565,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         fm.prepareForPlot();
         DatasetInfo ds;
-        ds.type = "line";
-        ds.xJson = "[0,1]";
-        ds.yJson = "[0,1]";
-        fm.pushDataset(std::move(ds));
+        ds.type.assign("line");
+        ds.xJson.assign("[0,1]");
+        ds.yJson.assign("[0,1]");
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
@@ -698,7 +700,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const int N = 200;
             auto *mr = gc.mr;
 
-            std::ostringstream xs, ys, zs;
+            StrBuf xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
             for (int i = 0; i < N; ++i) {
                 const double t = a + (b - a) * i / (double)(N - 1);
@@ -723,12 +725,12 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "plot3";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
-            ds.zJson = zs.str();
-            ds.style = "color=#1f77b4";
-            fm.pushDataset(std::move(ds));
+            ds.type.assign("plot3");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
+            ds.zJson = zs.take();
+            ds.style.assign("color=#1f77b4");
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -757,7 +759,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             outs[0] = Value(); return;
         }
 
-        std::vector<double> Xs(Cx), Ys(Ry);
+        keel::Array<double> Xs, Ys;
+        Xs.resize(Cx);
+        Ys.resize(Ry);
         for (keel::usize c = 0; c < Cx; ++c) Xs[c] = Xv.elemAsDouble(c);
         for (keel::usize r = 0; r < Ry; ++r) Ys[r] = Yv.elemAsDouble(r);
         const double xMin = Xs.front(), xMax = Xs.back();
@@ -810,7 +814,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         };
 
         // Build the seed list.
-        std::vector<std::pair<double, double>> seeds;
+        keel::Array<std::pair<double, double>> seeds;
         if (autoSlice) {
             // 5×5 evenly spaced inside the grid (1 cell margin so the
             // first integration step has data on every side).
@@ -839,8 +843,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         const double eps = 1e-9;
 
         const auto traceFrom = [&](double x0, double y0, int dir,
-                                   std::ostringstream &xs,
-                                   std::ostringstream &ys, keel::usize &count) {
+                                   StrBuf &xs,
+                                   StrBuf &ys, keel::usize &count) {
             double x = x0, y = y0;
             for (int step = 0; step < maxSteps; ++step) {
                 double u, v;
@@ -870,14 +874,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
-        std::ostringstream xs, ys;
+        StrBuf xs, ys;
         xs << '['; ys << '[';
         keel::usize count = 0;
         for (auto [sx0, sy0] : seeds) {
             // Trace forward then backward; insert a null break before
             // each new seed *and* between forward / backward halves so
             // they render as separate strokes.
-            std::ostringstream fwdX, fwdY, bwdX, bwdY;
+            StrBuf fwdX, fwdY, bwdX, bwdY;
             keel::usize fwdN = 0, bwdN = 0;
             traceFrom(sx0, sy0,  1, fwdX, fwdY, fwdN);
             traceFrom(sx0, sy0, -1, bwdX, bwdY, bwdN);
@@ -889,23 +893,23 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // it from the forward half. Renderer doesn't care about
             // direction — it just connects consecutive non-NaN points.
             if (bwdN > 0) {
-                xs << bwdX.str(); ys << bwdY.str();
+                xs << bwdX.as_ref(); ys << bwdY.as_ref();
                 count += bwdN;
                 if (fwdN > 0) { xs << ",null,"; ys << ",null,"; }
             }
             if (fwdN > 0) {
-                xs << fwdX.str(); ys << fwdY.str();
+                xs << fwdX.as_ref(); ys << fwdY.as_ref();
                 count += fwdN;
             }
         }
         xs << ']'; ys << ']';
 
         DatasetInfo ds;
-        ds.type = "line";
-        ds.xJson = xs.str();
-        ds.yJson = ys.str();
-        ds.style = "color=#2078b4";
-        fm.pushDataset(std::move(ds));
+        ds.type.assign("line");
+        ds.xJson = xs.take();
+        ds.yJson = ys.take();
+        ds.style.assign("color=#2078b4");
+        fm.pushDataset(keel::move(ds));
         fm.emitModified();
         outs[0] = Value();
     };
@@ -929,10 +933,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "stem";
+            ds.type.assign("stem");
             keel::usize nvStart = parsePlotXYStyle(args, ds);
             parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -946,10 +950,10 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "stairs";
+            ds.type.assign("stairs");
             keel::usize nvStart = parsePlotXYStyle(args, ds);
             parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -971,7 +975,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "errorbar";
+            ds.type.assign("errorbar");
 
             // Find the first char arg (line spec) — everything before is data.
             keel::usize nData = args.size();
@@ -1011,14 +1015,14 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             }
 
             parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
     // ── Log-scale plot types — graphics.line ────────────────────────
     auto registerLogPlot = [&reg](
-                                const char *name, const std::string &xscale,
-                                const std::string &yscale) {
+                                const char *name, const char *xscale,
+                                const char *yscale) {
         reg("line", name,
             [xscale, yscale](
                 keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -1030,15 +1034,15 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 }
                 auto &fm = gc.fm;
                 fm.prepareForPlot();
-                fm.currentAxes().xscale = xscale;
-                fm.currentAxes().yscale = yscale;
+                fm.currentAxes().xscale.assign(xscale);
+                fm.currentAxes().yscale.assign(yscale);
                 auto isSpec = [](const Value &v) {
                     if (!v.isChar()) return false;
-                    static const std::string alpha = "-:.o+*xsd^v<>phrgbcymwk";
-                    std::string s(v.toString().as_ref());
+                    static constexpr keel::StringRef alpha("-:.o+*xsd^v<>phrgbcymwk");
+                    keel::String s = v.toString();
                     if (s.empty()) return false;
                     for (char c : s)
-                        if (alpha.find(c) == std::string::npos) return false;
+                        if (alpha.find(c) == keel::kInvalidIndex) return false;
                     return true;
                 };
                 auto isData = [](const Value &v) {
@@ -1047,7 +1051,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 keel::usize i = 0;
                 while (i < args.size()) {
                     DatasetInfo ds;
-                    ds.type = "line";
+                    ds.type.assign("line");
                     if (i + 1 < args.size() && isData(args[i]) && isData(args[i + 1])) {
                         ds.xJson = vecToJson(args[i]);
                         ds.yJson = vecToJson(args[i + 1]);
@@ -1065,7 +1069,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     }
                     while (i + 1 < args.size() && args[i].isChar()
                            && !isSpec(args[i])) {
-                        std::string key(args[i].toString().as_ref());
+                        keel::String key = args[i].toString();
                         for (auto &c : key)
                             c = (char)std::tolower((unsigned char)c);
                         if (key == "linewidth")
@@ -1074,7 +1078,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                             ds.markerSize = args[i + 1].toScalar();
                         i += 2;
                     }
-                    fm.pushDataset(std::move(ds));
+                    fm.pushDataset(keel::move(ds));
                 }
                 fm.emitModified();
                 outs[0] = Value();
@@ -1112,8 +1116,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             if (!ax.datasets.empty()) {
                 auto &ds = ax.datasets.back();
-                if (!ds.style.empty()) ds.style += ";";
-                ds.style += "cometAnim=1";
+                if (!ds.style.empty()) ds.style.push_back(';');
+                ds.style.append("cometAnim=1");
                 fm.current().modified = true;
                 fm.emitModified();
             }
@@ -1125,8 +1129,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             if (!ax.datasets.empty()) {
                 auto &ds = ax.datasets.back();
-                if (!ds.style.empty()) ds.style += ";";
-                ds.style += "cometAnim=1";
+                if (!ds.style.empty()) ds.style.push_back(';');
+                ds.style.append("cometAnim=1");
                 fm.current().modified = true;
                 fm.emitModified();
             }
@@ -1162,10 +1166,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.prepareForPlot();
 
             // Walk TRI column-major: row i, column k → T[k*M + i] (1-based).
-            std::vector<double> Tbuf(TRI.numel());
+            keel::Array<double> Tbuf;
+            Tbuf.resize(TRI.numel());
             for (keel::usize i = 0; i < Tbuf.size(); ++i) Tbuf[i] = TRI.elemAsDouble(i);
             const double *T = Tbuf.data();
-            std::ostringstream xs, ys;
+            StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
             for (keel::usize i = 0; i < M; ++i) {
@@ -1183,16 +1188,16 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             xs << ']'; ys << ']';
 
             DatasetInfo ds;
-            ds.type = "line";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
+            ds.type.assign("line");
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
             keel::usize nvStart = 3;
             if (args.size() >= 4 && args[3].isChar()) {
                 ds.style = args[3].toString();
                 nvStart = 4;
             }
             parsePlotArgs(args, nvStart, ds);
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.emitModified();
             outs[0] = Value();
         });
@@ -1221,7 +1226,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const auto &yv = args[1];
             const keel::usize n = xv.numel();
             if (yv.numel() != n || n < 3) { outs[0] = Value(); return; }
-            std::vector<double> X(n), Y(n);
+            keel::Array<double> X, Y;
+            X.resize(n);
+            Y.resize(n);
             for (keel::usize i = 0; i < n; ++i) {
                 X[i] = xv.elemAsDouble(i);
                 Y[i] = yv.elemAsDouble(i);
@@ -1240,7 +1247,7 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 const double c2=cx*cx+cy*cy;
                 return ax*(by*c2-cy*b2) - ay*(bx*c2-cx*b2) + a2*(bx*cy-cx*by);
             };
-            std::vector<std::array<keel::usize, 3>> tris;
+            keel::Array<std::array<keel::usize, 3>> tris;
             for (keel::usize a = 0; a < n; ++a)
                 for (keel::usize b = a + 1; b < n; ++b)
                     for (keel::usize c = b + 1; c < n; ++c) {
@@ -1257,7 +1264,8 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     }
             // Per-triangle circumcenter.
             struct CC { double x, y; };
-            std::vector<CC> ccs(tris.size());
+            keel::Array<CC> ccs;
+            ccs.resize(tris.size());
             for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
                 const double ax=X[T[0]], ay=Y[T[0]];
@@ -1289,25 +1297,30 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             const double clipXLo = xMin - xPad, clipXHi = xMax + xPad;
             const double clipYLo = yMin - yPad, clipYHi = yMax + yPad;
 
-            // Build edge-to-triangles map. Each Delaunay edge is shared
+            // Build edge-to-triangles list. Each Delaunay edge is shared
             // by exactly 1 triangle (= convex-hull edge → unbounded
             // Voronoi cell, draw a ray) or 2 triangles (= interior
             // edge, draw the finite segment between their CCs).
-            std::map<std::pair<keel::usize, keel::usize>, std::vector<keel::usize>> edge2tri;
+            struct EdgeTri { keel::usize u, v, t; };
+            keel::Array<EdgeTri> edgeTris;
+            edgeTris.reserve(tris.size() * 3);
             for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
                 for (int e = 0; e < 3; ++e) {
                     keel::usize u = T[e], v = T[(e + 1) % 3];
                     if (u > v) std::swap(u, v);
-                    edge2tri[{u, v}].push_back(t);
+                    edgeTris.push_back(EdgeTri{u, v, t});
                 }
             }
+            std::sort(edgeTris.begin(), edgeTris.end(), [](const EdgeTri &a, const EdgeTri &b) {
+                return a.u != b.u ? a.u < b.u : (a.v != b.v ? a.v < b.v : a.t < b.t);
+            });
             // We DON'T pre-clip emitted segments to the data bbox: rays
             // need to extend out to the visible axis frame so unbounded
             // cells look terminated, not chopped short. xlim/ylim below
             // pin the axis and the IDE's SVG clipPath does the actual
             // boundary clipping per pixel.
-            std::ostringstream xs, ys;
+            StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
             const auto emit = [&](double xa, double ya, double xb, double yb) {
@@ -1317,18 +1330,21 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 ys << ya << ',' << yb;
             };
 
-            for (auto &kv : edge2tri) {
-                const keel::usize u = kv.first.first, v = kv.first.second;
-                const auto &neighbors = kv.second;
-                if (neighbors.size() == 2) {
+            for (keel::usize i = 0; i < edgeTris.size();) {
+                const keel::usize u = edgeTris[i].u;
+                const keel::usize v = edgeTris[i].v;
+                keel::usize j = i + 1;
+                while (j < edgeTris.size() && edgeTris[j].u == u && edgeTris[j].v == v) ++j;
+                const keel::usize cnt = j - i;
+                if (cnt == 2) {
                     // Interior edge — bounded segment between two CCs.
-                    const auto &A = ccs[neighbors[0]];
-                    const auto &B = ccs[neighbors[1]];
+                    const auto &A = ccs[edgeTris[i].t];
+                    const auto &B = ccs[edgeTris[i + 1].t];
                     emit(A.x, A.y, B.x, B.y);
-                } else if (neighbors.size() == 1) {
+                } else if (cnt == 1) {
                     // Hull edge — unbounded ray from the CC, perpendicular
                     // to the edge, going AWAY from the third triangle vertex.
-                    const keel::usize t = neighbors[0];
+                    const keel::usize t = edgeTris[i].t;
                     const auto &T = tris[t];
                     const keel::usize third = (T[0] != u && T[0] != v) ? T[0]
                                        : (T[1] != u && T[1] != v) ? T[1] : T[2];
@@ -1344,22 +1360,23 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                     // Extend the ray FAR — clipSeg will trim to the bbox.
                     const double far = (clipXHi - clipXLo) + (clipYHi - clipYLo);
                     const double nlen = std::sqrt(nx * nx + ny * ny);
-                    if (nlen < 1e-15) continue;
+                    if (nlen < 1e-15) { i = j; continue; }
                     const double endX = ccs[t].x + (nx / nlen) * far;
                     const double endY = ccs[t].y + (ny / nlen) * far;
                     emit(ccs[t].x, ccs[t].y, endX, endY);
                 }
+                i = j;
             }
             xs << ']'; ys << ']';
 
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo edgeDs;
-            edgeDs.type = "line";
-            edgeDs.xJson = xs.str();
-            edgeDs.yJson = ys.str();
-            edgeDs.style = "color=#5fb3d4";
-            fm.pushDataset(std::move(edgeDs));
+            edgeDs.type.assign("line");
+            edgeDs.xJson = xs.take();
+            edgeDs.yJson = ys.take();
+            edgeDs.style.assign("color=#5fb3d4");
+            fm.pushDataset(keel::move(edgeDs));
             // Scatter the input points on top.
             std::array<Value, 2> ptArgs{ xv, yv };
             std::array<Value, 1> outBuf;
@@ -1373,11 +1390,11 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             // Clamp axis to the data extent (computed above as
             // clipX/Y Lo/Hi). Same range we used for ray clipping —
             // both come from the input-points bbox plus 10% margin.
-            std::ostringstream xlim, ylim;
+            StrBuf xlim, ylim;
             xlim << '[' << clipXLo << ',' << clipXHi << ']';
             ylim << '[' << clipYLo << ',' << clipYHi << ']';
-            fm.currentAxes().xlimJson = xlim.str();
-            fm.currentAxes().ylimJson = ylim.str();
+            fm.currentAxes().xlimJson = xlim.take();
+            fm.currentAxes().ylimJson = ylim.take();
             // scatter() above already called emitModified, clearing the
             // modified flag. Re-flag so the JSON re-emits with our xlim.
             fm.current().modified = true;
@@ -1439,20 +1456,20 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             fm.prepareForPlot();
             // Vector form: emit one dataset per requested position.
             const keel::usize n = args[0].numel();
-            std::string lineSpec;
+            keel::String lineSpec;
             for (keel::usize i = 1; i < args.size(); ++i) {
                 if (args[i].isChar()) { lineSpec = args[i].toString(); break; }
             }
             for (keel::usize i = 0; i < n; ++i) {
                 DatasetInfo ds;
-                ds.type = type;
-                std::ostringstream xs, ys;
+                ds.type.assign(type);
+                StrBuf xs, ys;
                 xs << '[' << args[0].elemAsDouble(i) << ']';
                 ys << '[' << 0 << ']';   // sentinel y; renderer ignores
-                ds.xJson = xs.str();
-                ds.yJson = ys.str();
-                if (!lineSpec.empty()) ds.style = lineSpec;
-                fm.pushDataset(std::move(ds));
+                ds.xJson = xs.take();
+                ds.yJson = ys.take();
+                if (!lineSpec.empty()) ds.style = lineSpec.clone();
+                fm.pushDataset(keel::move(ds));
             }
             fm.emitModified();
             outs[0] = Value();
@@ -1465,9 +1482,9 @@ void buildLinePlots(std::vector<PlotEntry> &table)
             (void)nargout;
             auto &fm = gc.fm;
             DatasetInfo ds;
-            ds.type = "line";
-            ds.xJson = "[0,1]";
-            ds.yJson = "[0,1]";
+            ds.type.assign("line");
+            ds.xJson.assign("[0,1]");
+            ds.yJson.assign("[0,1]");
             keel::usize i = 0;
             if (args.size() >= 2 && (args[0].isNumeric() || args[0].isLogical())
                 && (args[1].isNumeric() || args[1].isLogical())) {
@@ -1475,28 +1492,28 @@ void buildLinePlots(std::vector<PlotEntry> &table)
                 ds.yJson = vecToJson(args[1]);
                 i = 2;
                 if (args.size() >= 3 && (args[2].isNumeric() || args[2].isLogical())) {
-                    ds.type = "plot3";
+                    ds.type.assign("plot3");
                     ds.zJson = vecToJson(args[2]);
                     i = 3;
                 }
             }
             for (; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 for (auto &c : key) c = (char)std::tolower((unsigned char)c);
                 if (key == "xdata" && args[i + 1].isNumeric())
                     ds.xJson = vecToJson(args[i + 1]);
                 else if (key == "ydata" && args[i + 1].isNumeric())
                     ds.yJson = vecToJson(args[i + 1]);
                 else if (key == "zdata" && args[i + 1].isNumeric()) {
-                    ds.type = "plot3";
+                    ds.type.assign("plot3");
                     ds.zJson = vecToJson(args[i + 1]);
                 } else if (key == "linewidth" && args[i + 1].isNumeric())
                     ds.lineWidth = args[i + 1].toScalar();
                 else if (key == "markersize" && args[i + 1].isNumeric())
                     ds.markerSize = args[i + 1].toScalar();
             }
-            fm.pushDataset(std::move(ds));
+            fm.pushDataset(keel::move(ds));
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();

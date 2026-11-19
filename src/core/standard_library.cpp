@@ -4,6 +4,7 @@
 // Toolboxes (signal, stats, etc.) are loaded dynamically as plugins via PluginLoader.
 
 #include <keel/memory.h>
+#include <keel/smart_ptr.h>
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/runtime/runtime.hpp>
@@ -43,9 +44,9 @@ void StandardLibrary::install(Engine &engine)
     registerFusionRules(engine);
 }
 
-std::unique_ptr<Engine> makeStandardEngine(keel::Allocator *mr)
+keel::UniquePtr<Engine> makeStandardEngine(keel::Allocator *mr)
 {
-    auto engine = std::make_unique<Engine>(mr);
+    auto engine = keel::make_unique<Engine>(mr);
     StandardLibrary::install(*engine);
     return engine;
 }

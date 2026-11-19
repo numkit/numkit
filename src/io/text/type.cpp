@@ -7,18 +7,15 @@
 // through the shared slurpFile (extras.hpp).
 #include <numkit/io/text/extras.hpp>
 
-#include <functional>
-#include <string>
-
 namespace numkit::io {
 
 // ── type ──────────────────────────────────────────────────────────────
 void type(FsContext &fs,
-          const std::function<void(const std::string &)> &out,
-          const std::string &filename)
+          keel::FunctionRef<void(keel::StringRef)> out,
+          keel::StringRef filename)
 {
-    auto content = slurpFile(fs, filename, "type");
-    out(content);
+    keel::String content = slurpFile(fs, filename, "type");
+    out(content.as_ref());
     if (content.empty() || content.back() != '\n')
         out("\n");
 }

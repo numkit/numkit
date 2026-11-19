@@ -40,8 +40,10 @@
 // each rule's match closure stays a few lines; the execute closures share the
 // runtime type/shape guard via bindAffineProduct.
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/memory.h>
+#include <keel/optional.h>
 #include <keel/complex.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/fusion_rule.hpp>
@@ -49,9 +51,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/ops/fused/fused_kernels.hpp>
 #include <numkit/ops/helpers.hpp>   // numkit::ops::createLike
-
-#include <optional>
-#include <vector>
 
 namespace numkit {
 
@@ -171,16 +170,16 @@ bool bindAffineProductCx(const Value &c0, const Value &c1, keel::c64 &scale,
 // The inner expression is left for the caller to classify (a leaf for plain
 // clamp, an affine product for the affine-clamp rules).
 struct ClampShape { const ASTNode *lo, *hi, *inner; };
-std::optional<ClampShape> peelClamp(const ASTNode *node, bool minOuter) {
+keel::Optional<ClampShape> peelClamp(const ASTNode *node, bool minOuter) {
     const char *outerFn = minOuter ? "min" : "max";
     const char *innerFn = minOuter ? "max" : "min";
     const ASTNode *o = calleeName(node);
     if (!o || o->strValue != outerFn || node->children.size() != 3)
-        return std::nullopt;
+        return keel::kNullOpt;
     const ASTNode *innerCall = node->children[2].get();
     const ASTNode *ic = calleeName(innerCall);
     if (!ic || ic->strValue != innerFn || innerCall->children.size() != 3)
-        return std::nullopt;
+        return keel::kNullOpt;
     // outer = OUTER(boundO, INNER(boundI, x)); max-outer → boundO=lo, boundI=hi;
     // min-outer → boundO=hi, boundI=lo.
     const ASTNode *boundO = node->children[1].get();
@@ -189,13 +188,13 @@ std::optional<ClampShape> peelClamp(const ASTNode *node, bool minOuter) {
     return ClampShape{minOuter ? boundI : boundO, minOuter ? boundO : boundI, x};
 }
 
-std::optional<std::vector<const ASTNode *>> matchClamp(const ASTNode *node,
-                                                       bool minOuter) {
+keel::Optional<keel::Array<const ASTNode *>> matchClamp(const ASTNode *node,
+                                                        bool minOuter) {
     auto cs = peelClamp(node, minOuter);
-    if (!cs) return std::nullopt;
+    if (!cs) return keel::kNullOpt;
     if (!isPureLeaf(cs->lo) || !isPureLeaf(cs->hi) || !isPureLeaf(cs->inner))
-        return std::nullopt;
-    return std::vector<const ASTNode *>{cs->inner, cs->lo, cs->hi};
+        return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{cs->inner, cs->lo, cs->hi};
 }
 
 // Fast path for a real-double array x and real-double scalar lo/hi. Bit-
@@ -219,27 +218,27 @@ bool execClamp(const Value *ops, keel::usize n, Value &out,
 // ---- affine:  (a.*x) ± b  →  fusedAffine(x, a, ±b) -----------------------
 
 // match the additive form `prod + b` or `b + prod`, prod = a.*x of pure leaves.
-std::optional<std::vector<const ASTNode *>> matchAffineAdd(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchAffineAdd(const ASTNode *node) {
     const ASTNode *add = asBinOp(node, "+");
-    if (!add) return std::nullopt;
+    if (!add) return keel::kNullOpt;
     const ASTNode *l = add->children[0].get(), *r = add->children[1].get();
     const ASTNode *prod = asPureProduct(l);
     const ASTNode *b = r;
     if (!prod) { prod = asPureProduct(r); b = l; }  // commute: b + a.*x
-    if (!prod || !isPureLeaf(b)) return std::nullopt;
-    return std::vector<const ASTNode *>{prod->children[0].get(),
+    if (!prod || !isPureLeaf(b)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{prod->children[0].get(),
                                         prod->children[1].get(), b};
 }
 
 // match the subtractive form `prod - b`, prod = a.*x of pure leaves. (`b -
 // prod` negates the scale — a different recipe, deferred to a later rule.)
-std::optional<std::vector<const ASTNode *>> matchAffineSub(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchAffineSub(const ASTNode *node) {
     const ASTNode *sub = asBinOp(node, "-");
-    if (!sub) return std::nullopt;
+    if (!sub) return keel::kNullOpt;
     const ASTNode *prod = asPureProduct(sub->children[0].get());
     const ASTNode *b = sub->children[1].get();
-    if (!prod || !isPureLeaf(b)) return std::nullopt;
-    return std::vector<const ASTNode *>{prod->children[0].get(),
+    if (!prod || !isPureLeaf(b)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{prod->children[0].get(),
                                         prod->children[1].get(), b};
 }
 
@@ -298,14 +297,14 @@ bool execAffine(const Value *ops, keel::usize n, Value &out,
 // products keeps this structurally disjoint from affine_add/sub (whose offset
 // is a leaf, not a product), so each binary node matches at most one rule —
 // important because the VM compiler commits to one rule at compile time.
-std::optional<std::vector<const ASTNode *>> matchAxpby(const ASTNode *node,
-                                                       const char *op) {
+keel::Optional<keel::Array<const ASTNode *>> matchAxpby(const ASTNode *node,
+                                                        const char *op) {
     const ASTNode *bin = asBinOp(node, op);
-    if (!bin) return std::nullopt;
+    if (!bin) return keel::kNullOpt;
     const ASTNode *p = asPureProduct(bin->children[0].get());
     const ASTNode *q = asPureProduct(bin->children[1].get());
-    if (!p || !q) return std::nullopt;
-    return std::vector<const ASTNode *>{p->children[0].get(), p->children[1].get(),
+    if (!p || !q) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{p->children[0].get(), p->children[1].get(),
                                         q->children[0].get(), q->children[1].get()};
 }
 
@@ -346,13 +345,13 @@ bool execAxpby(const Value *ops, keel::usize n, Value &out,
 // (→ `x - b.*y` = axpby(x, 1, y, -b)) or a real scalar (→ `c - a.*x`, the
 // negated-scale affine fusedAffine(x, -a, c) — the recipe affine_sub defers).
 // `prod - prod` stays with axpby_sub (a product is not a pure leaf → declines).
-std::optional<std::vector<const ASTNode *>> matchNegProd(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchNegProd(const ASTNode *node) {
     const ASTNode *sub = asBinOp(node, "-");
-    if (!sub) return std::nullopt;
+    if (!sub) return keel::kNullOpt;
     const ASTNode *leaf = sub->children[0].get();
     const ASTNode *prod = asPureProduct(sub->children[1].get());
-    if (!isPureLeaf(leaf) || !prod) return std::nullopt;
-    return std::vector<const ASTNode *>{leaf, prod->children[0].get(),
+    if (!isPureLeaf(leaf) || !prod) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{leaf, prod->children[0].get(),
                                         prod->children[1].get()};
 }
 
@@ -417,31 +416,31 @@ const ASTNode *asPureSub(const ASTNode *node) {
 }
 
 // match `(A - B) .* s` / `s .* (A - B)` (`*` accepted: scalar s ≡ `.*`).
-std::optional<std::vector<const ASTNode *>>
+keel::Optional<keel::Array<const ASTNode *>>
 matchShiftScaleMul(const ASTNode *node) {
     const ASTNode *mul = asBinOp(node, ".*");
     if (!mul) mul = asBinOp(node, "*");
-    if (!mul) return std::nullopt;
+    if (!mul) return keel::kNullOpt;
     const ASTNode *sub = asPureSub(mul->children[0].get());
     const ASTNode *s = mul->children[1].get();
     if (!sub) { sub = asPureSub(mul->children[1].get()); s = mul->children[0].get(); }
-    if (!sub || !isPureLeaf(s)) return std::nullopt;
-    return std::vector<const ASTNode *>{sub->children[0].get(),
+    if (!sub || !isPureLeaf(s)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{sub->children[0].get(),
                                         sub->children[1].get(), s};
 }
 
 // match `(A - B) ./ d` / `(A - B) / d` (division does NOT commute → d is the
 // right operand only). A non-scalar d makes `/` an mrdivide; the execute guard
 // declines it, so accepting `/` here is safe.
-std::optional<std::vector<const ASTNode *>>
+keel::Optional<keel::Array<const ASTNode *>>
 matchShiftScaleDiv(const ASTNode *node) {
     const ASTNode *div = asBinOp(node, "./");
     if (!div) div = asBinOp(node, "/");
-    if (!div) return std::nullopt;
+    if (!div) return keel::kNullOpt;
     const ASTNode *sub = asPureSub(div->children[0].get());
     const ASTNode *d = div->children[1].get();
-    if (!sub || !isPureLeaf(d)) return std::nullopt;
-    return std::vector<const ASTNode *>{sub->children[0].get(),
+    if (!sub || !isPureLeaf(d)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{sub->children[0].get(),
                                         sub->children[1].get(), d};
 }
 
@@ -486,8 +485,8 @@ bool execShiftScale(const Value *ops, keel::usize n, Value &out,
 // enumerators are only needed in registerFusionRules. Used by the f(inner)
 // families that follow (affine-clamp, abs, sq, unary, transcendental).
 enum class InnerKind;
-std::optional<std::vector<const ASTNode *>> matchInner(const ASTNode *node,
-                                                       InnerKind kind);
+keel::Optional<keel::Array<const ASTNode *>> matchInner(const ASTNode *node,
+                                                        InnerKind kind);
 bool bindInner(const Value *ops, keel::usize n, InnerKind kind, double &scale,
                double &offset, const Value *&x);
 bool bindInnerCx(const Value *ops, keel::usize n, InnerKind kind, keel::c64 &scale,
@@ -500,14 +499,14 @@ bool bindInnerCx(const Value *ops, keel::usize n, InnerKind kind, keel::c64 &sca
 
 // operands = [lo, hi, <inner-ops>] — lo/hi FIRST (fixed positions) so the
 // variable-arity inner (matchInner) follows. expr = clamp(<inner>) to [lo,hi].
-std::optional<std::vector<const ASTNode *>>
+keel::Optional<keel::Array<const ASTNode *>>
 matchAffineClamp(const ASTNode *node, InnerKind kind, bool minOuter) {
     auto cs = peelClamp(node, minOuter);
-    if (!cs || !isPureLeaf(cs->lo) || !isPureLeaf(cs->hi)) return std::nullopt;
+    if (!cs || !isPureLeaf(cs->lo) || !isPureLeaf(cs->hi)) return keel::kNullOpt;
     auto inner = matchInner(cs->inner, kind);
-    if (!inner) return std::nullopt;
-    std::vector<const ASTNode *> ops{cs->lo, cs->hi};
-    ops.insert(ops.end(), inner->begin(), inner->end());
+    if (!inner) return keel::kNullOpt;
+    keel::Array<const ASTNode *> ops{cs->lo, cs->hi};
+    ops.append(*inner);
     return ops;                               // [lo, hi, <inner-ops>]
 }
 
@@ -539,20 +538,20 @@ const ASTNode *absArg(const ASTNode *node) {
 }
 
 // abs of any affine inner (product/shift/neg), via matchInner on abs's argument.
-std::optional<std::vector<const ASTNode *>> matchAbsAffine(const ASTNode *node,
-                                                           InnerKind kind) {
+keel::Optional<keel::Array<const ASTNode *>> matchAbsAffine(const ASTNode *node,
+                                                            InnerKind kind) {
     const ASTNode *arg = absArg(node);
-    if (!arg) return std::nullopt;
+    if (!arg) return keel::kNullOpt;
     return matchInner(arg, kind);
 }
 
 // abs of a pure subtract `A - B` (covers abs(x-y), abs(x-c), abs(c-x)).
-std::optional<std::vector<const ASTNode *>> matchAbsDiff(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchAbsDiff(const ASTNode *node) {
     const ASTNode *arg = absArg(node);
-    if (!arg) return std::nullopt;
+    if (!arg) return keel::kNullOpt;
     const ASTNode *s = asPureSub(arg);
-    if (!s) return std::nullopt;
-    return std::vector<const ASTNode *>{s->children[0].get(),
+    if (!s) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{s->children[0].get(),
                                         s->children[1].get()};
 }
 
@@ -640,40 +639,40 @@ bool execAbsDiff(const Value *ops, keel::usize n, Value &out,
 // children), so a given inner node matches at most one kind.
 enum class InnerKind { ProductAdd, ProductSub, Product, ShiftAdd, ShiftSub, NegLeaf };
 
-std::optional<std::vector<const ASTNode *>> matchInner(const ASTNode *node,
-                                                       InnerKind kind) {
+keel::Optional<keel::Array<const ASTNode *>> matchInner(const ASTNode *node,
+                                                        InnerKind kind) {
     switch (kind) {
         case InnerKind::ProductAdd: return matchAffineAdd(node);     // a.*x+b / b+a.*x
         case InnerKind::ProductSub: return matchAffineSub(node);     // a.*x-b
         case InnerKind::Product: {                                   // a.*x (no offset)
             const ASTNode *p = asPureProduct(node);
-            if (!p) return std::nullopt;
-            return std::vector<const ASTNode *>{p->children[0].get(),
+            if (!p) return keel::kNullOpt;
+            return keel::Array<const ASTNode *>{p->children[0].get(),
                                                 p->children[1].get()};
         }
         case InnerKind::ShiftAdd: {                                  // x+c / c+x
             const ASTNode *a = asBinOp(node, "+");
             if (!a || !isPureLeaf(a->children[0].get()) ||
                 !isPureLeaf(a->children[1].get()))
-                return std::nullopt;
-            return std::vector<const ASTNode *>{a->children[0].get(),
+                return keel::kNullOpt;
+            return keel::Array<const ASTNode *>{a->children[0].get(),
                                                 a->children[1].get()};
         }
         case InnerKind::ShiftSub: {                                  // x-c / c-x
             const ASTNode *s = asPureSub(node);
-            if (!s) return std::nullopt;
-            return std::vector<const ASTNode *>{s->children[0].get(),
+            if (!s) return keel::kNullOpt;
+            return keel::Array<const ASTNode *>{s->children[0].get(),
                                                 s->children[1].get()};
         }
         case InnerKind::NegLeaf: {                                   // -x (unary minus)
             if (node->type != NodeType::UNARY_OP || node->strValue != "-" ||
                 node->children.size() != 1 ||
                 !isPureLeaf(node->children[0].get()))
-                return std::nullopt;
-            return std::vector<const ASTNode *>{node->children[0].get()};
+                return keel::kNullOpt;
+            return keel::Array<const ASTNode *>{node->children[0].get()};
         }
     }
-    return std::nullopt;
+    return keel::kNullOpt;
 }
 
 // Decode evaluated operands for `kind` into (scale, offset, x). Every mapping is
@@ -787,19 +786,19 @@ constexpr InnerKind kInnerKindsNoShiftSub[] = {
 // routes to the dedicated fusedUnaryShiftDiv / fusedTransShiftDiv kernels.
 
 // `(A-B)./d` → [A,B,d]; `x./d` → [x,d]. `/` accepted (scalar d ≡ `./`).
-std::optional<std::vector<const ASTNode *>> matchDivArg(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchDivArg(const ASTNode *node) {
     const ASTNode *div = asBinOp(node, "./");
     if (!div) div = asBinOp(node, "/");
-    if (!div) return std::nullopt;
+    if (!div) return keel::kNullOpt;
     const ASTNode *dd = div->children[1].get();
-    if (!isPureLeaf(dd)) return std::nullopt;
+    if (!isPureLeaf(dd)) return keel::kNullOpt;
     const ASTNode *left = div->children[0].get();
     if (const ASTNode *s = asPureSub(left))
-        return std::vector<const ASTNode *>{s->children[0].get(),
+        return keel::Array<const ASTNode *>{s->children[0].get(),
                                             s->children[1].get(), dd};
     if (isPureLeaf(left))
-        return std::vector<const ASTNode *>{left, dd};
-    return std::nullopt;
+        return keel::Array<const ASTNode *>{left, dd};
+    return keel::kNullOpt;
 }
 
 // Decode → (sub, div, x) for the (x-sub)/div kernel. `(c-x)/d` → (x-c)/(-d)
@@ -860,14 +859,14 @@ bool shiftDivAnyNegative(const double *x, double sub, double div, keel::usize n)
 // the canonical rescale-then-saturate `max(0,min(1,(x-lo)./range))`. Peel the
 // clamp, match the inner as a div-arg → ops = [lo, hi, <div-arg-ops>]. matchInner
 // rejects `./`, so the affine-clamp rules decline it and these own it.
-std::optional<std::vector<const ASTNode *>>
+keel::Optional<keel::Array<const ASTNode *>>
 matchAffineClampDiv(const ASTNode *node, bool minOuter) {
     auto cs = peelClamp(node, minOuter);
-    if (!cs || !isPureLeaf(cs->lo) || !isPureLeaf(cs->hi)) return std::nullopt;
+    if (!cs || !isPureLeaf(cs->lo) || !isPureLeaf(cs->hi)) return keel::kNullOpt;
     auto inner = matchDivArg(cs->inner);
-    if (!inner) return std::nullopt;
-    std::vector<const ASTNode *> ops{cs->lo, cs->hi};
-    ops.insert(ops.end(), inner->begin(), inner->end());
+    if (!inner) return keel::kNullOpt;
+    keel::Array<const ASTNode *> ops{cs->lo, cs->hi};
+    ops.append(*inner);
     return ops;                                // [lo, hi, <div-arg-ops>]
 }
 
@@ -992,33 +991,33 @@ const ASTNode *asSquare(const ASTNode *node) {
 }
 
 // (<inner>).^2 — square of any affine inner (product/shift/neg), via matchInner.
-std::optional<std::vector<const ASTNode *>> matchSqAffine(const ASTNode *node,
-                                                          InnerKind kind) {
+keel::Optional<keel::Array<const ASTNode *>> matchSqAffine(const ASTNode *node,
+                                                           InnerKind kind) {
     const ASTNode *base = asSquare(node);
-    if (!base) return std::nullopt;
+    if (!base) return keel::kNullOpt;
     return matchInner(base, kind);
 }
 
 // (A - B).^2 — square of a pure subtract (SSE term, squared deviation).
-std::optional<std::vector<const ASTNode *>> matchSqDiff(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchSqDiff(const ASTNode *node) {
     const ASTNode *base = asSquare(node);
-    if (!base) return std::nullopt;
+    if (!base) return keel::kNullOpt;
     const ASTNode *s = asPureSub(base);
-    if (!s) return std::nullopt;
-    return std::vector<const ASTNode *>{s->children[0].get(),
+    if (!s) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{s->children[0].get(),
                                         s->children[1].get()};
 }
 
 // sqrt(x.^2 + y.^2) — magnitude of two pure-leaf arrays.
-std::optional<std::vector<const ASTNode *>> matchSqrtSumSq(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchSqrtSumSq(const ASTNode *node) {
     const ASTNode *arg = unaryCallArg(node, "sqrt");
-    if (!arg) return std::nullopt;
+    if (!arg) return keel::kNullOpt;
     const ASTNode *add = asBinOp(arg, "+");
-    if (!add) return std::nullopt;
+    if (!add) return keel::kNullOpt;
     const ASTNode *bx = asSquare(add->children[0].get());
     const ASTNode *by = asSquare(add->children[1].get());
-    if (!bx || !by || !isPureLeaf(bx) || !isPureLeaf(by)) return std::nullopt;
-    return std::vector<const ASTNode *>{bx, by};
+    if (!bx || !by || !isPureLeaf(bx) || !isPureLeaf(by)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{bx, by};
 }
 
 bool execSqAffine(const Value *ops, keel::usize n, Value &out,
@@ -1183,28 +1182,28 @@ bool sameIdentifier(const ASTNode *a, const ASTNode *b) {
            a->strValue == b->strValue;
 }
 
-std::optional<std::vector<const ASTNode *>> matchSoftThreshold(const ASTNode *node) {
+keel::Optional<keel::Array<const ASTNode *>> matchSoftThreshold(const ASTNode *node) {
     const ASTNode *mul = asBinOp(node, ".*");
-    if (!mul) return std::nullopt;
+    if (!mul) return keel::kNullOpt;
     // one factor is sign(x), the other max(0, abs(x)-t) (either order).
     const ASTNode *c0 = mul->children[0].get(), *c1 = mul->children[1].get();
     const ASTNode *signX = unaryCallArg(c0, "sign");
     const ASTNode *maxNode = c1;
     if (!signX) { signX = unaryCallArg(c1, "sign"); maxNode = c0; }
-    if (!signX) return std::nullopt;
+    if (!signX) return keel::kNullOpt;
     // maxNode = max(0, abs(x)-t) / max(abs(x)-t, 0).
     const ASTNode *mxName = calleeName(maxNode);
     if (!mxName || mxName->strValue != "max" || maxNode->children.size() != 3)
-        return std::nullopt;
+        return keel::kNullOpt;
     const ASTNode *ma = maxNode->children[1].get(), *mb = maxNode->children[2].get();
     const ASTNode *sub = isZeroLiteral(ma) ? mb : (isZeroLiteral(mb) ? ma : nullptr);
-    if (!sub) return std::nullopt;
+    if (!sub) return keel::kNullOpt;
     const ASTNode *subN = asBinOp(sub, "-");           // must be abs(x) - t
-    if (!subN) return std::nullopt;
+    if (!subN) return keel::kNullOpt;
     const ASTNode *absX = unaryCallArg(subN->children[0].get(), "abs");
     const ASTNode *t = subN->children[1].get();
-    if (!absX || !isPureLeaf(t) || !sameIdentifier(signX, absX)) return std::nullopt;
-    return std::vector<const ASTNode *>{signX, t};     // [x, t]
+    if (!absX || !isPureLeaf(t) || !sameIdentifier(signX, absX)) return keel::kNullOpt;
+    return keel::Array<const ASTNode *>{signX, t};     // [x, t]
 }
 
 bool execSoftThreshold(const Value *ops, keel::usize n, Value &out,
@@ -1341,14 +1340,14 @@ bool execTransDiv(const Value *ops, keel::usize n, Value &out,
 // bugs/math/complex-zero-imag-narrowing.md.
 void addNarrowing(Engine &engine, FusionRule rule)
 {
-    auto inner = std::move(rule.execute);
-    rule.execute = [inner](const Value *ops, keel::usize n, Value &out,
-                           keel::Allocator *mr) -> bool {
+    auto inner = keel::move(rule.execute);
+    rule.execute = [inner = keel::move(inner)](const Value *ops, keel::usize n, Value &out,
+                                               keel::Allocator *mr) -> bool {
         if (!inner(ops, n, out, mr)) return false;
-        out = numkit::narrowComplex(std::move(out), mr);
+        out = numkit::narrowComplex(keel::move(out), mr);
         return true;
     };
-    engine.addFusionRule(std::move(rule));
+    engine.addFusionRule(keel::move(rule));
 }
 
 } // namespace
@@ -1483,9 +1482,9 @@ void registerFusionRules(Engine &engine) {
     FusionRule absDiv;
     absDiv.name  = "abs_div";
     absDiv.match = [](const ASTNode *node)
-                   -> std::optional<std::vector<const ASTNode *>> {
+                   -> keel::Optional<keel::Array<const ASTNode *>> {
         const ASTNode *arg = absArg(node);
-        if (!arg) return std::nullopt;
+        if (!arg) return keel::kNullOpt;
         return matchDivArg(arg);
     };
     absDiv.execute = execAbsDivInner;
@@ -1500,9 +1499,9 @@ void registerFusionRules(Engine &engine) {
             FusionRule r;
             r.name  = name;
             r.match = [fname, kind](const ASTNode *node)
-                      -> std::optional<std::vector<const ASTNode *>> {
+                      -> keel::Optional<keel::Array<const ASTNode *>> {
                 const ASTNode *arg = unaryCallArg(node, fname);
-                if (!arg) return std::nullopt;
+                if (!arg) return keel::kNullOpt;
                 return matchInner(arg, kind);
             };
             r.execute = [kind, fn](const Value *ops, keel::usize n, Value &out,
@@ -1523,9 +1522,9 @@ void registerFusionRules(Engine &engine) {
         FusionRule r;
         r.name  = name;
         r.match = [fname](const ASTNode *node)
-                  -> std::optional<std::vector<const ASTNode *>> {
+                  -> keel::Optional<keel::Array<const ASTNode *>> {
             const ASTNode *arg = unaryCallArg(node, fname);
-            if (!arg) return std::nullopt;
+            if (!arg) return keel::kNullOpt;
             return matchDivArg(arg);
         };
         r.execute = [fn](const Value *ops, keel::usize n, Value &out,
@@ -1562,9 +1561,9 @@ void registerFusionRules(Engine &engine) {
     FusionRule sqDiv;
     sqDiv.name  = "sq_div";
     sqDiv.match = [](const ASTNode *node)
-                  -> std::optional<std::vector<const ASTNode *>> {
+                  -> keel::Optional<keel::Array<const ASTNode *>> {
         const ASTNode *base = asSquare(node);
-        if (!base) return std::nullopt;
+        if (!base) return keel::kNullOpt;
         return matchDivArg(base);
     };
     sqDiv.execute = execSqDivInner;
@@ -1589,9 +1588,9 @@ void registerFusionRules(Engine &engine) {
             FusionRule r;
             r.name  = name;
             r.match = [fname, kind](const ASTNode *node)
-                      -> std::optional<std::vector<const ASTNode *>> {
+                      -> keel::Optional<keel::Array<const ASTNode *>> {
                 const ASTNode *arg = unaryCallArg(node, fname);
-                if (!arg) return std::nullopt;
+                if (!arg) return keel::kNullOpt;
                 return matchInner(arg, kind);
             };
             r.execute = [kind, fn](const Value *ops, keel::usize n, Value &out,
@@ -1625,9 +1624,9 @@ void registerFusionRules(Engine &engine) {
         FusionRule r;
         r.name  = name;
         r.match = [fname](const ASTNode *node)
-                  -> std::optional<std::vector<const ASTNode *>> {
+                  -> keel::Optional<keel::Array<const ASTNode *>> {
             const ASTNode *arg = unaryCallArg(node, fname);
-            if (!arg) return std::nullopt;
+            if (!arg) return keel::kNullOpt;
             return matchDivArg(arg);
         };
         r.execute = [fn](const Value *ops, keel::usize n, Value &out,

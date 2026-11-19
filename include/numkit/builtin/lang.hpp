@@ -3,10 +3,10 @@
 // Pure C++ Language keywords, variable name validation, environment, and evaluation.
 #pragma once
 
+#include <keel/array.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
-#include <string>
-#include <vector>
+#include <keel/string.h>
 #include <numkit/sys/env.hpp>
 #include <numkit/value/value.hpp>
 
@@ -34,14 +34,14 @@ namespace numkit::builtin {
 /// @param value Target string value.
 /// @throws std::runtime_error If @p name is empty or contains '='.
 /// @see getenv
-void setenv(const std::string &name, const std::string &value = "");
+void setenv(keel::StringRef name, keel::StringRef value = "");
 
 /// @brief Reads an operating system environment variable as a C++ string (`getenv(name)`).
 ///
 /// @param name Environment variable name.
 /// @return Variable value, or empty string `""` if unset.
 /// @see setenv
-std::string getenv(const std::string &name);
+keel::String getenv(keel::StringRef name);
 
 /// @brief Reads an environment variable returning a character row Value (`val = getenv(name)`).
 ///
@@ -62,13 +62,13 @@ Value getenv(const Value &name, keel::Allocator *mr = nullptr);
 /// @param name String identifier to test.
 /// @return `true` if @p name is a reserved keyword, `false` otherwise.
 /// @see isvarname, keywords
-bool iskeyword(const std::string &name);
+bool iskeyword(keel::StringRef name);
 
-/// @brief Lists all reserved MATLAB keywords as a C++ vector.
+/// @brief Lists all reserved MATLAB keywords as a C++ array.
 ///
-/// @return Vector of keyword strings.
+/// @return Array of keyword strings.
 /// @see iskeyword
-const std::vector<std::string> &keywords();
+const keel::Array<keel::String> &keywords();
 
 /// @brief MATLAB-compatible overload for @ref iskeyword.
 ///
@@ -89,7 +89,7 @@ Value iskeyword(keel::ArrayRef<Value> args, keel::Allocator *mr = nullptr);
 /// @param name String to validate.
 /// @return `true` if @p name is a valid variable name, `false` otherwise.
 /// @see iskeyword
-bool isvarname(const std::string &name);
+bool isvarname(keel::StringRef name);
 
 /// @brief MATLAB-compatible overload for @ref isvarname.
 ///

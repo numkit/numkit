@@ -7,12 +7,32 @@ namespace numkit {
 
 namespace depdetail {
 struct AxisRange;
-void recordAccess(ElemAccessMap &m, const std::string &base,
+void recordAccess(ElemAccessMap &m, keel::StringRef base,
                   const ASTNode *n);
-bool isSizeCallee(const std::string &callee);
+bool isSizeCallee(keel::StringRef callee);
 }  // namespace depdetail
 
 namespace {
+
+VarRegions &getOrInsertRegions(ElemAccessMap &m, keel::StringRef key)
+{
+    if (VarRegions *p = m.get(key))
+        return *p;
+    return *m.try_insert(keel::String::from(key), VarRegions{}).value;
+}
+
+void insertName(keel::HashSet<keel::String> &s, keel::StringRef name)
+{
+    if (!s.contains(name))
+        s.insert(keel::String::from(name));
+}
+
+void mergeNames(keel::HashSet<keel::String> &dst,
+                const keel::HashSet<keel::String> &src)
+{
+    for (const auto &n : src)
+        insertName(dst, n);
+}
 
 // A WILDCARD statement (opaque for/while/eval/…) may ACCUMULATE on
 // earlier state (`AF = AF + …` inside a for over a previously defined
@@ -21,11 +41,11 @@ namespace {
 // values: mark [0..w] dirty. Worst case this degrades to a full
 // prefix re-run — the documented wildcard contract (correct over
 // fast); scripts without wildcards keep their precise skipping.
-std::vector<keel::usize> closeDirtySet(const std::vector<StatementFacts> &facts,
-                                  const std::vector<char> &marked)
+keel::Array<keel::usize> closeDirtySet(const keel::Array<StatementFacts> &facts,
+                                       keel::ArrayRef<char> marked)
 {
-    std::vector<char> dirty(marked);
-    std::vector<keel::usize> work;
+    keel::Array<char> dirty(marked);
+    keel::Array<keel::usize> work;
     // Rebuild downstream edges lazily? No — the caller passes the
     // graph's own closure; here only the wildcard-prefix rule runs.
     (void)facts;
@@ -37,18 +57,18 @@ std::vector<keel::usize> closeDirtySet(const std::vector<StatementFacts> &facts,
 // Merge region-access maps (statement facts accumulate RHS + LHS).
 void mergeAccess(ElemAccessMap &dst, const ElemAccessMap &src)
 {
-    for (const auto &kv : src) {
-        VarRegions &d = dst[kv.first];
-        if (kv.second.all)
+    for (auto [k, v] : src) {
+        VarRegions &d = getOrInsertRegions(dst, k);
+        if (v.all)
             d.setAll();
-        for (const auto &r : kv.second.rects)
+        for (const auto &r : v.rects)
             d.add(r);
     }
 }
 
 // ── Expression walker: collect every identifier evaluated ──────────
 struct ReadCollector {
-    std::set<std::string> reads;
+    keel::HashSet<keel::String> reads;
     bool wildcard = false;   // eval/feval/assignin/clear or unresolved
     ElemAccessMap elemReads; // fine-grained rvalue regions (B1)
 
@@ -58,7 +78,7 @@ struct ReadCollector {
             return;
         switch (n->type) {
         case NodeType::IDENTIFIER:
-            reads.insert(n->strValue);
+            insertName(reads, n->strValue);
             return;
         case NodeType::CALL:
         case NodeType::COMMAND_CALL: {
@@ -68,12 +88,12 @@ struct ReadCollector {
             // are fine: the identifier was already read. Some call
             // forms carry the callee as an IDENTIFIER child instead of
             // strValue — check both.
-            std::string callee = n->strValue;
+            keel::StringRef callee = n->strValue;
             if (callee.empty() && !n->children.empty()
                 && n->children[0]->type == NodeType::IDENTIFIER)
                 callee = n->children[0]->strValue;
             if (!callee.empty())
-                reads.insert(callee);
+                insertName(reads, callee);
             if (callee == "eval" || callee == "feval"
                 || callee == "assignin" || callee == "clear"
                 || callee == "load" || callee == "run")
@@ -82,7 +102,7 @@ struct ReadCollector {
             // variable, so shape probes read ALL of it.
             if (depdetail::isSizeCallee(callee) && n->children.size() >= 2
                 && n->children[1]->type == NodeType::IDENTIFIER)
-                elemReads[n->children[1]->strValue].setAll();
+                getOrInsertRegions(elemReads, n->children[1]->strValue).setAll();
             // Paren access vs call: the parser emits BOTH as CALL with
             // the head as an IDENTIFIER child (`C(7)` ≡ `foo(3)` at AST
             // level — the variable/function split is runtime). Record
@@ -136,7 +156,7 @@ struct ReadCollector {
             for (const auto &c : n->children)
                 expr(c.get());
             for (const auto &p : n->paramNames)
-                reads.erase(p);
+                reads.remove(p);
             return;
         default:
             for (const auto &c : n->children)
@@ -175,15 +195,15 @@ StatementFacts factsFor(const ASTNode *s)
     switch (s->type) {
     case NodeType::FUNCTION_DEF:
     case NodeType::CLASSDEF_DEF:
-        f.writes.insert(s->strValue);
+        insertName(f.writes, s->strValue);
         return f;
     case NodeType::ASSIGN: {
         const ASTNode *lhs = s->children[0].get();
         ReadCollector rc;
         rc.expr(s->children[1].get());
         if (lhs->type == NodeType::IDENTIFIER) {
-            f.writes.insert(lhs->strValue);
-            f.elemWrites[lhs->strValue].setAll();   // whole-var def
+            insertName(f.writes, lhs->strValue);
+            getOrInsertRegions(f.elemWrites, lhs->strValue).setAll();   // whole-var def
         } else if ((lhs->type == NodeType::INDEX
                     || lhs->type == NodeType::CELL_INDEX)
                    && !lhs->children.empty()
@@ -192,21 +212,21 @@ StatementFacts factsFor(const ASTNode *s)
             // is BOTH read and written; the WRITE side carries the
             // literal region (the READ side is the merge of everything
             // ELSE — conservatively ALL via the coarse `reads`).
-            std::string base = lhs->children[0]->strValue;
-            f.reads.insert(base);          // coarse (portion-A compat)
-            f.writes.insert(base);
-            f.lhsMergeBases.insert(base);  // NOT an rvalue read (B1)
+            keel::StringRef base = lhs->children[0]->strValue;
+            insertName(f.reads, base);          // coarse (portion-A compat)
+            insertName(f.writes, base);
+            insertName(f.lhsMergeBases, base);  // NOT an rvalue read (B1)
             depdetail::recordAccess(f.elemWrites, base, lhs);
         } else {
             // s.f = v and friends — merge-write without a tractable
             // region: coarse read+write of the walked names.
             ReadCollector lc;
             lc.expr(lhs);
-            f.reads = lc.reads;
-            f.writes = lc.reads;
+            f.writes = lc.reads.clone();
+            f.reads = keel::move(lc.reads);
             f.wildcardReads = lc.wildcard;
         }
-        f.reads.insert(rc.reads.begin(), rc.reads.end());
+        mergeNames(f.reads, rc.reads);
         mergeAccess(f.elemReads, rc.elemReads);
         f.wildcardReads = f.wildcardReads || rc.wildcard;
         return f;
@@ -218,17 +238,17 @@ StatementFacts factsFor(const ASTNode *s)
                 ReadCollector lc;
                 lc.expr(t.get());
                 for (const auto &w : lc.reads)
-                    f.writes.insert(w);   // plain ids + merge-writes
+                    insertName(f.writes, w);   // plain ids + merge-writes
                 if (lc.wildcard)
                     f.wildcardReads = true;
             }
         for (const auto &r : s->returnNames)
             if (!r.empty() && r != "~")
-                f.writes.insert(r);
+                insertName(f.writes, r);
         // RHS is the CALL child (last child).
         if (!s->children.empty())
             rc.expr(s->children.back().get());
-        f.reads.insert(rc.reads.begin(), rc.reads.end());
+        mergeNames(f.reads, rc.reads);
         mergeAccess(f.elemReads, rc.elemReads);
         f.wildcardReads = f.wildcardReads || rc.wildcard;
         return f;
@@ -237,14 +257,14 @@ StatementFacts factsFor(const ASTNode *s)
         // delete s.f — reads s.
         ReadCollector rc;
         rc.expr(s->children[0].get());
-        f.reads = rc.reads;
+        f.reads = keel::move(rc.reads);
         return f;
     }
     case NodeType::EXPR_STMT: {
         ReadCollector rc;
         rc.expr(s->children.empty() ? s : s->children[0].get());
-        f.reads = rc.reads;
-        f.elemReads = std::move(rc.elemReads);
+        f.reads = keel::move(rc.reads);
+        f.elemReads = keel::move(rc.elemReads);
         f.wildcardReads = rc.wildcard;
         // A bare CALL statement (plot/title/grid on/legend/colormap…)
         // mutates shared FIGURE state invisible to variable facts.
@@ -256,8 +276,8 @@ StatementFacts factsFor(const ASTNode *s)
         if (e && (e->type == NodeType::CALL
                   || e->type == NodeType::COMMAND_CALL
                   || e->type == NodeType::IDENTIFIER)) {
-            f.reads.insert(kFigureStateVar);
-            f.writes.insert(kFigureStateVar);
+            insertName(f.reads, kFigureStateVar);
+            insertName(f.writes, kFigureStateVar);
         }
         return f;
     }
@@ -273,13 +293,13 @@ StatementFacts factsFor(const ASTNode *s)
         // EXPR_STMT case above.
         ReadCollector rc;
         rc.expr(s);
-        f.reads = rc.reads;
-        f.elemReads = std::move(rc.elemReads);
+        f.reads = keel::move(rc.reads);
+        f.elemReads = keel::move(rc.elemReads);
         f.wildcardReads = rc.wildcard;
         if (s->type == NodeType::CALL
             || s->type == NodeType::COMMAND_CALL) {
-            f.reads.insert(kFigureStateVar);
-            f.writes.insert(kFigureStateVar);
+            insertName(f.reads, kFigureStateVar);
+            insertName(f.writes, kFigureStateVar);
         }
         return f;
     }
@@ -288,9 +308,10 @@ StatementFacts factsFor(const ASTNode *s)
 
 }  // namespace
 
-std::vector<StatementFacts> computeStatementFacts(const ASTNode *program)
+keel::Array<StatementFacts> computeStatementFacts(const ASTNode *program)
 {
-    std::vector<StatementFacts> out;
+    keel::Array<StatementFacts> out;
+    (void)closeDirtySet;
     if (!program)
         return out;
     for (const auto &s : program->children)
@@ -298,8 +319,8 @@ std::vector<StatementFacts> computeStatementFacts(const ASTNode *program)
     return out;
 }
 
-DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
-    : facts_(std::move(facts))
+DependencyGraph::DependencyGraph(keel::Array<StatementFacts> facts)
+    : facts_(keel::move(facts))
 {
     downstream_.resize(facts_.size());
     // Two write semantics meet here:
@@ -317,9 +338,8 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
             continue;
         }
         for (const auto &x : facts_[j].reads) {
-            if (facts_[j].lhsMergeBases.count(x)
-                && facts_[j].elemReads.find(x)
-                       == facts_[j].elemReads.end()) {
+            if (facts_[j].lhsMergeBases.contains(x)
+                && !facts_[j].elemReads.contains(x)) {
                 // Coarse read came from the LHS ONLY (the RHS does not
                 // read the variable) — the assignment does not consume
                 // the current value; no read edge. When the RHS reads
@@ -327,31 +347,28 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
                 // region logic below applies.
                 continue;
             }
-            auto rj = facts_[j].elemReads.find(x);
-            bool wholeReader =
-                rj == facts_[j].elemReads.end() || rj->second.all;
+            const VarRegions *rj = facts_[j].elemReads.get(x);
+            bool wholeReader = !rj || rj->all;
             if (wholeReader) {
                 // Accumulate: every earlier writer contributes.
                 for (keel::usize i = j; i-- > 0;) {
-                    if (facts_[i].writes.count(x)
+                    if (facts_[i].writes.contains(x)
                         || facts_[i].wildcardReads)
                         downstream_[i].push_back(j);
                 }
                 continue;
             }
             // Region reader: nearest intersecting writer per region.
-            for (const auto &reg : rj->second.rects) {
+            for (const auto &reg : rj->rects) {
                 for (keel::usize i = j; i-- > 0;) {
                     if (facts_[i].wildcardReads) {
                         downstream_[i].push_back(j);
                         break;
                     }
-                    if (!facts_[i].writes.count(x))
+                    if (!facts_[i].writes.contains(x))
                         continue;
-                    auto wi = facts_[i].elemWrites.find(x);
-                    bool touches =
-                        wi == facts_[i].elemWrites.end()
-                        || wi->second.all || wi->second.touches(reg);
+                    const VarRegions *wi = facts_[i].elemWrites.get(x);
+                    bool touches = !wi || wi->all || wi->touches(reg);
                     if (touches) {
                         downstream_[i].push_back(j);
                         break;   // this region's value source found
@@ -363,50 +380,48 @@ DependencyGraph::DependencyGraph(std::vector<StatementFacts> facts)
     // Dedup edges.
     for (auto &d : downstream_) {
         std::sort(d.begin(), d.end());
-        d.erase(std::unique(d.begin(), d.end()), d.end());
+        auto *newEnd = std::unique(d.begin(), d.end());
+        d.resize(static_cast<keel::usize>(newEnd - d.begin()));
     }
 }
 
-std::vector<keel::usize> DependencyGraph::dirtySetForElement(
-    const std::string &var, keel::usize r, keel::usize c) const
+keel::Array<keel::usize> DependencyGraph::dirtySetForElement(
+    keel::StringRef var, keel::usize r, keel::usize c) const
 {
-    return dirtySetForElement(var, r, c, {});
+    keel::HashSet<keel::String> empty;
+    return dirtySetForElement(var, r, c, empty);
 }
 
-std::vector<keel::usize> DependencyGraph::dirtySetForElement(
-    const std::string &var, keel::usize r, keel::usize c,
-    const std::set<std::string> &externalDefs) const
+keel::Array<keel::usize> DependencyGraph::dirtySetForElement(
+    keel::StringRef var, keel::usize r, keel::usize c,
+    const keel::HashSet<keel::String> &externalDefs) const
 {
+    (void)externalDefs;
     const ElemRegion cell{r, r, c, c};
-    std::vector<char> dirty(facts_.size(), 0);
-    std::vector<keel::usize> work;
+    keel::Array<char> dirty(facts_.size(), 0);
+    keel::Array<keel::usize> work;
     for (keel::usize i = 0; i < facts_.size(); ++i) {
         bool affected = false;
         if (facts_[i].wildcardReads) {
             affected = true;
-        } else if (facts_[i].reads.count(var)) {
-            if (facts_[i].lhsMergeBases.count(var)
-                && facts_[i].reads.count(var)
-                       == facts_[i].lhsMergeBases.count(var)
-                   && facts_[i].elemReads.find(var)
-                          == facts_[i].elemReads.end()) {
+        } else if (facts_[i].reads.contains(var)) {
+            if (facts_[i].lhsMergeBases.contains(var)
+                && !facts_[i].elemReads.contains(var)) {
                 // The variable appears ONLY as a merge-write LHS:
                 // a definition of some OTHER cell — its inputs did not
                 // change, the external element write is independent.
                 // (If the RHS also reads var, elemReads has an entry
                 // and the checks below decide.)
-                auto re = facts_[i].elemReads.find(var);
-                if (re == facts_[i].elemReads.end()
-                    || !(re->second.all || re->second.touches(cell)))
+                const VarRegions *re = facts_[i].elemReads.get(var);
+                if (!re || !(re->all || re->touches(cell)))
                     affected = false;
                 else
-                    affected = re->second.all
-                               || re->second.touches(cell);
+                    affected = re->all || re->touches(cell);
             } else {
-                auto re = facts_[i].elemReads.find(var);
-                affected = re == facts_[i].elemReads.end()   // bare id
-                           || re->second.all
-                           || re->second.touches(cell);
+                const VarRegions *re = facts_[i].elemReads.get(var);
+                affected = !re   // bare id
+                           || re->all
+                           || re->touches(cell);
             }
         }
         if (affected) {
@@ -426,8 +441,8 @@ std::vector<keel::usize> DependencyGraph::dirtySetForElement(
                         // The param's own pure definition stays
                         // skipped — re-running it would clobber the
                         // setParam write with the script default.
-                        if (facts_[k].writes.count(var)
-                            && !facts_[k].reads.count(var)
+                        if (facts_[k].writes.contains(var)
+                            && !facts_[k].reads.contains(var)
                             && !facts_[k].wildcardReads)
                             continue;
                         if (!dirty[k]) {
@@ -450,41 +465,42 @@ std::vector<keel::usize> DependencyGraph::dirtySetForElement(
             }
     }
     applyWildcardPrefix();
-    std::vector<keel::usize> out;
+    keel::Array<keel::usize> out;
     for (keel::usize i = 0; i < facts_.size(); ++i)
         if (dirty[i])
             out.push_back(i);
     return out;
 }
 
-std::vector<keel::usize> DependencyGraph::dirtySetFor(const std::string &var) const
+keel::Array<keel::usize> DependencyGraph::dirtySetFor(keel::StringRef var) const
 {
-    return dirtySetFor(var, {});
+    keel::HashSet<keel::String> empty;
+    return dirtySetFor(var, empty);
 }
 
-std::vector<keel::usize> DependencyGraph::dirtySetFor(
-    const std::string &var,
-    const std::set<std::string> &externalDefs) const
+keel::Array<keel::usize> DependencyGraph::dirtySetFor(
+    keel::StringRef var,
+    const keel::HashSet<keel::String> &externalDefs) const
 {
-    std::vector<char> dirty(facts_.size(), 0);
-    std::vector<keel::usize> work;
+    keel::Array<char> dirty(facts_.size(), 0);
+    keel::Array<keel::usize> work;
     for (keel::usize i = 0; i < facts_.size(); ++i) {
         // A PURE DEFINITION of the parameter (writes var, never reads
         // it) is REPLACED by the setParam write — re-running it would
         // clobber the slider value back to the script default. Only
         // statements that READ var (or merge-write it) are affected.
-        bool pureDef = facts_[i].writes.count(var) > 0
-                       && facts_[i].reads.count(var) == 0
+        bool pureDef = facts_[i].writes.contains(var)
+                       && !facts_[i].reads.contains(var)
                        && !facts_[i].wildcardReads;
         if (pureDef)
             continue;
-        bool affected = facts_[i].writes.count(var) > 0
-                        || facts_[i].reads.count(var) > 0;
+        bool affected = facts_[i].writes.contains(var)
+                        || facts_[i].reads.contains(var);
         // A wildcard statement before ANY writer of var may itself
         // write var — conservatively treat wildcards as affected.
         if (!affected && facts_[i].wildcardReads) {
             for (keel::usize k = 0; k <= i; ++k)
-                if (facts_[k].writes.count(var)) {
+                if (facts_[k].writes.contains(var)) {
                     affected = true;
                     break;
                 }
@@ -513,13 +529,13 @@ std::vector<keel::usize> DependencyGraph::dirtySetFor(
                         // (the current slider OR another one) back to
                         // script defaults.
                         bool pureOfParam =
-                            facts_[k].writes.count(var)
-                            && !facts_[k].reads.count(var)
+                            facts_[k].writes.contains(var)
+                            && !facts_[k].reads.contains(var)
                             && !facts_[k].wildcardReads;
                         if (!pureOfParam) {
                             for (const auto &pv : externalDefs) {
-                                if (facts_[k].writes.count(pv)
-                                    && !facts_[k].reads.count(pv)
+                                if (facts_[k].writes.contains(pv)
+                                    && !facts_[k].reads.contains(pv)
                                     && !facts_[k].wildcardReads) {
                                     pureOfParam = true;
                                     break;
@@ -548,7 +564,7 @@ std::vector<keel::usize> DependencyGraph::dirtySetFor(
             }
     }
     applyWildcardPrefix();   // closure may reach new wildcards
-    std::vector<keel::usize> out;
+    keel::Array<keel::usize> out;
     for (keel::usize i = 0; i < facts_.size(); ++i)
         if (dirty[i])
             out.push_back(i);

@@ -1,24 +1,27 @@
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <initializer_list>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 namespace numkit {
 
 class Parser
 {
 public:
-    explicit Parser(const std::vector<Token> &tokens);
+    explicit Parser(keel::ArrayRef<Token> tokens);
+    explicit Parser(keel::Array<Token> &&tokens);
     ASTNodePtr parse();
 
 private:
-    std::vector<Token> tokens_;
+    keel::Array<Token> tokens_;
     keel::usize pos_ = 0;
     keel::usize nestingDepth_ = 0;
     static constexpr keel::usize MAX_NESTING_DEPTH = 200;
@@ -40,10 +43,10 @@ private:
             // 200-level limit fires — refuse with a diagnostic either way.
             StackGuard::check("parser");
             if (++p.nestingDepth_ > MAX_NESTING_DEPTH) {
-                throw std::runtime_error("Parse error at line " + std::to_string(p.current().line)
-                                         + " col " + std::to_string(p.current().col)
-                                         + ": Expression or block nesting exceeds maximum supported depth ("
-                                         + std::to_string(MAX_NESTING_DEPTH) + ")");
+                auto msg = keel::format(
+                    "Parse error at line {} col {}: Expression or block nesting exceeds maximum supported depth ({})",
+                    p.current().line, p.current().col, MAX_NESTING_DEPTH);
+                throw std::runtime_error(msg.c_str());
             }
         }
         ~NestingGuard() { --p.nestingDepth_; }
@@ -63,7 +66,7 @@ private:
     bool isAtEnd() const;
     bool check(TokenType t) const;
     bool match(TokenType t);
-    Token consume(TokenType t, const std::string &msg = "");
+    Token consume(TokenType t, keel::StringRef msg = "");
     void skipNewlines();
     void skipTerminators();
     // Consume a statement-terminating SEMICOLON or COMMA token (if
@@ -88,7 +91,7 @@ private:
     bool isTerminator(std::initializer_list<TokenType> terminators) const;
 
     // — Безопасный парсинг числа —
-    static keel::f64 parseDouble(const std::string &text, int line, int col);
+    static keel::f64 parseDouble(keel::StringRef text, int line, int col);
 
     // — Command-style calls (clear all, grid on, cd dir, etc.) —
     bool isCommandStyleCall() const;
@@ -130,7 +133,7 @@ private:
     ASTNodePtr parseAnonFunc();
     // Reconstruct anonymous-function source from the token span [from, to)
     // (for func2str). MATLAB-style: no inter-token whitespace, literals re-quoted.
-    std::string reconstructAnonSource(keel::usize from, keel::usize to) const;
+    keel::String reconstructAnonSource(keel::usize from, keel::usize to) const;
 
     // — Lookahead для function def —
     bool probeHasOutputSignature() const;

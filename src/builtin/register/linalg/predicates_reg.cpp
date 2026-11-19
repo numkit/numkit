@@ -9,7 +9,9 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/linalg/predicates.hpp>
 
 #include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
@@ -17,21 +19,19 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 
-#include <string>
-
 namespace numkit::linalg {
 namespace detail {
 
 static bool parseSkewOpt(const Value &v, const char *who)
 {
     if (!v.isChar() && !v.isString())
-        throw Error(std::string(who) + ": option must be 'skew' or 'nonskew'",
-                    0, 0, who, "", std::string("numkit:") + who + ":BadOpt");
+        throw Error(keel::format_small<128>("{}: option must be 'skew' or 'nonskew'", who),
+                    0, 0, who, "", keel::format_small<64>("numkit:{}:BadOpt", who));
     keel::String s = v.toString();
     if (s == "skew")     return true;
     if (s == "nonskew")  return false;
-    throw Error(std::string(who) + ": option must be 'skew' or 'nonskew'",
-                0, 0, who, "", std::string("numkit:") + who + ":BadOpt");
+    throw Error(keel::format_small<128>("{}: option must be 'skew' or 'nonskew'", who),
+                0, 0, who, "", keel::format_small<64>("numkit:{}:BadOpt", who));
 }
 
 void issymmetric_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,

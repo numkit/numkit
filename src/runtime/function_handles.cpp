@@ -13,13 +13,13 @@
 // bundle/installStandardLibrary calls.
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 
 #include <stdexcept>
-#include <string>
 
 namespace numkit::runtime {
 
@@ -34,7 +34,7 @@ void registerFunctionHandles(Engine &engine)
                                 if (!args[0].isChar() && !args[0].isString())
                                     throw std::runtime_error(
                                         "str2func: argument must be a string");
-                                std::string s(args[0].toString().as_ref());
+                                keel::String s = args[0].toString();
                                 // MATLAB str2func accepts three forms:
                                 //   'sin'        -> named handle
                                 //   '@sin'       -> named handle (strip '@')
@@ -48,14 +48,14 @@ void registerFunctionHandles(Engine &engine)
                                         ++j;
                                     if (j < s.size() && s[j] == '(') {
                                         // Anonymous function source — parse it.
-                                        outs[0] = ctx.engine->eval(s, true);
+                                        outs[0] = ctx.engine->eval(s.as_ref(), true);
                                     } else {
                                         outs[0] = Value::funcHandle(
                                             s.substr(j), ctx.engine->allocator());
                                     }
                                 } else {
                                     outs[0] = Value::funcHandle(
-                                        s, ctx.engine->allocator());
+                                        s.as_ref(), ctx.engine->allocator());
                                 }
                             });
 
@@ -75,18 +75,20 @@ void registerFunctionHandles(Engine &engine)
                                 if (!h->isFuncHandle())
                                     throw std::runtime_error(
                                         "func2str: argument must be a function handle");
-                                const std::string name(h->funcHandleName().as_ref());
-                                const std::string src(h->funcHandleSource().as_ref());
-                                const bool isAnon = name.rfind("__anon_", 0) == 0;
-                                std::string text;
+                                const keel::String name = h->funcHandleName();
+                                const keel::String src = h->funcHandleSource();
+                                const bool isAnon = name.starts_with("__anon_");
                                 if (!src.empty()) {
-                                    text = src;
+                                    outs[0] = Value::fromString(src.as_ref(), ctx.engine->allocator());
                                 } else if (isAnon) {
-                                    text = "@" + name;
+                                    keel::String text;
+                                    text.reserve(1 + name.size());
+                                    text.push_back('@');
+                                    text.append(name.as_ref());
+                                    outs[0] = Value::fromString(text.as_ref(), ctx.engine->allocator());
                                 } else {
-                                    text = name;
+                                    outs[0] = Value::fromString(name.as_ref(), ctx.engine->allocator());
                                 }
-                                outs[0] = Value::fromString(text, ctx.engine->allocator());
                             });
 }
 

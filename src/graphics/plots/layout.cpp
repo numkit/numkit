@@ -3,9 +3,13 @@
 // graphics.layout.* builders (figure / subplot / axes / labels / limits / legend / ticks / colormap), carved out of plots.cpp. Core-free bodies (GraphicsContext); shared
 // JSON/parse helpers come from plot_internal.hpp.
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/number.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
@@ -20,25 +24,21 @@
 #define M_PI 3.14159265358979323846
 #endif
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit {
 
-void buildLayoutPlots(std::vector<PlotEntry> &table)
+void buildLayoutPlots(keel::Array<PlotEntry> &table)
 {
     using namespace detail;
     auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
     };
     auto regCore = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/true, std::move(fn)});
+        table.push_back(PlotEntry{sub, name, /*core=*/true, keel::move(fn)});
     };
 
     regCore("layout", "figure",
@@ -134,7 +134,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             fm.emitModified();
             outs[0] = Value();
         });
-    auto queryOrSetLim = [](FigureManager &fm, std::string &limJson,
+    auto queryOrSetLim = [](FigureManager &fm, keel::String &limJson,
                             keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                             char axisChar) {
         keel::usize idx = (args.size() >= 1 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
@@ -146,7 +146,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             return;
         }
         if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
-            std::string mode = argStr(args[idx]);
+            keel::String mode = argStr(args[idx]);
             if (mode == "auto") {
                 limJson.clear();
                 fm.current().modified = true;
@@ -163,31 +163,32 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             keel::usize b = limJson.find('[');
             keel::usize c = limJson.find(',');
             keel::usize e = limJson.find(']');
-            if (b != std::string::npos && c != std::string::npos && e != std::string::npos && b < c && c < e) {
-                try {
-                    lo = std::stod(limJson.substr(b + 1, c - b - 1));
-                    hi = std::stod(limJson.substr(c + 1, e - c - 1));
+            if (b != keel::kInvalidIndex && c != keel::kInvalidIndex && e != keel::kInvalidIndex && b < c && c < e) {
+                auto rlo = keel::parse_f64(limJson.substr(b + 1, c - b - 1).trim());
+                auto rhi = keel::parse_f64(limJson.substr(c + 1, e - c - 1).trim());
+                if (rlo.is_ok() && rhi.is_ok()) {
+                    lo = rlo.value();
+                    hi = rhi.value();
                     parsed = true;
-                } catch (...) {}
+                }
             }
         }
         if (!parsed) {
             double dmin = 1e300, dmax = -1e300;
             for (const auto &ds : fm.currentAxes().datasets) {
-                const std::string &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
+                const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
+                const char *base = j.c_str();
                 keel::usize pos = 0;
                 while (pos < j.size()) {
                     if (std::isdigit((unsigned char)j[pos]) || j[pos] == '-' || j[pos] == '+') {
-                        keel::usize endp = 0;
-                        try {
-                            double v = std::stod(j.substr(pos), &endp);
-                            if (endp > 0 && std::isfinite(v)) {
-                                if (v < dmin) dmin = v;
-                                if (v > dmax) dmax = v;
-                                pos += endp;
-                                continue;
-                            }
-                        } catch (...) {}
+                        char *endptr = nullptr;
+                        double v = std::strtod(base + pos, &endptr);
+                        if (endptr && endptr > base + pos && std::isfinite(v)) {
+                            if (v < dmin) dmin = v;
+                            if (v > dmax) dmax = v;
+                            pos = static_cast<keel::usize>(endptr - base);
+                            continue;
+                        }
                     }
                     ++pos;
                 }
@@ -221,7 +222,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (idx >= args.size())
                 ax.holdOn = !ax.holdOn;
             else {
-                std::string s = argStr(args[idx]);
+                keel::String s = argStr(args[idx]);
                 ax.holdOn = (s == "on" || s == "all");
             }
             outs[0] = Value();
@@ -245,9 +246,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
                     if (auto *rec = fm.findHandle(hid)) {
                         if (rec->figureId > 0) fm.setFigure(rec->figureId);
-                        if (rec->axesIndex >= 0 &&
-                            static_cast<keel::usize>(rec->axesIndex) < fm.current().axes.size()) {
-                            fm.current().currentAxes = rec->axesIndex;
+                        if (rec->axesIndex < fm.current().axes.size()) {
+                            fm.current().currentAxes = static_cast<int>(rec->axesIndex);
                         }
                     }
                     outs[0] = Value();
@@ -255,7 +255,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 int mnp = 0;
                 if (args[0].isChar() || args[0].isString()) {
-                    try { mnp = std::stoi(std::string(args[0].toString().as_ref())); } catch (...) {}
+                    auto r = keel::parse_i64(args[0].toString().as_ref().trim());
+                    if (r.is_ok()) mnp = static_cast<int>(r.value());
                 } else {
                     mnp = static_cast<int>(args[0].elemAsDouble(0));
                 }
@@ -386,7 +387,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "annotation",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
-            std::string type(args[0].toString().as_ref());
+            keel::String type = args[0].toString();
             for (auto &c : type) c = (char)std::tolower(c);
             static const std::array<const char *, 6> kTypes = {
                 "line", "arrow", "textarrow", "ellipse", "rectangle",
@@ -399,7 +400,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &fig = fm.current();
             FigureState::Annotation an;
-            an.type = type;
+            an.type = keel::move(type);
             if (args.size() >= 2 && args[1].isNumeric()
                 && args[1].numel() >= 4
                 && !(args.size() >= 3 && args[2].isNumeric())) {
@@ -424,10 +425,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
             }
             // Name-Value walk.
-            auto colorToHex = [](const Value &cv, std::string &hexOut) -> bool {
+            auto colorToHex = [](const Value &cv, keel::String &hexOut) -> bool {
                 char buf[8];
                 if (cv.isChar()) {
-                    std::string s(cv.toString().as_ref());
+                    keel::String s = cv.toString();
                     for (auto &ch : s) ch = (char)std::tolower(ch);
                     static const std::pair<const char *, const char *> kMap[] = {
                         {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
@@ -439,7 +440,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     };
                     for (const auto &kv : kMap)
                         if (s == kv.first) {
-                            hexOut = kv.second;
+                            hexOut.assign(kv.second);
                             return true;
                         }
                     return false;
@@ -449,7 +450,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                                   (unsigned)(cv.elemAsDouble(0) * 255 + 0.5),
                                   (unsigned)(cv.elemAsDouble(1) * 255 + 0.5),
                                   (unsigned)(cv.elemAsDouble(2) * 255 + 0.5));
-                    hexOut = buf;
+                    hexOut.assign(buf);
                     return true;
                 }
                 return false;
@@ -460,7 +461,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             for (keel::usize i = 1; i + 1 < args.size(); ++i) {
                 if (!args[i].isChar())
                     continue;
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 for (auto &c : key) c = (char)std::tolower(c);
                 if (key == "string" && args[i + 1].isChar()) {
                     an.text = args[i + 1].toString();
@@ -472,7 +473,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     an.fontSize = args[i + 1].elemAsDouble(0);
                 }
             }
-            fig.annotations.push_back(std::move(an));
+            fig.annotations.push_back(keel::move(an));
             fig.modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -488,46 +489,49 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // it should append to whatever's already there even without
             // explicit `hold on`.
             DatasetInfo ds;
-            ds.type = "text";
-            std::ostringstream xs, ys;
+            ds.type.assign("text");
+            StrBuf xs, ys;
             xs << "[" << xv.elemAsDouble(0) << "]";
             ys << "[" << yv.elemAsDouble(0) << "]";
-            ds.xJson = xs.str();
-            ds.yJson = ys.str();
+            ds.xJson = xs.take();
+            ds.yJson = ys.take();
             keel::usize strIdx = (args.size() >= 4 && args[2].isNumeric() &&
                              (args[3].isChar() || args[3].isString() || args[3].isCell())) ? 3 : 2;
             ds.label = argStr(args[strIdx]);
-            std::string extras;
-            auto addExtra = [&](const std::string &kv) {
-                if (!extras.empty()) extras += ";";
-                extras += kv;
+            keel::String extras;
+            auto addExtra = [&](keel::StringRef kv) {
+                if (!extras.empty()) extras.push_back(';');
+                extras.append(kv);
             };
             for (keel::usize i = strIdx + 1; i + 1 < args.size(); i += 2) {
-                std::string key = argStr(args[i]);
-                for (auto &c : key) c = std::tolower(c);
+                keel::String key = argStr(args[i]);
+                for (auto &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 const Value &val = args[i + 1];
                 if (key == "color") {
                     if (val.isChar() || val.isString()) {
-                        addExtra("color=" + argStr(val));
+                        keel::String kv = keel::format("color={}", argStr(val));
+                        addExtra(kv.as_ref());
                     } else if (val.isNumeric() && val.numel() >= 3) {
-                        std::ostringstream os2;
+                        StrBuf os2;
                         os2 << "rgb=" << val.elemAsDouble(0) << ","
                             << val.elemAsDouble(1) << "," << val.elemAsDouble(2);
-                        addExtra(os2.str());
+                        addExtra(os2.as_ref());
                     }
                 } else if (key == "fontsize" && val.isNumeric()) {
-                    std::ostringstream fs;
+                    StrBuf fs;
                     fs << "fontSize=" << val.elemAsDouble(0);
-                    addExtra(fs.str());
+                    addExtra(fs.as_ref());
                 } else if (key == "horizontalalignment" && val.isChar()) {
-                    std::string a = argStr(val);
-                    for (auto &c : a) c = std::tolower(c);
-                    if (a == "left" || a == "center" || a == "right")
-                        addExtra("halign=" + a);
+                    keel::String a = argStr(val);
+                    for (auto &c : a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (a == "left" || a == "center" || a == "right") {
+                        keel::String kv = keel::format("halign={}", a);
+                        addExtra(kv.as_ref());
+                    }
                 }
             }
-            ds.style = extras;
-            fm.pushDataset(std::move(ds));
+            ds.style = keel::move(extras);
+            fm.pushDataset(keel::move(ds));
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -554,7 +558,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "ylim",
         [queryOrSetLim](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &ax = gc.fm.currentAxes();
-            std::string &lim = (ax.yyEnabled && ax.activeYside == "right") ? ax.ylim2Json : ax.ylimJson;
+            keel::String &lim = (ax.yyEnabled && ax.activeYside == "right") ? ax.ylim2Json : ax.ylimJson;
             queryOrSetLim(gc.fm, lim, args, nargout, outs, 'y');
         });
     reg("layout", "grid",
@@ -572,7 +576,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (idx >= args.size()) {
                 ax.gridMajor = !ax.gridMajor;
             } else if (args[idx].isChar() || args[idx].isString()) {
-                std::string arg = argStr(args[idx]);
+                keel::String arg = argStr(args[idx]);
                 for (auto &c : arg) c = (char)std::tolower((unsigned char)c);
                 if      (arg == "on")    { ax.gridMajor = true; }
                 else if (arg == "off")   { ax.gridMajor = false; ax.gridMinor = false; }
@@ -586,8 +590,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // Normalise a Location string ("NorthWest" → "northwest"). MATLAB
     // accepts mixed case; we always lowercase. Empty / unrecognised
     // strings clear the field so the renderer falls back to its default.
-    auto normLocation = [](keel::StringRef raw) -> std::string {
-        std::string s;
+    auto normLocation = [](keel::StringRef raw) -> keel::String {
+        keel::String s;
         s.reserve(raw.size());
         for (char c : raw) s.push_back((char)std::tolower((unsigned char)c));
         // Allowed values, mirroring MATLAB:
@@ -604,7 +608,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         };
         for (auto p : kAllowed)
             if (s == p) return s;
-        return std::string();
+        return keel::String{};
     };
     reg("layout", "legend",
         [normLocation](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
@@ -622,8 +626,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             bool visibilityOnly = !args.empty();
             for (keel::usize i = 0; i < args.size() && visibilityOnly; ++i) {
                 if (!args[i].isChar()) { visibilityOnly = false; break; }
-                std::string s(args[i].toString().as_ref());
-                std::string sl;
+                keel::String s = args[i].toString();
+                keel::String sl;
+                sl.reserve(s.size());
                 for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
                 if (sl != "boxoff" && sl != "boxon" && sl != "show"
                     && sl != "on" && sl != "hide" && sl != "off") {
@@ -635,7 +640,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // Don't reset legendLocation if the user calls bare `legend(...)`
             // again — but DO accept an explicit override.
             bool sawLocation = false;
-            std::string newLoc;
+            keel::String newLoc;
             for (keel::usize i = 0; i < args.size(); ++i) {
                 // Cell of labels — the canonical multi-legend form
                 // legend({'sine','cosine'}, 'Location', ...) — decompose
@@ -654,8 +659,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     ax.legendLabels.push_back(argStr(args[i]));
                     continue;
                 }
-                std::string s(args[i].toString().as_ref());
-                std::string sLower;
+                keel::String s = args[i].toString();
+                keel::String sLower;
                 sLower.reserve(s.size());
                 for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
                 if (sLower == "location" && i + 1 < args.size() && (args[i + 1].isChar() || args[i + 1].isString())) {
@@ -680,7 +685,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 }
                 if (isLegendProp && i + 1 < args.size()) {
                     if (sLower == "box" && (args[i + 1].isChar() || args[i + 1].isString())) {
-                        std::string bv(args[i + 1].toString().as_ref());
+                        keel::String bv = args[i + 1].toString();
                         for (char &c : bv) c = (char)std::tolower((unsigned char)c);
                         ax.legendBoxOn = (bv != "off");
                     }
@@ -710,10 +715,10 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     ax.legendBoxOn = true;
                     continue;
                 }
-                ax.legendLabels.push_back(s);
+                ax.legendLabels.push_back(keel::move(s));
             }
             if (sawLocation)
-                ax.legendLocation = newLoc;
+                ax.legendLocation = keel::move(newLoc);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -726,16 +731,16 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             // renderer's default location ('east'). Subsequent calls
             // can move it via 'Location', '<pos>'.
             if (ax.colorbarLocation.empty())
-                ax.colorbarLocation = "east";
+                ax.colorbarLocation.assign("east");
             for (keel::usize i = 0; i < args.size(); ++i) {
                 if (!args[i].isChar()) continue;
-                std::string s(args[i].toString().as_ref());
-                std::string sLower;
+                keel::String s = args[i].toString();
+                keel::String sLower;
                 sLower.reserve(s.size());
                 for (char c : s) sLower.push_back((char)std::tolower((unsigned char)c));
                 if (sLower == "location" && i + 1 < args.size() && args[i + 1].isChar()) {
                     auto loc = normLocation(args[i + 1].toString());
-                    if (!loc.empty()) ax.colorbarLocation = loc;
+                    if (!loc.empty()) ax.colorbarLocation = keel::move(loc);
                     ++i;
                     continue;
                 }
@@ -745,7 +750,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 if (sLower != "off" && sLower != "hide" && sLower != "on") {
                     auto loc = normLocation(s);
                     if (!loc.empty()) {
-                        ax.colorbarLocation = loc;
+                        ax.colorbarLocation = keel::move(loc);
                         continue;
                     }
                 }
@@ -774,15 +779,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
-                std::string mode(args[0].toString().as_ref());
+                keel::String mode = args[0].toString();
                 if (mode == "off") {
                     ax.axisVisible = false;
                 } else if (mode == "on") {
                     ax.axisVisible = true;
                 } else {
-                    ax.axisMode = mode;
-                    if (mode == "ij") ax.yDir = "reverse";
-                    else if (mode == "xy") ax.yDir = "normal";
+                    if (mode == "ij") ax.yDir.assign("reverse");
+                    else if (mode == "xy") ax.yDir.assign("normal");
+                    ax.axisMode = keel::move(mode);
                 }
                 fm.current().modified = true;
                 fm.emitModified();
@@ -790,15 +795,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 return;
             }
             if (!args.empty() && args[0].isNumeric() && args[0].numel() >= 4) {
-                std::ostringstream xs, ys;
+                StrBuf xs, ys;
                 xs << "[" << args[0].elemAsDouble(0) << "," << args[0].elemAsDouble(1) << "]";
                 ys << "[" << args[0].elemAsDouble(2) << "," << args[0].elemAsDouble(3) << "]";
-                ax.xlimJson = xs.str();
-                ax.ylimJson = ys.str();
+                ax.xlimJson = xs.take();
+                ax.ylimJson = ys.take();
                 if (args[0].numel() >= 6) {
-                    std::ostringstream zs;
+                    StrBuf zs;
                     zs << "[" << args[0].elemAsDouble(4) << "," << args[0].elemAsDouble(5) << "]";
-                    ax.zlimJson = zs.str();
+                    ax.zlimJson = zs.take();
                 }
                 fm.current().modified = true;
                 fm.emitModified();
@@ -822,9 +827,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
-                std::string v(args[0].toString().as_ref());
+                keel::String v = args[0].toString();
                 if (v == "reverse" || v == "normal") {
-                    fm.currentAxes().xDir = v;
+                    fm.currentAxes().xDir = keel::move(v);
                     fm.current().modified = true;
                     fm.emitModified();
                 }
@@ -835,9 +840,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (!args.empty() && args[0].isChar()) {
                 auto &fm = gc.fm;
-                std::string v(args[0].toString().as_ref());
+                keel::String v = args[0].toString();
                 if (v == "reverse" || v == "normal") {
-                    fm.currentAxes().yDir = v;
+                    fm.currentAxes().yDir = keel::move(v);
                     fm.current().modified = true;
                     fm.emitModified();
                 }
@@ -882,9 +887,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
             if (args[0].isChar()) {
-                std::string name(args[0].toString().as_ref());
-                for (auto &c : name) c = std::tolower(c);
-                ax.colormapName = name;
+                keel::String name = args[0].toString();
+                for (auto &c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                ax.colormapName = keel::move(name);
                 ax.customColormapJson.clear();
             } else {
                 // Numeric M×3 matrix → encode as JSON array of triplets
@@ -896,7 +901,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     outs[0] = Value();
                     return;
                 }
-                std::ostringstream os;
+                StrBuf os;
                 os << "[";
                 for (keel::usize r = 0; r < R; ++r) {
                     if (r) os << ",";
@@ -907,8 +912,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     os << "[" << rv << "," << gv << "," << bv << "]";
                 }
                 os << "]";
-                ax.customColormapJson = os.str();
-                if (ax.colormapName.empty()) ax.colormapName = "custom";
+                ax.customColormapJson = os.take();
+                if (ax.colormapName.empty()) ax.colormapName.assign("custom");
             }
             fm.current().modified = true;
             fm.emitModified();
@@ -923,12 +928,12 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             if (args.empty()) {
-                fm.currentAxes().colorScale = "linear";
+                fm.currentAxes().colorScale.assign("linear");
             } else if (args[0].isChar()) {
-                std::string mode(args[0].toString().as_ref());
-                for (auto &c : mode) c = std::tolower(c);
+                keel::String mode = args[0].toString();
+                for (auto &c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 if (mode == "log" || mode == "linear") {
-                    fm.currentAxes().colorScale = mode;
+                    fm.currentAxes().colorScale = keel::move(mode);
                 }
             }
             outs[0] = Value();
@@ -938,24 +943,24 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // these do NOT survive prepareForPlot — they're meant to be set AFTER
     // the plot, like in MATLAB. The IDE-side renderer (Heatmap, Interactive-
     // Plot) reads figure.xscale / figure.yscale to drive log-axis display.
-    auto regAxisScale = [&](const char *fnName, std::string AxesState::*field) {
+    auto regAxisScale = [&](const char *fnName, keel::String AxesState::*field) {
         reg("layout", fnName,
             [field, fnName](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                     GraphicsContext &gc) {
                 auto &fm = gc.fm;
-                std::string mode = "linear";
+                keel::String mode = keel::String::from("linear");
                 if (!args.empty() && args[0].isChar()) {
-                    std::string m(args[0].toString().as_ref());
-                    for (auto &c : m) c = std::tolower(c);
-                    if (m == "log" || m == "linear") mode = m;
+                    keel::String m = args[0].toString();
+                    for (auto &c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (m == "log" || m == "linear") mode = keel::move(m);
                 }
                 auto &ax = fm.currentAxes();
                 // yyaxis: yscale routes to yscale2 when right is active.
-                if (std::string(fnName) == "yscale"
+                if (keel::StringRef(fnName) == "yscale"
                     && ax.yyEnabled && ax.activeYside == "right")
-                    ax.yscale2 = mode;
+                    ax.yscale2 = keel::move(mode);
                 else
-                    ax.*field = mode;
+                    ax.*field = keel::move(mode);
                 fm.current().modified = true;
                 fm.emitModified();
                 outs[0] = Value();
@@ -971,14 +976,14 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
             auto &ax = fm.currentAxes();
-            std::string side = "left";
+            keel::String side = keel::String::from("left");
             if (!args.empty() && args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
-                if (s == "left" || s == "right") side = s;
+                if (s == "left" || s == "right") side = keel::move(s);
             }
             ax.yyEnabled = true;
-            ax.activeYside = side;
+            ax.activeYside = keel::move(side);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1000,15 +1005,15 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "linkaxes",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             auto &fm = gc.fm;
-            std::string mode = "xy";  // MATLAB default when no mode arg
+            keel::String mode = keel::String::from("xy");  // MATLAB default when no mode arg
             for (auto &a : args) {
                 if (a.isChar()) {
-                    std::string s(a.toString().as_ref());
-                    std::string sl;
+                    keel::String s = a.toString();
+                    keel::String sl;
                     sl.reserve(s.size());
                     for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
                     if (sl == "x" || sl == "y" || sl == "xy" || sl == "off") {
-                        mode = sl;
+                        mode = keel::move(sl);
                         break;  // only the first string arg is the mode
                     }
                 }
@@ -1016,7 +1021,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (mode == "off")
                 fm.current().linkMode.clear();
             else
-                fm.current().linkMode = mode;
+                fm.current().linkMode = keel::move(mode);
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1024,16 +1029,16 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // rotate3d / pan3d / zoom3d (on|off) — toggle the OrbitControls
     // axis-of-interaction for the 3-D renderer. MATLAB also accepts
     // these as no-arg toggles but the e2e parity tests pass strings.
-    auto interactionToggle = [](std::string AxesState::*field,
+    auto interactionToggle = [](keel::String AxesState::*field,
                                 keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
                                 GraphicsContext &gc) {
-        std::string mode = "on";
+        keel::String mode = keel::String::from("on");
         if (!args.empty() && args[0].isChar()) {
-            std::string s(args[0].toString().as_ref());
+            keel::String s = args[0].toString();
             for (auto &c : s) c = (char)std::tolower((unsigned char)c);
-            if (s == "on" || s == "off") mode = s;
+            if (s == "on" || s == "off") mode = keel::move(s);
         }
-        gc.fm.currentAxes().*field = mode;
+        gc.fm.currentAxes().*field = keel::move(mode);
         gc.fm.current().modified = true;
         gc.fm.emitModified();
         outs[0] = Value();
@@ -1054,7 +1059,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // numeric vector OR the string "auto" to clear. With no args,
     // the v1 returns an empty value (true MATLAB returns the
     // auto-generated tick set; needs renderer-side query plumbing).
-    auto ticksReg = [](std::string AxesState::*field,
+    auto ticksReg = [](keel::String AxesState::*field,
                        bool AxesState::*autoFlag) {
         return [field, autoFlag](keel::ArrayRef<Value> args, keel::usize nargout,
                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
@@ -1066,7 +1071,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 return;
             }
             if (args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "auto") {
                     (ax.*field).clear();
@@ -1077,7 +1082,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            std::ostringstream os;
+            StrBuf os;
             os << '[';
             const keel::usize n = args[0].numel();
             for (keel::usize i = 0; i < n; ++i) {
@@ -1085,7 +1090,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 os << args[0].elemAsDouble(i);
             }
             os << ']';
-            ax.*field = os.str();
+            ax.*field = os.take();
             ax.*autoFlag = false;   // explicit ticks freeze the mode
             fm.current().modified = true;
             fm.emitModified();
@@ -1099,7 +1104,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // strings. Accept a cell of strings, a string array, or a single
     // multiline string. v1: cell-of-chars (most common) supported via
     // per-element toString; "auto" clears.
-    auto tickLabelsReg = [](std::string AxesState::*field) {
+    auto tickLabelsReg = [](keel::String AxesState::*field) {
         return [field](keel::ArrayRef<Value> args, keel::usize nargout,
                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -1107,8 +1112,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &ax = fm.currentAxes();
             if (args.empty()) { outs[0] = Value(); return; }
             if (args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
-                std::string sl;
+                keel::String s = args[0].toString();
+                keel::String sl;
+                sl.reserve(s.size());
                 for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
                 if (sl == "auto") {
                     (ax.*field).clear();
@@ -1119,7 +1125,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 return;
             }
             // Build "[\"a\",\"b\",...]" from cell/string-array.
-            std::ostringstream os;
+            StrBuf os;
             os << '[';
             const keel::usize n = args[0].numel();
             for (keel::usize i = 0; i < n; ++i) {
@@ -1134,7 +1140,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 os << '"';
             }
             os << ']';
-            ax.*field = os.str();
+            ax.*field = os.take();
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1145,7 +1151,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     reg("layout", "zticklabels", tickLabelsReg(&AxesState::zTickLabelsJson));
     // xtickformat / ytickformat / ztickformat — set a sprintf-style
     // format string ("%.2f", "%.0e", etc.). 'auto' clears.
-    auto tickFormatReg = [](std::string AxesState::*field) {
+    auto tickFormatReg = [](keel::String AxesState::*field) {
         return [field](keel::ArrayRef<Value> args, keel::usize nargout,
                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -1155,13 +1161,14 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            std::string s(args[0].toString().as_ref());
-            std::string sl;
+            keel::String s = args[0].toString();
+            keel::String sl;
+            sl.reserve(s.size());
             for (char c : s) sl.push_back((char)std::tolower((unsigned char)c));
             if (sl == "auto") {
                 (ax.*field).clear();
             } else {
-                ax.*field = s;
+                ax.*field = keel::move(s);
             }
             fm.current().modified = true;
             fm.emitModified();
@@ -1196,7 +1203,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
         auto &fm = gc.fm;
         if (args.empty()) { outs[0] = Value(); return; }
         if (args[0].isChar()) {
-            std::string s(args[0].toString().as_ref());
+            keel::String s = args[0].toString();
             for (auto &c : s) c = (char)std::tolower((unsigned char)c);
             if (s == "auto") {
                 fm.currentAxes().axisMode.clear();
@@ -1212,7 +1219,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             const double dz = args[0].elemAsDouble(2);
             if (keel::abs(dx - dy) < 1e-9 && keel::abs(dy - dz) < 1e-9
                 && fm.currentAxes().axisMode.empty()) {
-                fm.currentAxes().axisMode = "equal";
+                fm.currentAxes().axisMode.assign("equal");
                 fm.current().modified = true;
                 fm.emitModified();
             }
@@ -1231,7 +1238,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             if (args.empty()) {
                 ax.boxOn = !ax.boxOn;
             } else if (args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if      (s == "on")  ax.boxOn = true;
                 else if (s == "off") ax.boxOn = false;
@@ -1273,7 +1280,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             ax.animatedDatasetIdx = -1;
             // 'reset' arg: also clear axis config + scales.
             if (!args.empty() && args[0].isChar()) {
-                std::string s(args[0].toString().as_ref());
+                keel::String s = args[0].toString();
                 for (auto &c : s) c = (char)std::tolower((unsigned char)c);
                 if (s == "reset") {
                     ax.title.clear(); ax.subtitle.clear();
@@ -1285,7 +1292,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                     ax.colormapName.clear();
                     ax.axisMode.clear();
                     ax.axisVisible = true;
-                    ax.xscale = "linear"; ax.yscale = "linear";
+                    ax.xscale.assign("linear"); ax.yscale.assign("linear");
                     ax.xTicksJson.clear(); ax.yTicksJson.clear();
                     ax.xTickLabelsJson.clear(); ax.yTickLabelsJson.clear();
                     ax.xTickFormat.clear(); ax.yTickFormat.clear();
@@ -1320,7 +1327,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
     // rebuilt on every push.
     // ────────────────────────────────────────────────────────────────
     auto rebuildAnimatedJson = [](DatasetInfo &ds) {
-        std::ostringstream xs, ys;
+        StrBuf xs, ys;
         xs << '[';
         for (keel::usize i = 0; i < ds.animatedX.size(); ++i) {
             if (i) xs << ',';
@@ -1333,8 +1340,8 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             ys << ds.animatedY[i];
         }
         ys << ']';
-        ds.xJson = xs.str();
-        ds.yJson = ys.str();
+        ds.xJson = xs.take();
+        ds.yJson = ys.take();
     };
     reg("layout", "animatedline",
         [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
@@ -1343,7 +1350,7 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
             auto &fm = gc.fm;
             fm.prepareForPlot();
             DatasetInfo ds;
-            ds.type = "line";
+            ds.type.assign("line");
             ds.isAnimated = true;
             // Optional initial points.
             if (args.size() >= 2 && !args[0].isChar() && !args[1].isChar()) {
@@ -1496,9 +1503,9 @@ void buildLayoutPlots(std::vector<PlotEntry> &table)
                 ok = true;
             }
             if (!ok) { outs[0] = Value(); return; }
-            std::ostringstream os;
+            StrBuf os;
             os << "[" << az << "," << el << "]";
-            fm.currentAxes().viewJson = os.str();
+            fm.currentAxes().viewJson = os.take();
             fm.current().modified = true;
             fm.emitModified();
             outs[0] = Value();
@@ -1527,21 +1534,21 @@ FigureManager::FigureCheckpoint FigureManager::checkpointFigures() const
 {
     FigureCheckpoint cp;
     for (const auto &[id, fig] : figures_) {
-        std::vector<AxesCheckpoint> ax;
+        keel::Array<AxesCheckpoint> ax;
         ax.reserve(fig.axes.size());
         for (const auto &a : fig.axes)
             ax.push_back(AxesCheckpoint{a.holdOn, a.datasets.size()});
-        cp.figures.emplace_back(id, std::move(ax));
+        cp.figures.push_back(FigureAxesCheckpoint{id, keel::move(ax)});
     }
     return cp;
 }
 
 void FigureManager::restoreFigures(const FigureCheckpoint &cp)
 {
-    auto find = [&cp](int id) -> const std::vector<AxesCheckpoint> * {
+    auto find = [&cp](int id) -> const keel::Array<AxesCheckpoint> * {
         for (const auto &p : cp.figures)
-            if (p.first == id)
-                return &p.second;
+            if (p.id == id)
+                return &p.axes;
         return nullptr;
     };
     // Figures created AFTER the checkpoint are effects of statements
@@ -1549,22 +1556,18 @@ void FigureManager::restoreFigures(const FigureCheckpoint &cp)
     // and would mint a new id on every tick). Delete them and emit
     // close markers so the renderer drops the stale cards; the replay
     // re-creates whatever the script actually needs.
-    for (auto it = figures_.begin(); it != figures_.end();) {
-        if (!find(it->first)) {
-            const int id = it->first;
-            for (auto &[hid, rec] : handleRegistry_)
+    for (keel::usize idx = 0; idx < figures_.size();) {
+        if (!find(figures_[idx].id)) {
+            const int id = figures_[idx].id;
+            for (auto [hid, rec] : handleRegistry_)
                 if (rec.figureId == id)
                     rec.deleted = true;
-            it = figures_.erase(it);
-            std::string marker =
-                "__FIGURE_CLOSE__:" + std::to_string(id) + "\n";
-            if (outputFunc_)
-                outputFunc_(marker);
-            else
-                std::cout << marker;
+            figures_.remove_at(idx);
+            keel::String marker = keel::format("__FIGURE_CLOSE__:{}\n", id);
+            emitRawOutput_(marker);
             continue;
         }
-        ++it;
+        ++idx;
     }
     for (auto &[id, fig] : figures_) {
         const auto *snaps = find(id);
@@ -1577,11 +1580,11 @@ void FigureManager::restoreFigures(const FigureCheckpoint &cp)
                     fig.modified = true;
                 }
                 if (ax.datasets.size() > s.datasetCount) {
-                    for (auto &[hid, rec] : handleRegistry_)
+                    for (auto [hid, rec] : handleRegistry_)
                         if (!rec.deleted && rec.figureId == id
-                            && rec.axesIndex == static_cast<int>(i)
-                            && rec.datasetIndex
-                                   >= static_cast<int>(s.datasetCount))
+                            && rec.axesIndex == i
+                            && rec.isChart()
+                            && rec.datasetIndex >= s.datasetCount)
                             rec.deleted = true;
                     ax.datasets.resize(s.datasetCount);
                     fig.modified = true;

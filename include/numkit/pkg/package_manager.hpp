@@ -4,12 +4,13 @@
 // Discovers, clones, builds, updates, and manages NumKit module plugins.
 #pragma once
 
+#include <keel/array.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/sys/process.hpp>
 #include <numkit/sys/env.hpp>
 
-#include <iostream>
-#include <string>
-#include <vector>
+#include <cstdio>
 
 namespace numkit {
 class Engine;
@@ -18,67 +19,69 @@ class Engine;
 namespace numkit::pkg {
 
 struct OfficialPackageInfo {
-    std::string name;         // "signal"
-    std::string description;  // "Signal Processing Toolbox (filters, spectral analysis, DSP)"
+    keel::String name;         // "signal"
+    keel::String description;  // "Signal Processing Toolbox (filters, spectral analysis, DSP)"
 };
 
 struct PackageTarget {
-    std::string raw;          // "numkit-signal", "user/repo", "https://...", "./path"
-    std::string name;         // "signal"
-    std::string gitUrl;       // "https://github.com/numkit/signal.git"
-    std::string tagOrBranch;  // "v1.0.0" or "main" (empty for auto-resolution)
+    keel::String raw;          // "numkit-signal", "user/repo", "https://...", "./path"
+    keel::String name;         // "signal"
+    keel::String gitUrl;       // "https://github.com/numkit/signal.git"
+    keel::String tagOrBranch;  // "v1.0.0" or "main" (empty for auto-resolution)
     bool isLocal = false;
     bool isOfficial = false;
-    std::string localPath;
+    keel::String localPath;
 };
 
 struct InstalledPackage {
-    std::string name;
-    std::string libraryPath;
-    std::string version;
-    std::string ref;
-    std::string commit;
-    std::string gitUrl;
+    keel::String name;
+    keel::String libraryPath;
+    keel::String version;
+    keel::String ref;
+    keel::String commit;
+    keel::String gitUrl;
     bool isLoaded = false;
 };
 
 class PackageManager {
 public:
-    explicit PackageManager(const std::string &modulesDir = "");
+    explicit PackageManager(keel::StringRef modulesDir = "");
 
     // Returns the catalog of official NumKit toolboxes
-    static const std::vector<OfficialPackageInfo> &officialCatalog();
-    static bool isOfficialPackageName(const std::string &name);
+    static const keel::Array<OfficialPackageInfo> &officialCatalog();
+    static bool isOfficialPackageName(keel::StringRef name);
 
     // Parses input into a structured package target
-    static PackageTarget resolveTarget(const std::string &input);
+    static PackageTarget resolveTarget(keel::StringRef input);
 
     // Resolves the target Git ref (release tag vs branch) for a remote package
-    std::string resolveRemoteRef(const PackageTarget &target, bool forceHead = false) const;
+    keel::String resolveRemoteRef(const PackageTarget &target, bool forceHead = false) const;
 
     // CLI and runtime commands
-    int install(const std::string &target, bool verbose = true, bool forceHead = false);
-    int installMany(const std::vector<std::string> &targets, bool installAll = false,
+    int install(keel::StringRef target, bool verbose = true, bool forceHead = false);
+    int installMany(keel::ArrayRef<keel::String> targets, bool installAll = false,
                     bool verbose = true, bool forceHead = false);
-    int update(const std::vector<std::string> &names = {}, bool verbose = true,
+    int update(keel::ArrayRef<keel::String> names = {}, bool verbose = true,
                bool forceHead = false);
-    int list(std::ostream &out) const;
-    int avail(std::ostream &out, const Engine *engine = nullptr) const;
-    int build(const std::string &dir = ".", bool verbose = true);
-    int remove(const std::string &name);
-    int load(const std::string &name, Engine &engine, const std::string &targetNamespace = "");
+    int list(keel::String &out) const;
+    int list(std::FILE *out = stdout) const;
+    int avail(keel::String &out, const Engine *engine = nullptr) const;
+    int avail(std::FILE *out = stdout, const Engine *engine = nullptr) const;
+    int build(keel::StringRef dir = ".", bool verbose = true);
+    int remove(keel::StringRef name);
+    int load(keel::StringRef name, Engine &engine, keel::StringRef targetNamespace = "");
 
-    const std::string &modulesDir() const { return modulesDir_; }
-    const std::string &cacheDir() const { return cacheDir_; }
+    const keel::String &modulesDir() const { return modulesDir_; }
+    const keel::String &cacheDir() const { return cacheDir_; }
 
-    std::vector<InstalledPackage> scanInstalled(const Engine *engine = nullptr) const;
+    keel::Array<InstalledPackage> scanInstalled(const Engine *engine = nullptr) const;
 
 private:
-    std::string modulesDir_;
-    std::string cacheDir_;
+    keel::String modulesDir_;
+    keel::String cacheDir_;
 
-    std::string locateSharedLibrary(const std::string &buildDir, const std::string &name) const;
-    std::string readCoreVersionRef() const;
+    keel::String locateSharedLibrary(keel::StringRef buildDir, keel::StringRef name) const;
+    keel::String readCoreVersionRef() const;
 };
 
 } // namespace numkit::pkg

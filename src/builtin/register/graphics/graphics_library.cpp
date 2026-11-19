@@ -26,10 +26,16 @@
 //   • one BuiltinClass per MATLAB class name routes dot-syntax
 //     (h.LineWidth, h.LineWidth = 2) through the FigureManager registry.
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
+#include <keel/format.h>
+#include <keel/hash_map.h>
 #include <keel/math.h>
+#include <keel/memory.h>
+#include <keel/number.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/graphics/library.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
@@ -39,15 +45,12 @@
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/value/object.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdio>
-#include <map>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
+#include <cstring>
 #include <utility>
-#include <vector>
 
 #ifdef _WIN32
 extern "C" {
@@ -71,32 +74,34 @@ constexpr const char *kLegendClass = "matlab.graphics.illustration.Legend";
 constexpr const char *kRootClass   = "matlab.ui.Root";
 
 // Builtin name → Text slot for the title/label family (adapter wrap).
-const std::string &textSlotOf(const std::string &fnName)
+keel::StringRef textSlotOf(keel::StringRef fnName)
 {
-    static const std::map<std::string, std::string> m = {
+    static constexpr std::pair<const char *, const char *> kSlots[] = {
         {"title", "title"}, {"subtitle", "subtitle"}, {"sgtitle", "sgtitle"},
         {"xlabel", "xlabel"}, {"ylabel", "ylabel"}, {"zlabel", "zlabel"},
     };
-    static const std::string kEmpty;
-    auto it = m.find(fnName);
-    return it == m.end() ? kEmpty : it->second;
+    for (const auto &kv : kSlots)
+        if (fnName == kv.first)
+            return keel::StringRef(kv.second);
+    return keel::StringRef{};
 }
 
 // Axes PROPERTY name → Text slot (get(gca,'Title') family — capitalized).
-const std::string &textSlotOfProp(const std::string &prop)
+keel::StringRef textSlotOfProp(keel::StringRef prop)
 {
-    static const std::map<std::string, std::string> m = {
+    static constexpr std::pair<const char *, const char *> kSlots[] = {
         {"Title", "title"}, {"Subtitle", "subtitle"},
         {"XLabel", "xlabel"}, {"YLabel", "ylabel"}, {"ZLabel", "zlabel"},
     };
-    static const std::string kEmpty;
-    auto it = m.find(prop);
-    return it == m.end() ? kEmpty : it->second;
+    for (const auto &kv : kSlots)
+        if (prop == kv.first)
+            return keel::StringRef(kv.second);
+    return keel::StringRef{};
 }
 
 // Which AxesState field a Text slot reads/writes ("sgtitle" → the
 // FigureState instead). ylabel under yyaxis-right routes to ylabel2.
-std::string *textFieldOf(FigureManager &fm, FigureManager::HandleRecord &rec)
+keel::String *textFieldOf(FigureManager &fm, FigureManager::HandleRecord &rec)
 {
     if (rec.slot == "sgtitle") {
         FigureState *fig = fm.figureOf(rec.figureId);
@@ -118,101 +123,111 @@ std::string *textFieldOf(FigureManager &fm, FigureManager::HandleRecord &rec)
 }
 
 // Builtin name → (type, MATLAB class name)
-const std::unordered_map<std::string, std::pair<std::string, std::string>> &
-handleTypes()
+struct HandleTypeEntry {
+    const char *fnName;
+    const char *type;
+    const char *className;
+};
+
+constexpr HandleTypeEntry kHandleTypes[] = {
+    {"plot",        "line",      "matlab.graphics.chart.primitive.Line"},
+    {"plot3",       "line",      "matlab.graphics.chart.primitive.Line"},
+    {"line",        "line",      "matlab.graphics.chart.primitive.Line"},
+    {"scatter",     "scatter",   "matlab.graphics.chart.scatter.Scatter"},
+    {"scatter3",    "scatter",   "matlab.graphics.chart.scatter.Scatter"},
+    {"stem",        "stem",      "matlab.graphics.chart.primitive.Stem"},
+    {"stem3",       "stem",      "matlab.graphics.chart.primitive.Stem"},
+    {"stairs",      "stairs",    "matlab.graphics.chart.primitive.Stair"},
+    {"bar",         "bar",       "matlab.graphics.chart.primitive.Bar"},
+    {"barh",        "bar",       "matlab.graphics.chart.primitive.Bar"},
+    {"errorbar",    "errorbar",  "matlab.graphics.chart.primitive.ErrorBar"},
+    {"area",        "area",      "matlab.graphics.chart.primitive.Area"},
+    {"pie",         "pie",       "matlab.graphics.chart.primitive.Pie"},
+    {"compass",     "compass",   "matlab.graphics.chart.primitive.Compass"},
+    {"polarplot",   "line",      "matlab.graphics.chart.primitive.Line"},
+    {"polar",       "line",      "matlab.graphics.chart.primitive.Line"},
+    {"patch",       "polygon",   "matlab.graphics.primitive.Patch"},
+    {"fill",        "polygon",   "matlab.graphics.primitive.Patch"},
+    {"surf",        "surface",   "matlab.graphics.chart.surface.Surface"},
+    {"surface",     "surface",   "matlab.graphics.primitive.Surface"},
+    {"pcolor",      "surface",   "matlab.graphics.primitive.Surface"},
+    {"mesh",        "surface",   "matlab.graphics.chart.surface.Surface"},
+    {"waterfall",   "surface",   "matlab.graphics.chart.surface.Waterfall"},
+    {"contour",     "contour",   "matlab.graphics.chart.contour.Contour"},
+    {"contour3",    "contour",   "matlab.graphics.chart.contour.Contour"},
+    {"contourf",    "contour",   "matlab.graphics.chart.contour.Contour"},
+    {"imagesc",     "image",     "matlab.graphics.image.Image"},
+    {"image",       "image",     "matlab.graphics.image.Image"},
+    {"quiver",      "quiver",    "matlab.graphics.chart.primitive.Quiver"},
+    {"feather",     "feather",   "matlab.graphics.chart.primitive.Feather"},
+    {"histogram",   "histogram", "matlab.graphics.chart.histogram.Histogram"},
+    {"fplot",       "line",      "matlab.graphics.chart.primitive.Line"},
+    {"semilogx",    "line",      "matlab.graphics.chart.primitive.Line"},
+    {"semilogy",    "line",      "matlab.graphics.chart.primitive.Line"},
+    {"loglog",      "line",      "matlab.graphics.chart.primitive.Line"},
+};
+
+const HandleTypeEntry *findHandleType(keel::StringRef fnName)
 {
-    static const std::unordered_map<std::string,
-        std::pair<std::string, std::string>> m = {
-        {"plot",        {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"plot3",       {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"line",        {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"scatter",     {"scatter", "matlab.graphics.chart.scatter.Scatter"}},
-        {"scatter3",    {"scatter", "matlab.graphics.chart.scatter.Scatter"}},
-        {"stem",        {"stem",    "matlab.graphics.chart.primitive.Stem"}},
-        {"stem3",       {"stem",    "matlab.graphics.chart.primitive.Stem"}},
-        {"stairs",      {"stairs",  "matlab.graphics.chart.primitive.Stair"}},
-        {"bar",         {"bar",     "matlab.graphics.chart.primitive.Bar"}},
-        {"barh",        {"bar",     "matlab.graphics.chart.primitive.Bar"}},
-        {"errorbar",    {"errorbar","matlab.graphics.chart.primitive.ErrorBar"}},
-        {"area",        {"area",    "matlab.graphics.chart.primitive.Area"}},
-        {"pie",         {"pie",     "matlab.graphics.chart.primitive.Pie"}},
-        {"compass",     {"compass", "matlab.graphics.chart.primitive.Compass"}},
-        {"polarplot",   {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"polar",       {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"patch",       {"polygon", "matlab.graphics.primitive.Patch"}},
-        {"fill",        {"polygon", "matlab.graphics.primitive.Patch"}},
-        {"surf",        {"surface", "matlab.graphics.chart.surface.Surface"}},
-        {"surface",     {"surface", "matlab.graphics.primitive.Surface"}},
-        {"pcolor",      {"surface", "matlab.graphics.primitive.Surface"}},
-        {"mesh",        {"surface", "matlab.graphics.chart.surface.Surface"}},
-        {"waterfall",   {"surface", "matlab.graphics.chart.surface.Waterfall"}},
-        {"contour",     {"contour", "matlab.graphics.chart.contour.Contour"}},
-        {"contour3",    {"contour", "matlab.graphics.chart.contour.Contour"}},
-        {"contourf",    {"contour", "matlab.graphics.chart.contour.Contour"}},
-        {"imagesc",     {"image",   "matlab.graphics.image.Image"}},
-        {"image",       {"image",   "matlab.graphics.image.Image"}},
-        {"quiver",      {"quiver",  "matlab.graphics.chart.primitive.Quiver"}},
-        {"feather",     {"feather", "matlab.graphics.chart.primitive.Feather"}},
-        {"histogram",   {"histogram","matlab.graphics.chart.histogram.Histogram"}},
-        {"fplot",       {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"semilogx",    {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"semilogy",    {"line",    "matlab.graphics.chart.primitive.Line"}},
-        {"loglog",      {"line",    "matlab.graphics.chart.primitive.Line"}},
-    };
-    return m;
+    for (const auto &e : kHandleTypes)
+        if (fnName == e.fnName)
+            return &e;
+    return nullptr;
 }
 
 // ── Property encoding ────────────────────────────────────────────────
 // rec->props maps name → string form (figure layer is Value-free).
-// Numerics use %.17g so decodeProp's stod round-trips bit-exactly
-// (std::to_string's 6 digits would silently truncate user values).
-std::string formatPropDouble(double d)
+// Numerics use %.17g so decodeProp's parse round-trips bit-exactly
+// (6 digits would silently truncate user values).
+keel::String formatPropDouble(double d)
 {
     char buf[40];
     std::snprintf(buf, sizeof buf, "%.17g", d);
-    return buf;
+    return keel::String::from(buf);
 }
 
-std::string encodeProp(const Value &v)
+keel::String encodeProp(const Value &v)
 {
     if (v.isChar() || v.isString())
-        return std::string(v.toString().as_ref());
+        return v.toString();
     if (v.isNumeric() && v.isScalar())
         return formatPropDouble(v.toScalar());
     if (v.isLogical() && v.numel() == 1)
-        return v.toBool() ? "1" : "0";
+        return keel::String::from(v.toBool() ? "1" : "0");
     if (v.isNumeric() && v.dims().rows() > 1 && v.dims().cols() > 1) {
         const keel::usize R = v.dims().rows();
         const keel::usize C = v.dims().cols();
-        std::string s = "[";
+        keel::String s = keel::String::from("[");
         for (keel::usize r = 0; r < R; ++r) {
-            if (r) s += ",";
-            s += "[";
+            if (r) s.push_back(',');
+            s.push_back('[');
             for (keel::usize c = 0; c < C; ++c) {
-                if (c) s += ",";
+                if (c) s.push_back(',');
                 const double x = v.elemAsDouble(c * R + r);
-                if (std::isfinite(x)) s += formatPropDouble(x);
-                else s += "null";
+                if (std::isfinite(x)) s.append(formatPropDouble(x));
+                else s.append("null");
             }
-            s += "]";
+            s.push_back(']');
         }
-        return s + "]";
+        s.push_back(']');
+        return s;
     }
     if (v.isNumeric() && v.numel() >= 2) {
-        std::string s = "[";
+        keel::String s = keel::String::from("[");
         for (keel::usize i = 0; i < v.numel(); ++i) {
-            if (i) s += ",";
-            s += formatPropDouble(v.elemAsDouble(i));
+            if (i) s.push_back(',');
+            s.append(formatPropDouble(v.elemAsDouble(i)));
         }
-        return s + "]";
+        s.push_back(']');
+        return s;
     }
-    return "";
+    return keel::String{};
 }
 
-Value decodeProp(const std::string &s, keel::Allocator *mr)
+Value decodeProp(keel::StringRef s, keel::Allocator *mr)
 {
     if (s.size() >= 2 && s[0] == '[' && s[1] == '[') {
-        std::vector<double> zf;
+        keel::Array<double> zf;
         keel::usize rows = 0, cols = 0;
         figrender::parseNestedDoubles(s, zf, rows, cols);
         if (rows > 0 && cols > 0 && zf.size() >= rows * cols) {
@@ -225,15 +240,18 @@ Value decodeProp(const std::string &s, keel::Allocator *mr)
         }
     }
     if (!s.empty() && s[0] == '[') {
-        std::vector<double> vals;
-        std::string num;
+        keel::Array<double> vals;
+        keel::String num;
         for (keel::usize i = 1; i < s.size(); ++i) {
             if (s[i] == ',' || s[i] == ']') {
                 if (!num.empty()) {
-                    try { vals.push_back(std::stod(num)); } catch (...) {}
+                    auto r = keel::parse_f64(num.as_ref().trim());
+                    if (r.is_ok()) vals.push_back(r.value());
                     num.clear();
                 }
-            } else num += s[i];
+            } else {
+                num.push_back(s[i]);
+            }
         }
         if (vals.size() == 1)
             return Value::scalar(vals[0], mr);
@@ -244,7 +262,11 @@ Value decodeProp(const std::string &s, keel::Allocator *mr)
             return r;
         }
     }
-    try { return Value::scalar(std::stod(s), mr); } catch (...) {}
+    {
+        auto r = keel::parse_f64(s.trim());
+        if (r.is_ok())
+            return Value::scalar(r.value(), mr);
+    }
     return Value::fromString(s, mr);
 }
 
@@ -252,17 +274,17 @@ Value decodeProp(const std::string &s, keel::Allocator *mr)
 // Introspection reports MATLAB's defaults even where the nk renderer
 // draws its own palette (get before set); once the user sets a property,
 // both get() and the render use the user value.
-Value chartDefaultProp(const std::string &type, const std::string &name,
+Value chartDefaultProp(keel::StringRef type, keel::StringRef name,
                        keel::Allocator *mr)
 {
-    auto str = [&](const char *s) { return Value::fromString(s, mr); };
+    auto str = [&](keel::StringRef s) { return Value::fromString(s, mr); };
     auto num = [&](double d) { return Value::scalar(d, mr); };
     auto rgb = [&](double r, double g, double b) {
         auto v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
         v.doubleDataMut()[0] = r; v.doubleDataMut()[1] = g; v.doubleDataMut()[2] = b;
         return v;
     };
-    if (name == "Type")       return str(type.c_str());
+    if (name == "Type")       return str(type);
     if (name == "Visible")    return str("on");
     if (name == "LineWidth")  return num(0.5);
     if (name == "MarkerSize") return num(6.0);
@@ -286,53 +308,67 @@ Value chartDefaultProp(const std::string &type, const std::string &name,
 // MATLAB linespec ("r--o") and the kv extras ("color=#hex;lineStyle=--").
 // A property set rewrites the string into the kv form, preserving the
 // components the user did not change.
-struct StyleParts { std::string colorHex, lineStyle, marker; };
+struct StyleParts { keel::String colorHex, lineStyle, marker; };
 
-StyleParts parseStyle(const std::string &s)
+StyleParts parseStyle(keel::StringRef s)
 {
     StyleParts p;
     if (s.empty()) return p;
-    if (s.find('=') != std::string::npos) {
+    if (s.find('=') != keel::kInvalidIndex) {
         for (keel::usize i = 0; i < s.size();) {
             keel::usize eq = s.find('=', i);
-            if (eq == std::string::npos) break;
+            if (eq == keel::kInvalidIndex) break;
             keel::usize semi = s.find(';', eq);
-            std::string key = s.substr(i, eq - i);
-            std::string val = s.substr(eq + 1,
-                (semi == std::string::npos ? s.size() : semi) - eq - 1);
-            if (key == "color") p.colorHex = val;
-            else if (key == "lineStyle") p.lineStyle = val;
-            else if (key == "marker") p.marker = val;
-            i = semi == std::string::npos ? s.size() : semi + 1;
+            keel::StringRef key = s.substr(i, eq - i);
+            keel::StringRef val = s.substr(eq + 1,
+                (semi == keel::kInvalidIndex ? s.size() : semi) - eq - 1);
+            if (key == "color") p.colorHex.assign(val);
+            else if (key == "lineStyle") p.lineStyle.assign(val);
+            else if (key == "marker") p.marker.assign(val);
+            i = semi == keel::kInvalidIndex ? s.size() : semi + 1;
         }
         return p;
     }
     // Compact dialect — mirrors the renderer's STYLE_COLOR map so a
     // rebuilt style keeps the same visual colour the plot was drawn with.
-    static const std::map<char, const char *> kCharColor = {
+    static constexpr std::pair<char, const char *> kCharColor[] = {
         {'r', "#f07070"}, {'g', "#6ee7a0"}, {'b', "#60d0f0"},
         {'k', "#d4d4f0"}, {'m', "#e070c0"}, {'c', "#60d0f0"},
         {'y', "#e8d060"}, {'w', "#ffffff"},
     };
+    static constexpr keel::StringRef kMarkers("o+*.xsd^v<>ph");
     keel::usize i = 0;
     while (i < s.size()) {
-        if (p.lineStyle.empty() && s.compare(i, 2, "--") == 0) { p.lineStyle = "--"; i += 2; continue; }
-        if (p.lineStyle.empty() && s.compare(i, 2, "-.") == 0)  { p.lineStyle = "-.";  i += 2; continue; }
-        char c = s[i];
-        if (p.lineStyle.empty() && (c == '-' || c == ':')) { p.lineStyle = std::string(1, c); ++i; continue; }
-        if (p.colorHex.empty()) {
-            auto hit = kCharColor.find(c);
-            if (hit != kCharColor.end()) { p.colorHex = hit->second; ++i; continue; }
+        if (p.lineStyle.empty() && i + 2 <= s.size() && s.substr(i, 2) == "--") {
+            p.lineStyle.assign("--"); i += 2; continue;
         }
-        if (p.marker.empty() && std::string("o+*.xsd^v<>ph").find(c) != std::string::npos) {
-            p.marker = std::string(1, c); ++i; continue;
+        if (p.lineStyle.empty() && i + 2 <= s.size() && s.substr(i, 2) == "-.") {
+            p.lineStyle.assign("-."); i += 2; continue;
+        }
+        char c = s[i];
+        if (p.lineStyle.empty() && (c == '-' || c == ':')) {
+            p.lineStyle.push_back(c); ++i; continue;
+        }
+        if (p.colorHex.empty()) {
+            bool matched = false;
+            for (const auto &kv : kCharColor) {
+                if (kv.first == c) {
+                    p.colorHex.assign(kv.second);
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) { ++i; continue; }
+        }
+        if (p.marker.empty() && kMarkers.find(c) != keel::kInvalidIndex) {
+            p.marker.push_back(c); ++i; continue;
         }
         ++i;
     }
     return p;
 }
 
-std::string rgbToHex(const Value &v)
+keel::String rgbToHex(const Value &v)
 {
     auto clamp255 = [](double d) {
         int i = static_cast<int>(d * 255.0 + 0.5);
@@ -345,12 +381,12 @@ std::string rgbToHex(const Value &v)
                   clamp255(v.numel() > 0 ? v.elemAsDouble(0) : 0),
                   clamp255(v.numel() > 1 ? v.elemAsDouble(1) : 0),
                   clamp255(v.numel() > 2 ? v.elemAsDouble(2) : 0));
-    return buf;
+    return keel::String::from(buf);
 }
 
 // ── Render-effect: apply one property to the backing DatasetInfo ─────
 void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                    const std::string &name, const Value &val)
+                    keel::StringRef name, const Value &val)
 {
     DatasetInfo *ds = fm.datasetOf(*rec);
     if (!ds)
@@ -367,32 +403,35 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "LineStyle") p.lineStyle = val.toString();
         else if (name == "Marker") p.marker = val.toString();
         else p.colorHex = rgbToHex(val);
-        std::string out;
-        auto append = [&](const char *k, const std::string &v) {
+        keel::String out;
+        auto append = [&](const char *k, keel::StringRef v) {
             if (v.empty() || v == "none") return;
-            if (!out.empty()) out += ";";
-            out += std::string(k) + "=" + v;
+            if (!out.empty()) out.push_back(';');
+            out.append(k);
+            out.push_back('=');
+            out.append(v);
         };
         append("color", p.colorHex);
         append("lineStyle", p.lineStyle);
         append("marker", p.marker);
-        ds->style = out;   // empty ⇒ renderer defaults (palette line, no marker)
+        ds->style = keel::move(out);   // empty ⇒ renderer defaults (palette line, no marker)
     } else if (name == "Visible") {
         ds->visible = !(val.isChar() || val.isString()) || val.toString() != "off";
     } else if (name == "DisplayName") {
-        ds->label = (val.isChar() || val.isString()) ? std::string(val.toString().as_ref()) : std::string();
+        ds->label = (val.isChar() || val.isString()) ? val.toString() : keel::String{};
     } else if ((name == "XData" || name == "YData") && val.isNumeric()) {
         // Replace the series. Huge series: drop the downsample state and
         // re-decide via maybeDownsampleSeries (rare path, correctness first).
-        std::vector<double> xs(val.numel());
+        keel::Array<double> xs;
+        xs.resize(val.numel());
         for (keel::usize i = 0; i < val.numel(); ++i)
             xs[i] = val.elemAsDouble(i);
         ds->xRaw.clear(); ds->yRaw.clear(); ds->seriesPyramid.clear();
         ds->seriesDownsampled = false; ds->seriesN = 0;
         (name == "XData" ? ds->xJson : ds->yJson) =
             figdetail::serializeFlatDoubles(xs);
-        if (ds->xJson.empty()) ds->xJson = "[]";
-        if (ds->yJson.empty()) ds->yJson = "[]";
+        if (ds->xJson.empty()) ds->xJson.assign("[]");
+        if (ds->yJson.empty()) ds->yJson.assign("[]");
         fm.maybeDownsampleSeries(*ds);
     } else if (name == "ZData" && val.isNumeric()) {
         if (val.dims().rows() > 1 && val.dims().cols() > 1
@@ -400,7 +439,8 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 || ds->type == "contour3")) {
             ds->zJson = encodeProp(val);
         } else if (val.dims().rows() == 1 || val.dims().cols() == 1) {
-            std::vector<double> zs(val.numel());
+            keel::Array<double> zs;
+            zs.resize(val.numel());
             for (keel::usize i = 0; i < val.numel(); ++i)
                 zs[i] = val.elemAsDouble(i);
             ds->zJson = figdetail::serializeFlatDoubles(zs);
@@ -417,7 +457,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 // Auto tick positions for get(gca,'XTick') in 'auto' mode — the SAME
 // niceTicks the renderer uses, over the explicit xlim if set, else the
 // data range (portion 34; MATLAB returns the drawn ticks).
-std::vector<double> axesAutoTicks(FigureManager &fm,
+keel::Array<double> axesAutoTicks(FigureManager &fm,
                                   FigureManager::HandleRecord *rec, char axis)
 {
     AxesState *ax = fm.axesOf(*rec);
@@ -425,7 +465,7 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
         return {};
     const bool log = (axis == 'x' ? ax->xscale : ax->yscale) == "log";
     double lo = 0, hi = 1;
-    const std::string &lim = axis == 'x' ? ax->xlimJson : ax->ylimJson;
+    const keel::String &lim = axis == 'x' ? ax->xlimJson : ax->ylimJson;
     if (!lim.empty()) {
         auto v = figdetail::parseFlatDoubles(lim);
         if (v.size() == 2) {
@@ -459,7 +499,7 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
             if (ds.type == "text")
                 continue;
             ++seriesDatasets;
-            const std::string &j = axis == 'x' ? ds.xJson : ds.yJson;
+            const keel::String &j = axis == 'x' ? ds.xJson : ds.yJson;
             for (double v : figdetail::parseFlatDoubles(j))
                 if (std::isfinite(v)) {
                     lo = std::min(lo, v);
@@ -490,17 +530,17 @@ std::vector<double> axesAutoTicks(FigureManager &fm,
 // values (FontSize ×1.1). Drop their stored font props.
 void resetAxesTextFonts(FigureManager &fm, FigureManager::HandleRecord *rec)
 {
-    for (auto &[id, r] : fm.handles())
+    for (auto [id, r] : fm.handles())
         if (!r.deleted && r.type == "text" && r.figureId == rec->figureId
             && r.axesIndex == rec->axesIndex) {
-            r.props.erase("FontSize");
-            r.props.erase("FontWeight");
-            r.props.erase("FontName");
+            r.props.remove("FontSize");
+            r.props.remove("FontWeight");
+            r.props.remove("FontName");
         }
 }
 
 // tick vector Value ← json "[a,b,c]"
-Value decodeTickVec(const std::string &json, keel::Allocator *mr)
+Value decodeTickVec(const keel::String &json, keel::Allocator *mr)
 {
     auto v = figdetail::parseFlatDoubles(json);
     if (v.empty())
@@ -512,18 +552,18 @@ Value decodeTickVec(const std::string &json, keel::Allocator *mr)
 }
 
 // ["a","b"] json → 1×N cell of char.
-Value decodeTickLabels(const std::string &json, keel::Allocator *mr)
+Value decodeTickLabels(keel::StringRef json, keel::Allocator *mr)
 {
-    std::vector<std::string> labels;
+    keel::Array<keel::String> labels;
     keel::usize i = 0;
     while (i < json.size()) {
         keel::usize q1 = json.find('"', i);
-        if (q1 == std::string::npos)
+        if (q1 == keel::kInvalidIndex)
             break;
         keel::usize q2 = json.find('"', q1 + 1);
-        if (q2 == std::string::npos)
+        if (q2 == keel::kInvalidIndex)
             break;
-        labels.push_back(json.substr(q1 + 1, q2 - q1 - 1));
+        labels.push_back(keel::String::from(json.substr(q1 + 1, q2 - q1 - 1)));
         i = q2 + 1;
     }
     if (labels.empty())
@@ -535,30 +575,39 @@ Value decodeTickLabels(const std::string &json, keel::Allocator *mr)
 }
 
 // cell/string-array/char → ["a","b"] json.
-std::string encodeTickLabels(const Value &v)
+keel::String encodeTickLabels(const Value &v)
 {
-    std::string out = "[";
+    keel::String out = keel::String::from("[");
     for (keel::usize i = 0; i < v.numel(); ++i) {
         if (i)
-            out += ",";
-        out += "\"" + std::string(v.cellAt(i).toString().as_ref()) + "\"";
+            out.push_back(',');
+        out.push_back('"');
+        out.append(v.cellAt(i).toString());
+        out.push_back('"');
     }
-    return out + "]";
+    out.push_back(']');
+    return out;
 }
 
 // ── Axes / figure property mapping (render-effect) ───────────────────
 bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                   const std::string &name, const Value &val)
+                   keel::StringRef name, const Value &val)
 {
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return false;
-    std::vector<double> v(val.isNumeric() ? val.numel() : 0);
+    keel::Array<double> v;
+    v.resize(val.isNumeric() ? val.numel() : 0);
     for (keel::usize i = 0; i < v.size(); ++i)
         v[i] = val.elemAsDouble(i);
-    auto limJson = [](const std::vector<double> &w) {
-        if (w.size() != 2) return std::string();
-        return "[" + formatPropDouble(w[0]) + "," + formatPropDouble(w[1]) + "]";
+    auto limJson = [](keel::ArrayRef<double> w) -> keel::String {
+        if (w.size() != 2) return keel::String{};
+        keel::String out = keel::String::from("[");
+        out.append(formatPropDouble(w[0]));
+        out.push_back(',');
+        out.append(formatPropDouble(w[1]));
+        out.push_back(']');
+        return out;
     };
     bool touched = true;
     if      (name == "XLim")  ax->xlimJson  = limJson(v);
@@ -589,26 +638,25 @@ bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         ax->lineWidth = v[0];   // axes frame; series LineWidth is per-chart
     else if ((name == "XTick" || name == "YTick" || name == "ZTick")
              && (val.isNumeric() || val.isEmpty())) {
-        std::ostringstream os;
-        os << '[';
+        keel::String os = keel::String::from("[");
         for (keel::usize i = 0; i < v.size(); ++i) {
-            if (i) os << ',';
-            os << formatPropDouble(v[i]);
+            if (i) os.push_back(',');
+            os.append(formatPropDouble(v[i]));
         }
-        os << ']';
+        os.push_back(']');
         (name == "XTick" ? ax->xTicksJson
-         : name == "YTick" ? ax->yTicksJson : ax->zTicksJson) = os.str();
+         : name == "YTick" ? ax->yTicksJson : ax->zTicksJson) = keel::move(os);
         (name == "XTick" ? ax->xTicksAuto
          : name == "YTick" ? ax->yTicksAuto : ax->zTicksAuto) = false;
     }
     else if ((name == "XTickLabel" || name == "YTickLabel"
               || name == "ZTickLabel")
              && (val.isCell() || val.isChar() || val.isString())) {
-        std::string json = val.isCell() ? encodeTickLabels(val)
-                                        : "[\"" + std::string(val.toString().as_ref()) + "\"]";
+        keel::String json = val.isCell() ? encodeTickLabels(val)
+                                         : keel::format("[\"{}\"]", val.toString());
         (name == "XTickLabel" ? ax->xTickLabelsJson
          : name == "YTickLabel" ? ax->yTickLabelsJson
-                                : ax->zTickLabelsJson) = json;
+                                : ax->zTickLabelsJson) = keel::move(json);
     }
     else if (name == "XTickMode" || name == "YTickMode"
              || name == "ZTickMode") {
@@ -633,7 +681,7 @@ bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 }
 
 Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                  const std::string &name, keel::Allocator *mr)
+                  keel::StringRef name, keel::Allocator *mr)
 {
     auto str = [&](const char *s) { return Value::fromString(s, mr); };
     auto num = [&](double d) { return Value::scalar(d, mr); };
@@ -646,7 +694,7 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         double dmin = 1e300, dmax = -1e300;
         for (const auto &ds : ax->datasets) {
             if (!ds.visible) continue;
-            const std::string &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
+            const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
             for (double v : figdetail::parseFlatDoubles(j)) {
                 if (std::isfinite(v)) {
                     if (v < dmin) dmin = v;
@@ -688,9 +736,8 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         return autoLim('z');
     }
     if (name == "Position" || name == "OuterPosition") {
-        auto it = rec->props.find(name);
-        if (it != rec->props.end())
-            return decodeProp(it->second, mr);
+        if (const keel::String *hit = rec->props.get(name))
+            return decodeProp(*hit, mr);
         const FigureState *fig = fm.figureOf(rec->figureId);
         int m = (fig && fig->subplotRows >= 1) ? fig->subplotRows : 1;
         int n = (fig && fig->subplotCols >= 1) ? fig->subplotCols : 1;
@@ -803,7 +850,7 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 // the full series when it was downsampled; xJson only the preview; zJson
 // carries nested 2-D rows for surface/waterfall/contour3 or flat 1-D values).
 Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
-                    const std::string &name, keel::Allocator *mr)
+                    keel::StringRef name, keel::Allocator *mr)
 {
     DatasetInfo *ds = fm.datasetOf(*rec);
     if (rec->type == "histogram" && ds) {
@@ -842,7 +889,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return v;
         }
     }
-    std::string mappedName = name;
+    keel::StringRef mappedName = name;
     if (mappedName == "XEndPoints") mappedName = "XData";
     if (mappedName == "YEndPoints") mappedName = "YData";
     if (mappedName != "XData" && mappedName != "YData" && mappedName != "ZData")
@@ -854,7 +901,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return Value::matrix(1, 0, ValueType::DOUBLE, mr);
         if (ds->zJson.size() >= 2 && ds->zJson[0] == '[' && ds->zJson[1] == '[')
             return decodeProp(ds->zJson, mr);
-        std::vector<double> zvals = figdetail::parseFlatDoubles(ds->zJson);
+        keel::Array<double> zvals = figdetail::parseFlatDoubles(ds->zJson);
         if (zvals.empty())
             return Value::matrix(1, 0, ValueType::DOUBLE, mr);
         auto v = Value::matrix(1, zvals.size(), ValueType::DOUBLE, mr);
@@ -862,10 +909,10 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             v.doubleDataMut()[i] = zvals[i];
         return v;
     }
-    const std::vector<double> &raw = (mappedName == "XData") ? ds->xRaw : ds->yRaw;
-    std::vector<double> vals;
+    const keel::Array<double> &raw = (mappedName == "XData") ? ds->xRaw : ds->yRaw;
+    keel::Array<double> vals;
     if (!raw.empty()) {
-        vals = raw;
+        vals = raw.clone();
     } else {
         vals = figdetail::parseFlatDoubles(
             (mappedName == "XData") ? ds->xJson : ds->yJson);
@@ -881,7 +928,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 // ── Handle record lookup helpers (create-or-reuse) ───────────────────
 int handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
 {
-    for (auto &[id, r] : fm.handles())
+    for (auto [id, r] : fm.handles())
         if (&r == rec)
             return id;
     return -1;
@@ -890,7 +937,7 @@ int handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
 FigureManager::HandleRecord *findRecordBy(FigureManager &fm, const char *type,
                                           int figureId, keel::usize axesIndex)
 {
-    for (auto &[id, rec] : fm.handles())
+    for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == type && rec.figureId == figureId
             && rec.axesIndex == axesIndex)
             return &rec;
@@ -943,9 +990,9 @@ Value makeAxesHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex,
 // Text handle bound to a label slot ("sgtitle" is figure-scoped: kNoAxes
 // so scoped axes sweeps keep it alive while clf/close invalidate it).
 Value makeTextHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex,
-                        const std::string &slot, keel::Allocator *mr)
+                        keel::StringRef slot, keel::Allocator *mr)
 {
-    for (auto &[id, rec] : fm.handles())
+    for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == "text" && rec.figureId == figureId
             && rec.slot == slot && rec.axesIndex == axesIndex)
             return makeGraphicsHandleValue(kTextClass, id, mr);
@@ -967,7 +1014,7 @@ Value makeLegendHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex
 // figure, so figure sweeps leave it alone).
 Value makeRootHandle(FigureManager &fm, keel::Allocator *mr)
 {
-    for (auto &[id, rec] : fm.handles())
+    for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == "root")
             return makeGraphicsHandleValue(kRootClass, id, mr);
     const int id = fm.createHandleAt(0, FigureManager::HandleRecord::kNoAxes,
@@ -976,8 +1023,8 @@ Value makeRootHandle(FigureManager &fm, keel::Allocator *mr)
 }
 
 // Array of handles (gcf.Children / groot.Children).
-Value makeHandleArray(const std::string &className,
-                      const std::vector<int> &ids,
+Value makeHandleArray(keel::StringRef className,
+                      keel::ArrayRef<int> ids,
                       keel::Allocator *mr)
 {
     if (ids.empty())
@@ -1003,9 +1050,9 @@ Value makeHandleArray(const std::string &className,
 // (Text.String, Legend.Location/Box/Visible, chart XData) read from the
 // figure state; everything user-set lives in rec->props; documented
 // MATLAB defaults fill the rest.
-std::string canonicalPropName(keel::StringRef raw)
+keel::String canonicalPropName(keel::StringRef raw)
 {
-    std::string low(raw.data(), raw.size());
+    keel::String low = keel::String::from(raw);
     for (char &ch : low)
         if (ch >= 'A' && ch <= 'Z')
             ch = static_cast<char>(ch - 'A' + 'a');
@@ -1041,15 +1088,15 @@ std::string canonicalPropName(keel::StringRef raw)
     };
     for (const auto &kv : kNames)
         if (low == kv.first)
-            return kv.second;
-    return std::string(raw.data(), raw.size());
+            return keel::String::from(kv.second);
+    return keel::String::from(raw);
 }
 
 Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     keel::StringRef rawName, keel::Allocator *mr,
                     bool strict = false)
 {
-    const std::string name = canonicalPropName(rawName);
+    const keel::String name = canonicalPropName(rawName);
     auto str = [&](const char *s) { return Value::fromString(s, mr); };
     auto num = [&](double d) { return Value::scalar(d, mr); };
     auto rgb = [&](double r, double g, double b) {
@@ -1060,11 +1107,11 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     if (rec->type == "root") {
         if (name == "Type")   return str("root");
         if (name == "Children") {
-            std::vector<int> ids;
+            keel::Array<int> ids;
             for (const auto &[fid, fig] : fm.figures()) {
                 (void)fig;
                 int hid = -1;
-                for (auto &[id, r] : fm.handles())
+                for (auto [id, r] : fm.handles())
                     if (!r.deleted && r.type == "figure" && r.figureId == fid) {
                         hid = id;
                         break;
@@ -1075,13 +1122,13 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             }
             return makeHandleArray(kFigureClass, ids, mr);
         }
-        auto it = rec->props.find(name);
-        return it != rec->props.end() ? decodeProp(it->second, mr) : Value();
+        const keel::String *hit = rec->props.get(name);
+        return hit ? decodeProp(*hit, mr) : Value();
     }
     if (rec->type == "text") {
         // Live String from the label slot (the render source of truth).
         if (name == "String") {
-            std::string *f = textFieldOf(fm, *rec);
+            keel::String *f = textFieldOf(fm, *rec);
             return str(f ? f->c_str() : "");
         }
         if (name == "Type")       return str("text");
@@ -1091,9 +1138,8 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 return makeFigureHandleFor(fm, rec->figureId, mr);
             return makeAxesHandleFor(fm, rec->figureId, rec->axesIndex, mr);
         }
-        auto it = rec->props.find(name);
-        if (it != rec->props.end())
-            return decodeProp(it->second, mr);
+        if (const keel::String *hit = rec->props.get(name))
+            return decodeProp(*hit, mr);
         // MATLAB R2025b (probe-verified): label Texts inherit the AXES
         // font — FontSize at 1.1× — unless the axes font was set (which
         // RESETS any explicit Text font, see resetAxesTextFonts).
@@ -1131,9 +1177,8 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Box")  return str(!ax || ax->legendBoxOn ? "on" : "off");
         if (name == "Visible")
             return str(!ax || !ax->legendHidden ? "on" : "off");
-        auto it = rec->props.find(name);
-        if (it != rec->props.end())
-            return decodeProp(it->second, mr);
+        if (const keel::String *hit = rec->props.get(name))
+            return decodeProp(*hit, mr);
         return Value();
     }
     if (rec->type == "figure") {
@@ -1145,10 +1190,10 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Children") {
             FigureState *fig = fm.figureOf(rec->figureId);
             const keel::usize n = fig ? fig->axes.size() : 0;
-            std::vector<int> ids;
+            keel::Array<int> ids;
             for (keel::usize k = 0; k < n; ++k) {
                 int hid = -1;
-                for (auto &[id, r] : fm.handles())
+                for (auto [id, r] : fm.handles())
                     if (!r.deleted && r.type == "axes"
                         && r.figureId == rec->figureId && r.axesIndex == k) {
                         hid = id;
@@ -1160,14 +1205,13 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             }
             return makeHandleArray(kAxesClass, ids, mr);
         }
-        auto it = rec->props.find(name);
-        if (it != rec->props.end())
-            return decodeProp(it->second, mr);
-        std::string lowName = name;
+        if (const keel::String *hit = rec->props.get(name))
+            return decodeProp(*hit, mr);
+        keel::String lowName = name.clone();
         for (char &ch : lowName)
             if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-        for (const auto &[k, v] : rec->props) {
-            std::string lk = k;
+        for (auto [k, v] : rec->props) {
+            keel::String lk = k.clone();
             for (char &ch : lk)
                 if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
             if (lk == lowName)
@@ -1211,23 +1255,21 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Parent")
             return makeFigureHandleFor(fm, rec->figureId, mr);
         // Label slots return Text handles (MATLAB), not strings.
-        const std::string &slot = textSlotOfProp(name);
+        keel::StringRef slot = textSlotOfProp(name);
         if (!slot.empty())
             return makeTextHandleFor(fm, rec->figureId, rec->axesIndex, slot, mr);
         Value v = axesGetProp(fm, rec, name, mr);
         if (!v.isEmpty())
             return v;
-        auto it = rec->props.find(name);
-        return it != rec->props.end()
-                   ? decodeProp(it->second, mr)
+        const keel::String *hit = rec->props.get(name);
+        return hit ? decodeProp(*hit, mr)
                    : (strict ? Value() : Value::fromString("", mr));
     }
     // Chart records.
     if (name == "Parent")
         return makeAxesHandleFor(fm, rec->figureId, rec->axesIndex, mr);
-    auto it = rec->props.find(name);
-    if (it != rec->props.end())
-        return decodeProp(it->second, mr);
+    if (const keel::String *hit = rec->props.get(name))
+        return decodeProp(*hit, mr);
     {
         Value v = chartDataProp(fm, rec, name, mr);
         if (!v.isEmpty())
@@ -1240,7 +1282,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     if (name == "Color" || name == "LineStyle" || name == "Marker") {
         DatasetInfo *ds = fm.datasetOf(*rec);
         if (ds && !ds->style.empty()) {
-            const std::string &s = ds->style;
+            const keel::String &s = ds->style;
             auto rgb = [&](double r, double g, double b) {
                 auto v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = r;
@@ -1248,21 +1290,21 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 v.doubleDataMut()[2] = b;
                 return v;
             };
-            auto strv = [&](const char *t) {
+            auto strv = [&](keel::StringRef t) {
                 return Value::fromString(t, mr);
             };
             if (name == "LineStyle") {
-                if (s.find("--") != std::string::npos)
+                if (s.find("--") != keel::kInvalidIndex)
                     return strv("--");
-                if (s.find("-.") != std::string::npos)
+                if (s.find("-.") != keel::kInvalidIndex)
                     return strv("-.");
-                if (s.find(':') != std::string::npos)
+                if (s.find(':') != keel::kInvalidIndex)
                     return strv(":");
             } else if (name == "Marker") {
                 static const char *kMarkers = "o+*.xsd^v<>ph";
                 for (char mc : s)
                     if (mc && std::strchr(kMarkers, mc))
-                        return strv(std::string(1, mc).c_str());
+                        return strv(keel::StringRef(&mc, 1));
             } else {
                 struct ColEntry { char c; double rgb[3]; };
                 static const ColEntry kCol[] = {
@@ -1272,7 +1314,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     {'m', {1, 0, 1}},       {'c', {0, 1, 1}},
                 };
                 keel::usize hp = s.find("color=#");
-                if (hp != std::string::npos) {
+                if (hp != keel::kInvalidIndex) {
                     unsigned R = 0, G = 0, B = 0;
                     if (std::sscanf(s.c_str() + hp + 7, "%02x%02x%02x", &R,
                                     &G, &B)
@@ -1283,19 +1325,19 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     // single-letter form must not collide with markers
                     // first (handled above), so scan for a colour char.
                     keel::usize cp = s.find("color=");
-                    std::string cand;
-                    if (cp != std::string::npos) {
+                    keel::String cand;
+                    if (cp != keel::kInvalidIndex) {
                         keel::usize e = s.find(';', cp);
-                        cand = s.substr(cp + 6,
-                                        e == std::string::npos
-                                            ? std::string::npos
-                                            : e - cp - 6);
+                        cand = keel::String::from(
+                            e == keel::kInvalidIndex
+                                ? s.substr(cp + 6)
+                                : s.substr(cp + 6, e - cp - 6));
                     } else if (s.size() == 1) {
-                        cand = s;
+                        cand = s.clone();
                     } else {
                         for (char ch : s)
                             if (std::strchr("rgbcymwkv", ch)) {
-                                cand = std::string(1, ch);
+                                cand.push_back(ch);
                                 break;
                             }
                     }
@@ -1327,19 +1369,19 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                    keel::StringRef rawName, const Value &val)
 {
-    const std::string name = canonicalPropName(rawName);
+    const keel::String name = canonicalPropName(rawName);
     if (name == "Parent" || val.isObject())
         return true;
     if (name == "XData" || name == "YData") {
-        rec->props.erase(name);
+        rec->props.remove(name);
     } else if (!(val.isNumeric() && val.numel() > 1024 && name != "ZData")) {
-        rec->props[name] = encodeProp(val);
+        rec->props.put(name.clone(), encodeProp(val));
     }
     if (rec->type == "text") {
         if (name == "String") {
-            std::string *f = textFieldOf(fm, *rec);
+            keel::String *f = textFieldOf(fm, *rec);
             if (f) {
-                *f = (val.isChar() || val.isString()) ? std::string(val.toString().as_ref()) : std::string();
+                *f = (val.isChar() || val.isString()) ? val.toString() : keel::String{};
                 fm.markFigureModified(rec->figureId);
             }
         }
@@ -1361,7 +1403,7 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         } else if (name == "String" && val.isCell()) {
             ax->legendLabels.clear();
             for (keel::usize i = 0; i < val.numel(); ++i)
-                ax->legendLabels.push_back(std::string(val.cellAt(i).toString().as_ref()));
+                ax->legendLabels.push_back(val.cellAt(i).toString());
             fm.markFigureModified(rec->figureId);
         }
         return true;
@@ -1385,97 +1427,102 @@ namespace {
 
 void registerHandleAccessors(Engine &engine)
 {
-    auto settableCatalogFor = [](const std::string &type)
-        -> std::map<std::string, std::vector<std::string>> {
+    struct SettableEntry {
+        const char *key;
+        keel::Array<const char *> choices;
+    };
+    auto settableCatalogFor = [](keel::StringRef type) -> keel::Array<SettableEntry> {
+        keel::Array<SettableEntry> out;
+        auto add = [&](const char *k, std::initializer_list<const char *> ch = {}) {
+            SettableEntry e;
+            e.key = k;
+            e.choices.reserve(ch.size());
+            for (const char *s : ch) e.choices.push_back(s);
+            out.push_back(keel::move(e));
+        };
         if (type == "figure") {
-            return {
-                {"Color", {}},
-                {"Name", {}},
-                {"NumberTitle", {"on", "off"}},
-                {"Position", {}},
-                {"Units", {"pixels", "normalized", "inches", "centimeters", "points"}},
-                {"Visible", {"on", "off"}},
-            };
+            add("Color");
+            add("Name");
+            add("NumberTitle", {"on", "off"});
+            add("Position");
+            add("Units", {"pixels", "normalized", "inches", "centimeters", "points"});
+            add("Visible", {"on", "off"});
+            return out;
         }
         if (type == "axes") {
-            return {
-                {"Box", {"on", "off"}},
-                {"CLim", {}},
-                {"CLimMode", {"auto", "manual"}},
-                {"FontName", {}},
-                {"FontSize", {}},
-                {"FontWeight", {"normal", "bold"}},
-                {"LineWidth", {}},
-                {"Title", {}},
-                {"Visible", {"on", "off"}},
-                {"XDir", {"normal", "reverse"}},
-                {"XGrid", {"on", "off"}},
-                {"XLabel", {}},
-                {"XLim", {}},
-                {"XScale", {"linear", "log"}},
-                {"XTick", {}},
-                {"XTickLabel", {}},
-                {"XTickLabelMode", {"auto", "manual"}},
-                {"XTickMode", {"auto", "manual"}},
-                {"YDir", {"normal", "reverse"}},
-                {"YGrid", {"on", "off"}},
-                {"YLabel", {}},
-                {"YLim", {}},
-                {"YScale", {"linear", "log"}},
-                {"YTick", {}},
-                {"YTickLabel", {}},
-                {"YTickLabelMode", {"auto", "manual"}},
-                {"YTickMode", {"auto", "manual"}},
-                {"ZLabel", {}},
-                {"ZLim", {}},
-                {"ZTick", {}},
-            };
+            add("Box", {"on", "off"});
+            add("CLim");
+            add("CLimMode", {"auto", "manual"});
+            add("FontName");
+            add("FontSize");
+            add("FontWeight", {"normal", "bold"});
+            add("LineWidth");
+            add("Title");
+            add("Visible", {"on", "off"});
+            add("XDir", {"normal", "reverse"});
+            add("XGrid", {"on", "off"});
+            add("XLabel");
+            add("XLim");
+            add("XScale", {"linear", "log"});
+            add("XTick");
+            add("XTickLabel");
+            add("XTickLabelMode", {"auto", "manual"});
+            add("XTickMode", {"auto", "manual"});
+            add("YDir", {"normal", "reverse"});
+            add("YGrid", {"on", "off"});
+            add("YLabel");
+            add("YLim");
+            add("YScale", {"linear", "log"});
+            add("YTick");
+            add("YTickLabel");
+            add("YTickLabelMode", {"auto", "manual"});
+            add("YTickMode", {"auto", "manual"});
+            add("ZLabel");
+            add("ZLim");
+            add("ZTick");
+            return out;
         }
         if (type == "text") {
-            return {
-                {"Color", {}},
-                {"FontName", {}},
-                {"FontSize", {}},
-                {"FontWeight", {"normal", "bold"}},
-                {"String", {}},
-                {"Visible", {"on", "off"}},
-            };
+            add("Color");
+            add("FontName");
+            add("FontSize");
+            add("FontWeight", {"normal", "bold"});
+            add("String");
+            add("Visible", {"on", "off"});
+            return out;
         }
         if (type == "legend") {
-            return {
-                {"Box", {"on", "off"}},
-                {"Location", {"north", "south", "east", "west", "northeast",
-                              "northwest", "southeast", "southwest", "best"}},
-                {"String", {}},
-                {"Visible", {"on", "off"}},
-            };
+            add("Box", {"on", "off"});
+            add("Location", {"north", "south", "east", "west", "northeast",
+                             "northwest", "southeast", "southwest", "best"});
+            add("String");
+            add("Visible", {"on", "off"});
+            return out;
         }
         if (type == "root") {
-            return {};
+            return out;
         }
         // Chart records (line, scatter, bar, surface, contour, ...).
-        std::map<std::string, std::vector<std::string>> m = {
-            {"Color", {}},
-            {"DisplayName", {}},
-            {"LineStyle", {"-", "--", ":", "-.", "none"}},
-            {"LineWidth", {}},
-            {"Marker", {"o", "+", "*", ".", "x", "square", "diamond",
-                        "^", "v", ">", "<", "pentagram", "hexagram", "none"}},
-            {"MarkerSize", {}},
-            {"Visible", {"on", "off"}},
-            {"XData", {}},
-            {"YData", {}},
-            {"ZData", {}},
-        };
-        if (type == "scatter")
-            m["SizeData"] = {};
         if (type == "bar") {
-            m["BarWidth"] = {};
-            m["BaseValue"] = {};
+            add("BarWidth");
+            add("BaseValue");
+        } else if (type == "stem" || type == "area") {
+            add("BaseValue");
         }
-        if (type == "stem" || type == "area")
-            m["BaseValue"] = {};
-        return m;
+        add("Color");
+        add("DisplayName");
+        add("LineStyle", {"-", "--", ":", "-.", "none"});
+        add("LineWidth");
+        add("Marker", {"o", "+", "*", ".", "x", "square", "diamond",
+                       "^", "v", ">", "<", "pentagram", "hexagram", "none"});
+        add("MarkerSize");
+        if (type == "scatter")
+            add("SizeData");
+        add("Visible", {"on", "off"});
+        add("XData");
+        add("YData");
+        add("ZData");
+        return out;
     };
 
     // set(h, ...)
@@ -1493,56 +1540,73 @@ void registerHandleAccessors(Engine &engine)
             if (args.size() == 1) {
                 const auto cat = settableCatalogFor(rec->type);
                 if (nargout == 0) {
-                    std::string text;
-                    for (const auto &[k, choices] : cat) {
-                        text += "    " + k;
-                        if (!choices.empty()) {
-                            text += ": [ ";
-                            for (keel::usize i = 0; i < choices.size(); ++i) {
-                                if (i) text += " | ";
-                                if (i == 0) text += "{" + choices[i] + "}";
-                                else text += choices[i];
+                    keel::String text;
+                    for (const auto &entry : cat) {
+                        text.append("    ");
+                        text.append(entry.key);
+                        if (!entry.choices.empty()) {
+                            text.append(": [ ");
+                            for (keel::usize i = 0; i < entry.choices.size(); ++i) {
+                                if (i) text.append(" | ");
+                                if (i == 0) {
+                                    text.push_back('{');
+                                    text.append(entry.choices[i]);
+                                    text.push_back('}');
+                                } else {
+                                    text.append(entry.choices[i]);
+                                }
                             }
-                            text += " ]";
+                            text.append(" ]");
                         }
-                        text += "\n";
+                        text.push_back('\n');
                     }
                     ctx.engine->outputText(text);
                     outs[0] = Value();
                     return;
                 }
                 Value st = Value::structure(mr);
-                for (const auto &[k, choices] : cat) {
-                    if (choices.empty()) {
-                        st.setFieldAll(k, Value::cell(1, 0, mr));
+                for (const auto &entry : cat) {
+                    if (entry.choices.empty()) {
+                        st.setFieldAll(entry.key, Value::cell(1, 0, mr));
                     } else {
-                        Value c = Value::cell(choices.size(), 1, mr);
-                        for (keel::usize i = 0; i < choices.size(); ++i)
-                            c.cellAt(i) = Value::fromString(choices[i], mr);
-                        st.setFieldAll(k, std::move(c));
+                        Value c = Value::cell(entry.choices.size(), 1, mr);
+                        for (keel::usize i = 0; i < entry.choices.size(); ++i)
+                            c.cellAt(i) = Value::fromString(entry.choices[i], mr);
+                        st.setFieldAll(entry.key, std::move(c));
                     }
                 }
                 outs[0] = std::move(st);
                 return;
             }
             if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
-                const std::string prop(args[1].toString().as_ref());
+                const keel::String prop = args[1].toString();
                 const auto cat = settableCatalogFor(rec->type);
-                auto it = cat.find(prop);
-                const std::vector<std::string> emptyChoices;
-                const auto &choices = (it != cat.end()) ? it->second : emptyChoices;
+                const keel::Array<const char *> *choicesPtr = nullptr;
+                for (const auto &entry : cat) {
+                    if (prop == entry.key) {
+                        choicesPtr = &entry.choices;
+                        break;
+                    }
+                }
+                const keel::Array<const char *> emptyChoices;
+                const auto &choices = choicesPtr ? *choicesPtr : emptyChoices;
                 if (nargout == 0) {
-                    std::string text;
+                    keel::String text;
                     if (!choices.empty()) {
-                        text += "[ ";
+                        text.append("[ ");
                         for (keel::usize i = 0; i < choices.size(); ++i) {
-                            if (i) text += " | ";
-                            if (i == 0) text += "{" + choices[i] + "}";
-                            else text += choices[i];
+                            if (i) text.append(" | ");
+                            if (i == 0) {
+                                text.push_back('{');
+                                text.append(choices[i]);
+                                text.push_back('}');
+                            } else {
+                                text.append(choices[i]);
+                            }
                         }
-                        text += " ]\n";
+                        text.append(" ]\n");
                     } else {
-                        text += "Property does not have a fixed set of property values.\n";
+                        text.append("Property does not have a fixed set of property values.\n");
                     }
                     ctx.engine->outputText(text);
                     outs[0] = Value();
@@ -1582,7 +1646,7 @@ void registerHandleAccessors(Engine &engine)
             engine.figureManager().emitModified();
             outs[0] = Value();
         };
-        engine.registerFunction("", "set", std::move(fn));
+        engine.registerFunction("", "set", keel::move(fn));
     }
     // get(h [, 'Prop']) — without a property name: struct of all
     {
@@ -1593,8 +1657,7 @@ void registerHandleAccessors(Engine &engine)
             const int id = graphicsHandleIdOf(args[0]);
             if (id < 0) {
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
-                    std::string prop(args[1].toString().as_ref());
-                    std::string lprop = prop;
+                    keel::String lprop = args[1].toString();
                     for (char &ch : lprop)
                         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
                     if (lprop == "pointerlocation") {
@@ -1652,15 +1715,15 @@ void registerHandleAccessors(Engine &engine)
                         outs[0] = std::move(v);
                         return;
                     }
-                    if (lprop.find("fontangle") != std::string::npos || lprop.find("fontweight") != std::string::npos) {
+                    if (lprop.find("fontangle") != keel::kInvalidIndex || lprop.find("fontweight") != keel::kInvalidIndex) {
                         outs[0] = Value::fromString("normal", engine.allocator());
                         return;
                     }
-                    if (lprop.find("fontname") != std::string::npos) {
+                    if (lprop.find("fontname") != keel::kInvalidIndex) {
                         outs[0] = Value::fromString("Helvetica", engine.allocator());
                         return;
                     }
-                    if (lprop.find("fontsize") != std::string::npos) {
+                    if (lprop.find("fontsize") != keel::kInvalidIndex) {
                         outs[0] = Value::scalar(10.0, engine.allocator());
                         return;
                     }
@@ -1679,31 +1742,31 @@ void registerHandleAccessors(Engine &engine)
             // get(h) → struct: stored props ∪ documented defaults.
             auto *mr = engine.allocator();
             Value st = Value::structure(mr);
-            std::map<std::string, std::string> fields(rec->props);
+            keel::HashMap<keel::String, keel::String> fields = rec->props.clone();
             static const char *kCommon[] = {
                 "Type", "Color", "LineStyle", "LineWidth", "Marker",
                 "MarkerSize", "Visible", "Parent", "Children",
             };
             for (const char *p : kCommon) {
-                if (fields.count(p)) continue;
+                if (fields.contains(p)) continue;
                 Value d = rec->isChart() ? chartDefaultProp(rec->type, p, mr)
                                          : Value();
                 if (!d.isEmpty())
-                    fields[p] = encodeProp(d);
+                    fields.put(keel::String::from(p), encodeProp(d));
             }
             if (rec->isChart()) {
                 for (const char *dp : {"XData", "YData", "ZData"}) {
-                    if (fields.count(dp)) continue;
+                    if (fields.contains(dp)) continue;
                     Value dv = chartDataProp(engine.figureManager(), rec, dp, mr);
                     if (!dv.isEmpty())
-                        fields[dp] = encodeProp(dv);
+                        fields.put(keel::String::from(dp), encodeProp(dv));
                 }
             }
             if (rec->type == "figure") {
-                fields["Number"] = std::to_string(rec->figureId);
-                fields["Type"] = "figure";
+                fields.put(keel::String::from("Number"), keel::format("{}", rec->figureId));
+                fields.put(keel::String::from("Type"), keel::String::from("figure"));
             } else if (rec->type == "axes") {
-                fields["Type"] = "axes";
+                fields.put(keel::String::from("Type"), keel::String::from("axes"));
                 static const char *kLayout[] = {
                     "XLim", "YLim", "XScale", "YScale", "XLabel", "YLabel",
                     "Title",
@@ -1711,25 +1774,30 @@ void registerHandleAccessors(Engine &engine)
                 for (const char *p : kLayout) {
                     Value v = axesGetProp(engine.figureManager(), rec, p, mr);
                     if (!v.isEmpty())
-                        fields[p] = encodeProp(v);
+                        fields.put(keel::String::from(p), encodeProp(v));
                 }
             } else if (rec->type == "text") {
-                fields["Type"] = "text";
+                fields.put(keel::String::from("Type"), keel::String::from("text"));
                 Value v = recordGetProp(engine.figureManager(), rec, "String", mr);
                 if (!v.isEmpty())
-                    fields["String"] = encodeProp(v);
+                    fields.put(keel::String::from("String"), encodeProp(v));
             } else if (rec->type == "legend") {
-                fields["Type"] = "legend";
-                fields["Location"] = encodeProp(
-                    recordGetProp(engine.figureManager(), rec, "Location", mr));
-                fields["Visible"] = encodeProp(
-                    recordGetProp(engine.figureManager(), rec, "Visible", mr));
+                fields.put(keel::String::from("Type"), keel::String::from("legend"));
+                fields.put(keel::String::from("Location"), encodeProp(
+                    recordGetProp(engine.figureManager(), rec, "Location", mr)));
+                fields.put(keel::String::from("Visible"), encodeProp(
+                    recordGetProp(engine.figureManager(), rec, "Visible", mr)));
             }
-            for (const auto &[k, v] : fields)
-                st.setFieldAll(k, decodeProp(v, mr));
+            keel::Array<keel::StringRef> sortedKeys;
+            sortedKeys.reserve(fields.size());
+            for (auto [k, v] : fields)
+                sortedKeys.push_back(k.as_ref());
+            std::sort(sortedKeys.begin(), sortedKeys.end());
+            for (keel::StringRef k : sortedKeys)
+                st.setFieldAll(k, decodeProp(*fields.get(k), mr));
             outs[0] = std::move(st);
         };
-        engine.registerFunction("", "get", std::move(fn));
+        engine.registerFunction("", "get", keel::move(fn));
     }
     // findobj([h][, 'Prop', value, ...] | '-property', Name)
     {
@@ -1775,15 +1843,15 @@ void registerHandleAccessors(Engine &engine)
 
             // Filters.
             struct Filt {
-                std::string prop;   // "Type" or a property name
+                keel::String prop;   // "Type" or a property name
                 Value want;
                 bool isPropTest;    // '-property' Name
             };
-            std::vector<Filt> filts;
+            keel::Array<Filt> filts;
             for (keel::usize i = first; i < args.size(); ++i) {
                 if (!args[i].isChar())
                     continue;
-                std::string key(args[i].toString().as_ref());
+                keel::String key = args[i].toString();
                 for (auto &c : key)
                     c = (char)std::tolower((unsigned char)c);
                 if (key == "-property" && i + 1 < args.size()
@@ -1791,7 +1859,7 @@ void registerHandleAccessors(Engine &engine)
                     Filt f;
                     f.isPropTest = true;
                     f.prop = args[++i].toString();
-                    filts.push_back(std::move(f));
+                    filts.push_back(keel::move(f));
                 } else if (key == "-regexp" || key == "-depth") {
                     // skip their option payload; unsupported, ignored
                     ++i;
@@ -1801,21 +1869,21 @@ void registerHandleAccessors(Engine &engine)
                     f.prop = args[i].toString();
                     f.want = args[i + 1];
                     ++i;
-                    filts.push_back(std::move(f));
+                    filts.push_back(keel::move(f));
                 }
             }
 
-            auto matlabType = [](const std::string &t) {
+            auto matlabType = [](keel::StringRef t) -> keel::StringRef {
                 if (t == "figure" || t == "axes" || t == "text"
                     || t == "line" || t == "legend" || t == "image")
                     return t;
                 // chart records carry dataset-ish types (scatter, bar…)
-                return std::string("line");
+                return keel::StringRef("line");
             };
 
-            std::vector<int> hits;
-            for (auto &kv : fm.handles()) {
-                auto *rec = &kv.second;
+            keel::Array<int> hits;
+            for (auto kv : fm.handles()) {
+                auto *rec = &kv.value;
                 if (!rec || rec->deleted)
                     continue;
                 // Hide slot-bound title/label text objects from findobj;
@@ -1825,7 +1893,7 @@ void registerHandleAccessors(Engine &engine)
                 if (scopeFig >= 0 && rec->figureId != scopeFig)
                     continue;
                 if (scopeSelf >= 0) {
-                    if (kv.first != scopeSelf)
+                    if (kv.key != scopeSelf)
                         continue;
                 } else if (scopeAxes >= 0
                            && rec->axesIndex != (keel::usize)scopeAxes
@@ -1845,7 +1913,7 @@ void registerHandleAccessors(Engine &engine)
                     if (f.prop == "Type") {
                         if (!f.want.isChar()
                             || matlabType(rec->type)
-                                   != f.want.toString()) {
+                                   != f.want.toString().as_ref()) {
                             pass = false;
                             break;
                         }
@@ -1915,12 +1983,12 @@ void registerHandleAccessors(Engine &engine)
                     }
                 }
                 if (pass)
-                    hits.push_back(kv.first);   // registry key = handle id
+                    hits.push_back(kv.key);   // registry key = handle id
             }
             std::sort(hits.begin(), hits.end());   // creation order
-            std::string cls = hits.empty()
-                ? std::string()
-                : fm.findHandle(hits[0])->className;
+            keel::StringRef cls = hits.empty()
+                ? keel::StringRef{}
+                : fm.findHandle(hits[0])->className.as_ref();
             outs[0] = makeHandleArray(cls, hits, mr);
             (void)engine;
         };
@@ -1939,14 +2007,14 @@ void registerHandleAccessors(Engine &engine)
             bool ok = rec != nullptr;
             if (ok && args.size() >= 2
                 && (args[1].isChar() || args[1].isString())) {
-                const std::string want(args[1].toString().as_ref());
+                const keel::String want = args[1].toString();
                 ok = rec->type == want || want == "chart"
                      || want == "graphics" || want == "axes"
                      || want == "figure";
             }
             outs[0] = Value::logicalScalar(ok);
         };
-        engine.registerFunction("", "isgraphics", std::move(fn));
+        engine.registerFunction("", "isgraphics", keel::move(fn));
     }
     // groot — the root graphics object (figure.Parent).
     {
@@ -2015,60 +2083,72 @@ void registerGraphicsClasses(Engine &engine)
 {
     // Distinct class names across the chart table + axes + figure
     // + text/legend/root records, plus class -> internal type mapping.
-    std::unordered_map<std::string, std::string> classToType = {
-        {kFigureClass, "figure"},
-        {kAxesClass,   "axes"},
-        {kTextClass,   "text"},
-        {kLegendClass, "legend"},
-        {kRootClass,   "root"},
-        {"matlab.graphics.Graphics", "line"},
-        {"matlab.graphics.GraphicsPlaceholder", "line"},
+    struct ClassTypePair {
+        const char *className;
+        const char *recType;
     };
-    for (const auto &kv : handleTypes())
-        classToType.emplace(kv.second.second, kv.second.first);
+    keel::Array<ClassTypePair> classToType;
+    auto addClass = [&](const char *cn, const char *rt) {
+        for (const auto &p : classToType)
+            if (keel::StringRef(p.className) == cn)
+                return;
+        classToType.push_back(ClassTypePair{cn, rt});
+    };
+    addClass(kFigureClass, "figure");
+    addClass(kAxesClass,   "axes");
+    addClass(kTextClass,   "text");
+    addClass(kLegendClass, "legend");
+    addClass(kRootClass,   "root");
+    addClass("matlab.graphics.Graphics", "line");
+    addClass("matlab.graphics.GraphicsPlaceholder", "line");
+    for (const auto &e : kHandleTypes)
+        addClass(e.className, e.type);
 
-    for (const auto &[clsName, recType] : classToType) {
+    for (const auto &pair : classToType) {
+        const char *clsName = pair.className;
+        const char *recType = pair.recType;
         BuiltinClass cls;
         cls.name = keel::String::from(clsName);
         cls.isHandle = true;
         cls.superclasses.push_back(keel::String::from("matlab.mixin.Handle"));
         cls.superclasses.push_back(keel::String::from("handle"));
-        cls.construct = [&engine, clsName = std::string(clsName), recType = std::string(recType)](
+        cls.construct = [&engine, clsName, recType](
                 keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
             auto &fm = ctx.engine->figureManager();
             auto *mr = ctx.engine->allocator();
+            const keel::StringRef recTypeRef(recType);
             Value h;
-            if (recType == "figure") {
+            if (recTypeRef == "figure") {
                 h = makeFigureHandle(fm, mr);
-            } else if (recType == "axes") {
+            } else if (recTypeRef == "axes") {
                 h = makeAxesHandle(fm, mr);
-            } else if (recType == "text") {
+            } else if (recTypeRef == "text") {
                 const int fid = fm.currentFigureId();
                 const keel::usize aidx = static_cast<keel::usize>(fm.current().currentAxes);
                 const int id = fm.createHandleAt(fid, aidx, "text", kTextClass);
                 h = makeGraphicsHandleValue(kTextClass, id, mr);
-            } else if (recType == "legend") {
+            } else if (recTypeRef == "legend") {
                 const int fid = fm.currentFigureId();
                 const keel::usize aidx = static_cast<keel::usize>(fm.current().currentAxes);
                 h = makeLegendHandleFor(fm, fid, aidx, mr);
-            } else if (recType == "root") {
+            } else if (recTypeRef == "root") {
                 h = makeRootHandle(fm, mr);
             } else {
                 AxesState &ax = fm.currentAxes();
                 const keel::usize dsIdx = ax.datasets.size();
                 DatasetInfo ds;
-                if (recType == "surface") {
-                    ds.type = "surf";
-                    ds.xJson = "[1,2,3]";
-                    ds.yJson = "[1,2,3]";
-                    ds.zJson = "[[1,0,0],[0,1,0],[0,0,1]]";
+                if (recTypeRef == "surface") {
+                    ds.type.assign("surf");
+                    ds.xJson.assign("[1,2,3]");
+                    ds.yJson.assign("[1,2,3]");
+                    ds.zJson.assign("[[1,0,0],[0,1,0],[0,0,1]]");
                 } else {
-                    ds.type = recType;
-                    ds.xJson = "[0,1]";
-                    ds.yJson = "[0,1]";
+                    ds.type.assign(recTypeRef);
+                    ds.xJson.assign("[0,1]");
+                    ds.yJson.assign("[0,1]");
                 }
-                ax.datasets.push_back(std::move(ds));
-                const int id = fm.createHandle(recType, clsName, dsIdx);
+                ax.datasets.push_back(keel::move(ds));
+                const int id = fm.createHandle(recTypeRef, clsName, dsIdx);
                 h = makeGraphicsHandleValue(clsName, id, mr);
             }
             const int hid = graphicsHandleIdOf(h);
@@ -2136,17 +2216,22 @@ void registerGraphicsClasses(Engine &engine)
             auto *rec = id >= 0 ? engine.figureManager().findHandle(id) : nullptr;
             if (!rec)
                 return keel::String::from("  deleted handle\n");
-            const std::string shortName = rec->className.substr(
-                rec->className.find_last_of('.') + 1);
-            std::string s = "  " + shortName + " with properties:\n\n";
-            auto line = [&](const char *k, const std::string &v) {
-                s += std::string("    ") + k + ": " + v + "\n";
+            const keel::usize dot = rec->className.rfind('.');
+            const keel::StringRef shortName = (dot == keel::kInvalidIndex)
+                ? rec->className.as_ref()
+                : rec->className.substr(dot + 1);
+            keel::String s = keel::format("  {} with properties:\n\n", shortName);
+            auto line = [&](const char *k, keel::StringRef v) {
+                s.append("    ");
+                s.append(k);
+                s.append(": ");
+                s.append(v);
+                s.push_back('\n');
             };
             for (const char *p : {"Color", "LineStyle", "LineWidth",
                                   "Marker", "Visible"}) {
-                auto it = rec->props.find(p);
-                if (it != rec->props.end()) {
-                    line(p, it->second);
+                if (const keel::String *hit = rec->props.get(p)) {
+                    line(p, *hit);
                     continue;
                 }
                 Value d = rec->isChart()
@@ -2155,9 +2240,9 @@ void registerGraphicsClasses(Engine &engine)
                 if (!d.isEmpty())
                     line(p, encodeProp(d));
             }
-            return keel::String::from(s);
+            return s;
         };
-        engine.registerClass(std::move(cls));
+        engine.registerClass(keel::move(cls));
     }
 }
 
@@ -2172,35 +2257,49 @@ void GraphicsLibrary::install(Engine &engine)
     registerGraphicsClasses(engine);
     registerFigureExport(engine);
 
-    std::vector<PlotEntry> table;
+    keel::Array<PlotEntry> table;
     buildPlotTable(table);
 
     // Handle-accessor names registered above — skip their (noop)
     // table entries (registerFunctionImpl_ throws on duplicates).
-    static const std::unordered_set<std::string> kHandleAccessorNames = {
-        "set", "get", "isgraphics", "ishandle", "isvalid",
+    auto isHandleAccessorName = [](keel::StringRef nm) -> bool {
+        static constexpr const char *kNames[] = {
+            "set", "get", "isgraphics", "ishandle", "isvalid",
+        };
+        for (const char *n : kNames)
+            if (nm == n) return true;
+        return false;
     };
     // Layout functions whose RESULT the adapter wraps into a handle
     // object (the core-free body only prepares the state / label field).
-    static const std::unordered_set<std::string> kHandleReturning = {
-        "figure", "gcf", "gca", "axes", "polaraxes",
-        "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
-        "legend", "text",
+    auto isHandleReturning = [](keel::StringRef nm) -> bool {
+        static constexpr const char *kNames[] = {
+            "figure", "gcf", "gca", "axes", "polaraxes",
+            "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
+            "legend", "text",
+        };
+        for (const char *n : kNames)
+            if (nm == n) return true;
+        return false;
     };
 
     for (PlotEntry &entry : table) {
-        if (kHandleAccessorNames.count(entry.name))
+        if (isHandleAccessorName(entry.name))
             continue;
-        std::string name(entry.name);
-        const bool hasHandle = handleTypes().count(name) > 0;
-        const bool wrapHandle = kHandleReturning.count(name) > 0;
+        const char *entryName = entry.name;
+        const HandleTypeEntry *hitType = findHandleType(entryName);
+        const bool hasHandle = hitType != nullptr;
+        const bool wrapHandle = isHandleReturning(entryName);
 
-        // The core-free plotting body; moved into the adapter closure.
+        // The core-free plotting body; shared via Arc so core entries can
+        // register under both graphics.<sub>.<name> and the bare core name.
+        auto sharedFn = keel::make_arc<GraphicsFn>(keel::move(entry.fn));
         auto ext =
-            [fn = std::move(entry.fn), hasHandle, wrapHandle, name = std::move(name)](
+            [fn = keel::move(sharedFn), hitType, hasHandle, wrapHandle, entryName](
                 keel::ArrayRef<Value> args, keel::usize nargout,
                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 auto &fm = ctx.engine->figureManager();
+                const keel::StringRef name(entryName);
                 // Chart calls only: snapshot the handle base. Calling this
                 // unconditionally would materialise a default figure before
                 // `figure`'s own body runs — and the first figure() would
@@ -2216,10 +2315,10 @@ void GraphicsLibrary::install(Engine &engine)
                     fm,
                     ctx.engine->allocator(),
                     // callBuiltin — forward to another registered plot builtin.
-                    [&ctx](std::string_view nm, keel::ArrayRef<Value> a,
+                    [&ctx](keel::StringRef nm, keel::ArrayRef<Value> a,
                            keel::usize no, keel::MutArrayRef<Value> o) -> bool {
                         const ExternalFunc *cf =
-                            ctx.engine->findExternal(std::string(nm), ctx.env);
+                            ctx.engine->findExternal(nm, ctx.env);
                         if (!cf)
                             return false;
                         (*cf)(a, no, o, ctx);
@@ -2230,7 +2329,7 @@ void GraphicsLibrary::install(Engine &engine)
                         return ctx.engine->callFunctionHandle(fh, a);
                     },
                 };
-                fn(args, nargout, outs, gc);
+                (*fn)(args, nargout, outs, gc);
 
                 // Post-hook: bind the handle object(s) so h = plot(...)
                 // works (bugs/closed/graphics/plot-family-no-return-value.md).
@@ -2239,18 +2338,15 @@ void GraphicsLibrary::install(Engine &engine)
                     const keel::usize base = fm.chartCallBase();
                     const keel::usize after = fm.currentAxes().datasets.size();
                     if (after > base) {
-                        const auto &types = handleTypes();
-                        auto hit = types.find(name);
+                        const keel::StringRef hType(hitType->type);
+                        const keel::StringRef hClass(hitType->className);
                         const bool isSurfOrContour =
-                            (hit->second.first == "surface"
-                             || hit->second.first == "contour");
+                            (hType == "surface" || hType == "contour");
                         const int nnew = isSurfOrContour
                                              ? 1
                                              : static_cast<int>(after - base);
                         if (nnew == 1) {
-                            const int id = fm.createHandle(hit->second.first,
-                                                           hit->second.second,
-                                                           base);
+                            const int id = fm.createHandle(hType, hClass, base);
                             if (isSurfOrContour) {
                                 const Value *zArg = nullptr;
                                 if (args.size() == 1 || args.size() == 2) {
@@ -2261,7 +2357,7 @@ void GraphicsLibrary::install(Engine &engine)
                                             && args[2].dims().cols() >= 2)
                                                ? &args[2]
                                                : &args[0];
-                                                                }
+                                }
                                 if (zArg && zArg->isNumeric()
                                     && zArg->dims().rows() >= 1
                                     && zArg->dims().cols() >= 1) {
@@ -2270,13 +2366,14 @@ void GraphicsLibrary::install(Engine &engine)
                                         if (!ds || ds->zJson.size() < 2
                                             || ds->zJson[0] != '['
                                             || ds->zJson[1] != '[') {
-                                            rec->props["ZData"] = encodeProp(*zArg);
+                                            rec->props.put(keel::String::from("ZData"),
+                                                           encodeProp(*zArg));
                                         }
                                     }
                                 }
                             }
                             outs[0] = makeGraphicsHandleValue(
-                                hit->second.second, id, ctx.engine->allocator());
+                                hClass, id, ctx.engine->allocator());
                         } else {
                             auto *res = ctx.engine->allocator()
                                             ? ctx.engine->allocator()
@@ -2285,7 +2382,7 @@ void GraphicsLibrary::install(Engine &engine)
                             states.reserve(static_cast<keel::usize>(nnew));
                             for (int i = 0; i < nnew; ++i) {
                                 const int id = fm.createHandle(
-                                    hit->second.first, hit->second.second,
+                                    hType, hClass,
                                     base + static_cast<keel::usize>(i));
                                 auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
                                 payload->handleId = id;
@@ -2295,7 +2392,7 @@ void GraphicsLibrary::install(Engine &engine)
                             }
                             Dims d{1, static_cast<keel::usize>(nnew)};
                             outs[0] = Value::objectArray(
-                                hit->second.second, d, keel::move(states),
+                                hClass, d, keel::move(states),
                                 /*isHandle=*/true, res);
                         }
                     }
@@ -2314,7 +2411,7 @@ void GraphicsLibrary::install(Engine &engine)
                                 }
                             }
                         }
-                    } else if (const std::string &slot = textSlotOf(name);
+                    } else if (keel::StringRef slot = textSlotOf(name);
                                !slot.empty()) {
                         // sgtitle is figure-scoped (kNoAxes) so scoped
                         // axes sweeps keep it; the rest bind the axes.
@@ -2347,11 +2444,12 @@ void GraphicsLibrary::install(Engine &engine)
                 }
             };
 
+        keel::String ns = keel::format("graphics.{}", entry.sub);
         if (entry.core) {
-            engine.registerFunction(std::string("graphics.") + entry.sub, entry.name, ext);
-            engine.registerFunction("", entry.name, std::move(ext));  // bare core name
+            engine.registerFunction(ns, entry.name, ext);
+            engine.registerFunction("", entry.name, keel::move(ext));  // bare core name
         } else {
-            engine.registerFunction(std::string("graphics.") + entry.sub, entry.name, std::move(ext));
+            engine.registerFunction(ns, entry.name, keel::move(ext));
         }
     }
 

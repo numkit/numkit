@@ -1,9 +1,16 @@
 // include/engine.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/function.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/small_array.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/core/types.hpp>
@@ -13,11 +20,6 @@
 #include <numkit/ops/rng_context.hpp>
 
 #include <atomic>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace numkit {
 
@@ -55,8 +57,8 @@ public:
     // Internal helpers and keel::ArenaTemp upstream-spill flow through here.
     keel::Allocator *allocator() const noexcept override { return mr_; }
 
-    void registerBinaryOp(const std::string &op, BinaryOpFunc func);
-    void registerUnaryOp(const std::string &op, UnaryOpFunc func);
+    void registerBinaryOp(keel::StringRef op, BinaryOpFunc func);
+    void registerUnaryOp(keel::StringRef op, UnaryOpFunc func);
 
     // Register a builtin function. Two forms:
     //   1-arg: registers in core (flat namespace, no prefix). The full
@@ -86,8 +88,8 @@ public:
     // ordinary synchronous external registration; the VM consults this first and
     // falls back to the synchronous builtin when the driver declines (builtin
     // handle / unsupported arg form). Returns the registered driver or nullptr.
-    void registerCallbackBuiltin(const std::string &name, std::shared_ptr<CallbackBuiltin> cb);
-    CallbackBuiltin *callbackBuiltin(const std::string &name) const;
+    void registerCallbackBuiltin(keel::StringRef name, keel::Arc<CallbackBuiltin> cb);
+    CallbackBuiltin *callbackBuiltin(keel::StringRef name) const;
     // True if `handle` (plain handle or {handle, captures…} closure cell) names
     // a USER function — i.e. there is a compiled body to step through — rather
     // than a builtin.
@@ -107,7 +109,7 @@ public:
     // parses and registers each top-level CLASSDEF_DEF via registerClassDef —
     // the identical call the compiler makes for a classdef statement — and
     // retains the text for the same post-clear replay.
-    void registerBuiltinClassSource(const std::string &src);
+    void registerBuiltinClassSource(keel::StringRef src);
     // Replay every retained startup registration (m-source functions +
     // classdefs). Parser/registry work only — no VM run — so it is safe to
     // call from inside the `clear` external while a chunk is executing.
@@ -123,13 +125,13 @@ public:
     // package qualification — which lives in the path — is threaded in here and
     // becomes the registry identity (class()/isa()/registry keys all use it).
     // Empty (the default) → use the node's own name (inline / unpackaged).
-    void registerClassDef(const ASTNode *classdef, const std::string &qualifiedName = "");
+    void registerClassDef(const ASTNode *classdef, keel::StringRef qualifiedName = "");
     // Same, with the class file's provenance known from the caller (the
     // m-file resolver) instead of captured from the currently executing
     // origin — resolution can happen while an unrelated script runs.
-    void registerClassDefFrom(const ASTNode *classdef, const std::string &qualifiedName,
-                              const std::string &fsName, const std::string &scriptDir,
-                              const std::string &scriptFile);
+    void registerClassDefFrom(const ASTNode *classdef, keel::StringRef qualifiedName,
+                              keel::StringRef fsName, keel::StringRef scriptDir,
+                              keel::StringRef scriptFile);
     // `clear classes` / `clear all`: remove every USER classdef so the next
     // reference re-loads (file classes) or errors as undefined (inline ones).
     // Built-in classes (containers.Map, …) are not in classDefs_ and survive.
@@ -137,7 +139,7 @@ public:
     // Run a classdef method body (args already include `self` first) /
     // constructor body (with `obj` seeded to the default instance) on the
     // TreeWalker, regardless of the active backend.
-    std::vector<Value> invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
+    keel::Array<Value> invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
                                          keel::usize nout);
     Value invokeClassCtor(const UserFunction &ctor, const Value &seed,
                           keel::ArrayRef<Value> args);
@@ -148,7 +150,7 @@ public:
     // Enforce a classdef method's declared access from the current context
     // (no-op for a public method). Used by the VM frame-dispatch path, which
     // bypasses the C++ method hook that would otherwise run the check.
-    void enforceMethodAccess(const std::string &className, const std::string &method);
+    void enforceMethodAccess(keel::StringRef className, keel::StringRef method);
     // A classdef property's `get.Prop` / `set.Prop` accessor UserFunction, or
     // nullptr when the property has none (plain stored property) / the class is
     // not a classdef. Used by the VM FIELD_GET/FIELD_SET opcode handlers to run
@@ -156,12 +158,12 @@ public:
     // propGet/propSet hook. enforceProp{Get,Set}Access enforces the property's
     // GetAccess/SetAccess from the current context before the accessor runs
     // (the access half that the propGet/propSet hook would otherwise perform).
-    const UserFunction *classGetter(const std::string &className,
-                                    const std::string &prop) const;
-    const UserFunction *classSetter(const std::string &className,
-                                    const std::string &prop) const;
-    void enforcePropGetAccess(const std::string &className, const std::string &prop);
-    void enforcePropSetAccess(const std::string &className, const std::string &prop);
+    const UserFunction *classGetter(keel::StringRef className,
+                                    keel::StringRef prop) const;
+    const UserFunction *classSetter(keel::StringRef className,
+                                    keel::StringRef prop) const;
+    void enforcePropGetAccess(keel::StringRef className, keel::StringRef prop);
+    void enforcePropSetAccess(keel::StringRef className, keel::StringRef prop);
     // Resolve a classdef operator overload (binary / unary) to its compiled
     // method chunk for an in-bytecode VM frame-push. Returns nullptr — caller
     // uses the numeric fast path or the C++ slow path (`tryObject*Op`) — when no
@@ -170,10 +172,10 @@ public:
     // success sets ownerClassOut to the dominant object's class and enforces the
     // operator method's access. The method's parameters ARE the operands:
     // binary args = [lhs, rhs], unary args = [operand]. P4, vm_callbacks_plan.md.
-    const BytecodeChunk *resolveBinaryOpChunk(const std::string &op, const Value &lhs,
-                                              const Value &rhs, std::string &ownerClassOut);
-    const BytecodeChunk *resolveUnaryOpChunk(const std::string &op, const Value &operand,
-                                             std::string &ownerClassOut);
+    const BytecodeChunk *resolveBinaryOpChunk(keel::StringRef op, const Value &lhs,
+                                              const Value &rhs, keel::String &ownerClassOut);
+    const BytecodeChunk *resolveUnaryOpChunk(keel::StringRef op, const Value &operand,
+                                             keel::String &ownerClassOut);
     // Resolve a classdef `subsref`/`subsasgn` overload to its compiled method
     // chunk for an in-bytecode VM frame-push, marshaling the call args (subsref:
     // [self, substruct]; subsasgn: [self, substruct, value]). `idx` is the flat
@@ -182,11 +184,11 @@ public:
     // indexing — when the class has no such overload or the body can't compile.
     // On success sets ownerClassOut to the object's class. P4, vm_callbacks_plan.md.
     const BytecodeChunk *resolveSubsrefChunk(const Value &self, keel::ArrayRef<Value> idx,
-                                             std::string &ownerClassOut,
-                                             std::vector<Value> &argsOut);
+                                             keel::String &ownerClassOut,
+                                             keel::Array<Value> &argsOut);
     const BytecodeChunk *resolveSubsasgnChunk(const Value &self, keel::ArrayRef<Value> idxAndVal,
-                                              std::string &ownerClassOut,
-                                              std::vector<Value> &argsOut);
+                                              keel::String &ownerClassOut,
+                                              keel::Array<Value> &argsOut);
     // Superclass-qualified calls from inside a classdef body
     // (`obj@Base(args)` / `method@Base(obj, args)`). superConstruct runs
     // Base's constructor with `seed` as the partially-built object and
@@ -194,9 +196,9 @@ public:
     // method (args already include `self` first). Both throw if Base is not
     // a registered classdef. When Base defines no constructor, superConstruct
     // returns `seed` unchanged (a base with only default property init).
-    Value superConstruct(const std::string &base, const Value &seed,
+    Value superConstruct(keel::StringRef base, const Value &seed,
                          keel::ArrayRef<Value> args);
-    std::vector<Value> superMethod(const std::string &base, const std::string &method,
+    keel::Array<Value> superMethod(keel::StringRef base, keel::StringRef method,
                                    keel::ArrayRef<Value> args, keel::usize nout);
     // classdef member-access context (private/protected/immutable). Push the
     // running method's/constructor's class on entry, pop on exit (RAII at the
@@ -205,10 +207,10 @@ public:
     // needs an exact class match; protected also admits subclasses of
     // `declClass`. `classCtxInCtorOf` is true when the top frame is a
     // constructor of `declClass` (used to gate `SetAccess = immutable`).
-    void pushClassCtx(std::string className, bool isCtor);
+    void pushClassCtx(keel::StringRef className, bool isCtor);
     void popClassCtx();
-    bool classCtxAllows(const std::string &declClass, bool privateOnly) const;
-    bool classCtxInCtorOf(const std::string &declClass) const;
+    bool classCtxAllows(keel::StringRef declClass, bool privateOnly) const;
+    bool classCtxInCtorOf(keel::StringRef declClass) const;
     // Construct an object enforcing a non-public constructor's access against
     // the current context (private ctor → only from the declaring class;
     // protected → also subclasses). Used at the user-facing `ClassName(args)`
@@ -220,24 +222,24 @@ public:
     // + every property at its declared default), WITHOUT running the user
     // constructor. This is the "seed" the constructor body receives bound to
     // its output variable. Throws if `className` is not a classdef.
-    Value makeDefaultInstance(const std::string &className);
+    Value makeDefaultInstance(keel::StringRef className);
     // The classdef's user-defined constructor (the method named like the
     // class), or nullptr when the class declares none / is not a classdef.
-    const UserFunction *classCtor(const std::string &className) const;
+    const UserFunction *classCtor(keel::StringRef className) const;
     // Enforce a non-public constructor's access against the current context
     // (the access half of constructChecked, without building the object). Used
     // by the VM ctor-frame path before pushing the constructor frame. No-op for
     // a public ctor or a non-classdef BuiltinClass.
-    void enforceCtorAccess(const std::string &className);
+    void enforceCtorAccess(keel::StringRef className);
     // MATLAB-style display text for an OBJECT value. `name` empty →
     // bare body (disp); otherwise the `name =\n\n<body>\n` form.
-    std::string formatObjectDisplay(const std::string &name, const Value &obj) const;
+    keel::String formatObjectDisplay(keel::StringRef name, const Value &obj) const;
     // Emit an OBJECT value to the engine output, honouring a class-defined
     // `display` (owns the whole output) or `disp` (owns the body; the default
     // `name =` header is added when `name` is non-empty) method on a scalar
     // object. Falls back to formatObjectDisplay otherwise. Shared by both
     // backends' display paths.
-    void displayObject(const std::string &name, const Value &obj);
+    void displayObject(keel::StringRef name, const Value &obj);
     // Operator overloading: when `lhs` or `rhs` is an OBJECT, dispatch the
     // binary operator `op` (the source token, e.g. "+", ".*", "==") to the
     // dominant object's class `ops` entry (MATLAB names: plus/times/eq/…).
@@ -246,14 +248,14 @@ public:
     // object. Throws the MATLAB "Undefined operator … for type …" error
     // when an object operand has no matching overload. Shared by both
     // engines' binary-op slow paths.
-    bool tryObjectBinaryOp(const std::string &op, const Value &lhs, const Value &rhs,
+    bool tryObjectBinaryOp(keel::StringRef op, const Value &lhs, const Value &rhs,
                            Environment *env, Value &out);
     // Unary counterpart: dispatch `op` ("-", "~", "'", ".'") to the
     // operand object's class `ops` (uminus/not/ctranspose/transpose). The
     // hook receives self = the operand and no args. Returns true (out set)
     // when handled; false when the operand is not an object. Throws the
     // MATLAB "Undefined operator" error when an object has no overload.
-    bool tryObjectUnaryOp(const std::string &op, const Value &operand,
+    bool tryObjectUnaryOp(keel::StringRef op, const Value &operand,
                           Environment *env, Value &out);
     // Value-level operator application with object-overload dispatch — the
     // counterpart to the AST (TreeWalker) and bytecode (VM) operator paths for
@@ -264,11 +266,11 @@ public:
     // neither applies. `op` is the source token ("+", ".*", "==", "-", "~",
     // "'", …). Short-circuit "&&"/"||" are NOT handled here (they are control
     // flow, lowered by the caller) — pass an eager logical op instead.
-    Value applyBinaryOp(const std::string &op, const Value &lhs, const Value &rhs);
-    Value applyUnaryOp(const std::string &op, const Value &operand);
+    Value applyBinaryOp(keel::StringRef op, const Value &lhs, const Value &rhs);
+    Value applyUnaryOp(keel::StringRef op, const Value &operand);
     // Builtin object-array slice store: dst(subscripts) = val, default-
     // filling grown slots via the class's no-arg constructor. `perDim` holds
-    // the resolved 0-based index list per subscript — one list → linear
+    // both 0-based index lists per subscript — one list → linear
     // store (shape-preserving / vector grow), several → N-D store (grid
     // grow). `val` is a scalar object (broadcast) or matches the target
     // count. Callers first verify dst is a valid target (empty/unset, or a
@@ -291,18 +293,18 @@ public:
     void setNamespaceMode(NamespaceMode mode) noexcept { namespaceMode_ = mode; bumpCallCacheEpoch(); }
     NamespaceMode namespaceMode() const noexcept { return namespaceMode_; }
 
-    void markPluginNamespace(const std::string &topNs, bool isolated = false);
-    bool isPluginNamespace(const std::string &topNs) const;
-    bool isIsolatedPluginNamespace(const std::string &topNs) const;
-    std::string formatUndefinedFunctionError(const std::string &funcName,
-                                             const std::string &baseMsg) const;
+    void markPluginNamespace(keel::StringRef topNs, bool isolated = false);
+    bool isPluginNamespace(keel::StringRef topNs) const;
+    bool isIsolatedPluginNamespace(keel::StringRef topNs) const;
+    keel::String formatUndefinedFunctionError(keel::StringRef funcName,
+                                              keel::StringRef baseMsg) const;
 
-    const std::vector<std::string> &namespaces() const { return namespaceOrder_; }
+    const keel::Array<keel::String> &namespaces() const { return namespaceOrder_; }
 
-    // Multimap from leaf name (last segment) to full name
+    // Multimap from leaf name (last segment) to full names
     // (incl. all promotions, aliases). Used by the resolver to
     // implement `import x.*` wildcard lookups in O(1).
-    const std::unordered_multimap<std::string, std::string> &shortNameIndex() const
+    const keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> &shortNameIndex() const
     {
         return shortNameIndex_;
     }
@@ -313,7 +315,7 @@ public:
     // fully-qualified) lookup is performed.
     //
     // Resolution order (per namespace_design.md Section 3):
-    //   1. Direct: externalFuncs_.find(name)  (core / already qualified)
+    //   1. Direct: externalFuncs_.get(name)  (core / already qualified)
     //   2. Walk env→parent chain, for each scope's active imports:
     //      - wildcard `import a.b.*`     → try "a.b.<name>"
     //      - explicit `import a.b.c`     → if c == name, try "a.b.c"
@@ -325,15 +327,15 @@ public:
     // Returns the full qualified name for a bare leaf name (e.g. "fft" →
     // "signal.transforms.fft") — the namespace source that the bare-name
     // resolver found. Empty when the name doesn't resolve. Used by `which`.
-    std::string bareNameSource(const std::string &name) const;
+    keel::String bareNameSource(keel::StringRef name) const;
 
     // Compile-time check: is `name` a leaf name registered anywhere in the
     // namespace tree? Used by the compiler to decide whether an identifier
     // is a callable. Does NOT consider imports — that's a runtime concept.
-    bool isKnownLeafName(const std::string &name) const;
+    bool isKnownLeafName(keel::StringRef name) const;
 
-    void setVariable(const std::string &name, Value val);
-    Value *getVariable(const std::string &name);
+    void setVariable(keel::StringRef name, Value val);
+    Value *getVariable(keel::StringRef name);
 
     // Execute code — uses current backend (TreeWalker by default).
     // When `suppressTopLevelDisplay==true`, every top-level statement
@@ -351,7 +353,7 @@ public:
     // only intended caller; the statement must outlive the call and
     // belong to a program parsed by THIS engine's parser.
     Value evalStatement(const ASTNode *stmt,
-                        std::shared_ptr<const std::string> src);
+                        keel::Arc<const keel::String> src);
     // See engine.cpp: rewrites variable-headed glued -// COMMAND_CALLs
     // into binary expressions BEFORE compiling (MATLAB-probed rule).
     void rewriteVarHeadedCommands(ASTNode *root);
@@ -369,12 +371,12 @@ public:
         Value value;
         bool ok = true;
         bool debugStop = false;
-        std::string errorMessage;
-        std::string errorId;      // numkit:<fn>:<tag> when the thrower set one
+        keel::String errorMessage;
+        keel::String errorId;      // numkit:<fn>:<tag> when the thrower set one
         int errorLine = 0;
         int errorCol = 0;
-        std::string errorFunc;
-        std::string errorContext;  // e.g. "in call to 'sin'"
+        keel::String errorFunc;
+        keel::String errorContext;  // e.g. "in call to 'sin'"
     };
     EvalResult evalSafe(keel::StringRef code);
 
@@ -390,8 +392,8 @@ public:
     // Element-wise fusion (see fusion_rule.hpp). The standard library
     // registers concrete rules; both backends consult them when enabled.
     // Disabled instantly (no rebuild) via setFusion(false) / NUMKIT_FUSE=0.
-    void addFusionRule(FusionRule rule) { fusionRules_.push_back(std::move(rule)); }
-    const std::vector<FusionRule> &fusionRules() const { return fusionRules_; }
+    void addFusionRule(FusionRule rule) { fusionRules_.push_back(keel::move(rule)); }
+    const keel::Array<FusionRule> &fusionRules() const { return fusionRules_; }
     void setFusion(bool on) { fusionEnabled_ = on; }
     bool fusionEnabled() const { return fusionEnabled_ && !fusionRules_.empty(); }
     // Fusion-fire telemetry: both backends call noteFusionHit() each time a rule's
@@ -401,21 +403,22 @@ public:
     keel::usize fusionHits() const { return fusionHits_; }
     void resetFusionHits() { fusionHits_ = 0; }
 
-    using OutputFunc = std::function<void(const std::string &)>;
+    using OutputFunc = keel::Function<void(keel::StringRef)>;
     void setOutputFunc(OutputFunc f);
-    OutputFunc outputFunc() const { return outputFunc_; }
+    OutputFunc swapOutputFunc(OutputFunc f);
+    const OutputFunc &outputFunc() const { return outputFunc_; }
     // Injectable line source for `input()` (the setOutputFunc pattern):
     // the provider returns ONE entered line (no trailing newline). When
     // unset, the input builtin reads stdin — the CLI path. Tests feed
     // canned lines; the WASM/JS shell pre-loads piped stdin through the
     // bindings (see repl_bindings); the IDE later supplies its own
     // transport (dev-docs/todo/ide_input_adapter.md).
-    using InputProvider = std::function<std::string()>;
-    void setInputProvider(InputProvider p) { inputProvider_ = std::move(p); }
+    using InputProvider = keel::Function<keel::String()>;
+    void setInputProvider(InputProvider p) { inputProvider_ = keel::move(p); }
     const InputProvider &inputProvider() const { return inputProvider_; }
     void setMaxRecursionDepth(int depth);
 
-    std::vector<std::string> workspaceVarNames() const;
+    keel::Array<keel::String> workspaceVarNames() const;
     void outputText(keel::StringRef s);
 
     FigureManager &figureManager() override { return *figureManager_; }
@@ -428,15 +431,15 @@ public:
     Environment &constantsEnv() { return *constantsEnv_; }
     Environment &globalsEnv() { return *globalsEnv_; }
 
-    bool hasFunction(const std::string &name) const;
-    bool hasUserFunction(const std::string &name) const;
-    bool hasExternalFunction(const std::string &name) const;
+    bool hasFunction(keel::StringRef name) const;
+    bool hasUserFunction(keel::StringRef name) const;
+    bool hasExternalFunction(keel::StringRef name) const;
     // Compile-time probe for the compiler's dotted-rvalue decision: can
     // `name` be CALLED with no parentheses? True when it is a registered
     // external (full name), a short-name leaf of one, or an
     // already-registered user function. No lazy m-file probing — the
     // predicate must stay side-effect-free.
-    bool hasCallableName(const std::string &name) const;
+    bool hasCallableName(keel::StringRef name) const;
 
     // ── Public callback API for builtins ──────────────────────
     // Invoke a function-handle Value from C++. Routes through TW so
@@ -467,12 +470,12 @@ public:
     // `import pkg.*` in scope can resolve bare `foo()` to `pkg.foo`.
     // Pass nullptr only for introspection paths that intentionally
     // bypass imports (e.g. `which`, `exist`).
-    const UserFunction *lookupUserFunction(const std::string &name,
+    const UserFunction *lookupUserFunction(keel::StringRef name,
                                             const Environment *env);
 
     // Const variant — never triggers the m-file resolver. Use for
     // pure introspection / "is this CURRENTLY known" checks.
-    const UserFunction *lookupUserFunctionLocal(const std::string &name) const;
+    const UserFunction *lookupUserFunctionLocal(keel::StringRef name) const;
 
     // Clear workspace-scope user functions. Script-local functions
     // live in a separate bucket (see beginScript/endScript) and are
@@ -487,7 +490,7 @@ public:
     // otherwise it lives in the workspace bucket. Single funnel for
     // the writes that previously went straight into the private maps
     // via friendship.
-    void adoptUserFunction(const std::string &name,
+    void adoptUserFunction(keel::StringRef name,
                             UserFunction uf,
                             bool scriptScope = false);
 
@@ -502,7 +505,7 @@ public:
     // "native:/scripts", "local:/work", or just a relative path).
     void addPath(keel::StringRef dir);
     void rmPath(keel::StringRef dir);
-    const std::vector<std::string> &path() const { return mPath_; }
+    const keel::Array<keel::String> &path() const { return mPath_; }
 
     // Drop all cached m-file entries — next lookup re-scans the disk.
     // Powers MATLAB's `rehash` builtin.
@@ -517,7 +520,7 @@ public:
 
     // Reload each evicted file-class base that a surviving (inline) subclass
     // still derives from; registerClassDef's cascade re-merges the dependents.
-    void reloadEvictedClassBases_(const std::vector<std::string> &bases);
+    void reloadEvictedClassBases_(keel::ArrayRef<keel::String> bases);
 
     // Mark the entry/exit of a top-level script or function
     // evaluation. While a script is active, any FUNCTION_DEF it
@@ -547,7 +550,7 @@ public:
 
 private:
     friend class DebugFacade;
-    void setDebugObserver(std::shared_ptr<DebugObserver> observer);
+    void setDebugObserver(keel::Arc<DebugObserver> observer);
     DebugObserver *debugObserver() const { return debugObserver_.get(); }
     BreakpointManager &breakpointManager() { return breakpointManager_; }
     const BreakpointManager &breakpointManager() const { return breakpointManager_; }
@@ -571,13 +574,13 @@ public:
     // were `pi`/`eps`/etc. Does not appear in `whos` or the debug
     // Workspace panel, can be shadowed by `name = …` and un-shadowed by
     // `clear name`, and survives `clear all`.
-    void registerConstant(const std::string &name, Value val);
+    void registerConstant(keel::StringRef name, Value val);
 
     // Is `name` a reserved name (MATLAB built-in OR host-registered
     // constant)? Used by the compiler / VM / debug workspace to hide
     // these names from user-workspace views and skip unnecessary
     // runtime safety checks.
-    bool isReservedName(const std::string &name) const;
+    bool isReservedName(keel::StringRef name) const;
 
     // Tic/toc timer access — used by workspace builtins
     void setTicTimer(TimePoint tp)
@@ -614,45 +617,56 @@ public:
     // also performs write-through to the caller's frame register if the
     // name is statically allocated (chunk.varMap hit). Used by assignin.
     void assignToCaller(keel::i32 n, keel::StringRef name, Value val) override;
-    void assignInBase(const std::string &name, Value val);
+    void assignInBase(keel::StringRef name, Value val);
     void syncFrameToEnv(Environment *env);
     void syncEnvRemovalsToFrame(Environment *env);
 
     // Per-function persistent variable storage (isolated per function & per Engine)
-    const std::shared_ptr<std::unordered_map<std::string, Value>> &persistentBucketPtr(const std::string &funcName)
+    const keel::Arc<keel::HashMap<keel::String, Value>> &persistentBucketPtr(keel::StringRef funcName)
     {
-        auto &ptr = persistentStore_[funcName];
-        if (!ptr)
-            ptr = std::make_shared<std::unordered_map<std::string, Value>>();
-        return ptr;
+        if (auto *existing = persistentStore_.get(funcName)) {
+            if (!*existing)
+                *existing = keel::make_arc<keel::HashMap<keel::String, Value>>();
+            return *existing;
+        }
+        auto res = persistentStore_.try_insert(
+            keel::String::from(funcName),
+            keel::make_arc<keel::HashMap<keel::String, Value>>());
+        return *res.value;
     }
-    std::unordered_map<std::string, Value> &persistentBucket(const std::string &funcName)
+    keel::HashMap<keel::String, Value> &persistentBucket(keel::StringRef funcName)
     {
         return *persistentBucketPtr(funcName);
     }
-    void clearPersistentForFunc(const std::string &funcName);
+    void clearPersistentForFunc(keel::StringRef funcName);
     void clearAllPersistent()
     {
-        for (auto &[k, b] : persistentStore_)
+        for (auto [k, b] : persistentStore_)
             if (b)
                 b->clear();
     }
 
     // Per-Engine warning state (`lastwarn`) and environment variable overlay (`setenv`/`getenv`)
-    void setLastWarn(std::string msg, std::string id = {})
+    void setLastWarn(keel::StringRef msg, keel::StringRef id = {})
     {
-        lastWarnMsg_ = std::move(msg);
-        lastWarnId_ = std::move(id);
+        lastWarnMsg_.assign(msg);
+        lastWarnId_.assign(id);
     }
-    const std::string &lastWarnMsg() const noexcept { return lastWarnMsg_; }
-    const std::string &lastWarnId() const noexcept { return lastWarnId_; }
+    const keel::String &lastWarnMsg() const noexcept { return lastWarnMsg_; }
+    const keel::String &lastWarnId() const noexcept { return lastWarnId_; }
 
-    void setEnvVar(keel::StringRef name, keel::StringRef val) { envOverlay_[std::string(name)] = std::string(val); }
-    std::string getEnvVar(keel::StringRef name) const;
+    void setEnvVar(keel::StringRef name, keel::StringRef val)
+    {
+        envOverlay_.put(keel::String::from(name), keel::String::from(val));
+    }
+    keel::String getEnvVar(keel::StringRef name) const;
 
     // Property accessor recursion guard (`get.Prop` / `set.Prop`)
-    bool isPropAccessorActive(const std::string &accessorName) const;
-    void pushPropAccessor(std::string accessorName) { activePropAccessors_.push_back(std::move(accessorName)); }
+    bool isPropAccessorActive(keel::StringRef accessorName) const;
+    void pushPropAccessor(keel::StringRef accessorName)
+    {
+        activePropAccessors_.push_back(keel::String::from(accessorName));
+    }
     void popPropAccessor()
     {
         if (!activePropAccessors_.empty())
@@ -666,7 +680,7 @@ public:
     // outside any user-function call, or when k is out of range.
     // Backed by per-CALL-site metadata recorded by the compiler / TW
     // call sites.
-    std::string inputName(int k);
+    keel::String inputName(int k);
 
     // ── Virtual filesystem ────────────────────────────────────
     //
@@ -715,11 +729,11 @@ public:
     {
         uf.originKnown = true;
         if (const keel::String *f = fsCtx_.currentScriptFile())
-            uf.sourceFile.assign(f->data(), f->size());
+            uf.sourceFile.assign(f->as_ref());
         if (const keel::String *d = fsCtx_.currentScriptDir())
-            uf.sourceDir.assign(d->data(), d->size());
+            uf.sourceDir.assign(d->as_ref());
         if (const keel::String *o = fsCtx_.currentScriptOrigin())
-            uf.sourceFs.assign(o->data(), o->size());
+            uf.sourceFs.assign(o->as_ref());
     }
 
     // Engine-owned current working directory.
@@ -768,23 +782,23 @@ public:
 
 private:
     keel::Allocator *mr_;  // not owned; caller-supplied or get_default_resource()
-    std::shared_ptr<Environment> globalsEnv_;     // shared across functions & closures
-    std::unique_ptr<Environment> constantsEnv_;  // pi, eps, inf, etc. — parent for all scopes
-    std::unique_ptr<Environment> workspaceEnv_;  // top-level workspace (base workspace)
+    keel::Arc<Environment> globalsEnv_;        // shared across functions & closures
+    keel::UniquePtr<Environment> constantsEnv_; // pi, eps, inf, etc. — parent for all scopes
+    keel::UniquePtr<Environment> workspaceEnv_; // top-level workspace (base workspace)
 
-    std::unordered_map<std::string, BinaryOpFunc> binaryOps_;
-    std::unordered_map<std::string, UnaryOpFunc> unaryOps_;
-    std::unordered_map<std::string, ExternalFunc> externalFuncs_;
+    keel::HashMap<keel::String, BinaryOpFunc> binaryOps_;
+    keel::HashMap<keel::String, UnaryOpFunc> unaryOps_;
+    keel::HashMap<keel::String, ExternalFunc> externalFuncs_;
 
     // Object-model class registry (object_model.md). Keyed by class name.
-    std::unordered_map<std::string, BuiltinClass> classes_;
+    keel::HashMap<keel::String, BuiltinClass> classes_;
     // Parsed user classdef descriptors (property defaults, ctor + method
     // UserFunctions), kept for inheritance merges. Full type in engine.cpp.
-    std::unordered_map<std::string, std::shared_ptr<ClassDefDesc>> classDefs_;
+    keel::HashMap<keel::String, keel::Arc<ClassDefDesc>> classDefs_;
     // Cloned source AST per registered classdef, so a base-class redefinition
     // can re-merge its (transitive) subclasses from scratch. Keyed by the
     // class's registry name (qualified for packaged classes).
-    std::unordered_map<std::string, std::shared_ptr<const ASTNode>> classDefAst_;
+    keel::HashMap<keel::String, keel::Arc<const ASTNode>> classDefAst_;
     // Re-entrancy guard for reregisterDerivedClasses: while a cascade is
     // re-registering subclasses, their own registerClassDef calls must not each
     // launch another (redundant, overlapping) cascade.
@@ -792,23 +806,23 @@ private:
     // Higher-order builtins that can run callbacks as pausable VM frames
     // (state-machine callbacks). Keyed by builtin name; consulted by the VM
     // before the synchronous external path. Full type in callback_builtin.hpp.
-    std::unordered_map<std::string, std::shared_ptr<CallbackBuiltin>> callbackBuiltins_;
-    std::unordered_map<std::string, UserFunction> userFuncs_;
-    std::unordered_map<std::string, std::shared_ptr<std::unordered_map<std::string, Value>>> persistentStore_;
-    std::string lastWarnMsg_;
-    std::string lastWarnId_;
-    std::unordered_map<std::string, std::string> envOverlay_;
-    std::vector<std::string> activePropAccessors_;
+    keel::HashMap<keel::String, keel::Arc<CallbackBuiltin>> callbackBuiltins_;
+    keel::HashMap<keel::String, UserFunction> userFuncs_;
+    keel::HashMap<keel::String, keel::Arc<keel::HashMap<keel::String, Value>>> persistentStore_;
+    keel::String lastWarnMsg_;
+    keel::String lastWarnId_;
+    keel::HashMap<keel::String, keel::String> envOverlay_;
+    keel::Array<keel::String> activePropAccessors_;
     // Startup registration sources retained for post-clear replay
     // (reinstallBuiltinSources): m-source function texts and classdef
     // source texts. Cleared functions/classes reload from disk in MATLAB —
     // these have no disk backing, so the engine re-registers them.
-    std::vector<std::string> builtinMSourceTexts_;
-    std::vector<std::string> builtinClassSourceTexts_;
+    keel::Array<keel::String> builtinMSourceTexts_;
+    keel::Array<keel::String> builtinClassSourceTexts_;
     // Parse+adopt halves of the public register entry points, factored out
     // for replay without re-appending to the retention lists.
-    void adoptBuiltinMSource_(const std::string &src);
-    void adoptBuiltinClassSource_(const std::string &src);
+    void adoptBuiltinMSource_(keel::StringRef src);
+    void adoptBuiltinClassSource_(keel::StringRef src);
 
     // Class-execution context stack for classdef member-access enforcement
     // (private / protected / immutable). Each frame is the class whose
@@ -818,28 +832,28 @@ private:
     // (only public members reachable).
     struct ClassCtxFrame
     {
-        std::string className;
+        keel::String className;
         bool isCtor;
     };
-    std::vector<ClassCtxFrame> classCtx_;
+    keel::Array<ClassCtxFrame> classCtx_;
     // Currently-executing class (TW callback guard, else VM top method frame;
     // empty == script scope). Backs classCtxAllows / classCtxInCtorOf.
-    std::string currentClassCtx_() const;
+    keel::StringRef currentClassCtx_() const;
 
     // Auxiliary indices into externalFuncs_, populated by registerFunction.
     // The full-name keys in externalFuncs_ are authoritative; these indices
     // exist purely to accelerate namespace-aware lookups (Phase 6).
-    std::unordered_multimap<std::string, std::string> shortNameIndex_;
-    std::vector<std::string> namespaceOrder_;
-    std::unordered_set<std::string> namespaceSet_;
-    std::unordered_set<std::string> pluginNamespaces_;
-    std::unordered_set<std::string> isolatedPluginNamespaces_;
+    keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> shortNameIndex_;
+    keel::Array<keel::String> namespaceOrder_;
+    keel::HashSet<keel::String> namespaceSet_;
+    keel::HashSet<keel::String> pluginNamespaces_;
+    keel::HashSet<keel::String> isolatedPluginNamespaces_;
     NamespaceMode namespaceMode_ = NamespaceMode::Compat;
 
     // Internal helper used by both registerFunction overloads.
     // Throws std::runtime_error if `fullName` already registered.
-    void registerFunctionImpl_(const std::string &fullName,
-                               const std::string &leafName,
+    void registerFunctionImpl_(keel::StringRef fullName,
+                               keel::StringRef leafName,
                                ExternalFunc func);
 
     // Shared body of registerClassDef / registerClassDefFrom. `originKnown`
@@ -847,31 +861,31 @@ private:
     // onto every method/ctor/accessor UserFunction so mfilename() inside a
     // method reports the class's file (inline classdefs capture the
     // executing script's origin; the resolver passes the matched file).
-    void registerClassDefImpl_(const ASTNode *cd, const std::string &qualifiedName,
-                               bool originKnown, const std::string &fsName,
-                               const std::string &scriptDir, const std::string &scriptFile);
+    void registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedName,
+                               bool originKnown, keel::StringRef fsName,
+                               keel::StringRef scriptDir, keel::StringRef scriptFile);
 
     // Evict a previously-registered classdef so a redefinition fully replaces
     // it (REPL / IDE re-run of `classdef Name … end`). Removes the registry
     // class, the descriptor, the `Name.static` / `Name.CONST` qualified
     // externals, and the compiled method chunks. Called by registerClassDef
     // when `Name` is already registered, instead of the old idempotent skip.
-    void unregisterClassDef(const std::string &name);
+    void unregisterClassDef(keel::StringRef name);
     // Remove the bare constructor external `externalFuncs_[name]` that
     // resolveMFile_ registers for a class loaded from `Name.m`. Guarded by
     // mFileCache_ membership so an inline `classdef sum` can never erase the
     // core `sum` builtin that merely shares the name.
-    void dropFileClassCtorExternal_(const std::string &name);
+    void dropFileClassCtorExternal_(keel::StringRef name);
     // After `base` is (re)registered, re-register every class that transitively
     // derives from it (parent-first), so subclasses — which hold a snapshot of
     // the base's methods/props — pick up the new definition. Guarded by
     // suppressDependentCascade_ against re-entrant fan-out.
-    void reregisterDerivedClasses(const std::string &base);
+    void reregisterDerivedClasses(keel::StringRef base);
 
     OutputFunc outputFunc_;
     InputProvider inputProvider_;   // empty → input() reads stdin
-    std::unique_ptr<FigureManager> figureManager_;
-    mutable std::unique_ptr<PluginLoader> pluginLoader_;
+    keel::UniquePtr<FigureManager> figureManager_;
+    mutable keel::UniquePtr<PluginLoader> pluginLoader_;
 
     // Tic/toc timer
     TimePoint ticBase_{};
@@ -885,44 +899,43 @@ private:
     // constantsEnv_ alongside the built-ins by reinstallConstants() so
     // `clear all` does not drop them. Name presence also feeds
     // isReservedName() so these behave the same as `pi`/`eps`/…
-    std::unordered_map<std::string, Value> userConstants_;
+    keel::HashMap<keel::String, Value> userConstants_;
 
     // Script-lexical user functions — peer to userFuncs_ but never
     // cleared by `clear all`. Managed by begin/endScript (which
     // drives both this map and the compiler's matching bucket) so
     // file-scoped functions survive a mid-script clear.
-    std::unordered_map<std::string, UserFunction> scriptLocalUserFuncs_;
-    std::vector<std::unordered_map<std::string, UserFunction>> savedScriptLocalUserFuncs_;
+    keel::HashMap<keel::String, UserFunction> scriptLocalUserFuncs_;
+    keel::Array<keel::HashMap<keel::String, UserFunction>> savedScriptLocalUserFuncs_;
 
     // ── M-file resolver state (Phase 9) ───────────────────────────
-    std::vector<std::string> mPath_;
+    keel::Array<keel::String> mPath_;
     struct MFileCacheEntry
     {
-        std::string fullPath;       // VFS-prefixed, the resolved location
-        keel::i64 mtime = 0;          // 0 if backend can't supply mtime
-        keel::i64 mtimeNs = 0;        // nanosecond mtime when available
-        keel::i64 fileSize = -1;      // file size from stat (-1 if unknown)
-        std::string contentHash;    // fallback when mtime is unavailable
-        std::shared_ptr<const std::string> sourceCode;  // keeps AST live
-        bool hasExternal = false;   // true when resolveMFile_ registered externalFuncs_[name]
+        keel::String fullPath;                  // VFS-prefixed, the resolved location
+        keel::i64 mtime = 0;                    // 0 if backend can't supply mtime
+        keel::i64 mtimeNs = 0;                  // nanosecond mtime when available
+        keel::i64 fileSize = -1;                // file size from stat (-1 if unknown)
+        keel::String contentHash;               // fallback when mtime is unavailable
+        keel::Arc<const keel::String> sourceCode; // keeps AST live
+        bool hasExternal = false;               // true when resolveMFile_ registered externalFuncs_[name]
     };
-    std::unordered_map<std::string, MFileCacheEntry> mFileCache_;
-    std::unordered_set<std::string> mFileMissCache_;
+    keel::HashMap<keel::String, MFileCacheEntry> mFileCache_;
+    keel::HashSet<keel::String> mFileMissCache_;
     // Helper — returns nullptr if `name`.m can't be located in any of
     // (script-origin, mPath_-list) or fails to parse. On success caches
     // the parsed UserFunction in userFuncs_ and the compiled chunk in
     // the Compiler.
-    const UserFunction *resolveMFile_(const std::string &name);
+    const UserFunction *resolveMFile_(keel::StringRef name);
 
     // Debugger
-    std::shared_ptr<DebugObserver> debugObserver_;
+    keel::Arc<DebugObserver> debugObserver_;
     BreakpointManager breakpointManager_;
-    std::unique_ptr<DebugController> debugController_;  // created when observer is set
+    keel::UniquePtr<DebugController> debugController_;  // created when observer is set
 
     // Virtual filesystem session: VFS registry + script-origin stack + cwd +
     // path resolver. Engine forwards its filesystem API to this (see the
-    // delegating wrappers in engine.cpp). Owned by value — FsContext is
-    // STL-only (fs/, L0).
+    // delegating wrappers in engine.cpp). Owned by value — FsContext is L0.
     FsContext fsCtx_;
 
     // The session's random-number stream + rng() control. Owned by value —
@@ -939,8 +952,8 @@ public:
 
 private:
     keel::u64 callCacheEpoch_ = 1;
-    std::unique_ptr<TreeWalker> treeWalker_;
-        // Engine-wide anonymous-function name counter. The VM compiler and
+    keel::UniquePtr<TreeWalker> treeWalker_;
+    // Engine-wide anonymous-function name counter. The VM compiler and
     // the TreeWalker fallback mint __anon_<N> names from this ONE source
     // so independently-numbered closures can never collide in
     // compiledFuncs_ / userFuncs_ (a TreeWalker-executed literal that
@@ -948,7 +961,7 @@ private:
     // foreign body — bugs/opened/core/anon-table-resolution-corruption.md).
     std::atomic<int> anonNameCounter_{0};
 
-    std::unique_ptr<Compiler> compiler_;
+    keel::UniquePtr<Compiler> compiler_;
 
 public:
     Compiler *compilerPtr() { return compiler_.get(); }
@@ -956,13 +969,13 @@ public:
 
 private:
     Value evalConstExpr(const ASTNode *expr);
-    std::unique_ptr<VM> vm_;
+    keel::UniquePtr<VM> vm_;
     Backend backend_ = Backend::VM;
 
     // Element-wise fusion: registered idiom→kernel rules + on/off gate.
     // Default reflects NUMKIT_FUSE (set in the ctor); the registry is empty
     // until the standard library installs rules, so a bare Engine is unaffected.
-    std::vector<FusionRule> fusionRules_;
+    keel::Array<FusionRule> fusionRules_;
     bool fusionEnabled_ = true;
     keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
 
@@ -979,7 +992,7 @@ private:
     // Compile one AST subtree as a VM chunk, run it, sync registers to
     // workspaceEnv. eval() calls this once per top-level statement when
     // splitting a multi-statement script for MATLAB-parity semantics.
-    Value runOneChunk(const ASTNode *ast, std::shared_ptr<const std::string> src);
+    Value runOneChunk(const ASTNode *ast, keel::Arc<const keel::String> src);
 
     friend class TreeWalker;
     friend class Compiler;
@@ -994,7 +1007,7 @@ class DebugFacade
 {
 public:
     explicit DebugFacade(Engine &e) : e_(e) {}
-    void setObserver(std::shared_ptr<DebugObserver> observer) { e_.setDebugObserver(std::move(observer)); }
+    void setObserver(keel::Arc<DebugObserver> observer) { e_.setDebugObserver(keel::move(observer)); }
     DebugObserver *observer() const { return e_.debugObserver(); }
     BreakpointManager &breakpoints() { return e_.breakpointManager(); }
     const BreakpointManager &breakpoints() const { return e_.breakpointManager(); }

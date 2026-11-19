@@ -13,9 +13,11 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/array.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <keel/complex.h>
 #include <numkit/linalg/decompositions.hpp>
 #include <numkit/linalg/qz.hpp>
@@ -35,10 +37,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <type_traits>
-#include <vector>
 
 namespace numkit::linalg {
 namespace detail {
@@ -60,7 +60,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         if (!args[i].isChar() && !args[i].isString())
             throw Error("chol: option must be 'lower' or 'upper'",
                         0, 0, "chol", "", "numkit:chol:BadOpt");
-        std::string s(args[i].toString().as_ref());
+        keel::String s = args[i].toString();
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if      (s == "lower") lower = true;
         else if (s == "upper") lower = false;
@@ -202,20 +202,19 @@ bool wantsEcon(keel::ArrayRef<Value> args, const char *fn)
 {
     if (args.size() < 2) return false;
     if (args.size() > 2)
-        throw Error(std::string(fn) + ": too many arguments",
-                    0, 0, fn, "", std::string("numkit:") + fn + ":nargin");
+        throw Error(keel::format_small<128>("{}: too many arguments", fn),
+                    0, 0, fn, "", keel::format_small<64>("numkit:{}:nargin", fn));
     const Value &o = args[1];
     if (o.type() == ValueType::CHAR) {
-        std::string s(o.toString().as_ref());
-        std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        keel::String s = o.toString();
+        for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (s == "econ") return true;
-        throw Error(std::string(fn) + ": unknown option '" + s + "'",
-                    0, 0, fn, "", std::string("numkit:") + fn + ":badOption");
+        throw Error(keel::format("{}: unknown option '{}'", fn, s),
+                    0, 0, fn, "", keel::format_small<64>("numkit:{}:badOption", fn));
     }
     if (o.isScalar() && o.toScalar() == 0.0) return true;
-    throw Error(std::string(fn) + ": invalid second argument",
-                0, 0, fn, "", std::string("numkit:") + fn + ":badArg");
+    throw Error(keel::format_small<128>("{}: invalid second argument", fn),
+                0, 0, fn, "", keel::format_small<64>("numkit:{}:badArg", fn));
 }
 
 } // namespace
@@ -230,12 +229,11 @@ void lu_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         if (args[1].type() != ValueType::CHAR)
             throw Error("lu: second argument must be the flag 'vector'",
                         0, 0, "lu", "", "numkit:lu:badArg");
-        std::string s(args[1].toString().as_ref());
-        std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        keel::String s = args[1].toString();
+        for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (s == "vector") vectorP = true;
         else if (s == "matrix") vectorP = false;
-        else throw Error("lu: unknown option '" + s + "'",
+        else throw Error(keel::format("lu: unknown option '{}'", s),
                          0, 0, "lu", "", "numkit:lu:badOption");
     }
 
@@ -260,13 +258,12 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
     for (keel::usize i = 1; i < args.size(); ++i) {
         const Value &o = args[i];
         if (o.type() == ValueType::CHAR || o.isString()) {
-            std::string s(o.toString().as_ref());
-            std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            keel::String s = o.toString();
+            for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (s == "econ")        econ = true;
             else if (s == "vector") vectorP = true;
             else if (s == "matrix") vectorP = false;
-            else throw Error("qr: unknown option '" + s + "'",
+            else throw Error(keel::format("qr: unknown option '{}'", s),
                              0, 0, "qr", "", "numkit:qr:option");
         } else if (o.numel() == 1 && o.toScalar() == 0.0) {
             econ = true;

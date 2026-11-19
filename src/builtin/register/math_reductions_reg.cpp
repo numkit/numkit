@@ -3,18 +3,19 @@
 // CallContext register half of math/arithmetic/reductions.cpp (Phase 2b compute/register split).
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
+#include <keel/arena.h>
+#include <keel/array.h>
+#include <keel/complex.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
-#include <keel/arena.h>
-#include <keel/complex.h>
+#include <keel/small_array.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/elmat.hpp>       // reshape (for 'all')
-#include <numkit/core/engine.hpp>
 #include <numkit/builtin/datafun.hpp>
-#include <numkit/builtin/elfun.hpp>       // abs adapter
-#include <numkit/builtin/elfun.hpp>      // exp / log adapters
-#include <numkit/builtin/elfun.hpp>   // sin / cos adapters
+#include <numkit/builtin/elfun.hpp>       // abs / exp / log / sin / cos adapters
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
@@ -24,16 +25,15 @@
 #include <numkit/builtin/detail/datafun/var_reduction.hpp>  // for sumScan + addInto
 #include <numkit/ops/reductions.hpp>
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
-#include <numkit/value/error.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
+#include <limits>
 #include <tuple>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -108,14 +108,14 @@ inline bool isStringArg(const Value &v)
 
 OutTypeMode parseOutTypeMode(const Value &arg, const char *fn)
 {
-    std::string s(arg.toString().as_ref());
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    keel::String s = arg.toString();
+    for (char &c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     if (s == "default") return OutTypeMode::Default;
     if (s == "double")  return OutTypeMode::Double;
     if (s == "native")  return OutTypeMode::Native;
-    throw Error(std::string(fn) + ": unknown output type '" + s + "'",
-                 0, 0, fn, "", std::string("numkit:") + fn + ":outtype");
+    throw Error(keel::format("{}: unknown output type '{}'", fn, s),
+                 0, 0, fn, "", keel::format_small<96>("numkit:{}:outtype", fn));
 }
 
 ValueType resolveNativeOutType(ValueType inType, const char *fn)
@@ -128,16 +128,16 @@ ValueType resolveNativeOutType(ValueType inType, const char *fn)
     case ValueType::LOGICAL:
     case ValueType::CHAR:
         // MATLAB: 'native' is only defined for numeric (non-logical) inputs.
-        throw Error(std::string(fn) + ": 'native' is not defined for logical/char inputs",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":nativeType");
+        throw Error(keel::format("{}: 'native' is not defined for logical/char inputs", fn),
+                     0, 0, fn, "", keel::format_small<96>("numkit:{}:nativeType", fn));
     case ValueType::COMPLEX:
         // COMPLEX is handled before this call (dispatchReductionAdapter
         // routes it to the complex path), so reaching this branch is a
         // bug in the dispatcher.
         return ValueType::COMPLEX;
     default:
-        throw Error(std::string(fn) + ": unsupported input type for 'native'",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":type");
+        throw Error(keel::format("{}: unsupported input type for 'native'", fn),
+                     0, 0, fn, "", keel::format_small<96>("numkit:{}:type", fn));
     }
 }
 
@@ -474,11 +474,11 @@ Value runNativeReduction(const Value &x, int dim, ValueType outType, keel::Alloc
     }
 }
 
-inline std::string lowercaseStr(const Value &v)
+inline keel::String lowercaseStr(const Value &v)
 {
-    std::string s(v.toString().as_ref());
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    keel::String s = v.toString();
+    for (char &c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
 
@@ -492,7 +492,7 @@ enum class StringFlag { Unknown, All, OutType, NanFlag };
 inline StringFlag classifyStringFlag(const Value &v)
 {
     if (!isStringArg(v)) return StringFlag::Unknown;
-    const std::string s = lowercaseStr(v);
+    const keel::String s = lowercaseStr(v);
     if (s == "all") return StringFlag::All;
     if (s == "default" || s == "double" || s == "native") return StringFlag::OutType;
     if (s == "omitnan" || s == "includenan") return StringFlag::NanFlag;
@@ -700,7 +700,7 @@ struct ReductionFlags {
     bool         isAll   = false;
     OutTypeMode  outMode = OutTypeMode::Default;
     bool         omitNan = false;
-    std::vector<int> dimSet;   // partial vecdim (full coverage -> isAll)
+    keel::SmallArray<int, 8> dimSet;   // partial vecdim (full coverage -> isAll)
 };
 
 // Parse args[1..] and populate the reduction-flag struct. Each kind of
@@ -719,28 +719,28 @@ ReductionFlags parseReductionFlags(keel::ArrayRef<Value> args, const char *fn)
             switch (classifyStringFlag(a)) {
             case StringFlag::All:
                 if (haveDim)
-                    throw Error(std::string(fn) + ": dim specified twice",
-                                 0, 0, fn, "", std::string("numkit:") + fn + ":dupDim");
+                    throw Error(keel::format("{}: dim specified twice", fn),
+                                 0, 0, fn, "", keel::format_small<96>("numkit:{}:dupDim", fn));
                 r.isAll = true; haveDim = true; break;
             case StringFlag::OutType:
                 if (haveOutType)
-                    throw Error(std::string(fn) + ": output type specified twice",
-                                 0, 0, fn, "", std::string("numkit:") + fn + ":outtypeDup");
+                    throw Error(keel::format("{}: output type specified twice", fn),
+                                 0, 0, fn, "", keel::format_small<96>("numkit:{}:outtypeDup", fn));
                 r.outMode = parseOutTypeMode(a, fn); haveOutType = true; break;
             case StringFlag::NanFlag:
                 if (haveNanFlag)
-                    throw Error(std::string(fn) + ": nan flag specified twice",
-                                 0, 0, fn, "", std::string("numkit:") + fn + ":nanFlagDup");
+                    throw Error(keel::format("{}: nan flag specified twice", fn),
+                                 0, 0, fn, "", keel::format_small<96>("numkit:{}:nanFlagDup", fn));
                 r.omitNan = (lowercaseStr(a) == "omitnan");
                 haveNanFlag = true; break;
             default:
-                throw Error(std::string(fn) + ": unknown flag '" + lowercaseStr(a) + "'",
-                             0, 0, fn, "", std::string("numkit:") + fn + ":badFlag");
+                throw Error(keel::format("{}: unknown flag '{}'", fn, lowercaseStr(a)),
+                             0, 0, fn, "", keel::format_small<96>("numkit:{}:badFlag", fn));
             }
         } else {
             if (haveDim)
-                throw Error(std::string(fn) + ": dim specified twice",
-                             0, 0, fn, "", std::string("numkit:") + fn + ":dupDim");
+                throw Error(keel::format("{}: dim specified twice", fn),
+                             0, 0, fn, "", keel::format_small<96>("numkit:{}:dupDim", fn));
             if (a.numel() == 1) {
                 r.dim = argcheck::dimArg(a, fn);
             } else {
@@ -895,7 +895,7 @@ keel::usize stripTrailingMaxMinFlags(keel::ArrayRef<Value> args, bool &omitNan, 
     linear = false;
     keel::usize n = args.size();
     while (n >= 2 && isStringArg(args[n - 1])) {
-        std::string s = lowercaseStr(args[n - 1]);
+        keel::String s = lowercaseStr(args[n - 1]);
         if (s == "omitnan")    { omitNan = true;  --n; continue; }
         if (s == "includenan") { omitNan = false; --n; continue; }
         if (s == "linear")     { linear = true;   --n; continue; }
@@ -910,15 +910,16 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
                           keel::ArrayRef<int> redDims,
                           keel::Allocator *mr)
 {
+    (void)mr;
     if (idx.isEmpty()) return idx;
     const int nd = std::max(2, a0.dims().ndim());
-    std::vector<char> listed(static_cast<keel::usize>(nd) + 1, 0);
+    keel::SmallArray<char, 16> listed(static_cast<keel::usize>(nd) + 1, '\0');
     for (int d : redDims)
         if (d >= 1 && d <= nd)
             listed[static_cast<keel::usize>(d)] = 1;
 
-    std::vector<std::pair<keel::usize, keel::usize>> nonListedDims;
-    std::vector<std::pair<keel::usize, keel::usize>> listedDims;
+    keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> nonListedDims;
+    keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> listedDims;
     keel::usize stride = 1;
     for (int d = 1; d <= nd; ++d) {
         keel::usize sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
@@ -993,7 +994,7 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
     int dim = 0;
-    std::vector<int> vecdimSet;
+    keel::SmallArray<int, 8> vecdimSet;
     if (n >= 3 && !args[2].isEmpty()) {
         if (args[2].numel() > 1)
             vecdimSet = vecdim::parseDimSet(args[2], "max");
@@ -1055,7 +1056,7 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
     int dim = 0;
-    std::vector<int> vecdimSet;
+    keel::SmallArray<int, 8> vecdimSet;
     if (n >= 3 && !args[2].isEmpty()) {
         if (args[2].numel() > 1)
             vecdimSet = vecdim::parseDimSet(args[2], "min");

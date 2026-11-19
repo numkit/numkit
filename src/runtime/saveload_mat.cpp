@@ -4,11 +4,15 @@
 // Supports uncompressed Level 5 (-v6), compressed Level 5 (-v7 via in-tree zlib),
 // and Level 4 (-v4). Zero external libraries (matio and zlib eliminated).
 
+#include <keel/algo.h>
+#include <keel/array.h>
+#include <keel/complex.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
-#include <keel/complex.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
@@ -17,11 +21,9 @@
 #include <numkit/sys/vfs.hpp>
 #include <numkit/ops/deflate.hpp>
 
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <string>
-#include <vector>
+#include <exception>
 
 namespace numkit::runtime {
 
@@ -78,9 +80,9 @@ Value createMatrix(const Dims &dims, ValueType vt, keel::Allocator *mr) {
     } else if (dims.ndims() == 3) {
         return Value::matrix3d(dims.dim(0), dims.dim(1), dims.dim(2), vt, mr);
     } else {
-        std::vector<keel::usize> d(dims.ndims());
+        keel::usize d[Dims::kMaxRank];
         for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
-        return Value::matrixND(d.data(), dims.ndims(), vt, mr);
+        return Value::matrixND(d, dims.ndims(), vt, mr);
     }
 }
 
@@ -100,16 +102,16 @@ Value createCell(const Dims &dims, keel::Allocator *mr) {
     } else if (dims.ndims() == 3) {
         return Value::cell3D(dims.dim(0), dims.dim(1), dims.dim(2), mr);
     } else {
-        std::vector<keel::usize> d(dims.ndims());
+        keel::usize d[Dims::kMaxRank];
         for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
-        return Value::cellND(d.data(), dims.ndims(), mr);
+        return Value::cellND(d, dims.ndims(), mr);
     }
 }
 
 // Helper: Byte stream writer
 class MatWriter {
 public:
-    std::vector<keel::u8> bytes;
+    keel::Array<keel::u8> bytes;
 
     void writeU8(keel::u8 v) { bytes.push_back(v); }
 
@@ -128,7 +130,7 @@ public:
     void writeBytes(const void *data, keel::usize count) {
         if (count == 0 || !data) return;
         const auto *p = reinterpret_cast<const keel::u8*>(data);
-        bytes.insert(bytes.end(), p, p + count);
+        bytes.append(keel::ArrayRef<keel::u8>(p, count));
     }
 
     void writeTag(keel::u32 type, const void *data, keel::u32 byteCount) {
@@ -262,15 +264,25 @@ public:
     }
 };
 
+struct DecodedMatrix {
+    keel::String name;
+    Value val;
+};
+
+struct NamedVar {
+    keel::String name;
+    Value val;
+};
+
 // Forward declarations for recursive encoding / decoding
-void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v);
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth = 0);
+void encodeMat5Matrix(MatWriter &mw, keel::StringRef name, const Value &v);
+DecodedMatrix decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth = 0);
 
 // ============================================================================
 // MAT5 Serialization (Value -> Bytes)
 // ============================================================================
 
-void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
+void encodeMat5Matrix(MatWriter &mw, keel::StringRef name, const Value &v) {
     if (v.type() == ValueType::STRING) {
         if (v.numel() <= 1) {
             encodeMat5Matrix(mw, name, Value::fromString(v.numel() == 1 ? v.stringElem(0).as_ref() : keel::StringRef("")));
@@ -320,13 +332,13 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     int nd = d.ndims();
     while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
-    std::vector<keel::i32> dimsVec(nd, 1);
+    keel::Array<keel::i32> dimsVec(static_cast<keel::usize>(nd), static_cast<keel::i32>(1));
     for (int i = 0; i < nd; ++i) {
-        dimsVec[i] = static_cast<keel::i32>(d.dim(i));
+        dimsVec[static_cast<keel::usize>(i)] = static_cast<keel::i32>(d.dim(i));
     }
     if (v.isFuncHandle()) {
         // v5 .mat emits 0x0 double placeholder for function handle
-        dimsVec = {0, 0};
+        dimsVec.assign({0, 0});
     }
     inner.writeTag(miINT32, dimsVec.data(), static_cast<keel::u32>(dimsVec.size() * sizeof(keel::i32)));
 
@@ -343,27 +355,29 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
             encodeMat5Matrix(inner, "", elem);
         }
     } else if (v.type() == ValueType::STRUCT || v.type() == ValueType::OBJECT) {
-        std::vector<std::string> fnames;
+        keel::Array<keel::String> fnames;
         if (v.type() == ValueType::OBJECT) {
-            std::string className(v.objectClassName().as_ref());
+            keel::String className = v.objectClassName();
             inner.writeTag(miINT8, className.data(), static_cast<keel::u32>(className.size()));
             if (const auto *st = v.objectStateConst()) {
-                for (auto entry : st->props) {
-                    fnames.emplace_back(entry.key.as_ref());
+                fnames.reserve(st->props.size());
+                for (auto [key, val] : st->props) {
+                    (void)val;
+                    fnames.push_back(key.clone());
                 }
-                std::sort(fnames.begin(), fnames.end());
+                keel::sort(fnames);
             }
         } else {
             auto fnOrder = v.fieldNamesInOrder();
             fnames.reserve(fnOrder.size());
             for (const auto &fn : fnOrder)
-                fnames.emplace_back(fn.as_ref());
+                fnames.push_back(fn.clone());
         }
 
         keel::i32 maxLen = 32;
         inner.writeTag(miINT32, &maxLen, sizeof(keel::i32));
 
-        std::vector<char> nameTable(fnames.size() * 32, 0);
+        keel::Array<char> nameTable(fnames.size() * 32, '\0');
         for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
             std::strncpy(nameTable.data() + fi * 32, fnames[fi].c_str(), 31);
         }
@@ -391,15 +405,15 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
     } else if (v.type() == ValueType::CHAR) {
         // UTF-16 character codes
         const char *src = v.charData();
-        std::vector<keel::u16> utf16(numElems);
+        keel::Array<keel::u16> utf16(numElems);
         for (keel::usize i = 0; i < numElems; ++i) {
             utf16[i] = static_cast<keel::u8>(src[i]);
         }
         inner.writeTag(miUTF16, utf16.data(), static_cast<keel::u32>(numElems * sizeof(keel::u16)));
     } else if (v.type() == ValueType::COMPLEX) {
         // Split complex into real and imaginary arrays
-        std::vector<double> realPart(numElems);
-        std::vector<double> imagPart(numElems);
+        keel::Array<double> realPart(numElems);
+        keel::Array<double> imagPart(numElems);
         const auto *cdata = v.complexData();
         for (keel::usize i = 0; i < numElems; ++i) {
             realPart[i] = cdata[i].real();
@@ -441,7 +455,7 @@ void encodeMat5Matrix(MatWriter &mw, const std::string &name, const Value &v) {
 // MAT5 Deserialization (Bytes -> Value)
 // ============================================================================
 
-std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth) {
+DecodedMatrix decodeMat5Matrix(MatReader &mr, keel::Allocator *mem, int depth) {
     if (depth > 64) {
         throw Error("load: MAT5 nesting depth exceeds limit");
     }
@@ -467,7 +481,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
     if (rawNd > Dims::kMaxRank)
         throw Error("load: MAT5 array rank exceeds maximum supported rank");
     int nd = rawNd < 2 ? 2 : rawNd;
-    std::vector<keel::usize> d(nd, 1);
+    keel::usize d[Dims::kMaxRank];
     keel::usize numElems = 1;
     for (int i = 0; i < nd; ++i) {
         if (i < rawNd) {
@@ -482,13 +496,14 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
             throw Error("load: MAT5 array size overflows address space");
         numElems *= d[i];
     }
-    Dims shape(d.data(), nd);
+    Dims shape(d, nd);
 
     // 3. Array Name
     auto nameTag = ir.readTag();
-    std::string name;
+    keel::String name;
     if (nameTag.byteCount > 0 && nameTag.payload) {
-        name = std::string(reinterpret_cast<const char*>(nameTag.payload), nameTag.byteCount);
+        name = keel::String::from(
+            keel::StringRef(reinterpret_cast<const char*>(nameTag.payload), nameTag.byteCount));
         while (!name.empty() && name.back() == '\0') name.pop_back();
     }
 
@@ -498,15 +513,16 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
     if (arrayClass == mxCELL_CLASS) {
         result = createCell(shape, mem);
         for (keel::usize i = 0; i < numElems; ++i) {
-            auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
-            result.cellAt(i) = childVal;
+            auto child = decodeMat5Matrix(ir, mem, depth + 1);
+            result.cellAt(i) = keel::move(child.val);
         }
     } else if (arrayClass == mxSTRUCT_CLASS || arrayClass == mxOBJECT_CLASS) {
-        std::string objClassName;
+        keel::String objClassName;
         if (arrayClass == mxOBJECT_CLASS) {
             auto classNameTag = ir.readTag();
             if (classNameTag.payload && classNameTag.byteCount > 0) {
-                objClassName = std::string(reinterpret_cast<const char*>(classNameTag.payload), classNameTag.byteCount);
+                objClassName = keel::String::from(
+                    keel::StringRef(reinterpret_cast<const char*>(classNameTag.payload), classNameTag.byteCount));
                 while (!objClassName.empty() && objClassName.back() == '\0')
                     objClassName.pop_back();
             }
@@ -521,23 +537,23 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
 
         auto fnamesTag = ir.readTag();
         keel::usize numFields = fnamesTag.byteCount / fnLen;
-        std::vector<std::string> fnames;
+        keel::Array<keel::String> fnames;
         fnames.reserve(numFields);
         for (keel::usize fi = 0; fi < numFields; ++fi) {
             const char *fnPtr = reinterpret_cast<const char*>(fnamesTag.payload + fi * fnLen);
             keel::usize curLen = 0;
             while (curLen < fnLen && fnPtr[curLen] != '\0') ++curLen;
-            fnames.emplace_back(fnPtr, curLen);
+            fnames.push_back(keel::String::from(keel::StringRef(fnPtr, curLen)));
         }
 
         if (fnames.size() > 0 && numElems > SIZE_MAX / fnames.size())
             throw Error("load: MAT5 struct field table overflows address space");
 
-        std::vector<std::vector<Value>> fieldVals(fnames.size(), std::vector<Value>(numElems));
+        keel::Array<Value> fieldVals(fnames.size() * numElems);
         for (keel::usize ei = 0; ei < numElems; ++ei) {
             for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                auto [childName, childVal] = decodeMat5Matrix(ir, mem, depth + 1);
-                fieldVals[fi][ei] = std::move(childVal);
+                auto child = decodeMat5Matrix(ir, mem, depth + 1);
+                fieldVals[fi * numElems + ei] = keel::move(child.val);
             }
         }
 
@@ -548,14 +564,14 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
                 result = Value::structArray(shape.rows(), shape.cols(), mem);
             } else {
                 result = Value::structArray(0, 0, mem);
-                result.resizeND(d.data(), nd, mem);
+                result.resizeND(d, nd, mem);
             }
             for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
                 if (numElems == 0) {
                     result.setFieldAll(fnames[fi], Value{});
                 } else {
                     for (keel::usize ei = 0; ei < numElems; ++ei) {
-                        result.setField(ei, fnames[fi], fieldVals[fi][ei]);
+                        result.setField(ei, fnames[fi], fieldVals[fi * numElems + ei]);
                     }
                 }
             }
@@ -567,20 +583,20 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
             } else if (numElems == 1 && shape.ndims() <= 2) {
                 auto st = keel::make_arc_in<ObjectState>(res, res);
                 for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                    st->props.put(keel::String::from(fnames[fi]), std::move(fieldVals[fi][0]));
+                    st->props.put(fnames[fi].clone(), keel::move(fieldVals[fi * numElems]));
                 }
-                result = Value::object(objClassName, std::move(st), false, mem);
+                result = Value::object(objClassName, keel::move(st), false, mem);
             } else {
                 keel::Array<keel::Arc<ObjectState>> states(res);
                 states.reserve(numElems);
                 for (keel::usize ei = 0; ei < numElems; ++ei) {
                     auto st = keel::make_arc_in<ObjectState>(res, res);
                     for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                        st->props.put(keel::String::from(fnames[fi]), std::move(fieldVals[fi][ei]));
+                        st->props.put(fnames[fi].clone(), keel::move(fieldVals[fi * numElems + ei]));
                     }
-                    states.push_back(std::move(st));
+                    states.push_back(keel::move(st));
                 }
-                result = Value::objectArray(objClassName, shape, std::move(states), false, mem);
+                result = Value::objectArray(objClassName, shape, keel::move(states), false, mem);
             }
         }
     } else if (arrayClass == mxCHAR_CLASS) {
@@ -588,14 +604,14 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
         result = createMatrix(shape, ValueType::CHAR, mem);
         char *out = result.charDataMut();
         if (dataTag.type == miUINT16 || dataTag.type == miUTF16) {
-            keel::usize charCount = std::min(numElems, static_cast<keel::usize>(dataTag.byteCount / 2));
+            keel::usize charCount = keel::min(numElems, static_cast<keel::usize>(dataTag.byteCount / 2));
             if (charCount > 0 && dataTag.payload) {
                 for (keel::usize i = 0; i < charCount; ++i) {
                     out[i] = static_cast<char>(ir.peekU16At(dataTag.payload + i * 2) & 0xFF);
                 }
             }
         } else if (dataTag.type == miUTF8 || dataTag.type == miUINT8 || dataTag.type == miINT8) {
-            keel::usize charCount = std::min(numElems, static_cast<keel::usize>(dataTag.byteCount));
+            keel::usize charCount = keel::min(numElems, static_cast<keel::usize>(dataTag.byteCount));
             if (charCount > 0 && dataTag.payload) {
                 std::memcpy(out, dataTag.payload, charCount);
             }
@@ -705,7 +721,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
             auto *cdata = result.complexDataMut();
             for (keel::usize i = 0; i < numElems; ++i) {
                 cdata[i] = keel::c64(readTagElemAsDouble(realTag, i),
-                                                readTagElemAsDouble(imagTag, i));
+                                     readTagElemAsDouble(imagTag, i));
             }
         } else {
             result = createMatrix(shape, vt, mem);
@@ -791,7 +807,7 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
         }
     }
 
-    return {name, result};
+    return {keel::move(name), keel::move(result)};
 }
 
 // ============================================================================
@@ -799,11 +815,13 @@ std::pair<std::string, Value> decodeMat5Matrix(MatReader &mr, keel::Allocator *m
 // ============================================================================
 
 void saveMat4(keel::StringRef osPath,
-              const std::vector<std::pair<std::string, Value>> &vars,
+              keel::ArrayRef<NamedVar> vars,
               VirtualFS &fs)
 {
     MatWriter mw;
-    for (const auto &[name, v] : vars) {
+    for (const auto &entry : vars) {
+        const auto &name = entry.name;
+        const auto &v = entry.val;
         if (!v.isNumeric() && !v.isChar() && !v.isComplex()) continue;
         const Dims &d = v.dims();
         keel::i32 rows = static_cast<keel::i32>(d.rows());
@@ -825,12 +843,12 @@ void saveMat4(keel::StringRef osPath,
         mw.writeU32(static_cast<keel::u32>(cols));
         mw.writeU32(static_cast<keel::u32>(imagf));
         mw.writeU32(static_cast<keel::u32>(namlen));
-        mw.writeBytes(name.c_str(), namlen);
+        mw.writeBytes(name.c_str(), static_cast<keel::usize>(namlen));
 
         keel::usize numElems = static_cast<keel::usize>(rows * cols);
         if (v.isComplex()) {
-            std::vector<double> realPart(numElems);
-            std::vector<double> imagPart(numElems);
+            keel::Array<double> realPart(numElems);
+            keel::Array<double> imagPart(numElems);
             const auto *cdata = v.complexData();
             for (keel::usize i = 0; i < numElems; ++i) {
                 realPart[i] = cdata[i].real();
@@ -844,7 +862,9 @@ void saveMat4(keel::StringRef osPath,
     }
     // Binary channel: MAT bytes contain values ≥ 0x80 that the text
     // writeFile path would UTF-8-mangle crossing the JS↔WASM boundary.
-    fs.writeFileBytes(osPath, std::string(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
+    fs.writeFileBytes(
+        osPath,
+        keel::StringRef(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
 }
 
 void loadMat4(Engine &engine,
@@ -855,7 +875,7 @@ void loadMat4(Engine &engine,
               keel::MutArrayRef<Value> outs,
               keel::Allocator *mr)
 {
-    std::string bytes(fs.readFileBytes(osPath).as_ref());
+    keel::String bytes = fs.readFileBytes(osPath);
     const auto *p = reinterpret_cast<const keel::u8*>(bytes.data());
     keel::usize len = bytes.size();
     keel::usize pos = 0;
@@ -898,8 +918,9 @@ void loadMat4(Engine &engine,
         const void *nulPtr = std::memchr(p + pos, '\0', nameBytes);
         if (!nulPtr) throw Error("load: invalid or corrupted .mat file");
         const keel::usize actualNameLen =
-            static_cast<const keel::u8 *>(nulPtr) - (p + pos);
-        std::string name(reinterpret_cast<const char *>(p + pos), actualNameLen);
+            static_cast<keel::usize>(static_cast<const keel::u8 *>(nulPtr) - (p + pos));
+        keel::String name = keel::String::from(
+            keel::StringRef(reinterpret_cast<const char *>(p + pos), actualNameLen));
         pos += nameBytes;
 
         const keel::usize rSz = static_cast<keel::usize>(rows);
@@ -949,7 +970,7 @@ void loadMat4(Engine &engine,
                 if (!outs.empty()) asStruct.setField(0, name, v);
             } else {
                 env.set(name, v);
-                engine.assignToCaller(0, name, std::move(v));
+                engine.assignToCaller(0, name, keel::move(v));
             }
             ++loadedCount;
         }
@@ -959,7 +980,7 @@ void loadMat4(Engine &engine,
         throw Error("load: invalid or corrupted .mat file");
     }
 
-    if (nargout > 0 && !outs.empty()) outs[0] = std::move(asStruct);
+    if (nargout > 0 && !outs.empty()) outs[0] = keel::move(asStruct);
 }
 
 } // anonymous namespace
@@ -969,22 +990,29 @@ void loadMat4(Engine &engine,
 // ============================================================================
 
 void saveMat(Engine &engine, Environment &env,
-             const std::string &filename,
-             const std::vector<std::string> &varnames,
+             keel::StringRef filename,
+             keel::ArrayRef<keel::String> varnames,
              int matVersion)
 {
     auto resolved = engine.resolvePath(filename);
     if (!resolved.fs)
-        throw Error("save: cannot resolve '" + filename + "'");
+        throw Error(keel::format("save: cannot resolve '{}'", filename));
 
-    std::vector<std::string> names = varnames;
-    if (names.empty()) names = env.localNames();
+    keel::Array<keel::String> names;
+    if (varnames.empty()) {
+        names = env.localNames();
+    } else {
+        names.reserve(varnames.size());
+        for (const auto &vn : varnames)
+            names.push_back(vn.clone());
+    }
 
-    std::vector<std::pair<std::string, Value>> vars;
+    keel::Array<NamedVar> vars;
+    vars.reserve(names.size());
     for (const auto &nm : names) {
         Value *v = env.get(nm);
-        if (!v) throw Error("save: variable '" + nm + "' not found");
-        vars.emplace_back(nm, *v);
+        if (!v) throw Error(keel::format("save: variable '{}' not found", nm));
+        vars.push_back({nm.clone(), *v});
     }
 
     if (matVersion == 4) {
@@ -996,7 +1024,8 @@ void saveMat(Engine &engine, Environment &env,
     // part of the MAT Level-5 format specification (readers identify the
     // file by it) — file-format interop, not shipped diagnostics.
     MatWriter mw;
-    std::string hdrText = "MATLAB 5.0 MAT-file, Platform: NumKit Autonomous Engine, Created by NumKit";
+    keel::String hdrText = keel::String::from(
+        "MATLAB 5.0 MAT-file, Platform: NumKit Autonomous Engine, Created by NumKit");
     hdrText.resize(116, ' ');
     mw.writeBytes(hdrText.data(), 116);
     keel::u8 zeroSubsystem[8] = {0};
@@ -1006,9 +1035,9 @@ void saveMat(Engine &engine, Environment &env,
     mw.writeU8('M');
 
     // Encode variables
-    for (const auto &[nm, v] : vars) {
+    for (const auto &entry : vars) {
         MatWriter itemWriter;
-        encodeMat5Matrix(itemWriter, nm, v);
+        encodeMat5Matrix(itemWriter, entry.name, entry.val);
 
         if (matVersion == 7) {
             // -v7: Compressed miMATRIX via zlib
@@ -1022,23 +1051,25 @@ void saveMat(Engine &engine, Environment &env,
     }
 
     // Binary channel — see the writeFileBytes note in saveMat4 above.
-    resolved.fs->writeFileBytes(resolved.path, std::string(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
+    resolved.fs->writeFileBytes(
+        resolved.path,
+        keel::StringRef(reinterpret_cast<const char*>(mw.bytes.data()), mw.bytes.size()));
 }
 
 void loadMat(Engine &engine, Environment &env,
-             const std::string &filename,
+             keel::StringRef filename,
              keel::usize nargout, keel::MutArrayRef<Value> outs)
 {
     keel::Allocator *mr = engine.allocator();
     auto resolved = engine.resolvePath(filename);
     if (!resolved.fs)
-        throw Error("load: cannot resolve '" + filename + "'");
+        throw Error(keel::format("load: cannot resolve '{}'", filename));
 
-    std::string bytes;
+    keel::String bytes;
     try {
-        bytes.assign(resolved.fs->readFileBytes(resolved.path).as_ref());
+        bytes = resolved.fs->readFileBytes(resolved.path);
     } catch (const std::exception &e) {
-        throw Error(std::string("load: ") + e.what());
+        throw Error(keel::format("load: {}", e.what()));
     }
 
     if (bytes.size() < 16)
@@ -1067,24 +1098,24 @@ void loadMat(Engine &engine, Environment &env,
                 MatReader decompReader(uncompressed.data(), uncompressed.size(), isBigEndian);
                 while (!decompReader.eof()) {
                     if (decompReader.remaining() < 8) break;
-                    auto [name, v] = decodeMat5Matrix(decompReader, mr);
-                    if (!name.empty()) {
-                        if (nargout > 0) asStruct.setField(0, name, v);
+                    auto item = decodeMat5Matrix(decompReader, mr);
+                    if (!item.name.empty()) {
+                        if (nargout > 0) asStruct.setField(0, item.name, item.val);
                         else {
-                            env.set(name, v);
-                            engine.assignToCaller(0, name, std::move(v));
+                            env.set(item.name, item.val);
+                            engine.assignToCaller(0, item.name, keel::move(item.val));
                         }
                         ++loadedCount;
                     }
                 }
             } else if (tag.type == miMATRIX) {
                 MatReader subReader(tag.payload - 8, tag.totalAdvance, isBigEndian);
-                auto [name, v] = decodeMat5Matrix(subReader, mr);
-                if (!name.empty()) {
-                    if (nargout > 0) asStruct.setField(0, name, v);
+                auto item = decodeMat5Matrix(subReader, mr);
+                if (!item.name.empty()) {
+                    if (nargout > 0) asStruct.setField(0, item.name, item.val);
                     else {
-                        env.set(name, v);
-                        engine.assignToCaller(0, name, std::move(v));
+                        env.set(item.name, item.val);
+                        engine.assignToCaller(0, item.name, keel::move(item.val));
                     }
                     ++loadedCount;
                 }
@@ -1095,7 +1126,7 @@ void loadMat(Engine &engine, Environment &env,
             throw Error("load: invalid or corrupted MAT5 file");
         }
 
-        if (nargout > 0 && !outs.empty()) outs[0] = std::move(asStruct);
+        if (nargout > 0 && !outs.empty()) outs[0] = keel::move(asStruct);
     } else {
         // MAT4 fallback
         loadMat4(engine, resolved.path, *resolved.fs, env, nargout, outs, mr);

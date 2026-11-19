@@ -2,28 +2,31 @@
 //
 // fileread / readlines / writelines / readmatrix / writematrix / type.
 
-#include <keel/core.h>
-#include <keel/memory.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
 #include <keel/math.h>
+#include <keel/memory.h>
+#include <keel/string.h>
 #include <numkit/io/text/extras.hpp>
 
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
 
+#include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <sstream>
-#include <string>
-#include <vector>
 
 namespace numkit::io {
 
 // Resolve via the FsContext VFS and read the whole file as a string. Public
 // (declared in extras.hpp) so the Engine-coupled `type` (type.cpp) can reuse it.
-std::string slurpFile(FsContext &fs, const std::string &filename, const char *fnName)
+keel::String slurpFile(FsContext &fs, keel::StringRef filename, const char *fnName)
 {
     FsContext::ResolvedPath resolved{};
     try {
@@ -32,19 +35,19 @@ std::string slurpFile(FsContext &fs, const std::string &filename, const char *fn
         throw Error(e.what());
     }
     if (!resolved.fs)
-        throw Error(std::string(fnName) + ": cannot resolve filesystem for '" + filename + "'",
-                     0, 0, fnName, "", std::string("numkit:") + fnName + ":noFs");
+        throw Error(keel::format("{}: cannot resolve filesystem for '{}'", fnName, filename),
+                    0, 0, fnName, "", keel::format("numkit:{}:noFs", fnName));
     try {
-        return std::string(resolved.fs->readFile(resolved.path).as_ref());
+        return resolved.fs->readFile(resolved.path.as_ref());
     } catch (const std::exception &e) {
-        throw Error(std::string(fnName) + ": " + e.what(),
-                     0, 0, fnName, "", std::string("numkit:") + fnName + ":readFailed");
+        throw Error(keel::format("{}: {}", fnName, e.what()),
+                    0, 0, fnName, "", keel::format("numkit:{}:readFailed", fnName));
     }
 }
 
 namespace {
 
-void spitFile(FsContext &fs, const std::string &filename, const std::string &content,
+void spitFile(FsContext &fs, keel::StringRef filename, keel::StringRef content,
               const char *fnName)
 {
     FsContext::ResolvedPath resolved{};
@@ -54,17 +57,17 @@ void spitFile(FsContext &fs, const std::string &filename, const std::string &con
         throw Error(e.what());
     }
     if (!resolved.fs)
-        throw Error(std::string(fnName) + ": cannot resolve filesystem for '" + filename + "'",
-                     0, 0, fnName, "", std::string("numkit:") + fnName + ":noFs");
+        throw Error(keel::format("{}: cannot resolve filesystem for '{}'", fnName, filename),
+                    0, 0, fnName, "", keel::format("numkit:{}:noFs", fnName));
     try {
-        resolved.fs->writeFile(resolved.path, content);
+        resolved.fs->writeFile(resolved.path.as_ref(), content);
     } catch (const std::exception &e) {
-        throw Error(std::string(fnName) + ": " + e.what(),
-                     0, 0, fnName, "", std::string("numkit:") + fnName + ":writeFailed");
+        throw Error(keel::format("{}: {}", fnName, e.what()),
+                    0, 0, fnName, "", keel::format("numkit:{}:writeFailed", fnName));
     }
 }
 
-Value charRow(keel::Allocator *mr, const std::string &s)
+Value charRow(keel::Allocator *mr, keel::StringRef s)
 {
     auto v = Value::matrix(1, s.size(), ValueType::CHAR, mr);
     for (keel::usize i = 0; i < s.size(); ++i)
@@ -74,61 +77,67 @@ Value charRow(keel::Allocator *mr, const std::string &s)
 
 // Split content by '\n', trimming '\r' from each line. Drop one trailing
 // empty line that comes from a terminal newline.
-std::vector<std::string> splitLines(const std::string &content)
+keel::Array<keel::StringRef> splitLines(keel::StringRef content, keel::Allocator *alloc = nullptr)
 {
-    std::vector<std::string> out;
+    keel::Array<keel::StringRef> out(alloc);
     keel::usize pos = 0;
     while (pos <= content.size()) {
         keel::usize nl = content.find('\n', pos);
-        keel::usize end = (nl == std::string::npos) ? content.size() : nl;
-        std::string line = content.substr(pos, end - pos);
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        out.push_back(std::move(line));
-        if (nl == std::string::npos) break;
+        keel::usize end = (nl == keel::kInvalidIndex) ? content.size() : nl;
+        keel::StringRef line = content.substr(pos, end - pos);
+        if (!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
+        out.push_back(line);
+        if (nl == keel::kInvalidIndex)
+            break;
         pos = nl + 1;
     }
     // Strip trailing empty element produced by a terminal newline.
-    if (!out.empty() && out.back().empty()) out.pop_back();
+    if (!out.empty() && out.back().empty())
+        out.pop_back();
     return out;
 }
 
-bool tryParseDouble(const std::string &tok, double &out)
-{
-    if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
-    try {
-        keel::usize pos = 0;
-        out = std::stod(tok, &pos);
-        // Trailing junk → not a clean number.
-        while (pos < tok.size() && std::isspace(static_cast<unsigned char>(tok[pos]))) ++pos;
-        return pos == tok.size();
-    } catch (...) {
-        return false;
-    }
-}
-
-// Comma / tab / semicolon delimited row.
-std::vector<std::string> splitRow(const std::string &line)
-{
-    std::vector<std::string> tokens;
-    std::string cur;
-    for (char c : line) {
-        if (c == ',' || c == ';' || c == '\t') {
-            tokens.push_back(cur);
-            cur.clear();
-        } else {
-            cur.push_back(c);
-        }
-    }
-    tokens.push_back(cur);
-    return tokens;
-}
-
-std::string trimWs(const std::string &s)
+keel::StringRef trimWs(keel::StringRef s)
 {
     keel::usize a = 0, b = s.size();
     while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
     while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
     return s.substr(a, b - a);
+}
+
+bool tryParseDouble(keel::StringRef tok, double &out)
+{
+    if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
+    keel::SmallString<128> buf(tok);
+    char *endp = nullptr;
+    errno = 0;
+    double val = std::strtod(buf.c_str(), &endp);
+    if (endp == buf.c_str() || errno == ERANGE)
+        return false;
+    // Trailing junk → not a clean number.
+    while (*endp != '\0' && std::isspace(static_cast<unsigned char>(*endp)))
+        ++endp;
+    if (*endp != '\0')
+        return false;
+    out = val;
+    return true;
+}
+
+// Comma / tab / semicolon delimited row.
+keel::Array<keel::StringRef> splitRow(keel::StringRef line, keel::Allocator *alloc = nullptr)
+{
+    keel::Array<keel::StringRef> tokens(alloc);
+    keel::usize start = 0;
+    for (keel::usize i = 0; i < line.size(); ++i) {
+        char c = line[i];
+        if (c == ',' || c == ';' || c == '\t') {
+            tokens.push_back(line.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    tokens.push_back(line.substr(start));
+    return tokens;
 }
 
 } // namespace
@@ -141,9 +150,10 @@ std::string trimWs(const std::string &s)
 // MATLAB-facing readmatrix / writematrix add VFS read/write on top.
 // ════════════════════════════════════════════════════════════════════════
 
-Value readmatrixFromString(const std::string &content, keel::Allocator *mr)
+Value readmatrixFromString(keel::StringRef content, keel::Allocator *mr)
 {
-    auto lines = splitLines(content);
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto lines = splitLines(content, scratch.allocator());
 
     // Skip leading non-numeric (header) rows: a row whose tokens are
     // all non-numeric (or which has any unparseable token) is considered
@@ -151,30 +161,29 @@ Value readmatrixFromString(const std::string &content, keel::Allocator *mr)
     keel::usize skip = 0;
     for (; skip < lines.size(); ++skip) {
         if (trimWs(lines[skip]).empty()) continue;
-        auto toks = splitRow(lines[skip]);
+        auto toks = splitRow(lines[skip], scratch.allocator());
         bool anyNum = false;
-        for (auto &t : toks) {
+        for (keel::StringRef t : toks) {
             double dummy;
             if (tryParseDouble(trimWs(t), dummy)) { anyNum = true; break; }
         }
         if (anyNum) break;
     }
 
-    keel::ArenaTemp scratch = keel::get_scratch(mr);
     keel::Array<keel::Array<double>> rows(scratch.allocator());
     keel::usize maxCols = 0;
     for (keel::usize i = skip; i < lines.size(); ++i) {
         if (trimWs(lines[i]).empty()) continue;
-        auto toks = splitRow(lines[i]);
+        auto toks = splitRow(lines[i], scratch.allocator());
         keel::Array<double> row(scratch.allocator());
         row.reserve(toks.size());
-        for (auto &t : toks) {
+        for (keel::StringRef t : toks) {
             double v = 0.0;
             tryParseDouble(trimWs(t), v);     // unparseable → 0 (MATLAB compat)
             row.push_back(v);
         }
         if (row.size() > maxCols) maxCols = row.size();
-        rows.push_back(std::move(row));
+        rows.push_back(keel::move(row));
     }
 
     const keel::usize R = rows.size();
@@ -189,47 +198,52 @@ Value readmatrixFromString(const std::string &content, keel::Allocator *mr)
     return out;
 }
 
-std::string writematrixToString(const Value &m)
+keel::String writematrixToString(const Value &m)
 {
     if (m.isComplex())
         throw Error("writematrix: complex matrices are not supported",
-                     0, 0, "writematrix", "", "numkit:writematrix:complex");
+                    0, 0, "writematrix", "", "numkit:writematrix:complex");
     const auto &d = m.dims();
     if (d.is3D())
         throw Error("writematrix: 3-D arrays are not supported",
-                     0, 0, "writematrix", "", "numkit:writematrix:nd");
+                    0, 0, "writematrix", "", "numkit:writematrix:nd");
     const keel::usize R = d.rows(), C = d.cols();
 
-    std::ostringstream os;
-    os.precision(15);
+    keel::String out;
     for (keel::usize r = 0; r < R; ++r) {
         for (keel::usize c = 0; c < C; ++c) {
-            if (c) os << ',';
+            if (c) out.push_back(',');
             const double v = m.elemAsDouble(c * R + r);
             if (std::isfinite(v) && std::floor(v) == v && keel::abs(v) < 1e16) {
-                os << static_cast<long long>(v);
+                keel::format_into(out, "{}", static_cast<long long>(v));
             } else {
-                os << v;
+                char buf[64];
+                int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
+                if (len > 0)
+                    out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
             }
         }
-        os << '\n';
+        out.push_back('\n');
     }
-    return os.str();
+    return out;
 }
 
 // ── fileread ──────────────────────────────────────────────────────────
-Value fileread(FsContext &fs, const std::string &filename,
+Value fileread(FsContext &fs, keel::StringRef filename,
                keel::Allocator *mr)
 {
-    return charRow(mr, slurpFile(fs, filename, "fileread"));
+    keel::String content = slurpFile(fs, filename, "fileread");
+    return charRow(mr, content.as_ref());
 }
 
 // ── readlines ─────────────────────────────────────────────────────────
 // Returns a STRING array (column vector), N×1.
-Value readlines(FsContext &fs, const std::string &filename,
+Value readlines(FsContext &fs, keel::StringRef filename,
                 keel::Allocator *mr)
 {
-    auto lines = splitLines(slurpFile(fs, filename, "readlines"));
+    keel::String content = slurpFile(fs, filename, "readlines");
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    auto lines = splitLines(content.as_ref(), scratch.allocator());
     auto out = Value::stringArray(lines.size(), 1, mr);
     for (keel::usize i = 0; i < lines.size(); ++i)
         out.stringElemSet(i, lines[i]);
@@ -237,15 +251,15 @@ Value readlines(FsContext &fs, const std::string &filename,
 }
 
 // ── writelines ────────────────────────────────────────────────────────
-void writelines(FsContext &fs, const Value &lines, const std::string &filename)
+void writelines(FsContext &fs, const Value &lines, keel::StringRef filename)
 {
-    std::ostringstream os;
+    keel::String out;
     auto append = [&](keel::StringRef s) {
-        os << std::string_view(s);
+        out.append(s);
 #ifdef _WIN32
-        os << "\r\n";
+        out.append("\r\n");
 #else
-        os << '\n';
+        out.push_back('\n');
 #endif
     };
 
@@ -266,27 +280,29 @@ void writelines(FsContext &fs, const Value &lines, const std::string &filename)
             const Value &cell = lines.cellAt(i);
             if (!cell.isChar() && !cell.isString())
                 throw Error("writelines: each cell element must be a string",
-                             0, 0, "writelines", "", "numkit:writelines:badCell");
+                            0, 0, "writelines", "", "numkit:writelines:badCell");
             append(cell.toString());
         }
     } else {
         throw Error("writelines: lines must be a string, string array, or cell of strings",
-                     0, 0, "writelines", "", "numkit:writelines:badArg");
+                    0, 0, "writelines", "", "numkit:writelines:badArg");
     }
-    spitFile(fs, filename, os.str(), "writelines");
+    spitFile(fs, filename, out.as_ref(), "writelines");
 }
 
 // ── readmatrix ────────────────────────────────────────────────────────
-Value readmatrix(FsContext &fs, const std::string &filename,
+Value readmatrix(FsContext &fs, keel::StringRef filename,
                  keel::Allocator *mr)
 {
-    return readmatrixFromString(slurpFile(fs, filename, "readmatrix"), mr);
+    keel::String content = slurpFile(fs, filename, "readmatrix");
+    return readmatrixFromString(content.as_ref(), mr);
 }
 
 // ── writematrix ───────────────────────────────────────────────────────
-void writematrix(FsContext &fs, const Value &m, const std::string &filename)
+void writematrix(FsContext &fs, const Value &m, keel::StringRef filename)
 {
-    spitFile(fs, filename, writematrixToString(m), "writematrix");
+    keel::String content = writematrixToString(m);
+    spitFile(fs, filename, content.as_ref(), "writematrix");
 }
 
 

@@ -2,26 +2,26 @@
 //
 // Language runtime introspection, reflection, and OOP metadata.
 
+#include <keel/algo.h>
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
-#include <memory>
-#include <string>
-#include <vector>
+#include <stdexcept>
 
 namespace numkit::runtime {
 
 namespace {
 
-Value metaConcat(const std::vector<Value> &v, keel::Allocator *mr)
+Value metaConcat(keel::ArrayRef<Value> v, keel::Allocator *mr)
 {
     if (v.empty())
         return Value::Empty;
@@ -37,7 +37,7 @@ Value buildMetaProperty(const PropMeta &p, keel::Allocator *mr)
     st->props.put(keel::String::from("SetAccess"), Value::fromString(p.setAccess, mr));
     st->props.put(keel::String::from("Constant"), Value::logicalScalar(p.isConstant, mr));
     st->props.put(keel::String::from("Dependent"), Value::logicalScalar(p.isDependent, mr));
-    return Value::object("meta.property", std::move(st), /*isHandle=*/false, mr);
+    return Value::object("meta.property", keel::move(st), /*isHandle=*/false, mr);
 }
 
 Value buildMetaMethod(const MethodMeta &m, keel::Allocator *mr)
@@ -48,40 +48,49 @@ Value buildMetaMethod(const MethodMeta &m, keel::Allocator *mr)
     st->props.put(keel::String::from("Static"), Value::logicalScalar(m.isStatic, mr));
     st->props.put(keel::String::from("Access"), Value::fromString(m.access, mr));
     st->props.put(keel::String::from("Abstract"), Value::logicalScalar(m.isAbstract, mr));
-    return Value::object("meta.method", std::move(st), /*isHandle=*/false, mr);
+    return Value::object("meta.method", keel::move(st), /*isHandle=*/false, mr);
 }
 
-Value buildMetaClass(const std::string &cn, Engine &eng, keel::Allocator *mr)
+Value buildMetaClass(keel::StringRef cn, Engine &eng, keel::Allocator *mr)
 {
     const BuiltinClass *cls = eng.findClass(cn);
     auto *res = mr ? mr : keel::default_allocator();
     auto st = keel::make_arc_in<ObjectState>(res, res);
     st->props.put(keel::String::from("Name"), Value::fromString(cn, mr));
-    std::vector<std::string> sup;
+    keel::Array<keel::String> sup;
+    bool hasHandle = false;
     if (cls) {
-        sup.reserve(cls->superclasses.size());
-        for (const auto &s : cls->superclasses)
-            sup.emplace_back(s.as_ref());
+        sup.reserve(cls->superclasses.size() + 1);
+        for (const auto &s : cls->superclasses) {
+            if (s == "handle")
+                hasHandle = true;
+            sup.push_back(s.clone());
+        }
     }
-    if (cls && cls->isHandle && std::find(sup.begin(), sup.end(), "handle") == sup.end())
-        sup.push_back("handle");
-    std::vector<Value> supObjs;
+    if (cls && cls->isHandle && !hasHandle)
+        sup.push_back(keel::String::from("handle"));
+    keel::Array<Value> supObjs;
+    supObjs.reserve(sup.size());
     for (const auto &s : sup)
         supObjs.push_back(buildMetaClass(s, eng, mr)); // recurse over ancestors
     st->props.put(keel::String::from("SuperclassList"), metaConcat(supObjs, mr));
-    std::vector<Value> propObjs;
-    if (cls)
+    keel::Array<Value> propObjs;
+    if (cls) {
+        propObjs.reserve(cls->propMeta.size());
         for (const auto &p : cls->propMeta)
             propObjs.push_back(buildMetaProperty(p, mr));
+    }
     st->props.put(keel::String::from("PropertyList"), metaConcat(propObjs, mr));
-    std::vector<Value> methObjs;
-    if (cls)
+    keel::Array<Value> methObjs;
+    if (cls) {
+        methObjs.reserve(cls->methodMeta.size());
         for (const auto &m : cls->methodMeta)
             methObjs.push_back(buildMetaMethod(m, mr));
+    }
     st->props.put(keel::String::from("MethodList"), metaConcat(methObjs, mr));
     st->props.put(keel::String::from("Sealed"), Value::logicalScalar(cls && cls->isSealed, mr));
     st->props.put(keel::String::from("Abstract"), Value::logicalScalar(cls && cls->isAbstract, mr));
-    return Value::object("meta.class", std::move(st), /*isHandle=*/false, mr);
+    return Value::object("meta.class", keel::move(st), /*isHandle=*/false, mr);
 }
 
 } // namespace
@@ -95,11 +104,11 @@ void registerReflectionRuntime(Engine &engine)
                 throw std::runtime_error("functions: argument must be a function handle");
             auto *mr = ctx.engine->allocator();
             auto s = Value::structure(mr);
-            const std::string name(args[0].funcHandleName().as_ref());
+            const keel::String name = args[0].funcHandleName();
             s.field("function") = Value::fromString(name, mr);
             s.field("type")     = Value::fromString("simple", mr);
             s.field("file")     = Value::fromString("", mr);
-            outs[0] = std::move(s);
+            outs[0] = keel::move(s);
         });
 
     engine.registerFunction("localfunctions",
@@ -124,11 +133,11 @@ void registerReflectionRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw std::runtime_error("isa requires two arguments");
-            const std::string target(args[1].toString().as_ref());
+            const keel::String target = args[1].toString();
             const Value &x = args[0];
             bool result = false;
             if (x.isObject()) {
-                const std::string cn(x.objectClassName().as_ref());
+                const keel::String cn = x.objectClassName();
                 result = (cn == target);
                 const BuiltinClass *cls = ctx.engine->findClass(cn);
                 if (!result && cls)
@@ -141,7 +150,8 @@ void registerReflectionRuntime(Engine &engine)
                     result = true;
             } else {
                 const ValueType t = x.type();
-                const std::string tn = x.isSingleComplex() ? "single" : std::string(mtypeName(t));
+                const keel::StringRef tn =
+                    x.isSingleComplex() ? keel::StringRef("single") : keel::StringRef(mtypeName(t));
                 const bool isFloat = (t == ValueType::DOUBLE || t == ValueType::SINGLE
                                       || t == ValueType::COMPLEX);
                 const bool isInt = (t == ValueType::INT8 || t == ValueType::INT16
@@ -171,8 +181,8 @@ void registerReflectionRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("properties requires an argument");
-            std::string cn = args[0].isObject() ? std::string(args[0].objectClassName().as_ref())
-                                                : std::string(args[0].toString().as_ref());
+            keel::String cn = args[0].isObject() ? args[0].objectClassName().clone()
+                                                 : args[0].toString();
             const BuiltinClass *cls = ctx.engine->findClass(cn);
             const keel::usize n = cls ? cls->propNames.size() : 0;
             Value c = Value::cell(n, 1, ctx.engine->allocator());
@@ -185,20 +195,21 @@ void registerReflectionRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty())
                 throw std::runtime_error("methods requires an argument");
-            std::string cn = args[0].isObject() ? std::string(args[0].objectClassName().as_ref())
-                                                : std::string(args[0].toString().as_ref());
+            keel::String cn = args[0].isObject() ? args[0].objectClassName().clone()
+                                                 : args[0].toString();
             const BuiltinClass *cls = ctx.engine->findClass(cn);
-            std::vector<std::string> names;
+            keel::Array<keel::String> names;
             if (cls)
-                for (auto entry : cls->methods) {
+                for (auto [key, val] : cls->methods) {
+                    (void)val;
                     bool hid = false;
                     for (const auto &h : cls->hidden) {
-                        if (h == entry.key) { hid = true; break; }
+                        if (h == key) { hid = true; break; }
                     }
                     if (!hid)
-                        names.emplace_back(entry.key.as_ref());
+                        names.push_back(key.clone());
                 }
-            std::sort(names.begin(), names.end());
+            keel::sort(names);
             Value c = Value::cell(names.size(), 1, ctx.engine->allocator());
             for (keel::usize i = 0; i < names.size(); ++i)
                 c.cellAt(i) = Value::fromString(names[i], ctx.engine->allocator());
@@ -236,8 +247,8 @@ void registerReflectionRuntime(Engine &engine)
             if (args.size() < 2)
                 throw Error("ismethod: requires (obj, name)", 0, 0, "ismethod", "",
                             "numkit:ismethod:nargin");
-            std::string cn = args[0].isObject() ? std::string(args[0].objectClassName().as_ref())
-                                                : std::string(args[0].toString().as_ref());
+            keel::String cn = args[0].isObject() ? args[0].objectClassName().clone()
+                                                 : args[0].toString();
             const BuiltinClass *cls = ctx.engine->findClass(cn);
             auto has = [&](keel::StringRef n) {
                 return cls && cls->methods.contains(n);
@@ -259,17 +270,20 @@ void registerReflectionRuntime(Engine &engine)
             if (args.empty())
                 throw Error("superclasses: requires (obj or 'ClassName')", 0, 0,
                             "superclasses", "", "numkit:superclasses:nargin");
-            std::string cn = args[0].isObject() ? std::string(args[0].objectClassName().as_ref())
-                                                : std::string(args[0].toString().as_ref());
+            keel::String cn = args[0].isObject() ? args[0].objectClassName().clone()
+                                                 : args[0].toString();
             const BuiltinClass *cls = ctx.engine->findClass(cn);
-            std::vector<std::string> names;
+            keel::Array<keel::String> names;
             if (cls) {
-                names.reserve(cls->superclasses.size());
-                for (const auto &s : cls->superclasses)
-                    names.emplace_back(s.as_ref());
-                if (cls->isHandle
-                    && std::find(names.begin(), names.end(), "handle") == names.end())
-                    names.push_back("handle");
+                names.reserve(cls->superclasses.size() + 1);
+                bool hasHandle = false;
+                for (const auto &s : cls->superclasses) {
+                    if (s == "handle")
+                        hasHandle = true;
+                    names.push_back(s.clone());
+                }
+                if (cls->isHandle && !hasHandle)
+                    names.push_back(keel::String::from("handle"));
             }
             Value c = Value::cell(names.size(), 1, ctx.engine->allocator());
             for (keel::usize i = 0; i < names.size(); ++i)
@@ -293,14 +307,14 @@ void registerReflectionRuntime(Engine &engine)
         for (const char *pn : {"Name", "GetAccess", "SetAccess", "Constant", "Dependent"})
             mp.propNames.push_back(keel::String::from(pn));
         mp.propGet = metaPropGet;
-        engine.registerClass(std::move(mp));
+        engine.registerClass(keel::move(mp));
 
         BuiltinClass mm;
         mm.name = keel::String::from("meta.method");
         for (const char *pn : {"Name", "Static", "Access", "Abstract"})
             mm.propNames.push_back(keel::String::from(pn));
         mm.propGet = metaPropGet;
-        engine.registerClass(std::move(mm));
+        engine.registerClass(keel::move(mm));
 
         BuiltinClass mc;
         mc.name = keel::String::from("meta.class");
@@ -308,7 +322,7 @@ void registerReflectionRuntime(Engine &engine)
                                "Sealed", "Abstract"})
             mc.propNames.push_back(keel::String::from(pn));
         mc.propGet = metaPropGet;
-        engine.registerClass(std::move(mc));
+        engine.registerClass(keel::move(mc));
     }
     engine.registerFunction("metaclass",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
@@ -316,14 +330,17 @@ void registerReflectionRuntime(Engine &engine)
                 throw Error("metaclass: requires 1 argument", 0, 0, "metaclass", "",
                             "numkit:metaclass:nargin");
             auto *mr = ctx.engine->allocator();
-            std::string cn;
+            keel::String cn;
             if (args[0].isObject()) {
-                cn = args[0].objectClassName();
-            } else if (args[0].type() == ValueType::CHAR
-                       && ctx.engine->findClass(args[0].toString())) {
-                cn = args[0].toString();
+                cn = args[0].objectClassName().clone();
+            } else if (args[0].type() == ValueType::CHAR) {
+                keel::String cand = args[0].toString();
+                if (ctx.engine->findClass(cand))
+                    cn = keel::move(cand);
+                else
+                    cn = keel::String::from(mtypeName(args[0].type()));
             } else {
-                cn = mtypeName(args[0].type());
+                cn = keel::String::from(mtypeName(args[0].type()));
             }
             outs[0] = buildMetaClass(cn, *ctx.engine, mr);
         });
@@ -331,7 +348,7 @@ void registerReflectionRuntime(Engine &engine)
     auto checkIsClassOrSub = [](const Value &v, const char *target, Engine &eng) -> bool {
         if (!v.isObject())
             return false;
-        const std::string cn(v.objectClassName().as_ref());
+        const keel::String cn = v.objectClassName();
         if (cn == target)
             return true;
         if (const BuiltinClass *cls = eng.findClass(cn)) {

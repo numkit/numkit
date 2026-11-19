@@ -9,11 +9,13 @@
 // language-namespaced builtins). textscan + its format parser are textscan-
 // only, so they ride along here whole.
 
-#include <keel/core.h>
-#include <keel/memory.h>
-#include <keel/ref.h>
 #include <keel/arena.h>
 #include <keel/array.h>
+#include <keel/core.h>
+#include <keel/format.h>
+#include <keel/memory.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/io.hpp>
 #include <numkit/builtin/strfun.hpp>
 #include <numkit/builtin/scan_core.hpp>     // detail::scanfEmit + ScanfOut
@@ -23,15 +25,11 @@
 #include <numkit/value/value.hpp>
 #include <numkit/ops/io_helpers.hpp>       // SizeSpec / parseReadSize (numkit::builtin::detail)
 
-#include <algorithm>
-#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <string>
-#include <utility>
 
 namespace numkit::runtime {
 
@@ -52,8 +50,8 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     if (args.size() >= 3)
         sz = numkit::ops::parseReadSize(args[2], "fscanf");
 
-    std::string input(f->buffer.begin() + f->cursor, f->buffer.end());
-    std::string fmt(args[1].toString().as_ref());
+    keel::StringRef input(f->buffer.data() + f->cursor, f->buffer.size() - f->cursor);
+    keel::String fmt = args[1].toString();
 
     ScanfOut r{0, 0};
     scanfEmit(input, fmt, sz, nargout, outs, r, mr);
@@ -71,24 +69,28 @@ namespace {
 
 struct TextscanOptions
 {
-    explicit TextscanOptions(keel::Allocator *mr) : treatAsEmpty(mr) {}
+    explicit TextscanOptions(keel::Allocator *mr)
+        : delimiters(mr),
+          endOfLine(keel::String::from("\n", mr)),
+          commentStyle(mr),
+          treatAsEmpty(mr)
+    {}
 
     // Empty → whitespace-default mode (runs of space/tab/\f/\v + EOL
     // count as a single field boundary). Non-empty → explicit-delim
     // mode: ONE char in this set is one field boundary, and EOL
     // chars are still separate record boundaries that always
     // collapse.
-    std::string delimiters;
-    std::string endOfLine = "\n";
+    keel::String delimiters;
+    keel::String endOfLine;
     keel::usize headerLines = 0;
     // Line-comment marker. When non-empty, anything from its first
     // occurrence up to the next EndOfLine char is ignored.
-    std::string commentStyle;
+    keel::String commentStyle;
     // Tokens whose text equals any entry in this set are coerced to
-    // "empty" (numeric → EmptyValue, %s → ''). Vector body lives on
-    // the per-call arena; the std::string elements stay on the
-    // default heap (typically short enough for SSO anyway).
-    keel::Array<std::string> treatAsEmpty;
+    // "empty" (numeric → EmptyValue, %s → ''). Vector body and
+    // string elements live on the per-call arena.
+    keel::Array<keel::String> treatAsEmpty;
     // In explicit-delim mode only: when true, runs of delim chars
     // collapse to one boundary (no empty fields emitted). Default
     // false, matching MATLAB; whitespace-default mode always
@@ -100,9 +102,12 @@ struct TextscanOptions
 
 struct TextscanConv { char spec; bool suppress; int width; };
 
+struct StagedNum { keel::usize col; double val; };
+struct StagedStr { keel::usize col; keel::String val; };
+
 // Parse formatSpec into an ordered conversion list. Unrecognised
 // % codes throw before any scanning happens.
-keel::Array<TextscanConv> parseTextscanFormat(const std::string &fmt, keel::Allocator *mr)
+keel::Array<TextscanConv> parseTextscanFormat(keel::StringRef fmt, keel::Allocator *mr)
 {
     keel::Array<TextscanConv> out(mr);
     for (keel::usize i = 0; i < fmt.size(); ++i) {
@@ -127,8 +132,7 @@ keel::Array<TextscanConv> parseTextscanFormat(const std::string &fmt, keel::Allo
         case 's':
             break;
         default:
-            throw Error(std::string("textscan: unsupported conversion '%")
-                            + spec + "'");
+            throw Error(keel::format("textscan: unsupported conversion '%{}'", spec));
         }
         out.push_back({spec, suppress, width});
     }
@@ -147,22 +151,24 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         throw Error("textscan: requires (source, format [, N] [, opt, value …])");
 
     // Source — fid scalar or char array.
-    std::string input;
+    keel::String ownedInput;
+    keel::StringRef input;
     Engine::OpenFile *srcFile = nullptr;
     if (args[0].isChar()) {
-        input = args[0].toString();
+        ownedInput = args[0].toString();
+        input = ownedInput.as_ref();
     } else if (args[0].isScalar()) {
         int fid = static_cast<int>(args[0].toScalar());
         srcFile = engine.findFile(fid);
         if (!srcFile || !srcFile->forRead)
             throw Error("textscan: invalid file identifier");
-        input.assign(srcFile->buffer.begin() + srcFile->cursor,
-                     srcFile->buffer.end());
+        input = keel::StringRef(srcFile->buffer.data() + srcFile->cursor,
+                                srcFile->buffer.size() - srcFile->cursor);
     } else {
         throw Error("textscan: source must be a file identifier or char array");
     }
 
-    std::string fmt(args[1].toString().as_ref());
+    keel::String fmt = args[1].toString();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto convs = parseTextscanFormat(fmt, scratch.allocator());
 
@@ -182,24 +188,24 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     // Parse name/value options into a TextscanOptions struct.
     TextscanOptions opts{scratch.allocator()};
     auto lower = [](keel::StringRef sr) {
-        std::string s(sr);
+        keel::String s = keel::String::from(sr);
         for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return s;
     };
     while (argIdx + 1 < args.size()) {
         if (!args[argIdx].isChar())
             throw Error("textscan: option name must be a char array");
-        std::string name = lower(args[argIdx].toString());
+        keel::String name = lower(args[argIdx].toString());
         const Value &val = args[argIdx + 1];
         if (name == "delimiter") {
             if (val.isChar()) {
-                opts.delimiters = val.toString();
+                opts.delimiters.assign(val.toString());
             } else if (val.isCell()) {
                 // Concatenate every char in the cells into one delimiter set.
                 opts.delimiters.clear();
                 for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &d = val.cellAt(i);
-                    if (d.isChar()) opts.delimiters += std::string_view(d.toString());
+                    if (d.isChar()) opts.delimiters.append(d.toString());
                 }
             } else {
                 throw Error("textscan: 'Delimiter' must be a char array or cell");
@@ -207,7 +213,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         } else if (name == "endofline") {
             if (!val.isChar())
                 throw Error("textscan: 'EndOfLine' must be a char array");
-            opts.endOfLine = val.toString();
+            opts.endOfLine.assign(val.toString());
         } else if (name == "headerlines") {
             double d = val.toScalar();
             if (d < 0 || !std::isfinite(d))
@@ -216,14 +222,15 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         } else if (name == "commentstyle") {
             if (!val.isChar())
                 throw Error("textscan: 'CommentStyle' must be a char array");
-            opts.commentStyle = val.toString();
+            opts.commentStyle.assign(val.toString());
         } else if (name == "treatasempty") {
             if (val.isChar()) {
-                opts.treatAsEmpty.push_back(std::string(val.toString().as_ref()));
+                opts.treatAsEmpty.push_back(keel::String::from(val.toString(), scratch.allocator()));
             } else if (val.isCell()) {
                 for (keel::usize i = 0; i < val.numel(); ++i) {
                     const Value &e = val.cellAt(i);
-                    if (e.isChar()) opts.treatAsEmpty.push_back(std::string(e.toString().as_ref()));
+                    if (e.isChar())
+                        opts.treatAsEmpty.push_back(keel::String::from(e.toString(), scratch.allocator()));
                 }
             } else {
                 throw Error("textscan: 'TreatAsEmpty' must be a char array or cell");
@@ -237,8 +244,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 throw Error("textscan: 'EmptyValue' must be a numeric scalar");
             opts.emptyValue = val.toScalar();
         } else {
-            throw Error("textscan: unsupported option '" + std::string(args[argIdx].toString().as_ref())
-                            + "'");
+            throw Error(keel::format("textscan: unsupported option '{}'", args[argIdx].toString()));
         }
         argIdx += 2;
     }
@@ -251,22 +257,21 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     keel::usize pos = 0;
 
     auto isEol = [&opts](char c) {
-        return opts.endOfLine.find(c) != std::string::npos;
+        return opts.endOfLine.find(c) != keel::kInvalidIndex;
     };
     auto isWs = [](char c) {
         return c == ' ' || c == '\t' || c == '\f' || c == '\v';
     };
     auto isExplicitDelim = [&opts](char c) {
-        return opts.delimiters.find(c) != std::string::npos;
+        return opts.delimiters.find(c) != keel::kInvalidIndex;
     };
     auto atComment = [&opts, &input, &pos]() -> bool {
         return !opts.commentStyle.empty() &&
-               pos + opts.commentStyle.size() <= input.size() &&
-               input.compare(pos, opts.commentStyle.size(), opts.commentStyle) == 0;
+               input.substr(pos).starts_with(opts.commentStyle.as_ref());
     };
-    auto isEmpty = [&opts](const std::string &tok) {
-        for (auto &e : opts.treatAsEmpty)
-            if (tok == e) return true;
+    auto isEmpty = [&opts](keel::StringRef tok) {
+        for (const auto &e : opts.treatAsEmpty)
+            if (e == tok) return true;
         return false;
     };
 
@@ -348,7 +353,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     // In explicit-delim mode, trailing whitespace inside the
     // field is trimmed (so "1 , 2" with delim ',' yields "1"
     // and "2", not "1 " and " 2").
-    auto readField = [&]() -> std::string {
+    auto readField = [&]() -> keel::StringRef {
         keel::usize start = pos;
         while (pos < input.size()) {
             char c = input[pos];
@@ -370,7 +375,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
 
     // Per-column accumulators. Both outer and inner arrays allocate from the arena.
     keel::Array<keel::Array<double>> numCols(scratch.allocator());
-    keel::Array<keel::Array<std::string>> strCols(scratch.allocator());
+    keel::Array<keel::Array<keel::String>> strCols(scratch.allocator());
     numCols.reserve(convs.size());
     strCols.reserve(convs.size());
     for (keel::usize ci = 0; ci < convs.size(); ++ci) {
@@ -382,8 +387,9 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     // under the monotonic resource (footgun #c in scratch.hpp).
     // After a few iterations the capacity stabilises and clear() reuses
     // it — total arena footprint stays bounded.
-    keel::Array<std::pair<keel::usize, double>>      stageNum(scratch.allocator());
-    keel::Array<std::pair<keel::usize, std::string>> stageStr(scratch.allocator());
+    keel::Array<StagedNum> stageNum(scratch.allocator());
+    keel::Array<StagedStr> stageStr(scratch.allocator());
+    keel::String tokBuf(scratch.allocator());
     keel::usize cycles = 0;
 
     skipLeading();                         // past leading ws/EOL/comments once
@@ -411,7 +417,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             // the empty-field branch correctly. In whitespace-
             // default mode, the same empty-tok path distinguishes
             // "no more data" and triggers fullCycle = false.
-            std::string tok = readField();
+            keel::StringRef tok = readField();
 
             // Two kinds of "empty token" can flow out of readField:
             //
@@ -426,7 +432,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             // TreatAsEmpty hit in whitespace-default mode still
             // yields EmptyValue instead of rolling back.
             bool coercedEmpty = !tok.empty() && isEmpty(tok);
-            if (coercedEmpty) tok.clear();
+            if (coercedEmpty) tok = {};
 
             const TextscanConv &c = convs[i];
             if (tok.empty()) {
@@ -436,21 +442,23 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 }
                 if (c.suppress) continue;
                 if (c.spec == 's')
-                    stageStr.push_back({i, std::string()});
+                    stageStr.push_back({i, keel::String(scratch.allocator())});
                 else
                     stageNum.push_back({i, opts.emptyValue});
                 continue;
             }
 
             if (c.width > 0 && static_cast<int>(tok.size()) > c.width)
-                tok.resize(static_cast<keel::usize>(c.width));
+                tok = tok.substr(0, static_cast<keel::usize>(c.width));
 
             if (c.spec == 's') {
-                if (!c.suppress) stageStr.push_back({i, std::move(tok)});
+                if (!c.suppress)
+                    stageStr.push_back({i, keel::String::from(tok, scratch.allocator())});
                 continue;
             }
 
-            const char *start = tok.c_str();
+            tokBuf.assign(tok);
+            const char *start = tokBuf.c_str();
             char *endp = nullptr;
             double v = 0.0;
             switch (c.spec) {
@@ -487,8 +495,8 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             break;
         }
 
-        for (auto &p : stageNum) numCols[p.first].push_back(p.second);
-        for (auto &p : stageStr) strCols[p.first].push_back(std::move(p.second));
+        for (auto &p : stageNum) numCols[p.col].push_back(p.val);
+        for (auto &p : stageStr) strCols[p.col].push_back(keel::move(p.val));
         ++cycles;
     }
 
@@ -508,7 +516,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             Value inner = Value::cell(k, 1);
             for (keel::usize j = 0; j < k; ++j)
                 inner.cellAt(j) = Value::fromString(strCols[i][j], mr);
-            result.cellAt(slot++) = std::move(inner);
+            result.cellAt(slot++) = keel::move(inner);
         } else {
             keel::usize k = numCols[i].size();
             Value col = (k == 0)
@@ -517,10 +525,10 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             if (k > 0)
                 std::memcpy(col.doubleDataMut(), numCols[i].data(),
                             k * sizeof(double));
-            result.cellAt(slot++) = std::move(col);
+            result.cellAt(slot++) = keel::move(col);
         }
     }
-    outs[0] = std::move(result);
+    outs[0] = keel::move(result);
 }
 
 } // namespace numkit::runtime

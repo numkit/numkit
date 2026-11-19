@@ -4,8 +4,10 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/builtin/ops.hpp>
 #include <numkit/builtin/datatypes.hpp>
@@ -22,10 +24,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -51,23 +51,23 @@ ValueType pickBitwiseResultType(const Value &a, const Value &b, const char *fn)
     if (!int0 && !int1) return ValueType::DOUBLE;
     if (int0 && int1) {
         if (t0 != t1)
-            throw Error(std::string(fn) + ": integer inputs must be the same class",
+            throw Error(keel::format("{}: integer inputs must be the same class", fn),
                          0, 0, fn, "",
-                         std::string("numkit:") + fn + ":mixedInt");
+                         keel::format("numkit:{}:mixedInt", fn));
         return t0;
     }
     // One int, one non-int.
     if (int0) {
         if (!dbl1 || !b.isScalar())
-            throw Error(std::string(fn) + ": integer + non-scalar-double mix",
+            throw Error(keel::format("{}: integer + non-scalar-double mix", fn),
                          0, 0, fn, "",
-                         std::string("numkit:") + fn + ":badMix");
+                         keel::format("numkit:{}:badMix", fn));
         return t0;
     }
     if (!dbl0 || !a.isScalar())
-        throw Error(std::string(fn) + ": integer + non-scalar-double mix",
+        throw Error(keel::format("{}: integer + non-scalar-double mix", fn),
                      0, 0, fn, "",
-                     std::string("numkit:") + fn + ":badMix");
+                     keel::format("numkit:{}:badMix", fn));
     return t1;
 }
 
@@ -168,15 +168,15 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     auto *mr = ctx.engine->allocator();
 
     int width = 0;
-    std::string explicitType;       // empty = inferred or default
+    keel::String explicitType(mr);  // empty = inferred or default
 
     if (args.size() >= 2 && !args[1].isEmpty()) {
         if (args[1].isChar() || args[1].isString()) {
             const auto t = args[1].toString();
-            if      (t == "uint8"  || t == "int8")  { width = 8;  explicitType = t; }
-            else if (t == "uint16" || t == "int16") { width = 16; explicitType = t; }
-            else if (t == "uint32" || t == "int32") { width = 32; explicitType = t; }
-            else if (t == "uint64" || t == "int64") { width = 64; explicitType = t; }
+            if      (t == "uint8"  || t == "int8")  { width = 8;  explicitType.assign(t); }
+            else if (t == "uint16" || t == "int16") { width = 16; explicitType.assign(t); }
+            else if (t == "uint32" || t == "int32") { width = 32; explicitType.assign(t); }
+            else if (t == "uint64" || t == "int64") { width = 64; explicitType.assign(t); }
             else
                 throw Error("bitcmp: unknown type name",
                              0, 0, "bitcmp", "", "numkit:bitcmp:badType");
@@ -195,7 +195,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
                 "bitcmp: 1-arg form requires an integer input "
                 "(use bitcmp(A, 'uintN') for double inputs).",
                 0, 0, "bitcmp", "", "numkit:bitcmp:doubleNeedsClass");
-        explicitType = mtypeName(t);
+        explicitType.assign(mtypeName(t));
         switch (t) {
         case ValueType::INT8: case ValueType::UINT8:  width = 8;  break;
         case ValueType::INT16: case ValueType::UINT16: width = 16; break;

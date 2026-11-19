@@ -10,19 +10,18 @@
 #pragma once
 
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/builtin/datafun.hpp>   // sum / prod / mean
 #include <numkit/builtin/elmat.hpp>  // length / ndims
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <string>
-#include <vector>
 
 namespace numkit::runtime::detail::handlefn {
 
@@ -59,11 +58,11 @@ inline bool builtinReturnsString(BuiltinFn f)
     return f == BuiltinFn::ClassName;
 }
 
-inline std::string lowerName(keel::StringRef s)
+inline keel::String lowerName(keel::StringRef s)
 {
-    std::string r(s);
-    std::transform(r.begin(), r.end(), r.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    keel::String r = keel::String::from(s);
+    for (keel::usize i = 0; i < r.size(); ++i)
+        r[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(r[i])));
     return r;
 }
 
@@ -74,9 +73,9 @@ inline std::string lowerName(keel::StringRef s)
 inline bool tryParseBuiltinHandle(const Value &h, BuiltinFn &out, const char *fn)
 {
     if (!h.isFuncHandle())
-        throw Error(std::string(fn) + ": fn argument must be a function handle",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":fnType");
-    const std::string s = lowerName(h.funcHandleName());
+        throw Error(keel::format("{}: fn argument must be a function handle", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:fnType", fn));
+    const keel::String s = lowerName(h.funcHandleName());
     if (s == "numel")     { out = BuiltinFn::Numel;     return true; }
     if (s == "length")    { out = BuiltinFn::Length;    return true; }
     if (s == "ndims")     { out = BuiltinFn::Ndims;     return true; }
@@ -156,20 +155,20 @@ inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,
         return Value::logicalScalar(!v.isComplex(), mr);
     case BuiltinFn::IsNan: {
         if (!v.isScalar())
-            throw Error(std::string(fn) + ": @isnan requires each cell to be scalar in uniform mode",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":notScalar");
+            throw Error(keel::format("{}: @isnan requires each cell to be scalar in uniform mode", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
         return Value::logicalScalar(std::isnan(v.toScalar()), mr);
     }
     case BuiltinFn::IsInf: {
         if (!v.isScalar())
-            throw Error(std::string(fn) + ": @isinf requires each cell to be scalar in uniform mode",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":notScalar");
+            throw Error(keel::format("{}: @isinf requires each cell to be scalar in uniform mode", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
         return Value::logicalScalar(std::isinf(v.toScalar()), mr);
     }
     case BuiltinFn::IsFinite: {
         if (!v.isScalar())
-            throw Error(std::string(fn) + ": @isfinite requires each cell to be scalar in uniform mode",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":notScalar");
+            throw Error(keel::format("{}: @isfinite requires each cell to be scalar in uniform mode", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
         return Value::logicalScalar(std::isfinite(v.toScalar()), mr);
     }
     case BuiltinFn::Sum:  return ::numkit::builtin::sum (v, mr);
@@ -177,11 +176,11 @@ inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,
     case BuiltinFn::Mean: return ::numkit::builtin::mean(v, mr);
     case BuiltinFn::ClassName: {
         const char *name = classNameOf(v);
-        return Value::fromString(std::string(name), mr);
+        return Value::fromString(name, mr);
     }
     }
-    throw Error(std::string(fn) + ": internal: unhandled builtin",
-                 0, 0, fn, "", std::string("numkit:") + fn + ":internal");
+    throw Error(keel::format("{}: internal: unhandled builtin", fn),
+                 0, 0, fn, "", keel::format("numkit:{}:internal", fn));
 }
 
 inline Value applyHandle(keel::Allocator *mr, const Value &handle,
@@ -191,9 +190,9 @@ inline Value applyHandle(keel::Allocator *mr, const Value &handle,
     if (isBuiltin)
         return applyBuiltin(mr, builtinTag, v, fn);
     if (engine == nullptr)
-        throw Error(std::string(fn) + ": custom function handles need an "
-                     "Engine — use the engine-aware adapter (callback API).",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":fnUnsupported");
+        throw Error(keel::format("{}: custom function handles need an "
+                     "Engine — use the engine-aware adapter (callback API).", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:fnUnsupported", fn));
     Value arg = v;
     keel::ArrayRef<Value> args(&arg, 1);
     return engine->callFunctionHandle(handle, args);
@@ -205,8 +204,8 @@ inline Value packUniform(keel::Allocator *mr, BuiltinFn f,
 {
     const bool wantLogical = builtinReturnsLogical(f);
     if (builtinReturnsString(f))
-        throw Error(std::string(fn) + ": @class output must use UniformOutput=false",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":nonUniform");
+        throw Error(keel::format("{}: @class output must use UniformOutput=false", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:nonUniform", fn));
 
     const ValueType outT = wantLogical ? ValueType::LOGICAL : ValueType::DOUBLE;
     const keel::usize r = outDims.rows();
@@ -218,8 +217,8 @@ inline Value packUniform(keel::Allocator *mr, BuiltinFn f,
     for (keel::usize i = 0; i < n; ++i) {
         const Value &v = results[i];
         if (!v.isScalar())
-            throw Error(std::string(fn) + ": fn returned a non-scalar; pass 'UniformOutput', false",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":notScalar");
+            throw Error(keel::format("{}: fn returned a non-scalar; pass 'UniformOutput', false", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
         if (wantLogical)
             out.logicalDataMut()[i] = v.toBool() ? 1 : 0;
         else
@@ -234,19 +233,19 @@ inline bool parseUniformOutputFlag(keel::ArrayRef<Value> args, keel::usize dataA
     bool uniform = true;
     for (keel::usize i = dataArgCount; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
-            throw Error(std::string(fn) + ": expected option name (string)",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":badFlag");
-        const std::string key = lowerName(args[i].toString());
+            throw Error(keel::format("{}: expected option name (string)", fn),
+                         0, 0, fn, "", keel::format("numkit:{}:badFlag", fn));
+        const keel::String key = lowerName(args[i].toString());
         if (key == "uniformoutput") {
             uniform = args[i + 1].toBool();
         } else {
-            throw Error(std::string(fn) + ": unsupported option '" + key + "'",
-                         0, 0, fn, "", std::string("numkit:") + fn + ":badFlag");
+            throw Error(keel::format("{}: unsupported option '{}'", fn, key),
+                         0, 0, fn, "", keel::format("numkit:{}:badFlag", fn));
         }
     }
     if ((args.size() - dataArgCount) % 2 != 0)
-        throw Error(std::string(fn) + ": option name without value",
-                     0, 0, fn, "", std::string("numkit:") + fn + ":badFlag");
+        throw Error(keel::format("{}: option name without value", fn),
+                     0, 0, fn, "", keel::format("numkit:{}:badFlag", fn));
     return uniform;
 }
 

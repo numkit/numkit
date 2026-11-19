@@ -7,9 +7,12 @@
 //   delegateTo   — comet* (line) + bubblechart / swarmchart / ... (bar)
 // Carved out of buildPlotTable; bodies verbatim (pure helpers via header).
 
+#include <keel/array.h>
 #include <keel/core.h>
-#include <keel/ref.h>
 #include <keel/math.h>
+#include <keel/number.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
@@ -24,13 +27,8 @@
 #endif
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 namespace numkit::detail {
 
@@ -51,9 +49,9 @@ void heatmapImpl(
         // the end of this function sees the right yDir.
         if (axisIj) {
             if (fm.currentAxes().axisMode.empty()) {
-                fm.currentAxes().axisMode = "ij";
+                fm.currentAxes().axisMode.assign("ij");
             }
-            fm.currentAxes().yDir = "reverse";
+            fm.currentAxes().yDir.assign("reverse");
         }
 
         const Value *C_arg = nullptr;
@@ -87,7 +85,7 @@ void heatmapImpl(
         }
 
         DatasetInfo ds;
-        ds.type = typeName;
+        ds.type.assign(typeName);
         ds.originalRows = rows;
         ds.originalCols = cols;
 
@@ -127,15 +125,17 @@ void heatmapImpl(
         // override. clim is in original-domain values; in log mode we
         // need to take log10 of both limits for the quantization range.
         if (!fm.currentAxes().climJson.empty()) {
-            const std::string &s = fm.currentAxes().climJson;
+            const keel::String &s = fm.currentAxes().climJson;
             keel::usize lb = s.find('[');
-            keel::usize comma = s.find(',', lb);
-            keel::usize rb = s.find(']', comma);
-            if (lb != std::string::npos && comma != std::string::npos
-                && rb != std::string::npos) {
-                try {
-                    double a = std::stod(s.substr(lb + 1, comma - lb - 1));
-                    double b = std::stod(s.substr(comma + 1, rb - comma - 1));
+            keel::usize comma = (lb != keel::kInvalidIndex) ? s.find(',', lb) : keel::kInvalidIndex;
+            keel::usize rb = (comma != keel::kInvalidIndex) ? s.find(']', comma) : keel::kInvalidIndex;
+            if (lb != keel::kInvalidIndex && comma != keel::kInvalidIndex
+                && rb != keel::kInvalidIndex) {
+                auto ra = keel::parse_f64(s.substr(lb + 1, comma - lb - 1).trim());
+                auto rbv = keel::parse_f64(s.substr(comma + 1, rb - comma - 1).trim());
+                if (ra.is_ok() && rbv.is_ok()) {
+                    double a = ra.value();
+                    double b = rbv.value();
                     if (logColor) {
                         if (a > 0 && b > 0) {
                             cmin = std::log10(a);
@@ -146,7 +146,7 @@ void heatmapImpl(
                         cmin = a;
                         cmax = b;
                     }
-                } catch (...) { /* keep scanned values */ }
+                }
             }
         }
         if (!std::isfinite(cmin) || !std::isfinite(cmax) || cmin == cmax) {
@@ -179,7 +179,7 @@ void heatmapImpl(
         // matrices get mean-pooled in index space (idx 255 NaN-skipped).
         constexpr keel::usize MAX_INLINE_CELLS = 2'000'000;
         const keel::usize totalCells = rows * cols;
-        std::ostringstream zs;
+        StrBuf zs;
         zs << "[";
 
         if (totalCells <= MAX_INLINE_CELLS) {
@@ -226,24 +226,24 @@ void heatmapImpl(
             ds.downsampled = true;
         }
         zs << "]";
-        ds.zJson = zs.str();
+        ds.zJson = zs.take();
 
         if (x_arg && x_arg->numel() >= 2) {
             ds.xJson = vecToJson(*x_arg);
         } else {
-            std::ostringstream xs;
+            StrBuf xs;
             xs << "[1," << cols << "]";
-            ds.xJson = xs.str();
+            ds.xJson = xs.take();
         }
         if (y_arg && y_arg->numel() >= 2) {
             ds.yJson = vecToJson(*y_arg);
         } else {
-            std::ostringstream ys;
+            StrBuf ys;
             ys << "[1," << rows << "]";
-            ds.yJson = ys.str();
+            ds.yJson = ys.take();
         }
 
-        fm.pushDataset(std::move(ds));
+        fm.pushDataset(keel::move(ds));
         // NOTE: axis-ij setting moved OUT of heatmapImpl. Setting yDir
         // here would ride on emitModified() below, freezing it into
         // the JSON before histogram2 (which delegates here) gets a
@@ -258,7 +258,7 @@ void geoForward(const char *target, keel::ArrayRef<Value> args,
     if (args.size() < 2) { outs[0] = Value(); return; }
     // Build a new arg list with (lon, lat, ...) — i.e. swap the
     // first two so target's X = lon, Y = lat.
-    std::vector<Value> proxied;
+    keel::Array<Value> proxied;
     proxied.reserve(args.size());
     proxied.push_back(args[1]);   // lon → X
     proxied.push_back(args[0]);   // lat → Y
@@ -269,8 +269,8 @@ void geoForward(const char *target, keel::ArrayRef<Value> args,
     // Add convenience axis labels so the "no basemap" output is
     // self-explanatory (lat/lon instead of generic X/Y).
     auto &ax = gc.fm.currentAxes();
-    if (ax.xlabel.empty()) ax.xlabel = "lon";
-    if (ax.ylabel.empty()) ax.ylabel = "lat";
+    if (ax.xlabel.empty()) ax.xlabel.assign("lon");
+    if (ax.ylabel.empty()) ax.ylabel.assign("lat");
     gc.fm.current().modified = true;
     gc.fm.emitModified();
     outs[0] = Value();

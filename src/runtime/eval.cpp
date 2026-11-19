@@ -7,7 +7,9 @@
 // owning translation unit / layer differs. registerEvalFamily is composed by
 // installRuntimeLibrary (runtime.cpp), which bundle/installStandardLibrary calls.
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/runtime/function_file.hpp>
 #include <numkit/runtime/runtime.hpp>
 
@@ -15,10 +17,9 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 
+#include <cstdio>
 #include <cstdlib>
-#include <iostream>
 #include <stdexcept>
-#include <string>
 
 namespace numkit::runtime {
 
@@ -29,7 +30,7 @@ void registerEvalFamily(Engine &engine)
     // leaked variables and imports into workspaceEnv. Provided as an
     // escape hatch for code that depended on the old (buggy) scope.
     auto resolveEvalScope = [](CallContext &ctx) -> Environment * {
-        std::string legacy = ctx.engine->getEnvVar("NUMKIT_LEGACY_EVAL_SCOPE");
+        keel::String legacy = ctx.engine->getEnvVar("NUMKIT_LEGACY_EVAL_SCOPE");
         if (legacy == "1")
             return &ctx.engine->workspaceEnv();
         return ctx.env;
@@ -37,14 +38,14 @@ void registerEvalFamily(Engine &engine)
 
     engine.registerFunction(
         "run", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize,
-                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                                  keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isChar())
                 throw std::runtime_error("run requires a string filename");
-            std::string p(args[0].toString().as_ref());
-            auto rp = ctx.engine->resolvePath(p);
-            if (!rp.fs || !rp.fs->exists(rp.path))
-                throw std::runtime_error("run: file not found: " + p);
-            std::string content(rp.fs->readFile(rp.path).as_ref());
+            keel::String p = args[0].toString();
+            auto rp = ctx.engine->resolvePath(p.as_ref());
+            if (!rp.fs || !rp.fs->exists(rp.path.as_ref()))
+                throw std::runtime_error(keel::format("run: file not found: {}", p).c_str());
+            keel::String content = rp.fs->readFile(rp.path.as_ref());
 
             // Push script origin for the duration of the run so that
             // sibling .m files in the same directory resolve without
@@ -53,27 +54,35 @@ void registerEvalFamily(Engine &engine)
             // Root-level files ("/foo.m") need scriptDir = "/" — an
             // empty string would be treated as "no scriptDir" by the
             // resolver, so substr(0,0) won't do.
-            std::string scriptDir;
+            keel::String scriptDir;
             {
-                std::string rpPath(rp.path.as_ref());
-                keel::usize slash = rpPath.find_last_of("/\\");
+                keel::StringRef rpPath = rp.path.as_ref();
+                keel::usize slash = keel::kInvalidIndex;
+                for (keel::usize i = rpPath.size(); i > 0; --i) {
+                    if (rpPath[i - 1] == '/' || rpPath[i - 1] == '\\') {
+                        slash = i - 1;
+                        break;
+                    }
+                }
                 if (slash == 0)
-                    scriptDir.assign(1, rpPath[0]);   // "/" or "\\"
-                else if (slash != std::string::npos)
-                    scriptDir = rpPath.substr(0, slash);
+                    scriptDir.push_back(rpPath[0]);   // "/" or "\\"
+                else if (slash != keel::kInvalidIndex)
+                    scriptDir.assign(rpPath.substr(0, slash));
             }
-            ctx.engine->pushScriptOrigin(rp.fs->name(), scriptDir, rp.path);
+            ctx.engine->pushScriptOrigin(rp.fs->name().as_ref(), scriptDir.as_ref(), rp.path.as_ref());
             // MATLAB run() semantics: a FUNCTION file executes its primary
             // function — nullary runs; required inputs fail with the natural
             // "not enough input arguments" (bugs/opened/lang/run-invokes-
             // nullary-function-file.md; MATLAB-verified via the corpus).
-            std::string primaryFn;
-            bool isFunctionFile = numkit::runtime::primaryFunctionOfFile(content, primaryFn);
+            keel::String primaryFn;
+            bool isFunctionFile = numkit::runtime::primaryFunctionOfFile(content.as_ref(), primaryFn);
             Environment *scope = resolveEvalScope(ctx);
             try {
-                ctx.engine->eval(content, scope);
-                if (isFunctionFile)
-                    ctx.engine->eval(primaryFn + ";", scope);
+                ctx.engine->eval(content.as_ref(), scope);
+                if (isFunctionFile) {
+                    primaryFn.push_back(';');
+                    ctx.engine->eval(primaryFn.as_ref(), scope);
+                }
             } catch (...) {
                 ctx.engine->popScriptOrigin();
                 throw;
@@ -106,11 +115,12 @@ void registerEvalFamily(Engine &engine)
             if (args.size() == 1) {
                 if (!args[0].isChar())
                     throw std::runtime_error("mfilename: argument must be 'fullpath'");
-                const std::string opt(args[0].toString().as_ref());
+                const keel::String opt = args[0].toString();
                 if (opt != "fullpath")
                     throw std::runtime_error(
-                        "mfilename: unrecognized option '" + opt
-                        + "' (only 'fullpath' is supported)");
+                        keel::format("mfilename: unrecognized option '{}' (only 'fullpath' is supported)",
+                                     opt)
+                            .c_str());
                 fullpath = true;
             }
             const keel::String *file = ctx.engine->currentScriptFile();
@@ -122,18 +132,27 @@ void registerEvalFamily(Engine &engine)
             // both native-backslash and canonical-forward forms. A path
             // with no separator keeps just the extension-stripped base
             // for BOTH forms.
-            std::string p(file->as_ref());
-            keel::usize slash = p.find_last_of("/\\");
-            std::string base = (slash == std::string::npos) ? p
-                                                            : p.substr(slash + 1);
-            keel::usize dot = base.find_last_of('.');
-            if (dot != std::string::npos && dot > 0)
-                base.resize(dot);
-            std::string out =
-                fullpath && slash != std::string::npos
-                    ? p.substr(0, slash + 1) + base
-                    : base;
-            outs[0] = Value::stringScalar(out, ctx.engine->allocator());
+            keel::StringRef p = file->as_ref();
+            keel::usize slash = keel::kInvalidIndex;
+            for (keel::usize i = p.size(); i > 0; --i) {
+                if (p[i - 1] == '/' || p[i - 1] == '\\') {
+                    slash = i - 1;
+                    break;
+                }
+            }
+            keel::StringRef base = (slash == keel::kInvalidIndex) ? p : p.substr(slash + 1);
+            keel::usize dot = base.rfind('.');
+            if (dot != keel::kInvalidIndex && dot > 0)
+                base = base.substr(0, dot);
+            if (fullpath && slash != keel::kInvalidIndex) {
+                keel::String out;
+                out.reserve(slash + 1 + base.size());
+                out.append(p.substr(0, slash + 1));
+                out.append(base);
+                outs[0] = Value::stringScalar(out.as_ref(), ctx.engine->allocator());
+            } else {
+                outs[0] = Value::stringScalar(base, ctx.engine->allocator());
+            }
         });
 
     // ── eval ─────────────────────────────────────────────────
@@ -149,11 +168,11 @@ void registerEvalFamily(Engine &engine)
     // executing.
     engine.registerFunction(
         "eval", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
-                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isChar())
                 throw std::runtime_error("eval requires a string");
             const bool suppress = (nargout >= 1);
-            outs[0] = ctx.engine->eval(args[0].toString(),
+            outs[0] = ctx.engine->eval(args[0].toString().as_ref(),
                                        resolveEvalScope(ctx),
                                        suppress);
         });
@@ -175,7 +194,7 @@ void registerEvalFamily(Engine &engine)
     // Environment — input is at parity with eval(), guarded there.
     engine.registerFunction(
         "input", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
-                                     keel::MutArrayRef<Value> outs, CallContext &ctx) {
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || (!args[0].isChar() && !args[0].isString()))
                 throw std::runtime_error(
                     "input: prompt must be a character vector or string scalar");
@@ -184,7 +203,7 @@ void registerEvalFamily(Engine &engine)
                 if (!args[1].isChar() && !args[1].isString())
                     throw std::runtime_error(
                         "input: format must be the character 's'");
-                const std::string fmt(args[1].toString().as_ref());
+                const keel::String fmt = args[1].toString();
                 if (fmt != "s")
                     throw std::runtime_error(
                         "input: format must be the character 's'");
@@ -193,21 +212,31 @@ void registerEvalFamily(Engine &engine)
             if (nargout > 1)
                 throw std::runtime_error("input: Too many output arguments");
 
-            ctx.engine->outputText(args[0].toString());
-            std::string line;
+            ctx.engine->outputText(args[0].toString().as_ref());
+            keel::String line;
             const auto &provider = ctx.engine->inputProvider();
             if (provider) {
                 line = provider();
             } else {
-                if (!std::getline(std::cin, line))  // EOF -> empty line
-                    line.clear();
+                char buf[256];
+                while (std::fgets(buf, sizeof(buf), stdin) != nullptr) {
+                    keel::StringRef chunk(buf);
+                    if (!chunk.empty() && chunk.back() == '\n') {
+                        chunk.remove_suffix(1);
+                        if (!chunk.empty() && chunk.back() == '\r')
+                            chunk.remove_suffix(1);
+                        line.append(chunk);
+                        break;
+                    }
+                    line.append(chunk);
+                }
             }
             if (asText)
-                outs[0] = Value::fromString(line, ctx.engine->allocator());
+                outs[0] = Value::fromString(line.as_ref(), ctx.engine->allocator());
             else if (line.empty())
                 outs[0] = Value::Empty;
             else
-                outs[0] = ctx.engine->eval(line, resolveEvalScope(ctx),
+                outs[0] = ctx.engine->eval(line.as_ref(), resolveEvalScope(ctx),
                                            /*suppressDisplay=*/true);
         });
 
@@ -222,8 +251,8 @@ void registerEvalFamily(Engine &engine)
                 throw std::runtime_error("evalin: requires (workspace, code)");
             if (!args[0].isChar() || !args[1].isChar())
                 throw std::runtime_error("evalin: arguments must be strings");
-            std::string where(args[0].toString().as_ref());
-            std::string code(args[1].toString().as_ref());
+            keel::String where = args[0].toString();
+            keel::String code = args[1].toString();
             Environment *target = nullptr;
             if (where == "base") {
                 target = &ctx.engine->workspaceEnv();
@@ -235,9 +264,10 @@ void registerEvalFamily(Engine &engine)
                 if (!target) target = &ctx.engine->workspaceEnv();
             } else {
                 throw std::runtime_error(
-                    "evalin: workspace must be 'base' or 'caller', got '" + where + "'");
+                    keel::format("evalin: workspace must be 'base' or 'caller', got '{}'", where)
+                        .c_str());
             }
-            outs[0] = ctx.engine->eval(code, target);
+            outs[0] = ctx.engine->eval(code.as_ref(), target);
         });
 }
 

@@ -32,17 +32,18 @@
 
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
 
 #include <cstdint>
-#include <memory>
-#include <set>
-#include <string>
-#include <vector>
 
 namespace numkit {
 
@@ -59,17 +60,17 @@ public:
     /// (whole-source eval — script/function semantics identical to a
     /// plain run). Returns false on parse or initial-run error
     /// (see lastError()).
-    bool load(const std::string &source);
+    bool load(keel::StringRef source);
 
     /// Whole-variable parameter write (Play sliders). Marks the
     /// dependency-dirty set; the script's own pure definitions of the
     /// variable are skipped (the param replaces them).
-    void setParam(const std::string &var, Value value);
+    void setParam(keel::StringRef var, Value value);
 
     /// Single-cell write (the reactive table editor). Native cell
     /// assignment via the engine; marks the ELEMENT-dirty set — only
     /// formulas whose READ regions touch (r,c) re-run.
-    void setParamElement(const std::string &var, keel::usize r, keel::usize c,
+    void setParamElement(keel::StringRef var, keel::usize r, keel::usize c,
                          Value value);
 
     /// Execute the dirty statements in source order through the
@@ -82,37 +83,37 @@ public:
 
     /// Tarjan SCCs over the dependency edges (invariant guard —
     /// expected empty while edges stay forward-only).
-    std::vector<std::vector<keel::usize>> detectCycles() const;
+    keel::Array<keel::Array<keel::usize>> detectCycles() const;
 
     const DependencyGraph &graph() const { return *graph_; }
     keel::usize statementCount() const { return statements_.size(); }
-    const std::string &lastError() const { return lastError_; }
+    const keel::String &lastError() const { return lastError_; }
 
     /// Bumped on every committed write (param/element/evalDirty) — the
     /// buffer-generation source for zero-copy array views (portion C).
     keel::u64 generation() const { return generation_; }
 
 private:
-    void markDirty(const std::vector<keel::usize> &indices);
+    void markDirty(keel::ArrayRef<keel::usize> indices);
     Value runStatement(keel::usize index);
 
     Engine &engine_;
-    std::shared_ptr<const std::string> src_;
-    std::vector<ASTNodePtr> statements_;   // program children (owned)
-    std::unique_ptr<DependencyGraph> graph_;
+    keel::Arc<const keel::String> src_;
+    keel::Array<ASTNodePtr> statements_;   // program children (owned)
+    keel::UniquePtr<DependencyGraph> graph_;
     // Figure-state rollback points, one per statement (captured after
     // that statement ran). evalDirty restores the checkpoint of the
     // last CLEAN statement before the dirty set, so re-run graphics
     // statements reproduce the full-re-run figure (no `hold on`
     // line accumulation across ticks).
-    std::vector<FigureManager::FigureCheckpoint> checkpoints_;
+    keel::Array<FigureManager::FigureCheckpoint> checkpoints_;
     // Figure state captured in load() BEFORE the first statement runs
     // (may hold a PREVIOUS script's figures — sessions share the
     // engine). The rollback target when a dirty set starts at 0.
     FigureManager::FigureCheckpoint preScriptCp_;
-    std::set<keel::usize> dirty_;
-    std::set<std::string> params_;   // externally-set variables
-    std::string lastError_;
+    keel::HashSet<keel::usize> dirty_;
+    keel::HashSet<keel::String> params_;   // externally-set variables
+    keel::String lastError_;
     keel::u64 generation_ = 0;
 };
 

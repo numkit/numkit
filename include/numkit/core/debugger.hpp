@@ -12,13 +12,14 @@
 //
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
 #include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace numkit {
 
@@ -47,7 +48,7 @@ enum class ExecStatus : keel::u8 { Completed, Paused };
 // ============================================================
 struct StackFrame
 {
-    std::string functionName; // "<script>" for top-level
+    keel::String functionName; // "<script>" for top-level
     keel::u16 line = 0;
     keel::u16 col = 0;
 
@@ -61,10 +62,22 @@ struct StackFrame
     // Variable inspection (works for both backends)
     struct VarEntry
     {
-        std::string name;
+        keel::String name;
         const Value *value;
     };
-    std::vector<VarEntry> variables() const;
+    keel::Array<VarEntry> variables() const;
+
+    StackFrame clone(keel::Allocator *alloc = nullptr) const
+    {
+        StackFrame cp;
+        cp.functionName = functionName.clone(alloc);
+        cp.line = line;
+        cp.col = col;
+        cp.chunk = chunk;
+        cp.registers = registers;
+        cp.env = env;
+        return cp;
+    }
 };
 
 // ============================================================
@@ -76,22 +89,22 @@ struct DebugContext
 {
     keel::u16 line = 0;
     keel::u16 col = 0;
-    const std::string *functionName = nullptr;
+    const keel::String *functionName = nullptr;
 
     // Source code text for display. Available in VM backend (from BytecodeChunk).
     // Null in TreeWalker backend (TW operates on AST, not compiled chunks).
-    const std::string *sourceCode = nullptr;
+    const keel::String *sourceCode = nullptr;
 
     // Call stack: front() = top-level, back() = current frame
-    const std::vector<StackFrame> *callStack = nullptr;
+    const keel::Array<StackFrame> *callStack = nullptr;
 
     const StackFrame *currentFrame() const
     {
         return (callStack && !callStack->empty()) ? &callStack->back() : nullptr;
     }
 
-    const Value *getVariable(const std::string &name) const;
-    std::vector<std::string> variableNames() const;
+    const Value *getVariable(keel::StringRef name) const;
+    keel::Array<keel::String> variableNames() const;
 };
 
 // ============================================================
@@ -103,7 +116,7 @@ public:
     virtual ~DebugObserver() = default;
     virtual DebugAction onLine(const DebugContext &ctx) = 0;
     virtual DebugAction onBreakpoint(const DebugContext &ctx) = 0;
-    virtual void onError(const DebugContext &ctx, const std::string &msg) = 0;
+    virtual void onError(const DebugContext &ctx, keel::StringRef msg) = 0;
     virtual void onFunctionEntry(const DebugContext &ctx) = 0;
     virtual void onFunctionExit(const DebugContext &ctx) = 0;
 };
@@ -119,24 +132,24 @@ public:
         int id = 0;
         keel::u16 line = 0;
         bool enabled = true;
-        std::string condition; // empty = unconditional; else a boolean expr
+        keel::String condition; // empty = unconditional; else a boolean expr
     };
 
     int addBreakpoint(keel::u16 line);
-    int addBreakpoint(keel::u16 line, const std::string &condition);
+    int addBreakpoint(keel::u16 line, keel::StringRef condition);
     void removeBreakpoint(int id);
     void enableBreakpoint(int id, bool enabled);
     void clearAll();
     bool shouldBreak(keel::u16 line) const;
     // Condition text of the enabled breakpoint at `line` (empty if none or
     // unconditional). The manager only stores it; the debugger evaluates it.
-    std::string conditionForLine(keel::u16 line) const;
-    const std::vector<Breakpoint> &breakpoints() const { return breakpoints_; }
+    keel::String conditionForLine(keel::u16 line) const;
+    const keel::Array<Breakpoint> &breakpoints() const { return breakpoints_; }
 
 private:
-    std::vector<Breakpoint> breakpoints_;
+    keel::Array<Breakpoint> breakpoints_;
     int nextId_ = 1;
-    mutable std::unordered_map<keel::u16, keel::usize> lineIndex_;
+    mutable keel::HashMap<keel::u16, keel::usize> lineIndex_;
     mutable bool indexDirty_ = true;
     void rebuildIndex() const;
 };
@@ -174,14 +187,14 @@ public:
     void popFrame();
 
     // RAII guard: pushes frame on construction, pops on destruction (even on exception).
-    // Movable (for std::optional), not copyable.
+    // Movable (for keel::Optional), not copyable.
     class FrameGuard
     {
     public:
         FrameGuard(DebugController &ctl, StackFrame frame)
             : ctl_(&ctl)
         {
-            ctl_->pushFrame(std::move(frame));
+            ctl_->pushFrame(keel::move(frame));
         }
         ~FrameGuard()
         {
@@ -201,8 +214,8 @@ public:
         DebugController *ctl_;
     };
 
-    std::vector<StackFrame> &callStack() { return callStack_; }
-    const std::vector<StackFrame> &callStack() const { return callStack_; }
+    keel::Array<StackFrame> &callStack() { return callStack_; }
+    const keel::Array<StackFrame> &callStack() const { return callStack_; }
     StackFrame *currentFrame() { return callStack_.empty() ? nullptr : &callStack_.back(); }
 
     DebugContext makeContext(keel::u16 line, keel::u16 col) const;
@@ -217,7 +230,7 @@ public:
 private:
     DebugObserver *observer_;
     BreakpointManager *bpm_;
-    std::vector<StackFrame> callStack_;
+    keel::Array<StackFrame> callStack_;
     DebugAction stepAction_ = DebugAction::Continue;
     int stepDepth_ = 0;
     keel::u16 lastLine_ = 0;

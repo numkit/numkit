@@ -3,11 +3,12 @@
 // PluginLoader: dynamic loading and resolution for NumKit modules (.dll / .so).
 #pragma once
 
+#include <keel/array.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/sys/plugin.hpp>
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace numkit {
 
@@ -24,32 +25,32 @@ public:
     // Load a dynamic module library (.dll / .so / .dylib)
     // If targetNamespace is non-empty, all functions registered by the module
     // will be prefixed with targetNamespace (e.g. targetNamespace = "sig" -> "sig.filter").
-    bool loadModule(const std::string &path, const std::string &targetNamespace = "");
+    bool loadModule(keel::StringRef path, keel::StringRef targetNamespace = "");
 
     // Add a search directory for plugins and manifest.json discovery
-    void addSearchPath(const std::string &dir);
+    void addSearchPath(keel::StringRef dir);
 
     // Try to auto-load a module if a known manifest exports `functionName`
-    bool tryAutoLoadForFunction(const std::string &functionName);
+    bool tryAutoLoadForFunction(keel::StringRef functionName);
 
     // Return the package name that exports `functionName` (without loading it), or empty string
-    std::string moduleProvidingFunction(const std::string &functionName);
+    keel::String moduleProvidingFunction(keel::StringRef functionName);
 
     // Locate the shared library path for a known package name (e.g. "signal")
-    std::string findPackageLibrary(const std::string &pkgName);
+    keel::String findPackageLibrary(keel::StringRef pkgName);
 
     // Check if a library at `path` is already loaded
-    bool isLoaded(const std::string &path) const;
+    bool isLoaded(keel::StringRef path) const;
 
     // List of loaded library paths
-    std::vector<std::string> loadedModules() const;
+    keel::Array<keel::String> loadedModules() const;
 
 private:
     Engine &engine_;
-    std::vector<std::string> searchPaths_;
-    std::unordered_set<std::string> loadedPaths_;
+    keel::Array<keel::String> searchPaths_;
+    keel::HashSet<keel::String> loadedPaths_;
 
-    std::unordered_map<std::string, std::string> manifestIndex_;
+    keel::HashMap<keel::String, keel::String> manifestIndex_;
     bool manifestsScanned_{false};
 
     void scanManifests_();

@@ -5,7 +5,9 @@
 #include <keel/core.h>
 #include <keel/fs.h>
 #include <keel/memory.h>
+#include <keel/number.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/io/paths/paths.hpp>
 
 #include <numkit/value/error.hpp>
@@ -16,8 +18,6 @@
 #include <chrono>
 #include <cstdint>
 #include <random>
-#include <sstream>
-#include <string>
 
 namespace numkit::io {
 
@@ -32,28 +32,42 @@ constexpr char kPathSepChar =
 
 bool isPathSep(char c) { return c == '/' || c == '\\'; }
 
-// Strip trailing separators from the right edge.
-std::string rtrimSep(const std::string &s)
-{
-    keel::usize end = s.size();
-    while (end > 0 && isPathSep(s[end - 1])) --end;
-    return s.substr(0, end);
-}
-
 // Strip leading separators from the left edge.
-std::string ltrimSep(const std::string &s)
+keel::StringRef ltrimSep(keel::StringRef s)
 {
     keel::usize start = 0;
     while (start < s.size() && isPathSep(s[start])) ++start;
     return s.substr(start);
 }
 
-Value charValue(keel::Allocator *mr, const std::string &s)
+Value charValue(keel::Allocator *mr, keel::StringRef s)
 {
     auto v = Value::matrix(1, s.size(), ValueType::CHAR, mr);
     for (keel::usize i = 0; i < s.size(); ++i)
-        v.charDataMut()[i] = static_cast<char>(s[i]);
+        v.charDataMut()[i] = s[i];
     return v;
+}
+
+template <typename PartT>
+Value fullfileImpl(keel::ArrayRef<PartT> parts, keel::Allocator *mr)
+{
+    const keel::usize n = parts.size();
+    if (n == 0)
+        return charValue(mr, keel::StringRef{});
+    keel::String out = keel::String::from(parts[0], mr);
+    for (keel::usize i = 1; i < n; ++i) {
+        keel::StringRef p(parts[i]);
+        if (p.empty()) continue;
+        if (out.empty()) {
+            out.assign(p);
+            continue;
+        }
+        while (!out.empty() && isPathSep(out.back()))
+            out.pop_back();
+        out.push_back(kPathSepChar);
+        out.append(ltrimSep(p));
+    }
+    return charValue(mr, out.as_ref());
 }
 
 } // namespace
@@ -61,67 +75,59 @@ Value charValue(keel::Allocator *mr, const std::string &s)
 Value filesep(keel::Allocator *mr)
 {
     // (mr-last by convention; only one arg here.)
-    return charValue(mr, std::string(1, kPathSepChar));
+    const char sep[1] = {kPathSepChar};
+    return charValue(mr, keel::StringRef(sep, 1));
 }
 
-Value fullfile(keel::ArrayRef<std::string> parts,
+Value fullfile(keel::ArrayRef<keel::String> parts,
                keel::Allocator *mr)
 {
-    const keel::usize n = parts.size();
-    if (n == 0)
-        return charValue(mr, std::string{});
-    std::string out = parts[0];
-    for (keel::usize i = 1; i < n; ++i) {
-        const std::string &p = parts[i];
-        if (p.empty()) continue;
-        if (out.empty()) {
-            out = p;
-            continue;
-        }
-        out = rtrimSep(out);
-        out += kPathSepChar;
-        out += ltrimSep(p);
-    }
-    return charValue(mr, out);
+    return fullfileImpl(parts, mr);
+}
+
+Value fullfile(keel::ArrayRef<keel::StringRef> parts,
+               keel::Allocator *mr)
+{
+    return fullfileImpl(parts, mr);
 }
 
 std::tuple<Value, Value, Value>
-fileparts(const std::string &path, keel::Allocator *mr)
+fileparts(keel::StringRef path, keel::Allocator *mr)
 {
     // Find last separator.
-    keel::usize lastSep = std::string::npos;
+    keel::usize lastSep = keel::kInvalidIndex;
     for (keel::usize i = path.size(); i-- > 0;) {
         if (isPathSep(path[i])) { lastSep = i; break; }
     }
-    std::string folder, base;
-    if (lastSep == std::string::npos) {
+    keel::StringRef folder, base;
+    if (lastSep == keel::kInvalidIndex) {
         folder = "";
         base = path;
     } else {
         folder = (lastSep == 0)
-                    ? std::string(1, path[0])              // root
+                    ? path.substr(0, 1)              // root
                     : path.substr(0, lastSep);
         base = path.substr(lastSep + 1);
     }
     // Find last '.' in base — but ignore a leading dot ('.bashrc').
-    std::string name = base, ext;
+    keel::StringRef name = base, ext;
     if (!base.empty()) {
-        keel::usize dot = base.find_last_of('.');
-        if (dot != std::string::npos && dot > 0) {
+        keel::usize dot = base.rfind('.');
+        if (dot != keel::kInvalidIndex && dot > 0) {
             name = base.substr(0, dot);
             ext = base.substr(dot);
         }
     }
     return std::make_tuple(charValue(mr, folder),
-                            charValue(mr, name),
-                            charValue(mr, ext));
+                           charValue(mr, name),
+                           charValue(mr, ext));
 }
 
 Value tempdir(FsContext &fs, keel::Allocator *mr)
 {
     // Prefer the resolved-FS temp area when available (lets hosts hook
     // a virtual temp area — IDE / WASM use this). Fall back to host OS.
-    std::string td;
+    keel::String td(mr);
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(".");
@@ -132,12 +138,12 @@ Value tempdir(FsContext &fs, keel::Allocator *mr)
         try { td = resolved.fs->tempArea(); } catch (...) { td.clear(); }
     }
     if (td.empty()) {
-        auto p = keel::fs_temp_dir();
-        if (p.is_ok()) td.assign(p->data(), p->size());
+        auto p = keel::fs_temp_dir(mr);
+        if (p.is_ok()) td.assign(p->as_ref());
     }
     if (!td.empty() && !isPathSep(td.back()))
         td.push_back(kPathSepChar);
-    return charValue(mr, td);
+    return charValue(mr, td.as_ref());
 }
 
 Value tempname(FsContext &fs, keel::Allocator *mr)
@@ -153,11 +159,15 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
             std::chrono::high_resolution_clock::now().time_since_epoch().count())};
     const keel::u64 r = rng();
 
-    auto td = tempdir(fs, mr).toString();
-    std::ostringstream os;
-    os << td.c_str() << "tp"
-       << std::hex << ns << "_" << r << "_" << n;
-    return charValue(mr, os.str());
+    keel::String out = tempdir(fs, mr).toString();
+    char hexBuf[32];
+    out.append("tp");
+    out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), ns, 16, false)));
+    out.push_back('_');
+    out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), r, 16, false)));
+    out.push_back('_');
+    out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), n, 16, false)));
+    return charValue(mr, out.as_ref());
 }
 
 

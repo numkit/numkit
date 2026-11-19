@@ -1,8 +1,11 @@
 // src/bundle/src/register/builtin/iofun_reg.cpp
 
+#include <keel/array.h>
 #include <keel/core.h>
 #include <keel/memory.h>
+#include <keel/number.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/builtin/iofun.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
@@ -23,106 +26,121 @@ void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, 
 #include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <string>
-#include <vector>
+#include <utility>
 
 namespace numkit::builtin::detail {
 
-static std::string jsonEscape(keel::StringRef s) {
-    std::string out = "\"";
+static void jsonEscapeAppend(keel::StringRef s, keel::String &out) {
+    out.push_back('\"');
     for (unsigned char c : s) {
-        if (c == '\"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else out.push_back((char)c);
+        if (c == '\"') out.append("\\\"");
+        else if (c == '\\') out.append("\\\\");
+        else if (c == '\n') out.append("\\n");
+        else if (c == '\r') out.append("\\r");
+        else if (c == '\t') out.append("\\t");
+        else out.push_back(static_cast<char>(c));
     }
-    out += "\"";
-    return out;
+    out.push_back('\"');
 }
 
-static std::string jsonEncodeVal(const Value &v) {
+static void jsonEncodeValAppend(const Value &v, keel::String &out) {
     if (v.isChar() || v.isString()) {
-        return jsonEscape(v.toString());
+        jsonEscapeAppend(v.toString(), out);
+        return;
     }
     if (v.isLogical() && v.numel() == 1) {
-        return v.toBool() ? "true" : "false";
+        out.append(v.toBool() ? "true" : "false");
+        return;
     }
     if (v.isCell()) {
-        std::string out = "[";
+        out.push_back('[');
         for (keel::usize i = 0; i < v.numel(); ++i) {
-            if (i > 0) out += ",";
-            out += jsonEncodeVal(v.cellAt(i));
+            if (i > 0) out.push_back(',');
+            jsonEncodeValAppend(v.cellAt(i), out);
         }
-        out += "]";
-        return out;
+        out.push_back(']');
+        return;
     }
     if (v.isStruct() && v.numel() == 1) {
-        std::string out = "{";
+        out.push_back('{');
         const auto &fields = v.fieldNamesInOrder();
         for (keel::usize i = 0; i < fields.size(); ++i) {
-            if (i > 0) out += ",";
-            out += jsonEscape(fields[i]) + ":" + jsonEncodeVal(v.field(fields[i]));
+            if (i > 0) out.push_back(',');
+            jsonEscapeAppend(fields[i], out);
+            out.push_back(':');
+            jsonEncodeValAppend(v.field(fields[i]), out);
         }
-        out += "}";
-        return out;
+        out.push_back('}');
+        return;
     }
     if (v.isNumeric() || v.isLogical()) {
-        if (v.isEmpty()) return "[]";
+        if (v.isEmpty()) {
+            out.append("[]");
+            return;
+        }
         if (v.numel() == 1) {
             double d = v.elemAsDouble(0);
-            if (!std::isfinite(d)) return "null";
+            if (!std::isfinite(d)) {
+                out.append("null");
+                return;
+            }
             char buf[64];
             std::snprintf(buf, sizeof(buf), "%.15g", d);
-            return buf;
+            out.append(buf);
+            return;
         }
         keel::usize R = v.dims().rows();
         keel::usize C = v.dims().cols();
         if (R == 1 || C == 1) {
-            std::string out = "[";
+            out.push_back('[');
             for (keel::usize i = 0; i < v.numel(); ++i) {
-                if (i > 0) out += ",";
+                if (i > 0) out.push_back(',');
                 double d = v.elemAsDouble(i);
-                if (!std::isfinite(d)) out += "null";
+                if (!std::isfinite(d)) out.append("null");
                 else {
                     char buf[64];
                     std::snprintf(buf, sizeof(buf), "%.15g", d);
-                    out += buf;
+                    out.append(buf);
                 }
             }
-            out += "]";
-            return out;
+            out.push_back(']');
+            return;
         }
-        std::string out = "[";
+        out.push_back('[');
         for (keel::usize r = 0; r < R; ++r) {
-            if (r > 0) out += ",";
-            out += "[";
+            if (r > 0) out.push_back(',');
+            out.push_back('[');
             for (keel::usize c = 0; c < C; ++c) {
-                if (c > 0) out += ",";
+                if (c > 0) out.push_back(',');
                 double d = v.elemAsDouble(r + c * R);
-                if (!std::isfinite(d)) out += "null";
+                if (!std::isfinite(d)) out.append("null");
                 else {
                     char buf[64];
                     std::snprintf(buf, sizeof(buf), "%.15g", d);
-                    out += buf;
+                    out.append(buf);
                 }
             }
-            out += "]";
+            out.push_back(']');
         }
-        out += "]";
-        return out;
+        out.push_back(']');
+        return;
     }
-    return "null";
+    out.append("null");
+}
+
+static keel::String jsonEncodeVal(const Value &v, keel::Allocator *mr) {
+    keel::String out(mr);
+    jsonEncodeValAppend(v, out);
+    return out;
 }
 
 struct JsonParser {
-    const std::string &s;
+    keel::StringRef s;
     keel::usize pos = 0;
     keel::Allocator *mr;
 
     void skipWs() {
-        while (pos < s.size() && std::isspace((unsigned char)s[pos])) ++pos;
+        while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) ++pos;
     }
 
     Value parseValue() {
@@ -132,15 +150,15 @@ struct JsonParser {
         if (c == '"') return Value::fromString(parseString(), mr);
         if (c == '[') return parseArray();
         if (c == '{') return parseObject();
-        if (s.compare(pos, 4, "true") == 0) { pos += 4; return Value::logicalScalar(true, mr); }
-        if (s.compare(pos, 5, "false") == 0) { pos += 5; return Value::logicalScalar(false, mr); }
-        if (s.compare(pos, 4, "null") == 0) { pos += 4; return Value::matrix(0, 0, ValueType::DOUBLE, mr); }
+        if (pos + 4 <= s.size() && s.substr(pos, 4) == "true") { pos += 4; return Value::logicalScalar(true, mr); }
+        if (pos + 5 <= s.size() && s.substr(pos, 5) == "false") { pos += 5; return Value::logicalScalar(false, mr); }
+        if (pos + 4 <= s.size() && s.substr(pos, 4) == "null") { pos += 4; return Value::matrix(0, 0, ValueType::DOUBLE, mr); }
         return parseNumber();
     }
 
-    std::string parseString() {
+    keel::String parseString() {
         if (pos < s.size() && s[pos] == '"') ++pos;
-        std::string out;
+        keel::String out(mr);
         while (pos < s.size() && s[pos] != '"') {
             if (s[pos] == '\\' && pos + 1 < s.size()) {
                 ++pos;
@@ -159,18 +177,17 @@ struct JsonParser {
 
     Value parseNumber() {
         keel::usize start = pos;
-        while (pos < s.size() && (std::isdigit((unsigned char)s[pos]) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
+        while (pos < s.size() && (std::isdigit(static_cast<unsigned char>(s[pos])) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
             ++pos;
         }
-        double d = 0.0;
-        try { d = std::stod(s.substr(start, pos - start)); } catch (...) {}
+        double d = keel::parse_f64(s.substr(start, pos - start)).value_or(0.0);
         return Value::scalar(d, mr);
     }
 
     Value parseArray() {
         ++pos; // '['
         skipWs();
-        std::vector<Value> elems;
+        keel::Array<Value> elems(mr);
         if (pos < s.size() && s[pos] == ']') {
             ++pos;
             return Value::matrix(0, 0, ValueType::DOUBLE, mr);
@@ -215,19 +232,19 @@ struct JsonParser {
     Value parseObject() {
         ++pos; // '{'
         skipWs();
-        std::vector<std::string> fields;
-        std::vector<Value> vals;
+        keel::Array<keel::String> fields(mr);
+        keel::Array<Value> vals(mr);
         if (pos < s.size() && s[pos] == '}') {
             ++pos;
             return Value::structure(mr);
         }
         while (pos < s.size()) {
             skipWs();
-            std::string key = parseString();
+            keel::String key = parseString();
             skipWs();
             if (pos < s.size() && s[pos] == ':') ++pos;
             Value val = parseValue();
-            fields.push_back(key);
+            fields.push_back(keel::move(key));
             vals.push_back(std::move(val));
             skipWs();
             if (pos < s.size() && s[pos] == ',') { ++pos; continue; }
@@ -242,13 +259,14 @@ struct JsonParser {
 
 static void jsonencode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     argcheck::checkNargin(args.size(), 1, 3, "jsonencode");
-    outs[0] = Value::fromString(jsonEncodeVal(args[0]), ctx.engine->allocator());
+    auto *mr = ctx.engine->allocator();
+    outs[0] = Value::fromString(jsonEncodeVal(args[0], mr), mr);
 }
 
 static void jsondecode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
     argcheck::checkNargin(args.size(), 1, 3, "jsondecode");
-    std::string s(args[0].toString().as_ref());
-    JsonParser jp{s, 0, ctx.engine->allocator()};
+    keel::String raw = args[0].toString();
+    JsonParser jp{raw.as_ref(), 0, ctx.engine->allocator()};
     outs[0] = jp.parseValue();
 }
 

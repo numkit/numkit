@@ -12,6 +12,7 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/io/library.hpp>
 
 #include <numkit/core/engine.hpp>
@@ -60,7 +61,9 @@ void IoLibrary::install(Engine &engine)
     // io is a MATLAB-mirror library — every function dual-registered
     // (io.<sub>.<name> + compat.<name>).
     auto reg = [&](const char *sub, const char *name, ExternalFunc fn) {
-        engine.registerFunction(std::string("io.") + sub, name, std::move(fn));
+        keel::SmallString<64> ns("io.");
+        ns.append(sub);
+        engine.registerFunction(ns, name, keel::move(fn));
         // compat.* registration removed — bare-name resolver replaces it
     };
 

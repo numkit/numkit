@@ -1,17 +1,18 @@
 // include/compiler.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
+#include <keel/hash_set.h>
+#include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <algorithm>
 #include <cstdint>
-#include <unordered_set>
-
 #include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace numkit {
 
@@ -26,11 +27,11 @@ public:
     explicit Compiler(Engine &engine);
 
     BytecodeChunk compile(const ASTNode *ast,
-                          std::shared_ptr<const std::string> sourceCode = nullptr);
+                          keel::Arc<const keel::String> sourceCode = nullptr);
 
     // Compile a function definition into a BytecodeChunk
     BytecodeChunk compileFunction(const ASTNode *funcDef,
-                                  std::shared_ptr<const std::string> sourceCode = nullptr);
+                                  keel::Arc<const keel::String> sourceCode = nullptr);
 
     // Register a FUNCTION_DEF node in the currently-active compiled
     // function table (+ engine.{script,user}Funcs_) without running
@@ -44,23 +45,23 @@ public:
     // package-qualified m-files (`+pkg/foo.m` is bound under
     // "pkg.foo", not the leaf "foo", so two packages with the same
     // leaf don't collide in compiledFuncs_).
-    void registerFunctionAs(const std::string &qualifiedName,
+    void registerFunctionAs(keel::StringRef qualifiedName,
                              const ASTNode *funcDef);
 
     // Same, with the function file's provenance (m-file resolver path).
     // Anonymous functions compiled inside the body capture THAT file —
     // at runtime their ANON_FUNC node executes under the function's
     // origin frame, and the compile-time capture must agree.
-    void registerFunctionAs(const std::string &qualifiedName,
-                             const ASTNode *funcDef, const std::string &fsName,
-                             const std::string &scriptDir, const std::string &scriptFile);
+    void registerFunctionAs(keel::StringRef qualifiedName,
+                             const ASTNode *funcDef, keel::StringRef fsName,
+                             keel::StringRef scriptDir, keel::StringRef scriptFile);
 
     // Stamp m-file provenance onto an already-registered chunk. The
     // engine's m-file resolver compiles first and learns the concrete
     // file from its search loop only afterwards.
-    void setChunkOrigin(const std::string &qualifiedName,
-                        const std::string &fsName, const std::string &scriptDir,
-                        const std::string &scriptFile);
+    void setChunkOrigin(keel::StringRef qualifiedName,
+                        keel::StringRef fsName, keel::StringRef scriptDir,
+                        keel::StringRef scriptFile);
 
     // Compile a classdef method / constructor body (reconstructed from its
     // UserFunction) into the GLOBAL compiled-function table under `uf.name`
@@ -73,25 +74,25 @@ public:
     // Workspace-scope compiled functions. Populated by `function` at
     // the REPL or by anonymous-function allocation. Cleared by
     // `clear all` / `clear functions` (see Engine::clearUserFunctions).
-    const std::unordered_map<std::string, BytecodeChunk> &compiledFuncs() const
+    const keel::HashMap<keel::String, BytecodeChunk> &compiledFuncs() const
     {
         return compiledFuncs_;
     }
     void clearCompiledFuncs() { compiledFuncs_.clear(); }
     // Drop a single compiled chunk by name (used by rehash to invalidate just
     // the reloaded m-file, not every compiled function), plus any nested chunks.
-    void eraseCompiledFunc(const std::string &name);
+    void eraseCompiledFunc(keel::StringRef name);
     // Drop every compiled classdef-method chunk for `className` — keys of the
     // form "ClassName>method" — so redefining the class recompiles its bodies
     // from scratch instead of reusing stale cached chunks.
-    void eraseCompiledFuncsForClass(const std::string &className);
+    void eraseCompiledFuncsForClass(keel::StringRef className);
 
     // Script-scope compiled functions. Populated by beginScriptScope
     // via compileFunctionDef routing. NEVER cleared by
     // clearCompiledFuncs — that's the whole point of keeping this
     // bucket separate. Its lifetime is bounded by beginScriptScope /
     // endScriptScope pairs.
-    const std::unordered_map<std::string, BytecodeChunk> &scriptLocalCompiledFuncs() const
+    const keel::HashMap<keel::String, BytecodeChunk> &scriptLocalCompiledFuncs() const
     {
         return scriptLocalCompiledFuncs_;
     }
@@ -99,7 +100,7 @@ public:
     // Unified lookup used by dispatch sites outside the compiler —
     // tries script-scope first, then workspace-scope. Returns
     // nullptr if unknown.
-    const BytecodeChunk *findCompiled(const std::string &name) const;
+    const BytecodeChunk *findCompiled(keel::StringRef name) const;
 
     // Enter/leave a script-lexical scope. While inside, compiled
     // FUNCTION_DEFs land in scriptLocalCompiledFuncs_ rather than
@@ -116,12 +117,12 @@ public:
     void promoteScriptLocalsToWorkspace();
 
     // Debug: dump bytecode
-    static std::string disassemble(const BytecodeChunk &chunk);
+    static keel::String disassemble(const BytecodeChunk &chunk);
 
 private:
     struct RegBitset
     {
-        std::vector<keel::u64> words;
+        keel::Array<keel::u64> words;
 
         bool test(keel::usize pos) const
         {
@@ -153,7 +154,7 @@ private:
     BytecodeChunk chunk_;
 
     // Register allocation: variable name → register index
-    std::unordered_map<std::string, keel::u16> varRegisters_;
+    keel::HashMap<keel::String, keel::u16> varRegisters_;
     // nextReg_ is `int` so we can detect overflow (>= kInvalidReg = 65535)
     // before it wraps.
     int nextReg_ = 0;
@@ -172,33 +173,33 @@ private:
     bool inFusionFallback_ = false;
     // Maps pre-evaluated fusion operand AST nodes to their registers while
     // emitting the fallback path of FUSE_EWISE so operands never evaluate twice.
-    std::unordered_map<const ASTNode *, keel::u16> fusedOperandRegs_;
+    keel::HashMap<const ASTNode *, keel::u16> fusedOperandRegs_;
     keel::u16 nargoutContext_ = 1; // expected number of outputs (0=statement, 1=expression)
     int activeTryDepth_ = 0;      // active enclosing TRY_BEGIN depth in current chunk
 
     // Provenance context for anonymous functions compiled as part of a
     // NAMED function's body. Managed by AnonOriginSentry.
     bool anonOriginKnown_ = false;
-    std::string anonOriginFs_;
-    std::string anonOriginDir_;
-    std::string anonOriginFile_;
+    keel::String anonOriginFs_;
+    keel::String anonOriginDir_;
+    keel::String anonOriginFile_;
 
     class AnonOriginSentry
     {
     public:
-        AnonOriginSentry(Compiler &c, bool known, std::string fs,
-                         std::string dir, std::string file);
+        AnonOriginSentry(Compiler &c, bool known, keel::String fs,
+                         keel::String dir, keel::String file);
         ~AnonOriginSentry();
         AnonOriginSentry(const AnonOriginSentry &) = delete;
         AnonOriginSentry &operator=(const AnonOriginSentry &) = delete;
     private:
         Compiler &c_;
         bool known_;
-        std::string fs_, dir_, file_;
+        keel::String fs_, dir_, file_;
     };
     friend class AnonOriginSentry;
 
-    void registerFunctionAsImpl_(const std::string &qualifiedName,
+    void registerFunctionAsImpl_(keel::StringRef qualifiedName,
                                   const ASTNode *funcDef);
 
     // Index context for END_VAL compilation (kInvalidReg when outside indexing)
@@ -211,21 +212,25 @@ private:
 
     // Compiled function table (persists across compile() calls) —
     // workspace-scope (cleared by `clear all`/`clear functions`).
-    std::unordered_map<std::string, BytecodeChunk> compiledFuncs_;
+    keel::HashMap<keel::String, BytecodeChunk> compiledFuncs_;
 
     // Script-lexical compiled functions.
-    std::unordered_map<std::string, BytecodeChunk> scriptLocalCompiledFuncs_;
-    std::vector<std::unordered_map<std::string, BytecodeChunk>> savedScriptLocalCompiledFuncs_;
+    keel::HashMap<keel::String, BytecodeChunk> scriptLocalCompiledFuncs_;
+    keel::Array<keel::HashMap<keel::String, BytecodeChunk>> savedScriptLocalCompiledFuncs_;
     int scriptDepth_ = 0;
 
-    keel::u16 varRegWrite(const std::string &name);
-    keel::u16 varRegRead(const std::string &name);
-    keel::u16 varRegLookup(const std::string &name, bool preloadReserved = true);
+    keel::u16 varRegWrite(keel::StringRef name);
+    keel::u16 varRegRead(keel::StringRef name);
+    keel::u16 varRegLookup(keel::StringRef name, bool preloadReserved = true);
     keel::u16 allocPinnedReg();
-    void markAssigned(const std::string &name) { chunk_.assignedVars.insert(name); }
+    void markAssigned(keel::StringRef name)
+    {
+        if (!chunk_.assignedVars.contains(name))
+            chunk_.assignedVars.insert(keel::String::from(name));
+    }
     void preImportGlobals(const ASTNode *ast);
-    void collectAllIdentifiers(const ASTNode *node, std::unordered_set<std::string> &out);
-    void collectAssignedNames(const ASTNode *node, std::vector<std::string> &out);
+    void collectAllIdentifiers(const ASTNode *node, keel::HashSet<keel::String> &out);
+    void collectAssignedNames(const ASTNode *node, keel::Array<keel::String> &out);
     void preallocateAssignedVars(const ASTNode *body);
     void preallocatePinnedConstants(const ASTNode *body);
     keel::u16 tempReg();
@@ -243,9 +248,9 @@ private:
     void patchJump(keel::usize instrPos, keel::i32 offset);
 
     keel::i32 addConstant(keel::f64 value);
-    keel::i32 addStringConstant(const std::string &s);
+    keel::i32 addStringConstant(keel::StringRef s);
     keel::i32 appendConstant(Value v);
-    keel::i32 appendString(const std::string &s);
+    keel::i32 appendString(keel::StringRef s);
 
     keel::u16 reserveRegs(keel::usize n);
 
@@ -259,7 +264,7 @@ private:
     keel::u16 compileAssign(const ASTNode *node);
     keel::u16 compileMultiAssign(const ASTNode *node);
     keel::u16 compileBinaryOp(const ASTNode *node);
-    keel::u16 emitPlainBinary(const std::string &op, keel::u16 left, keel::u16 right);
+    keel::u16 emitPlainBinary(keel::StringRef op, keel::u16 left, keel::u16 right);
     keel::u16 emitFusedMulAdd(bool isPlus, const ASTNode *rhs, keel::u16 acc);
     keel::u16 compileUnaryOp(const ASTNode *node);
     keel::u16 compileExprStmt(const ASTNode *node);
@@ -289,8 +294,8 @@ private:
                               int explicitOutBase, keel::u16 nout);
     keel::u16 compileAnonFunc(const ASTNode *node);
     void collectFreeVars(const ASTNode *node,
-                         const std::vector<std::string> &params,
-                         std::vector<std::string> &freeVars);
+                         keel::ArrayRef<keel::String> params,
+                         keel::Array<keel::String> &freeVars);
     keel::u16 compileWhile(const ASTNode *node);
     keel::u16 compileBreak(const ASTNode *node);
     keel::u16 compileContinue(const ASTNode *node);
@@ -304,19 +309,19 @@ private:
     keel::u16 compileCall(const ASTNode *node);
     int tryCompileFused(const ASTNode *node);
     keel::u16 compileFused(const ASTNode *node, keel::usize ruleIdx,
-                          const std::vector<const ASTNode *> &operands);
+                          keel::ArrayRef<const ASTNode *> operands);
     keel::u16 compileCommandCall(const ASTNode *node);
     void recordCallArgNames(const ASTNode *callNode, keel::usize callInstrIdx);
     keel::u16 compileFunctionDef(const ASTNode *node);
     keel::u16 compileReturn(const ASTNode *node);
     void emitVarargoutReturn();
     keel::u16 compileDeleteAssign(const ASTNode *node);
-    static keel::i8 resolveBuiltinId(const std::string &name, keel::usize nargs);
+    static keel::i8 resolveBuiltinId(keel::StringRef name, keel::usize nargs);
 
     // Constant register cache: maps constant pool index → register that holds it
-    std::unordered_map<keel::i32, keel::u16> constRegCache_;
+    keel::HashMap<keel::i32, keel::u16> constRegCache_;
     // Pinned constant registers allocated at chunk entry (< maxVarReg_)
-    std::unordered_map<keel::i32, keel::u16> pinnedConstRegs_;
+    keel::HashMap<keel::i32, keel::u16> pinnedConstRegs_;
 
     // Scalar register tracking (dynamic bitset across 16-bit register space)
     RegBitset scalarRegs_;
@@ -328,36 +333,45 @@ private:
 
     struct NestedFuncInfo
     {
-        std::string compiledName;
-        std::string displaySource;
-        std::vector<std::string> upvalueNames;
+        keel::String compiledName;
+        keel::String displaySource;
+        keel::Array<keel::String> upvalueNames;
+
+        NestedFuncInfo clone(keel::Allocator *alloc = nullptr) const
+        {
+            return NestedFuncInfo{
+                compiledName.clone(alloc),
+                displaySource.clone(alloc),
+                upvalueNames.clone(alloc),
+            };
+        }
     };
 
     struct EnclosingLexicalContext
     {
-        std::vector<std::string> inheritedUpvalueNames;
-        std::unordered_map<std::string, NestedFuncInfo> siblingNestedFuncs;
+        keel::Array<keel::String> inheritedUpvalueNames;
+        keel::HashMap<keel::String, NestedFuncInfo> siblingNestedFuncs;
     };
 
-    std::unordered_map<std::string, keel::u16> upvalueRegs_;
-    std::unordered_map<std::string, keel::u16> allScopeUpvalueBoxRegs_;
-    std::unordered_map<std::string, NestedFuncInfo> nestedFuncInfo_;
+    keel::HashMap<keel::String, keel::u16> upvalueRegs_;
+    keel::HashMap<keel::String, keel::u16> allScopeUpvalueBoxRegs_;
+    keel::HashMap<keel::String, NestedFuncInfo> nestedFuncInfo_;
     const EnclosingLexicalContext *pendingLexicalCtx_ = nullptr;
 
-    void emitUpvalLoadRawIfShared(const std::string &name, keel::u16 reg);
-    void emitUpvalStoreIfShared(const std::string &name, keel::u16 reg);
+    void emitUpvalLoadRawIfShared(keel::StringRef name, keel::u16 reg);
+    void emitUpvalStoreIfShared(keel::StringRef name, keel::u16 reg);
     keel::u16 emitNestedFuncHandle(const NestedFuncInfo &info);
 
     void peepholeOptimize();
 
     struct LoopContext
     {
-        std::vector<keel::usize> breakPatches;
-        std::vector<keel::usize> continuePatches;
+        keel::Array<keel::usize> breakPatches;
+        keel::Array<keel::usize> continuePatches;
         bool isForLoop = false;
         int tryDepthAtEntry = 0;
     };
-    std::vector<LoopContext> loopStack_;
+    keel::Array<LoopContext> loopStack_;
 };
 
 } // namespace numkit

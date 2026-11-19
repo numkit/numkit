@@ -1,8 +1,12 @@
 // include/vm.hpp
 #pragma once
 
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/hash_map.h>
 #include <keel/ref.h>
+#include <keel/smart_ptr.h>
+#include <keel/string.h>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/debugger.hpp>
@@ -11,10 +15,7 @@
 #include <numkit/value/value.hpp>
 
 #include <exception>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include <utility>
 
 namespace numkit {
 
@@ -39,63 +40,61 @@ public:
                               DebugAction initialAction = DebugAction::StepInto);
     ExecStatus resumeExecution();
     bool isPaused() const { return !frames_.empty(); }
-    Value takeResult() { return std::move(lastResult_); }
+    Value takeResult() { return keel::move(lastResult_); }
 
     // Re-entrant call from C++ INTO a compiled chunk, returning all outputs.
-    std::vector<Value> callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<Value> args,
+    keel::Array<Value> callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<Value> args,
                                      keel::usize nargout,
-                                     const std::string &ownerClass = std::string(),
+                                     keel::StringRef ownerClass = {},
                                      bool isCtor = false, const Value *ctorSeed = nullptr);
 
     // Schedule a user-code function-handle callback as a pausable VM frame on
     // behalf of a native continuation.
     bool pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel::usize nargout,
-                           std::shared_ptr<VmContinuation> cont);
+                           keel::Arc<VmContinuation> cont);
 
     // Write a Value into regStack_ at an absolute offset (used by heap-boxed
     // continuation adapters so regStack_ growth never dangles a raw Value*).
     void writeRegAtOffset(keel::usize regOffset, Value val)
     {
         ensureRegStackCapacity(regOffset + 1);
-        regStack_[regOffset] = std::move(val);
+        regStack_[regOffset] = keel::move(val);
     }
 
     struct PausedState;
-    std::unique_ptr<PausedState> savePausedState();
-    void restorePausedState(std::unique_ptr<PausedState> state);
+    keel::UniquePtr<PausedState> savePausedState();
+    void restorePausedState(keel::UniquePtr<PausedState> state);
 
-    void setCompiledFuncs(const std::unordered_map<std::string, BytecodeChunk> *funcs)
+    void setCompiledFuncs(const keel::HashMap<keel::String, BytecodeChunk> *funcs)
     {
         compiledFuncs_ = funcs;
         scriptLocalFuncs_ = nullptr;
     }
-    void setCompiledFuncs(const std::unordered_map<std::string, BytecodeChunk> *funcs,
-                          const std::unordered_map<std::string, BytecodeChunk> *scriptLocal)
+    void setCompiledFuncs(const keel::HashMap<keel::String, BytecodeChunk> *funcs,
+                          const keel::HashMap<keel::String, BytecodeChunk> *scriptLocal)
     {
         compiledFuncs_ = funcs;
         scriptLocalFuncs_ = scriptLocal;
     }
 
-    const BytecodeChunk *findCompiledFunc(const std::string &name) const
+    const BytecodeChunk *findCompiledFunc(keel::StringRef name) const
     {
         if (scriptLocalFuncs_) {
-            auto it = scriptLocalFuncs_->find(name);
-            if (it != scriptLocalFuncs_->end())
-                return &it->second;
+            if (const BytecodeChunk *c = scriptLocalFuncs_->get(name))
+                return c;
         }
         if (compiledFuncs_) {
-            auto it = compiledFuncs_->find(name);
-            if (it != compiledFuncs_->end())
-                return &it->second;
+            if (const BytecodeChunk *c = compiledFuncs_->get(name))
+                return c;
         }
         return nullptr;
     }
 
     // After execute(), get exported variables for environment sync
-    const std::vector<std::pair<std::string, Value>> &lastVarMap() const { return lastVarMap_; }
+    const keel::Array<std::pair<keel::String, Value>> &lastVarMap() const { return lastVarMap_; }
     void clearLastVarMap() { lastVarMap_.clear(); }
 
-    void setFrameDynVars(std::unordered_map<std::string, Value> *dv);
+    void setFrameDynVars(keel::HashMap<keel::String, Value> *dv);
 
     struct FrameView
     {
@@ -123,10 +122,9 @@ public:
 
     int callDepth() const;
 
-    const std::string &currentMethodClass() const
+    keel::StringRef currentMethodClass() const
     {
-        static const std::string kEmpty;
-        return frames_.empty() ? kEmpty : frames_.back().ownerClass;
+        return frames_.empty() ? keel::StringRef{} : frames_.back().ownerClass.as_ref();
     }
     bool currentMethodIsCtor() const
     {
@@ -136,55 +134,54 @@ public:
     void setMaxRecursionDepth(int d) { maxRecursion_ = d; }
 
     Environment *callerEnvAtDepth(int n);
-    void assignInCallerFrame(int n, const std::string &name, const Value &val);
+    void assignInCallerFrame(int n, keel::StringRef name, const Value &val);
 
     Environment *inheritedScope_ = nullptr;
     bool inReentrantEval_ = false;
 
     void setStopOnError(bool b) { stopOnError_ = b; }
     bool atErrorPause() const { return atErrorPause_; }
-    const std::string &errorPauseMessage() const { return errorPauseMsg_; }
+    const keel::String &errorPauseMessage() const { return errorPauseMsg_; }
 
     bool stopOnError_ = false;
     bool atErrorPause_ = false;
     std::exception_ptr pausedError_;
-    std::string errorPauseMsg_;
+    keel::String errorPauseMsg_;
 
-    void writeToFrameMatchingEnv(Environment *env, const std::string &name,
+    void writeToFrameMatchingEnv(Environment *env, keel::StringRef name,
                                  const Value &val);
     void syncFrameToEnv(Environment *env);
     void syncEnvRemovalsToFrame(Environment *env);
-    bool hasActiveFrameNamed(const std::string &funcName) const;
+    bool hasActiveFrameNamed(keel::StringRef funcName) const;
     void flushWorkspaceFrame();
 
-    const std::vector<std::string> &currentFrameCallerArgNames() const
+    keel::ArrayRef<keel::String> currentFrameCallerArgNames() const
     {
-        static const std::vector<std::string> kEmpty;
-        if (frames_.size() < 2) return kEmpty;
-        return frames_.back().callerArgNames;
+        if (frames_.size() < 2) return {};
+        return frames_.back().callerArgNames.as_ref();
     }
 
-    std::unordered_map<std::string, Value>
+    keel::HashMap<keel::String, Value>
     snapshotFrameVars(Environment *frameEnv);
 
-    void setNextFrameDynVars(std::unordered_map<std::string, Value> *dv)
+    void setNextFrameDynVars(keel::HashMap<keel::String, Value> *dv)
     {
         nextFrameDynVars_ = dv;
     }
-    std::unordered_map<std::string, Value> *nextFrameDynVars() const
+    keel::HashMap<keel::String, Value> *nextFrameDynVars() const
     {
         return nextFrameDynVars_;
     }
 
 private:
     Engine &engine_;
-    std::unordered_map<std::string, Value> *nextFrameDynVars_ = nullptr;
-    const std::unordered_map<std::string, BytecodeChunk> *compiledFuncs_ = nullptr;
-    const std::unordered_map<std::string, BytecodeChunk> *scriptLocalFuncs_ = nullptr;
+    keel::HashMap<keel::String, Value> *nextFrameDynVars_ = nullptr;
+    const keel::HashMap<keel::String, BytecodeChunk> *compiledFuncs_ = nullptr;
+    const keel::HashMap<keel::String, BytecodeChunk> *scriptLocalFuncs_ = nullptr;
 
     // Register stack — grows dynamically via ensureRegStackCapacity
     static constexpr keel::usize kInitialRegStackSize = 256 * 50;
-    std::vector<Value> regStack_;
+    keel::Array<Value> regStack_;
     keel::usize regStackTop_ = 0;
     Value *R_ = nullptr;
     void ensureRegStackCapacity(keel::usize needed);
@@ -204,17 +201,17 @@ private:
         keel::u16 outBase = 0;            // multi-return: output base register
         keel::u16 nout = 0;               // multi-return: output count
         keel::usize nargout = 1;
-        std::string ownerClass;
+        keel::String ownerClass;
         bool isCtor = false;
         bool isScriptFrame = false;
 
-        std::unordered_map<std::string, Value> *dynVars = nullptr;
-        std::unique_ptr<Environment> env;
-        std::vector<std::string> callerArgNames;
+        keel::HashMap<keel::String, Value> *dynVars = nullptr;
+        keel::UniquePtr<Environment> env;
+        keel::Array<keel::String> callerArgNames;
         keel::usize originDepth = 0;
-        std::shared_ptr<VmContinuation> cont;
+        keel::Arc<VmContinuation> cont;
     };
-    std::vector<CallFrame> frames_;
+    keel::Array<CallFrame> frames_;
     Value lastResult_;
 
     // For-loop state
@@ -231,7 +228,7 @@ private:
         keel::f64 lazyStart = 0.0;
         keel::f64 lazyStep  = 1.0;
     };
-    std::vector<ForState> forStack_;
+    keel::Array<ForState> forStack_;
 
     // Try/catch handler stack
     struct TryHandler
@@ -241,7 +238,7 @@ private:
         keel::usize forStackSize;        // forStack_ size at TRY_BEGIN (restore on catch)
         keel::usize frameIndex;          // index in frames_ that owns this handler
     };
-    std::vector<TryHandler> tryStack_;
+    keel::Array<TryHandler> tryStack_;
 
     struct CallCacheEntry
     {
@@ -256,45 +253,56 @@ private:
         keel::usize containerRegAbs = 0;
         keel::usize valRegAbs = 0;
         Kind kind = Kind::Field;
-        std::string fieldName;
+        keel::String fieldName;
         keel::usize cellLinearIdx = 0;
+
+        LvalDetach clone(keel::Allocator *alloc = nullptr) const
+        {
+            return LvalDetach{
+                containerRegAbs,
+                valRegAbs,
+                kind,
+                fieldName.clone(alloc),
+                cellLinearIdx,
+            };
+        }
     };
 
 public:
     struct PausedState
     {
-        std::vector<CallFrame> frames;
-        std::vector<ForState> forStack;
-        std::vector<TryHandler> tryStack;
-        std::vector<LvalDetach> lvalDetaches;
-        std::vector<Value> regSnapshot;
+        keel::Array<CallFrame> frames;
+        keel::Array<ForState> forStack;
+        keel::Array<TryHandler> tryStack;
+        keel::Array<LvalDetach> lvalDetaches;
+        keel::Array<Value> regSnapshot;
         keel::usize regStackTop = 0;
         Value lastResult;
-        std::unordered_map<const BytecodeChunk *,
-                           std::vector<CallCacheEntry>>
+        keel::HashMap<const BytecodeChunk *,
+                      keel::Array<CallCacheEntry>>
             chunkCallCache;
         bool wasReentrantEval = false;
     };
-    std::vector<PausedState *> activePausedStates_;
+    keel::Array<PausedState *> activePausedStates_;
 private:
 
     int maxRecursion_ = 200;
 
     // Per-chunk call target inline cache (user functions + external builtins)
-    std::unordered_map<const BytecodeChunk *, std::vector<CallCacheEntry>> chunkCallCache_;
+    keel::HashMap<const BytecodeChunk *, keel::Array<CallCacheEntry>> chunkCallCache_;
 
     // Unwind-safe temporary unshare stack for compound lvalues (`s.arr(i) = x`)
-    std::vector<LvalDetach> lvalDetaches_;
+    keel::Array<LvalDetach> lvalDetaches_;
     void rollbackLvalDetaches();
 
     // Reusable Environment pool to avoid heap allocations per function call
-    std::vector<std::unique_ptr<Environment>> envPool_;
+    keel::Array<keel::UniquePtr<Environment>> envPool_;
 
     // Exported variables after execution
-    std::vector<std::pair<std::string, Value>> lastVarMap_;
+    keel::Array<std::pair<keel::String, Value>> lastVarMap_;
 
     // Multi-return buffer (unbounded; cleared after distribution)
-    std::vector<Value> returnBuf_;
+    keel::Array<Value> returnBuf_;
 
     // ── Core dispatch loop (non-recursive) ──────────────────
     ExecStatus dispatchLoop();
@@ -302,10 +310,10 @@ private:
     void pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::usize nargs,
                        keel::u16 destReg, keel::usize nargout,
                        bool isMulti = false, keel::u16 outBase = 0, keel::u16 nout = 0,
-                       const std::string &ownerClass = std::string(), bool isCtor = false,
+                       keel::StringRef ownerClass = {}, bool isCtor = false,
                        const Value *ctorSeed = nullptr);
     void popCallFrame(Value retVal);
-    bool startContinuation(std::shared_ptr<VmContinuation> cont);
+    bool startContinuation(keel::Arc<VmContinuation> cont);
 
     Environment *currentCallEnv();
     Environment *materializeFrameEnv(CallFrame &f, const Value *frameRegs);

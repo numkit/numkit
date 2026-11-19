@@ -1,9 +1,12 @@
 // src/c_api/c_api.cpp
 //
 // Self-contained C-ABI implementation for `numkit/numkit` (`numkit_c`).
+#include <keel/array.h>
 #include <keel/core.h>
+#include <keel/format.h>
 #include <keel/fs.h>
 #include <keel/ref.h>
+#include <keel/string.h>
 #include <numkit/core/c_api.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/core/standard_engine.hpp>
@@ -14,8 +17,6 @@
 #include <cstring>
 #include <exception>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
@@ -62,18 +63,18 @@ struct numkit_engine_ctx_s {
 
     numkit_engine_ctx_s()
     {
-        engine.setOutputFunc([](const std::string &) {});
+        engine.setOutputFunc([](keel::StringRef) {});
         keel::String libDir = currentLibraryDir();
         if (!libDir.empty()) {
-            engine.pluginLoader().addSearchPath(std::string(libDir.data(), libDir.size()));
+            engine.pluginLoader().addSearchPath(libDir);
             keel::String modDir = keel::path_join(libDir, "modules");
-            engine.pluginLoader().addSearchPath(std::string(modDir.data(), modDir.size()));
+            engine.pluginLoader().addSearchPath(modDir);
             keel::StringRef parent = keel::path_dirname(libDir);
             if (!parent.empty() && parent != "." && parent != libDir.as_ref()) {
                 keel::String binMods = keel::path_join(parent, "bin", "modules");
                 keel::String sibLib = keel::path_join(parent, "lib");
-                engine.pluginLoader().addSearchPath(std::string(binMods.data(), binMods.size()));
-                engine.pluginLoader().addSearchPath(std::string(sibLib.data(), sibLib.size()));
+                engine.pluginLoader().addSearchPath(binMods);
+                engine.pluginLoader().addSearchPath(sibLib);
             }
         }
         if (const char *envPath = std::getenv("NUMKIT_MODULE_PATH")) {
@@ -81,16 +82,17 @@ struct numkit_engine_ctx_s {
         }
     }
 
-    const numkit::ExternalFunc *resolve(const std::string &ns, const std::string &name)
+    const numkit::ExternalFunc *resolve(keel::StringRef ns, keel::StringRef name)
     {
         const numkit::ExternalFunc *fn = nullptr;
         if (!ns.empty()) {
-            fn = engine.findExternal(ns + "." + name, &engine.workspaceEnv());
+            keel::String full = keel::format("{}.{}", ns, name);
+            fn = engine.findExternal(full, &engine.workspaceEnv());
             if (!fn) {
-                std::string libPath = engine.pluginLoader().findPackageLibrary(ns);
+                keel::String libPath = engine.pluginLoader().findPackageLibrary(ns);
                 if (!libPath.empty()) {
                     engine.pluginLoader().loadModule(libPath);
-                    fn = engine.findExternal(ns + "." + name, &engine.workspaceEnv());
+                    fn = engine.findExternal(full, &engine.workspaceEnv());
                 }
             }
         }
@@ -114,7 +116,7 @@ int runEngineDispatch(const numkit_val *const *args,
                       numkit_error *err,
                       InvokeFn &&doInvoke) noexcept
 {
-using numkit::Value;
+    using numkit::Value;
     using numkit::c_abi::boxValue;
     using numkit::c_abi::clearError;
     using numkit::c_abi::setError;
@@ -128,7 +130,7 @@ using numkit::Value;
         }
 
         Value inStack[8];
-        std::vector<Value> inHeap;
+        keel::Array<Value> inHeap;
         Value *inPtr = inStack;
         if (nargs > 8) {
             inHeap.resize(nargs);
@@ -140,7 +142,7 @@ using numkit::Value;
 
         keel::usize outSlots = nargout == 0 ? 1 : nargout;
         Value outStack[4];
-        std::vector<Value> outHeap;
+        keel::Array<Value> outHeap;
         Value *outPtr = outStack;
         if (outSlots > 4) {
             outHeap.resize(outSlots);
@@ -150,7 +152,7 @@ using numkit::Value;
         doInvoke(keel::ArrayRef<Value>(inPtr, nargs), nargout, keel::MutArrayRef<Value>(outPtr, outSlots));
 
         for (keel::usize i = 0; i < nargout; ++i) {
-            outs[i] = boxValue(std::move(outPtr[i]));
+            outs[i] = boxValue(keel::move(outPtr[i]));
         }
         return 0;
     } catch (const std::exception &ex) {
@@ -206,14 +208,15 @@ int numkit_engine_load_plugin(numkit_engine_ctx *ctx,
     try {
         if (keel::fs_is_file(name_or_path)) {
             if (!ctx->engine.pluginLoader().loadModule(name_or_path)) {
-                throw std::runtime_error(std::string("Failed to load plugin: ") + name_or_path);
+                auto msg = keel::format("Failed to load plugin: {}", name_or_path);
+                throw std::runtime_error(msg.c_str());
             }
             return 0;
         }
-        std::string libPath = ctx->engine.pluginLoader().findPackageLibrary(name_or_path);
+        keel::String libPath = ctx->engine.pluginLoader().findPackageLibrary(name_or_path);
         if (libPath.empty() || !ctx->engine.pluginLoader().loadModule(libPath)) {
-            throw std::runtime_error(std::string("Could not locate or load plugin '") +
-                                     name_or_path + "'");
+            auto msg = keel::format("Could not locate or load plugin '{}'", name_or_path);
+            throw std::runtime_error(msg.c_str());
         }
         return 0;
     } catch (const std::exception &ex) {
@@ -242,9 +245,9 @@ int numkit_engine_register_fn(numkit_engine_ctx *ctx,
             numkit::c_abi::invokeHostCallback(fn, user_data, args, nargout, outs);
         };
         if (ns && *ns) {
-            ctx->engine.registerFunction(ns, name, std::move(cb));
+            ctx->engine.registerFunction(ns, name, keel::move(cb));
         } else {
-            ctx->engine.registerFunction(name, std::move(cb));
+            ctx->engine.registerFunction(name, keel::move(cb));
         }
         return 0;
     } catch (const std::exception &ex) {
@@ -298,8 +301,8 @@ int numkit_engine_call(numkit_engine_ctx *ctx,
         numkit::c_abi::setError(err, 1, "Null engine context or empty function name");
         return 1;
     }
-    std::string nsStr = ns ? ns : "";
-    std::string nameStr = name;
+    keel::StringRef nsStr = ns ? ns : "";
+    keel::StringRef nameStr = name;
     return runEngineDispatch(args, nargs, nargout, outs, err,
                              [&](keel::ArrayRef<numkit::Value> inSpan,
                                  keel::usize nOut,
@@ -321,9 +324,10 @@ int numkit_engine_call(numkit_engine_ctx *ctx,
                                  }
                                  const numkit::ExternalFunc *fn = ctx->resolve(nsStr, nameStr);
                                  if (!fn) {
-                                     std::string full =
-                                         nsStr.empty() ? nameStr : (nsStr + "." + nameStr);
-                                     throw std::runtime_error("Undefined function '" + full + "'");
+                                     keel::String msg = nsStr.empty()
+                                         ? keel::format("Undefined function '{}'", nameStr)
+                                         : keel::format("Undefined function '{}.{}'", nsStr, nameStr);
+                                     throw std::runtime_error(msg.c_str());
                                  }
                                  (*fn)(inSpan, nOut, outSpan, callCtx);
                              });
@@ -341,7 +345,7 @@ numkit_val *numkit_engine_eval(numkit_engine_ctx *ctx, const char *code, numkit_
         numkit::c_abi::setError(err, 1, res.errorMessage.c_str());
         return nullptr;
     }
-    return numkit::c_abi::boxValue(std::move(res.value));
+    return numkit::c_abi::boxValue(keel::move(res.value));
 }
 
 numkit_val *numkit_engine_workspace_get(numkit_engine_ctx *ctx,
@@ -355,7 +359,7 @@ numkit_val *numkit_engine_workspace_get(numkit_engine_ctx *ctx,
     }
     const numkit::Value *v = ctx->engine.getVariable(name);
     if (!v || v->isUnset() || v->isDeleted()) {
-        std::string msg = std::string("Undefined variable '") + name + "'";
+        keel::String msg = keel::format("Undefined variable '{}'", name);
         numkit::c_abi::setError(err, 1, msg.c_str());
         return nullptr;
     }
@@ -392,7 +396,7 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
     }
     try {
         const numkit::Value &val = numkit::c_abi::unboxValue(v);
-        std::string s;
+        keel::String s;
         if (val.isObject()) {
             const numkit::BuiltinClass *cls = ctx->engine.findClass(val.objectClassName());
             if (cls) {
@@ -403,18 +407,22 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
                     (*charPtr)(selfCopy, keel::ArrayRef<numkit::Value>(), 1,
                                keel::MutArrayRef<numkit::Value>(&out, 1), callCtx);
                     if (out.isChar() || out.isString()) {
-                        s = std::string(out.toString().as_ref());
+                        s = out.toString();
                     }
                 }
                 if (s.empty() && cls->dispText) {
-                    s = std::string(cls->dispText(val).as_ref());
-                    while (!s.empty() && (s.front() == ' ' || s.front() == '\n'))
-                        s.erase(s.begin());
-                    while (!s.empty() && (s.back() == ' ' || s.back() == '\n')) s.pop_back();
+                    s = cls->dispText(val);
+                    keel::StringRef sv = s.as_ref();
+                    while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\n'))
+                        sv = sv.substr(1);
+                    while (!sv.empty() && (sv.back() == ' ' || sv.back() == '\n'))
+                        sv = sv.substr(0, sv.size() - 1);
+                    if (sv.size() != s.size())
+                        s = keel::String::from(sv);
                 }
             }
         }
-        if (s.empty()) s = std::string(val.toString().as_ref());
+        if (s.empty()) s = val.toString();
         if (!buf || buf_cap == 0) return s.size();
         keel::usize n = std::min(s.size(), buf_cap - 1);
         if (n > 0) std::memcpy(buf, s.data(), n);
