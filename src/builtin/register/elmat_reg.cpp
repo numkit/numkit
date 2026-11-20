@@ -12,10 +12,10 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
 
+#include <keel/random.h>
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <random>
 #include <stdexcept>
 #include <utility>
 
@@ -209,8 +209,7 @@ void register_elmat(Engine &engine) {
             auto out = Value::matrix(m, n, ValueType::DOUBLE, mr);
             double *p = out.doubleDataMut();
             auto &rng = ctx.engine->rng();
-            std::uniform_real_distribution<double> dist(-1.0, 1.0);
-            for (keel::usize i = 0; i < m * n; ++i) p[i] = dist(rng);
+            for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::uniform_f64(rng, -1.0, 1.0);
             outs[0] = std::move(out);
         });
 

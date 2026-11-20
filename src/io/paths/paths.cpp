@@ -7,6 +7,7 @@
 #include <keel/memory.h>
 #include <keel/number.h>
 #include <keel/process.h>
+#include <keel/random.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/time.h>
@@ -18,7 +19,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <random>
 
 namespace numkit::io {
 
@@ -149,9 +149,13 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
     const keel::u64 pid = keel::process_id();
     const keel::u64 ns = keel::monotonic_ns();
 
-    static thread_local std::mt19937_64 rng{
-        std::random_device{}() ^ static_cast<keel::u64>(keel::wall_clock_ns()) ^ (keel::process_id() * 0x9E3779B97F4A7C15ULL)};
-    const keel::u64 r = rng();
+    static thread_local keel::Xoshiro256PlusPlus rng = []() {
+        auto r = keel::Xoshiro256PlusPlus::from_os();
+        if (r.is_ok()) return r.value();
+        return keel::Xoshiro256PlusPlus(
+            static_cast<keel::u64>(keel::wall_clock_ns()) ^ (keel::process_id() * 0x9E3779B97F4A7C15ULL));
+    }();
+    const keel::u64 r = rng.next_u64();
 
     keel::String out = tempdir(fs, mr).toString();
     char hexBuf[32];
