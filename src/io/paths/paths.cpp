@@ -6,6 +6,7 @@
 #include <keel/fs.h>
 #include <keel/memory.h>
 #include <keel/number.h>
+#include <keel/process.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/time.h>
@@ -150,15 +151,18 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
 {
     static std::atomic<keel::u64> counter{0};
     const keel::u64 n = counter.fetch_add(1, std::memory_order_relaxed);
+    const keel::u64 pid = keel::process_id();
     const keel::u64 ns = keel::monotonic_ns();
 
     static thread_local std::mt19937_64 rng{
-        std::random_device{}() ^ static_cast<keel::u64>(keel::wall_clock_ns())};
+        std::random_device{}() ^ static_cast<keel::u64>(keel::wall_clock_ns()) ^ (keel::process_id() * 0x9E3779B97F4A7C15ULL)};
     const keel::u64 r = rng();
 
     keel::String out = tempdir(fs, mr).toString();
     char hexBuf[32];
     out.append("tp");
+    out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), pid, 16, false)));
+    out.push_back('_');
     out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), ns, 16, false)));
     out.push_back('_');
     out.append(keel::StringRef(hexBuf, keel::format_u64(hexBuf, sizeof(hexBuf), r, 16, false)));

@@ -211,14 +211,6 @@ static bool parseManifest(keel::StringRef content, keel::String &libName, keel::
     return !libName.empty();
 }
 
-static keel::String getExecutableDir() {
-    auto exe = keel::fs_exe_path();
-    if (exe.is_ok() && !exe->empty()) {
-        return keel::String::from(keel::path_dirname(*exe));
-    }
-    return {};
-}
-
 static bool sharedLibExistsInDir(keel::StringRef dir, keel::StringRef libName) {
     if (!keel::fs_exists(dir)) return false;
     const keel::StringRef candidates[] = {
@@ -271,23 +263,16 @@ PluginLoader::PluginLoader(Engine &engine)
     addUnique("../modules");
     addUnique("..");
 
-#ifdef _WIN32
-    if (auto up = keel::env_get("USERPROFILE")) {
-        if (!up->empty()) addUnique(keel::path_join(*up, ".numkit", "modules"));
+    if (auto home = keel::fs_home_dir(); home.is_ok() && !home->empty()) {
+        addUnique(keel::path_join(*home, ".numkit", "modules"));
     }
-#else
-    if (auto home = keel::env_get("HOME")) {
-        if (!home->empty()) addUnique(keel::path_join(*home, ".numkit", "modules"));
-    }
-#endif
 
-    keel::String exeDir = getExecutableDir();
-    if (!exeDir.empty()) {
-        addUnique(exeDir);
-        addUnique(keel::path_join(exeDir, "modules"));
-        addUnique(keel::path_join(exeDir, "..", "modules"));
-        addUnique(keel::path_join(exeDir, "..", ".."));
-        addUnique(keel::path_join(exeDir, "..", "..", ".."));
+    if (auto exeDir = keel::fs_exe_dir(); exeDir.is_ok() && !exeDir->empty()) {
+        addUnique(*exeDir);
+        addUnique(keel::path_join(*exeDir, "modules"));
+        addUnique(keel::path_join(*exeDir, "..", "modules"));
+        addUnique(keel::path_join(*exeDir, "..", ".."));
+        addUnique(keel::path_join(*exeDir, "..", "..", ".."));
     }
 }
 

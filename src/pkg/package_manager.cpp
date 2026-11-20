@@ -7,6 +7,7 @@
 #include <keel/format.h>
 #include <keel/fs.h>
 #include <keel/number.h>
+#include <keel/process.h>
 #include <keel/ref.h>
 #include <keel/small_array.h>
 #include <keel/string.h>
@@ -66,20 +67,59 @@ InstalledPackage cloneInstalledPackage(const InstalledPackage &p)
 
 keel::String getUserHomeDir()
 {
-#ifdef _WIN32
-    keel::String home = sys::envGet("USERPROFILE");
-    if (home.empty()) {
-        keel::String drive = sys::envGet("HOMEDRIVE");
-        keel::String path = sys::envGet("HOMEPATH");
-        keel::String combined = keel::format("{}{}", drive, path);
-        return combined.empty() ? keel::String::from(".") : keel::move(combined);
-    }
-    return home;
-#else
-    keel::String home = sys::envGet("HOME");
-    return home.empty() ? keel::String::from(".") : keel::move(home);
-#endif
+    auto home = keel::fs_home_dir();
+    return (home.is_ok() && !home->empty()) ? keel::move(*home) : keel::String::from(".");
 }
+
+// Reentrant per-prefix cross-process lock guarding mutating pkg commands
+// (installMany / update may call install() recursively on the same thread).
+class PkgLockGuard {
+public:
+    explicit PkgLockGuard(keel::StringRef modulesDir)
+    {
+        if (depth_ > 0) {
+            ++depth_;
+            acquired_ = true;
+            return;
+        }
+        keel::String key = keel::format("numkit-pkg:{}", modulesDir);
+        auto res = keel::ProcessLock::try_acquire(key, keel::LockScope::User);
+        if (res.is_ok()) {
+            lock_ = keel::move(*res);
+            ++depth_;
+            acquired_ = true;
+            return;
+        }
+        if (res.error().code == keel::ErrorCode::AlreadyExists) {
+            keel::eprint("Error: Another 'numkit pkg' operation is already in progress for '{}'.\n",
+                         modulesDir);
+            acquired_ = false;
+            return;
+        }
+        // Fallback: if the OS environment cannot create lock files (e.g., restricted sandbox),
+        // do not block the user's package operation.
+        ++depth_;
+        acquired_ = true;
+    }
+
+    ~PkgLockGuard()
+    {
+        if (acquired_) {
+            --depth_;
+            lock_.release();
+        }
+    }
+
+    PkgLockGuard(const PkgLockGuard &) = delete;
+    PkgLockGuard &operator=(const PkgLockGuard &) = delete;
+
+    bool ok() const noexcept { return acquired_; }
+
+private:
+    keel::ProcessLock lock_;
+    bool acquired_ = false;
+    static inline thread_local keel::u32 depth_ = 0;
+};
 
 keel::String getNumkitPrefix()
 {
@@ -613,6 +653,9 @@ keel::String PackageManager::locateSharedLibrary(keel::StringRef buildDir, keel:
 
 int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forceHead)
 {
+    PkgLockGuard pkgLock(modulesDir_);
+    if (!pkgLock.ok()) return 1;
+
     auto cmakeTool = sys::findCMake();
     if (!cmakeTool.found) {
         keel::eprint("Error: CMake not found in PATH or standard installation directories.\n");
@@ -782,6 +825,9 @@ int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forc
 int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool installAll,
                                 bool verbose, bool forceHead)
 {
+    PkgLockGuard pkgLock(modulesDir_);
+    if (!pkgLock.ok()) return 1;
+
     keel::Array<keel::String> listToInstall;
     if (installAll) {
         listToInstall.reserve(officialCatalog().size());
@@ -819,6 +865,9 @@ int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool insta
 
 int PackageManager::update(keel::ArrayRef<keel::String> names, bool verbose, bool forceHead)
 {
+    PkgLockGuard pkgLock(modulesDir_);
+    if (!pkgLock.ok()) return 1;
+
     auto installed = scanInstalled();
     if (installed.empty()) {
         keel::print("No NumKit packages are currently installed.\n");
@@ -1036,6 +1085,9 @@ int PackageManager::build(keel::StringRef dir, bool verbose)
 
 int PackageManager::remove(keel::StringRef nameInput)
 {
+    PkgLockGuard pkgLock(modulesDir_);
+    if (!pkgLock.ok()) return 1;
+
     keel::StringRef name = nameInput;
     if (name.starts_with("numkit-")) {
         name = name.substr(7);

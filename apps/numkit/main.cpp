@@ -251,7 +251,10 @@ keel::String findCodegenBinary(const char *argv0)
 #else
     const char *binName = "numkit-codegen";
 #endif
-    if (argv0 && argv0[0] != '\0') {
+    if (auto exeDir = keel::fs_exe_dir(); exeDir.is_ok() && !exeDir->empty()) {
+        keel::String sibling = keel::path_join(*exeDir, binName);
+        if (keel::fs_exists(sibling)) return sibling;
+    } else if (argv0 && argv0[0] != '\0') {
         auto absSelf = keel::fs_absolute(argv0);
         if (absSelf.is_ok() && !absSelf->empty()) {
             const keel::StringRef selfDir = keel::path_dirname(*absSelf);
@@ -261,13 +264,8 @@ keel::String findCodegenBinary(const char *argv0)
             }
         }
     }
-#ifdef _WIN32
-    keel::String home = numkit::envGet("USERPROFILE");
-#else
-    keel::String home = numkit::envGet("HOME");
-#endif
-    if (!home.empty()) {
-        keel::String p = keel::path_join(home, ".numkit", "bin", binName);
+    if (auto home = keel::fs_home_dir(); home.is_ok() && !home->empty()) {
+        keel::String p = keel::path_join(*home, ".numkit", "bin", binName);
         if (keel::fs_exists(p)) return p;
     }
     return keel::String::from(binName);
