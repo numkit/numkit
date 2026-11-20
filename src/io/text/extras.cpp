@@ -6,6 +6,7 @@
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/fs.h>
 #include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/string.h>
@@ -255,11 +256,7 @@ void writelines(FsContext &fs, const Value &lines, keel::StringRef filename)
     keel::String out;
     auto append = [&](keel::StringRef s) {
         out.append(s);
-#ifdef _WIN32
-        out.append("\r\n");
-#else
-        out.push_back('\n');
-#endif
+        out.append(keel::fs_line_ending());
     };
 
     if (lines.isString() && lines.numel() != 1) {
@@ -269,10 +266,10 @@ void writelines(FsContext &fs, const Value &lines, keel::StringRef filename)
         // silently wrote just the first line. See bugs/io/writelines.md.
         const keel::usize n = lines.numel();
         for (keel::usize i = 0; i < n; ++i)
-            append(lines.stringElem(i));
+            append(lines.stringElemRef(i));
     } else if (lines.isChar() || lines.isString()) {
         // Single char row / scalar string → one line.
-        append(lines.toString());
+        append(lines.asStringRef());
     } else if (lines.isCell()) {
         const keel::usize n = lines.numel();
         for (keel::usize i = 0; i < n; ++i) {

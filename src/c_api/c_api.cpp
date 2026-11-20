@@ -15,43 +15,19 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <keel/dynlib.h>
 #include <cstring>
 #include <exception>
 #include <stdexcept>
-
-#if defined(_WIN32)
-#  define WIN32_LEAN_AND_MEAN
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <windows.h>
-#else
-#  include <dlfcn.h>
-#endif
 
 namespace {
 
 keel::String currentLibraryDir()
 {
-#if defined(_WIN32)
-    HMODULE hm = nullptr;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&currentLibraryDir), &hm)) {
-        char path[MAX_PATH];
-        DWORD len = GetModuleFileNameA(hm, path, MAX_PATH);
-        if (len > 0) {
-            return keel::path_normalize(keel::path_dirname(keel::StringRef(path, static_cast<keel::usize>(len))));
-        }
+    if (auto p = keel::dynlib_path_from_address(reinterpret_cast<const void *>(&currentLibraryDir));
+        p.is_ok() && !p->empty()) {
+        return keel::String::from(keel::path_dirname(*p));
     }
-#else
-    Dl_info info{};
-    if (dladdr(reinterpret_cast<const void *>(&currentLibraryDir), &info) && info.dli_fname) {
-        auto p = keel::fs_realpath(info.dli_fname);
-        if (p.is_ok()) return keel::String::from(keel::path_dirname(*p));
-        return keel::String::from(keel::path_dirname(info.dli_fname));
-    }
-#endif
     auto cwd = keel::fs_current_dir();
     if (cwd.is_ok()) return keel::move(*cwd);
     return keel::String{};

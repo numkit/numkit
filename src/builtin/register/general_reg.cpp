@@ -1,6 +1,7 @@
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/fs.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
@@ -567,11 +568,8 @@ void register_general(Engine &engine) {
     //  because no io equivalent exists yet.)
     engine.registerFunction("pathsep",
                             [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-#ifdef _WIN32
-                                outs[0] = Value::fromString(";", ctx.engine->allocator());
-#else
-                                outs[0] = Value::fromString(":", ctx.engine->allocator());
-#endif
+                                const char sep[1] = {keel::fs_path_list_sep()};
+                                outs[0] = Value::fromString(keel::StringRef(sep, 1), ctx.engine->allocator());
                             });
 
     

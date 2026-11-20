@@ -24,12 +24,7 @@ namespace numkit::io {
 
 namespace {
 
-constexpr char kPathSepChar =
-#ifdef _WIN32
-    '\\';
-#else
-    '/';
-#endif
+constexpr char kPathSepChar = keel::fs_native_sep();
 
 bool isPathSep(char c) { return c == '/' || c == '\\'; }
 

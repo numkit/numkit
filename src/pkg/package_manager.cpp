@@ -4,6 +4,7 @@
 
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/dynlib.h>
 #include <keel/format.h>
 #include <keel/fs.h>
 #include <keel/number.h>
@@ -128,21 +129,11 @@ keel::String getNumkitPrefix()
     return keel::path_join(getUserHomeDir(), ".numkit");
 }
 
-keel::StringRef getSharedLibExtension()
-{
-#ifdef _WIN32
-    return ".dll";
-#elif defined(__APPLE__)
-    return ".dylib";
-#else
-    return ".so";
-#endif
-}
-
-keel::String cmakeToolchainFlags(keel::StringRef buildDir)
+void appendCmakeToolchainArgs(keel::StringRef buildDir, keel::Array<keel::String> &args)
 {
     if (keel::fs_exists(keel::path_join(buildDir, "CMakeCache.txt"))) {
-        return keel::String::from(" -DNUMKIT_BUILD_TESTS=OFF");
+        args.push_back(keel::String::from("-DNUMKIT_BUILD_TESTS=OFF"));
+        return;
     }
 
     auto compilers = sys::findAllCxxCompilers();
@@ -159,19 +150,45 @@ keel::String cmakeToolchainFlags(keel::StringRef buildDir)
         auto zig = sys::findZig();
         auto ninja = sys::findNinja();
         if (zig.found && ninja.found) {
-            return keel::format(
-                " -G Ninja"
-                " -DCMAKE_MAKE_PROGRAM=\"{}\""
-                " -DCMAKE_CXX_COMPILER=\"{}\""
-                " -DCMAKE_CXX_COMPILER_ARG1=c++"
-                " -DCMAKE_C_COMPILER=\"{}\""
-                " -DCMAKE_C_COMPILER_ARG1=cc"
-                " -DNUMKIT_BUILD_TESTS=OFF",
-                ninja.path, zig.path, zig.path);
+            args.push_back(keel::String::from("-G"));
+            args.push_back(keel::String::from("Ninja"));
+            args.push_back(keel::format("-DCMAKE_MAKE_PROGRAM={}", ninja.path));
+            args.push_back(keel::format("-DCMAKE_CXX_COMPILER={}", zig.path));
+            args.push_back(keel::String::from("-DCMAKE_CXX_COMPILER_ARG1=c++"));
+            args.push_back(keel::format("-DCMAKE_C_COMPILER={}", zig.path));
+            args.push_back(keel::String::from("-DCMAKE_C_COMPILER_ARG1=cc"));
+            args.push_back(keel::String::from("-DNUMKIT_BUILD_TESTS=OFF"));
+            return;
         }
     }
 
-    return keel::String::from(" -DNUMKIT_BUILD_TESTS=OFF");
+    args.push_back(keel::String::from("-DNUMKIT_BUILD_TESTS=OFF"));
+}
+
+sys::ProcessResult runArgv(keel::ArrayRef<keel::StringRef> argv)
+{
+    sys::ProcessResult out;
+    keel::ProcessOptions opts;
+    opts.capture_stdout = true;
+    opts.capture_stderr = true;
+    opts.merge_stderr = true;
+    auto res = keel::process_run(argv, opts);
+    if (res.is_ok()) {
+        out.exitCode = res->exit_code;
+        out.output = keel::move(res->stdout_text);
+    } else {
+        out.exitCode = -1;
+        out.output = keel::String::from(keel::error_message(res.error()));
+    }
+    return out;
+}
+
+sys::ProcessResult runArgvOwned(keel::ArrayRef<keel::String> ownedArgs)
+{
+    keel::Array<keel::StringRef> refs;
+    refs.reserve(ownedArgs.size());
+    for (const auto &a : ownedArgs) refs.push_back(a.as_ref());
+    return runArgv(refs.as_ref());
 }
 
 struct SemVerTag {
@@ -245,31 +262,6 @@ bool isValidPackageName(keel::StringRef name)
     return true;
 }
 
-keel::String quoteShellArg(keel::StringRef s)
-{
-#ifdef _WIN32
-    keel::String out = keel::String::from("\"");
-    for (char ch : s) {
-        if (ch == '"')
-            out.append("\\\"");
-        else
-            out.push_back(ch);
-    }
-    out.push_back('"');
-    return out;
-#else
-    keel::String out = keel::String::from("'");
-    for (char ch : s) {
-        if (ch == '\'')
-            out.append("'\\''");
-        else
-            out.push_back(ch);
-    }
-    out.push_back('\'');
-    return out;
-#endif
-}
-
 keel::String weaklyCanonical(keel::StringRef rawPath)
 {
     auto absRes = keel::fs_absolute(rawPath);
@@ -317,9 +309,8 @@ keel::Array<SemVerTag> fetchRemoteSemVerTags(keel::StringRef gitPath, keel::Stri
     keel::Array<SemVerTag> tags;
     if (gitUrl.empty() || gitUrl[0] == '-' || hasControlChars(gitUrl) || hasControlChars(gitPath))
         return tags;
-    keel::String cmd = keel::format("{} ls-remote --tags --refs -- {}",
-                                    quoteShellArg(gitPath), quoteShellArg(gitUrl));
-    auto res = sys::runProcess(cmd);
+    const keel::StringRef argv[] = {gitPath, "ls-remote", "--tags", "--refs", "--", gitUrl};
+    auto res = runArgv(argv);
     if (!res.ok()) return tags;
 
     const keel::StringRef prefix = "refs/tags/";
@@ -346,9 +337,8 @@ keel::String queryRemoteRefCommit(keel::StringRef gitPath, keel::StringRef gitUr
     if (gitUrl.empty() || gitUrl[0] == '-' || ref.empty() || ref[0] == '-'
         || hasControlChars(gitUrl) || hasControlChars(ref) || hasControlChars(gitPath))
         return {};
-    keel::String cmd = keel::format("{} ls-remote -- {} {}",
-                                    quoteShellArg(gitPath), quoteShellArg(gitUrl), quoteShellArg(ref));
-    auto res = sys::runProcess(cmd);
+    const keel::StringRef argv[] = {gitPath, "ls-remote", "--", gitUrl, ref};
+    auto res = runArgv(argv);
     if (!res.ok() || res.output.empty()) return {};
     keel::StringRef s = trimRef(res.output.as_ref());
     keel::usize end = 0;
@@ -636,7 +626,7 @@ keel::String PackageManager::resolveRemoteRef(const PackageTarget &target, bool 
 
 keel::String PackageManager::locateSharedLibrary(keel::StringRef buildDir, keel::StringRef name) const
 {
-    keel::StringRef ext = getSharedLibExtension();
+    keel::StringRef ext = keel::dynlib_extension();
     keel::String expected1 = keel::format("numkit_{}{}", name, ext);
     keel::String expected2 = keel::format("{}{}", name, ext);
 
@@ -710,17 +700,18 @@ int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forc
             if (verbose) {
                 keel::print("Fetching {} from {}...\n", resolvedRef, target.gitUrl);
             }
-            keel::String fetchCmd = keel::format("{} -C {} fetch --depth 1 origin -- {}",
-                                                 quoteShellArg(gitTool.path),
-                                                 quoteShellArg(sourceDir),
-                                                 quoteShellArg(resolvedRef));
-            auto fetchRes = sys::runProcess(fetchCmd);
+            const keel::StringRef fetchArgv[] = {
+                gitTool.path.as_ref(), "-C", sourceDir.as_ref(),
+                "fetch", "--depth", "1", "origin", "--", resolvedRef.as_ref()
+            };
+            auto fetchRes = runArgv(fetchArgv);
             bool switched = false;
             if (fetchRes.ok()) {
-                keel::String coCmd = keel::format("{} -C {} checkout --force FETCH_HEAD",
-                                                  quoteShellArg(gitTool.path),
-                                                  quoteShellArg(sourceDir));
-                switched = sys::runProcess(coCmd).ok();
+                const keel::StringRef coArgv[] = {
+                    gitTool.path.as_ref(), "-C", sourceDir.as_ref(),
+                    "checkout", "--force", "FETCH_HEAD"
+                };
+                switched = runArgv(coArgv).ok();
             }
             if (!switched) {
                 if (verbose) {
@@ -732,25 +723,33 @@ int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forc
         }
 
         if (!keel::fs_exists(sourceDir)) {
-            keel::String cloneCmd = keel::format("{} clone --depth 1 ", quoteShellArg(gitTool.path));
+            keel::SmallArray<keel::StringRef, 12> cloneArgv;
+            cloneArgv.push_back(gitTool.path.as_ref());
+            cloneArgv.push_back("clone");
+            cloneArgv.push_back("--depth");
+            cloneArgv.push_back("1");
             if (!resolvedRef.empty() && resolvedRef != "HEAD") {
-                keel::format_into(cloneCmd, "--branch {} ", quoteShellArg(resolvedRef));
+                cloneArgv.push_back("--branch");
+                cloneArgv.push_back(resolvedRef.as_ref());
             }
-            keel::format_into(cloneCmd, "-- {} {}", quoteShellArg(target.gitUrl), quoteShellArg(sourceDir));
+            cloneArgv.push_back("--");
+            cloneArgv.push_back(target.gitUrl.as_ref());
+            cloneArgv.push_back(sourceDir.as_ref());
 
             if (verbose) {
                 keel::print("Cloning {} ({})...\n", target.gitUrl, resolvedRef);
             }
-            auto cloneRes = sys::runProcess(cloneCmd);
+            auto cloneRes = runArgv(cloneArgv.as_ref());
             if (!cloneRes.ok()) {
                 keel::eprint("Error cloning repository from {}:\n{}\n", target.gitUrl, cloneRes.output);
                 return 1;
             }
         }
 
-        keel::String revCmd = keel::format("{} -C {} rev-parse --short HEAD",
-                                           quoteShellArg(gitTool.path), quoteShellArg(sourceDir));
-        auto revRes = sys::runProcess(revCmd);
+        const keel::StringRef revArgv[] = {
+            gitTool.path.as_ref(), "-C", sourceDir.as_ref(), "rev-parse", "--short", "HEAD"
+        };
+        auto revRes = runArgv(revArgv);
         if (revRes.ok()) {
             shortSha = keel::String::from(trimRef(revRes.output.as_ref()));
         }
@@ -765,27 +764,31 @@ int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forc
 
     // Configure CMake build
     keel::String buildDir = keel::path_join(sourceDir, "build");
-    keel::String cfgCmd = keel::format("{} -B {} -S {} -DCMAKE_BUILD_TYPE=Release{}",
-                                       quoteShellArg(cmakeTool.path),
-                                       quoteShellArg(buildDir),
-                                       quoteShellArg(sourceDir),
-                                       cmakeToolchainFlags(buildDir));
+    keel::Array<keel::String> cfgArgs;
+    cfgArgs.push_back(cmakeTool.path.clone());
+    cfgArgs.push_back(keel::String::from("-B"));
+    cfgArgs.push_back(buildDir.clone());
+    cfgArgs.push_back(keel::String::from("-S"));
+    cfgArgs.push_back(sourceDir.clone());
+    cfgArgs.push_back(keel::String::from("-DCMAKE_BUILD_TYPE=Release"));
+    appendCmakeToolchainArgs(buildDir, cfgArgs);
     if (verbose) {
         keel::print("Configuring CMake project...\n");
     }
-    auto cfgRes = sys::runProcess(cfgCmd);
+    auto cfgRes = runArgvOwned(cfgArgs.as_ref());
     if (!cfgRes.ok()) {
         keel::eprint("CMake configuration failed:\n{}\n", cfgRes.output);
         return 1;
     }
 
     // Build project
-    keel::String buildCmd = keel::format("{} --build {} --config Release --parallel",
-                                         quoteShellArg(cmakeTool.path), quoteShellArg(buildDir));
+    const keel::StringRef buildArgv[] = {
+        cmakeTool.path.as_ref(), "--build", buildDir.as_ref(), "--config", "Release", "--parallel"
+    };
     if (verbose) {
         keel::print("Building shared module...\n");
     }
-    auto buildRes = sys::runProcess(buildCmd);
+    auto buildRes = runArgv(buildArgv);
     if (!buildRes.ok()) {
         keel::eprint("CMake build failed:\n{}\n", buildRes.output);
         return 1;
@@ -1058,20 +1061,24 @@ int PackageManager::build(keel::StringRef dir, bool verbose)
         keel::print("Building module in {}...\n", dir);
     }
 
-    keel::String cfgCmd = keel::format("{} -B {} -S {} -DCMAKE_BUILD_TYPE=Release{}",
-                                       quoteShellArg(cmakeTool.path),
-                                       quoteShellArg(buildDir),
-                                       quoteShellArg(dir),
-                                       cmakeToolchainFlags(buildDir));
-    auto cfgRes = sys::runProcess(cfgCmd);
+    keel::Array<keel::String> cfgArgs;
+    cfgArgs.push_back(cmakeTool.path.clone());
+    cfgArgs.push_back(keel::String::from("-B"));
+    cfgArgs.push_back(buildDir.clone());
+    cfgArgs.push_back(keel::String::from("-S"));
+    cfgArgs.push_back(keel::String::from(dir));
+    cfgArgs.push_back(keel::String::from("-DCMAKE_BUILD_TYPE=Release"));
+    appendCmakeToolchainArgs(buildDir, cfgArgs);
+    auto cfgRes = runArgvOwned(cfgArgs.as_ref());
     if (!cfgRes.ok()) {
         keel::eprint("CMake configuration failed:\n{}\n", cfgRes.output);
         return 1;
     }
 
-    keel::String buildCmd = keel::format("{} --build {} --config Release --parallel",
-                                         quoteShellArg(cmakeTool.path), quoteShellArg(buildDir));
-    auto buildRes = sys::runProcess(buildCmd);
+    const keel::StringRef buildArgv[] = {
+        cmakeTool.path.as_ref(), "--build", buildDir.as_ref(), "--config", "Release", "--parallel"
+    };
+    auto buildRes = runArgv(buildArgv);
     if (!buildRes.ok()) {
         keel::eprint("CMake build failed:\n{}\n", buildRes.output);
         return 1;

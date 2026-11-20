@@ -246,11 +246,7 @@ void printUsage(const char *prog)
 
 keel::String findCodegenBinary(const char *argv0)
 {
-#ifdef _WIN32
-    const char *binName = "numkit-codegen.exe";
-#else
-    const char *binName = "numkit-codegen";
-#endif
+    const keel::String binName = keel::format("numkit-codegen{}", keel::process_exe_extension());
     if (auto exeDir = keel::fs_exe_dir(); exeDir.is_ok() && !exeDir->empty()) {
         keel::String sibling = keel::path_join(*exeDir, binName);
         if (keel::fs_exists(sibling)) return sibling;
