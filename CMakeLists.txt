@@ -63,32 +63,32 @@ if(NOT TARGET numkit_ops)
     endif()
 endif()
 
-# ── Dependency: keel::mat ────────────────────────────────────────────────
-if(NOT TARGET keel::mat)
-    find_package(keel_mat QUIET CONFIG)
-    if(TARGET keel::keel_mat AND NOT TARGET keel::mat)
-        add_library(keel::mat ALIAS keel::keel_mat)
+# ── Dependency: keel::matfile ────────────────────────────────────────────
+if(NOT TARGET keel::matfile)
+    find_package(keel_matfile QUIET CONFIG)
+    if(TARGET keel::keel_matfile AND NOT TARGET keel::matfile)
+        add_library(keel::matfile ALIAS keel::keel_matfile)
     endif()
 endif()
-if(NOT TARGET keel::mat)
-    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_MAT)
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/mat/CMakeLists.txt")
-            set(FETCHCONTENT_SOURCE_DIR_KEEL_MAT
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/mat"
+if(NOT TARGET keel::matfile)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_MATFILE)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/matfile/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_MATFILE
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/matfile"
                 CACHE PATH "")
-        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/mat/CMakeLists.txt")
-            set(FETCHCONTENT_SOURCE_DIR_KEEL_MAT
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/mat"
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/matfile/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_MATFILE
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/matfile"
                 CACHE PATH "")
         endif()
     endif()
-    set(KEEL_MAT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(KEEL_MATFILE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
-        keel_mat
-        GIT_REPOSITORY https://github.com/keelcpp/mat.git
-        GIT_TAG        161a43d22bb1eea0fa3ce8085603e658198ff3b9
+        keel_matfile
+        GIT_REPOSITORY https://github.com/keelcpp/matfile.git
+        GIT_TAG        3d0258e7a482030e93cd7c34de9e328177b2f547
     )
-    FetchContent_MakeAvailable(keel_mat)
+    FetchContent_MakeAvailable(keel_matfile)
 endif()
 
 # ── Gather Sources ───────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ target_link_libraries(numkit
         numkit_sys
         numkit_ops
     PRIVATE
-        keel::mat
+        keel::matfile
 )
 
 target_compile_definitions(numkit PUBLIC NUMKIT_CORE_BUILD=1)
