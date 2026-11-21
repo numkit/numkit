@@ -194,7 +194,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                         double v = I.elemAsDouble(srcIdx) * scale;
                         if (v < 0) v = 0;
                         else if (v > 255) v = 255;
-                        ds.rgbBytes[outIdx + k] = static_cast<keel::u8>(v + 0.5);
+                        ds.rgbBytes[outIdx + k] = keel::as<keel::u8>(v + 0.5);
                     }
                     // Synthesize opaque alpha when input is plain RGB.
                     if (!hasAlpha) ds.rgbBytes[outIdx + 3] = 255;
@@ -214,10 +214,10 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
                         const keel::usize off = (r * C + c) * bytesPerPixel;
-                        zs << "[" << static_cast<int>(ds.rgbBytes[off])
-                           << "," << static_cast<int>(ds.rgbBytes[off + 1])
-                           << "," << static_cast<int>(ds.rgbBytes[off + 2])
-                           << "," << static_cast<int>(ds.rgbBytes[off + 3]) << "]";
+                        zs << "[" << keel::as<int>(ds.rgbBytes[off])
+                           << "," << keel::as<int>(ds.rgbBytes[off + 1])
+                           << "," << keel::as<int>(ds.rgbBytes[off + 2])
+                           << "," << keel::as<int>(ds.rgbBytes[off + 3]) << "]";
                     }
                     zs << "]";
                 }
@@ -310,7 +310,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     double t = (v - cmin) * qScale;
                     if (t < 0) t = 0;
                     else if (t > 254) t = 254;
-                    ds.zQuantized[i] = static_cast<keel::u8>(t + 0.5);
+                    ds.zQuantized[i] = keel::as<keel::u8>(t + 0.5);
                 }
             }
             constexpr keel::usize MAX_INLINE_CELLS = 2'000'000;
@@ -323,7 +323,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     zs << "[";
                     for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
-                        zs << static_cast<int>(ds.zQuantized[c * R + r]);
+                        zs << keel::as<int>(ds.zQuantized[c * R + r]);
                     }
                     zs << "]";
                 }

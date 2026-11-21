@@ -71,7 +71,7 @@ static Value narrowUniqueClass(const Value &d, ValueType vt,
         char *dst = r.charDataMut();
         const keel::usize n = d.numel();
         for (keel::usize i = 0; i < n; ++i)
-            dst[i] = static_cast<char>(static_cast<int>(d.elemAsDouble(i)));
+            dst[i] = keel::as<char>(keel::as<int>(d.elemAsDouble(i)));
         return r;
     }
     return doubleToIntegerExact(d, vt, mr);   // INT8..UINT64
@@ -171,13 +171,13 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                 keel::String s = getElemStr(i);
                 if (const keel::usize *found = seen.get(s.as_ref())) {
                     if (last) iaVec[*found] = i;
-                    icVec[i] = static_cast<double>(*found + 1);
+                    icVec[i] = keel::as<double>(*found + 1);
                 } else {
                     keel::usize pos = uniqStrs.size();
                     seen.put(s.clone(sa), pos);
                     uniqStrs.push_back(std::move(s));
                     iaVec.push_back(i);
-                    icVec[i] = static_cast<double>(pos + 1);
+                    icVec[i] = keel::as<double>(pos + 1);
                 }
             }
         } else {
@@ -206,7 +206,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             for (keel::usize i = 0; i < n; ++i) {
                 keel::String s = getElemStr(i);
                 const keel::usize *rk = rankMap.get(s.as_ref());
-                icVec[i] = static_cast<double>((rk ? *rk : 0) + 1);
+                icVec[i] = keel::as<double>((rk ? *rk : 0) + 1);
             }
         }
         const keel::usize k = uniqStrs.size();
@@ -225,7 +225,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         if (nargout > 1) {
             Value iaOut = Value::matrix(k, k == 0 ? 0 : 1, ValueType::DOUBLE, mr);
             for (keel::usize j = 0; j < k; ++j)
-                iaOut.doubleDataMut()[j] = static_cast<double>(iaVec[j] + 1);
+                iaOut.doubleDataMut()[j] = keel::as<double>(iaVec[j] + 1);
             outs[1] = std::move(iaOut);
         }
         if (nargout > 2) {
@@ -414,8 +414,8 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             if (nbins == 0 || std::isnan(v) || v < ed[0] || v > ed[nbins]) {
                 bd[idx] = 0.0;
             } else {
-                const keel::usize b = static_cast<keel::usize>(std::upper_bound(ed, ed + nbins, v) - ed);
-                bd[idx] = static_cast<double>(b);
+                const keel::usize b = keel::as<keel::usize>(std::upper_bound(ed, ed + nbins, v) - ed);
+                bd[idx] = keel::as<double>(b);
             }
         }
         outs[2] = std::move(binOut);
@@ -441,7 +441,7 @@ void histc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         const keel::usize n = x.numel();
         for (keel::usize i = 0; i < n; ++i) {
             const keel::usize b = histcBin(p[i], e, nE);
-            bd[i] = (b == SIZE_MAX) ? 0.0 : static_cast<double>(b + 1);
+            bd[i] = (b == SIZE_MAX) ? 0.0 : keel::as<double>(b + 1);
         }
         outs[1] = std::move(binOut);
     }
@@ -480,7 +480,7 @@ ismemberRows(const Value &A, const Value &B, bool wantLoc, keel::Allocator *mr)
         for (keel::usize r = 0; r < br; ++r)
             if (!rowHasNan(bd, bc, br, r))
                 bmap.try_insert(extractRow(bd, bc, br, r, scratch.allocator()),
-                                static_cast<double>(r + 1));  // try_insert keeps the lowest index
+                                keel::as<double>(r + 1));  // try_insert keeps the lowest index
     }
     for (keel::usize r = 0; r < ar; ++r) {
         if (rowHasNan(ad, ac, ar, r)) {
@@ -538,7 +538,7 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         const double *pb = b.doubleData();
         for (keel::usize i = 0; i < b.numel(); ++i)
             if (!std::isnan(pb[i]))
-                idxB.try_insert(pb[i], static_cast<double>(i + 1));  // try_insert keeps the lowest index
+                idxB.try_insert(pb[i], keel::as<double>(i + 1));  // try_insert keeps the lowest index
         Value loc = createLike(a, ValueType::DOUBLE, mr);
         double *lo = loc.doubleDataMut();
         const double *pa = a.doubleData();
@@ -620,8 +620,8 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
         for (keel::usize i = 0; i < k; ++i) {
             const double v = result.elemAsDouble(i);
             const keel::usize ai = setopFirstIndex(A, mapA, v);
-            if (ai != 0) iaVec.push_back(static_cast<double>(ai));
-            else ibVec.push_back(static_cast<double>(setopFirstIndex(B, mapB, v)));
+            if (ai != 0) iaVec.push_back(keel::as<double>(ai));
+            else ibVec.push_back(keel::as<double>(setopFirstIndex(B, mapB, v)));
         }
         auto colOf = [&](const keel::Array<double> &v) {
             Value c = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
@@ -637,7 +637,7 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
     Value ia = Value::matrix(k, 1, ValueType::DOUBLE, mr);
     for (keel::usize i = 0; i < k; ++i)
         ia.doubleDataMut()[i] =
-            static_cast<double>(setopFirstIndex(A, mapA, result.elemAsDouble(i)));
+            keel::as<double>(setopFirstIndex(A, mapA, result.elemAsDouble(i)));
     if (nargout >= 2) outs[1] = ia;
 
     if (kind == SetOpKind::Intersect && nargout >= 3) {
@@ -646,7 +646,7 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
         Value ib = Value::matrix(k, 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < k; ++i)
             ib.doubleDataMut()[i] =
-                static_cast<double>(setopFirstIndex(B, mapB, result.elemAsDouble(i)));
+                keel::as<double>(setopFirstIndex(B, mapB, result.elemAsDouble(i)));
         outs[2] = ib;
     }
 }
@@ -708,9 +708,9 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
         keel::ArenaTemp scratchU = keel::get_scratch(mr);
         keel::Array<double> iaVec(scratchU.allocator()), ibVec(scratchU.allocator());
         for (keel::usize i = 0; i < iaAll.numel(); ++i) {
-            const keel::usize idx1 = static_cast<keel::usize>(iaAll.elemAsDouble(i));
-            if (idx1 <= ar) iaVec.push_back(static_cast<double>(idx1));
-            else            ibVec.push_back(static_cast<double>(idx1 - ar));
+            const keel::usize idx1 = keel::as<keel::usize>(iaAll.elemAsDouble(i));
+            if (idx1 <= ar) iaVec.push_back(keel::as<double>(idx1));
+            else            ibVec.push_back(keel::as<double>(idx1 - ar));
         }
         if (nargout >= 2) outs[1] = makeColVec(iaVec);
         if (nargout >= 3) outs[2] = makeColVec(ibVec);
@@ -751,14 +751,14 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
     if (nargout >= 2) {
         keel::Array<double> iaVec(nonNan.size(), scratch.allocator());
         for (keel::usize i = 0; i < nonNan.size(); ++i)
-            iaVec[i] = static_cast<double>(nonNan[i] + 1);
+            iaVec[i] = keel::as<double>(nonNan[i] + 1);
         outs[1] = makeColVec(iaVec);
     }
     if (wantInB && nargout >= 3) {
         keel::Array<double> ibVec(nonNan.size(), scratch.allocator());
         for (keel::usize i = 0; i < nonNan.size(); ++i) {
             RowKey key = extractRow(ad, ac, ar, nonNan[i], scratch.allocator());
-            ibVec[i] = static_cast<double>(*bset.get(key));
+            ibVec[i] = keel::as<double>(*bset.get(key));
         }
         outs[2] = makeColVec(ibVec);
     }
@@ -829,8 +829,8 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
     if (nargout >= 2) {
         keel::Array<double> iaVec(scratch.allocator()), ibVec(scratch.allocator());
         for (keel::usize ci : nonNan) {
-            if (ci < ar) iaVec.push_back(static_cast<double>(ci + 1));
-            else         ibVec.push_back(static_cast<double>(ci - ar + 1));
+            if (ci < ar) iaVec.push_back(keel::as<double>(ci + 1));
+            else         ibVec.push_back(keel::as<double>(ci - ar + 1));
         }
         outs[1] = makeColVec(iaVec);
         if (nargout >= 3) outs[2] = makeColVec(ibVec);

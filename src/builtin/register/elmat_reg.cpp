@@ -327,8 +327,8 @@ void register_elmat(Engine &engine) {
                 float *dst = out.singleDataMut();
                 for (keel::usize i = 0; i < n; ++i) {
                     float v = x.isComplex()
-                        ? static_cast<float>(keel::abs(x.complexData()[i]))
-                        : keel::abs(static_cast<float>(x.elemAsDouble(i)));
+                        ? keel::as<float>(keel::abs(x.complexData()[i]))
+                        : keel::abs(keel::as<float>(x.elemAsDouble(i)));
                     if (std::isnan(v) || std::isinf(v)) {
                         dst[i] = std::numeric_limits<float>::quiet_NaN();
                     } else if (v <= std::numeric_limits<float>::min()) {

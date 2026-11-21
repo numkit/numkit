@@ -153,7 +153,7 @@ Value tempname(FsContext &fs, keel::Allocator *mr)
         auto r = keel::random::Xoshiro256PlusPlus::from_os();
         if (r.is_ok()) return r.value();
         return keel::random::Xoshiro256PlusPlus(
-            static_cast<keel::u64>(keel::wall_clock_ns()) ^ (keel::process_id() * 0x9E3779B97F4A7C15ULL));
+            keel::as<keel::u64>(keel::wall_clock_ns()) ^ (keel::process_id() * 0x9E3779B97F4A7C15ULL));
     }();
     const keel::u64 r = rng.next_u64();
 

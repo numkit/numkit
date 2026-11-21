@@ -38,7 +38,7 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
         // Bucket indices by group id (sorted).
         keel::HashMap<int, keel::Array<keel::usize>> buckets;
         for (keel::usize i = 0; i < n; ++i)
-            buckets.get_or_insert(static_cast<int>(G.elemAsDouble(i))).push_back(i);
+            buckets.get_or_insert(keel::as<int>(G.elemAsDouble(i))).push_back(i);
         keel::Array<int> gids;
         gids.reserve(buckets.size());
         for (auto [k, v] : buckets) {

@@ -268,7 +268,7 @@ static const char *builtinIdName(int bid)
         nullptr, nullptr, nullptr, nullptr, "mod",   "rem",   "max",   "min",
         "pow",   "atan2",
     };
-    constexpr int n = static_cast<int>(sizeof(kNames) / sizeof(kNames[0]));
+    constexpr int n = keel::as<int>(sizeof(kNames) / sizeof(kNames[0]));
     return (bid >= 0 && bid < n) ? kNames[bid] : nullptr;
 }
 
@@ -573,7 +573,7 @@ keel::Array<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
     lastResult_ = Value();
     pushCallFrame(chunk, argbuf.empty() ? nullptr : argbuf.data(),
                   argbuf.size(), /*destReg=*/0, nout,
-                  /*isMulti=*/multi, /*outBase=*/0, /*nout=*/static_cast<keel::u16>(nout),
+                  /*isMulti=*/multi, /*outBase=*/0, /*nout=*/keel::as<keel::u16>(nout),
                   ownerClass, isCtor, ctorSeed);
 
     ExecStatus status = dispatchLoop();
@@ -702,7 +702,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, kee
     pausedError_ = nullptr;
 
     keel::u32 nregs = chunk.numRegisters;
-    keel::usize pc = args ? std::min(nargs, static_cast<keel::usize>(chunk.numParams)) : 0;
+    keel::usize pc = args ? std::min(nargs, keel::as<keel::usize>(chunk.numParams)) : 0;
     keel::Array<Value> argsCopy(pc);
     for (keel::usize i = 0; i < pc; ++i)
         argsCopy[i] = args[i];
@@ -825,7 +825,7 @@ enter_frame:
         while (ip < end) {
             // ── Debug hook: check for line change, breakpoints ──
             if (dbgCtl) {
-                keel::usize idx = static_cast<keel::usize>(ip - chunk.code.data());
+                keel::usize idx = keel::as<keel::usize>(ip - chunk.code.data());
                 if (idx < chunk.sourceMap.size()) {
                     auto &loc = chunk.sourceMap[idx];
                     if (loc.line > 0) {
@@ -902,8 +902,8 @@ enter_frame:
                         if (const auto *endFn = cls->methods.get("__end")) {
                             Value self = arr;
                             Value eargs[2] = {
-                                Value::scalar(static_cast<double>(I.c), engine_.mr_),
-                                Value::scalar(static_cast<double>(ndims), engine_.mr_)};
+                                Value::scalar(keel::as<double>(I.c), engine_.mr_),
+                                Value::scalar(keel::as<double>(ndims), engine_.mr_)};
                             Value out[1];
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*endFn)(self, keel::ArrayRef<Value>(eargs, 2), 1,
@@ -917,16 +917,16 @@ enter_frame:
                 if (ndims <= 1) {
                     // Linear indexing: end = numel
                     sz = arr.numel();
-                } else if (I.c == ndims - 1 && arr.dims().ndim() > static_cast<keel::i32>(ndims)) {
+                } else if (I.c == ndims - 1 && arr.dims().ndim() > keel::as<keel::i32>(ndims)) {
                     keel::usize prod = 1;
-                    for (keel::i32 d = static_cast<keel::i32>(I.c); d < arr.dims().ndim(); ++d)
+                    for (keel::i32 d = keel::as<keel::i32>(I.c); d < arr.dims().ndim(); ++d)
                         prod *= arr.dims().dimSize(d);
                     sz = prod;
                 } else {
                     // Dimensional indexing: end = size along dimension c
                     sz = arr.dims().dimSize(I.c);
                 }
-                R[I.a] = Value::scalar(static_cast<double>(sz), engine_.mr_);
+                R[I.a] = Value::scalar(keel::as<double>(sz), engine_.mr_);
                 break;
             }
 
@@ -1207,12 +1207,12 @@ enter_frame:
                 // disable fusion even for already-compiled bytecode.
                 if (engine_.fusionEnabled()) {
                     const FusionRule &rule =
-                        engine_.fusionRules()[static_cast<keel::usize>(I.d)];
+                        engine_.fusionRules()[keel::as<keel::usize>(I.d)];
                     Value fout;
                     if (rule.execute(&R[I.b], I.c, fout, engine_.mr_)) {
                         engine_.noteFusionHit();
                         R[I.a] = std::move(fout);
-                        ip += static_cast<int>(I.e) + 1;
+                        ip += keel::as<int>(I.e) + 1;
                         continue;
                     }
                 }
@@ -2115,8 +2115,8 @@ enter_frame:
                                            engine_.mr_);
                 } else {
                     // ND read (≥4): CELL handled by indexGetND directly now.
-                    const int nd = static_cast<int>(ndims);
-                    const keel::usize ndu = static_cast<keel::usize>(nd);
+                    const int nd = keel::as<int>(ndims);
+                    const keel::usize ndu = keel::as<keel::usize>(nd);
                     keel::Array<keel::Array<keel::usize>> idxLists(ndu);
                     keel::Array<const keel::usize *> idxPtrs(ndu);
                     keel::Array<keel::usize> idxCounts(ndu);
@@ -2191,14 +2191,14 @@ enter_frame:
                             keel::usize rCursor = 0;
                             int colonsLeft = nColons;
                             auto nextRhsDim = [&]() -> keel::usize {
-                                while (rCursor < static_cast<keel::usize>(val.dims().ndim())
-                                       && val.dims().dim(static_cast<int>(rCursor)) == 1
-                                       && (static_cast<keel::usize>(val.dims().ndim()) - rCursor) > static_cast<keel::usize>(colonsLeft)) {
+                                while (rCursor < keel::as<keel::usize>(val.dims().ndim())
+                                       && val.dims().dim(keel::as<int>(rCursor)) == 1
+                                       && (keel::as<keel::usize>(val.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
                                     ++rCursor;
                                 }
                                 --colonsLeft;
-                                return (rCursor < static_cast<keel::usize>(val.dims().ndim()))
-                                           ? val.dims().dim(static_cast<int>(rCursor++))
+                                return (rCursor < keel::as<keel::usize>(val.dims().ndim()))
+                                           ? val.dims().dim(keel::as<int>(rCursor++))
                                            : 1;
                             };
                             if (riColon) maxR = nextRhsDim();
@@ -2220,10 +2220,10 @@ enter_frame:
                 } else {
                     // ND write (≥4): grow the target *first* so the
                     // subsequent resolveIndices bounds checks succeed.
-                    const int nd = static_cast<int>(ndims);
+                    const int nd = keel::as<int>(ndims);
                     const int curNd = R[I.a].dims().ndim();
                     const int newNd = std::max(nd, curNd);
-                    keel::Array<keel::usize> need(newNd, static_cast<keel::usize>(1));
+                    keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     auto isColon = [](const Value &v) {
@@ -2233,12 +2233,12 @@ enter_frame:
                         const Value &iv = R[base + i];
                         if (isColon(iv) || iv.isLogical()) continue;
                         if (iv.isDoubleScalar()) {
-                            keel::usize v = static_cast<keel::usize>(iv.toScalar());
+                            keel::usize v = keel::as<keel::usize>(iv.toScalar());
                             if (v > need[i]) need[i] = v;
                         } else if (iv.type() == ValueType::DOUBLE) {
                             const double *d = iv.doubleData();
                             for (keel::usize k = 0; k < iv.numel(); ++k) {
-                                keel::usize v = static_cast<keel::usize>(d[k]);
+                                keel::usize v = keel::as<keel::usize>(d[k]);
                                 if (v > need[i]) need[i] = v;
                             }
                         }
@@ -2249,7 +2249,7 @@ enter_frame:
                     if (grow)
                         R[I.a].resizeND(need.data(), newNd, engine_.mr_);
 
-                    const keel::usize ndu = static_cast<keel::usize>(nd);
+                    const keel::usize ndu = keel::as<keel::usize>(nd);
                     keel::Array<keel::Array<keel::usize>> idxLists(ndu);
                     keel::Array<const keel::usize *> idxPtrs(ndu);
                     keel::Array<keel::usize> idxCounts(ndu);
@@ -3040,11 +3040,11 @@ enter_frame:
                     for (keel::u16 i = 0; i < ndims; ++i)
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
                     const int curNd = R[I.a].dims().ndim();
-                    const int newNd = std::max(static_cast<int>(ndims), curNd);
-                    keel::Array<keel::usize> need(newNd, static_cast<keel::usize>(1));
+                    const int newNd = std::max(keel::as<int>(ndims), curNd);
+                    keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
                     for (int i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
-                    bool grow = (static_cast<int>(ndims) > curNd);
+                    bool grow = (keel::as<int>(ndims) > curNd);
                     for (keel::u16 i = 0; i < ndims; ++i) {
                         if (coords[i] + 1 > need[i]) {
                             need[i] = coords[i] + 1;
@@ -3140,7 +3140,7 @@ enter_frame:
 
                 // Try resolved inline cache first
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < static_cast<keel::i32>(resolvedFuncs.size())
+                if (funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
                     && resolvedFuncs[funcIdx].epoch == curEpoch) {
                     const auto &ce = resolvedFuncs[funcIdx];
                     if (ce.userChunk) {
@@ -3167,7 +3167,7 @@ enter_frame:
                     const keel::String &funcName = chunk.strings[funcIdx];
                     const BytecodeChunk *found = findCompiledFunc(funcName);
                     if (found) {
-                        if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                        if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                             resolvedFuncs.resize(funcIdx + 1);
                         resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         targetChunk = found;
@@ -3268,7 +3268,7 @@ enter_frame:
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
                         if (!hasImports && originStable) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         }
@@ -3299,7 +3299,7 @@ enter_frame:
                         if (!cb && !hasImports && originStable
                             && !(na >= 1 && R[argBase].isObject())
                             && !engine_.findClass(funcName)) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
                         }
@@ -3333,7 +3333,7 @@ enter_frame:
                     auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
                         if (chunk.parentFuncName.empty())
                             return keel::kNullOpt;
-                        for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                        for (int fi = keel::as<int>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                 continue;
@@ -3346,10 +3346,10 @@ enter_frame:
                                 }
                             }
                         }
-                        for (int psi = static_cast<int>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
+                        for (int psi = keel::as<int>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
                             const VM::PausedState *ps = activePausedStates_[psi];
                             if (!ps) continue;
-                            for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                            for (int fi = keel::as<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                 const CallFrame &pf = ps->frames[fi];
                                 if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                     continue;
@@ -3506,14 +3506,14 @@ enter_frame:
                     || engine_.currentScriptDir()->empty();
 
                 const BytecodeChunk *targetChunk = nullptr;
-                if (funcIdx < static_cast<keel::i32>(resolvedFuncs.size())
+                if (funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
                     && resolvedFuncs[funcIdx].epoch == curEpoch
                     && resolvedFuncs[funcIdx].userChunk)
                     targetChunk = resolvedFuncs[funcIdx].userChunk;
                 if (!targetChunk) {
                     const keel::String &funcName = chunk.strings[funcIdx];
                     if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                        if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                        if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                             resolvedFuncs.resize(funcIdx + 1);
                         resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         targetChunk = found;
@@ -3583,7 +3583,7 @@ enter_frame:
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
                         if (!hasImports && originStable) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         }
@@ -3691,7 +3691,7 @@ enter_frame:
                     || engine_.currentScriptDir()->empty();
 
                 // Inline cache check (user chunk or external builtin)
-                if (funcIdx < static_cast<keel::i32>(resolvedFuncs.size())
+                if (funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
                     && resolvedFuncs[funcIdx].epoch == curEpoch) {
                     const auto &ce = resolvedFuncs[funcIdx];
                     if (ce.userChunk) {
@@ -3720,7 +3720,7 @@ enter_frame:
 
                 // Try compiled user function first.
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                    if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                    if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                         resolvedFuncs.resize(funcIdx + 1);
                     resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                     frame.ip = ip + 1;
@@ -3781,7 +3781,7 @@ enter_frame:
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
                         if (!hasImports && originStable) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         }
@@ -3799,7 +3799,7 @@ enter_frame:
                             && !(NF >= 1 && AB[0].isObject())
                             && !engine_.callbackBuiltin(funcName)
                             && !engine_.findClass(funcName)) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
                         }
@@ -3850,7 +3850,7 @@ enter_frame:
                     || !engine_.currentScriptDir()
                     || engine_.currentScriptDir()->empty();
 
-                if (funcIdx < static_cast<keel::i32>(resolvedFuncs.size())
+                if (funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
                     && resolvedFuncs[funcIdx].epoch == curEpoch) {
                     const auto &ce = resolvedFuncs[funcIdx];
                     if (ce.userChunk) {
@@ -3878,7 +3878,7 @@ enter_frame:
                 }
 
                 if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                    if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                    if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                         resolvedFuncs.resize(funcIdx + 1);
                     resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                     frame.ip = ip + 1;
@@ -3925,7 +3925,7 @@ enter_frame:
                         if (!found)
                             found = engine_.ensureClassMethodChunk(*uf);
                         if (!hasImports && originStable) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
                         }
@@ -3941,7 +3941,7 @@ enter_frame:
                             && !(NF >= 1 && AB[0].isObject())
                             && !engine_.callbackBuiltin(funcName)
                             && !engine_.findClass(funcName)) {
-                            if (funcIdx >= static_cast<keel::i32>(resolvedFuncs.size()))
+                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
                                 resolvedFuncs.resize(funcIdx + 1);
                             resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
                         }
@@ -4040,8 +4040,8 @@ enter_frame:
                 // a=outBase, b=objReg, c=argBase, d=nameIdx,
                 // e=(nargs<<8)|nout (each byte <= 255).
                 keel::u16 outBase = I.a, objReg = I.b, argBase = I.c;
-                keel::u16 na = static_cast<keel::u16>((I.e >> 8) & 0xFF);
-                keel::u16 nout = static_cast<keel::u16>(I.e & 0xFF);
+                keel::u16 na = keel::as<keel::u16>((I.e >> 8) & 0xFF);
+                keel::u16 nout = keel::as<keel::u16>(I.e & 0xFF);
                 const keel::String &mname = chunk.strings[I.d];
                 Value &obj = R[objReg];
                 if (!obj.isObject())
@@ -4307,7 +4307,7 @@ enter_frame:
                     if (!chunk.parentFuncName.empty()) {
                         const keel::String &nn = chunk.strings[I.d];
                         bool foundInParent = false;
-                        for (int fi = static_cast<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                        for (int fi = keel::as<int>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                 continue;
@@ -4325,10 +4325,10 @@ enter_frame:
                                 break;
                         }
                         if (!foundInParent) {
-                            for (int psi = static_cast<int>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
+                            for (int psi = keel::as<int>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
                                 const VM::PausedState *ps = activePausedStates_[psi];
                                 if (!ps) continue;
-                                for (int fi = static_cast<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                                for (int fi = keel::as<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                     const CallFrame &pf = ps->frames[fi];
                                     if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                         continue;
@@ -4552,7 +4552,7 @@ enter_frame:
         // Enrich with current instruction's source location if missing
         // (e.g. Error thrown from a public C++ library API that didn't
         // know its call site).
-        keel::usize instrIdx = static_cast<keel::usize>(ip - chunk.code.data());
+        keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
         if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
             mle.attachIfMissing(chunk.sourceMap[instrIdx].line,
                                 chunk.sourceMap[instrIdx].col,
@@ -4816,7 +4816,7 @@ static keel::String describeInstruction(const Instruction &instr,
                                      const Instruction *ip,
                                      const BytecodeChunk &chunk)
 {
-    keel::usize instrIdx = static_cast<keel::usize>(ip - chunk.code.data());
+    keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
     if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
         keel::String context = describeInstruction(*ip, chunk);
         throw Error(ex.what(),
@@ -5219,12 +5219,12 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     // empty 0x0 when none) — same semantics as TreeWalker.
     const bool va = !funcChunk.paramNames.empty()
                     && funcChunk.paramNames.back() == "varargin";
-    if (!va && userNargs > static_cast<keel::usize>(funcChunk.numParams))
+    if (!va && userNargs > keel::as<keel::usize>(funcChunk.numParams))
         throw std::runtime_error(
             keel::format("Too many input arguments for function '{}'", funcChunk.name).c_str());
 
     keel::u32 nregs = funcChunk.numRegisters;
-    keel::usize pc = std::min(userNargs, static_cast<keel::usize>(funcChunk.numParams));
+    keel::usize pc = std::min(userNargs, keel::as<keel::usize>(funcChunk.numParams));
 
     // Copy args, upvalue boxes, varargin, and ctorSeed BEFORE ensureRegStackCapacity,
     // since `args` or `ctorSeed` may point into caller registers inside regStack_.
@@ -5288,15 +5288,15 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
 
     // Inject nargin/nargout into function scope in O(1)
     if (funcChunk.narginReg < nregs)
-        newR[funcChunk.narginReg] = Value::scalar(static_cast<double>(userNargs), nullptr);
+        newR[funcChunk.narginReg] = Value::scalar(keel::as<double>(userNargs), nullptr);
     if (funcChunk.nargoutReg < nregs)
-        newR[funcChunk.nargoutReg] = Value::scalar(static_cast<double>(nargout), nullptr);
+        newR[funcChunk.nargoutReg] = Value::scalar(keel::as<double>(nargout), nullptr);
     if (funcChunk.narginReg == kInvalidReg && funcChunk.nargoutReg == kInvalidReg) {
         for (const auto &[vname, reg] : funcChunk.varMap) {
             if (vname == "nargin" && reg < nregs)
-                newR[reg] = Value::scalar(static_cast<double>(userNargs), nullptr);
+                newR[reg] = Value::scalar(keel::as<double>(userNargs), nullptr);
             else if (vname == "nargout" && reg < nregs)
-                newR[reg] = Value::scalar(static_cast<double>(nargout), nullptr);
+                newR[reg] = Value::scalar(keel::as<double>(nargout), nullptr);
         }
     }
 
@@ -5334,10 +5334,10 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
         const auto &callerFrame = frames_.back();
         if (callerFrame.chunk && callerFrame.ip
             && callerFrame.ip > callerFrame.chunk->code.data()) {
-            keel::usize callIdx = static_cast<keel::usize>(
+            keel::usize callIdx = keel::as<keel::usize>(
                 (callerFrame.ip - 1) - callerFrame.chunk->code.data());
             if (const auto *argNames = callerFrame.chunk->callSiteArgNames.get(
-                    static_cast<keel::u32>(callIdx)))
+                    keel::as<keel::u32>(callIdx)))
                 callerArgNames = argNames->clone();
         }
     }
@@ -5553,7 +5553,7 @@ void VM::forSetVar(Value &varReg, const ForState &fs)
         // Lazy colon range: compute scalar from start + index*step.
         // start/stop bounds are validated at FOR_INIT_RANGE time, so
         // here we just emit the value with no allocation.
-        const double v = fs.lazyStart + static_cast<double>(fs.index) * fs.lazyStep;
+        const double v = fs.lazyStart + keel::as<double>(fs.index) * fs.lazyStep;
         if (varReg.isDoubleScalar())
             varReg.setScalarFast(v);
         else
@@ -5935,7 +5935,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
             R[dstReg] = mv.indexGet2D(rids.data(), rids.size(), cids.data(), cids.size(),
                                    engine_.mr_);
         } else {
-            const int nd = static_cast<int>(na);
+            const int nd = keel::as<int>(na);
             keel::Array<keel::Array<keel::usize>> lists;
             lists.resize(nd);
             keel::Array<const keel::usize *> ptrs;
@@ -5960,7 +5960,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
     const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
 
     // Build args: user args + captured values
-    keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
+    keel::usize totalArgsN = keel::as<keel::usize>(na) + numCaptures;
     keel::Array<Value> argsBuf;
     argsBuf.resize(totalArgsN);
     for (keel::usize i = 0; i < na; ++i)
@@ -6007,7 +6007,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
 {
     // a=outBase, b=fhReg, c=argBase, d=nargs, e=nout
     keel::u16 outBase = I.a, fhReg = I.b, argBase = I.c;
-    keel::u16 na = static_cast<keel::u16>(I.d);
+    keel::u16 na = keel::as<keel::u16>(I.d);
     keel::u16 nout = I.e;
 
     // Resolve the function handle (plain or closure) + its captures.
@@ -6044,7 +6044,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
 
     // Build args: user args followed by captured values.
-    keel::usize totalArgsN = static_cast<keel::usize>(na) + numCaptures;
+    keel::usize totalArgsN = keel::as<keel::usize>(na) + numCaptures;
     keel::Array<Value> argsBuf;
     argsBuf.resize(totalArgsN);
     for (keel::usize i = 0; i < na; ++i)
@@ -6186,7 +6186,7 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
         }
     } else {
         // ND indexing fallback for na >= 4. CELL handled by indexGetND.
-        const int nd = static_cast<int>(na);
+        const int nd = keel::as<int>(na);
         keel::Array<keel::Array<keel::usize>> idxLists;
         idxLists.resize(nd);
         keel::Array<const keel::usize *> idxPtrs;

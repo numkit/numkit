@@ -65,7 +65,7 @@ bool isHermitianApprox(const Value &A, double tol)
     if (A.dims().ndim() != 2 || A.dims().rows() != A.dims().cols())
         return false;
     if (!A.isComplex()) return false;
-    const keel::usize n = static_cast<keel::usize>(A.dims().rows());
+    const keel::usize n = keel::as<keel::usize>(A.dims().rows());
     const keel::c64 *d = A.complexData();
     for (keel::usize i = 0; i < n; ++i)
         for (keel::usize j = i + 1; j < n; ++j) {
@@ -123,7 +123,7 @@ std::tuple<Value, Value> eigVDAuto(const Value &M, keel::Allocator *mr)
 static Value leftEigenvectors(const Value &M, const Value &D,
                               keel::Allocator *mr)
 {
-    const keel::usize n = static_cast<keel::usize>(M.dims().dim(0));
+    const keel::usize n = keel::as<keel::usize>(M.dims().dim(0));
     // Mᵀ.
     Value Mt = Value::matrix(n, n, ValueType::DOUBLE, mr);
     double *mt = Mt.doubleDataMut();

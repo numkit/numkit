@@ -371,7 +371,7 @@ StyleParts parseStyle(keel::StringRef s)
 keel::String rgbToHex(const Value &v)
 {
     auto clamp255 = [](double d) {
-        int i = static_cast<int>(d * 255.0 + 0.5);
+        int i = keel::as<int>(d * 255.0 + 0.5);
         if (i < 0) i = 0;
         if (i > 255) i = 255;
         return i;
@@ -868,7 +868,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         }
         if (name == "NumBins") {
             auto cv = figdetail::parseFlatDoubles(ds->yJson);
-            return Value::scalar(static_cast<double>(cv.size()), mr);
+            return Value::scalar(keel::as<double>(cv.size()), mr);
         }
         if (name == "BinWidth") {
             auto ev = figdetail::parseFlatDoubles(ds->zJson);
@@ -948,7 +948,7 @@ Value makeAxesHandle(FigureManager &fm, keel::Allocator *mr)
 {
     FigureState &fig = fm.current();
     const int fid = fm.currentFigureId();
-    const keel::usize aidx = static_cast<keel::usize>(fig.currentAxes);
+    const keel::usize aidx = keel::as<keel::usize>(fig.currentAxes);
     if (auto *rec = findRecordBy(fm, "axes", fid, aidx))
         return makeGraphicsHandleValue(kAxesClass, handleIdOfRecord(fm, rec), mr);
     const int id = fm.createHandle("axes", kAxesClass);
@@ -1055,7 +1055,7 @@ keel::String canonicalPropName(keel::StringRef raw)
     keel::String low = keel::String::from(raw);
     for (char &ch : low)
         if (ch >= 'A' && ch <= 'Z')
-            ch = static_cast<char>(ch - 'A' + 'a');
+            ch = keel::as<char>(ch - 'A' + 'a');
     static const std::pair<const char *, const char *> kNames[] = {
         {"xlim", "XLim"}, {"ylim", "YLim"}, {"zlim", "ZLim"}, {"clim", "CLim"},
         {"xtick", "XTick"}, {"ytick", "YTick"}, {"ztick", "ZTick"},
@@ -1209,11 +1209,11 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return decodeProp(*hit, mr);
         keel::String lowName = name.clone();
         for (char &ch : lowName)
-            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+            if (ch >= 'A' && ch <= 'Z') ch = keel::as<char>(ch - 'A' + 'a');
         for (auto [k, v] : rec->props) {
             keel::String lk = k.clone();
             for (char &ch : lk)
-                if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+                if (ch >= 'A' && ch <= 'Z') ch = keel::as<char>(ch - 'A' + 'a');
             if (lk == lowName)
                 return decodeProp(v, mr);
         }
@@ -1677,9 +1677,9 @@ void registerHandleAccessors(Engine &engine)
                             const int logW  = GetDeviceCaps(hdc, 8);   // HORZRES
                             ReleaseDC(nullptr, hdc);
                             if (physW > 0 && physH > 0 && logW > 0) {
-                                const double scale = std::round((static_cast<double>(physW) / static_cast<double>(logW)) * 4.0) / 4.0;
-                                w = (scale > 0.0) ? (static_cast<double>(physW) / scale) : static_cast<double>(logW);
-                                h = (scale > 0.0) ? (static_cast<double>(physH) / scale) : static_cast<double>(physH);
+                                const double scale = std::round((keel::as<double>(physW) / keel::as<double>(logW)) * 4.0) / 4.0;
+                                w = (scale > 0.0) ? (keel::as<double>(physW) / scale) : keel::as<double>(logW);
+                                h = (scale > 0.0) ? (keel::as<double>(physH) / scale) : keel::as<double>(physH);
                             }
                         }
 #endif
@@ -2034,14 +2034,14 @@ void registerHandleAccessors(Engine &engine)
             keel::usize r = 1, c = 1;
             if (args.size() == 1 && args[0].isNumeric()) {
                 if (args[0].numel() == 1) {
-                    r = c = static_cast<keel::usize>(std::max(0.0, args[0].toScalar()));
+                    r = c = keel::as<keel::usize>(std::max(0.0, args[0].toScalar()));
                 } else if (args[0].numel() >= 2) {
-                    r = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-                    c = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
+                    r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
+                    c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
                 }
             } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-                r = static_cast<keel::usize>(std::max(0.0, args[0].toScalar()));
-                c = static_cast<keel::usize>(std::max(0.0, args[1].toScalar()));
+                r = keel::as<keel::usize>(std::max(0.0, args[0].toScalar()));
+                c = keel::as<keel::usize>(std::max(0.0, args[1].toScalar()));
             }
             auto *res = mr ? mr : keel::default_allocator();
             keel::usize n = r * c;
@@ -2124,12 +2124,12 @@ void registerGraphicsClasses(Engine &engine)
                 h = makeAxesHandle(fm, mr);
             } else if (recTypeRef == "text") {
                 const int fid = fm.currentFigureId();
-                const keel::usize aidx = static_cast<keel::usize>(fm.current().currentAxes);
+                const keel::usize aidx = keel::as<keel::usize>(fm.current().currentAxes);
                 const int id = fm.createHandleAt(fid, aidx, "text", kTextClass);
                 h = makeGraphicsHandleValue(kTextClass, id, mr);
             } else if (recTypeRef == "legend") {
                 const int fid = fm.currentFigureId();
-                const keel::usize aidx = static_cast<keel::usize>(fm.current().currentAxes);
+                const keel::usize aidx = keel::as<keel::usize>(fm.current().currentAxes);
                 h = makeLegendHandleFor(fm, fid, aidx, mr);
             } else if (recTypeRef == "root") {
                 h = makeRootHandle(fm, mr);
@@ -2344,7 +2344,7 @@ void GraphicsLibrary::install(Engine &engine)
                             (hType == "surface" || hType == "contour");
                         const int nnew = isSurfOrContour
                                              ? 1
-                                             : static_cast<int>(after - base);
+                                             : keel::as<int>(after - base);
                         if (nnew == 1) {
                             const int id = fm.createHandle(hType, hClass, base);
                             if (isSurfOrContour) {
@@ -2383,14 +2383,14 @@ void GraphicsLibrary::install(Engine &engine)
                             for (int i = 0; i < nnew; ++i) {
                                 const int id = fm.createHandle(
                                     hType, hClass,
-                                    base + static_cast<keel::usize>(i));
+                                    base + keel::as<keel::usize>(i));
                                 auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
                                 payload->handleId = id;
                                 auto st = keel::make_arc_in<ObjectState>(res, res);
                                 st->native = keel::move(payload);
                                 states.push_back(keel::move(st));
                             }
-                            Dims d{1, static_cast<keel::usize>(nnew)};
+                            Dims d{1, keel::as<keel::usize>(nnew)};
                             outs[0] = Value::objectArray(
                                 hClass, d, keel::move(states),
                                 /*isHandle=*/true, res);
@@ -2423,18 +2423,18 @@ void GraphicsLibrary::install(Engine &engine)
                                       slot, mr)
                                 : makeTextHandleFor(
                                       fm, fm.currentFigureId(),
-                                      static_cast<keel::usize>(
+                                      keel::as<keel::usize>(
                                           fm.current().currentAxes),
                                       slot, mr);
                     } else if (name == "text") {
                         outs[0] = makeTextHandleFor(
                             fm, fm.currentFigureId(),
-                            static_cast<keel::usize>(fm.current().currentAxes),
+                            keel::as<keel::usize>(fm.current().currentAxes),
                             "text", mr);
                     } else if (name == "legend") {
                         outs[0] = makeLegendHandleFor(
                             fm, fm.currentFigureId(),
-                            static_cast<keel::usize>(fm.current().currentAxes),
+                            keel::as<keel::usize>(fm.current().currentAxes),
                             mr);
                     } else {
                         outs[0] = makeAxesHandle(fm, mr);

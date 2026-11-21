@@ -169,7 +169,7 @@ void heatmapImpl(
                 double t = (v - cmin) * qScale;
                 if (t < 0) t = 0;
                 else if (t > 254) t = 254;
-                ds.zQuantized[i] = static_cast<keel::u8>(t + 0.5);
+                ds.zQuantized[i] = keel::as<keel::u8>(t + 0.5);
             }
         }
 
@@ -187,7 +187,7 @@ void heatmapImpl(
                 zs << "[";
                 for (keel::usize c = 0; c < cols; ++c) {
                     if (c) zs << ",";
-                    zs << static_cast<int>(ds.zQuantized[c * rows + r]);
+                    zs << keel::as<int>(ds.zQuantized[c * rows + r]);
                 }
                 zs << "]";
             }

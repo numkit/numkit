@@ -1174,9 +1174,9 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             xs << '['; ys << '[';
             bool first = true;
             for (keel::usize i = 0; i < M; ++i) {
-                const keel::usize a = static_cast<keel::usize>(T[0 * M + i]) - 1;
-                const keel::usize b = static_cast<keel::usize>(T[1 * M + i]) - 1;
-                const keel::usize c = static_cast<keel::usize>(T[2 * M + i]) - 1;
+                const keel::usize a = keel::as<keel::usize>(T[0 * M + i]) - 1;
+                const keel::usize b = keel::as<keel::usize>(T[1 * M + i]) - 1;
+                const keel::usize c = keel::as<keel::usize>(T[2 * M + i]) - 1;
                 if (a >= N || b >= N || c >= N) continue;
                 if (!first) { xs << ",null,"; ys << ",null,"; }
                 first = false;

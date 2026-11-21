@@ -399,12 +399,12 @@ void registerFigureExport(Engine &engine)
             outs[0] = std::move(H);
             if (nargout >= 2 && outs.size() >= 2) {
                 Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = static_cast<double>(i + 1);
+                for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = keel::as<double>(i + 1);
                 outs[1] = std::move(T);
             }
             if (nargout >= 3 && outs.size() >= 3) {
                 Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = static_cast<double>(i + 1);
+                for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = keel::as<double>(i + 1);
                 outs[2] = std::move(P);
             }
         };
@@ -426,14 +426,14 @@ void registerFigureExport(Engine &engine)
                 keel::usize m = 256;
                 if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {
                     double mv = args[0].toScalar();
-                    m = (mv >= 0.0) ? static_cast<keel::usize>(mv) : 0;
+                    m = (mv >= 0.0) ? keel::as<keel::usize>(mv) : 0;
                 }
                 Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
                 if (m > 0) {
                     double *d = C.doubleDataMut();
                     if (paletteName == "jet") {
                         std::fill(d, d + 3 * m, 0.0);
-                        const int mi = static_cast<int>(m);
+                        const int mi = keel::as<int>(m);
                         const int n = (mi + 3) / 4;
                         const int ulen = n + (n - 1) + n;
                         auto u_at = [&](int idx1) -> double {
@@ -449,11 +449,11 @@ void registerFigureExport(Engine &engine)
                             const int b = g - n;
                             if (r >= 1 && r <= mi) {
                                 ++rcount;
-                                d[0 * m + static_cast<keel::usize>(r - 1)] = u_at(rcount);
+                                d[0 * m + keel::as<keel::usize>(r - 1)] = u_at(rcount);
                             }
                             if (g >= 1 && g <= mi) {
                                 ++gcount;
-                                d[1 * m + static_cast<keel::usize>(g - 1)] = u_at(gcount);
+                                d[1 * m + keel::as<keel::usize>(g - 1)] = u_at(gcount);
                             }
                             if (b >= 1 && b <= mi) ++bcount;
                         }
@@ -463,7 +463,7 @@ void registerFigureExport(Engine &engine)
                             const int b = g - n;
                             if (b >= 1 && b <= mi) {
                                 ++bsofar;
-                                d[2 * m + static_cast<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
+                                d[2 * m + keel::as<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
                             }
                         }
                     } else if (paletteName == "gray") {
@@ -477,7 +477,7 @@ void registerFigureExport(Engine &engine)
                             d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
                         }
                     } else if (paletteName == "hot") {
-                        const int mi = static_cast<int>(m);
+                        const int mi = keel::as<int>(m);
                         const int n = (3 * mi) / 8;
                         for (int i = 0; i < mi; ++i) {
                             d[i]         = (i < n) ? double(i + 1) / double(n) : 1.0;
@@ -488,8 +488,8 @@ void registerFigureExport(Engine &engine)
                         int tableN = 256;
                         const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
                         for (keel::usize i = 0; i < m; ++i) {
-                            double t = (m == 1) ? 0.0 : static_cast<double>(i) / static_cast<double>(m - 1);
-                            int idx = std::min(tableN - 1, std::max(0, static_cast<int>(std::lround(t * (tableN - 1)))));
+                            double t = (m == 1) ? 0.0 : keel::as<double>(i) / keel::as<double>(m - 1);
+                            int idx = std::min(tableN - 1, std::max(0, keel::as<int>(std::lround(t * (tableN - 1)))));
                             d[i]         = tbl[idx * 3 + 0] / 255.0;
                             d[i + m]     = tbl[idx * 3 + 1] / 255.0;
                             d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;

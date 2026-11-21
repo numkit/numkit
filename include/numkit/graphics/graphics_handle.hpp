@@ -34,7 +34,7 @@ struct GraphicsHandlePayload : public NativePayload
         p->numericValue = numericValue;
         return p;
     }
-    keel::f64 asDouble() const override { return static_cast<keel::f64>(numericValue != 0 ? numericValue : handleId); }
+    keel::f64 asDouble() const override { return keel::as<keel::f64>(numericValue != 0 ? numericValue : handleId); }
 };
 
 // Registry id of a graphics-handle Value, or -1 when `v` is not one.

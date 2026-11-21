@@ -147,7 +147,7 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     xs.push_back('['); ys.push_back('[');
     for (keel::usize i = 0; i < m; ++i) {
         if (i) { xs.push_back(','); ys.push_back(','); }
-        const keel::usize kk = static_cast<keel::usize>(k[i]) - 1;
+        const keel::usize kk = keel::as<keel::usize>(k[i]) - 1;
         figdetail::appendDouble(xs, args[0].elemAsDouble(kk));
         figdetail::appendDouble(ys, args[1].elemAsDouble(kk));
     }
@@ -402,7 +402,7 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 bestIdx = p + 1;
             }
         }
-        K.doubleDataMut()[q] = static_cast<double>(bestIdx);
+        K.doubleDataMut()[q] = keel::as<double>(bestIdx);
         if (nargout >= 2)
             D.doubleDataMut()[q] = std::sqrt(bestDistSq);
     }

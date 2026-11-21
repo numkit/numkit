@@ -156,8 +156,8 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
     if (op == '^') {
         if (!isTfStruct(a) || !b.isScalar() || !b.isNumeric() || b.isComplex()) return false;
         const double expVal = b.toScalar();
-        const int k = static_cast<int>(expVal);
-        if (static_cast<double>(k) != expVal) return false;
+        const int k = keel::as<int>(expVal);
+        if (keel::as<double>(k) != expVal) return false;
         keel::Array<double> num = {1.0}, den = {1.0};
         const int ak = keel::abs(k);
         const auto &baseN = (k >= 0) ? pa.num : pa.den;

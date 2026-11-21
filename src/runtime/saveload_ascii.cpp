@@ -44,7 +44,7 @@ void saveAscii(Engine &engine, Environment &env,
                 char buf[32];
                 int len = std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
                 if (len > 0)
-                    out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
+                    out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
             }
             out.push_back('\n');
         }
@@ -102,7 +102,7 @@ void loadAscii(Engine &engine, Environment &env,
             if (endp == start)
                 throw Error(keel::format("load: parse error near '{}'", line.substr(q)));
             row.push_back(v);
-            q = static_cast<keel::usize>(endp - line.c_str());
+            q = keel::as<keel::usize>(endp - line.c_str());
         }
         rows.push_back(keel::move(row));
     }

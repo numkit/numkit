@@ -50,7 +50,7 @@ void fprintf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     argcheck::checkNargin(args.size(), 1, "fprintf");
     keel::usize count = ::numkit::runtime::fprintf(*ctx.engine, args);
     if (nargout >= 1 && !outs.empty())
-        outs[0] = Value::scalar(static_cast<double>(count), ctx.engine->allocator());
+        outs[0] = Value::scalar(keel::as<double>(count), ctx.engine->allocator());
 }
 
 } // namespace detail

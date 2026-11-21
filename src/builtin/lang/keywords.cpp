@@ -59,7 +59,7 @@ bool isvarname(keel::StringRef s)
     if (s.empty()) return false;
     if (keel::is_ascii_alpha(s[0]) == 0) return false;
     for (keel::usize i = 1; i < s.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const unsigned char c = keel::as<unsigned char>(s[i]);
         if (!(keel::is_ascii_alnum(c) || c == '_')) return false;
     }
     return !iskeyword(s);

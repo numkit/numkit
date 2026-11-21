@@ -380,14 +380,14 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             }
             const double bw = (mx - mn) / nbins;
             const double bwSafe = (bw == 0) ? 1.0 : bw;
-            keel::Array<double> counts(nbins, 0.0), centers(static_cast<keel::usize>(nbins));
+            keel::Array<double> counts(nbins, 0.0), centers(keel::as<keel::usize>(nbins));
             for (int i = 0; i < nbins; ++i)
-                centers[static_cast<keel::usize>(i)] = mn + bwSafe * (i + 0.5);
+                centers[keel::as<keel::usize>(i)] = mn + bwSafe * (i + 0.5);
             for (double v : xs) {
                 int b = (int)((v - mn) / bwSafe);
                 if (b >= nbins) b = nbins - 1;
                 if (b < 0) b = 0;
-                counts[static_cast<keel::usize>(b)] += 1;
+                counts[keel::as<keel::usize>(b)] += 1;
             }
             double mean = 0;
             for (double v : xs) mean += v;
@@ -404,7 +404,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             bx << '['; by << '[';
             for (int i = 0; i < nbins; ++i) {
                 if (i) { bx << ','; by << ','; }
-                bx << centers[static_cast<keel::usize>(i)]; by << counts[static_cast<keel::usize>(i)];
+                bx << centers[keel::as<keel::usize>(i)]; by << counts[keel::as<keel::usize>(i)];
             }
             bx << ']'; by << ']';
             fx << '['; fy << '[';
@@ -625,7 +625,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 }
             } else {
                 int bins = (args.size() >= 2 && !args[1].isEmpty())
-                    ? std::max(1, static_cast<int>(args[1].toScalar()))
+                    ? std::max(1, keel::as<int>(args[1].toScalar()))
                     : 10;
                 double mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
                 double mx = mn;
@@ -647,7 +647,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     const double v = data.elemAsDouble(i);
                     if (std::isnan(v))
                         continue;
-                    int b = static_cast<int>((v - mn) / bw);
+                    int b = keel::as<int>((v - mn) / bw);
                     if (b >= bins)
                         b = bins - 1;
                     if (b < 0)
@@ -1317,7 +1317,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
 
                 // Sample KDE density on a uniform y grid [mn, mx].
-                keel::Array<double> ys(kdePts), den(static_cast<keel::usize>(kdePts));
+                keel::Array<double> ys(kdePts), den(keel::as<keel::usize>(kdePts));
                 double maxD = 0;
                 for (int g = 0; g < kdePts; ++g) {
                     const double y = mn + (mx - mn) * g / (double)(kdePts - 1);
@@ -1327,8 +1327,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                         s += std::exp(-0.5 * t * t);
                     }
                     s /= (col.size() * bw * std::sqrt(2 * 3.14159265358979323846));
-                    ys[static_cast<keel::usize>(g)] = y;
-                    den[static_cast<keel::usize>(g)] = s;
+                    ys[keel::as<keel::usize>(g)] = y;
+                    den[keel::as<keel::usize>(g)] = s;
                     if (s > maxD) maxD = s;
                 }
                 if (maxD <= 0) continue;
@@ -1344,12 +1344,12 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 for (int g = 0; g < kdePts; ++g) {
                     if (!first) { xs << ','; vy << ','; }
                     first = false;
-                    xs << (cx + den[static_cast<keel::usize>(g)] * scale);
-                    vy << ys[static_cast<keel::usize>(g)];
+                    xs << (cx + den[keel::as<keel::usize>(g)] * scale);
+                    vy << ys[keel::as<keel::usize>(g)];
                 }
                 for (int g = kdePts - 1; g >= 0; --g) {
-                    xs << ',' << (cx - den[static_cast<keel::usize>(g)] * scale);
-                    vy << ',' << ys[static_cast<keel::usize>(g)];
+                    xs << ',' << (cx - den[keel::as<keel::usize>(g)] * scale);
+                    vy << ',' << ys[keel::as<keel::usize>(g)];
                 }
                 xs << ']'; vy << ']';
                 DatasetInfo dsV;

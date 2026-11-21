@@ -91,8 +91,8 @@ void register_lang(Engine &engine) {
     auto fwdCallFn = [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
                         CallContext &ctx) {
         argcheck::checkNargin(args.size(), 2, "__numkit_fwd_call__");
-        long long nll = static_cast<long long>(args[0].toScalar());
-        keel::usize n = (nll > 0) ? static_cast<keel::usize>(nll) : 1;
+        long long nll = keel::as<long long>(args[0].toScalar());
+        keel::usize n = (nll > 0) ? keel::as<keel::usize>(nll) : 1;
         keel::ArrayRef<Value> callArgs(args.data() + 2, args.size() - 2);
         keel::Array<Value> rs(ctx.engine->allocator());
         bool done = false;

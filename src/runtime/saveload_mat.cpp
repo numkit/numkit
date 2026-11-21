@@ -118,7 +118,7 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
         const int nd = d.ndims();
         for (int i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
         keel::matfile::MatArray cell = keel::matfile::MatArray::make_cell(
-            keel::ArrayRef<keel::usize>(dimsBuf, static_cast<keel::usize>(nd)), alloc);
+            keel::ArrayRef<keel::usize>(dimsBuf, keel::as<keel::usize>(nd)), alloc);
         for (keel::usize i = 0; i < v.numel(); ++i) {
             *cell.cell_mut(i) = keel::matfile::MatArray::from_string(v.stringElem(i).as_ref(), alloc);
         }
@@ -137,7 +137,7 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
     while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
     for (int i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
-    const keel::ArrayRef<keel::usize> dimsRef(dimsBuf, static_cast<keel::usize>(nd));
+    const keel::ArrayRef<keel::usize> dimsRef(dimsBuf, keel::as<keel::usize>(nd));
     const keel::usize numElems = d.numel();
 
     if (v.type() == ValueType::CELL) {
@@ -220,24 +220,24 @@ double readMatScalarAsDouble(const keel::matfile::MatArray &arr, const keel::Arr
         case keel::matfile::MatClass::Double:
             return reinterpret_cast<const double *>(buf.data())[idx];
         case keel::matfile::MatClass::Single:
-            return static_cast<double>(reinterpret_cast<const float *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const float *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int8:
-            return static_cast<double>(reinterpret_cast<const keel::i8 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::i8 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint8:
         case keel::matfile::MatClass::Logical:
-            return static_cast<double>(buf[idx]);
+            return keel::as<double>(buf[idx]);
         case keel::matfile::MatClass::Int16:
-            return static_cast<double>(reinterpret_cast<const keel::i16 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::i16 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint16:
-            return static_cast<double>(reinterpret_cast<const keel::u16 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::u16 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int32:
-            return static_cast<double>(reinterpret_cast<const keel::i32 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::i32 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint32:
-            return static_cast<double>(reinterpret_cast<const keel::u32 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::u32 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int64:
-            return static_cast<double>(reinterpret_cast<const keel::i64 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::i64 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint64:
-            return static_cast<double>(reinterpret_cast<const keel::u64 *>(buf.data())[idx]);
+            return keel::as<double>(reinterpret_cast<const keel::u64 *>(buf.data())[idx]);
         default:
             return 0.0;
     }
@@ -245,13 +245,13 @@ double readMatScalarAsDouble(const keel::matfile::MatArray &arr, const keel::Arr
 
 Value matArrayToValue(const keel::matfile::MatArray &arr, keel::Allocator *mr)
 {
-    if (arr.rank() > static_cast<keel::usize>(Dims::kMaxRank)) {
+    if (arr.rank() > keel::as<keel::usize>(Dims::kMaxRank)) {
         throw Error("load: MAT5 array rank exceeds maximum supported rank");
     }
-    const int nd = arr.rank() < 2 ? 2 : static_cast<int>(arr.rank());
+    const int nd = arr.rank() < 2 ? 2 : keel::as<int>(arr.rank());
     keel::usize d[Dims::kMaxRank];
     for (int i = 0; i < nd; ++i) {
-        d[i] = (static_cast<keel::usize>(i) < arr.rank()) ? arr.dims[static_cast<keel::usize>(i)] : keel::usize{1};
+        d[i] = (keel::as<keel::usize>(i) < arr.rank()) ? arr.dims[keel::as<keel::usize>(i)] : keel::usize{1};
     }
     const Dims shape(d, nd);
     const keel::usize numElems = shape.numel();
@@ -326,7 +326,7 @@ Value matArrayToValue(const keel::matfile::MatArray &arr, keel::Allocator *mr)
         char *out = result.charDataMut();
         const auto u16s = arr.as_utf16();
         const keel::usize n = keel::min(numElems, u16s.size());
-        for (keel::usize i = 0; i < n; ++i) out[i] = static_cast<char>(u16s[i] & 0xFFu);
+        for (keel::usize i = 0; i < n; ++i) out[i] = keel::as<char>(u16s[i] & 0xFFu);
         return result;
     }
 
@@ -426,7 +426,7 @@ void loadMat(Engine &engine, Environment &env,
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     keel::matfile::MatReadOptions opts;
-    opts.max_rank = static_cast<keel::usize>(Dims::kMaxRank);
+    opts.max_rank = keel::as<keel::usize>(Dims::kMaxRank);
     opts.allocator = scratch.allocator();
 
     auto decoded = keel::matfile::mat_decode(

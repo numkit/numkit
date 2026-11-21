@@ -47,7 +47,7 @@ keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
     int fid = 1;
     keel::usize fmtIdx = 0;
     if (args.size() >= 2 && args[0].isScalar() && args[1].isChar()) {
-        fid = static_cast<int>(args[0].toScalar());
+        fid = keel::as<int>(args[0].toScalar());
         fmtIdx = 1;
     }
     if (!args[fmtIdx].isChar())

@@ -111,8 +111,8 @@ void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
                  const keel::ArenaTemp &scratch)
 {
     const int np = deg + 1;
-    if (static_cast<keel::usize>(np) > m && m > 0) {
-        const int subNp = static_cast<int>(m);
+    if (keel::as<keel::usize>(np) > m && m > 0) {
+        const int subNp = keel::as<int>(m);
         auto subP = keel::Array<double>(m, scratch.allocator());
         auto subR = keel::Array<double>(m * m, scratch.allocator());
         polyfitCore(xx, yd, m, subNp - 1, subP.data(), subR.data(), normr, df, scratch);
@@ -125,30 +125,30 @@ void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
                 Rout[(offset + r) + (offset + c) * np] = subR[r + c * subNp];
         return;
     }
-    auto V = keel::Array<double>(m * static_cast<keel::usize>(np), scratch.allocator());
+    auto V = keel::Array<double>(m * keel::as<keel::usize>(np), scratch.allocator());
     for (keel::usize i = 0; i < m; ++i)
         for (int j = 0; j < np; ++j)
-            V[static_cast<keel::usize>(j) * m + i] = std::pow(xx[i], deg - j);
+            V[keel::as<keel::usize>(j) * m + i] = std::pow(xx[i], deg - j);
 
-    auto VtV = keel::Array<double>(static_cast<keel::usize>(np) * np, scratch.allocator());  // col-major
+    auto VtV = keel::Array<double>(keel::as<keel::usize>(np) * np, scratch.allocator());  // col-major
     for (int r = 0; r < np; ++r)
         for (int c = 0; c < np; ++c) {
             double s = 0.0;
             for (keel::usize i = 0; i < m; ++i)
-                s += V[static_cast<keel::usize>(r) * m + i] * V[static_cast<keel::usize>(c) * m + i];
-            VtV[static_cast<keel::usize>(c) * np + r] = s;
+                s += V[keel::as<keel::usize>(r) * m + i] * V[keel::as<keel::usize>(c) * m + i];
+            VtV[keel::as<keel::usize>(c) * np + r] = s;
         }
     auto Vty = keel::Array<double>(np, scratch.allocator());
     for (int r = 0; r < np; ++r) {
         double s = 0.0;
-        for (keel::usize i = 0; i < m; ++i) s += V[static_cast<keel::usize>(r) * m + i] * yd[i];
+        for (keel::usize i = 0; i < m; ++i) s += V[keel::as<keel::usize>(r) * m + i] * yd[i];
         Vty[r] = s;
     }
 
     // Solve VtV p = Vty (Gaussian elimination with partial pivoting).
-    auto aug = keel::Array<double>(static_cast<keel::usize>(np) * (np + 1), scratch.allocator());
+    auto aug = keel::Array<double>(keel::as<keel::usize>(np) * (np + 1), scratch.allocator());
     for (int r = 0; r < np; ++r) {
-        for (int c = 0; c < np; ++c) aug[r * (np + 1) + c] = VtV[static_cast<keel::usize>(c) * np + r];
+        for (int c = 0; c < np; ++c) aug[r * (np + 1) + c] = VtV[keel::as<keel::usize>(c) * np + r];
         aug[r * (np + 1) + np] = Vty[r];
     }
     for (int k = 0; k < np; ++k) {
@@ -180,13 +180,13 @@ void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
     // matches MATLAB bit-for-bit.
     for (int i = 0; i < np * np; ++i) Rout[i] = 0.0;
     for (int j = 0; j < np; ++j) {
-        double d = VtV[static_cast<keel::usize>(j) * np + j];
+        double d = VtV[keel::as<keel::usize>(j) * np + j];
         for (int k = 0; k < j; ++k)
             d -= Rout[k + j * np] * Rout[k + j * np];
         d = (d > 0.0) ? std::sqrt(d) : 0.0;
         Rout[j + j * np] = d;
         for (int i = j + 1; i < np; ++i) {
-            double s = VtV[static_cast<keel::usize>(i) * np + j];  // symmetric
+            double s = VtV[keel::as<keel::usize>(i) * np + j];  // symmetric
             for (int k = 0; k < j; ++k)
                 s -= Rout[k + j * np] * Rout[k + i * np];
             Rout[j + i * np] = (d != 0.0) ? s / d : 0.0;
@@ -197,12 +197,12 @@ void polyfitCore(const double *xx, const double *yd, keel::usize m, int deg,
     double ss = 0.0;
     for (keel::usize i = 0; i < m; ++i) {
         double yi = 0.0;
-        for (int j = 0; j < np; ++j) yi += V[static_cast<keel::usize>(j) * m + i] * pOut[j];
+        for (int j = 0; j < np; ++j) yi += V[keel::as<keel::usize>(j) * m + i] * pOut[j];
         const double e = yd[i] - yi;
         ss += e * e;
     }
     normr = std::sqrt(ss);
-    df = (m > static_cast<keel::usize>(np)) ? static_cast<double>(m - np) : 0.0;
+    df = (m > keel::as<keel::usize>(np)) ? keel::as<double>(m - np) : 0.0;
 }
 
 } // namespace
@@ -216,7 +216,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const double dv = argcheck::expectedReal(args[2], 3, "degree", "polyfit");
     argcheck::expectedInteger(dv, 3, "degree", "polyfit");
     argcheck::expectedNonNegative(dv, 3, "degree", "polyfit");
-    const int deg = static_cast<int>(dv);
+    const int deg = keel::as<int>(dv);
 
     if (nargout <= 1) {                       // coefficients only — fast path
         outs[0] = polyfit(x, y, deg, mr);
@@ -238,10 +238,10 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     if (center) {
         double s = 0.0;
         for (keel::usize i = 0; i < m; ++i) s += xraw[i];
-        mu0 = s / static_cast<double>(m);
+        mu0 = s / keel::as<double>(m);
         double v = 0.0;
         for (keel::usize i = 0; i < m; ++i) { const double d = xraw[i] - mu0; v += d * d; }
-        mu1 = (m > 1) ? std::sqrt(v / static_cast<double>(m - 1)) : 0.0;
+        mu1 = (m > 1) ? std::sqrt(v / keel::as<double>(m - 1)) : 0.0;
         if (mu1 == 0.0) mu1 = 1.0;            // constant x → avoid /0
         for (keel::usize i = 0; i < m; ++i) xx[i] = (xraw[i] - mu0) / mu1;
     } else {
@@ -249,7 +249,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
 
     auto pbuf = keel::Array<double>(np, scratch.allocator());
-    auto Rbuf = keel::Array<double>(static_cast<keel::usize>(np) * np, scratch.allocator());
+    auto Rbuf = keel::Array<double>(keel::as<keel::usize>(np) * np, scratch.allocator());
     double normr = 0.0, df = 0.0;
     polyfitCore(xx.data(), yd, m, deg, pbuf.data(), Rbuf.data(), normr, df, scratch);
 
@@ -260,7 +260,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     Value S = Value::structure(mr);
     auto Rmat = Value::matrix(np, np, ValueType::DOUBLE, mr);
     std::memcpy(Rmat.doubleDataMut(), Rbuf.data(),
-                static_cast<keel::usize>(np) * np * sizeof(double));
+                keel::as<keel::usize>(np) * np * sizeof(double));
     S.setFieldAll("R", Rmat);
     S.setFieldAll("df", Value::scalar(df, mr));
     S.setFieldAll("normr", Value::scalar(normr, mr));
@@ -268,7 +268,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // S field; the data is already to hand, it was just never exposed).
     double yMean = 0.0;
     for (keel::usize i = 0; i < m; ++i) yMean += yd[i];
-    yMean /= static_cast<double>(m);
+    yMean /= keel::as<double>(m);
     double sstot = 0.0;
     for (keel::usize i = 0; i < m; ++i) { const double d = yd[i] - yMean; sstot += d * d; }
     S.setFieldAll("rsquared", Value::scalar(1.0 - (normr * normr) / sstot, mr));
@@ -319,7 +319,7 @@ void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const Value &Rm    = S.field("R");
     const double *R    = Rm.doubleData();
     const keel::usize np    = p.numel();
-    const int    deg   = static_cast<int>(np) - 1;
+    const int    deg   = keel::as<int>(np) - 1;
 
     auto delta = createLike(xUsed, ValueType::DOUBLE, mr);
     double *dd = delta.doubleDataMut();
@@ -332,7 +332,7 @@ void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto erow = keel::Array<double>(np, scratch.allocator());
     for (keel::usize i = 0; i < nx; ++i) {
         for (keel::usize j = 0; j < np; ++j)
-            vrow[j] = std::pow(xd[i], static_cast<double>(deg - static_cast<int>(j)));
+            vrow[j] = std::pow(xd[i], keel::as<double>(deg - keel::as<int>(j)));
         // Solve e·R = v with R upper-triangular: e[c] = (v[c] - Σ_{k<c} e[k]·R[k][c]) / R[c][c].
         for (keel::usize c = 0; c < np; ++c) {
             double s = vrow[c];
@@ -377,7 +377,7 @@ void padecoef_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, 2, "padecoef");
     argcheck::checkNargin(args.size(), 2, 2, "padecoef");
     const double T = args[0].toScalar();
-    const int    N = static_cast<int>(argcheck::roundLength(args[1], 2, "N", "padecoef"));
+    const int    N = keel::as<int>(argcheck::roundLength(args[1], 2, "N", "padecoef"));
     auto p = padecoef(T, N, ctx.engine->allocator());
     outs[0] = std::move(p.num);
     if (nargout > 1) outs[1] = std::move(p.den);

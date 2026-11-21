@@ -215,12 +215,12 @@ keel::String writematrixToString(const Value &m)
             if (c) out.push_back(',');
             const double v = m.elemAsDouble(c * R + r);
             if (std::isfinite(v) && std::floor(v) == v && keel::abs(v) < 1e16) {
-                keel::format_into(out, "{}", static_cast<long long>(v));
+                keel::format_into(out, "{}", keel::as<long long>(v));
             } else {
                 char buf[64];
                 int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
                 if (len > 0)
-                    out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
+                    out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
             }
         }
         out.push_back('\n');

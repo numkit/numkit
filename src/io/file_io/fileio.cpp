@@ -35,7 +35,7 @@ FsContext::OpenFile *requireReadFid(FsContext &fs, keel::ArrayRef<Value> args, c
 {
     if (args.empty() || !args[0].isScalar())
         throw Error(keel::format("{}: file identifier required", fn));
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error(keel::format("{}: invalid file identifier", fn));
@@ -64,7 +64,7 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
             auto row = Value::matrix(1, ids.size(), ValueType::DOUBLE, mr);
             double *d = row.doubleDataMut();
             for (keel::usize i = 0; i < ids.size(); ++i)
-                d[i] = static_cast<double>(ids[i]);
+                d[i] = keel::as<double>(ids[i]);
             outs[0] = keel::move(row);
         }
         return;
@@ -83,7 +83,7 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
         if (auto *f = fs.findFile(fid))
             f->mode.append(";be");
     }
-    outs[0] = Value::scalar(static_cast<double>(fid), mr);
+    outs[0] = Value::scalar(keel::as<double>(fid), mr);
     // [fid, errmsg] = fopen(...) — errmsg is '' on success.
     if (nargout > 1)
         outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError().as_ref() : keel::StringRef(""), mr);
@@ -102,7 +102,7 @@ void fclose(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
 
     if (!args[0].isScalar())
         throw Error("fclose: argument must be a numeric fid or 'all'");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     bool ok = fs.closeFile(fid);
     outs[0] = Value::scalar(ok ? 0.0 : -1.0, mr);
 }
@@ -141,7 +141,7 @@ void fgets(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     keel::usize start = f->cursor;
     keel::usize remaining = f->buffer.size() - start;
     keel::usize nchar = (args.size() >= 2 && args[1].isScalar())
-                       ? static_cast<keel::usize>(args[1].toScalar())
+                       ? keel::as<keel::usize>(args[1].toScalar())
                        : remaining;
     keel::usize nlPos = f->buffer.find('\n', start);
     keel::usize end;
@@ -158,7 +158,7 @@ void feof(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArray
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("feof: file identifier required");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f)
         throw Error("feof: invalid file identifier");
@@ -169,7 +169,7 @@ void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ferror: file identifier required");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f)
         throw Error("ferror: invalid file identifier");
@@ -188,7 +188,7 @@ void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ftell: file identifier required");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f) {
         outs[0] = Value::scalar(-1.0, mr);
@@ -196,7 +196,7 @@ void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     }
     // Write-mode: report end-of-buffer (where next append lands).
     keel::usize pos = f->forWrite ? f->buffer.size() : f->cursor;
-    outs[0] = Value::scalar(static_cast<double>(pos), mr);
+    outs[0] = Value::scalar(keel::as<double>(pos), mr);
 }
 
 void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
@@ -206,12 +206,12 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     if (args.size() < 2 || !args[0].isScalar() || !args[1].isScalar())
         return fail();
 
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         return fail();
 
-    long long offset = static_cast<long long>(args[1].toScalar());
+    long long offset = keel::as<long long>(args[1].toScalar());
 
     // Origin: defaults to 'bof' when omitted. Accepts either a string
     // ('bof'/'cof'/'eof') or the int codes -1/0/1 used by some
@@ -225,7 +225,7 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
             else if (o == "eof") origin = EOFO;
             else return fail();
         } else if (args[2].isScalar()) {
-            int o = static_cast<int>(args[2].toScalar());
+            int o = keel::as<int>(args[2].toScalar());
             if (o == -1) origin = BOF;
             else if (o == 0) origin = COF;
             else if (o == 1) origin = EOFO;
@@ -237,14 +237,14 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
 
     long long base = 0;
     if (origin == BOF) base = 0;
-    else if (origin == COF) base = static_cast<long long>(f->cursor);
-    else base = static_cast<long long>(f->buffer.size());
+    else if (origin == COF) base = keel::as<long long>(f->cursor);
+    else base = keel::as<long long>(f->buffer.size());
 
     long long target = base + offset;
-    if (target < 0 || static_cast<keel::usize>(target) > f->buffer.size())
+    if (target < 0 || keel::as<keel::usize>(target) > f->buffer.size())
         return fail();
 
-    f->cursor = static_cast<keel::usize>(target);
+    f->cursor = keel::as<keel::usize>(target);
     outs[0] = Value::scalar(0.0, mr);
 }
 
@@ -253,7 +253,7 @@ void frewind(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutAr
     (void)mr;
     if (args.empty() || !args[0].isScalar())
         throw Error("frewind: file identifier required");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error("frewind: invalid file identifier");
@@ -266,7 +266,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("fread: file identifier required");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error("fread: invalid file identifier");
@@ -294,7 +294,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
             be = numkit::ops::parseEndian(args[3].toString().as_ref(), "fread");
         } else if (args[3].isScalar() || args[3].isEmpty()) {
             if (args[3].isScalar())
-                skip = static_cast<keel::usize>(keel::max(0.0, args[3].toScalar()));
+                skip = keel::as<keel::usize>(keel::max(0.0, args[3].toScalar()));
         } else {
             throw Error("fread: machine format must be a char array");
         }
@@ -326,14 +326,14 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
             case 1: { keel::u8  x; std::memcpy(&x, tmp, 1); v = x; break; }
             case 2: { keel::u16 x; std::memcpy(&x, tmp, 2); v = x; break; }
             case 4: { keel::u32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
+            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = keel::as<double>(x); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
             case 1: { keel::i8  x; std::memcpy(&x, tmp, 1); v = x; break; }
             case 2: { keel::i16 x; std::memcpy(&x, tmp, 2); v = x; break; }
             case 4: { keel::i32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = static_cast<double>(x); break; }
+            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = keel::as<double>(x); break; }
             }
         } else {
             if (bsize == 4) { float x; std::memcpy(&x, tmp, 4); v = x; }
@@ -347,14 +347,14 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     }
     outs[0] = numkit::ops::shapeFreadOutput(values.data(), values.size(), sz, mr);
     if (nargout > 1)
-        outs[1] = Value::scalar(static_cast<double>(n), mr);
+        outs[1] = Value::scalar(keel::as<double>(n), mr);
 }
 
 void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
 {
     if (args.size() < 2 || !args[0].isScalar())
         throw Error("fwrite: requires (fid, array [, precision [, machineformat]])");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forWrite)
         throw Error("fwrite: invalid file identifier");
@@ -395,20 +395,20 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
         double v = A.elemAsDouble(i);
         if (kind == 0) {
             switch (bsize) {
-            case 1: { keel::u8  x = static_cast<keel::u8 >(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { keel::u16 x = static_cast<keel::u16>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { keel::u32 x = static_cast<keel::u32>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { keel::u64 x = static_cast<keel::u64>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::u8  x = keel::as<keel::u8>(v); std::memcpy(dst, &x, 1); break; }
+            case 2: { keel::u16 x = keel::as<keel::u16>(v); std::memcpy(dst, &x, 2); break; }
+            case 4: { keel::u32 x = keel::as<keel::u32>(v); std::memcpy(dst, &x, 4); break; }
+            case 8: { keel::u64 x = keel::as<keel::u64>(v); std::memcpy(dst, &x, 8); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
-            case 1: { keel::i8  x = static_cast<keel::i8 >(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { keel::i16 x = static_cast<keel::i16>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { keel::i32 x = static_cast<keel::i32>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { keel::i64 x = static_cast<keel::i64>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::i8  x = keel::as<keel::i8>(v); std::memcpy(dst, &x, 1); break; }
+            case 2: { keel::i16 x = keel::as<keel::i16>(v); std::memcpy(dst, &x, 2); break; }
+            case 4: { keel::i32 x = keel::as<keel::i32>(v); std::memcpy(dst, &x, 4); break; }
+            case 8: { keel::i64 x = keel::as<keel::i64>(v); std::memcpy(dst, &x, 8); break; }
             }
         } else {
-            if (bsize == 4) { float x = static_cast<float>(v); std::memcpy(dst, &x, 4); }
+            if (bsize == 4) { float x = keel::as<float>(v); std::memcpy(dst, &x, 4); }
             else            {                                  std::memcpy(dst, &v, 8); }
         }
         if (be && bsize > 1)
@@ -424,7 +424,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     if (!bytes.empty())
         std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());
     f->cursor = writePos + bytes.size();
-    outs[0] = Value::scalar(static_cast<double>(numel), mr);
+    outs[0] = Value::scalar(keel::as<double>(numel), mr);
 }
 
 

@@ -57,7 +57,7 @@ double polygammaScalar(int k, double x)
                             : -std::numeric_limits<double>::infinity();
     }
     double factK = 1.0;
-    for (int i = 2; i <= k; ++i) factK *= static_cast<double>(i);
+    for (int i = 2; i <= k; ++i) factK *= keel::as<double>(i);
     const double sign = (k % 2 == 1) ? 1.0 : -1.0;
 
     double r = 0.0;
@@ -69,7 +69,7 @@ double polygammaScalar(int k, double x)
     const double invY = 1.0 / y;
     const double invY2 = invY * invY;
     const double yk = std::pow(invY, k);
-    const double factKm1 = factK / static_cast<double>(k);
+    const double factKm1 = factK / keel::as<double>(k);
 
     // Bernoulli numbers B_2..B_10
     static constexpr double B[5] = {
@@ -80,8 +80,8 @@ double polygammaScalar(int k, double x)
     double binomNum = factKm1; // (2m + k - 1)! / (2m)! starts at (k - 1)! for m = 0
     for (int m = 1; m <= 5; ++m) {
         const int twoM = 2 * m;
-        binomNum *= static_cast<double>((twoM + k - 2) * (twoM + k - 1))
-                  / static_cast<double>((twoM - 1) * twoM);
+        binomNum *= keel::as<double>((twoM + k - 2) * (twoM + k - 1))
+                  / keel::as<double>((twoM - 1) * twoM);
         series += B[m - 1] * binomNum * powY2;
         powY2 *= invY2;
     }
@@ -101,7 +101,7 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     const double kv = argcheck::expectedReal(args[0], 1, "k", "psi");
     argcheck::expectedInteger(kv, 1, "k", "psi");
     argcheck::expectedNonNegative(kv, 1, "k", "psi");
-    const int k = static_cast<int>(kv);
+    const int k = keel::as<int>(kv);
     if (k == 0) {
         outs[0] = psi(args[1], mr);
         return;
@@ -115,7 +115,7 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
         Value sOut = ops::createLike(X, ValueType::SINGLE, mr);
         float *sd = sOut.singleDataMut();
         for (keel::usize i = 0; i < X.numel(); ++i)
-            sd[i] = static_cast<float>(od[i]);
+            sd[i] = keel::as<float>(od[i]);
         outs[0] = std::move(sOut);
     } else {
         outs[0] = std::move(out);
@@ -159,7 +159,7 @@ void legendre_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     const double nv = argcheck::expectedReal(args[0], 1, "n", "legendre");
     argcheck::expectedInteger(nv, 1, "n", "legendre");
     argcheck::expectedNonNegative(nv, 1, "n", "legendre");
-    const int n = static_cast<int>(nv);
+    const int n = keel::as<int>(nv);
     outs[0] = legendre(n, args[1], ctx.engine->allocator());
 }
 

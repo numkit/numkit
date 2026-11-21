@@ -61,7 +61,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     for (keel::usize i = 0; i < n; ++i) {
         double gd = G.elemAsDouble(i);
         if (std::isnan(gd)) continue;
-        int gid = static_cast<int>(gd);
+        int gid = keel::as<int>(gd);
         if (gid <= 0) continue;
         auto *existing = buckets.get(gid);
         if (!existing) {
@@ -167,7 +167,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::Array<int> gids(mr);
         for (keel::usize i = 0; i < n; ++i) {
             double v = fg.G.elemAsDouble(i);
-            int gid = std::isnan(v) ? 0 : static_cast<int>(v);
+            int gid = std::isnan(v) ? 0 : keel::as<int>(v);
             auto *existing = buckets.get(gid);
             if (!existing) {
                 gids.push_back(gid);
@@ -255,7 +255,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::Array<int> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         double v = fg.G.elemAsDouble(i);
-        int gid = std::isnan(v) ? 0 : static_cast<int>(v);
+        int gid = std::isnan(v) ? 0 : keel::as<int>(v);
         auto *existing = buckets.get(gid);
         if (!existing) {
             gids.push_back(gid);

@@ -72,8 +72,8 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     if (A.dims().ndim() != 2)
         throw Error("chol: input must be a 2D matrix",
                     0, 0, "chol", "", "numkit:chol:notMatrix");
-    const keel::usize m = static_cast<keel::usize>(A.dims().dim(0));
-    const keel::usize n = static_cast<keel::usize>(A.dims().dim(1));
+    const keel::usize m = keel::as<keel::usize>(A.dims().dim(0));
+    const keel::usize n = keel::as<keel::usize>(A.dims().dim(1));
     if (m != n)
         throw Error("chol: matrix must be square",
                     0, 0, "chol", "", "numkit:chol:notSquare");
@@ -106,7 +106,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
                 if (lower) sub = transposeSquare(roData(sub), k, mr);
             }
             outs[0] = detail::narrowDoubleToSingleIf(sub, wantSingle, mr);
-            outs[1] = Value::scalar(static_cast<double>(fail));
+            outs[1] = Value::scalar(keel::as<double>(fail));
             return;
         }
         if (lower) R = transposeSquare(roData(R), n, mr);
@@ -193,7 +193,7 @@ Value permMatrixToVector(const Value &P, keel::Allocator *mr)
             const double v = P.elemAsDouble(j * n + i);
             if (v > best) { best = v; col = j; }
         }
-        out[i] = static_cast<double>(col + 1);
+        out[i] = keel::as<double>(col + 1);
     }
     return p;
 }
@@ -289,7 +289,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         if (vectorP) {
             Value p = Value::matrix(1, n, ValueType::DOUBLE, mr);
             double *pd = p.doubleDataMut();
-            for (keel::usize k = 0; k < n; ++k) pd[k] = static_cast<double>(perm[k] + 1);
+            for (keel::usize k = 0; k < n; ++k) pd[k] = keel::as<double>(perm[k] + 1);
             outs[2] = std::move(p);
         } else {
             Value P = Value::matrix(n, n, ValueType::DOUBLE, mr);
@@ -366,8 +366,8 @@ void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         throw Error("qrinsert: k must be a positive integer",
                     0, 0, "qrinsert", "", "numkit:qrinsert:badK");
     auto [Q1, R1] = isRow
-        ? qrinsert_row(args[0], args[1], static_cast<keel::usize>(kd), args[3], ctx.engine->allocator())
-        : qrinsert(args[0], args[1], static_cast<keel::usize>(kd), args[3], ctx.engine->allocator());
+        ? qrinsert_row(args[0], args[1], keel::as<keel::usize>(kd), args[3], ctx.engine->allocator())
+        : qrinsert(args[0], args[1], keel::as<keel::usize>(kd), args[3], ctx.engine->allocator());
     outs[0] = std::move(Q1);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
 }
@@ -391,8 +391,8 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         throw Error("qrdelete: k must be a positive integer",
                     0, 0, "qrdelete", "", "numkit:qrdelete:badK");
     auto [Q1, R1] = isRow
-        ? qrdelete_row(args[0], args[1], static_cast<keel::usize>(kd), ctx.engine->allocator())
-        : qrdelete(args[0], args[1], static_cast<keel::usize>(kd), ctx.engine->allocator());
+        ? qrdelete_row(args[0], args[1], keel::as<keel::usize>(kd), ctx.engine->allocator())
+        : qrdelete(args[0], args[1], keel::as<keel::usize>(kd), ctx.engine->allocator());
     outs[0] = std::move(Q1);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
 }
@@ -490,9 +490,9 @@ void eigs_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
 
     keel::usize k = 6;
     if (args.size() > kIdx && !args[kIdx].isEmpty() && !args[kIdx].isStruct()) {
-        k = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
-            argcheck::expectedReal(args[kIdx], static_cast<int>(kIdx + 1), "k", "eigs"),
-            static_cast<int>(kIdx + 1), "k", "eigs"));
+        k = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
+            argcheck::expectedReal(args[kIdx], keel::as<int>(kIdx + 1), "k", "eigs"),
+            keel::as<int>(kIdx + 1), "k", "eigs"));
     }
 
     Value sigma;
@@ -516,7 +516,7 @@ void svds_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
 {
     argcheck::checkNargin(args.size(), 1, 4, "svds");
     keel::usize k = (args.size() >= 2 && !args[1].isEmpty())
-        ? static_cast<keel::usize>(argcheck::expectedPositiveInteger(
+        ? keel::as<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[1], 2, "k", "svds"), 2, "k", "svds")) : 6;
     if (nargout <= 1) {
         outs[0] = svds_values(args[0], k, ctx.engine->allocator());

@@ -224,7 +224,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
         auto parsed = keel::parse_i64(part);
         if (!parsed.is_ok())
             return false;
-        nums.push_back(static_cast<int>(*parsed));
+        nums.push_back(keel::as<int>(*parsed));
         if (dot == keel::kInvalidIndex)
             break;
         rem = rem.substr(dot + 1);
@@ -243,7 +243,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
 bool hasControlChars(keel::StringRef s)
 {
     for (char chRaw : s) {
-        unsigned char ch = static_cast<unsigned char>(chRaw);
+        unsigned char ch = keel::as<unsigned char>(chRaw);
         if (ch < 0x20 || ch == 0x7F)
             return true;
     }
@@ -255,7 +255,7 @@ bool isValidPackageName(keel::StringRef name)
     if (name.empty() || name == "." || name == ".." || name[0] == '-')
         return false;
     for (char chRaw : name) {
-        unsigned char ch = static_cast<unsigned char>(chRaw);
+        unsigned char ch = keel::as<unsigned char>(chRaw);
         if (!(keel::is_ascii_alnum(ch) || ch == '_' || ch == '-' || ch == '.'))
             return false;
     }
@@ -860,7 +860,7 @@ int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool insta
 
     if (listToInstall.size() > 1) {
         keel::print("\nSummary: {}/{} package(s) installed successfully.\n",
-                    listToInstall.size() - static_cast<keel::usize>(failures),
+                    listToInstall.size() - keel::as<keel::usize>(failures),
                     listToInstall.size());
     }
     return failures == 0 ? 0 : 1;

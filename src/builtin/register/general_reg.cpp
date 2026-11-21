@@ -688,20 +688,20 @@ void register_general(Engine &engine) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
                 double *d = v.doubleDataMut();
-                const double step = 2.0 / static_cast<double>(n);
+                const double step = 2.0 / keel::as<double>(n);
                 for (keel::usize i = 0; i < n; ++i)
-                    d[i] = step * static_cast<double>(i);
+                    d[i] = step * keel::as<double>(i);
                 return v;
             };
             auto centered_vec = [&](keel::usize n) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
                 double *d = v.doubleDataMut();
-                const long start = (n % 2 == 0) ? -static_cast<long>(n)
-                                                : -static_cast<long>(n) + 1;
+                const long start = (n % 2 == 0) ? -keel::as<long>(n)
+                                                : -keel::as<long>(n) + 1;
                 for (keel::usize i = 0; i < n; ++i)
-                    d[i] = static_cast<double>(start + 2 * static_cast<long>(i))
-                         / static_cast<double>(n);
+                    d[i] = keel::as<double>(start + 2 * keel::as<long>(i))
+                         / keel::as<double>(n);
                 return v;
             };
             auto half_vec = [&](keel::usize n) {
@@ -711,14 +711,14 @@ void register_general(Engine &engine) {
                 double last;
                 if (n % 2 == 0) { m = n / 2 + 1; last = 1.0; }
                 else            { m = (n + 1) / 2;
-                                  last = 1.0 - 1.0 / static_cast<double>(n); }
+                                  last = 1.0 - 1.0 / keel::as<double>(n); }
                 auto v = Value::matrix(1, m, ValueType::DOUBLE, mr);
                 double *d = v.doubleDataMut();
                 if (m == 1) d[0] = 0.0;
                 else {
-                    const double step = last / static_cast<double>(m - 1);
+                    const double step = last / keel::as<double>(m - 1);
                     for (keel::usize i = 0; i < m; ++i)
-                        d[i] = step * static_cast<double>(i);
+                        d[i] = step * keel::as<double>(i);
                 }
                 return v;
             };

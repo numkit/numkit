@@ -40,7 +40,7 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     keel::Allocator *mr = engine.allocator();
     if (args.size() < 2 || !args[0].isScalar() || !args[1].isChar())
         throw Error("fscanf: requires (fid, format [, size])");
-    int fid = static_cast<int>(args[0].toScalar());
+    int fid = keel::as<int>(args[0].toScalar());
     auto *f = engine.findFile(fid);
     if (!f || !f->forRead)
         throw Error("fscanf: invalid file identifier");
@@ -157,7 +157,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         ownedInput = args[0].toString();
         input = ownedInput.as_ref();
     } else if (args[0].isScalar()) {
-        int fid = static_cast<int>(args[0].toScalar());
+        int fid = keel::as<int>(args[0].toScalar());
         srcFile = engine.findFile(fid);
         if (!srcFile || !srcFile->forRead)
             throw Error("textscan: invalid file identifier");
@@ -179,7 +179,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         if (!std::isinf(d)) {
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: N must be Inf or a non-negative integer");
-            cycleCap = static_cast<keel::usize>(d);
+            cycleCap = keel::as<keel::usize>(d);
         }
         ++argIdx;
     }
@@ -217,7 +217,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             double d = val.toScalar();
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: 'HeaderLines' must be a non-negative integer");
-            opts.headerLines = static_cast<keel::usize>(d);
+            opts.headerLines = keel::as<keel::usize>(d);
         } else if (name == "commentstyle") {
             if (!val.isChar())
                 throw Error("textscan: 'CommentStyle' must be a char array");
@@ -447,8 +447,8 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 continue;
             }
 
-            if (c.width > 0 && static_cast<int>(tok.size()) > c.width)
-                tok = tok.substr(0, static_cast<keel::usize>(c.width));
+            if (c.width > 0 && keel::as<int>(tok.size()) > c.width)
+                tok = tok.substr(0, keel::as<keel::usize>(c.width));
 
             if (c.spec == 's') {
                 if (!c.suppress)
@@ -463,24 +463,24 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             switch (c.spec) {
             case 'd': case 'i': {
                 long long iv = std::strtoll(start, &endp, 10);
-                v = static_cast<double>(iv);
+                v = keel::as<double>(iv);
                 break;
             }
             case 'u': {
                 unsigned long long uv = std::strtoull(start, &endp, 10);
-                v = static_cast<double>(uv);
+                v = keel::as<double>(uv);
                 break;
             }
             case 'f': case 'e': case 'g': case 'E': case 'G':
                 v = std::strtod(start, &endp); break;
             case 'x': case 'X': {
                 unsigned long long uv = std::strtoull(start, &endp, 16);
-                v = static_cast<double>(uv);
+                v = keel::as<double>(uv);
                 break;
             }
             case 'o': {
                 unsigned long long uv = std::strtoull(start, &endp, 8);
-                v = static_cast<double>(uv);
+                v = keel::as<double>(uv);
                 break;
             }
             }

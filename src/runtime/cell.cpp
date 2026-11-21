@@ -128,7 +128,7 @@ Value num2cell(const Value &x, keel::Allocator *mr)
     const auto &d = x.dims();
     keel::usize shape[Dims::kMaxRank];
     for (int k = 0; k < d.ndim(); ++k)
-        shape[k] = static_cast<keel::usize>(d.dim(k));
+        shape[k] = keel::as<keel::usize>(d.dim(k));
     auto c = Value::cellND(shape, d.ndim(), mr);
     const keel::usize n = x.numel();
     if (x.isComplex()) {
@@ -145,16 +145,16 @@ static Value num2cellDim(const Value &x, keel::ArrayRef<int> dims,
                          keel::Allocator *mr)
 {
     const int nd = x.dims().ndim();
-    const keel::usize und = static_cast<keel::usize>(nd);
+    const keel::usize und = keel::as<keel::usize>(nd);
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    keel::Array<keel::u8> collapse(und, static_cast<keel::u8>(0), scratch.allocator());
+    keel::Array<keel::u8> collapse(und, keel::as<keel::u8>(0), scratch.allocator());
     bool anyCollapsed = false;
     for (int d : dims) {
         if (d < 1)
             throw Error("num2cell: dimension argument must be a positive integer",
                          0, 0, "num2cell", "", "numkit:num2cell:badDim");
         if (d <= nd) {
-            collapse[static_cast<keel::usize>(d - 1)] = 1;
+            collapse[keel::as<keel::usize>(d - 1)] = 1;
             anyCollapsed = true;
         }
     }
@@ -163,14 +163,14 @@ static Value num2cellDim(const Value &x, keel::ArrayRef<int> dims,
     keel::Array<keel::usize> inShape(und, scratch.allocator());
     keel::Array<keel::usize> cellShape(und, scratch.allocator());
     keel::Array<keel::usize> elemShape(und, scratch.allocator());
-    keel::Array<keel::usize> inStrides(und, static_cast<keel::usize>(1), scratch.allocator());
-    keel::Array<keel::usize> cellStrides(und, static_cast<keel::usize>(1), scratch.allocator());
-    keel::Array<keel::usize> elemStrides(und, static_cast<keel::usize>(1), scratch.allocator());
+    keel::Array<keel::usize> inStrides(und, keel::as<keel::usize>(1), scratch.allocator());
+    keel::Array<keel::usize> cellStrides(und, keel::as<keel::usize>(1), scratch.allocator());
+    keel::Array<keel::usize> elemStrides(und, keel::as<keel::usize>(1), scratch.allocator());
 
     keel::usize inTotal = 1, cellTotal = 1, elemTotal = 1;
     for (int k = 0; k < nd; ++k) {
-        const keel::usize uk = static_cast<keel::usize>(k);
-        const keel::usize sk = static_cast<keel::usize>(x.dims().dim(k));
+        const keel::usize uk = keel::as<keel::usize>(k);
+        const keel::usize sk = keel::as<keel::usize>(x.dims().dim(k));
         inShape[uk] = sk;
         inStrides[uk] = inTotal;
         inTotal *= sk;
@@ -188,9 +188,9 @@ static Value num2cellDim(const Value &x, keel::ArrayRef<int> dims,
     }
 
     int cellNd = nd;
-    while (cellNd > 2 && cellShape[static_cast<keel::usize>(cellNd - 1)] == 1) --cellNd;
+    while (cellNd > 2 && cellShape[keel::as<keel::usize>(cellNd - 1)] == 1) --cellNd;
     int elemNd = nd;
-    while (elemNd > 2 && elemShape[static_cast<keel::usize>(elemNd - 1)] == 1) --elemNd;
+    while (elemNd > 2 && elemShape[keel::as<keel::usize>(elemNd - 1)] == 1) --elemNd;
 
     auto out = Value::cellND(cellShape.data(), cellNd, mr);
     const bool cplx = x.isComplex();
@@ -202,7 +202,7 @@ static Value num2cellDim(const Value &x, keel::ArrayRef<int> dims,
         keel::usize rem = lin;
         keel::usize ci = 0, ei = 0;
         for (int k = 0; k < nd; ++k) {
-            const keel::usize uk = static_cast<keel::usize>(k);
+            const keel::usize uk = keel::as<keel::usize>(k);
             const keel::usize ik = rem % inShape[uk];
             rem /= inShape[uk];
             if (collapse[uk])
@@ -241,7 +241,7 @@ Value cell2mat(const Value &c, keel::Allocator *mr)
         const auto &cd = c.dims();
         keel::usize shape[Dims::kMaxRank];
         for (int k = 0; k < cd.ndim(); ++k)
-            shape[k] = static_cast<keel::usize>(cd.dim(k));
+            shape[k] = keel::as<keel::usize>(cd.dim(k));
         auto m = Value::matrixND(shape, cd.ndim(), ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < c.numel(); ++i)
             m.doubleDataMut()[i] = c.cellAt(i).toScalar();
@@ -256,7 +256,7 @@ Value cell2mat(const Value &c, keel::Allocator *mr)
         keel::usize curShape[Dims::kMaxRank];
         keel::usize total = 1;
         for (int k = 0; k < nd; ++k) {
-            curShape[k] = static_cast<keel::usize>(cd.dim(k));
+            curShape[k] = keel::as<keel::usize>(cd.dim(k));
             total *= curShape[k];
         }
         keel::Array<Value> cur(total);
@@ -269,7 +269,7 @@ Value cell2mat(const Value &c, keel::Allocator *mr)
             for (keel::usize base = 0; base < nextTotal; ++base) {
                 for (keel::usize k = 0; k < dimLen; ++k)
                     slice[k] = cur[base + k * nextTotal];
-                next[base] = numkit::builtin::cat(static_cast<keel::usize>(d),
+                next[base] = numkit::builtin::cat(keel::as<keel::usize>(d),
                                                   keel::ArrayRef<Value>(slice.data(), dimLen), mr);
             }
             cur = keel::move(next);
@@ -387,20 +387,20 @@ Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, k
             rowS.push_back(R);
             colS.reserve(nRow);
             for (keel::usize i = 0; i < nRow; ++i)
-                colS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
+                colS.push_back(keel::as<keel::usize>(rowSizesV.elemAsDouble(i)));
         } else {
             rowS.reserve(nRow);
             for (keel::usize i = 0; i < nRow; ++i)
-                rowS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
+                rowS.push_back(keel::as<keel::usize>(rowSizesV.elemAsDouble(i)));
             colS.push_back(C);
         }
     } else {
         rowS.reserve(nRow);
         for (keel::usize i = 0; i < nRow; ++i)
-            rowS.push_back(static_cast<keel::usize>(rowSizesV.elemAsDouble(i)));
+            rowS.push_back(keel::as<keel::usize>(rowSizesV.elemAsDouble(i)));
         colS.reserve(nCol);
         for (keel::usize j = 0; j < nCol; ++j)
-            colS.push_back(static_cast<keel::usize>(colSizesV.elemAsDouble(j)));
+            colS.push_back(keel::as<keel::usize>(colSizesV.elemAsDouble(j)));
     }
 
     keel::usize rsum = 0, csum = 0;
@@ -573,7 +573,7 @@ static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
         if (args.size() < 3)
             throw Error("cellfun: the 'size' form needs a dimension: cellfun('size', C, k)",
                          0, 0, "cellfun", "", "numkit:cellfun:badName");
-        sizeDim = static_cast<int>(args[2].toScalar());
+        sizeDim = keel::as<int>(args[2].toScalar());
         if (sizeDim < 1)
             throw Error("cellfun: 'size' dimension must be a positive integer",
                          0, 0, "cellfun", "", "numkit:cellfun:badName");
@@ -598,18 +598,18 @@ static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
         if (name == "isempty")          val = (e.isEmpty() || e.numel() == 0) ? 1.0 : 0.0;
         else if (name == "islogical")   val = e.isLogical() ? 1.0 : 0.0;
         else if (name == "isreal")      val = e.isComplex() ? 0.0 : 1.0;
-        else if (name == "ndims")       val = static_cast<double>(e.dims().ndim());
-        else if (name == "prodofsize")  val = static_cast<double>(e.numel());
+        else if (name == "ndims")       val = keel::as<double>(e.dims().ndim());
+        else if (name == "prodofsize")  val = keel::as<double>(e.numel());
         else if (name == "length") {
             if (e.numel() == 0) val = 0.0;
             else {
                 keel::usize mx = 0; const auto &ed = e.dims();
                 for (int k = 0; k < ed.ndim(); ++k)
                     if (ed.dim(k) > mx) mx = ed.dim(k);
-                val = static_cast<double>(mx);
+                val = keel::as<double>(mx);
             }
         }
-        else if (isSize)                val = static_cast<double>(e.dims().dim(sizeDim - 1));
+        else if (isSize)                val = keel::as<double>(e.dims().dim(sizeDim - 1));
         else if (isIsclass)             val = (clsName == hf::classNameOf(e)) ? 1.0 : 0.0;
         if (wantLogical) out.logicalDataMut()[i] = (val != 0.0) ? 1 : 0;
         else             out.doubleDataMut()[i]  = val;
@@ -693,31 +693,31 @@ void cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
         const keel::usize n = args[0].numel();
         auto dims = keel::Array<keel::usize>(n, scratch.allocator());
         for (keel::usize i = 0; i < n; ++i)
-            dims[i] = static_cast<keel::usize>(args[0].elemAsDouble(i));
-        outs[0] = Value::cellND(dims.data(), static_cast<int>(n));
+            dims[i] = keel::as<keel::usize>(args[0].elemAsDouble(i));
+        outs[0] = Value::cellND(dims.data(), keel::as<int>(n));
         return;
     }
-    keel::usize r = static_cast<keel::usize>(args[0].toScalar());
+    keel::usize r = keel::as<keel::usize>(args[0].toScalar());
     if (args.size() == 1) {
         outs[0] = Value::cell(r, r);
         return;
     }
     if (args.size() == 2) {
-        keel::usize c = static_cast<keel::usize>(args[1].toScalar());
+        keel::usize c = keel::as<keel::usize>(args[1].toScalar());
         outs[0] = Value::cell(r, c);
         return;
     }
     if (args.size() == 3) {
-        keel::usize c = static_cast<keel::usize>(args[1].toScalar());
-        keel::usize p = static_cast<keel::usize>(args[2].toScalar());
+        keel::usize c = keel::as<keel::usize>(args[1].toScalar());
+        keel::usize p = keel::as<keel::usize>(args[2].toScalar());
         outs[0] = (p > 0) ? Value::cell3D(r, c, p) : Value::cell(r, c);
         return;
     }
     // 4+ scalar args: cell(m, n, p, q, ...).
     auto dims = keel::Array<keel::usize>(args.size(), scratch.allocator());
     for (keel::usize i = 0; i < args.size(); ++i)
-        dims[i] = static_cast<keel::usize>(args[i].toScalar());
-    outs[0] = Value::cellND(dims.data(), static_cast<int>(args.size()));
+        dims[i] = keel::as<keel::usize>(args[i].toScalar());
+    outs[0] = Value::cellND(dims.data(), keel::as<int>(args.size()));
 }
 
 void num2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -734,7 +734,7 @@ void num2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
         for (keel::usize i = 1; i < args.size(); ++i) {
             const Value &dv = args[i];
             for (keel::usize k = 0; k < dv.numel(); ++k)
-                dims.push_back(static_cast<int>(dv.elemAsDouble(k)));
+                dims.push_back(keel::as<int>(dv.elemAsDouble(k)));
         }
         outs[0] = num2cellDim(args[0], dims, mr);
         return;

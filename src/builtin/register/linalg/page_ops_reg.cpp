@@ -89,10 +89,10 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
         if (nd < 2 || nd > 3)
             throw Error("pagenorm: input must be 2-D or 3-D",
                         0, 0, "pagenorm", "", "numkit:pagenorm:badDim");
-        const keel::usize m = static_cast<keel::usize>(args[0].dims().dim(0));
-        const keel::usize n = static_cast<keel::usize>(args[0].dims().dim(1));
+        const keel::usize m = keel::as<keel::usize>(args[0].dims().dim(0));
+        const keel::usize n = keel::as<keel::usize>(args[0].dims().dim(1));
         const keel::usize pages = (nd == 2) ? 1
-            : static_cast<keel::usize>(args[0].dims().dim(2));
+            : keel::as<keel::usize>(args[0].dims().dim(2));
         Value out = (nd == 2) ? Value::matrix(1, 1, ValueType::DOUBLE, mr)
                               : Value::matrix3d(1, 1, pages, ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();

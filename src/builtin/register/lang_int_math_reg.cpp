@@ -150,13 +150,13 @@ void gcd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         outs[1] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
             keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
-            return static_cast<double>(u);
+            return keel::as<double>(u);
         }, mr);
     if (nargout >= 3)
         outs[2] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
             keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
-            return static_cast<double>(v);
+            return keel::as<double>(v);
         }, mr);
 }
 
@@ -183,7 +183,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
             const double wv = argcheck::expectedReal(args[1], 2, "width", "bitcmp");
             argcheck::expectedInteger(wv, 2, "width", "bitcmp");
             argcheck::expectedBetween(wv, 1, 64, 2, "width", "bitcmp");
-            width = static_cast<int>(wv);
+            width = keel::as<int>(wv);
         }
     } else {
         // 1-arg form: width / class is inferred from the input type.

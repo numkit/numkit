@@ -121,7 +121,7 @@ keel::usize toSubIndex(double v, keel::usize maxAllowed, const char *fn)
     if (keel::abs(v - rounded) > 1e-9)
         throw Error(keel::format("{}: subscripts must be integer-valued", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subInt", fn));
-    const keel::usize idx = static_cast<keel::usize>(rounded);
+    const keel::usize idx = keel::as<keel::usize>(rounded);
     if (maxAllowed > 0 && idx > maxAllowed)
         throw Error(keel::format("{}: subscript exceeds output dimension", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subOOB", fn));
@@ -177,7 +177,7 @@ Value allocOutput(const keel::usize *shape, keel::usize nShape, keel::Allocator 
         return Value::matrix(shape[0], 1, ValueType::DOUBLE, mr);
     if (nShape == 2)
         return Value::matrix(shape[0], shape[1], ValueType::DOUBLE, mr);
-    return Value::matrixND(shape, static_cast<int>(nShape),
+    return Value::matrixND(shape, keel::as<int>(nShape),
                             ValueType::DOUBLE, mr);
 }
 
@@ -258,7 +258,7 @@ keel::Array<keel::usize> parseSizeArg(const Value &sz, keel::Allocator *mr)
         if (!std::isfinite(v) || v < 0)
             throw Error("accumarray: sz entries must be non-negative integers",
                          0, 0, "accumarray", "", "numkit:accumarray:sizeRange");
-        shape[i] = static_cast<keel::usize>(std::round(v));
+        shape[i] = keel::as<keel::usize>(std::round(v));
     }
     return shape;
 }
@@ -423,7 +423,7 @@ void register_datafun(Engine &engine) {
                 for (keel::usize i = 0; i < rows; ++i) {
                     double val = p[i + j * rows];
                     if (val > 0.5) {
-                        best = static_cast<double>(i + 1);
+                        best = keel::as<double>(i + 1);
                         break;
                     }
                 }
@@ -630,7 +630,7 @@ void register_datafun(Engine &engine) {
                     if (d <= 0 || d != std::floor(d))
                         throw Error("fftn: size entries must be positive integers",
                                     0, 0, "fftn", "", "numkit:fftn:badSize");
-                    sz[i] = static_cast<keel::usize>(d);
+                    sz[i] = keel::as<keel::usize>(d);
                 }
             }
             outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
@@ -649,7 +649,7 @@ void register_datafun(Engine &engine) {
                     if (d <= 0 || d != std::floor(d))
                         throw Error("ifftn: size entries must be positive integers",
                                     0, 0, "ifftn", "", "numkit:ifftn:badSize");
-                    sz[i] = static_cast<keel::usize>(d);
+                    sz[i] = keel::as<keel::usize>(d);
                 }
             }
             outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);

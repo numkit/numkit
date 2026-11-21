@@ -91,7 +91,7 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
             keel::usize sz;
             if (ndims == 1) {
                 sz = array.numel();
-            } else if (dim == ndims - 1 && array.dims().ndim() > static_cast<int>(ndims)) {
+            } else if (dim == ndims - 1 && array.dims().ndim() > keel::as<int>(ndims)) {
                 sz = 1;
                 for (int d = dim; d < array.dims().ndim(); ++d)
                     sz *= array.dims().dimSize(d);
@@ -283,8 +283,8 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
                 if (const auto *m = cls ? cls->methods.get("__end") : nullptr) {
                     Value self = *ctx.array;
                     Value eargs[2] = {
-                        Value::scalar(static_cast<double>(ctx.dimension), engine_.mr_),
-                        Value::scalar(static_cast<double>(ctx.ndims), engine_.mr_)};
+                        Value::scalar(keel::as<double>(ctx.dimension), engine_.mr_),
+                        Value::scalar(keel::as<double>(ctx.ndims), engine_.mr_)};
                     Value out[1];
                     CallContext cctx{&engine_, env};
                     (*m)(self, keel::ArrayRef<Value>(eargs, 2), 1,
@@ -294,7 +294,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             }
             keel::usize sz = (ctx.ndims == 1) ? ctx.array->numel()
                                          : ctx.array->dims().dimSize(ctx.dimension);
-            return Value::scalar(static_cast<double>(sz), engine_.mr_);
+            return Value::scalar(keel::as<double>(sz), engine_.mr_);
         }
         throw std::runtime_error("'end' used outside of indexing context");
     }
@@ -388,8 +388,8 @@ Value TreeWalker::execBlock(const ASTNode *node, Environment *env)
         // ── Debug hook: check for line change, breakpoints ──
         if (auto *ctl = debugCtl()) {
             if (child->line > 0) {
-                if (!ctl->checkLine(static_cast<keel::u16>(child->line),
-                                    static_cast<keel::u16>(child->col),
+                if (!ctl->checkLine(keel::as<keel::u16>(child->line),
+                                    keel::as<keel::u16>(child->col),
                                     currentRecursionDepth_))
                     throw DebugStopException();
             }
@@ -561,7 +561,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             args.reserve(nargs + 1);
             for (keel::usize i = 0; i < nargs; ++i) {
                 IndexContextGuard guard(indexContextStack_,
-                                        {var, static_cast<int>(i), static_cast<int>(nargs)});
+                                        {var, keel::as<int>(i), keel::as<int>(nargs)});
                 args.push_back(execNode(lhs->children[i + 1].get(), env));
             }
             args.push_back(rhs);
@@ -602,12 +602,12 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 const ASTNode *sub = lhs->children[d + 1].get();
                 if ((var->isUnset() || var->isEmpty())
                     && sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
-                    const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(static_cast<int>(d));
+                    const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(keel::as<int>(d));
                     perDim[d].resize(n);
                     for (keel::usize k = 0; k < n; ++k) perDim[d][k] = k;
                 } else {
                     perDim[d] = resolveIndex(sub, *var,
-                                             static_cast<int>(d), static_cast<int>(nargs), env);
+                                             keel::as<int>(d), keel::as<int>(nargs), env);
                 }
             }
             engine_.objectStoreSlice(*var, perDim, rhs, env);
@@ -775,14 +775,14 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 keel::usize rCursor = 0;
                 int colonsLeft = nColons;
                 auto nextRhsDim = [&]() -> keel::usize {
-                    while (rCursor < static_cast<keel::usize>(rhs.dims().ndim())
-                           && rhs.dims().dim(static_cast<int>(rCursor)) == 1
-                           && (static_cast<keel::usize>(rhs.dims().ndim()) - rCursor) > static_cast<keel::usize>(colonsLeft)) {
+                    while (rCursor < keel::as<keel::usize>(rhs.dims().ndim())
+                           && rhs.dims().dim(keel::as<int>(rCursor)) == 1
+                           && (keel::as<keel::usize>(rhs.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
                         ++rCursor;
                     }
                     --colonsLeft;
-                    return (rCursor < static_cast<keel::usize>(rhs.dims().ndim()))
-                               ? rhs.dims().dim(static_cast<int>(rCursor++))
+                    return (rCursor < keel::as<keel::usize>(rhs.dims().ndim()))
+                               ? rhs.dims().dim(keel::as<int>(rCursor++))
                                : 1;
                 };
                 if (riColon) maxR = nextRhsDim();
@@ -811,8 +811,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     } else {
         // ND assign: nargs >= 4. indexSetND auto-grows the target rank
         // (and per-axis size) to fit any out-of-range subscripts.
-        const int nd = static_cast<int>(nargs);
-        keel::Array<keel::Array<keel::usize>> idxLists(static_cast<keel::usize>(nd));
+        const int nd = keel::as<int>(nargs);
+        keel::Array<keel::Array<keel::usize>> idxLists(keel::as<keel::usize>(nd));
         keel::Array<const keel::usize *> idxPtrs(nd);
         keel::Array<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
@@ -871,11 +871,11 @@ Value &TreeWalker::resolveCellSlot(const ASTNode *node, Environment *env)
     keel::Array<keel::usize> coords(nidx);
     for (keel::usize i = 0; i < nidx; ++i) {
         IndexContextGuard guard(indexContextStack_,
-                                {var, static_cast<int>(i), static_cast<int>(nidx)});
+                                {var, keel::as<int>(i), keel::as<int>(nidx)});
         Value v = execNode(node->children[i + 1].get(), env);
         coords[i] = Value::checkedScalarIndex(v.toScalar());
     }
-    keel::usize linear = var->growCellTo(coords.data(), static_cast<int>(nidx), engine_.mr_);
+    keel::usize linear = var->growCellTo(coords.data(), keel::as<int>(nidx), engine_.mr_);
     return var->cellAt(linear);
 }
 
@@ -897,12 +897,12 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
             throw std::runtime_error("Indexed field assignment on a non-struct value");
 
         const keel::usize nargs = objNode->children.size() - 1;
-        if (nargs > static_cast<keel::usize>(Dims::kMaxRank))
+        if (nargs > keel::as<keel::usize>(Dims::kMaxRank))
             throw std::runtime_error("Struct array indexing rank exceeds maximum supported rank");
         keel::Array<keel::usize> coords(nargs);
         for (keel::usize a = 0; a < nargs; ++a) {
             IndexContextGuard guard(indexContextStack_,
-                                    {var, static_cast<int>(a), static_cast<int>(nargs)});
+                                    {var, keel::as<int>(a), keel::as<int>(nargs)});
             Value v = execNode(objNode->children[a + 1].get(), env);
             coords[a] = Value::checkedScalarIndex(v.toScalar());
         }
@@ -911,7 +911,7 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
             linear = coords[0];
             var->growStructArrayTo(linear, engine_.mr_); // preserves row/col vector shape
         } else {
-            linear = var->growStructArrayND(coords.data(), static_cast<int>(nargs),
+            linear = var->growStructArrayND(coords.data(), keel::as<int>(nargs),
                                             engine_.mr_);
         }
 
@@ -999,7 +999,7 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
                 args.reserve(nidx + 1);
                 for (keel::usize i = 0; i < nidx; ++i) {
                     IndexContextGuard guard(indexContextStack_,
-                                            {&baseObj, static_cast<int>(i), static_cast<int>(nidx)});
+                                            {&baseObj, keel::as<int>(i), keel::as<int>(nidx)});
                     args.push_back(execNode(lhs->children[i + 1].get(), env));
                 }
                 args.push_back(rhs);
@@ -1362,12 +1362,12 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
         keel::Array<keel::usize> perDimCount(nargs);
         for (keel::usize i = 0; i < nargs; ++i) {
             perDim[i] = resolveIndex(lhs->children[i + 1].get(), *var,
-                                     static_cast<int>(i), static_cast<int>(nargs), env);
+                                     keel::as<int>(i), keel::as<int>(nargs), env);
             perDimPtrs[i]  = perDim[i].data();
             perDimCount[i] = perDim[i].size();
         }
         var->indexDeleteND(perDimPtrs.data(), perDimCount.data(),
-                           static_cast<int>(nargs), engine_.mr_);
+                           keel::as<int>(nargs), engine_.mr_);
     }
     return Value();
 }
@@ -1845,7 +1845,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
                 args.reserve(nsub);
                 for (keel::usize i = 0; i < nsub; ++i) {
                     IndexContextGuard guard(indexContextStack_,
-                                            {var, static_cast<int>(i), static_cast<int>(nsub)});
+                                            {var, keel::as<int>(i), keel::as<int>(nsub)});
                     Value v = execNodeExpand(node->children[i + 1].get(), env);
                     if (v.isCsl())
                         for (keel::usize k = 0; k < v.cslCount(); ++k)
@@ -2048,8 +2048,8 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
     }
     // ND read: nargs >= 4
     {
-        const int nd = static_cast<int>(nargs);
-        keel::Array<keel::Array<keel::usize>> idxLists(static_cast<keel::usize>(nd));
+        const int nd = keel::as<int>(nargs);
+        keel::Array<keel::Array<keel::usize>> idxLists(keel::as<keel::usize>(nd));
         keel::Array<const keel::usize *> idxPtrs(nd);
         keel::Array<keel::usize> idxCounts(nd);
         for (int i = 0; i < nd; ++i) {
@@ -2107,15 +2107,15 @@ Value TreeWalker::execCellIndex(const ASTNode *node, Environment *env)
     // ND brace-cell read (nidx ≥ 4): column-major linear index, bounds-checked.
     keel::Array<keel::usize> coords(nidx);
     for (keel::usize i = 0; i < nidx; ++i) {
-        IndexContextGuard guard(indexContextStack_, {&obj, static_cast<int>(i),
-                                                     static_cast<int>(nidx)});
+        IndexContextGuard guard(indexContextStack_, {&obj, keel::as<int>(i),
+                                                     keel::as<int>(nidx)});
         Value v = execNode(node->children[i + 1].get(), env);
         coords[i] = Value::checkedScalarIndex(v.toScalar());
     }
     const auto &d = obj.dims();
     keel::usize idx = 0, stride = 1;
     for (keel::usize i = 0; i < nidx; ++i) {
-        const keel::usize lim = (static_cast<int>(i) < d.ndim()) ? d.dim(static_cast<int>(i)) : 1;
+        const keel::usize lim = (keel::as<int>(i) < d.ndim()) ? d.dim(keel::as<int>(i)) : 1;
         if (coords[i] >= lim) {
             auto msg = keel::format("Cell index out of bounds (dim {}: {} > {})",
                                     i + 1, coords[i] + 1, lim);
@@ -2142,7 +2142,7 @@ keel::Array<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
             args.reserve(nidx);
             for (keel::usize i = 0; i < nidx; ++i) {
                 IndexContextGuard guard(indexContextStack_,
-                                        {&obj, static_cast<int>(i), static_cast<int>(nidx)});
+                                        {&obj, keel::as<int>(i), keel::as<int>(nidx)});
                 args.push_back(execNode(node->children[i + 1].get(), env));
             }
             Value outBuf[1];
@@ -3440,8 +3440,8 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     if (func.usesNarginNargout) {
         keel::usize nout = std::max(func.returns.size(), keel::usize(1));
         localEnv.setLocal("nargin",
-                          Value::scalar(static_cast<double>(args.size()), engine_.mr_));
-        localEnv.setLocal("nargout", Value::scalar(static_cast<double>(nout), engine_.mr_));
+                          Value::scalar(keel::as<double>(args.size()), engine_.mr_));
+        localEnv.setLocal("nargout", Value::scalar(keel::as<double>(nout), engine_.mr_));
     }
 
     keel::Optional<DebugController::FrameGuard> dbgFrame;
@@ -3541,8 +3541,8 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     func.usesNarginNargout = 1;
     if (func.usesNarginNargout) {
         localEnv.setLocal("nargin",
-                          Value::scalar(static_cast<double>(args.size()), engine_.mr_));
-        localEnv.setLocal("nargout", Value::scalar(static_cast<double>(nout), engine_.mr_));
+                          Value::scalar(keel::as<double>(args.size()), engine_.mr_));
+        localEnv.setLocal("nargout", Value::scalar(keel::as<double>(nout), engine_.mr_));
     }
 
     for (auto &retName : func.returns)
@@ -3669,7 +3669,7 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
     // MATLAB seeds the constructor's output variable with a default instance.
     if (!func.returns.empty())
         localEnv.setLocal(func.returns[0], seed);
-    localEnv.setLocal("nargin", Value::scalar(static_cast<double>(args.size()), engine_.mr_));
+    localEnv.setLocal("nargin", Value::scalar(keel::as<double>(args.size()), engine_.mr_));
     localEnv.setLocal("nargout", Value::scalar(1.0, engine_.mr_));
 
     keel::Optional<FsContext::OriginFrame> originGuard;

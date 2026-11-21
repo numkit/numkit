@@ -85,21 +85,21 @@ const Token &Parser::peekToken(int off) const
     // parser level so peekToken(1) returns the next *real* token,
     // not the comment between current and next. Negative offsets do
     // the mirrored skip-backwards.
-    long long p = static_cast<long long>(pos_);
+    long long p = keel::as<long long>(pos_);
     if (off == 0) {
-        if (p < 0 || p >= static_cast<long long>(tokens_.size())) return tokens_.back();
-        return tokens_[static_cast<keel::usize>(p)];
+        if (p < 0 || p >= keel::as<long long>(tokens_.size())) return tokens_.back();
+        return tokens_[keel::as<keel::usize>(p)];
     }
     const int dir   = (off > 0) ? 1 : -1;
     const int steps = (off > 0) ? off : -off;
     for (int s = 0; s < steps; ++s) {
         do {
             p += dir;
-            if (p < 0 || p >= static_cast<long long>(tokens_.size()))
+            if (p < 0 || p >= keel::as<long long>(tokens_.size()))
                 return tokens_.back();
-        } while (tokens_[static_cast<keel::usize>(p)].type == TokenType::COMMENT);
+        } while (tokens_[keel::as<keel::usize>(p)].type == TokenType::COMMENT);
     }
-    return tokens_[static_cast<keel::usize>(p)];
+    return tokens_[keel::as<keel::usize>(p)];
 }
 
 bool Parser::isAtEnd() const
@@ -221,7 +221,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
         unsigned long long val = std::strtoull(start, &end, 2);
         if (end == start || *end != '\0' || errno == ERANGE)
             throwInvalid();
-        return static_cast<keel::f64>(val);
+        return keel::as<keel::f64>(val);
     }
 
     // Octal: 0o...
@@ -234,7 +234,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
         unsigned long long val = std::strtoull(start, &end, 8);
         if (end == start || *end != '\0' || errno == ERANGE)
             throwInvalid();
-        return static_cast<keel::f64>(val);
+        return keel::as<keel::f64>(val);
     }
 
     // Hex и decimal — std::strtod обрабатывает оба
@@ -387,10 +387,10 @@ bool Parser::isCommandStyleCall() const
     // operator AND the operand being glued to the operator.
     if (next.type == TokenType::MINUS || next.type == TokenType::SLASH) {
         const int headEnd = current().endCol > 0 ? current().endCol
-                                                 : current().col + static_cast<int>(current().value.size());
+                                                 : current().col + keel::as<int>(current().value.size());
         const Token &operand = peekToken(2);
         const int nextEnd = next.endCol > 0 ? next.endCol
-                                            : next.col + static_cast<int>(next.value.size());
+                                            : next.col + keel::as<int>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
@@ -405,10 +405,10 @@ bool Parser::isCommandStyleCall() const
     if (next.type == TokenType::DOT || next.type == TokenType::DOT_SLASH
         || next.type == TokenType::DOT_BACKSLASH) {
         const int headEnd = current().endCol > 0 ? current().endCol
-                                                 : current().col + static_cast<int>(current().value.size());
+                                                 : current().col + keel::as<int>(current().value.size());
         const Token &operand = peekToken(2);
         const int nextEnd = next.endCol > 0 ? next.endCol
-                                            : next.col + static_cast<int>(next.value.size());
+                                            : next.col + keel::as<int>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
@@ -519,8 +519,8 @@ ASTNodePtr Parser::parseCommandStyleCall()
         // Quoted strings store the UNQUOTED value but span the quotes in
         // the source (opening quote at t.col, closing after the value).
         if (t.type == TokenType::STRING || t.type == TokenType::DQSTRING)
-            return t.col + static_cast<int>(t.value.size()) + 1;
-        return t.col + static_cast<int>(t.value.size()) - 1;
+            return t.col + keel::as<int>(t.value.size()) + 1;
+        return t.col + keel::as<int>(t.value.size()) - 1;
     };
     auto flushArg = [&]() {
         if (!haveArg)

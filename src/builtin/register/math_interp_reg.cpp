@@ -281,16 +281,16 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
 
     const int N = (maxNd >= 4) ? maxNd
-                : (L >= 5 && (L % 2 == 1) ? static_cast<int>((L - 1) / 2)
-                                          : static_cast<int>(L - 1));
-    if (N < 4 || (L != static_cast<keel::usize>(N + 1) && L != static_cast<keel::usize>(2 * N + 1))) {
+                : (L >= 5 && (L % 2 == 1) ? keel::as<int>((L - 1) / 2)
+                                          : keel::as<int>(L - 1));
+    if (N < 4 || (L != keel::as<keel::usize>(N + 1) && L != keel::as<keel::usize>(2 * N + 1))) {
         throw Error("interpn: invalid number of arguments for N-D interpolation",
                      0, 0, "interpn", "", "numkit:interpn:nargin");
     }
 
-    const bool hasGrids = (L == static_cast<keel::usize>(2 * N + 1));
-    const Value &V = hasGrids ? args[static_cast<keel::usize>(N)] : args[0];
-    const keel::usize qStart = hasGrids ? static_cast<keel::usize>(N + 1) : 1;
+    const bool hasGrids = (L == keel::as<keel::usize>(2 * N + 1));
+    const Value &V = hasGrids ? args[keel::as<keel::usize>(N)] : args[0];
+    const keel::usize qStart = hasGrids ? keel::as<keel::usize>(N + 1) : 1;
 
     keel::String method = keel::String::from("linear");
     if (L < args.size() && (args[L].isChar() || args[L].isString())) {
@@ -311,12 +311,12 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::usize> vStrides(N, keel::usize(1), sa);
     keel::usize strideAcc = 1;
     for (int d = 0; d < N; ++d) {
-        const keel::usize sd = (d < V.dims().ndim()) ? static_cast<keel::usize>(V.dims().dim(d)) : 1;
+        const keel::usize sd = (d < V.dims().ndim()) ? keel::as<keel::usize>(V.dims().dim(d)) : 1;
         if (sd < 2)
             throw Error("interpn: each dimension of V must have length >= 2",
                          0, 0, "interpn", "", "numkit:interpn:smallDim");
-        vShape[static_cast<keel::usize>(d)] = sd;
-        vStrides[static_cast<keel::usize>(d)] = strideAcc;
+        vShape[keel::as<keel::usize>(d)] = sd;
+        vStrides[keel::as<keel::usize>(d)] = strideAcc;
         strideAcc *= sd;
     }
 
@@ -324,19 +324,19 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::Array<double>> grids(sa);
     grids.reserve(N);
     for (int d = 0; d < N; ++d) {
-        const keel::usize sd = vShape[static_cast<keel::usize>(d)];
+        const keel::usize sd = vShape[keel::as<keel::usize>(d)];
         keel::Array<double> gdVec(sd, sa);
         if (!hasGrids) {
             for (keel::usize k = 0; k < sd; ++k)
-                gdVec[k] = static_cast<double>(k + 1);
+                gdVec[k] = keel::as<double>(k + 1);
         } else {
-            const Value &Gd = args[static_cast<keel::usize>(d)];
+            const Value &Gd = args[keel::as<keel::usize>(d)];
             if (Gd.numel() == sd) {
                 for (keel::usize k = 0; k < sd; ++k)
                     gdVec[k] = Gd.elemAsDouble(k);
             } else {
                 // Full ndgrid tensor: step along axis d using vStrides[d].
-                const keel::usize st = vStrides[static_cast<keel::usize>(d)];
+                const keel::usize st = vStrides[keel::as<keel::usize>(d)];
                 for (keel::usize k = 0; k < sd; ++k)
                     gdVec[k] = Gd.elemAsDouble(k * st);
             }
@@ -348,31 +348,31 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const keel::usize nQuery = Xq0.numel();
     keel::Array<keel::usize> outShape(Xq0.dims().ndim(), sa);
     for (int k = 0; k < Xq0.dims().ndim(); ++k)
-        outShape[static_cast<keel::usize>(k)] = static_cast<keel::usize>(Xq0.dims().dim(k));
+        outShape[keel::as<keel::usize>(k)] = keel::as<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
                                 mr);
     double *od = out.doubleDataMut();
 
     keel::Array<keel::usize> idx0(N, sa);
     keel::Array<double> frac(N, sa);
-    const keel::usize nCorners = static_cast<keel::usize>(1) << N;
+    const keel::usize nCorners = keel::as<keel::usize>(1) << N;
 
     for (keel::usize q = 0; q < nQuery; ++q) {
         bool outOfBounds = false;
         for (int d = 0; d < N; ++d) {
-            const Value &Xqd = args[qStart + static_cast<keel::usize>(d)];
+            const Value &Xqd = args[qStart + keel::as<keel::usize>(d)];
             const double xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
-            const auto &g = grids[static_cast<keel::usize>(d)];
+            const auto &g = grids[keel::as<keel::usize>(d)];
             if (std::isnan(xq) || xq < g[0] || xq > g[g.size() - 1]) {
                 outOfBounds = true;
                 break;
             }
             auto it = std::upper_bound(g.begin(), g.end(), xq);
-            keel::usize i0 = (it == g.begin()) ? 0 : static_cast<keel::usize>((it - g.begin()) - 1);
+            keel::usize i0 = (it == g.begin()) ? 0 : keel::as<keel::usize>((it - g.begin()) - 1);
             if (i0 >= g.size() - 1) i0 = g.size() - 2;
             const double denom = g[i0 + 1] - g[i0];
-            idx0[static_cast<keel::usize>(d)] = i0;
-            frac[static_cast<keel::usize>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
+            idx0[keel::as<keel::usize>(d)] = i0;
+            frac[keel::as<keel::usize>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
         }
         if (outOfBounds) {
             od[q] = std::numeric_limits<double>::quiet_NaN();
@@ -381,9 +381,9 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         if (isNearest) {
             keel::usize lin = 0;
             for (int d = 0; d < N; ++d) {
-                const keel::usize pick = idx0[static_cast<keel::usize>(d)]
-                                  + (frac[static_cast<keel::usize>(d)] >= 0.5 ? 1 : 0);
-                lin += pick * vStrides[static_cast<keel::usize>(d)];
+                const keel::usize pick = idx0[keel::as<keel::usize>(d)]
+                                  + (frac[keel::as<keel::usize>(d)] >= 0.5 ? 1 : 0);
+                lin += pick * vStrides[keel::as<keel::usize>(d)];
             }
             od[q] = V.elemAsDouble(lin);
         } else {
@@ -393,10 +393,10 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 keel::usize lin = 0;
                 for (int d = 0; d < N; ++d) {
                     const bool hi = ((mask >> d) & 1u) != 0;
-                    const double fd = frac[static_cast<keel::usize>(d)];
+                    const double fd = frac[keel::as<keel::usize>(d)];
                     w *= hi ? fd : (1.0 - fd);
-                    lin += (idx0[static_cast<keel::usize>(d)] + (hi ? 1 : 0))
-                         * vStrides[static_cast<keel::usize>(d)];
+                    lin += (idx0[keel::as<keel::usize>(d)] + (hi ? 1 : 0))
+                         * vStrides[keel::as<keel::usize>(d)];
                 }
                 acc += w * V.elemAsDouble(lin);
             }

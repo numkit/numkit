@@ -169,14 +169,14 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
             int b = (int)(t / bw);
             if (b >= nbins) b = nbins - 1;
             if (b < 0) b = 0;
-            counts[static_cast<keel::usize>(b)] += 1;
+            counts[keel::as<keel::usize>(b)] += 1;
         }
         StrBuf tx, ty;
         tx << '['; ty << '[';
         for (int i = 0; i < nbins; ++i) {
             if (i) { tx << ','; ty << ','; }
             tx << (bw * (i + 0.5));    // bin centre
-            ty << counts[static_cast<keel::usize>(i)];
+            ty << counts[keel::as<keel::usize>(i)];
         }
         tx << ']'; ty << ']';
         txOut = tx.take();

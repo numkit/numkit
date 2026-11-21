@@ -1394,7 +1394,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                     int n = std::snprintf(numBuf, sizeof(numBuf), "%f", vp->toScalar());
                     if (n > 0) {
                         body.append(": ");
-                        body.append(keel::StringRef(numBuf, static_cast<keel::usize>(n)));
+                        body.append(keel::StringRef(numBuf, keel::as<keel::usize>(n)));
                     }
                 }
             }
@@ -2139,8 +2139,8 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                                                 : full;
                     for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
                         if (namespaceOrder_[i] == topNs)
-                            return static_cast<int>(i);
-                    return static_cast<int>(namespaceOrder_.size());
+                            return keel::as<int>(i);
+                    return keel::as<int>(namespaceOrder_.size());
                 };
                 const keel::String *best = nullptr;
                 int bestRank = INT_MAX;
@@ -2218,8 +2218,8 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
                                     : full;
         for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
             if (namespaceOrder_[i] == topNs)
-                return static_cast<int>(i);
-        return static_cast<int>(namespaceOrder_.size());
+                return keel::as<int>(i);
+        return keel::as<int>(namespaceOrder_.size());
     };
     const keel::String *best = nullptr;
     int bestRank = INT_MAX;
@@ -3143,7 +3143,7 @@ int Engine::callerDepth() const
     if (vm_ && backend_ == Backend::VM)
         return vm_->callDepth();
     if (treeWalker_)
-        return static_cast<int>(treeWalker_->activeFrames().size());
+        return keel::as<int>(treeWalker_->activeFrames().size());
     return 0;
 }
 
@@ -3154,7 +3154,7 @@ Environment *Engine::callerEnv(int n)
         return vm_->callerEnvAtDepth(n);
     if (treeWalker_) {
         const auto &frames = treeWalker_->activeFrames();
-        if (n < static_cast<int>(frames.size()))
+        if (n < keel::as<int>(frames.size()))
             return frames[frames.size() - 1 - n].env;
         return workspaceEnv_.get();
     }
@@ -3219,7 +3219,7 @@ keel::String Engine::inputName(int k)
 
     if (vm_ && backend_ == Backend::VM) {
         const auto names = vm_->currentFrameCallerArgNames();
-        if (k > static_cast<int>(names.size()))
+        if (k > keel::as<int>(names.size()))
             return {};  // beyond known names: arg wasn't recorded
         return names[k - 1].clone();
     }
@@ -3227,7 +3227,7 @@ keel::String Engine::inputName(int k)
         const auto &frames = treeWalker_->activeFrames();
         if (frames.empty()) return {};
         const auto &names = frames.back().callerArgNames;
-        if (k > static_cast<int>(names.size()))
+        if (k > keel::as<int>(names.size()))
             return {};
         return names[k - 1].clone();
     }

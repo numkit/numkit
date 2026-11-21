@@ -37,7 +37,7 @@ static void jsonEscapeAppend(keel::StringRef s, keel::String &out) {
         else if (c == '\n') out.append("\\n");
         else if (c == '\r') out.append("\\r");
         else if (c == '\t') out.append("\\t");
-        else out.push_back(static_cast<char>(c));
+        else out.push_back(keel::as<char>(c));
     }
     out.push_back('\"');
 }

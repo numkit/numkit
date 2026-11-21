@@ -149,8 +149,8 @@ inline T toOutT(double v)
     } else {
         if (std::isnan(v)) return T{};
         v = std::round(v);
-        constexpr double lo = static_cast<double>(std::numeric_limits<T>::min());
-        constexpr double hi = static_cast<double>(std::numeric_limits<T>::max());
+        constexpr double lo = keel::as<double>(std::numeric_limits<T>::min());
+        constexpr double hi = keel::as<double>(std::numeric_limits<T>::max());
         if (v < lo) return std::numeric_limits<T>::min();
         if (v > hi) return std::numeric_limits<T>::max();
         return static_cast<T>(v);
@@ -161,7 +161,7 @@ template <typename T>
 inline Value makeNativeScalar(T v, ValueType outType, keel::Allocator *mr)
 {
     if (outType == ValueType::DOUBLE)
-        return Value::scalar(static_cast<double>(v), mr);
+        return Value::scalar(keel::as<double>(v), mr);
     auto r = Value::matrix(1, 1, outType, mr);
     static_cast<T *>(r.rawDataMut())[0] = v;
     return r;
@@ -219,7 +219,7 @@ Value reduceTypedAll(const Value &x, ValueType outType, keel::Allocator *mr,
 {
     if (x.isEmpty()) {
         // Empty input: scalar reduce → identity (sum=0, prod=1, mean=NaN).
-        const T v = finalize(static_cast<double>(init), 0);
+        const T v = finalize(keel::as<double>(init), 0);
         return makeNativeScalar<T>(v, outType, mr);
     }
     if (x.isScalar() || x.dims().isVector()) {
@@ -292,12 +292,12 @@ struct MeanOp {
     static double accum(double a, double b) { return a + b; }
     template<typename T>
     static T finalize(double acc, keel::usize n) {
-        return toOutT<T>(n == 0 ? std::nan("") : acc / static_cast<double>(n));
+        return toOutT<T>(n == 0 ? std::nan("") : acc / keel::as<double>(n));
     }
     static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
     static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
     static keel::c64 cFinalize(keel::c64 acc, keel::usize n) {
-        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / static_cast<double>(n);
+        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / keel::as<double>(n);
     }
 };
 
@@ -523,7 +523,7 @@ inline T nanFinalize(double acc, keel::usize nonNanCount)
 {
     if constexpr (std::is_same_v<Op, MeanOp>)
         return toOutT<T>(nonNanCount == 0 ? std::nan("")
-                                          : acc / static_cast<double>(nonNanCount));
+                                          : acc / keel::as<double>(nonNanCount));
     else
         // sum: empty → 0 (matches MATLAB nansum). prod: empty → 1.
         return toOutT<T>(acc);
@@ -653,7 +653,7 @@ Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
     auto finalizeOne = [](keel::c64 acc, keel::usize count) -> keel::c64 {
         if constexpr (std::is_same_v<Op, MeanOp>)
             return count == 0 ? keel::c64(std::nan(""), 0.0)
-                              : acc / static_cast<double>(count);
+                              : acc / keel::as<double>(count);
         else
             return acc;
     };
@@ -821,7 +821,7 @@ Value dispatchReductionAdapter(keel::ArrayRef<Value> args, const char *fn,
     if (!f.dimSet.empty()) {
         Value c = vecdim::collapseDims(args[0], f.dimSet, mr);
         return vecdim::expandReduced(
-            run(c, static_cast<int>(c.dims().ndim()), false),
+            run(c, keel::as<int>(c.dims().ndim()), false),
             args[0], f.dimSet, mr);
     }
     return run(args[0], f.dim, f.isAll);
@@ -913,17 +913,17 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
     (void)mr;
     if (idx.isEmpty()) return idx;
     const int nd = std::max(2, a0.dims().ndim());
-    keel::SmallArray<char, 16> listed(static_cast<keel::usize>(nd) + 1, '\0');
+    keel::SmallArray<char, 16> listed(keel::as<keel::usize>(nd) + 1, '\0');
     for (int d : redDims)
         if (d >= 1 && d <= nd)
-            listed[static_cast<keel::usize>(d)] = 1;
+            listed[keel::as<keel::usize>(d)] = 1;
 
     keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> nonListedDims;
     keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> listedDims;
     keel::usize stride = 1;
     for (int d = 1; d <= nd; ++d) {
         keel::usize sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
-        if (listed[static_cast<keel::usize>(d)])
+        if (listed[keel::as<keel::usize>(d)])
             listedDims.emplace_back(sz, stride);
         else
             nonListedDims.emplace_back(sz, stride);
@@ -936,7 +936,7 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
     for (keel::usize q = 0; q < total; ++q) {
         double v = dst[q];
         if (!std::isfinite(v) || v < 1.0) continue;
-        keel::usize k = static_cast<keel::usize>(v) - 1;
+        keel::usize k = keel::as<keel::usize>(v) - 1;
 
         keel::usize remQ = q;
         keel::usize baseOff = 0;
@@ -954,7 +954,7 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
             redOff += coord * st;
         }
 
-        dst[q] = static_cast<double>(1 + baseOff + redOff);
+        dst[q] = keel::as<double>(1 + baseOff + redOff);
     }
     return out;
 }
@@ -1008,8 +1008,8 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                         0, 0, "max", "", "numkit:max:vecdimLinear");
         Value c = vecdim::collapseDims(a0, vecdimSet, mr);
         auto [val, idx] = omitNan
-            ? maxOmitNan(c, static_cast<int>(c.dims().ndim()), mr)
-            : max(c, static_cast<int>(c.dims().ndim()), mr);
+            ? maxOmitNan(c, keel::as<int>(c.dims().ndim()), mr)
+            : max(c, keel::as<int>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
@@ -1070,8 +1070,8 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                         0, 0, "min", "", "numkit:min:vecdimLinear");
         Value c = vecdim::collapseDims(a0, vecdimSet, mr);
         auto [val, idx] = omitNan
-            ? minOmitNan(c, static_cast<int>(c.dims().ndim()), mr)
-            : min(c, static_cast<int>(c.dims().ndim()), mr);
+            ? minOmitNan(c, keel::as<int>(c.dims().ndim()), mr)
+            : min(c, keel::as<int>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);

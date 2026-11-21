@@ -58,7 +58,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 id = rec->figureId;
                 fm.setFigure(id);
             } else {
-                id = static_cast<int>(args[0].toScalar());
+                id = keel::as<int>(args[0].toScalar());
                 fm.setFigure(id);
             }
             fm.current().modified = true;
@@ -66,7 +66,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             // The bundle adapter wraps this id into a matlab.ui.Figure
             // handle object (kHandleReturning wrap). Always emit the id —
             // MATLAB binds a bare `figure` statement's Figure into `ans`.
-            outs[0] = Value::scalar(static_cast<double>(id), mr);
+            outs[0] = Value::scalar(keel::as<double>(id), mr);
         });
     regCore("layout", "close",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
@@ -91,7 +91,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 }
             } else if (args[0].isNumeric()) {
                 for (keel::usize k = 0; k < args[0].numel(); ++k) {
-                    int id = static_cast<int>(args[0].elemAsDouble(k));
+                    int id = keel::as<int>(args[0].elemAsDouble(k));
                     fm.closeFigureNotify(id);
                 }
             }
@@ -186,7 +186,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                         if (endptr && endptr > base + pos && std::isfinite(v)) {
                             if (v < dmin) dmin = v;
                             if (v > dmax) dmax = v;
-                            pos = static_cast<keel::usize>(endptr - base);
+                            pos = keel::as<keel::usize>(endptr - base);
                             continue;
                         }
                     }
@@ -234,7 +234,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     regCore("layout", "colordef",
         [](keel::ArrayRef<Value> /*args*/, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (nargout >= 1)
-                outs[0] = Value::scalar(static_cast<double>(gc.fm.current().id));
+                outs[0] = Value::scalar(keel::as<double>(gc.fm.current().id));
             else
                 outs[0] = Value();
         });
@@ -247,7 +247,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                     if (auto *rec = fm.findHandle(hid)) {
                         if (rec->figureId > 0) fm.setFigure(rec->figureId);
                         if (rec->axesIndex < fm.current().axes.size()) {
-                            fm.current().currentAxes = static_cast<int>(rec->axesIndex);
+                            fm.current().currentAxes = keel::as<int>(rec->axesIndex);
                         }
                     }
                     outs[0] = Value();
@@ -256,9 +256,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 int mnp = 0;
                 if (args[0].isChar() || args[0].isString()) {
                     auto r = keel::parse_i64(args[0].toString().as_ref().trim());
-                    if (r.is_ok()) mnp = static_cast<int>(r.value());
+                    if (r.is_ok()) mnp = keel::as<int>(r.value());
                 } else {
-                    mnp = static_cast<int>(args[0].elemAsDouble(0));
+                    mnp = keel::as<int>(args[0].elemAsDouble(0));
                 }
                 if (mnp >= 111 && mnp <= 999) {
                     int m = mnp / 100;
@@ -275,9 +275,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            int m = static_cast<int>(args[0].elemAsDouble(0));
-            int n = static_cast<int>(args[1].elemAsDouble(0));
-            int p = static_cast<int>(args[2].elemAsDouble(0));
+            int m = keel::as<int>(args[0].elemAsDouble(0));
+            int n = keel::as<int>(args[1].elemAsDouble(0));
+            int p = keel::as<int>(args[2].elemAsDouble(0));
             fm.setSubplot(m, n, p);
             outs[0] = Value();
         });
@@ -876,7 +876,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 auto cm = Value::matrix(64, 3, ValueType::DOUBLE, gc.mr);
                 double *p = cm.doubleDataMut();
                 for (keel::usize i = 0; i < 64; ++i) {
-                    const double v = static_cast<double>(i) / 63.0;
+                    const double v = keel::as<double>(i) / 63.0;
                     p[i] = v;
                     p[64 + i] = v;
                     p[128 + i] = v;

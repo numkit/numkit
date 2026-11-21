@@ -49,23 +49,23 @@ inline keel::i64 daysFromCivil(keel::i64 y, keel::i64 m, keel::i64 d) noexcept
     m = mAdj;
     y -= (m <= 2) ? 1 : 0;
     const keel::i64 era = (y >= 0 ? y : y - 399) / 400;
-    const unsigned yoe = static_cast<unsigned>(y - era * 400);
-    const unsigned doy = (153 * (static_cast<unsigned>(m) + (m > 2 ? -3 : 9)) + 2) / 5 + 0;
+    const unsigned yoe = keel::as<unsigned>(y - era * 400);
+    const unsigned doy = (153 * (keel::as<unsigned>(m) + (m > 2 ? -3 : 9)) + 2) / 5 + 0;
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + static_cast<keel::i64>(doe) - 719468 + (d - 1);
+    return era * 146097 + keel::as<keel::i64>(doe) - 719468 + (d - 1);
 }
 
 inline void civilFromDays(keel::i64 z, keel::i64 &y, keel::i64 &m, keel::i64 &d) noexcept
 {
     z += 719468;
     const keel::i64 era = (z >= 0 ? z : z - 146096) / 146097;
-    const unsigned doe = static_cast<unsigned>(z - era * 146097);
+    const unsigned doe = keel::as<unsigned>(z - era * 146097);
     const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    y = static_cast<keel::i64>(yoe) + era * 400;
+    y = keel::as<keel::i64>(yoe) + era * 400;
     const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     const unsigned mp = (5 * doy + 2) / 153;
-    d = static_cast<keel::i64>(doy - (153 * mp + 2) / 5 + 1);
-    m = static_cast<keel::i64>(mp) + (mp < 10 ? 3 : -9);
+    d = keel::as<keel::i64>(doy - (153 * mp + 2) / 5 + 1);
+    m = keel::as<keel::i64>(mp) + (mp < 10 ? 3 : -9);
     y += (m <= 2) ? 1 : 0;
 }
 
@@ -89,13 +89,13 @@ inline double composeSerialDay(double Y, double M, double D,
     if (std::isnan(Y) || std::isnan(M) || std::isnan(D)
         || std::isnan(H) || std::isnan(MI) || std::isnan(S))
         return std::numeric_limits<double>::quiet_NaN();
-    keel::i64 yi = static_cast<keel::i64>(std::floor(Y));
-    keel::i64 mi = static_cast<keel::i64>(std::floor(M));
-    keel::i64 di = static_cast<keel::i64>(std::floor(D));
-    double fracD = (D - static_cast<double>(di))
+    keel::i64 yi = keel::as<keel::i64>(std::floor(Y));
+    keel::i64 mi = keel::as<keel::i64>(std::floor(M));
+    keel::i64 di = keel::as<keel::i64>(std::floor(D));
+    double fracD = (D - keel::as<double>(di))
                    + (H * 3600.0 + MI * 60.0 + S) / kSecondsPerDay;
     keel::i64 daysSince1970 = daysFromCivil(yi, mi, di);
-    return static_cast<double>(daysSince1970) + kEpochSerialDay + fracD;
+    return keel::as<double>(daysSince1970) + kEpochSerialDay + fracD;
 }
 
 struct CivilDateTime
@@ -114,8 +114,8 @@ inline CivilDateTime decomposeSerialDay(double serialDay) noexcept
     }
     // Round to nearest millisecond to avoid FP drift in H:MI:S extraction
     double shifted = serialDay - kEpochSerialDay;
-    keel::i64 wholeDays = static_cast<keel::i64>(std::floor(shifted));
-    double remSec = (shifted - static_cast<double>(wholeDays)) * kSecondsPerDay;
+    keel::i64 wholeDays = keel::as<keel::i64>(std::floor(shifted));
+    double remSec = (shifted - keel::as<double>(wholeDays)) * kSecondsPerDay;
     double roundedMs = std::round(remSec * 1000.0);
     if (roundedMs >= 86400000.0) {
         wholeDays += 1;
@@ -125,11 +125,11 @@ inline CivilDateTime decomposeSerialDay(double serialDay) noexcept
         roundedMs += 86400000.0;
     }
     civilFromDays(wholeDays, out.year, out.month, out.day);
-    keel::i64 totalWholeSec = static_cast<keel::i64>(roundedMs / 1000.0);
-    double msPart = roundedMs - static_cast<double>(totalWholeSec) * 1000.0;
+    keel::i64 totalWholeSec = keel::as<keel::i64>(roundedMs / 1000.0);
+    double msPart = roundedMs - keel::as<double>(totalWholeSec) * 1000.0;
     out.hour = totalWholeSec / 3600;
     out.minute = (totalWholeSec % 3600) / 60;
-    out.second = static_cast<double>(totalWholeSec % 60) + msPart / 1000.0;
+    out.second = keel::as<double>(totalWholeSec % 60) + msPart / 1000.0;
     return out;
 }
 
@@ -143,9 +143,9 @@ inline double addCalendarMonths(double serialDay, keel::i64 deltaMonths,
     keel::i64 yNew = c.year + (m0 >= 0 ? m0 / 12 : (m0 - 11) / 12);
     keel::i64 mNew = m0 - (yNew - c.year) * 12 + 1;
     keel::i64 dNew = std::min(c.day, daysInMonth(yNew, mNew));
-    return composeSerialDay(static_cast<double>(yNew), static_cast<double>(mNew),
-                            static_cast<double>(dNew + deltaDays),
-                            static_cast<double>(c.hour), static_cast<double>(c.minute),
+    return composeSerialDay(keel::as<double>(yNew), keel::as<double>(mNew),
+                            keel::as<double>(dNew + deltaDays),
+                            keel::as<double>(c.hour), keel::as<double>(c.minute),
                             c.second + deltaSeconds);
 }
 
@@ -163,12 +163,12 @@ inline keel::String formatDateTimeElem(double serialDay, keel::StringRef fmt, bo
         f = anyTimeInArray ? keel::StringRef("dd-MMM-uuuu HH:mm:ss") : keel::StringRef("dd-MMM-uuuu");
     }
     char y4[16], m2[8], d2[8], h2[8], mi2[8], s2[16];
-    std::snprintf(y4, sizeof(y4), "%04lld", static_cast<long long>(c.year));
-    std::snprintf(m2, sizeof(m2), "%02lld", static_cast<long long>(c.month));
-    std::snprintf(d2, sizeof(d2), "%02lld", static_cast<long long>(c.day));
-    std::snprintf(h2, sizeof(h2), "%02lld", static_cast<long long>(c.hour));
-    std::snprintf(mi2, sizeof(mi2), "%02lld", static_cast<long long>(c.minute));
-    int wholeSec = static_cast<int>(std::floor(c.second + 1e-9));
+    std::snprintf(y4, sizeof(y4), "%04lld", keel::as<long long>(c.year));
+    std::snprintf(m2, sizeof(m2), "%02lld", keel::as<long long>(c.month));
+    std::snprintf(d2, sizeof(d2), "%02lld", keel::as<long long>(c.day));
+    std::snprintf(h2, sizeof(h2), "%02lld", keel::as<long long>(c.hour));
+    std::snprintf(mi2, sizeof(mi2), "%02lld", keel::as<long long>(c.minute));
+    int wholeSec = keel::as<int>(std::floor(c.second + 1e-9));
     double fracSec = c.second - wholeSec;
     std::snprintf(s2, sizeof(s2), "%02d", wholeSec);
     const char *mmm = (c.month >= 1 && c.month <= 12) ? kMonthShort[c.month - 1] : "Jan";
@@ -193,15 +193,15 @@ inline keel::String formatDateTimeElem(double serialDay, keel::StringRef fmt, bo
             i += 4;
         } else if (matchAt(i, "uu") || matchAt(i, "yy")) {
             char y2[8];
-            std::snprintf(y2, sizeof(y2), "%02lld", static_cast<long long>(c.year % 100));
+            std::snprintf(y2, sizeof(y2), "%02lld", keel::as<long long>(c.year % 100));
             res.append(y2);
             i += 2;
         } else if (matchAt(i, "QQQ")) {
-            int q = static_cast<int>((c.month - 1) / 3 + 1);
+            int q = keel::as<int>((c.month - 1) / 3 + 1);
             keel::format_into(res, "Q{}", q);
             i += 3;
         } else if (matchAt(i, "QQ")) {
-            int q = static_cast<int>((c.month - 1) / 3 + 1);
+            int q = keel::as<int>((c.month - 1) / 3 + 1);
             keel::format_into(res, "Q{}", q);
             i += 2;
         } else if (matchAt(i, "MMM")) {
@@ -220,7 +220,7 @@ inline keel::String formatDateTimeElem(double serialDay, keel::StringRef fmt, bo
             res.append(mi2);
             i += 2;
         } else if (matchAt(i, "ss.SSS")) {
-            int ms = static_cast<int>(std::round(fracSec * 1000.0));
+            int ms = keel::as<int>(std::round(fracSec * 1000.0));
             char msBuf[16];
             std::snprintf(msBuf, sizeof(msBuf), "%s.%03d", s2, ms);
             res.append(msBuf);
@@ -268,7 +268,7 @@ inline double parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
         long val = std::strtol(p, &ep, 10);
         if (ep == p)
             return false;
-        out = static_cast<int>(val);
+        out = keel::as<int>(val);
         p = ep;
         return true;
     };
@@ -513,7 +513,7 @@ inline keel::String formatDurationElem(double sec, keel::StringRef fmt)
         return keel::format("%g yr", sec / kSecondsPerYear);
     bool neg = sec < 0.0;
     double a = keel::abs(sec);
-    keel::i64 totalMs = static_cast<keel::i64>(std::round(a * 1000.0));
+    keel::i64 totalMs = keel::as<keel::i64>(std::round(a * 1000.0));
     keel::i64 wholeSec = totalMs / 1000;
     keel::i64 ms = totalMs % 1000;
     keel::i64 hh = wholeSec / 3600;
@@ -523,16 +523,16 @@ inline keel::String formatDurationElem(double sec, keel::StringRef fmt)
     if (ms == 0) {
         std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld",
                       neg ? "-" : "",
-                      static_cast<long long>(hh),
-                      static_cast<long long>(mm),
-                      static_cast<long long>(ss));
+                      keel::as<long long>(hh),
+                      keel::as<long long>(mm),
+                      keel::as<long long>(ss));
     } else {
         std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld.%03lld",
                       neg ? "-" : "",
-                      static_cast<long long>(hh),
-                      static_cast<long long>(mm),
-                      static_cast<long long>(ss),
-                      static_cast<long long>(ms));
+                      keel::as<long long>(hh),
+                      keel::as<long long>(mm),
+                      keel::as<long long>(ss),
+                      keel::as<long long>(ms));
     }
     return keel::String::from(buf);
 }
@@ -588,13 +588,13 @@ inline Value extractDatetimeComponent(const Value &self, int comp, keel::Allocat
         if (c.isNaT)
             return std::numeric_limits<double>::quiet_NaN();
         switch (comp) {
-        case 0: return static_cast<double>(c.year);
-        case 1: return static_cast<double>(c.month);
-        case 2: return static_cast<double>(c.day);
-        case 3: return static_cast<double>(c.hour);
-        case 4: return static_cast<double>(c.minute);
+        case 0: return keel::as<double>(c.year);
+        case 1: return keel::as<double>(c.month);
+        case 2: return keel::as<double>(c.day);
+        case 3: return keel::as<double>(c.hour);
+        case 4: return keel::as<double>(c.minute);
         case 5: return c.second;
-        case 6: return static_cast<double>((c.month - 1) / 3 + 1); // quarter
+        case 6: return keel::as<double>((c.month - 1) / 3 + 1); // quarter
         default: return 0.0;
         }
     };
@@ -623,11 +623,11 @@ inline void mutateDatetimeComponent(Value &self, int comp, const Value &val)
             continue;
         double v = (nv == 1) ? val.toScalar() : val.elemAsDouble(i);
         CivilDateTime c = decomposeSerialDay(p->serialDay);
-        double y = static_cast<double>(c.year);
-        double m = static_cast<double>(c.month);
-        double d = static_cast<double>(c.day);
-        double h = static_cast<double>(c.hour);
-        double mi = static_cast<double>(c.minute);
+        double y = keel::as<double>(c.year);
+        double m = keel::as<double>(c.month);
+        double d = keel::as<double>(c.day);
+        double h = keel::as<double>(c.hour);
+        double mi = keel::as<double>(c.minute);
         double s = c.second;
         switch (comp) {
         case 0: y = v; break;
@@ -684,8 +684,8 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
         auto extract = [&](const CalDurElemPayload *p) -> double {
             if (!p) return 0.0;
             if (monthMult != 0)
-                return static_cast<double>(p->months) / static_cast<double>(monthMult);
-            return static_cast<double>(p->days) / static_cast<double>(dayMult);
+                return keel::as<double>(p->months) / keel::as<double>(monthMult);
+            return keel::as<double>(p->days) / keel::as<double>(dayMult);
         };
         if (n == 1)
             return Value::scalar(extract(calElem(x, 0)), mr);
@@ -706,7 +706,7 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
         if (!std::isfinite(v) || std::floor(v) != v)
             throw std::runtime_error(
                 keel::format("numkit:{}:MustBeInteger: Calendar duration quantities must be finite integers.", fnName).c_str());
-        keel::i64 iv = static_cast<keel::i64>(v);
+        keel::i64 iv = keel::as<keel::i64>(v);
         items[i] = CalDurElemPayload(iv * monthMult, iv * dayMult, 0.0);
     }
     return makeCalDurArray(x.dims(), items.as_ref(), mr);
@@ -757,7 +757,7 @@ void register_timefun(Engine &engine) {
             const keel::u64 nowNs = keel::monotonic_ns();
             ctx.engine->setTicTimer(nowNs);
             if (nargout > 0) {
-                const double id = static_cast<double>(nowNs / 1000ULL);
+                const double id = keel::as<double>(nowNs / 1000ULL);
                 outs[0] = Value::scalar(id, ctx.engine->allocator());
             } else {
                 outs[0] = Value();
@@ -771,13 +771,13 @@ void register_timefun(Engine &engine) {
             keel::u64 startNs = 0;
             if (!args.empty() && args[0].isScalar()) {
                 const double v = args[0].toScalar();
-                startNs = (v > 0.0) ? static_cast<keel::u64>(v) * 1000ULL : 0ULL;
+                startNs = (v > 0.0) ? keel::as<keel::u64>(v) * 1000ULL : 0ULL;
             } else if (ctx.engine->ticWasCalled()) {
                 startNs = ctx.engine->ticTimer();
             } else {
                 throw std::runtime_error("toc: You must call 'tic' before calling 'toc'.");
             }
-            const double elapsed = (nowNs >= startNs) ? static_cast<double>(nowNs - startNs) * 1e-9 : 0.0;
+            const double elapsed = (nowNs >= startNs) ? keel::as<double>(nowNs - startNs) * 1e-9 : 0.0;
             if (nargout > 0) {
                 outs[0] = Value::scalar(elapsed, ctx.engine->allocator());
             } else {
@@ -841,10 +841,10 @@ void register_timefun(Engine &engine) {
                 static const char *kShort[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
                 static const char *kLong[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
                 double dval = args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(0);
-                keel::i64 f = static_cast<keel::i64>(std::floor(dval)) - 2;
+                keel::i64 f = keel::as<keel::i64>(std::floor(dval)) - 2;
                 keel::i64 r = f % 7;
                 if (r < 0) r += 7;
-                int dayIdx = static_cast<int>(r) + 1;
+                int dayIdx = keel::as<int>(r) + 1;
                 outs[1] = Value::fromString(wantLong ? kLong[dayIdx - 1] : kShort[dayIdx - 1], mr);
             }
         });
@@ -1006,14 +1006,14 @@ void register_timefun(Engine &engine) {
             keel::usize r = 1, c = 1;
             if (args.size() == 1 && args[0].isNumeric()) {
                 if (args[0].numel() == 1) {
-                    r = c = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
+                    r = c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
                 } else if (args[0].numel() >= 2) {
-                    r = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-                    c = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
+                    r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
+                    c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
                 }
             } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-                r = static_cast<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-                c = static_cast<keel::usize>(std::max(0.0, args[1].elemAsDouble(0)));
+                r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
+                c = keel::as<keel::usize>(std::max(0.0, args[1].elemAsDouble(0)));
             }
             keel::Array<double> nats(mr);
             nats.assign(r * c, std::numeric_limits<double>::quiet_NaN());
@@ -1204,7 +1204,7 @@ void register_timefun(Engine &engine) {
                 keel::StringRef fmt = durElem(self, 0) ? durElem(self, 0)->format.as_ref() : keel::StringRef("hh:mm:ss");
                 outs[0] = makeDurationScalar(bestVal, fmt, mr);
                 if (nargout >= 2)
-                    outs[1] = Value::scalar(static_cast<double>(bestIdx + 1), mr);
+                    outs[1] = Value::scalar(keel::as<double>(bestIdx + 1), mr);
             });
         };
         addDurMinMaxMethod("min", false);
@@ -1389,9 +1389,9 @@ void register_timefun(Engine &engine) {
                 keel::Array<CalDurElemPayload> items(mr);
                 items.resize(R);
                 for (keel::usize r = 0; r < R; ++r) {
-                    keel::i64 y = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r)));
-                    keel::i64 m = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r + R)));
-                    keel::i64 d = static_cast<keel::i64>(std::round(args[0].elemAsDouble(r + 2 * R)));
+                    keel::i64 y = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r)));
+                    keel::i64 m = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r + R)));
+                    keel::i64 d = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r + 2 * R)));
                     items[r] = CalDurElemPayload(y * 12 + m, d, 0.0);
                 }
                 return makeCalDurArray(Dims(R, 1), items.as_ref(), mr);
@@ -1403,9 +1403,9 @@ void register_timefun(Engine &engine) {
                 keel::Array<CalDurElemPayload> items(mr);
                 items.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
-                    keel::i64 y = static_cast<keel::i64>(std::round(args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i)));
-                    keel::i64 m = static_cast<keel::i64>(std::round(args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i)));
-                    keel::i64 dy = static_cast<keel::i64>(std::round(args[2].numel() == 1 ? args[2].toScalar() : args[2].elemAsDouble(i)));
+                    keel::i64 y = keel::as<keel::i64>(std::round(args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i)));
+                    keel::i64 m = keel::as<keel::i64>(std::round(args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i)));
+                    keel::i64 dy = keel::as<keel::i64>(std::round(args[2].numel() == 1 ? args[2].toScalar() : args[2].elemAsDouble(i)));
                     double sec = 0.0;
                     if (args.size() == 6) {
                         double hh = args[3].numel() == 1 ? args[3].toScalar() : args[3].elemAsDouble(i);
@@ -1514,7 +1514,7 @@ void register_timefun(Engine &engine) {
                     items[i] = CalDurElemPayload(
                         c1->months + sign * c2->months,
                         c1->days + sign * c2->days,
-                        c1->seconds + static_cast<double>(sign) * c2->seconds);
+                        c1->seconds + keel::as<double>(sign) * c2->seconds);
                 }
                 outs[0] = makeCalDurArray(d, items.as_ref(), mr);
             };
@@ -1667,11 +1667,11 @@ void register_timefun(Engine &engine) {
                     } else if (convFrom == "excel") {
                         sds[i] = v + 693960.0;
                     } else if (convFrom == "yyyymmdd") {
-                        keel::i64 iv = static_cast<keel::i64>(std::llround(v));
+                        keel::i64 iv = keel::as<keel::i64>(std::llround(v));
                         keel::i64 y = iv / 10000;
                         keel::i64 m = (iv / 100) % 100;
                         keel::i64 d = iv % 100;
-                        sds[i] = composeSerialDay(static_cast<double>(y), static_cast<double>(m), static_cast<double>(d));
+                        sds[i] = composeSerialDay(keel::as<double>(y), keel::as<double>(m), keel::as<double>(d));
                     } else {
                         throw std::runtime_error(
                             keel::format("numkit:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '{}'.", convFrom).c_str());
@@ -1932,7 +1932,7 @@ void register_timefun(Engine &engine) {
                 self,
                 [](double sd) {
                     CivilDateTime c = decomposeSerialDay(sd);
-                    return static_cast<double>(c.year * 10000 + c.month * 100 + c.day);
+                    return keel::as<double>(c.year * 10000 + c.month * 100 + c.day);
                 },
                 ctx.engine->allocator());
         });
@@ -1950,11 +1950,11 @@ void register_timefun(Engine &engine) {
                     for (keel::usize k = 0; k < 6; ++k)
                         dst[i + k * n] = std::numeric_limits<double>::quiet_NaN();
                 } else {
-                    dst[i + 0 * n] = static_cast<double>(c.year);
-                    dst[i + 1 * n] = static_cast<double>(c.month);
-                    dst[i + 2 * n] = static_cast<double>(c.day);
-                    dst[i + 3 * n] = static_cast<double>(c.hour);
-                    dst[i + 4 * n] = static_cast<double>(c.minute);
+                    dst[i + 0 * n] = keel::as<double>(c.year);
+                    dst[i + 1 * n] = keel::as<double>(c.month);
+                    dst[i + 2 * n] = keel::as<double>(c.day);
+                    dst[i + 3 * n] = keel::as<double>(c.hour);
+                    dst[i + 4 * n] = keel::as<double>(c.minute);
                     dst[i + 5 * n] = c.second;
                 }
             }
@@ -2157,8 +2157,8 @@ void register_timefun(Engine &engine) {
                 keel::i64 months = (c2.year - c1.year) * 12 + (c2.month - c1.month);
                 double anchor = addCalendarMonths(sd1, months, 0, 0.0);
                 double remDays = sd2 - anchor;
-                keel::i64 wholeDays = static_cast<keel::i64>(std::trunc(remDays));
-                double remSec = (remDays - static_cast<double>(wholeDays)) * kSecondsPerDay;
+                keel::i64 wholeDays = keel::as<keel::i64>(std::trunc(remDays));
+                double remSec = (remDays - keel::as<double>(wholeDays)) * kSecondsPerDay;
                 items[i] = CalDurElemPayload(months, wholeDays, remSec);
             }
             outs[0] = makeCalDurArray(d, items.as_ref(), mr);
@@ -2244,7 +2244,7 @@ void register_timefun(Engine &engine) {
             if (nargout >= 2) {
                 Value idx = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < n; ++i)
-                    idx.doubleDataMut()[i] = static_cast<double>(order[i] + 1);
+                    idx.doubleDataMut()[i] = keel::as<double>(order[i] + 1);
                 outs[1] = std::move(idx);
             }
         });
@@ -2274,7 +2274,7 @@ void register_timefun(Engine &engine) {
                                              p0 ? p0->format.as_ref() : keel::StringRef(""),
                                              p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
                 if (nargout >= 2)
-                    outs[1] = Value::scalar(static_cast<double>(bestIdx + 1), mr);
+                    outs[1] = Value::scalar(keel::as<double>(bestIdx + 1), mr);
             });
         };
         addMinMaxMethod("min", false);
@@ -2395,13 +2395,13 @@ void register_timefun(Engine &engine) {
             if (nargout >= 2) {
                 Value iaVal = Value::matrix(ia.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < ia.size(); ++i)
-                    iaVal.doubleDataMut()[i] = static_cast<double>(ia[i]);
+                    iaVal.doubleDataMut()[i] = keel::as<double>(ia[i]);
                 outs[1] = std::move(iaVal);
             }
             if (nargout >= 3) {
                 Value icVal = Value::matrix(n, 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < n; ++i)
-                    icVal.doubleDataMut()[i] = static_cast<double>(ic[i]);
+                    icVal.doubleDataMut()[i] = keel::as<double>(ic[i]);
                 outs[2] = std::move(icVal);
             }
         });
@@ -2461,13 +2461,13 @@ void register_timefun(Engine &engine) {
             if (nargout >= 2) {
                 Value iaVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < items.size(); ++i)
-                    iaVal.doubleDataMut()[i] = static_cast<double>(items[i].ia);
+                    iaVal.doubleDataMut()[i] = keel::as<double>(items[i].ia);
                 outs[1] = std::move(iaVal);
             }
             if (nargout >= 3) {
                 Value ibVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < items.size(); ++i)
-                    ibVal.doubleDataMut()[i] = static_cast<double>(items[i].ib);
+                    ibVal.doubleDataMut()[i] = keel::as<double>(items[i].ib);
                 outs[2] = std::move(ibVal);
             }
         });
@@ -2497,7 +2497,7 @@ void register_timefun(Engine &engine) {
                     }
                 }
                 lia.logicalDataMut()[i] = found > 0 ? 1 : 0;
-                locb.doubleDataMut()[i] = static_cast<double>(found);
+                locb.doubleDataMut()[i] = keel::as<double>(found);
             }
             outs[0] = std::move(lia);
             if (nargout >= 2)
@@ -2675,13 +2675,13 @@ void register_timefun(Engine &engine) {
             if (args.size() == 3 && args[1].isObject()
                 && args[1].objectClassNameRef() == "calendarDuration") {
                 const auto *cp = calElem(args[1], 0);
-                double approxStep = static_cast<double>(cp->months) * 30.0
-                                    + static_cast<double>(cp->days)
+                double approxStep = keel::as<double>(cp->months) * 30.0
+                                    + keel::as<double>(cp->days)
                                     + cp->seconds / kSecondsPerDay;
                 if (approxStep == 0.0)
                     throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (keel::i64 k = 0; k < 100000; ++k) {
-                    double cur = addCalendarMonths(startSd, cp->months * k, cp->days * k, cp->seconds * static_cast<double>(k));
+                    double cur = addCalendarMonths(startSd, cp->months * k, cp->days * k, cp->seconds * keel::as<double>(k));
                     if ((approxStep > 0.0 && cur > stopSd + kTol)
                         || (approxStep < 0.0 && cur < stopSd - kTol))
                         break;
@@ -2700,7 +2700,7 @@ void register_timefun(Engine &engine) {
                 if (stepDays == 0.0)
                     throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (keel::i64 k = 0; k < 100000; ++k) {
-                    double cur = startSd + static_cast<double>(k) * stepDays;
+                    double cur = startSd + keel::as<double>(k) * stepDays;
                     if ((stepDays > 0.0 && cur > stopSd + kTol)
                         || (stepDays < 0.0 && cur < stopSd - kTol))
                         break;

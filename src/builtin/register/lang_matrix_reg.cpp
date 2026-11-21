@@ -177,12 +177,12 @@ void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
         const keel::usize len = std::max({ni, nj, nv});
         keel::usize M = 0, N = 0;
         for (keel::usize k = 0; k < ni; ++k) {
-            long long r = static_cast<long long>(vi.elemAsDouble(k));
-            if (r > static_cast<long long>(M)) M = static_cast<keel::usize>(r);
+            long long r = keel::as<long long>(vi.elemAsDouble(k));
+            if (r > keel::as<long long>(M)) M = keel::as<keel::usize>(r);
         }
         for (keel::usize k = 0; k < nj; ++k) {
-            long long c = static_cast<long long>(vj.elemAsDouble(k));
-            if (c > static_cast<long long>(N)) N = static_cast<keel::usize>(c);
+            long long c = keel::as<long long>(vj.elemAsDouble(k));
+            if (c > keel::as<long long>(N)) N = keel::as<keel::usize>(c);
         }
         if (args.size() >= 5) {
             M = argcheck::arrayDim(args[3], "sparse");
@@ -191,8 +191,8 @@ void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
         Value out = Value::matrix(M, N, ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
         for (keel::usize k = 0; k < len; ++k) {
-            keel::usize r = static_cast<keel::usize>(vi.elemAsDouble(ni == 1 ? 0 : k));
-            keel::usize c = static_cast<keel::usize>(vj.elemAsDouble(nj == 1 ? 0 : k));
+            keel::usize r = keel::as<keel::usize>(vi.elemAsDouble(ni == 1 ? 0 : k));
+            keel::usize c = keel::as<keel::usize>(vj.elemAsDouble(nj == 1 ? 0 : k));
             double val = vv.elemAsDouble(nv == 1 ? 0 : k);
             if (r >= 1 && r <= M && c >= 1 && c <= N) {
                 od[(r - 1) + (c - 1) * M] += val;
@@ -211,8 +211,8 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // 1 or 2 arguments: [B, d] = spdiags(A) or B = spdiags(A, d)
     if (args.size() <= 2) {
         const Value &A = args[0];
-        const long long m = static_cast<long long>(A.dims().rows());
-        const long long n = static_cast<long long>(A.dims().cols());
+        const long long m = keel::as<long long>(A.dims().rows());
+        const long long n = keel::as<long long>(A.dims().cols());
         const long long pLen = std::min(m, n);
 
         keel::Array<long long> diags(mr);
@@ -223,7 +223,7 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 const long long iEnd = std::min(m - 1, n - 1 - k);
                 for (long long i = iStart; i <= iEnd; ++i) {
                     const long long j = i + k;
-                    if (A.elemAsDouble(static_cast<keel::usize>(i + j * m)) != 0.0) {
+                    if (A.elemAsDouble(keel::as<keel::usize>(i + j * m)) != 0.0) {
                         anyNz = true;
                         break;
                     }
@@ -234,11 +234,11 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             const Value &dVal = args[1];
             diags.resize(dVal.numel());
             for (keel::usize idx = 0; idx < dVal.numel(); ++idx)
-                diags[idx] = static_cast<long long>(dVal.elemAsDouble(idx));
+                diags[idx] = keel::as<long long>(dVal.elemAsDouble(idx));
         }
 
         const keel::usize numD = diags.size();
-        Value B = Value::matrix(static_cast<keel::usize>(pLen), numD, ValueType::DOUBLE, mr);
+        Value B = Value::matrix(keel::as<keel::usize>(pLen), numD, ValueType::DOUBLE, mr);
         double *bd = B.doubleDataMut();
         for (keel::usize col = 0; col < numD; ++col) {
             const long long k = diags[col];
@@ -248,8 +248,8 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 const long long j = i + k;
                 const long long rowB = (m >= n) ? j : i;
                 if (rowB >= 0 && rowB < pLen)
-                    bd[static_cast<keel::usize>(rowB) + col * static_cast<keel::usize>(pLen)] =
-                        A.elemAsDouble(static_cast<keel::usize>(i + j * m));
+                    bd[keel::as<keel::usize>(rowB) + col * keel::as<keel::usize>(pLen)] =
+                        A.elemAsDouble(keel::as<keel::usize>(i + j * m));
             }
         }
         outs[0] = std::move(B);
@@ -257,7 +257,7 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             Value dOut = Value::matrix(numD, 1, ValueType::DOUBLE, mr);
             double *dd = dOut.doubleDataMut();
             for (keel::usize idx = 0; idx < numD; ++idx)
-                dd[idx] = static_cast<double>(diags[idx]);
+                dd[idx] = keel::as<double>(diags[idx]);
             outs[1] = std::move(dOut);
         }
         return;
@@ -270,33 +270,33 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     Value out;
     if (args.size() == 3) {
         const Value &Aold = args[2];
-        m = static_cast<long long>(Aold.dims().rows());
-        n = static_cast<long long>(Aold.dims().cols());
-        out = Value::matrix(static_cast<keel::usize>(m), static_cast<keel::usize>(n), ValueType::DOUBLE, mr);
+        m = keel::as<long long>(Aold.dims().rows());
+        n = keel::as<long long>(Aold.dims().cols());
+        out = Value::matrix(keel::as<keel::usize>(m), keel::as<keel::usize>(n), ValueType::DOUBLE, mr);
         double *od = out.doubleDataMut();
         for (keel::usize idx = 0; idx < Aold.numel(); ++idx)
             od[idx] = Aold.elemAsDouble(idx);
     } else {
-        m = static_cast<long long>(argcheck::arrayDim(args[2], "spdiags"));
-        n = static_cast<long long>(argcheck::arrayDim(args[3], "spdiags"));
-        out = Value::matrix(static_cast<keel::usize>(m), static_cast<keel::usize>(n), ValueType::DOUBLE, mr);
+        m = keel::as<long long>(argcheck::arrayDim(args[2], "spdiags"));
+        n = keel::as<long long>(argcheck::arrayDim(args[3], "spdiags"));
+        out = Value::matrix(keel::as<keel::usize>(m), keel::as<keel::usize>(n), ValueType::DOUBLE, mr);
     }
 
     double *od = out.doubleDataMut();
-    const long long bRows = static_cast<long long>(B.dims().rows());
-    const long long bCols = static_cast<long long>(B.dims().cols());
+    const long long bRows = keel::as<long long>(B.dims().rows());
+    const long long bCols = keel::as<long long>(B.dims().cols());
     const keel::usize numD = dVal.numel();
-    for (keel::usize col = 0; col < numD && static_cast<long long>(col) < bCols; ++col) {
-        const long long k = static_cast<long long>(dVal.elemAsDouble(col));
+    for (keel::usize col = 0; col < numD && keel::as<long long>(col) < bCols; ++col) {
+        const long long k = keel::as<long long>(dVal.elemAsDouble(col));
         const long long iStart = std::max(0LL, -k);
         const long long iEnd = std::min(m - 1, n - 1 - k);
         for (long long i = iStart; i <= iEnd; ++i) {
             const long long j = i + k;
             const long long rowB = (m >= n) ? j : i;
             const double val = (rowB >= 0 && rowB < bRows)
-                                   ? B.elemAsDouble(static_cast<keel::usize>(rowB + static_cast<long long>(col) * bRows))
+                                   ? B.elemAsDouble(keel::as<keel::usize>(rowB + keel::as<long long>(col) * bRows))
                                    : 0.0;
-            od[static_cast<keel::usize>(i + j * m)] = val;
+            od[keel::as<keel::usize>(i + j * m)] = val;
         }
     }
     outs[0] = std::move(out);
@@ -479,7 +479,7 @@ void magic_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     if (nd < 0.0 || nd != std::floor(nd))
         throw Error("magic: N must be a non-negative integer",
                      0, 0, "magic", "", "numkit:magic:badN");
-    outs[0] = magic(static_cast<keel::usize>(nd), ctx.engine->allocator());
+    outs[0] = magic(keel::as<keel::usize>(nd), ctx.engine->allocator());
 }
 
 void toeplitz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -533,7 +533,7 @@ keel::usize requireSizeArg(keel::ArrayRef<Value> args, const char *fn)
     if (nd < 0.0 || nd != std::floor(nd))
         throw Error(keel::format("{}: N must be a non-negative integer", fn),
                     0, 0, fn, "", keel::format("numkit:{}:badN", fn));
-    return static_cast<keel::usize>(nd);
+    return keel::as<keel::usize>(nd);
 }
 
 } // anonymous namespace
@@ -627,7 +627,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                 throw Error("topkrows: col must be a positive integer "
                             "or vector of positive integers",
                             0, 0, "topkrows", "", "numkit:topkrows:badCol");
-            cols.push_back(static_cast<keel::usize>(v) - 1);
+            cols.push_back(keel::as<keel::usize>(v) - 1);
         }
         ++i;
     }
@@ -680,7 +680,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                         0, 0, "topkrows", "", "numkit:topkrows:notMatrix");
         const keel::usize m = A.dims().rows();
         const keel::usize n = A.dims().cols();
-        const keel::usize kk = std::min(static_cast<keel::usize>(kd), m);
+        const keel::usize kk = std::min(keel::as<keel::usize>(kd), m);
         if (cols.empty()) {
             cols.reserve(n);
             for (keel::usize j = 0; j < n; ++j) cols.push_back(j);
@@ -740,14 +740,14 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             auto I = Value::matrix(kk, 1, ValueType::DOUBLE, mr);
             double *id = I.doubleDataMut();
             for (keel::usize k2 = 0; k2 < kk; ++k2)
-                id[k2] = static_cast<double>(ord[k2] + 1);
+                id[k2] = keel::as<double>(ord[k2] + 1);
             outs[1] = std::move(I);
         }
         return;
     }
 
     keel::Array<keel::usize> idx_out(mr);
-    auto B = topkrows_full(args[0], static_cast<keel::usize>(kd),
+    auto B = topkrows_full(args[0], keel::as<keel::usize>(kd),
                             keel::ArrayRef<keel::usize>(cols.data(), cols.size()),
                             keel::ArrayRef<keel::u8>(desc.data(), desc.size()),
                             (nargout >= 2) ? &idx_out : nullptr, mr);
@@ -780,14 +780,14 @@ void size_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         for (keel::usize i = 0; i < nargout && i < outs.size(); ++i) {
             double v;
             if (i + 1 < nargout) {
-                v = static_cast<double>(dims.dim(static_cast<int>(i)));
+                v = keel::as<double>(dims.dim(keel::as<int>(i)));
             } else {
                 // Last requested output: multiply remaining dims (if any).
                 keel::usize prod = 1;
-                for (int j = static_cast<int>(i); j < dims.ndim(); ++j)
+                for (int j = keel::as<int>(i); j < dims.ndim(); ++j)
                     prod *= dims.dim(j);
-                if (dims.ndim() <= static_cast<int>(i)) prod = 1;
-                v = static_cast<double>(prod);
+                if (dims.ndim() <= keel::as<int>(i)) prod = 1;
+                v = keel::as<double>(prod);
             }
             outs[i] = Value::scalar(v, mr);
         }
@@ -849,7 +849,7 @@ keel::Array<keel::usize> parseReshapeDims(const Value &x, keel::ArrayRef<Value> 
                                 "inferred with []; found a second one.",
                                  0, 0, "reshape", "",
                                  "numkit:reshape:multipleInferred");
-                inferPos = static_cast<int>(i);
+                inferPos = keel::as<int>(i);
             } else {
                 dims[i] = argcheck::reshapeSize(
                     argcheck::reshapeSizeArg(sizeArgs[i], "reshape"),
@@ -914,7 +914,7 @@ void peaks_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
         if (dn < 0 || dn > 1.0e9 || std::isnan(dn))
             throw Error("peaks: n must be a non-negative integer",
                          0, 0, "peaks", "", "numkit:peaks:badN");
-        n = static_cast<keel::usize>(dn);
+        n = keel::as<keel::usize>(dn);
     }
     outs[0] = peaks(n, ctx.engine->allocator());
 }
@@ -924,7 +924,7 @@ void sphere_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
 {
     keel::usize n = 20;  // MATLAB default
     if (!args.empty())
-        n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
+        n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[0], 1, "n", "sphere"), 1, "n", "sphere"));
     auto s = sphere(n, ctx.engine->allocator());
     outs[0] = std::move(s.X);
@@ -946,7 +946,7 @@ void cylinder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     } else {
         if (args[0].isScalar()) {
             // cylinder(n) — single integer arg is `n`, R defaults to [1 1].
-            n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
+            n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
                 argcheck::expectedReal(args[0], 1, "n", "cylinder"), 1, "n", "cylinder"));
             R = Value::matrix(1, 2, ValueType::DOUBLE, mr);
             R.doubleDataMut()[0] = 1.0;
@@ -954,7 +954,7 @@ void cylinder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         } else {
             R = args[0];
             if (args.size() >= 2)
-                n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
+                n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
                     argcheck::expectedReal(args[1], 2, "n", "cylinder"), 2, "n", "cylinder"));
         }
     }
@@ -976,7 +976,7 @@ void ellipsoid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     const double zr = args[5].toScalar();
     keel::usize n = 20;
     if (args.size() >= 7)
-        n = static_cast<keel::usize>(argcheck::expectedPositiveInteger(
+        n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[6], 7, "n", "ellipsoid"), 7, "n", "ellipsoid"));
     auto s = ellipsoid(xc, yc, zc, xr, yr, zr, n, ctx.engine->allocator());
     outs[0] = std::move(s.X);
@@ -1146,15 +1146,15 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             if (dirs.size() == 1) {
                 const bool d = dirs[0] != 0;
                 for (keel::usize k = 1; k <= C; ++k)
-                    cols.push_back(d ? -static_cast<int>(k) : static_cast<int>(k));
+                    cols.push_back(d ? -keel::as<int>(k) : keel::as<int>(k));
             } else {
                 if (dirs.size() != C)
                     throw Error("sortrows: number of directions must match the "
                                 "number of columns",
                                  0, 0, "sortrows", "", "numkit:sortrows:dirCount");
                 for (keel::usize k = 0; k < C; ++k)
-                    cols.push_back(dirs[k] ? -static_cast<int>(k + 1)
-                                           : static_cast<int>(k + 1));
+                    cols.push_back(dirs[k] ? -keel::as<int>(k + 1)
+                                           : keel::as<int>(k + 1));
             }
         } else {
             cols.reserve(c.numel());
@@ -1163,7 +1163,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                 if (v != std::floor(v))
                     throw Error("sortrows: column index must be an integer",
                                  0, 0, "sortrows", "", "numkit:sortrows:badCol");
-                cols.push_back(static_cast<int>(v));
+                cols.push_back(keel::as<int>(v));
             }
             // Optional direction argument: sortrows(A, cols, direction[s]).
             // Re-signs the listed columns by direction (overriding any sign in
@@ -1221,7 +1221,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         if (!std::isfinite(kd) || kd < 1.0 || kd != std::floor(kd))
             throw Error("find: Second argument must be a positive scalar integer.",
                          0, 0, "find", "", "numkit:find:badK");
-        kReq = static_cast<keel::usize>(kd);
+        kReq = keel::as<keel::usize>(kd);
     }
     bool fromLast = false;
     if (args.size() >= 3 && !args[2].isEmpty()) {
@@ -1230,7 +1230,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
                          0, 0, "find", "", "numkit:find:badDir");
         keel::String d = args[2].toString();
         for (char &ch : d)
-            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + 32);
+            if (ch >= 'A' && ch <= 'Z') ch = keel::as<char>(ch + 32);
         if (d == "last") fromLast = true;
         else if (d == "first") fromLast = false;
         else
@@ -1260,7 +1260,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         Value r = mk(ValueType::DOUBLE);
         double *rd = r.doubleDataMut();
         for (keel::usize t = 0; t < count; ++t)
-            rd[t] = static_cast<double>(lin[start + t] + 1);
+            rd[t] = keel::as<double>(lin[start + t] + 1);
         outs[0] = std::move(r);
         return;
     }
@@ -1274,8 +1274,8 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     double *cd = colV.doubleDataMut();
     for (keel::usize t = 0; t < count; ++t) {
         const keel::usize i = lin[start + t];
-        rd[t] = static_cast<double>(i % R + 1);
-        cd[t] = static_cast<double>(i / R + 1);
+        rd[t] = keel::as<double>(i % R + 1);
+        cd[t] = keel::as<double>(i / R + 1);
     }
     outs[0] = std::move(rowV);
     outs[1] = std::move(colV);
@@ -1400,7 +1400,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         }
         const keel::usize outCount = std::min(D, outs.size());
         for (keel::usize m = 0; m < outCount; ++m) {
-            Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
+            Value G = Value::matrixND(shape.data(), keel::as<int>(D), ValueType::DOUBLE, mr);
             double *gd = G.doubleDataMut();
             const keel::usize stride_m = strides[m];
             for (keel::usize lin = 0; lin < total; ++lin) {
@@ -1438,7 +1438,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     const keel::usize wantOut = std::max<keel::usize>(1, nargout);
     const keel::usize outCount = std::min({wantOut, D, outs.size()});
     for (keel::usize m = 0; m < outCount; ++m) {
-        Value G = Value::matrixND(shape.data(), static_cast<int>(D), ValueType::DOUBLE, mr);
+        Value G = Value::matrixND(shape.data(), keel::as<int>(D), ValueType::DOUBLE, mr);
         double *gd = G.doubleDataMut();
         const keel::usize stride_m = strides[m];
         const keel::usize len_m = shape[m];
@@ -1686,7 +1686,7 @@ void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         if (!std::isfinite(nv) || nv != std::floor(nv) || nv < 1.0)
             throw Error("diff: Difference order N must be a positive integer scalar",
                          0, 0, "diff", "", "numkit:diff:badOrder");
-        n = static_cast<int>(nv);
+        n = keel::as<int>(nv);
     }
     if (args.size() >= 3 && !args[2].isEmpty())
         dim = argcheck::dimArg(args[2], "diff");

@@ -77,7 +77,7 @@ inline keel::String serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
         else if (std::isinf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
         else {
             int n = std::snprintf(buf, sizeof(buf), "%.17g", x);
-            if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+            if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
         }
     }
     out.push_back(']');
@@ -91,19 +91,19 @@ inline keel::String serializeFlatDoubles(const keel::Array<keel::f64> &v) {
 inline void appendDouble(keel::String &out, keel::f64 v) {
     char buf[64];
     int n = std::snprintf(buf, sizeof(buf), "%.6g", v);
-    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
 inline void appendInt(keel::String &out, int v) {
     char buf[32];
     int n = std::snprintf(buf, sizeof(buf), "%d", v);
-    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
 inline void appendUsize(keel::String &out, keel::usize v) {
     char buf[32];
     int n = std::snprintf(buf, sizeof(buf), "%zu", v);
-    if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
+    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
 }  // namespace figdetail
@@ -602,7 +602,7 @@ struct FigureState
     {
         if (axes.empty())
             axes.push_back(AxesState{});
-        return axes[static_cast<keel::usize>(currentAxes)];
+        return axes[keel::as<keel::usize>(currentAxes)];
     }
 
     FigureState clone(keel::Allocator *alloc = nullptr) const
@@ -672,11 +672,11 @@ public:
         // kNoAxes marks figure-scoped records (sgtitle Text) — scoped
         // axes sweeps (prepareForPlot) leave them alone; full-figure
         // sweeps (clf/close) invalidate them.
-        static constexpr keel::usize kNoAxes = static_cast<keel::usize>(-1);
+        static constexpr keel::usize kNoAxes = keel::as<keel::usize>(-1);
         keel::usize axesIndex = 0;
         // Chart records: index into axes[axesIndex].datasets.
         // kNoDataset for everything else (they address state directly).
-        static constexpr keel::usize kNoDataset = static_cast<keel::usize>(-1);
+        static constexpr keel::usize kNoDataset = keel::as<keel::usize>(-1);
         keel::usize datasetIndex = kNoDataset;
         // Text records: which label slot this Text writes to
         // ("title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel").
@@ -712,7 +712,7 @@ public:
     {
         auto &fig = current();
         return createHandleAt(currentFigure_,
-                              static_cast<keel::usize>(fig.currentAxes),
+                              keel::as<keel::usize>(fig.currentAxes),
                               type, className, slot, datasetIndex);
     }
 
@@ -788,7 +788,7 @@ public:
                 && rec.axesIndex == axesIndex)
                 rec.deleted = true;
         fig->axes.remove_at(axesIndex);
-        if (fig->currentAxes >= static_cast<int>(axesIndex)
+        if (fig->currentAxes >= keel::as<int>(axesIndex)
             && fig->currentAxes > 0)
             --fig->currentAxes;
         for (auto [hid, rec] : handleRegistry_) {
@@ -849,7 +849,7 @@ public:
         for (auto [hid, rec] : handleRegistry_) {
             if (rec.figureId != figureId || rec.deleted)
                 continue;
-            if (axesIdx >= 0 && rec.axesIndex != static_cast<keel::usize>(axesIdx))
+            if (axesIdx >= 0 && rec.axesIndex != keel::as<keel::usize>(axesIdx))
                 continue;
             if (!includeFigureRecord && rec.type == "figure")
                 continue;
@@ -956,8 +956,8 @@ public:
         fig.subplotCols = n;
 
         // Find the axes for this subplot position
-        for (int i = 0; i < static_cast<int>(fig.axes.size()); ++i) {
-            auto &cand = fig.axes[static_cast<keel::usize>(i)];
+        for (int i = 0; i < keel::as<int>(fig.axes.size()); ++i) {
+            auto &cand = fig.axes[keel::as<keel::usize>(i)];
             if (cand.subplotIndex == p
                 && (cand.subplotRows == 0
                     || (cand.subplotRows == m && cand.subplotCols == n))) {
@@ -970,8 +970,8 @@ public:
         // call adopts its slot instead of ghosting it, so
         // gcf.Children counts match MATLAB
         // (bugs/closed/graphics/subplot-replaces-default-axes.md).
-        for (int i = 0; i < static_cast<int>(fig.axes.size()); ++i) {
-            auto &cand = fig.axes[static_cast<keel::usize>(i)];
+        for (int i = 0; i < keel::as<int>(fig.axes.size()); ++i) {
+            auto &cand = fig.axes[keel::as<keel::usize>(i)];
             if (cand.subplotIndex == 0) {
                 invalidateHandles(fig.id, i,
                                   /*axes records*/ true, /*figure rec*/ false);
@@ -990,7 +990,7 @@ public:
         ax.subplotRows = m;
         ax.subplotCols = n;
         fig.axes.push_back(keel::move(ax));
-        fig.currentAxes = static_cast<int>(fig.axes.size()) - 1;
+        fig.currentAxes = keel::as<int>(fig.axes.size()) - 1;
     }
 
     void prepareForPlot()
@@ -1009,7 +1009,7 @@ public:
                     if (dsSide == side) {
                         for (auto [hid, rec] : handleRegistry_) {
                             if (rec.deleted || rec.figureId != fig.id
-                                || rec.axesIndex != static_cast<keel::usize>(fig.currentAxes)
+                                || rec.axesIndex != keel::as<keel::usize>(fig.currentAxes)
                                 || !rec.isChart())
                                 continue;
                             if (rec.datasetIndex == idx)
@@ -1645,10 +1645,10 @@ public:
         DecimatedSeries out;
         const FigureState *fig = findFigure_(figId);
         if (!fig) return out;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return out;
-        const auto &ax = fig->axes[static_cast<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= static_cast<int>(ax.datasets.size())) return out;
-        const auto &ds = ax.datasets[static_cast<keel::usize>(dsIdx)];
+        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return out;
+        const auto &ax = fig->axes[keel::as<keel::usize>(axIdx)];
+        if (dsIdx < 0 || dsIdx >= keel::as<int>(ax.datasets.size())) return out;
+        const auto &ds = ax.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.xRaw.empty() || ds.xRaw.size() != ds.yRaw.size()) return out;
         // Build the coarse LOD levels once, then pick the cheapest level for
         // this viewport so the decimation is O(width) even fully zoomed out.
@@ -1677,10 +1677,10 @@ public:
 
         const FigureState *fig = findFigure_(figId);
         if (!fig) return false;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return false;
-        const auto &axState = fig->axes[static_cast<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= static_cast<int>(axState.datasets.size())) return false;
-        const auto &ds = axState.datasets[static_cast<keel::usize>(dsIdx)];
+        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return false;
+        const auto &axState = fig->axes[keel::as<keel::usize>(axIdx)];
+        if (dsIdx < 0 || dsIdx >= keel::as<int>(axState.datasets.size())) return false;
+        const auto &ds = axState.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
         const keel::usize fullRows = ds.originalRows;
@@ -1691,8 +1691,8 @@ public:
         // Clamp source-rect to the dataset bounds.
         if (srcR0 < 0) { srcH += srcR0; srcR0 = 0; }
         if (srcC0 < 0) { srcW += srcC0; srcC0 = 0; }
-        const keel::f64 srcR1 = std::min(static_cast<keel::f64>(fullRows), srcR0 + srcH);
-        const keel::f64 srcC1 = std::min(static_cast<keel::f64>(fullCols), srcC0 + srcW);
+        const keel::f64 srcR1 = std::min(keel::as<keel::f64>(fullRows), srcR0 + srcH);
+        const keel::f64 srcC1 = std::min(keel::as<keel::f64>(fullCols), srcC0 + srcW);
         if (srcR1 <= srcR0 || srcC1 <= srcC0) return false;
 
         // Log axes need a strictly-positive lower bound.
@@ -1709,7 +1709,7 @@ public:
         const keel::f64 minStep = std::min(rStep0, cStep0);
         int level = 0;
         if (minStep > 1.5) {
-            level = static_cast<int>(std::floor(std::log2(minStep)));
+            level = keel::as<int>(std::floor(std::log2(minStep)));
             if (level < 0) level = 0;
             if (level > 10) level = 10;
         }
@@ -1722,10 +1722,10 @@ public:
             lvlData = ds.zQuantized.data();
             lvlRows = fullRows;
             lvlCols = fullCols;
-        } else if (level <= static_cast<int>(ds.lodLevels.size())) {
-            lvlData = ds.lodLevels[static_cast<keel::usize>(level - 1)].data();
-            lvlRows = ds.lodDims[static_cast<keel::usize>(level - 1)].first;
-            lvlCols = ds.lodDims[static_cast<keel::usize>(level - 1)].second;
+        } else if (level <= keel::as<int>(ds.lodLevels.size())) {
+            lvlData = ds.lodLevels[keel::as<keel::usize>(level - 1)].data();
+            lvlRows = ds.lodDims[keel::as<keel::usize>(level - 1)].first;
+            lvlCols = ds.lodDims[keel::as<keel::usize>(level - 1)].second;
         } else {
             // ensureLOD couldn't build (e.g. dataset too small) — fall back to L0.
             lvlData = ds.zQuantized.data();
@@ -1735,15 +1735,15 @@ public:
         }
 
         // Map source-rect from L0 coords to the chosen level's coords.
-        const keel::f64 scaleFactor = static_cast<keel::f64>(1 << level);
+        const keel::f64 scaleFactor = keel::as<keel::f64>(1 << level);
         const keel::f64 lvlR0 = srcR0 / scaleFactor;
         const keel::f64 lvlC0 = srcC0 / scaleFactor;
         const keel::f64 lvlR1 = srcR1 / scaleFactor;
         const keel::f64 lvlC1 = srcC1 / scaleFactor;
         const keel::f64 rStep = (lvlR1 - lvlR0) / displayH;
         const keel::f64 cStep = (lvlC1 - lvlC0) / displayW;
-        const int rBlock = std::max(1, static_cast<int>(std::ceil(rStep)));
-        const int cBlock = std::max(1, static_cast<int>(std::ceil(cStep)));
+        const int rBlock = std::max(1, keel::as<int>(std::ceil(rStep)));
+        const int cBlock = std::max(1, keel::as<int>(std::ceil(cStep)));
 
         // Log-ratios computed in level coords (log preserves ratios).
         const keel::f64 yLogRatio = yLog ? std::log(lvlR1 / lvlR0) : 0.0;
@@ -1754,24 +1754,24 @@ public:
             const keel::f64 rCenter = yLog
                 ? lvlR0 * std::exp(v * yLogRatio)
                 : lvlR0 + v * (lvlR1 - lvlR0);
-            const int rA = std::max(0, static_cast<int>(rCenter) - rBlock / 2);
-            const int rB = std::min(static_cast<int>(lvlRows), rA + rBlock);
+            const int rA = std::max(0, keel::as<int>(rCenter) - rBlock / 2);
+            const int rB = std::min(keel::as<int>(lvlRows), rA + rBlock);
             for (int ocol = 0; ocol < displayW; ++ocol) {
                 const keel::f64 u = (ocol + 0.5) / displayW;
                 const keel::f64 cCenter = xLog
                     ? lvlC0 * std::exp(u * xLogRatio)
                     : lvlC0 + u * (lvlC1 - lvlC0);
-                const int cA = std::max(0, static_cast<int>(cCenter) - cBlock / 2);
-                const int cB = std::min(static_cast<int>(lvlCols), cA + cBlock);
+                const int cA = std::max(0, keel::as<int>(cCenter) - cBlock / 2);
+                const int cB = std::min(keel::as<int>(lvlCols), cA + cBlock);
                 int sum = 0, n = 0;
                 for (int cc = cA; cc < cB; ++cc) {
                     for (int rr = rA; rr < rB; ++rr) {
-                        const keel::u8 q = lvlData[static_cast<keel::usize>(cc) * lvlRows + static_cast<keel::usize>(rr)];
+                        const keel::u8 q = lvlData[keel::as<keel::usize>(cc) * lvlRows + keel::as<keel::usize>(rr)];
                         if (q != 255) { sum += q; ++n; }
                     }
                 }
                 out[orow * displayW + ocol] = (n > 0)
-                    ? static_cast<keel::u8>((sum + n / 2) / n)
+                    ? keel::as<keel::u8>((sum + n / 2) / n)
                     : keel::u8{255};
             }
         }
@@ -1788,7 +1788,7 @@ public:
      */
     void ensureLOD(const DatasetInfo &ds, int targetLevel) const
     {
-        while (static_cast<int>(ds.lodLevels.size()) < targetLevel) {
+        while (keel::as<int>(ds.lodLevels.size()) < targetLevel) {
             keel::usize pRows, pCols;
             const keel::u8 *parent;
             if (ds.lodLevels.empty()) {
@@ -1821,7 +1821,7 @@ public:
                         }
                     }
                     child[cc * cRows + rr] = (n > 0)
-                        ? static_cast<keel::u8>((sum + n / 2) / n)
+                        ? keel::as<keel::u8>((sum + n / 2) / n)
                         : keel::u8{255};
                 }
             }
@@ -1848,10 +1848,10 @@ public:
 
         const FigureState *fig = findFigure_(figId);
         if (!fig) return false;
-        if (axIdx < 0 || axIdx >= static_cast<int>(fig->axes.size())) return false;
-        const auto &axState = fig->axes[static_cast<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= static_cast<int>(axState.datasets.size())) return false;
-        const auto &ds = axState.datasets[static_cast<keel::usize>(dsIdx)];
+        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return false;
+        const auto &axState = fig->axes[keel::as<keel::usize>(axIdx)];
+        if (dsIdx < 0 || dsIdx >= keel::as<int>(axState.datasets.size())) return false;
+        const auto &ds = axState.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
         const keel::usize fullRows = ds.originalRows;
@@ -1864,16 +1864,16 @@ public:
         if (c0 < 0) c0 = 0;
         if (h < 0 || w < 0) return false;
 
-        const keel::usize rEnd = std::min(fullRows, static_cast<keel::usize>(r0) + static_cast<keel::usize>(h));
-        const keel::usize cEnd = std::min(fullCols, static_cast<keel::usize>(c0) + static_cast<keel::usize>(w));
-        if (static_cast<keel::usize>(r0) >= fullRows || static_cast<keel::usize>(c0) >= fullCols
-            || rEnd <= static_cast<keel::usize>(r0) || cEnd <= static_cast<keel::usize>(c0)) {
+        const keel::usize rEnd = std::min(fullRows, keel::as<keel::usize>(r0) + keel::as<keel::usize>(h));
+        const keel::usize cEnd = std::min(fullCols, keel::as<keel::usize>(c0) + keel::as<keel::usize>(w));
+        if (keel::as<keel::usize>(r0) >= fullRows || keel::as<keel::usize>(c0) >= fullCols
+            || rEnd <= keel::as<keel::usize>(r0) || cEnd <= keel::as<keel::usize>(c0)) {
             return false;
         }
 
-        const keel::usize srcH = rEnd - static_cast<keel::usize>(r0);
-        const keel::usize srcW = cEnd - static_cast<keel::usize>(c0);
-        const keel::usize L = static_cast<keel::usize>(lod);
+        const keel::usize srcH = rEnd - keel::as<keel::usize>(r0);
+        const keel::usize srcW = cEnd - keel::as<keel::usize>(c0);
+        const keel::usize L = keel::as<keel::usize>(lod);
         const keel::usize oH = (srcH + L - 1) / L;
         const keel::usize oW = (srcW + L - 1) / L;
 
@@ -1882,10 +1882,10 @@ public:
         // Mean-pool indices over L×L blocks. Index 255 = NaN, skipped.
         // Row-major output (suits canvas blit). zQuantized is column-major.
         for (keel::usize orow = 0; orow < oH; ++orow) {
-            const keel::usize rA = static_cast<keel::usize>(r0) + orow * L;
+            const keel::usize rA = keel::as<keel::usize>(r0) + orow * L;
             const keel::usize rB = std::min(rEnd, rA + L);
             for (keel::usize ocol = 0; ocol < oW; ++ocol) {
-                const keel::usize cA = static_cast<keel::usize>(c0) + ocol * L;
+                const keel::usize cA = keel::as<keel::usize>(c0) + ocol * L;
                 const keel::usize cB = std::min(cEnd, cA + L);
                 int sum = 0;
                 int n = 0;
@@ -1899,7 +1899,7 @@ public:
                     }
                 }
                 out[orow * oW + ocol] = (n > 0)
-                    ? static_cast<keel::u8>((sum + n / 2) / n)
+                    ? keel::as<keel::u8>((sum + n / 2) / n)
                     : keel::u8{255};
             }
         }

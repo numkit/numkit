@@ -61,7 +61,7 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%d", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(unsigned int v)
@@ -69,7 +69,7 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%u", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(long v)
@@ -77,7 +77,7 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%ld", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(unsigned long v)
@@ -85,7 +85,7 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%lu", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(long long v)
@@ -93,7 +93,7 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%lld", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(unsigned long long v)
@@ -101,19 +101,19 @@ struct StrBuf {
         char tmp[32];
         int n = std::snprintf(tmp, sizeof(tmp), "%llu", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
     StrBuf &operator<<(float v)
     {
-        return (*this) << static_cast<double>(v);
+        return (*this) << keel::as<double>(v);
     }
     StrBuf &operator<<(double v)
     {
         char tmp[64];
         int n = std::snprintf(tmp, sizeof(tmp), "%.6g", v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, static_cast<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
 };

@@ -116,7 +116,7 @@ void register_strfun(Engine &engine) {
                 for (keel::usize i = 0; i < arr.numel(); ++i) {
                     keel::String s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
                     bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(static_cast<double>(i + 1));
+                    if (m) hits.push_back(keel::as<double>(i + 1));
                 }
             } else if (arr.isChar()) {
                 keel::usize R = arr.dims().rows(), C = arr.dims().cols();
@@ -124,10 +124,10 @@ void register_strfun(Engine &engine) {
                     keel::String s(mr);
                     s.reserve(C);
                     for (keel::usize c = 0; c < C; ++c)
-                        s.push_back(static_cast<char>(arr.charData()[c * R + r]));
+                        s.push_back(keel::as<char>(arr.charData()[c * R + r]));
                     while (exact && !s.empty() && s.back() == ' ') s.pop_back();
                     bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(static_cast<double>(r + 1));
+                    if (m) hits.push_back(keel::as<double>(r + 1));
                 }
             }
             if (hits.empty()) {

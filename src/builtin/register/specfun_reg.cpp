@@ -123,8 +123,8 @@ void register_specfun(Engine &engine) {
                     si = ax;
                     double p = ax;
                     for (int k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (static_cast<double>(2 * k) * static_cast<double>(2 * k + 1));
-                        double term = p / static_cast<double>(2 * k + 1);
+                        p *= -ax * ax / (keel::as<double>(2 * k) * keel::as<double>(2 * k + 1));
+                        double term = p / keel::as<double>(2 * k + 1);
                         si += term;
                         if (keel::abs(term) < 1e-16 * keel::abs(si)) break;
                     }
@@ -132,8 +132,8 @@ void register_specfun(Engine &engine) {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
-                        double kk = static_cast<double>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                        double kk = keel::as<double>(k);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<double>(2 * k + 1) + cf);
                     }
                     keel::c64 h = 1.0 / (z + 1.0 + cf);
                     double f = -h.imag();
@@ -161,8 +161,8 @@ void register_specfun(Engine &engine) {
                     double ci = kGamma + std::log(ax);
                     double p = 1.0;
                     for (int k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (static_cast<double>(2 * k - 1) * static_cast<double>(2 * k));
-                        double term = p / static_cast<double>(2 * k);
+                        p *= -ax * ax / (keel::as<double>(2 * k - 1) * keel::as<double>(2 * k));
+                        double term = p / keel::as<double>(2 * k);
                         ci += term;
                         if (keel::abs(term) < 1e-16 * keel::abs(ci)) break;
                     }
@@ -171,8 +171,8 @@ void register_specfun(Engine &engine) {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
-                        double kk = static_cast<double>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + static_cast<double>(2 * k + 1) + cf);
+                        double kk = keel::as<double>(k);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<double>(2 * k + 1) + cf);
                     }
                     keel::c64 h = 1.0 / (z + 1.0 + cf);
                     double f = -h.imag();

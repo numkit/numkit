@@ -36,7 +36,7 @@ keel::Array<int> permFromValue(const Value &v, keel::Allocator *mr)
     keel::Array<int> p(mr);
     p.reserve(v.numel());
     for (keel::usize i = 0; i < v.numel(); ++i)
-        p.push_back(static_cast<int>(v.doubleData()[i]));
+        p.push_back(keel::as<int>(v.doubleData()[i]));
     return p;
 }
 
@@ -101,7 +101,7 @@ void shiftdim_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto res = shiftdimAuto(args[0], mr);
     outs[0] = std::move(res.v);
     if (nargout > 1)
-        outs[1] = Value::scalar(static_cast<double>(res.dropped), mr);
+        outs[1] = Value::scalar(keel::as<double>(res.dropped), mr);
 }
 
 } // namespace detail

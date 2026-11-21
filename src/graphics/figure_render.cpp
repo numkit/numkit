@@ -52,13 +52,13 @@ struct Rgb {
     {
         if (hex.size() >= 7 && hex[0] == '#') {
             auto hexNibble = [](char c) -> keel::u8 {
-                if (c >= '0' && c <= '9') return static_cast<keel::u8>(c - '0');
-                if (c >= 'a' && c <= 'f') return static_cast<keel::u8>(10 + c - 'a');
-                if (c >= 'A' && c <= 'F') return static_cast<keel::u8>(10 + c - 'A');
+                if (c >= '0' && c <= '9') return keel::as<keel::u8>(c - '0');
+                if (c >= 'a' && c <= 'f') return keel::as<keel::u8>(10 + c - 'a');
+                if (c >= 'A' && c <= 'F') return keel::as<keel::u8>(10 + c - 'A');
                 return 0;
             };
             auto h = [&](keel::usize i) -> keel::u8 {
-                return static_cast<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
+                return keel::as<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
             };
             return Rgb(h(1), h(3), h(5));
         }
@@ -335,16 +335,16 @@ const keel::u8 *namedPalette(keel::StringRef name, int &n)
     static const auto tables = [] {
         keel::StaticArray<keel::StaticArray<keel::u8, 256 * 3>, kNumPalettes> t{};
         auto hexNibble = [](char c) -> keel::u8 {
-            if (c >= '0' && c <= '9') return static_cast<keel::u8>(c - '0');
-            if (c >= 'a' && c <= 'f') return static_cast<keel::u8>(10 + c - 'a');
-            if (c >= 'A' && c <= 'F') return static_cast<keel::u8>(10 + c - 'A');
+            if (c >= '0' && c <= '9') return keel::as<keel::u8>(c - '0');
+            if (c >= 'a' && c <= 'f') return keel::as<keel::u8>(10 + c - 'a');
+            if (c >= 'A' && c <= 'F') return keel::as<keel::u8>(10 + c - 'A');
             return 0;
         };
         for (keel::usize idx = 0; idx < kNumPalettes; ++idx) {
             const char *hex = kNamedPaletteHex[idx].hex;
             const keel::usize len = std::strlen(hex);
             for (keel::usize i = 0, outIdx = 0; i + 1 < len && outIdx < 256 * 3; i += 2, ++outIdx)
-                t[idx][outIdx] = static_cast<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
+                t[idx][outIdx] = keel::as<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
         }
         return t;
     }();
@@ -2101,7 +2101,7 @@ keel::String renderFigureSvg(const FigureState &fig, int W, int H,
     auto appendF = [](keel::String &dst, double v) {
         char b[64];
         int n = std::snprintf(b, sizeof b, "%f", v);
-        if (n > 0) dst.append(keel::StringRef(b, static_cast<keel::usize>(n)));
+        if (n > 0) dst.append(keel::StringRef(b, keel::as<keel::usize>(n)));
     };
     for (const Cmd &c : cmds) {
         if (c.kind == Cmd::IMAGE) {
@@ -2414,7 +2414,7 @@ class Raster
 public:
     Raster(int w, int h) : w_(w), h_(h)
     {
-        px_.resize(static_cast<keel::usize>(w) * static_cast<keel::usize>(h) * 3, 255);
+        px_.resize(keel::as<keel::usize>(w) * keel::as<keel::usize>(h) * 3, 255);
     }
 
     void px(int x, int y, Rgb c)

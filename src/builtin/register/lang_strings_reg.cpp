@@ -94,7 +94,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 result = Value::matrix(rows, 1, ValueType::DOUBLE, mr);
                 double *dd = result.doubleDataMut();
                 for (keel::usize r = 0; r < rows; ++r)
-                    dd[r] = static_cast<double>(cd[r] - '0');
+                    dd[r] = keel::as<double>(cd[r] - '0');
                 ok = true;
             }
         }
@@ -502,10 +502,10 @@ bool parseBetweenBoundaries(keel::ArrayRef<Value> args, keel::usize startIdx, co
         argcheck::checkNargin(args.size(), startIdx, startIdx, fn);
     }
     argcheck::expectedChoice(args[startIdx], {"boundaries"},
-                             static_cast<int>(startIdx + 1), "Name", fn);
+                             keel::as<int>(startIdx + 1), "Name", fn);
     const keel::usize b = argcheck::expectedChoice(
         args[startIdx + 1], {"inclusive", "exclusive"},
-        static_cast<int>(startIdx + 2), "Boundaries", fn);
+        keel::as<int>(startIdx + 2), "Boundaries", fn);
     return b == 0;
 }
 
@@ -592,7 +592,7 @@ void dec2base_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     const double bv = argcheck::expectedReal(args[1], 2, "base", "dec2base");
     argcheck::expectedInteger(bv, 2, "base", "dec2base");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "dec2base");
-    const int base = static_cast<int>(bv);
+    const int base = keel::as<int>(bv);
     const int len  = (args.size() >= 3 && !args[2].isEmpty())
                        ? argcheck::expectedInteger(
         argcheck::expectedReal(args[2], 3, "len", "dec2base"), 3, "len", "dec2base") : 0;
@@ -606,7 +606,7 @@ void base2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     const double bv = argcheck::expectedReal(args[1], 2, "base", "base2dec");
     argcheck::expectedInteger(bv, 2, "base", "base2dec");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "base2dec");
-    const int base = static_cast<int>(bv);
+    const int base = keel::as<int>(bv);
     outs[0] = base2dec(args[0], base, ctx.engine->allocator());
 }
 
@@ -654,8 +654,8 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         }
         const double tol = (user_tol > 0) ? user_tol : defaultRatTol(v);
         const auto exp = ratExpansion(v, tol);
-        Nd[i] = static_cast<double>(exp.p);
-        Dd[i] = static_cast<double>(exp.q);
+        Nd[i] = keel::as<double>(exp.p);
+        Dd[i] = keel::as<double>(exp.q);
     }
     outs[0] = std::move(N);
     outs[1] = std::move(D);

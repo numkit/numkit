@@ -180,7 +180,7 @@ keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC
         char buf[32];
         int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
         if (len > 0)
-            out.append(keel::StringRef(buf, static_cast<keel::usize>(len)));
+            out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
     };
 
     for (keel::usize r = 0; r < R; ++r) {
@@ -229,15 +229,15 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
     bool haveRange = false;
 
     if (args.size() >= 2)
-        r1 = static_cast<keel::usize>(args[1].toScalar());
+        r1 = keel::as<keel::usize>(args[1].toScalar());
     if (args.size() >= 3)
-        c1 = static_cast<keel::usize>(args[2].toScalar());
+        c1 = keel::as<keel::usize>(args[2].toScalar());
     if (args.size() >= 4) {
         if (args[3].numel() != 4)
             throw Error("csvread: range argument must be [R1 C1 R2 C2]");
         haveRange = true;
-        r2 = static_cast<keel::usize>(args[3](2));
-        c2 = static_cast<keel::usize>(args[3](3));
+        r2 = keel::as<keel::usize>(args[3](2));
+        c2 = keel::as<keel::usize>(args[3](3));
         if (r2 < r1 || c2 < c1)
             throw Error("csvread: invalid range [R1 C1 R2 C2]");
     }
@@ -269,9 +269,9 @@ void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
 
     keel::usize offR = 0, offC = 0;
     if (args.size() >= 3)
-        offR = static_cast<keel::usize>(args[2].toScalar());
+        offR = keel::as<keel::usize>(args[2].toScalar());
     if (args.size() >= 4)
-        offC = static_cast<keel::usize>(args[3].toScalar());
+        offC = keel::as<keel::usize>(args[3].toScalar());
 
     const keel::String out = csvwriteToString(M, offR, offC);
 

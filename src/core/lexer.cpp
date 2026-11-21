@@ -122,9 +122,9 @@ void Lexer::error(keel::StringRef msg, int line, int col)
 Lexer::Lexer(keel::StringRef source)
 {
     if (source.size() >= 3
-        && static_cast<unsigned char>(source[0]) == 0xEF
-        && static_cast<unsigned char>(source[1]) == 0xBB
-        && static_cast<unsigned char>(source[2]) == 0xBF) {
+        && keel::as<unsigned char>(source[0]) == 0xEF
+        && keel::as<unsigned char>(source[1]) == 0xBB
+        && keel::as<unsigned char>(source[2]) == 0xBF) {
         source = source.substr(3);
     }
     if (source.find('\r') != keel::kInvalidIndex) {
@@ -150,10 +150,10 @@ char Lexer::peek() const
 
 char Lexer::peek(int offset) const
 {
-    long long p = static_cast<long long>(pos_) + offset;
-    if (p < 0 || static_cast<keel::usize>(p) >= src_.size())
+    long long p = keel::as<long long>(pos_) + offset;
+    if (p < 0 || keel::as<keel::usize>(p) >= src_.size())
         return '\0';
-    return src_[static_cast<keel::usize>(p)];
+    return src_[keel::as<keel::usize>(p)];
 }
 
 char Lexer::advance()
@@ -179,7 +179,7 @@ void Lexer::addToken(TokenType type, keel::StringRef val, int line, int col)
 
 int Lexer::bracketDepth() const
 {
-    return static_cast<int>(bracketStack_.size());
+    return keel::as<int>(bracketStack_.size());
 }
 
 bool Lexer::inMatrixContext() const
@@ -290,7 +290,7 @@ void Lexer::insertImplicitComma()
     if (!inMatrixContext() || tokens_.empty())
         return;
 
-    int prevIdx = static_cast<int>(tokens_.size()) - 1;
+    int prevIdx = keel::as<int>(tokens_.size()) - 1;
     while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
         --prevIdx;
     if (prevIdx < 0)
@@ -859,7 +859,7 @@ keel::Array<Token> Lexer::tokenize()
 
             if (bracketDepth() > 0) {
                 if (inMatrixContext()) {
-                    int prevIdx = static_cast<int>(tokens_.size()) - 1;
+                    int prevIdx = keel::as<int>(tokens_.size()) - 1;
                     while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
                         --prevIdx;
                     if (prevIdx >= 0 && isValueToken(tokens_[prevIdx].type)) {
