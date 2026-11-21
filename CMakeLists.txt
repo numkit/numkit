@@ -63,6 +63,34 @@ if(NOT TARGET numkit_ops)
     endif()
 endif()
 
+# ── Dependency: keel::mat ────────────────────────────────────────────────
+if(NOT TARGET keel::mat)
+    find_package(keel_mat QUIET CONFIG)
+    if(TARGET keel::keel_mat AND NOT TARGET keel::mat)
+        add_library(keel::mat ALIAS keel::keel_mat)
+    endif()
+endif()
+if(NOT TARGET keel::mat)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_MAT)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/mat/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_MAT
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/mat"
+                CACHE PATH "")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/mat/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_MAT
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/mat"
+                CACHE PATH "")
+        endif()
+    endif()
+    set(KEEL_MAT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        keel_mat
+        GIT_REPOSITORY https://github.com/keelcpp/mat.git
+        GIT_TAG        e655e2ebd16fa149620424b6de085650e8d4bfc6
+    )
+    FetchContent_MakeAvailable(keel_mat)
+endif()
+
 # ── Gather Sources ───────────────────────────────────────────────────────
 file(GLOB_RECURSE NUMKIT_SOURCES
     "src/core/*.cpp"
@@ -102,6 +130,8 @@ target_link_libraries(numkit
         numkit_value
         numkit_sys
         numkit_ops
+    PRIVATE
+        keel::mat
 )
 
 target_compile_definitions(numkit PUBLIC NUMKIT_CORE_BUILD=1)
