@@ -53,7 +53,7 @@ void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nargout == 2 || (nargout >= 2 && outs.size() == 2)) {
         // 2-out: [T, B] where T = diag(d).
         Value T = Value::matrix(n, n, ValueType::DOUBLE, mr);
-        double *td = T.doubleDataMut();
+        keel::f64 *td = T.doubleDataMut();
         std::fill(td, td + n * n, 0.0);
         for (keel::usize i = 0; i < n; ++i) td[i + i * n] = R.d_col.elemAsDouble(i);
         outs[0] = detail::narrowDoubleToSingleIf(T, R.d_col.type() == ValueType::SINGLE, mr);

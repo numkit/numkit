@@ -241,7 +241,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
     const char *start = clean.c_str();
     char *end = nullptr;
     errno = 0;
-    double val = std::strtod(start, &end);
+    keel::f64 val = std::strtod(start, &end);
     if (end == start || *end != '\0' || errno == ERANGE)
         throwInvalid();
     return val;

@@ -179,7 +179,7 @@ const HandleTypeEntry *findHandleType(keel::StringRef fnName)
 // rec->props maps name → string form (figure layer is Value-free).
 // Numerics use %.17g so decodeProp's parse round-trips bit-exactly
 // (6 digits would silently truncate user values).
-keel::String formatPropDouble(double d)
+keel::String formatPropDouble(keel::f64 d)
 {
     char buf[40];
     std::snprintf(buf, sizeof buf, "%.17g", d);
@@ -203,7 +203,7 @@ keel::String encodeProp(const Value &v)
             s.push_back('[');
             for (keel::usize c = 0; c < C; ++c) {
                 if (c) s.push_back(',');
-                const double x = v.elemAsDouble(c * R + r);
+                const keel::f64 x = v.elemAsDouble(c * R + r);
                 if (std::isfinite(x)) s.append(formatPropDouble(x));
                 else s.append("null");
             }
@@ -227,12 +227,12 @@ keel::String encodeProp(const Value &v)
 Value decodeProp(keel::StringRef s, keel::Allocator *mr)
 {
     if (s.size() >= 2 && s[0] == '[' && s[1] == '[') {
-        keel::Array<double> zf;
+        keel::Array<keel::f64> zf;
         keel::usize rows = 0, cols = 0;
         figrender::parseNestedDoubles(s, zf, rows, cols);
         if (rows > 0 && cols > 0 && zf.size() >= rows * cols) {
             auto r = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
-            double *rd = r.doubleDataMut();
+            keel::f64 *rd = r.doubleDataMut();
             for (keel::usize rr = 0; rr < rows; ++rr)
                 for (keel::usize cc = 0; cc < cols; ++cc)
                     rd[cc * rows + rr] = zf[rr * cols + cc];
@@ -240,7 +240,7 @@ Value decodeProp(keel::StringRef s, keel::Allocator *mr)
         }
     }
     if (!s.empty() && s[0] == '[') {
-        keel::Array<double> vals;
+        keel::Array<keel::f64> vals;
         keel::String num;
         for (keel::usize i = 1; i < s.size(); ++i) {
             if (s[i] == ',' || s[i] == ']') {
@@ -278,8 +278,8 @@ Value chartDefaultProp(keel::StringRef type, keel::StringRef name,
                        keel::Allocator *mr)
 {
     auto str = [&](keel::StringRef s) { return Value::fromString(s, mr); };
-    auto num = [&](double d) { return Value::scalar(d, mr); };
-    auto rgb = [&](double r, double g, double b) {
+    auto num = [&](keel::f64 d) { return Value::scalar(d, mr); };
+    auto rgb = [&](keel::f64 r, keel::f64 g, keel::f64 b) {
         auto v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
         v.doubleDataMut()[0] = r; v.doubleDataMut()[1] = g; v.doubleDataMut()[2] = b;
         return v;
@@ -370,7 +370,7 @@ StyleParts parseStyle(keel::StringRef s)
 
 keel::String rgbToHex(const Value &v)
 {
-    auto clamp255 = [](double d) {
+    auto clamp255 = [](keel::f64 d) {
         int i = keel::as<int>(d * 255.0 + 0.5);
         if (i < 0) i = 0;
         if (i > 255) i = 255;
@@ -393,10 +393,10 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         return;
     bool touched = true;
     if (name == "LineWidth" && val.isNumeric() && val.numel() == 1) {
-        double w = val.toScalar();
+        keel::f64 w = val.toScalar();
         ds->lineWidth = w > 0 ? w : 0.0;   // 0/negative = default
     } else if (name == "MarkerSize" && val.isNumeric() && val.numel() == 1) {
-        double m = val.toScalar();
+        keel::f64 m = val.toScalar();
         ds->markerSize = m > 0 ? m : 0.0;
     } else if (name == "LineStyle" || name == "Marker" || name == "Color") {
         StyleParts p = parseStyle(ds->style);
@@ -422,7 +422,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     } else if ((name == "XData" || name == "YData") && val.isNumeric()) {
         // Replace the series. Huge series: drop the downsample state and
         // re-decide via maybeDownsampleSeries (rare path, correctness first).
-        keel::Array<double> xs;
+        keel::Array<keel::f64> xs;
         xs.resize(val.numel());
         for (keel::usize i = 0; i < val.numel(); ++i)
             xs[i] = val.elemAsDouble(i);
@@ -439,7 +439,7 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 || ds->type == "contour3")) {
             ds->zJson = encodeProp(val);
         } else if (val.dims().rows() == 1 || val.dims().cols() == 1) {
-            keel::Array<double> zs;
+            keel::Array<keel::f64> zs;
             zs.resize(val.numel());
             for (keel::usize i = 0; i < val.numel(); ++i)
                 zs[i] = val.elemAsDouble(i);
@@ -457,14 +457,14 @@ void applyChartProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 // Auto tick positions for get(gca,'XTick') in 'auto' mode — the SAME
 // niceTicks the renderer uses, over the explicit xlim if set, else the
 // data range (portion 34; MATLAB returns the drawn ticks).
-keel::Array<double> axesAutoTicks(FigureManager &fm,
+keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
                                   FigureManager::HandleRecord *rec, char axis)
 {
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return {};
     const bool log = (axis == 'x' ? ax->xscale : ax->yscale) == "log";
-    double lo = 0, hi = 1;
+    keel::f64 lo = 0, hi = 1;
     const keel::String &lim = axis == 'x' ? ax->xlimJson : ax->ylimJson;
     if (!lim.empty()) {
         auto v = figdetail::parseFlatDoubles(lim);
@@ -489,8 +489,8 @@ keel::Array<double> axesAutoTicks(FigureManager &fm,
                     lo = std::min(lo, 0.5);
                     hi = std::max(hi, cells > 0 ? cells + 0.5 : 1.5);
                 } else {
-                    double span = v.back() - v.front();
-                    double sp = cells > 1 ? span / (double)(cells - 1) : (span > 0 ? span : 1.0);
+                    keel::f64 span = v.back() - v.front();
+                    keel::f64 sp = cells > 1 ? span / (keel::f64)(cells - 1) : (span > 0 ? span : 1.0);
                     lo = std::min(lo, v.front() - sp / 2);
                     hi = std::max(hi, v.back() + sp / 2);
                 }
@@ -500,7 +500,7 @@ keel::Array<double> axesAutoTicks(FigureManager &fm,
                 continue;
             ++seriesDatasets;
             const keel::String &j = axis == 'x' ? ds.xJson : ds.yJson;
-            for (double v : figdetail::parseFlatDoubles(j))
+            for (keel::f64 v : figdetail::parseFlatDoubles(j))
                 if (std::isfinite(v)) {
                     lo = std::min(lo, v);
                     hi = std::max(hi, v);
@@ -512,7 +512,7 @@ keel::Array<double> axesAutoTicks(FigureManager &fm,
         }
         bool imageOnly = imgDatasets > 0 && seriesDatasets == 0;
         if (!imageOnly) {
-            double d = (hi - lo) * 0.05;
+            keel::f64 d = (hi - lo) * 0.05;
             lo -= d;
             hi += d;
         }
@@ -596,11 +596,11 @@ bool applyAxesProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return false;
-    keel::Array<double> v;
+    keel::Array<keel::f64> v;
     v.resize(val.isNumeric() ? val.numel() : 0);
     for (keel::usize i = 0; i < v.size(); ++i)
         v[i] = val.elemAsDouble(i);
-    auto limJson = [](keel::ArrayRef<double> w) -> keel::String {
+    auto limJson = [](keel::ArrayRef<keel::f64> w) -> keel::String {
         if (w.size() != 2) return keel::String{};
         keel::String out = keel::String::from("[");
         out.append(formatPropDouble(w[0]));
@@ -684,18 +684,18 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                   keel::StringRef name, keel::Allocator *mr)
 {
     auto str = [&](const char *s) { return Value::fromString(s, mr); };
-    auto num = [&](double d) { return Value::scalar(d, mr); };
+    auto num = [&](keel::f64 d) { return Value::scalar(d, mr); };
     if (name == "Type") return str("axes");
     AxesState *ax = fm.axesOf(*rec);
     if (!ax)
         return Value();
     auto autoLim = [&](char axisChar) {
-        double lo = 0.0, hi = 1.0;
-        double dmin = 1e300, dmax = -1e300;
+        keel::f64 lo = 0.0, hi = 1.0;
+        keel::f64 dmin = 1e300, dmax = -1e300;
         for (const auto &ds : ax->datasets) {
             if (!ds.visible) continue;
             const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
-            for (double v : figdetail::parseFlatDoubles(j)) {
+            for (keel::f64 v : figdetail::parseFlatDoubles(j)) {
                 if (std::isfinite(v)) {
                     if (v < dmin) dmin = v;
                     if (v > dmax) dmax = v;
@@ -704,10 +704,10 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         }
         if (dmin <= dmax) {
             if (dmax > dmin) {
-                const double span = dmax - dmin;
-                const double p10 = std::pow(10.0, std::floor(std::log10(span)));
-                const double s = span / p10;
-                const double step = (s <= 1.5) ? 0.2 * p10
+                const keel::f64 span = dmax - dmin;
+                const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
+                const keel::f64 s = span / p10;
+                const keel::f64 step = (s <= 1.5) ? 0.2 * p10
                                   : (s <= 3.0) ? 0.5 * p10
                                   : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                : 2.0 * p10;
@@ -742,12 +742,12 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         int m = (fig && fig->subplotRows >= 1) ? fig->subplotRows : 1;
         int n = (fig && fig->subplotCols >= 1) ? fig->subplotCols : 1;
         int p = (ax && ax->subplotIndex >= 1) ? ax->subplotIndex : 1;
-        double left = 0.13, bottom = 0.11, width = 0.775, height = 0.815;
+        keel::f64 left = 0.13, bottom = 0.11, width = 0.775, height = 0.815;
         if (m > 1 || n > 1) {
             int r = (p - 1) / n;
             int c = (p - 1) % n;
-            double stepX = 0.775 / (n - 0.24);
-            double stepY = 0.815 / (m - 0.28);
+            keel::f64 stepX = 0.775 / (n - 0.24);
+            keel::f64 stepY = 0.815 / (m - 0.28);
             width  = (n == 1) ? 0.775 : 0.76 * stepX;
             height = (m == 1) ? 0.815 : 0.72 * stepY;
             left   = 0.13 + c * stepX;
@@ -868,7 +868,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         }
         if (name == "NumBins") {
             auto cv = figdetail::parseFlatDoubles(ds->yJson);
-            return Value::scalar(keel::as<double>(cv.size()), mr);
+            return Value::scalar(keel::as<keel::f64>(cv.size()), mr);
         }
         if (name == "BinWidth") {
             auto ev = figdetail::parseFlatDoubles(ds->zJson);
@@ -901,7 +901,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return Value::matrix(1, 0, ValueType::DOUBLE, mr);
         if (ds->zJson.size() >= 2 && ds->zJson[0] == '[' && ds->zJson[1] == '[')
             return decodeProp(ds->zJson, mr);
-        keel::Array<double> zvals = figdetail::parseFlatDoubles(ds->zJson);
+        keel::Array<keel::f64> zvals = figdetail::parseFlatDoubles(ds->zJson);
         if (zvals.empty())
             return Value::matrix(1, 0, ValueType::DOUBLE, mr);
         auto v = Value::matrix(1, zvals.size(), ValueType::DOUBLE, mr);
@@ -909,8 +909,8 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             v.doubleDataMut()[i] = zvals[i];
         return v;
     }
-    const keel::Array<double> &raw = (mappedName == "XData") ? ds->xRaw : ds->yRaw;
-    keel::Array<double> vals;
+    const keel::Array<keel::f64> &raw = (mappedName == "XData") ? ds->xRaw : ds->yRaw;
+    keel::Array<keel::f64> vals;
     if (!raw.empty()) {
         vals = raw.clone();
     } else {
@@ -1098,8 +1098,8 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 {
     const keel::String name = canonicalPropName(rawName);
     auto str = [&](const char *s) { return Value::fromString(s, mr); };
-    auto num = [&](double d) { return Value::scalar(d, mr); };
-    auto rgb = [&](double r, double g, double b) {
+    auto num = [&](keel::f64 d) { return Value::scalar(d, mr); };
+    auto rgb = [&](keel::f64 r, keel::f64 g, keel::f64 b) {
         auto v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
         v.doubleDataMut()[0] = r; v.doubleDataMut()[1] = g; v.doubleDataMut()[2] = b;
         return v;
@@ -1283,7 +1283,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         DatasetInfo *ds = fm.datasetOf(*rec);
         if (ds && !ds->style.empty()) {
             const keel::String &s = ds->style;
-            auto rgb = [&](double r, double g, double b) {
+            auto rgb = [&](keel::f64 r, keel::f64 g, keel::f64 b) {
                 auto v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = r;
                 v.doubleDataMut()[1] = g;
@@ -1306,7 +1306,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     if (mc && std::strchr(kMarkers, mc))
                         return strv(keel::StringRef(&mc, 1));
             } else {
-                struct ColEntry { char c; double rgb[3]; };
+                struct ColEntry { char c; keel::f64 rgb[3]; };
                 static const ColEntry kCol[] = {
                     {'r', {1, 0, 0}},       {'g', {0, 0.5, 0}},
                     {'b', {0, 0, 1}},       {'k', {0, 0, 0}},
@@ -1669,7 +1669,7 @@ void registerHandleAccessors(Engine &engine)
                     if (lprop == "screensize") {
                         Value v = Value::matrix(1, 4, ValueType::DOUBLE, engine.allocator());
                         v.doubleDataMut()[0] = 1.0; v.doubleDataMut()[1] = 1.0;
-                        double w = 1920.0, h = 1080.0;
+                        keel::f64 w = 1920.0, h = 1080.0;
 #ifdef _WIN32
                         if (void *hdc = GetDC(nullptr)) {
                             const int physW = GetDeviceCaps(hdc, 118); // DESKTOPHORZRES
@@ -1677,9 +1677,9 @@ void registerHandleAccessors(Engine &engine)
                             const int logW  = GetDeviceCaps(hdc, 8);   // HORZRES
                             ReleaseDC(nullptr, hdc);
                             if (physW > 0 && physH > 0 && logW > 0) {
-                                const double scale = std::round((keel::as<double>(physW) / keel::as<double>(logW)) * 4.0) / 4.0;
-                                w = (scale > 0.0) ? (keel::as<double>(physW) / scale) : keel::as<double>(logW);
-                                h = (scale > 0.0) ? (keel::as<double>(physH) / scale) : keel::as<double>(physH);
+                                const keel::f64 scale = std::round((keel::as<keel::f64>(physW) / keel::as<keel::f64>(logW)) * 4.0) / 4.0;
+                                w = (scale > 0.0) ? (keel::as<keel::f64>(physW) / scale) : keel::as<keel::f64>(logW);
+                                h = (scale > 0.0) ? (keel::as<keel::f64>(physH) / scale) : keel::as<keel::f64>(physH);
                             }
                         }
 #endif
@@ -1930,7 +1930,7 @@ void registerHandleAccessors(Engine &engine)
                         && v.numel() == 3
                         && (f.prop == "Color" || f.prop == "EdgeColor"
                             || f.prop == "FaceColor")) {
-                        struct ColEntry { const char *n; double rgb[3]; };
+                        struct ColEntry { const char *n; keel::f64 rgb[3]; };
                         static const ColEntry kCol[] = {
                             {"r", {1, 0, 0}},     {"g", {0, 0.5, 0}},
                             {"b", {0, 0, 1}},     {"k", {0, 0, 0}},

@@ -104,11 +104,11 @@ struct StrBuf {
             buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
-    StrBuf &operator<<(float v)
+    StrBuf &operator<<(keel::f32 v)
     {
-        return (*this) << keel::as<double>(v);
+        return (*this) << keel::as<keel::f64>(v);
     }
-    StrBuf &operator<<(double v)
+    StrBuf &operator<<(keel::f64 v)
     {
         char tmp[64];
         int n = std::snprintf(tmp, sizeof(tmp), "%.6g", v);
@@ -121,7 +121,7 @@ struct StrBuf {
 // Render a numeric/complex Value as a JSON number array ("[1,2,3]"). Complex
 // uses magnitude; NaN -> null; +/-Inf -> +/-1e308.
 keel::String vecToJson(const Value &v);
-keel::String vecToJson(keel::ArrayRef<double> v);
+keel::String vecToJson(keel::ArrayRef<keel::f64> v);
 
 // "[1,2,...,n]" — the 1-based implicit-X axis for a plot given only Y.
 keel::String makeIndexJson(keel::usize n);
@@ -137,7 +137,7 @@ void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo
 keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds);
 
 // Append a double to os as JSON (NaN -> null; +/-Inf -> +/-1e308).
-void doubleToJson(StrBuf &os, double val);
+void doubleToJson(StrBuf &os, keel::f64 val);
 
 
 // Plot bodies shared by >1 family (defined in plots/shared.cpp).

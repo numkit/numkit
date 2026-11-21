@@ -43,7 +43,7 @@ void norm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         throw Error("norm: string p must be 'fro' or 'inf'",
                     0, 0, "norm", "", "numkit:norm:badStringP");
     }
-    const double pv = p.toScalar();
+    const keel::f64 pv = p.toScalar();
     if (std::isinf(pv)) {
         if (pv > 0.0) {
             outs[0] = norm_inf(args[0], mr);
@@ -66,7 +66,7 @@ void vecnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "vecnorm");
-    double p = 2.0;
+    keel::f64 p = 2.0;
     int dim = 0;
     if (args.size() >= 2) p = args[1].toScalar();
     if (args.size() >= 3) dim = argcheck::dimArg(args[2], "vecnorm");

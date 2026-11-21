@@ -91,10 +91,10 @@ void register_specfun(Engine &engine) {
             keel::Allocator *mr = ctx.engine->allocator();
             const Value &x = args[0];
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            double *dst = out.doubleDataMut();
+            keel::f64 *dst = out.doubleDataMut();
             const keel::usize n = x.numel();
             for (keel::usize i = 0; i < n; ++i) {
-                double v = x.elemAsDouble(i);
+                keel::f64 v = x.elemAsDouble(i);
                 if (std::isnan(v)) dst[i] = v;
                 else if (v < 0.0)  dst[i] = 0.0;
                 else if (v == 0.0) dst[i] = 0.5;
@@ -108,23 +108,23 @@ void register_specfun(Engine &engine) {
             keel::Allocator *mr = ctx.engine->allocator();
             const Value &x = args[0];
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            double *dst = out.doubleDataMut();
+            keel::f64 *dst = out.doubleDataMut();
             const keel::usize n = x.numel();
-            constexpr double kPi2 = 1.57079632679489661923;
+            constexpr keel::f64 kPi2 = 1.57079632679489661923;
             for (keel::usize i = 0; i < n; ++i) {
-                double v = x.elemAsDouble(i);
+                keel::f64 v = x.elemAsDouble(i);
                 if (std::isnan(v)) { dst[i] = v; continue; }
                 if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
                 if (v == 0.0) { dst[i] = 0.0; continue; }
-                double sgn = (v < 0.0) ? -1.0 : 1.0;
-                double ax = keel::abs(v);
-                double si = 0.0;
+                keel::f64 sgn = (v < 0.0) ? -1.0 : 1.0;
+                keel::f64 ax = keel::abs(v);
+                keel::f64 si = 0.0;
                 if (ax <= 4.0) {
                     si = ax;
-                    double p = ax;
+                    keel::f64 p = ax;
                     for (int k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (keel::as<double>(2 * k) * keel::as<double>(2 * k + 1));
-                        double term = p / keel::as<double>(2 * k + 1);
+                        p *= -ax * ax / (keel::as<keel::f64>(2 * k) * keel::as<keel::f64>(2 * k + 1));
+                        keel::f64 term = p / keel::as<keel::f64>(2 * k + 1);
                         si += term;
                         if (keel::abs(term) < 1e-16 * keel::abs(si)) break;
                     }
@@ -132,12 +132,12 @@ void register_specfun(Engine &engine) {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
-                        double kk = keel::as<double>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<double>(2 * k + 1) + cf);
+                        keel::f64 kk = keel::as<keel::f64>(k);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
                     }
                     keel::c64 h = 1.0 / (z + 1.0 + cf);
-                    double f = -h.imag();
-                    double g = h.real();
+                    keel::f64 f = -h.imag();
+                    keel::f64 g = h.real();
                     si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
                 }
                 dst[i] = sgn * si;
@@ -154,15 +154,15 @@ void register_specfun(Engine &engine) {
             for (keel::usize i = 0; i < n; ++i) {
                 if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
             }
-            constexpr double kGamma = 0.57721566490153286060651209;
-            constexpr double kPi = 3.14159265358979323846;
-            auto evalPosCi = [&](double ax) -> double {
+            constexpr keel::f64 kGamma = 0.57721566490153286060651209;
+            constexpr keel::f64 kPi = 3.14159265358979323846;
+            auto evalPosCi = [&](keel::f64 ax) -> keel::f64 {
                 if (ax <= 4.0) {
-                    double ci = kGamma + std::log(ax);
-                    double p = 1.0;
+                    keel::f64 ci = kGamma + std::log(ax);
+                    keel::f64 p = 1.0;
                     for (int k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (keel::as<double>(2 * k - 1) * keel::as<double>(2 * k));
-                        double term = p / keel::as<double>(2 * k);
+                        p *= -ax * ax / (keel::as<keel::f64>(2 * k - 1) * keel::as<keel::f64>(2 * k));
+                        keel::f64 term = p / keel::as<keel::f64>(2 * k);
                         ci += term;
                         if (keel::abs(term) < 1e-16 * keel::abs(ci)) break;
                     }
@@ -171,22 +171,22 @@ void register_specfun(Engine &engine) {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
                     for (int k = 120; k >= 1; --k) {
-                        double kk = keel::as<double>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<double>(2 * k + 1) + cf);
+                        keel::f64 kk = keel::as<keel::f64>(k);
+                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
                     }
                     keel::c64 h = 1.0 / (z + 1.0 + cf);
-                    double f = -h.imag();
-                    double g = h.real();
+                    keel::f64 f = -h.imag();
+                    keel::f64 g = h.real();
                     return f * std::sin(ax) - g * std::cos(ax);
                 }
             };
             if (!hasNeg) {
                 Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-                double *dst = out.doubleDataMut();
+                keel::f64 *dst = out.doubleDataMut();
                 for (keel::usize i = 0; i < n; ++i) {
-                    double v = x.elemAsDouble(i);
+                    keel::f64 v = x.elemAsDouble(i);
                     if (std::isnan(v)) dst[i] = v;
-                    else if (v == 0.0) dst[i] = -std::numeric_limits<double>::infinity();
+                    else if (v == 0.0) dst[i] = -std::numeric_limits<keel::f64>::infinity();
                     else if (std::isinf(v)) dst[i] = 0.0;
                     else dst[i] = evalPosCi(v);
                 }
@@ -195,9 +195,9 @@ void register_specfun(Engine &engine) {
                 Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
                 auto *dst = out.complexDataMut();
                 for (keel::usize i = 0; i < n; ++i) {
-                    double v = x.elemAsDouble(i);
+                    keel::f64 v = x.elemAsDouble(i);
                     if (std::isnan(v)) dst[i] = {v, v};
-                    else if (v == 0.0) dst[i] = {-std::numeric_limits<double>::infinity(), 0.0};
+                    else if (v == 0.0) dst[i] = {-std::numeric_limits<keel::f64>::infinity(), 0.0};
                     else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
                     else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
                 }
@@ -213,56 +213,56 @@ void register_specfun(Engine &engine) {
             if (args.size() == 2)
                 branch = argcheck::expectedInteger(
                     argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
-            auto evalLambertW = [](int k, double z) -> double {
+            auto evalLambertW = [](int k, keel::f64 z) -> keel::f64 {
                 if (std::isnan(z)) return z;
-                const double negInvE = -1.0 / std::exp(1.0);
+                const keel::f64 negInvE = -1.0 / std::exp(1.0);
                 if (k == 0) {
                     if (z == 0.0) return 0.0;
                     if (std::isinf(z) && z > 0.0) return z;
-                    if (z < negInvE) return std::numeric_limits<double>::quiet_NaN();
+                    if (z < negInvE) return std::numeric_limits<keel::f64>::quiet_NaN();
                     if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
-                    double w;
+                    keel::f64 w;
                     if (z < -0.3) {
-                        double p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
+                        keel::f64 p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
                         w = -1.0 + p - p * p / 3.0;
                     } else if (z < 1.0) {
                         w = z * (1.0 - z + 1.5 * z * z) / (1.0 + 0.5 * z * z);
                     } else {
-                        double lz = std::log(z);
+                        keel::f64 lz = std::log(z);
                         w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
                     }
                     for (int it = 0; it < 50; ++it) {
-                        double ew = std::exp(w);
-                        double wew = w * ew;
-                        double f = wew - z;
+                        keel::f64 ew = std::exp(w);
+                        keel::f64 wew = w * ew;
+                        keel::f64 f = wew - z;
                         if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
-                        double wp1 = w + 1.0;
-                        double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+                        keel::f64 wp1 = w + 1.0;
+                        keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
                         if (denom == 0.0) break;
-                        double dw = f / denom;
+                        keel::f64 dw = f / denom;
                         w -= dw;
                         if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
                     }
                     return w;
                 } else if (k == -1) {
-                    if (z < negInvE || z >= 0.0) return std::numeric_limits<double>::quiet_NaN();
+                    if (z < negInvE || z >= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
                     if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
-                    double w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
+                    keel::f64 w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
                                           : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
                     for (int it = 0; it < 50; ++it) {
-                        double ew = std::exp(w);
-                        double f = w * ew - z;
+                        keel::f64 ew = std::exp(w);
+                        keel::f64 f = w * ew - z;
                         if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
-                        double wp1 = w + 1.0;
-                        double denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+                        keel::f64 wp1 = w + 1.0;
+                        keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
                         if (denom == 0.0) break;
-                        double dw = f / denom;
+                        keel::f64 dw = f / denom;
                         w -= dw;
                         if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
                     }
                     return w;
                 }
-                return std::numeric_limits<double>::quiet_NaN();
+                return std::numeric_limits<keel::f64>::quiet_NaN();
             };
             const keel::usize n = x.numel();
             if (n == 1) {
@@ -270,7 +270,7 @@ void register_specfun(Engine &engine) {
                 return;
             }
             Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            double *dst = out.doubleDataMut();
+            keel::f64 *dst = out.doubleDataMut();
             for (keel::usize i = 0; i < n; ++i)
                 dst[i] = evalLambertW(branch, x.elemAsDouble(i));
             outs[0] = std::move(out);

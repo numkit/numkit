@@ -68,7 +68,7 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
             keel::Array<Value> callArgs(inputs->size(), mr);
             for (keel::usize k = 0; k < inputs->size(); ++k) {
                 auto sub = Value::matrix(idxs.size(), 1, ValueType::DOUBLE, mr);
-                double *sd = sub.doubleDataMut();
+                keel::f64 *sd = sub.doubleDataMut();
                 for (keel::usize j = 0; j < idxs.size(); ++j)
                     sd[j] = (*inputs)[k].elemAsDouble(idxs[j]);
                 callArgs[k] = keel::move(sub);
@@ -77,7 +77,7 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
         };
         cont->pack = [mr](keel::Array<Value> &results) -> Value {
             auto out = Value::matrix(results.size(), 1, ValueType::DOUBLE, mr);
-            double *d = out.doubleDataMut();
+            keel::f64 *d = out.doubleDataMut();
             for (keel::usize i = 0; i < results.size(); ++i)
                 d[i] = results[i].toScalar();
             return out;

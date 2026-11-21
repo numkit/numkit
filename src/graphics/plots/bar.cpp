@@ -100,13 +100,13 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 "#e26a6a", "#d4a5e6", "#f2a37e", "#6fcfbf",
             };
             // Build base X vector — explicit when given, else 1..Yr.
-            keel::Array<double> xb(Yr);
+            keel::Array<keel::f64> xb(Yr);
             if (xArg) {
                 for (keel::usize r = 0; r < Yr; ++r) xb[r] = xArg->elemAsDouble(r);
             } else {
-                for (keel::usize r = 0; r < Yr; ++r) xb[r] = (double)(r + 1);
+                for (keel::usize r = 0; r < Yr; ++r) xb[r] = (keel::f64)(r + 1);
             }
-            keel::Array<double> Ybuf(yArg->numel());
+            keel::Array<keel::f64> Ybuf(yArg->numel());
             if (transposeY) {
                 keel::usize origR = yArg->dims().rows();
                 keel::usize origC = yArg->dims().cols();
@@ -116,14 +116,14 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             } else {
                 for (keel::usize i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yArg->elemAsDouble(i);
             }
-            const double *Yp = Ybuf.data();
+            const keel::f64 *Yp = Ybuf.data();
             if (mode == "stacked") {
                 // Cumulative sums; emit column Yc-1 first so lower
                 // bands overdraw the bottom of higher ones (same idea
                 // as area-stacked).
-                keel::Array<double> S(Yr * Yc, 0.0);
+                keel::Array<keel::f64> S(Yr * Yc, 0.0);
                 for (keel::usize r = 0; r < Yr; ++r) {
-                    double acc = 0;
+                    keel::f64 acc = 0;
                     for (keel::usize c = 0; c < Yc; ++c) {
                         acc += Yp[c * Yr + r];
                         S[r * Yc + c] = acc;
@@ -160,14 +160,14 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 // with the same default width, so sub-pixel
                 // positioning is the visible separator. With Yc bars
                 // per group, offsets span ±0.4 around the base.
-                const double groupHalf = 0.4;
-                const double slot = (Yc > 1) ? (2 * groupHalf) / (Yc - 1) : 0.0;
+                const keel::f64 groupHalf = 0.4;
+                const keel::f64 slot = (Yc > 1) ? (2 * groupHalf) / (Yc - 1) : 0.0;
                 for (keel::usize cc = 0; cc < Yc; ++cc) {
                     DatasetInfo ds;
                     ds.type.assign("bar");
                     StrBuf xs, ys;
                     xs << '['; ys << '[';
-                    const double off = -groupHalf + slot * cc;
+                    const keel::f64 off = -groupHalf + slot * cc;
                     for (keel::usize r = 0; r < Yr; ++r) {
                         if (r) { xs << ','; ys << ','; }
                         xs << (xb[r] + off);
@@ -195,10 +195,10 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         (void)nargout;
         if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
         const auto &X = args[0];
-        keel::Array<double> xs;
+        keel::Array<keel::f64> xs;
         xs.reserve(X.numel());
         for (keel::usize i = 0; i < X.numel(); ++i) {
-            const double v = X.elemAsDouble(i);
+            const keel::f64 v = X.elemAsDouble(i);
             if (std::isfinite(v)) xs.push_back(v);
         }
         if (xs.empty()) { outs[0] = Value(); return; }
@@ -210,7 +210,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         for (keel::usize i = 0; i < N; ++i) {
             if (i) { sx << ','; sy << ','; }
             sx << xs[i];
-            sy << ((double)(i + 1) / (double)N);
+            sy << ((keel::f64)(i + 1) / (keel::f64)N);
         }
         sx << ']'; sy << ']';
 
@@ -240,9 +240,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
-            keel::Array<double> xs;
+            keel::Array<keel::f64> xs;
             for (keel::usize i = 0; i < args[0].numel(); ++i) {
-                const double v = args[0].elemAsDouble(i);
+                const keel::f64 v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) xs.push_back(v);
             }
             if (xs.size() < 2) { outs[0] = Value(); return; }
@@ -252,14 +252,14 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             // Probit (inverse normal CDF) — Abramowitz & Stegun 26.2.23
             // rational approx, good to ~4.5e-4 absolute error. Mirrors
             // the upper tail; the lower tail is its negative.
-            const auto probit = [](double p) {
+            const auto probit = [](keel::f64 p) {
                 p = std::max(1e-15, std::min(1.0 - 1e-15, p));
                 const bool lower = (p < 0.5);
-                const double q = lower ? p : (1.0 - p);
-                const double t = std::sqrt(-2.0 * std::log(q));
-                const double c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
-                const double d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
-                const double r = t - (c0 + c1*t + c2*t*t)
+                const keel::f64 q = lower ? p : (1.0 - p);
+                const keel::f64 t = std::sqrt(-2.0 * std::log(q));
+                const keel::f64 c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+                const keel::f64 d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+                const keel::f64 r = t - (c0 + c1*t + c2*t*t)
                                    / (1 + d1*t + d2*t*t + d3*t*t*t);
                 return lower ? -r : r;
             };
@@ -268,7 +268,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             tx << '['; ty << '[';
             for (keel::usize i = 0; i < N; ++i) {
                 if (i) { tx << ','; ty << ','; }
-                tx << probit((i + 0.5) / (double)N);
+                tx << probit((i + 0.5) / (keel::f64)N);
                 ty << xs[i];
             }
             tx << ']'; ty << ']';
@@ -276,15 +276,15 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             // Reference line: passes through (probit(0.25), q1) and
             // (probit(0.75), q3) where q1, q3 are the 25th / 75th
             // percentiles of the sample.
-            const double q1 = xs[(keel::usize)((N - 1) * 0.25)];
-            const double q3 = xs[(keel::usize)((N - 1) * 0.75)];
-            const double t1 = probit(0.25), t3 = probit(0.75);
-            const double slope = (q3 - q1) / (t3 - t1);
-            const double intercept = q1 - slope * t1;
+            const keel::f64 q1 = xs[(keel::usize)((N - 1) * 0.25)];
+            const keel::f64 q3 = xs[(keel::usize)((N - 1) * 0.75)];
+            const keel::f64 t1 = probit(0.25), t3 = probit(0.75);
+            const keel::f64 slope = (q3 - q1) / (t3 - t1);
+            const keel::f64 intercept = q1 - slope * t1;
             // Extend slightly past the data range so the ref line
             // visibly bisects the cloud.
-            const double tlo = probit(0.5 / N) - 0.1;
-            const double thi = probit(1.0 - 0.5 / N) + 0.1;
+            const keel::f64 tlo = probit(0.5 / N) - 0.1;
+            const keel::f64 thi = probit(1.0 - 0.5 / N) + 0.1;
             StrBuf lx, ly;
             lx << '[' << tlo << ',' << thi << ']';
             ly << '[' << (intercept + slope * tlo) << ',' << (intercept + slope * thi) << ']';
@@ -316,20 +316,20 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
-            keel::Array<double> ys;
+            keel::Array<keel::f64> ys;
             for (keel::usize i = 0; i < args[0].numel(); ++i) {
-                const double v = args[0].elemAsDouble(i);
+                const keel::f64 v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) ys.push_back(v);
             }
             if (ys.empty()) { outs[0] = Value(); return; }
-            std::sort(ys.begin(), ys.end(), [](double a, double b) { return a > b; });
-            double sum = 0;
-            for (double v : ys) sum += v;
+            std::sort(ys.begin(), ys.end(), [](keel::f64 a, keel::f64 b) { return a > b; });
+            keel::f64 sum = 0;
+            for (keel::f64 v : ys) sum += v;
             if (sum == 0) sum = 1;
 
             StrBuf bx, by, lx, ly;
             bx << '['; by << '['; lx << '['; ly << '[';
-            double cum = 0;
+            keel::f64 cum = 0;
             for (keel::usize i = 0; i < ys.size(); ++i) {
                 if (i) { bx << ','; by << ','; lx << ','; ly << ','; }
                 cum += ys[i];
@@ -363,9 +363,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
-            keel::Array<double> xs;
+            keel::Array<keel::f64> xs;
             for (keel::usize i = 0; i < args[0].numel(); ++i) {
-                const double v = args[0].elemAsDouble(i);
+                const keel::f64 v = args[0].elemAsDouble(i);
                 if (std::isfinite(v)) xs.push_back(v);
             }
             if (xs.size() < 2) { outs[0] = Value(); return; }
@@ -373,30 +373,30 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             if (args.size() >= 2 && args[1].numel() == 1)
                 nbins = std::max(1, (int)args[1].toScalar());
 
-            double mn = xs[0], mx = xs[0];
-            for (double v : xs) {
+            keel::f64 mn = xs[0], mx = xs[0];
+            for (keel::f64 v : xs) {
                 if (v < mn) mn = v;
                 if (v > mx) mx = v;
             }
-            const double bw = (mx - mn) / nbins;
-            const double bwSafe = (bw == 0) ? 1.0 : bw;
-            keel::Array<double> counts(nbins, 0.0), centers(keel::as<keel::usize>(nbins));
+            const keel::f64 bw = (mx - mn) / nbins;
+            const keel::f64 bwSafe = (bw == 0) ? 1.0 : bw;
+            keel::Array<keel::f64> counts(nbins, 0.0), centers(keel::as<keel::usize>(nbins));
             for (int i = 0; i < nbins; ++i)
                 centers[keel::as<keel::usize>(i)] = mn + bwSafe * (i + 0.5);
-            for (double v : xs) {
+            for (keel::f64 v : xs) {
                 int b = (int)((v - mn) / bwSafe);
                 if (b >= nbins) b = nbins - 1;
                 if (b < 0) b = 0;
                 counts[keel::as<keel::usize>(b)] += 1;
             }
-            double mean = 0;
-            for (double v : xs) mean += v;
+            keel::f64 mean = 0;
+            for (keel::f64 v : xs) mean += v;
             mean /= xs.size();
-            double var = 0;
-            for (double v : xs) var += (v - mean) * (v - mean);
+            keel::f64 var = 0;
+            for (keel::f64 v : xs) var += (v - mean) * (v - mean);
             var /= (xs.size() > 1 ? xs.size() - 1 : 1);
-            const double sd = std::sqrt(var);
-            const double sdSafe = (sd > 0) ? sd : 1.0;
+            const keel::f64 sd = std::sqrt(var);
+            const keel::f64 sdSafe = (sd > 0) ? sd : 1.0;
 
             // Sample the Gaussian on a fine grid for the fit curve.
             const int gridN = 100;
@@ -408,11 +408,11 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             }
             bx << ']'; by << ']';
             fx << '['; fy << '[';
-            const double scale = xs.size() * bwSafe;
+            const keel::f64 scale = xs.size() * bwSafe;
             for (int g = 0; g < gridN; ++g) {
                 if (g) { fx << ','; fy << ','; }
-                const double xg = mn + (mx - mn) * g / (gridN - 1);
-                const double pdf = std::exp(-0.5 * std::pow((xg - mean) / sdSafe, 2))
+                const keel::f64 xg = mn + (mx - mn) * g / (gridN - 1);
+                const keel::f64 pdf = std::exp(-0.5 * std::pow((xg - mean) / sdSafe, 2))
                                  / (sdSafe * std::sqrt(2 * 3.14159265358979323846));
                 fx << xg; fy << (pdf * scale);
             }
@@ -453,10 +453,10 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             // order. G can be numeric or char (treat both via toScalar
             // when numeric; char-array support deferred — most users
             // pass numeric labels).
-            keel::Array<double> groupKeys;
+            keel::Array<keel::f64> groupKeys;
             keel::Array<int> groupIdx(N);
             for (keel::usize i = 0; i < N; ++i) {
-                const double k = G.elemAsDouble(i);
+                const keel::f64 k = G.elemAsDouble(i);
                 int found = -1;
                 for (keel::usize j = 0; j < groupKeys.size(); ++j) {
                     if (groupKeys[j] == k) { found = (int)j; break; }
@@ -520,7 +520,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             bool first = true;
             for (keel::usize c = 0; c < C; ++c) {
                 for (keel::usize r = 0; r < R; ++r) {
-                    const double v = M.elemAsDouble(c * R + r);
+                    const keel::f64 v = M.elemAsDouble(c * R + r);
                     if (v == 0.0 || !std::isfinite(v)) continue;
                     if (!first) { xs << ','; ys << ','; }
                     first = false;
@@ -613,9 +613,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
                 for (keel::usize b = 0; b < bins; ++b)
                     centers.doubleDataMut()[b] = args[1].elemAsDouble(b);
-                const double *cd = centers.doubleData();
+                const keel::f64 *cd = centers.doubleData();
                 for (keel::usize i = 0; i < data.numel(); ++i) {
-                    const double v = data.elemAsDouble(i);
+                    const keel::f64 v = data.elemAsDouble(i);
                     if (std::isnan(v))
                         continue;
                     keel::usize b = 0;
@@ -627,16 +627,16 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 int bins = (args.size() >= 2 && !args[1].isEmpty())
                     ? std::max(1, keel::as<int>(args[1].toScalar()))
                     : 10;
-                double mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
-                double mx = mn;
+                keel::f64 mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
+                keel::f64 mx = mn;
                 for (keel::usize i = 1; i < data.numel(); ++i) {
-                    const double v = data.elemAsDouble(i);
+                    const keel::f64 v = data.elemAsDouble(i);
                     if (!std::isnan(v)) {
                         mn = std::min(mn, v);
                         mx = std::max(mx, v);
                     }
                 }
-                double bw = (mx - mn) / bins;
+                keel::f64 bw = (mx - mn) / bins;
                 if (bw == 0 || !std::isfinite(bw))
                     bw = 1.0;
                 centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
@@ -644,7 +644,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 for (int b = 0; b < bins; ++b)
                     centers.doubleDataMut()[b] = mn + bw * (b + 0.5);
                 for (keel::usize i = 0; i < data.numel(); ++i) {
-                    const double v = data.elemAsDouble(i);
+                    const keel::f64 v = data.elemAsDouble(i);
                     if (std::isnan(v))
                         continue;
                     int b = keel::as<int>((v - mn) / bw);
@@ -695,11 +695,11 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             const Value &X = args[0];
             const keel::usize n = X.numel();
             if (!n) { outs[0] = Value(); return; }
-            keel::Array<double> v(n);
-            double mn = X.elemAsDouble(0), mx = mn, sum = 0, sum2 = 0;
+            keel::Array<keel::f64> v(n);
+            keel::f64 mn = X.elemAsDouble(0), mx = mn, sum = 0, sum2 = 0;
             bool allInt = true;
             for (keel::usize i = 0; i < n; ++i) {
-                double x = X.elemAsDouble(i);
+                keel::f64 x = X.elemAsDouble(i);
                 v[i] = x;
                 mn = std::min(mn, x);
                 mx = std::max(mx, x);
@@ -708,17 +708,17 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 if (keel::abs(x - std::round(x)) > 1e-9)
                     allInt = false;
             }
-            double mean = sum / n;
-            double var = n > 1 ? (sum2 - n * mean * mean) / (n - 1) : 0;
-            double sd = std::sqrt(std::max(0.0, var));
+            keel::f64 mean = sum / n;
+            keel::f64 var = n > 1 ? (sum2 - n * mean * mean) / (n - 1) : 0;
+            keel::f64 sd = std::sqrt(std::max(0.0, var));
 
             // Edges: explicit vector > nbins scalar > BinWidth NV > auto.
-            keel::Array<double> edges;
-            double binWidthNV = 0;
-            double limLo = 0, limHi = 0;
+            keel::Array<keel::f64> edges;
+            keel::f64 binWidthNV = 0;
+            keel::f64 limLo = 0, limHi = 0;
             bool hasLimits = false;
             keel::String faceKV, edgeKV;
-            double faceAlpha = 0.6;   // MATLAB default (probe R2025b)
+            keel::f64 faceAlpha = 0.6;   // MATLAB default (probe R2025b)
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar()) continue;
                 keel::String key = args[i].toString();
@@ -771,25 +771,25 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 } else {
                     int nb = (int)args[1].toScalar();
                     if (nb < 1) nb = 1;
-                    double w = (mx - mn) / nb;
+                    keel::f64 w = (mx - mn) / nb;
                     if (!(w > 0)) w = 1;
                     for (int k = 0; k <= nb; ++k)
                         edges.push_back(mn + k * w);
                 }
             } else {
-                double w;
+                keel::f64 w;
                 if (binWidthNV > 0) {
                     w = binWidthNV;
                 } else if (allInt) {
                     w = 1;
                 } else {
-                    double scott = 3.5 * sd * std::pow((double)n, -1.0 / 3.0);
+                    keel::f64 scott = 3.5 * sd * std::pow((keel::f64)n, -1.0 / 3.0);
                     // floor to one significant digit (probe: 0.35→0.3)
-                    double p = std::pow(10.0, std::floor(std::log10(scott > 0 ? scott : 1)));
+                    keel::f64 p = std::pow(10.0, std::floor(std::log10(scott > 0 ? scott : 1)));
                     w = std::floor((scott > 0 ? scott : 1) / p) * p;
                     if (!(w > 0)) w = 1;
                 }
-                double lo, hi;
+                keel::f64 lo, hi;
                 if (hasLimits) {
                     lo = limLo;
                     hi = limHi;
@@ -802,16 +802,16 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     hi = std::ceil(mx / w) * w;
                 }
                 if (!(hi > lo)) hi = lo + w;
-                for (double e = lo; e <= hi + w * 1e-9; e += w)
+                for (keel::f64 e = lo; e <= hi + w * 1e-9; e += w)
                     edges.push_back(e);
             }
             const keel::usize nb = edges.size() > 1 ? edges.size() - 1 : 1;
 
-            keel::Array<double> centers(nb), counts(nb, 0.0);
+            keel::Array<keel::f64> centers(nb), counts(nb, 0.0);
             for (keel::usize b = 0; b < nb; ++b)
                 centers[b] = 0.5 * (edges[b] + edges[b + 1]);
             for (keel::usize i = 0; i < n; ++i) {
-                double x = v[i];
+                keel::f64 x = v[i];
                 if (x < edges.front() || x > edges.back())
                     continue;
                 keel::usize b = nb - 1;
@@ -881,11 +881,11 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             if (nx < 1) nx = 1;
             if (ny < 1) ny = 1;
 
-            double xmn = X.elemAsDouble(0), xmx = xmn;
-            double ymn = Y.elemAsDouble(0), ymx = ymn;
+            keel::f64 xmn = X.elemAsDouble(0), xmx = xmn;
+            keel::f64 ymn = Y.elemAsDouble(0), ymx = ymn;
             for (keel::usize k = 1; k < N; ++k) {
-                const double xv = X.elemAsDouble(k);
-                const double yv = Y.elemAsDouble(k);
+                const keel::f64 xv = X.elemAsDouble(k);
+                const keel::f64 yv = Y.elemAsDouble(k);
                 if (std::isfinite(xv)) {
                     if (xv < xmn) xmn = xv;
                     if (xv > xmx) xmx = xv;
@@ -895,8 +895,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     if (yv > ymx) ymx = yv;
                 }
             }
-            double bwx = (xmx - xmn) / nx;
-            double bwy = (ymx - ymn) / ny;
+            keel::f64 bwx = (xmx - xmn) / nx;
+            keel::f64 bwy = (ymx - ymn) / ny;
             if (bwx == 0) bwx = 1;
             if (bwy == 0) bwy = 1;
 
@@ -911,8 +911,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             for (int j = 0; j < ny; ++j)
                 centers_y.doubleDataMut()[j] = ymn + bwy * (j + 0.5);
             for (keel::usize k = 0; k < N; ++k) {
-                const double xv = X.elemAsDouble(k);
-                const double yv = Y.elemAsDouble(k);
+                const keel::f64 xv = X.elemAsDouble(k);
+                const keel::f64 yv = Y.elemAsDouble(k);
                 if (!std::isfinite(xv) || !std::isfinite(yv))
                     continue;
                 int i = (int)((xv - xmn) / bwx);
@@ -1054,9 +1054,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         }
         const auto &X = args[0];
         const keel::usize N = X.numel();
-        double total = 0;
+        keel::f64 total = 0;
         for (keel::usize i = 0; i < N; ++i) {
-            const double v = X.elemAsDouble(i);
+            const keel::f64 v = X.elemAsDouble(i);
             if (std::isfinite(v) && v > 0) total += v;
         }
         if (total <= 0) { outs[0] = Value(); return; }
@@ -1068,29 +1068,29 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             "#bcbd22", "#17becf",
         };
 
-        const double TAU = 2 * 3.14159265358979323846;
+        const keel::f64 TAU = 2 * 3.14159265358979323846;
         const int arcSamples = 24;          // vertices per wedge arc
-        const double tiltY = tilt3d ? 0.4 : 1.0;   // pie3 squashes Y
+        const keel::f64 tiltY = tilt3d ? 0.4 : 1.0;   // pie3 squashes Y
 
         auto &fm = gc.fm;
         fm.prepareForPlot();
         // Force equal axis so the pie stays circular.
         fm.currentAxes().axisMode.assign("equal");
 
-        double angle = 0;
+        keel::f64 angle = 0;
         for (keel::usize i = 0; i < N; ++i) {
-            const double v = X.elemAsDouble(i);
+            const keel::f64 v = X.elemAsDouble(i);
             if (!std::isfinite(v) || v <= 0) continue;
-            const double dθ = v / total * TAU;
-            const double θ0 = angle;
-            const double θ1 = angle + dθ;
+            const keel::f64 dθ = v / total * TAU;
+            const keel::f64 θ0 = angle;
+            const keel::f64 θ1 = angle + dθ;
             angle = θ1;
 
             // Explode: shift centre along the wedge bisector.
-            double cx = 0, cy = 0;
+            keel::f64 cx = 0, cy = 0;
             if (expl && expl->numel() > i && expl->elemAsDouble(i) != 0) {
-                const double mid = (θ0 + θ1) / 2;
-                const double off = 0.1;
+                const keel::f64 mid = (θ0 + θ1) / 2;
+                const keel::f64 off = 0.1;
                 cx = off * std::cos(mid);
                 cy = off * std::sin(mid) * tiltY;
             }
@@ -1099,7 +1099,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             xs << '['; ys << '[';
             xs << cx; ys << cy;
             for (int s = 0; s <= arcSamples; ++s) {
-                const double t = θ0 + (θ1 - θ0) * s / arcSamples;
+                const keel::f64 t = θ0 + (θ1 - θ0) * s / arcSamples;
                 xs << ',' << (cx + std::cos(t));
                 ys << ',' << (cy + std::sin(t) * tiltY);
             }
@@ -1154,28 +1154,28 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
-        const double w = 0.4;     // half-width of each box (so total is 0.8)
+        const keel::f64 w = 0.4;     // half-width of each box (so total is 0.8)
         for (keel::usize bi = 0; bi < nBoxes; ++bi) {
-            keel::Array<double> col;
+            keel::Array<keel::f64> col;
             col.reserve(nPerBox);
             for (keel::usize r = 0; r < nPerBox; ++r) {
-                const double v = single
+                const keel::f64 v = single
                     ? M.elemAsDouble(r)
                     : M.elemAsDouble(bi * R + r);
                 if (std::isfinite(v)) col.push_back(v);
             }
             if (col.size() < 2) continue;
             std::sort(col.begin(), col.end());
-            const double q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
-            const double q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
-            const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
-            const double iqr = q3 - q1;
-            const double loFence = q1 - 1.5 * iqr;
-            const double hiFence = q3 + 1.5 * iqr;
-            double whLo = col.front(), whHi = col.back();
+            const keel::f64 q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
+            const keel::f64 q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
+            const keel::f64 q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
+            const keel::f64 iqr = q3 - q1;
+            const keel::f64 loFence = q1 - 1.5 * iqr;
+            const keel::f64 hiFence = q3 + 1.5 * iqr;
+            keel::f64 whLo = col.front(), whHi = col.back();
             // Whiskers extend to the most extreme finite point WITHIN
             // the fence, not the fence itself.
-            for (double v : col) {
+            for (keel::f64 v : col) {
                 if (v >= loFence && v < whLo) whLo = v;
                 if (v <= hiFence && v > whHi) whHi = v;
             }
@@ -1185,13 +1185,13 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             if (whHi > hiFence) whHi = hiFence;
             // Re-clamp to the closest in-fence point (more reliable
             // when there are no in-fence extremes).
-            for (double v : col) {
+            for (keel::f64 v : col) {
                 if (v >= loFence && v <= q1 && v < whLo) whLo = v;
                 if (v <= hiFence && v >= q3 && v > whHi) whHi = v;
             }
 
-            const double cx = (double)(bi + 1);
-            const double xL = cx - w, xR = cx + w;
+            const keel::f64 cx = (keel::f64)(bi + 1);
+            const keel::f64 xL = cx - w, xR = cx + w;
 
             // 1. IQR box (polygon).
             StrBuf bx, by;
@@ -1244,7 +1244,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             StrBuf ox, oy;
             ox << '['; oy << '[';
             bool first = true;
-            for (double v : col) {
+            for (keel::f64 v : col) {
                 if (v >= loFence && v <= hiFence) continue;
                 if (!first) { ox << ','; oy << ','; }
                 first = false;
@@ -1290,40 +1290,40 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
 
             const int kdePts = 50;
             for (keel::usize bi = 0; bi < nViolins; ++bi) {
-                keel::Array<double> col;
+                keel::Array<keel::f64> col;
                 col.reserve(nPerColumn);
                 for (keel::usize r = 0; r < nPerColumn; ++r) {
-                    const double v = single
+                    const keel::f64 v = single
                         ? M.elemAsDouble(r)
                         : M.elemAsDouble(bi * R + r);
                     if (std::isfinite(v)) col.push_back(v);
                 }
                 if (col.size() < 2) continue;
-                double mean = 0;
-                for (double v : col) mean += v;
+                keel::f64 mean = 0;
+                for (keel::f64 v : col) mean += v;
                 mean /= col.size();
-                double var = 0;
-                for (double v : col) var += (v - mean) * (v - mean);
+                keel::f64 var = 0;
+                for (keel::f64 v : col) var += (v - mean) * (v - mean);
                 var /= col.size() - 1;
-                const double sd = std::sqrt(var);
+                const keel::f64 sd = std::sqrt(var);
                 if (sd <= 0) continue;
-                const double bw = 1.06 * sd * std::pow((double)col.size(), -0.2);
+                const keel::f64 bw = 1.06 * sd * std::pow((keel::f64)col.size(), -0.2);
                 if (bw <= 0) continue;
 
                 std::sort(col.begin(), col.end());
-                const double mn = col.front(), mx = col.back();
-                const double q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
-                const double q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
-                const double q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
+                const keel::f64 mn = col.front(), mx = col.back();
+                const keel::f64 q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
+                const keel::f64 q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
+                const keel::f64 q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
 
                 // Sample KDE density on a uniform y grid [mn, mx].
-                keel::Array<double> ys(kdePts), den(keel::as<keel::usize>(kdePts));
-                double maxD = 0;
+                keel::Array<keel::f64> ys(kdePts), den(keel::as<keel::usize>(kdePts));
+                keel::f64 maxD = 0;
                 for (int g = 0; g < kdePts; ++g) {
-                    const double y = mn + (mx - mn) * g / (double)(kdePts - 1);
-                    double s = 0;
-                    for (double v : col) {
-                        const double t = (y - v) / bw;
+                    const keel::f64 y = mn + (mx - mn) * g / (keel::f64)(kdePts - 1);
+                    keel::f64 s = 0;
+                    for (keel::f64 v : col) {
+                        const keel::f64 t = (y - v) / bw;
                         s += std::exp(-0.5 * t * t);
                     }
                     s /= (col.size() * bw * std::sqrt(2 * 3.14159265358979323846));
@@ -1332,9 +1332,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     if (s > maxD) maxD = s;
                 }
                 if (maxD <= 0) continue;
-                const double cx = (double)(bi + 1);
-                const double halfW = 0.4;
-                const double scale = halfW / maxD;
+                const keel::f64 cx = (keel::f64)(bi + 1);
+                const keel::f64 halfW = 0.4;
+                const keel::f64 scale = halfW / maxD;
 
                 // Violin polygon: right side bottom-to-top + left side
                 // top-to-bottom. Closed by the polygon renderer.
@@ -1360,7 +1360,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 fm.pushDataset(keel::move(dsV));
 
                 // Slim box (Q1..Q3) at the centre.
-                const double bxW = 0.06;
+                const keel::f64 bxW = 0.06;
                 StrBuf bxs, bys;
                 bxs << '[' << (cx - bxW) << ',' << (cx + bxW) << ','
                     << (cx + bxW) << ',' << (cx - bxW) << ']';
@@ -1414,7 +1414,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 zs << '[';
                 for (keel::usize c = 0; c < C; ++c) {
                     if (c) zs << ',';
-                    const double v = Z.elemAsDouble(c * R + r);
+                    const keel::f64 v = Z.elemAsDouble(c * R + r);
                     if (std::isfinite(v)) zs << v;
                     else                  zs << "null";
                 }
@@ -1458,9 +1458,9 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 if (c > 0) { xs << ",null,"; ys << ",null,"; zs << ",null,"; }
                 for (keel::usize r = 0; r < R; ++r) {
                     if (r > 0) { xs << ','; ys << ','; zs << ','; }
-                    const double xv = X.elemAsDouble(c * R + r);
-                    const double yv = Y.elemAsDouble(c * R + r);
-                    const double zv = Z.elemAsDouble(c * R + r);
+                    const keel::f64 xv = X.elemAsDouble(c * R + r);
+                    const keel::f64 yv = Y.elemAsDouble(c * R + r);
+                    const keel::f64 zv = Z.elemAsDouble(c * R + r);
                     if (std::isfinite(xv)) xs << xv; else xs << "null";
                     if (std::isfinite(yv)) ys << yv; else ys << "null";
                     if (std::isfinite(zv)) zs << zv; else zs << "null";
@@ -1526,7 +1526,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             const keel::usize n = std::min(xv.numel(), yv.numel());
             auto *mr = gc.mr;
             auto Xjit = Value::matrix(1, n, ValueType::DOUBLE, mr);
-            double *xj = Xjit.doubleDataMut();
+            keel::f64 *xj = Xjit.doubleDataMut();
             for (keel::usize i = 0; i < n; ++i) xj[i] = xv.elemAsDouble(i);
             // Group indices by integer-rounded X (categorical use case).
             struct Bucket { long key; keel::Array<keel::usize> idxs; };
@@ -1551,24 +1551,24 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             // Per bucket, spread points uniformly in [-half, +half] of
             // the slot width. Slot = 0.35 × the smallest gap between
             // distinct X values, capped at 0.4 absolute.
-            double minGap = 1.0;
+            keel::f64 minGap = 1.0;
             if (buckets.size() > 1) {
                 long prev = LONG_MIN;
                 for (const auto &bk : buckets) {
                     if (prev != LONG_MIN) {
-                        const double g = keel::abs((double)(bk.key - prev));
+                        const keel::f64 g = keel::abs((keel::f64)(bk.key - prev));
                         if (g < minGap || minGap == 1.0) minGap = g;
                     }
                     prev = bk.key;
                 }
             }
-            const double half = std::min(0.4, 0.35 * minGap);
+            const keel::f64 half = std::min(0.4, 0.35 * minGap);
             for (const auto &bk : buckets) {
                 const keel::usize m = bk.idxs.size();
                 if (m <= 1) continue;
                 for (keel::usize j = 0; j < m; ++j) {
-                    const double t = (m == 1) ? 0.0
-                        : (-half + 2 * half * (double)j / (m - 1));
+                    const keel::f64 t = (m == 1) ? 0.0
+                        : (-half + 2 * half * (keel::f64)j / (m - 1));
                     xj[bk.idxs[j]] += t;
                 }
             }
@@ -1596,7 +1596,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
     // Helper — emit a text-annotation dataset at (x, y) with label.
     // Picks a colour that contrasts with the cell value (white on
     // dark bins, black on light bins) via a brightness threshold.
-    auto pushCellText = [](FigureManager &fm, double x, double y,
+    auto pushCellText = [](FigureManager &fm, keel::f64 x, keel::f64 y,
                            keel::StringRef label, bool darkBg) {
         DatasetInfo t;
         t.type.assign("text");
@@ -1660,10 +1660,10 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                 const keel::usize R = C.dims().rows();
                 const keel::usize W = C.dims().cols();
                 if (R * W <= 400) {   // ≤ 20×20 grid — show labels
-                    double cmn = std::numeric_limits<double>::infinity();
-                    double cmx = -std::numeric_limits<double>::infinity();
+                    keel::f64 cmn = std::numeric_limits<keel::f64>::infinity();
+                    keel::f64 cmx = -std::numeric_limits<keel::f64>::infinity();
                     for (keel::usize i = 0; i < R * W; ++i) {
-                        const double v = C.elemAsDouble(i);
+                        const keel::f64 v = C.elemAsDouble(i);
                         if (std::isfinite(v)) {
                             if (v < cmn) cmn = v;
                             if (v > cmx) cmx = v;
@@ -1672,8 +1672,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     auto &fm = gc.fm;
                     for (keel::usize r = 0; r < R; ++r) {
                         for (keel::usize cc = 0; cc < W; ++cc) {
-                            const double v = C.elemAsDouble(cc * R + r);
-                            const double t_ = (cmx == cmn) ? 0.5
+                            const keel::f64 v = C.elemAsDouble(cc * R + r);
+                            const keel::f64 t_ = (cmx == cmn) ? 0.5
                                 : (v - cmn) / (cmx - cmn);
                             // Dark background ↔ low t (blue/cyan side
                             // of parula). Threshold 0.4 picks readable
@@ -1682,8 +1682,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                             char buf[32];
                             std::snprintf(buf, sizeof buf, labelFmt.c_str(), v);
                             pushCellText(fm,
-                                         (double)(cc + 1),
-                                         (double)(r + 1),
+                                         (keel::f64)(cc + 1),
+                                         (keel::f64)(r + 1),
                                          keel::StringRef(buf), dark);
                         }
                     }

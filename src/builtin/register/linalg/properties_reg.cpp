@@ -49,7 +49,7 @@ void det_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
 void rank_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rank");
-    const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
+    const keel::f64 tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
     outs[0] = rank_of(args[0], tol, ctx.engine->allocator());
 }
 
@@ -70,7 +70,7 @@ void cond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         else throw Error("cond: string p must be 'fro' or 'inf'",
                          0, 0, "cond", "", "numkit:cond:badStringP");
     } else {
-        const double pv = p.toScalar();
+        const keel::f64 pv = p.toScalar();
         if      (pv == 1.0) p_kind = 1;
         else if (pv == 2.0) p_kind = 2;
         else if (std::isinf(pv)) p_kind = 3;

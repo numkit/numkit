@@ -101,7 +101,7 @@ void shiftdim_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto res = shiftdimAuto(args[0], mr);
     outs[0] = std::move(res.v);
     if (nargout > 1)
-        outs[1] = Value::scalar(keel::as<double>(res.dropped), mr);
+        outs[1] = Value::scalar(keel::as<keel::f64>(res.dropped), mr);
 }
 
 } // namespace detail

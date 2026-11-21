@@ -3421,7 +3421,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         const keel::String tail = keel::String::from(arg.substr(1));
         char *endPtr = nullptr;
         errno = 0;
-        double parsedNum = 0.0;
+        keel::f64 parsedNum = 0.0;
         bool isNum = false;
         if (!tail.empty() && tail != ".") {
             parsedNum = std::strtod(tail.c_str(), &endPtr);

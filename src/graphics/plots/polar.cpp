@@ -51,7 +51,7 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
             // Build polar (theta, rho) pairs from (U, V).
             StrBuf tx, ry;
             tx << '['; ry << '[';
-            const auto emit = [&](double u, double v, bool first) {
+            const auto emit = [&](keel::f64 u, keel::f64 v, bool first) {
                 if (!first) { tx << ','; ry << ','; }
                 tx << std::atan2(v, u);
                 ry << std::hypot(u, v);
@@ -157,12 +157,12 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
     // dataset `type` tag and the default bin count.
     auto computeAngularHistogram = [](const Value &theta, int nbins,
                                       keel::String &txOut, keel::String &tyOut) {
-        const double TAU = 2 * 3.14159265358979323846;
-        const double bw  = TAU / nbins;
-        keel::Array<double> counts(nbins, 0.0);
+        const keel::f64 TAU = 2 * 3.14159265358979323846;
+        const keel::f64 bw  = TAU / nbins;
+        keel::Array<keel::f64> counts(nbins, 0.0);
         const keel::usize N = theta.numel();
         for (keel::usize i = 0; i < N; ++i) {
-            double t = theta.elemAsDouble(i);
+            keel::f64 t = theta.elemAsDouble(i);
             if (!std::isfinite(t)) continue;
             t = std::fmod(t, TAU);
             if (t < 0) t += TAU;

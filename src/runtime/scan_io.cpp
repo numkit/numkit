@@ -96,12 +96,12 @@ struct TextscanOptions
     // collapses regardless.
     bool multipleDelimsAsOne = false;
     // Value substituted for empty numeric fields. MATLAB default NaN.
-    double emptyValue = std::numeric_limits<double>::quiet_NaN();
+    keel::f64 emptyValue = std::numeric_limits<keel::f64>::quiet_NaN();
 };
 
 struct TextscanConv { char spec; bool suppress; int width; };
 
-struct StagedNum { keel::usize col; double val; };
+struct StagedNum { keel::usize col; keel::f64 val; };
 struct StagedStr { keel::usize col; keel::String val; };
 
 // Parse formatSpec into an ordered conversion list. Unrecognised
@@ -175,7 +175,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     keel::usize argIdx = 2;
     keel::usize cycleCap = SIZE_MAX;
     if (argIdx < args.size() && args[argIdx].isScalar() && !args[argIdx].isChar()) {
-        double d = args[argIdx].toScalar();
+        keel::f64 d = args[argIdx].toScalar();
         if (!std::isinf(d)) {
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: N must be Inf or a non-negative integer");
@@ -214,7 +214,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 throw Error("textscan: 'EndOfLine' must be a char array");
             opts.endOfLine.assign(val.toString());
         } else if (name == "headerlines") {
-            double d = val.toScalar();
+            keel::f64 d = val.toScalar();
             if (d < 0 || !std::isfinite(d))
                 throw Error("textscan: 'HeaderLines' must be a non-negative integer");
             opts.headerLines = keel::as<keel::usize>(d);
@@ -373,7 +373,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     };
 
     // Per-column accumulators. Both outer and inner arrays allocate from the arena.
-    keel::Array<keel::Array<double>> numCols(scratch.allocator());
+    keel::Array<keel::Array<keel::f64>> numCols(scratch.allocator());
     keel::Array<keel::Array<keel::String>> strCols(scratch.allocator());
     numCols.reserve(convs.size());
     strCols.reserve(convs.size());
@@ -459,28 +459,28 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             tokBuf.assign(tok);
             const char *start = tokBuf.c_str();
             char *endp = nullptr;
-            double v = 0.0;
+            keel::f64 v = 0.0;
             switch (c.spec) {
             case 'd': case 'i': {
                 long long iv = std::strtoll(start, &endp, 10);
-                v = keel::as<double>(iv);
+                v = keel::as<keel::f64>(iv);
                 break;
             }
             case 'u': {
                 unsigned long long uv = std::strtoull(start, &endp, 10);
-                v = keel::as<double>(uv);
+                v = keel::as<keel::f64>(uv);
                 break;
             }
             case 'f': case 'e': case 'g': case 'E': case 'G':
                 v = std::strtod(start, &endp); break;
             case 'x': case 'X': {
                 unsigned long long uv = std::strtoull(start, &endp, 16);
-                v = keel::as<double>(uv);
+                v = keel::as<keel::f64>(uv);
                 break;
             }
             case 'o': {
                 unsigned long long uv = std::strtoull(start, &endp, 8);
-                v = keel::as<double>(uv);
+                v = keel::as<keel::f64>(uv);
                 break;
             }
             }
@@ -523,7 +523,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                              : Value::matrix(k, 1, ValueType::DOUBLE, mr);
             if (k > 0)
                 std::memcpy(col.doubleDataMut(), numCols[i].data(),
-                            k * sizeof(double));
+                            k * sizeof(keel::f64));
             result.cellAt(slot++) = keel::move(col);
         }
     }

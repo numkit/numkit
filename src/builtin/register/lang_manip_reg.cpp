@@ -51,7 +51,7 @@ void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
             throw Error("repmat: tile vector must not be empty",
                          0, 0, "repmat", "", "numkit:repmat:badTileVec");
         }
-        auto tileOf = [&](double d) {
+        auto tileOf = [&](keel::f64 d) {
             argcheck::expectedNonNegative(
                 argcheck::expectedInteger(d, 1, "tile", "repmat"), 1, "tile", "repmat");
             return keel::as<keel::usize>(d);
@@ -68,7 +68,7 @@ void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     } else {
         tiles.reserve(args.size() - 1);
         for (keel::usize i = 1; i < args.size(); ++i) {
-            const double d = argcheck::expectedReal(args[i], int(i) + 1, "tile", "repmat");
+            const keel::f64 d = argcheck::expectedReal(args[i], int(i) + 1, "tile", "repmat");
             argcheck::expectedInteger(d, int(i) + 1, "tile", "repmat");
             argcheck::expectedNonNegative(d, int(i) + 1, "tile", "repmat");
             tiles.push_back(keel::as<keel::usize>(d));
@@ -213,7 +213,7 @@ void sub2ind_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
 struct ResizeOpts {
     int dim = 0;
     keel::String side{"trailing"};
-    double fillValue = 0.0;
+    keel::f64 fillValue = 0.0;
 };
 
 ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const char *fn)
@@ -250,7 +250,7 @@ ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const cha
                                          keel::as<int>(i + 2), "Dimension", fn);
                 opts.dim = 0;
             } else {
-                const double dv = argcheck::expectedReal(val, keel::as<int>(i + 2), "Dimension", fn);
+                const keel::f64 dv = argcheck::expectedReal(val, keel::as<int>(i + 2), "Dimension", fn);
                 opts.dim = argcheck::expectedInteger(dv, keel::as<int>(i + 2), "Dimension", fn);
                 argcheck::expectedPositive(dv, keel::as<int>(i + 2), "Dimension", fn);
             }

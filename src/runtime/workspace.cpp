@@ -315,9 +315,9 @@ void registerWorkspaceRuntime(Engine &engine)
         "inputname", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() != 1)
                 throw std::runtime_error("inputname: requires one argument (k)");
-            double kd = args[0].toScalar();
+            keel::f64 kd = args[0].toScalar();
             int k = keel::as<int>(kd);
-            if (keel::as<double>(k) != kd || k < 1)
+            if (keel::as<keel::f64>(k) != kd || k < 1)
                 throw std::runtime_error("inputname: k must be a positive integer");
             keel::String name = ctx.engine->inputName(k);
             outs[0] = Value::fromString(name, ctx.engine->allocator());
@@ -475,7 +475,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         const int nd = keel::max(2, d.ndim());
                                         Value sz = Value::matrix(1, keel::as<keel::usize>(nd), ValueType::DOUBLE, mr);
                                         for (int k = 0; k < nd; ++k)
-                                            sz.doubleDataMut()[k] = keel::as<double>(d.dim(k));
+                                            sz.doubleDataMut()[k] = keel::as<keel::f64>(d.dim(k));
                                         keel::StringRef classStr = entry.val->isSingleComplex()
                                             ? keel::StringRef("single")
                                             : keel::StringRef(mtypeName(entry.val->type()));
@@ -484,7 +484,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                         nest.field("level") = Value::scalar(0.0, mr);
                                         sa.setField(idx, "name", Value::fromString(entry.name, mr));
                                         sa.setField(idx, "size", keel::move(sz));
-                                        sa.setField(idx, "bytes", Value::scalar(keel::as<double>(entry.val->deepBytes()), mr));
+                                        sa.setField(idx, "bytes", Value::scalar(keel::as<keel::f64>(entry.val->deepBytes()), mr));
                                         sa.setField(idx, "class", Value::fromString(classStr, mr));
                                         sa.setField(idx, "global", Value::logicalScalar(env->isGlobal(entry.name), mr));
                                         sa.setField(idx, "sparse", Value::logicalScalar(false, mr));
@@ -556,7 +556,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                 if (typeFilter == "class") {
                                     if (!ctx.engine->findClass(varName))
                                         (void)ctx.engine->lookupUserFunction(varName, env);
-                                    double c = ctx.engine->findClass(varName) ? 8.0 : 0.0;
+                                    keel::f64 c = ctx.engine->findClass(varName) ? 8.0 : 0.0;
                                     outs[0] = Value::scalar(c, ctx.engine->allocator());
                                     return;
                                 }
@@ -576,7 +576,7 @@ void registerWorkspaceRuntime(Engine &engine)
                                     } catch (...) { return false; }
                                 };
 
-                                double code = 0;
+                                keel::f64 code = 0;
                                 bool isVar = (env->getLocal(varName) != nullptr);
                                 if (!isVar && env->isGlobal(varName)) {
                                     auto *gs = env->globalsEnv();

@@ -527,8 +527,8 @@ void register_general(Engine &engine) {
                                         full.push_back('/');
                                     full.append(entries[i].name);
                                     auto est = rp.fs->stat(full);
-                                    fields.put(keel::String("bytes", mr),   Value::scalar(est ? double(est->size) : 0.0, mr));
-                                    fields.put(keel::String("datenum", mr), Value::scalar(est ? double(est->mtime) : 0.0, mr));
+                                    fields.put(keel::String("bytes", mr),   Value::scalar(est ? keel::f64(est->size) : 0.0, mr));
+                                    fields.put(keel::String("datenum", mr), Value::scalar(est ? keel::f64(est->mtime) : 0.0, mr));
                                     fields.put(keel::String("date", mr),    Value::fromString("", mr));
                                 }
                                 outs[0] = std::move(arr);
@@ -687,38 +687,38 @@ void register_general(Engine &engine) {
             auto whole_vec = [&](keel::usize n) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
-                double *d = v.doubleDataMut();
-                const double step = 2.0 / keel::as<double>(n);
+                keel::f64 *d = v.doubleDataMut();
+                const keel::f64 step = 2.0 / keel::as<keel::f64>(n);
                 for (keel::usize i = 0; i < n; ++i)
-                    d[i] = step * keel::as<double>(i);
+                    d[i] = step * keel::as<keel::f64>(i);
                 return v;
             };
             auto centered_vec = [&](keel::usize n) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
-                double *d = v.doubleDataMut();
+                keel::f64 *d = v.doubleDataMut();
                 const long start = (n % 2 == 0) ? -keel::as<long>(n)
                                                 : -keel::as<long>(n) + 1;
                 for (keel::usize i = 0; i < n; ++i)
-                    d[i] = keel::as<double>(start + 2 * keel::as<long>(i))
-                         / keel::as<double>(n);
+                    d[i] = keel::as<keel::f64>(start + 2 * keel::as<long>(i))
+                         / keel::as<keel::f64>(n);
                 return v;
             };
             auto half_vec = [&](keel::usize n) {
                 if (n == 0)
                     return Value::matrix(1, 0, ValueType::DOUBLE, mr);
                 keel::usize m;
-                double last;
+                keel::f64 last;
                 if (n % 2 == 0) { m = n / 2 + 1; last = 1.0; }
                 else            { m = (n + 1) / 2;
-                                  last = 1.0 - 1.0 / keel::as<double>(n); }
+                                  last = 1.0 - 1.0 / keel::as<keel::f64>(n); }
                 auto v = Value::matrix(1, m, ValueType::DOUBLE, mr);
-                double *d = v.doubleDataMut();
+                keel::f64 *d = v.doubleDataMut();
                 if (m == 1) d[0] = 0.0;
                 else {
-                    const double step = last / keel::as<double>(m - 1);
+                    const keel::f64 step = last / keel::as<keel::f64>(m - 1);
                     for (keel::usize i = 0; i < m; ++i)
-                        d[i] = step * keel::as<double>(i);
+                        d[i] = step * keel::as<keel::f64>(i);
                 }
                 return v;
             };

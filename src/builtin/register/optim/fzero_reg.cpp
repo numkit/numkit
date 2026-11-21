@@ -37,7 +37,7 @@ void requireFuncHandle(const Value &fn, const char *who)
 }
 
 // Evaluate the objective at a point (scalar or vector Value) → scalar.
-double evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
+keel::f64 evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
 {
     Value a[1] = { pt };
     auto r = ctx.engine->callFunctionHandleMulti(handle, keel::ArrayRef<Value>(a, 1), 1);
@@ -96,9 +96,9 @@ void fminbnd_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
 {
     argcheck::checkNargin(args.size(), 3, 4, "fminbnd");
     requireFuncHandle(args[0], "fminbnd");
-    const double lo = args[1].toScalar();
-    const double hi = args[2].toScalar();
-    const double tol = (args.size() >= 4 && !args[3].isEmpty()) ? args[3].toScalar() : 1e-6;
+    const keel::f64 lo = args[1].toScalar();
+    const keel::f64 hi = args[2].toScalar();
+    const keel::f64 tol = (args.size() >= 4 && !args[3].isEmpty()) ? args[3].toScalar() : 1e-6;
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {
@@ -114,7 +114,7 @@ void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
 {
     argcheck::checkNargin(args.size(), 2, 3, "fminsearch");
     requireFuncHandle(args[0], "fminsearch");
-    const double tol = (args.size() >= 3 && !args[2].isEmpty()) ? args[2].toScalar() : 1e-4;
+    const keel::f64 tol = (args.size() >= 3 && !args[2].isEmpty()) ? args[2].toScalar() : 1e-4;
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {
@@ -129,10 +129,10 @@ void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
     const Value &x0v = args[1];
     const keel::usize n = x0v.numel();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    keel::Array<double> x0buf(n, scratch.allocator());
+    keel::Array<keel::f64> x0buf(n, scratch.allocator());
     for (keel::usize i = 0; i < n; ++i) x0buf[i] = x0v.elemAsDouble(i);
 
-    Value r = fminsearch(cb, keel::ArrayRef<double>(x0buf.data(), n), tol, mr);
+    Value r = fminsearch(cb, keel::ArrayRef<keel::f64>(x0buf.data(), n), tol, mr);
 
     // MATLAB convention: output shape mirrors input. Library returns
     // a column; if the user passed a row, copy into a row Value.

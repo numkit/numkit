@@ -71,26 +71,26 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
             return Z_arg->elemAsDouble(c * R + r);   // column-major
         };
 
-        keel::Array<double> Xs(C), Ys(R);
+        keel::Array<keel::f64> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
             for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
             for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
         } else {
-            for (keel::usize c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
-            for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = (keel::f64)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = (keel::f64)(r + 1);
         }
 
-        double zmn = std::numeric_limits<double>::infinity();
-        double zmx = -std::numeric_limits<double>::infinity();
+        keel::f64 zmn = std::numeric_limits<keel::f64>::infinity();
+        keel::f64 zmx = -std::numeric_limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < R * C; ++i) {
-            const double v = Z_arg->elemAsDouble(i);
+            const keel::f64 v = Z_arg->elemAsDouble(i);
             if (std::isfinite(v)) {
                 if (v < zmn) zmn = v;
                 if (v > zmx) zmx = v;
             }
         }
 
-        keel::Array<double> levels;
+        keel::Array<keel::f64> levels;
         int n = 10;
         if (levels_arg) {
             if (levels_arg->numel() == 1) {
@@ -107,32 +107,32 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
             if (n == 1) {
                 levels.push_back((zmn + zmx) / 2.0);
             } else {
-                const double step = (zmx - zmn) / (n + 1);
+                const keel::f64 step = (zmx - zmn) / (n + 1);
                 for (int i = 1; i <= n; ++i)
                     levels.push_back(zmn + step * i);
             }
         }
 
-        const auto interp = [](double a, double b, double va, double vb, double L) {
+        const auto interp = [](keel::f64 a, keel::f64 b, keel::f64 va, keel::f64 vb, keel::f64 L) {
             if (keel::abs(vb - va) < 1e-15) return a;
             return a + (L - va) / (vb - va) * (b - a);
         };
 
         // HSL → RGB ramp helper: blue (240°) at zmn → red (0°) at zmx.
-        const auto colorForLevel = [&](double L) {
-            const double t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
-            const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
-            const double Cr = 0.6;
-            const double H = Hd / 60.0;
-            const double Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
-            double r1 = 0, g1 = 0, b1 = 0;
+        const auto colorForLevel = [&](keel::f64 L) {
+            const keel::f64 t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
+            const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
+            const keel::f64 Cr = 0.6;
+            const keel::f64 H = Hd / 60.0;
+            const keel::f64 Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
+            keel::f64 r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
             else if (H < 3) { r1 = 0;  g1 = Cr; b1 = Xc; }
             else if (H < 4) { r1 = 0;  g1 = Xc; b1 = Cr; }
             else if (H < 5) { r1 = Xc; g1 = 0;  b1 = Cr; }
             else            { r1 = Cr; g1 = 0;  b1 = Xc; }
-            const double m = 0.5 - Cr / 2.0;
+            const keel::f64 m = 0.5 - Cr / 2.0;
             const int R8 = (int)((r1 + m) * 255);
             const int G8 = (int)((g1 + m) * 255);
             const int B8 = (int)((b1 + m) * 255);
@@ -143,17 +143,17 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
 
         // Marching squares per level. Each cell's 4-bit code (TL, TR, BR, BL)
         // maps to 0/1/2 segments on the cell's edges.
-        struct Pt { double x, y; };
-        for (double L : levels) {
+        struct Pt { keel::f64 x, y; };
+        for (keel::f64 L : levels) {
             StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
             for (keel::usize r = 0; r + 1 < R; ++r) {
                 for (keel::usize c = 0; c + 1 < C; ++c) {
-                    const double v_tl = Zat(r,     c);
-                    const double v_tr = Zat(r,     c + 1);
-                    const double v_bl = Zat(r + 1, c);
-                    const double v_br = Zat(r + 1, c + 1);
+                    const keel::f64 v_tl = Zat(r,     c);
+                    const keel::f64 v_tr = Zat(r,     c + 1);
+                    const keel::f64 v_bl = Zat(r + 1, c);
+                    const keel::f64 v_br = Zat(r + 1, c + 1);
                     if (!std::isfinite(v_tl) || !std::isfinite(v_tr)
                      || !std::isfinite(v_bl) || !std::isfinite(v_br)) continue;
                     int code = 0;
@@ -163,8 +163,8 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
                     if (v_bl > L) code |= 8;
                     if (code == 0 || code == 15) continue;
 
-                    const double xL = Xs[c], xR = Xs[c + 1];
-                    const double yT = Ys[r], yB = Ys[r + 1];
+                    const keel::f64 xL = Xs[c], xR = Xs[c + 1];
+                    const keel::f64 yT = Ys[r], yB = Ys[r + 1];
                     const Pt T   = { interp(xL, xR, v_tl, v_tr, L), yT };
                     const Pt Re  = { xR, interp(yT, yB, v_tr, v_br, L) };
                     const Pt B   = { interp(xL, xR, v_bl, v_br, L), yB };
@@ -256,26 +256,26 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
         const auto Zat = [&](keel::usize r, keel::usize c) {
             return Z_arg->elemAsDouble(c * R + r);
         };
-        keel::Array<double> Xs(C), Ys(R);
+        keel::Array<keel::f64> Xs(C), Ys(R);
         if (X_arg && Y_arg && X_arg->numel() >= C && Y_arg->numel() >= R) {
             for (keel::usize c = 0; c < C; ++c) Xs[c] = X_arg->elemAsDouble(c);
             for (keel::usize r = 0; r < R; ++r) Ys[r] = Y_arg->elemAsDouble(r);
         } else {
-            for (keel::usize c = 0; c < C; ++c) Xs[c] = (double)(c + 1);
-            for (keel::usize r = 0; r < R; ++r) Ys[r] = (double)(r + 1);
+            for (keel::usize c = 0; c < C; ++c) Xs[c] = (keel::f64)(c + 1);
+            for (keel::usize r = 0; r < R; ++r) Ys[r] = (keel::f64)(r + 1);
         }
 
-        double zmn = std::numeric_limits<double>::infinity();
-        double zmx = -std::numeric_limits<double>::infinity();
+        keel::f64 zmn = std::numeric_limits<keel::f64>::infinity();
+        keel::f64 zmx = -std::numeric_limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < R * C; ++i) {
-            const double v = Z_arg->elemAsDouble(i);
+            const keel::f64 v = Z_arg->elemAsDouble(i);
             if (std::isfinite(v)) {
                 if (v < zmn) zmn = v;
                 if (v > zmx) zmx = v;
             }
         }
 
-        keel::Array<double> levels;
+        keel::Array<keel::f64> levels;
         int n = 10;
         if (levels_arg) {
             if (levels_arg->numel() == 1) {
@@ -290,7 +290,7 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
             if (n == 1) {
                 levels.push_back((zmn + zmx) / 2.0);
             } else {
-                const double step = (zmx - zmn) / (n + 1);
+                const keel::f64 step = (zmx - zmn) / (n + 1);
                 for (int i = 1; i <= n; ++i)
                     levels.push_back(zmn + step * i);
             }
@@ -299,26 +299,26 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
         // (lightest colour) so descending layers sit on top.
         std::sort(levels.begin(), levels.end());
 
-        const auto interp = [](double a, double b, double va, double vb, double L) {
+        const auto interp = [](keel::f64 a, keel::f64 b, keel::f64 va, keel::f64 vb, keel::f64 L) {
             if (keel::abs(vb - va) < 1e-15) return a;
             return a + (L - va) / (vb - va) * (b - a);
         };
 
         // HSL→RGB ramp same as contour (blue→red across [zmn, zmx]).
-        const auto colorForLevel = [&](double L) {
-            const double t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
-            const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
-            const double Cr = 0.6;
-            const double H = Hd / 60.0;
-            const double Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
-            double r1 = 0, g1 = 0, b1 = 0;
+        const auto colorForLevel = [&](keel::f64 L) {
+            const keel::f64 t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
+            const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
+            const keel::f64 Cr = 0.6;
+            const keel::f64 H = Hd / 60.0;
+            const keel::f64 Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
+            keel::f64 r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
             else if (H < 3) { r1 = 0;  g1 = Cr; b1 = Xc; }
             else if (H < 4) { r1 = 0;  g1 = Xc; b1 = Cr; }
             else if (H < 5) { r1 = Xc; g1 = 0;  b1 = Cr; }
             else            { r1 = Cr; g1 = 0;  b1 = Xc; }
-            const double m = 0.5 - Cr / 2.0;
+            const keel::f64 m = 0.5 - Cr / 2.0;
             const int R8 = (int)((r1 + m) * 255);
             const int G8 = (int)((g1 + m) * 255);
             const int B8 = (int)((b1 + m) * 255);
@@ -347,8 +347,8 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
         // For each level (ascending), draw the closed region "Z >= L"
         // as one combined polygon dataset with null separators. Each
         // cell contributes 0..6 vertices depending on its 4-bit code.
-        struct Pt { double x, y; };
-        for (double L : levels) {
+        struct Pt { keel::f64 x, y; };
+        for (keel::f64 L : levels) {
             StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
@@ -364,10 +364,10 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
 
             for (keel::usize r = 0; r + 1 < R; ++r) {
                 for (keel::usize c = 0; c + 1 < C; ++c) {
-                    const double v_tl = Zat(r,     c);
-                    const double v_tr = Zat(r,     c + 1);
-                    const double v_br = Zat(r + 1, c + 1);
-                    const double v_bl = Zat(r + 1, c);
+                    const keel::f64 v_tl = Zat(r,     c);
+                    const keel::f64 v_tr = Zat(r,     c + 1);
+                    const keel::f64 v_br = Zat(r + 1, c + 1);
+                    const keel::f64 v_bl = Zat(r + 1, c);
                     if (!std::isfinite(v_tl) || !std::isfinite(v_tr)
                      || !std::isfinite(v_bl) || !std::isfinite(v_br)) continue;
                     int code = 0;
@@ -376,8 +376,8 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
                     if (v_br >= L) code |= 4;
                     if (v_bl >= L) code |= 8;
                     if (code == 0) continue;
-                    const double xL = Xs[c], xR = Xs[c + 1];
-                    const double yT = Ys[r], yB = Ys[r + 1];
+                    const keel::f64 xL = Xs[c], xR = Xs[c + 1];
+                    const keel::f64 yT = Ys[r], yB = Ys[r + 1];
                     const Pt TL = { xL, yT }, TR = { xR, yT };
                     const Pt BR = { xR, yB }, BL = { xL, yB };
                     const Pt T   = { interp(xL, xR, v_tl, v_tr, L), yT };

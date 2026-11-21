@@ -128,7 +128,7 @@ void register_lang(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 3, 4, "nargchk");
             auto *mr = ctx.engine->allocator();
-            double lo = args[0].toScalar(), hi = args[1].toScalar(), n = args[2].toScalar();
+            keel::f64 lo = args[0].toScalar(), hi = args[1].toScalar(), n = args[2].toScalar();
             if (n < lo) outs[0] = Value::fromString("Not enough input arguments.", mr);
             else if (n > hi) outs[0] = Value::fromString("Too many input arguments.", mr);
             else outs[0] = Value::logicalScalar(false, mr);

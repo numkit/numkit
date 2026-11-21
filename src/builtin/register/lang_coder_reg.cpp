@@ -51,7 +51,7 @@ void system_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                     0, 0, "system", "", "numkit:system:nargin");
     const auto r = numkit::sys::runProcess(charArg(args[0]));
     // Single-output returns status; two outputs [status, cmdout] return both.
-    outs[0] = Value::scalar(keel::as<double>(r.exitCode), ctx.engine->allocator());
+    outs[0] = Value::scalar(keel::as<keel::f64>(r.exitCode), ctx.engine->allocator());
     if (nargout >= 2)
         outs[1] = Value::fromString(r.output, ctx.engine->allocator());
 #endif
@@ -93,7 +93,7 @@ void runNative_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     opts.merge_stderr = true;
     auto res = keel::process_run(keel::ArrayRef<keel::StringRef>(argv, 2), opts, ctx.engine->allocator());
     if (res.is_ok()) {
-        outs[0] = Value::scalar(keel::as<double>(res->exit_code), ctx.engine->allocator());
+        outs[0] = Value::scalar(keel::as<keel::f64>(res->exit_code), ctx.engine->allocator());
         if (nargout >= 2)
             outs[1] = Value::fromString(res->stdout_text, ctx.engine->allocator());
     } else {

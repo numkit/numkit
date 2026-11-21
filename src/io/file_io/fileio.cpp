@@ -62,9 +62,9 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
             outs[0] = Value::matrix(1, 0, ValueType::DOUBLE, mr);
         } else {
             auto row = Value::matrix(1, ids.size(), ValueType::DOUBLE, mr);
-            double *d = row.doubleDataMut();
+            keel::f64 *d = row.doubleDataMut();
             for (keel::usize i = 0; i < ids.size(); ++i)
-                d[i] = keel::as<double>(ids[i]);
+                d[i] = keel::as<keel::f64>(ids[i]);
             outs[0] = keel::move(row);
         }
         return;
@@ -83,7 +83,7 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
         if (auto *f = fs.findFile(fid))
             f->mode.append(";be");
     }
-    outs[0] = Value::scalar(keel::as<double>(fid), mr);
+    outs[0] = Value::scalar(keel::as<keel::f64>(fid), mr);
     // [fid, errmsg] = fopen(...) — errmsg is '' on success.
     if (nargout > 1)
         outs[1] = Value::fromString(fid < 0 ? fs.lastFopenError().as_ref() : keel::StringRef(""), mr);
@@ -196,7 +196,7 @@ void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     }
     // Write-mode: report end-of-buffer (where next append lands).
     keel::usize pos = f->forWrite ? f->buffer.size() : f->cursor;
-    outs[0] = Value::scalar(keel::as<double>(pos), mr);
+    outs[0] = Value::scalar(keel::as<keel::f64>(pos), mr);
 }
 
 void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
@@ -313,30 +313,30 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
         f->lastError = keel::String::from("End of file reached.");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    auto values = keel::Array<double>(n, scratch.allocator());
+    auto values = keel::Array<keel::f64>(n, scratch.allocator());
     for (keel::usize i = 0; i < n; ++i) {
         // Local copy lets us byte-swap safely without mutating f->buffer.
         char tmp[8];
         std::memcpy(tmp, f->buffer.data() + f->cursor + i * stride, bsize);
         if (be && bsize > 1) numkit::ops::byteSwap(tmp, bsize);
 
-        double v = 0.0;
+        keel::f64 v = 0.0;
         if (kind == 0) {
             switch (bsize) {
             case 1: { keel::u8  x; std::memcpy(&x, tmp, 1); v = x; break; }
             case 2: { keel::u16 x; std::memcpy(&x, tmp, 2); v = x; break; }
             case 4: { keel::u32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = keel::as<double>(x); break; }
+            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
             case 1: { keel::i8  x; std::memcpy(&x, tmp, 1); v = x; break; }
             case 2: { keel::i16 x; std::memcpy(&x, tmp, 2); v = x; break; }
             case 4: { keel::i32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = keel::as<double>(x); break; }
+            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
             }
         } else {
-            if (bsize == 4) { float x; std::memcpy(&x, tmp, 4); v = x; }
+            if (bsize == 4) { keel::f32 x; std::memcpy(&x, tmp, 4); v = x; }
             else            {                     std::memcpy(&v, tmp, 8); }
         }
         values[i] = v;
@@ -347,7 +347,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     }
     outs[0] = numkit::ops::shapeFreadOutput(values.data(), values.size(), sz, mr);
     if (nargout > 1)
-        outs[1] = Value::scalar(keel::as<double>(n), mr);
+        outs[1] = Value::scalar(keel::as<keel::f64>(n), mr);
 }
 
 void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, keel::Allocator *mr)
@@ -392,7 +392,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     keel::Array<char> bytes(numel * bsize, '\0', scratch.allocator());
     char *dst = bytes.data();
     for (keel::usize i = 0; i < numel; ++i) {
-        double v = A.elemAsDouble(i);
+        keel::f64 v = A.elemAsDouble(i);
         if (kind == 0) {
             switch (bsize) {
             case 1: { keel::u8  x = keel::as<keel::u8>(v); std::memcpy(dst, &x, 1); break; }
@@ -408,7 +408,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
             case 8: { keel::i64 x = keel::as<keel::i64>(v); std::memcpy(dst, &x, 8); break; }
             }
         } else {
-            if (bsize == 4) { float x = keel::as<float>(v); std::memcpy(dst, &x, 4); }
+            if (bsize == 4) { keel::f32 x = keel::as<keel::f32>(v); std::memcpy(dst, &x, 4); }
             else            {                                  std::memcpy(dst, &v, 8); }
         }
         if (be && bsize > 1)
@@ -424,7 +424,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     if (!bytes.empty())
         std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());
     f->cursor = writePos + bytes.size();
-    outs[0] = Value::scalar(keel::as<double>(numel), mr);
+    outs[0] = Value::scalar(keel::as<keel::f64>(numel), mr);
 }
 
 

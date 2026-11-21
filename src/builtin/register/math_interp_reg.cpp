@@ -47,7 +47,7 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     // (extrapolate using the method) or a numeric extrapval (fill
     // out-of-range with it).
     Interp1Extrap mode = Interp1Extrap::Default;
-    double fill = std::numeric_limits<double>::quiet_NaN();
+    keel::f64 fill = std::numeric_limits<keel::f64>::quiet_NaN();
     if (args.size() >= 5) {
         const Value &e = args[4];
         if (e.isChar() || e.isString()) {
@@ -321,14 +321,14 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
 
     // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
-    keel::Array<keel::Array<double>> grids(sa);
+    keel::Array<keel::Array<keel::f64>> grids(sa);
     grids.reserve(N);
     for (int d = 0; d < N; ++d) {
         const keel::usize sd = vShape[keel::as<keel::usize>(d)];
-        keel::Array<double> gdVec(sd, sa);
+        keel::Array<keel::f64> gdVec(sd, sa);
         if (!hasGrids) {
             for (keel::usize k = 0; k < sd; ++k)
-                gdVec[k] = keel::as<double>(k + 1);
+                gdVec[k] = keel::as<keel::f64>(k + 1);
         } else {
             const Value &Gd = args[keel::as<keel::usize>(d)];
             if (Gd.numel() == sd) {
@@ -351,17 +351,17 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         outShape[keel::as<keel::usize>(k)] = keel::as<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
                                 mr);
-    double *od = out.doubleDataMut();
+    keel::f64 *od = out.doubleDataMut();
 
     keel::Array<keel::usize> idx0(N, sa);
-    keel::Array<double> frac(N, sa);
+    keel::Array<keel::f64> frac(N, sa);
     const keel::usize nCorners = keel::as<keel::usize>(1) << N;
 
     for (keel::usize q = 0; q < nQuery; ++q) {
         bool outOfBounds = false;
         for (int d = 0; d < N; ++d) {
             const Value &Xqd = args[qStart + keel::as<keel::usize>(d)];
-            const double xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
+            const keel::f64 xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
             const auto &g = grids[keel::as<keel::usize>(d)];
             if (std::isnan(xq) || xq < g[0] || xq > g[g.size() - 1]) {
                 outOfBounds = true;
@@ -370,12 +370,12 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             auto it = std::upper_bound(g.begin(), g.end(), xq);
             keel::usize i0 = (it == g.begin()) ? 0 : keel::as<keel::usize>((it - g.begin()) - 1);
             if (i0 >= g.size() - 1) i0 = g.size() - 2;
-            const double denom = g[i0 + 1] - g[i0];
+            const keel::f64 denom = g[i0 + 1] - g[i0];
             idx0[keel::as<keel::usize>(d)] = i0;
             frac[keel::as<keel::usize>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
         }
         if (outOfBounds) {
-            od[q] = std::numeric_limits<double>::quiet_NaN();
+            od[q] = std::numeric_limits<keel::f64>::quiet_NaN();
             continue;
         }
         if (isNearest) {
@@ -387,13 +387,13 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             }
             od[q] = V.elemAsDouble(lin);
         } else {
-            double acc = 0.0;
+            keel::f64 acc = 0.0;
             for (keel::usize mask = 0; mask < nCorners; ++mask) {
-                double w = 1.0;
+                keel::f64 w = 1.0;
                 keel::usize lin = 0;
                 for (int d = 0; d < N; ++d) {
                     const bool hi = ((mask >> d) & 1u) != 0;
-                    const double fd = frac[keel::as<keel::usize>(d)];
+                    const keel::f64 fd = frac[keel::as<keel::usize>(d)];
                     w *= hi ? fd : (1.0 - fd);
                     lin += (idx0[keel::as<keel::usize>(d)] + (hi ? 1 : 0))
                          * vStrides[keel::as<keel::usize>(d)];

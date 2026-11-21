@@ -66,9 +66,9 @@ namespace { Value castDoubleToSingle(const Value &src, keel::Allocator *mr)
         dst = Value::matrix(src.dims().rows(), src.dims().cols(),
                             ValueType::SINGLE, mr);
     const keel::usize n = src.numel();
-    const double *sp = src.doubleData();
-    float *dp = dst.singleDataMut();
-    for (keel::usize i = 0; i < n; ++i) dp[i] = keel::as<float>(sp[i]);
+    const keel::f64 *sp = src.doubleData();
+    keel::f32 *dp = dst.singleDataMut();
+    for (keel::usize i = 0; i < n; ++i) dp[i] = keel::as<keel::f32>(sp[i]);
     return dst;
 }}
 
@@ -88,17 +88,17 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
         const keel::String flag = dimArgs[0].toString();
         if (flag == "seed") {
-            outs[0] = Value::scalar(keel::as<double>(rngRef.legacyRandSeed()),
+            outs[0] = Value::scalar(keel::as<keel::f64>(rngRef.legacyRandSeed()),
                                     ctx.engine->allocator());
             return;
         }
         if (flag == "state") {
             auto st = Value::matrix(35, 1, ValueType::DOUBLE, ctx.engine->allocator());
-            double *d = st.doubleDataMut();
+            keel::f64 *d = st.doubleDataMut();
             for (keel::usize i = 0; i < 32; ++i) d[i] = rngRef.v5SwbZ()[i];
-            d[32] = keel::as<double>(rngRef.v5SwbIdx());
+            d[32] = keel::as<keel::f64>(rngRef.v5SwbIdx());
             d[33] = rngRef.v5SwbBorrow();
-            d[34] = keel::as<double>(rngRef.v5SwbJ()) * 2.2204460492503131e-16;
+            d[34] = keel::as<keel::f64>(rngRef.v5SwbJ()) * 2.2204460492503131e-16;
             outs[0] = std::move(st);
             return;
         }
@@ -131,10 +131,10 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                 return;
             }
             if (dimArgs[1].numel() == 35) {
-                double z[32];
+                keel::f64 z[32];
                 for (keel::usize i = 0; i < 32; ++i) z[i] = dimArgs[1].elemAsDouble(i);
                 const keel::usize idx = keel::as<keel::usize>(dimArgs[1].elemAsDouble(32));
-                const double borrow = dimArgs[1].elemAsDouble(33);
+                const keel::f64 borrow = dimArgs[1].elemAsDouble(33);
                 const keel::u32 j = keel::as<keel::u32>(
                     std::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
                 rngRef.setLegacyV5RandState(z, idx, borrow, j);
@@ -190,14 +190,14 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     if (dimArgs.size() == 1 && (dimArgs[0].isChar() || dimArgs[0].isString())) {
         const keel::String flag = dimArgs[0].toString();
         if (flag == "seed") {
-            outs[0] = Value::scalar(keel::as<double>(rngRef.legacyRandnSeed()),
+            outs[0] = Value::scalar(keel::as<keel::f64>(rngRef.legacyRandnSeed()),
                                     ctx.engine->allocator());
             return;
         }
         if (flag == "state") {
             auto st = Value::matrix(2, 1, ValueType::DOUBLE, ctx.engine->allocator());
-            st.doubleDataMut()[0] = keel::as<double>(rngRef.v5RandnIcng());
-            st.doubleDataMut()[1] = keel::as<double>(rngRef.v5RandnJsr());
+            st.doubleDataMut()[0] = keel::as<keel::f64>(rngRef.v5RandnIcng());
+            st.doubleDataMut()[1] = keel::as<keel::f64>(rngRef.v5RandnJsr());
             outs[0] = std::move(st);
             return;
         }
@@ -267,13 +267,13 @@ namespace { Value castDoubleToType(const Value &src, ValueType t, keel::Allocato
     } else
         dst = Value::matrix(src.dims().rows(), src.dims().cols(), t, mr);
     const keel::usize n = src.numel();
-    const double *sp = src.doubleData();
+    const keel::f64 *sp = src.doubleData();
     auto cast_loop = [&](auto *dp, auto /*tag*/) {
         using T = std::remove_pointer_t<decltype(dp)>;
         for (keel::usize i = 0; i < n; ++i) dp[i] = static_cast<T>(sp[i]);
     };
     switch (t) {
-      case ValueType::SINGLE: cast_loop(dst.singleDataMut(),  float{});    break;
+      case ValueType::SINGLE: cast_loop(dst.singleDataMut(),  keel::f32{});    break;
       case ValueType::INT8:   cast_loop(dst.int8DataMut(),    keel::i8{});   break;
       case ValueType::INT16:  cast_loop(dst.int16DataMut(),   keel::i16{});  break;
       case ValueType::INT32:  cast_loop(dst.int32DataMut(),   keel::i32{});  break;
@@ -337,9 +337,9 @@ void randi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
                             0, 0, "randi", "", "numkit:randi:badRange");
             auto m = Value::matrixND(dims.data(), keel::as<int>(dims.size()),
                                       ValueType::DOUBLE, mr);
-            const double span = keel::as<double>(imax - imin + 1);
+            const keel::f64 span = keel::as<keel::f64>(imax - imin + 1);
             for (keel::usize i = 0; i < m.numel(); ++i)
-                m.doubleDataMut()[i] = keel::as<double>(imin) + std::floor(rngRef.nextUniform() * span);
+                m.doubleDataMut()[i] = keel::as<keel::f64>(imin) + std::floor(rngRef.nextUniform() * span);
             dbl_out = std::move(m);
         }
     }
@@ -385,7 +385,7 @@ void register_randstream(Engine &engine)
         }
         payload->rng.seed(seedVal);
         st->props.put(keel::String("Type", mr), Value::fromString(genType, mr));
-        st->props.put(keel::String("Seed", mr), Value::scalar(keel::as<double>(seedVal), mr));
+        st->props.put(keel::String("Seed", mr), Value::scalar(keel::as<keel::f64>(seedVal), mr));
         st->native = keel::move(payload);
         return Value::object("RandStream", keel::move(st), true, mr);
     };
@@ -477,7 +477,7 @@ void rng_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             throw Error("rng: string argument must be 'default' or 'shuffle'",
                          0, 0, "rng", "", "numkit:rng:badStringArg");
     } else if (a.isScalar() || a.numel() == 1) {
-        const double sd = a.toScalar();
+        const keel::f64 sd = a.toScalar();
         if (sd < 0.0)
             throw Error("rng: seed must be a non-negative integer",
                          0, 0, "rng", "", "numkit:rng:badSeed");

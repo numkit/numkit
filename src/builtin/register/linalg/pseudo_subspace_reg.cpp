@@ -22,21 +22,21 @@ namespace detail {
 void pinv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pinv");
-    const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
+    const keel::f64 tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
     outs[0] = pinv(args[0], tol, ctx.engine->allocator());
 }
 
 void orth_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "orth");
-    const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
+    const keel::f64 tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
     outs[0] = orth(args[0], tol, ctx.engine->allocator());
 }
 
 void null_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "null");
-    const double tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
+    const keel::f64 tol = (args.size() >= 2) ? args[1].toScalar() : -1.0;
     outs[0] = null_basis(args[0], tol, ctx.engine->allocator());
 }
 

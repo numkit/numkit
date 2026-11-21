@@ -59,7 +59,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
     keel::Array<int> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
-        double gd = G.elemAsDouble(i);
+        keel::f64 gd = G.elemAsDouble(i);
         if (std::isnan(gd)) continue;
         int gid = keel::as<int>(gd);
         if (gid <= 0) continue;
@@ -83,7 +83,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
     keel::usize nGroups = gids.size();
     auto result = Value::matrix(nGroups, 1, ValueType::DOUBLE, mr);
-    double *rd = result.doubleDataMut();
+    keel::f64 *rd = result.doubleDataMut();
 
     keel::usize gIdx = 0;
     for (int gid : gids) {
@@ -91,7 +91,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         keel::Array<Value> callArgs(nIn, mr);
         for (keel::usize k = 0; k < nIn; ++k) {
             auto sub = Value::matrix(idxs.size(), 1, ValueType::DOUBLE, mr);
-            double *sd = sub.doubleDataMut();
+            keel::f64 *sd = sub.doubleDataMut();
             for (keel::usize j = 0; j < idxs.size(); ++j)
                 sd[j] = args[1 + k].elemAsDouble(idxs[j]);
             callArgs[k] = std::move(sub);
@@ -166,7 +166,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
         keel::Array<int> gids(mr);
         for (keel::usize i = 0; i < n; ++i) {
-            double v = fg.G.elemAsDouble(i);
+            keel::f64 v = fg.G.elemAsDouble(i);
             int gid = std::isnan(v) ? 0 : keel::as<int>(v);
             auto *existing = buckets.get(gid);
             if (!existing) {
@@ -182,9 +182,9 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
         auto B = (nCols == 1) ? Value::matrix(nRows, 1, ValueType::DOUBLE, mr)
                               : Value::matrix(nRows, nCols, ValueType::DOUBLE, mr);
-        double *bd = B.doubleDataMut();
+        keel::f64 *bd = B.doubleDataMut();
         for (keel::usize i = 0; i < nRows * nCols; ++i)
-            bd[i] = std::numeric_limits<double>::quiet_NaN();
+            bd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
 
         auto Aget = [&](keel::usize r, keel::usize c) {
             return A.elemAsDouble(r + c * nRows);
@@ -196,7 +196,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 const keel::usize kn = rows.size();
                 if (kn == 0) continue;
                 auto sub = Value::matrix(kn, 1, ValueType::DOUBLE, mr);
-                double *sd = sub.doubleDataMut();
+                keel::f64 *sd = sub.doubleDataMut();
                 for (keel::usize j = 0; j < kn; ++j) sd[j] = Aget(rows[j], c);
                 keel::StaticArray<Value, 1> callArgs{sub};
                 Value r = ctx.engine->callFunctionHandle(
@@ -206,7 +206,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                     for (keel::usize j = 0; j < kn; ++j)
                         bd[rows[j] + c * nRows] = r.elemAsDouble(j);
                 } else if (rn == 1) {
-                    const double v = r.toScalar();
+                    const keel::f64 v = r.toScalar();
                     for (keel::usize j = 0; j < kn; ++j)
                         bd[rows[j] + c * nRows] = v;
                 } else {
@@ -223,7 +223,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     if (nargout >= 2) {
         auto BG = Value::matrix(nRows, 1, ValueType::DOUBLE, mr);
-        double *gd = BG.doubleDataMut();
+        keel::f64 *gd = BG.doubleDataMut();
         for (keel::usize i = 0; i < nRows; ++i)
             gd[i] = G.elemAsDouble(i);
         outs[1] = std::move(BG);
@@ -254,7 +254,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
     keel::Array<int> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
-        double v = fg.G.elemAsDouble(i);
+        keel::f64 v = fg.G.elemAsDouble(i);
         int gid = std::isnan(v) ? 0 : keel::as<int>(v);
         auto *existing = buckets.get(gid);
         if (!existing) {
@@ -280,7 +280,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         auto sub = (nCols == 1)
             ? Value::matrix(kn, 1, ValueType::DOUBLE, mr)
             : Value::matrix(kn, nCols, ValueType::DOUBLE, mr);
-        double *sd = sub.doubleDataMut();
+        keel::f64 *sd = sub.doubleDataMut();
         for (keel::usize c = 0; c < nCols; ++c)
             for (keel::usize j = 0; j < kn; ++j)
                 sd[j + c * kn] = Aget(rows[j], c);
@@ -309,7 +309,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     auto B = (nCols == 1) ? Value::matrix(kRows, 1, ValueType::DOUBLE, mr)
                           : Value::matrix(kRows, nCols, ValueType::DOUBLE, mr);
-    double *bd = B.doubleDataMut();
+    keel::f64 *bd = B.doubleDataMut();
     for (keel::usize c = 0; c < nCols; ++c)
         for (keel::usize j = 0; j < kRows; ++j)
             bd[j + c * kRows] = Aget(kept_idx[j], c);
@@ -317,7 +317,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     if (nargout >= 2) {
         auto BG = Value::matrix(kRows, 1, ValueType::DOUBLE, mr);
-        double *gd = BG.doubleDataMut();
+        keel::f64 *gd = BG.doubleDataMut();
         for (keel::usize j = 0; j < kRows; ++j)
             gd[j] = G.elemAsDouble(kept_idx[j]);
         outs[1] = std::move(BG);

@@ -28,10 +28,10 @@
 // Value) when it can write straight into a uniquely-owned destination
 // buffer of the right shape.
 namespace numkit::ops::detail {
-void plusLoop   (const double *a, const double *b, double *out, keel::usize n);
-void minusLoop  (const double *a, const double *b, double *out, keel::usize n);
-void timesLoop  (const double *a, const double *b, double *out, keel::usize n);
-void rdivideLoop(const double *a, const double *b, double *out, keel::usize n);
+void plusLoop   (const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::usize n);
+void minusLoop  (const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::usize n);
+void timesLoop  (const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::usize n);
+void rdivideLoop(const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::usize n);
 } // namespace numkit::ops::detail
 
 namespace numkit {
@@ -191,9 +191,9 @@ static bool tryInPlaceBinaryOp(Value &dst, OpCode op,
     if (!(dst.dims() == lhs.dims()) || !(dst.dims() == rhs.dims())) return false;
 
     const keel::usize n = dst.numel();
-    const double *a = lhs.doubleData();
-    const double *b = rhs.doubleData();
-    double       *o = dst.doubleDataMut();   // refCount==1 → no detach copy
+    const keel::f64 *a = lhs.doubleData();
+    const keel::f64 *b = rhs.doubleData();
+    keel::f64       *o = dst.doubleDataMut();   // refCount==1 → no detach copy
     switch (op) {
     case OpCode::ADD:   ops::detail::plusLoop   (a, b, o, n); return true;
     case OpCode::SUB:   ops::detail::minusLoop  (a, b, o, n); return true;
@@ -278,12 +278,12 @@ static inline bool isArithScalar(const Value &v)
     return v.isDoubleScalar() || v.isLogicalScalar();
 }
 
-static inline double asScalar(const Value &v)
+static inline keel::f64 asScalar(const Value &v)
 {
     return v.fastScalarVal();
 }
 
-static inline keel::usize checkedIndex(double idx, keel::usize numel)
+static inline keel::usize checkedIndex(keel::f64 idx, keel::usize numel)
 {
     keel::usize i = 0;
     if (tryIndex0(idx, i)) {
@@ -902,8 +902,8 @@ enter_frame:
                         if (const auto *endFn = cls->methods.get("__end")) {
                             Value self = arr;
                             Value eargs[2] = {
-                                Value::scalar(keel::as<double>(I.c), engine_.mr_),
-                                Value::scalar(keel::as<double>(ndims), engine_.mr_)};
+                                Value::scalar(keel::as<keel::f64>(I.c), engine_.mr_),
+                                Value::scalar(keel::as<keel::f64>(ndims), engine_.mr_)};
                             Value out[1];
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*endFn)(self, keel::ArrayRef<Value>(eargs, 2), 1,
@@ -926,7 +926,7 @@ enter_frame:
                     // Dimensional indexing: end = size along dimension c
                     sz = arr.dims().dimSize(I.c);
                 }
-                R[I.a] = Value::scalar(keel::as<double>(sz), engine_.mr_);
+                R[I.a] = Value::scalar(keel::as<keel::f64>(sz), engine_.mr_);
                 break;
             }
 
@@ -988,13 +988,13 @@ enter_frame:
             case OpCode::POW:
             case OpCode::EPOW:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c])) {
-                    double base = asScalar(R[I.b]);
-                    double exp = asScalar(R[I.c]);
+                    keel::f64 base = asScalar(R[I.b]);
+                    keel::f64 exp = asScalar(R[I.c]);
                     if (base < 0.0 && exp != std::floor(exp)) {
                         // negative base ^ non-integer exp -> complex; defer to power().
                         R[I.a] = binarySlowPath(I.op, R[I.b], R[I.c]);
                     } else {
-                        double result;
+                        keel::f64 result;
                         if (exp == 2.0)
                             result = base * base;
                         else if (exp == 3.0)
@@ -1026,14 +1026,14 @@ enter_frame:
                 R[I.a].setScalarFast(R[I.b].scalarVal() / R[I.c].scalarVal());
                 break;
             case OpCode::POW_SS: {
-                double base = R[I.b].scalarVal();
-                double exp = R[I.c].scalarVal();
+                keel::f64 base = R[I.b].scalarVal();
+                keel::f64 exp = R[I.c].scalarVal();
                 if (base < 0.0 && exp != std::floor(exp)) {
                     // negative base ^ non-integer exp -> complex; defer to power().
                     R[I.a] = binarySlowPath(OpCode::EPOW, R[I.b], R[I.c]);
                     break;
                 }
-                double result;
+                keel::f64 result;
                 if (exp == 2.0)
                     result = base * base;
                 else if (exp == 3.0)
@@ -1060,7 +1060,7 @@ enter_frame:
             // is safe.
             case OpCode::MULADD:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c]) && isArithScalar(R[I.e])) {
-                    double prod = asScalar(R[I.c]) * asScalar(R[I.e]);
+                    keel::f64 prod = asScalar(R[I.c]) * asScalar(R[I.e]);
                     R[I.a].setScalarFast(asScalar(R[I.b]) + prod);
                 } else {
                     Value prod = binarySlowPath(OpCode::MUL, R[I.c], R[I.e]);
@@ -1069,7 +1069,7 @@ enter_frame:
                 break;
             case OpCode::MULSUB:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c]) && isArithScalar(R[I.e])) {
-                    double prod = asScalar(R[I.c]) * asScalar(R[I.e]);
+                    keel::f64 prod = asScalar(R[I.c]) * asScalar(R[I.e]);
                     R[I.a].setScalarFast(asScalar(R[I.b]) - prod);
                 } else {
                     Value prod = binarySlowPath(OpCode::MUL, R[I.c], R[I.e]);
@@ -1078,7 +1078,7 @@ enter_frame:
                 break;
             case OpCode::EMULADD:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c]) && isArithScalar(R[I.e])) {
-                    double prod = asScalar(R[I.c]) * asScalar(R[I.e]);
+                    keel::f64 prod = asScalar(R[I.c]) * asScalar(R[I.e]);
                     R[I.a].setScalarFast(asScalar(R[I.b]) + prod);
                 } else {
                     Value prod = binarySlowPath(OpCode::EMUL, R[I.c], R[I.e]);
@@ -1087,7 +1087,7 @@ enter_frame:
                 break;
             case OpCode::EMULSUB:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c]) && isArithScalar(R[I.e])) {
-                    double prod = asScalar(R[I.c]) * asScalar(R[I.e]);
+                    keel::f64 prod = asScalar(R[I.c]) * asScalar(R[I.e]);
                     R[I.a].setScalarFast(asScalar(R[I.b]) - prod);
                 } else {
                     Value prod = binarySlowPath(OpCode::EMUL, R[I.c], R[I.e]);
@@ -1140,7 +1140,7 @@ enter_frame:
                 break;
             case OpCode::AND:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    double bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
+                    keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
                     if (std::isnan(bv) || std::isnan(cv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 && cv != 0.0);
@@ -1150,7 +1150,7 @@ enter_frame:
                 break;
             case OpCode::OR:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    double bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
+                    keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
                     if (std::isnan(bv) || std::isnan(cv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 || cv != 0.0);
@@ -1172,7 +1172,7 @@ enter_frame:
                 break;
             case OpCode::NOT:
                 if (R[I.b].isDoubleScalar()) {
-                    double bv = R[I.b].scalarVal();
+                    keel::f64 bv = R[I.b].scalarVal();
                     if (std::isnan(bv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv == 0.0);
@@ -1294,7 +1294,7 @@ enter_frame:
                 // live in the ForState, the loop var is recomputed as start + index*step
                 // each iteration. Non-double or object operands materialize the typed
                 // colon range so char/integer/custom-class loops match COLON semantics.
-                auto colonScalar = [](const Value &v) -> double {
+                auto colonScalar = [](const Value &v) -> keel::f64 {
                     return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
                 };
                 const bool allDouble = (R[I.b].type() == ValueType::DOUBLE)
@@ -1396,9 +1396,9 @@ enter_frame:
                     ip += I.d;
                     continue;
                 }
-                const double start = colonScalar(R[I.b]);
-                const double stop  = colonScalar(R[I.c]);
-                const double step  = (I.e == kInvalidReg) ? 1.0
+                const keel::f64 start = colonScalar(R[I.b]);
+                const keel::f64 stop  = colonScalar(R[I.c]);
+                const keel::f64 step  = (I.e == kInvalidReg) ? 1.0
                                                           : colonScalar(R[I.e]);
                 const keel::usize count = Value::colonCount(start, step, stop);
                 if (count == 0) { R[I.a] = Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_);
@@ -1463,10 +1463,10 @@ enter_frame:
                     R[I.a] = Value::matrix(1, 0, t, engine_.mr_);
                     break;
                 }
-                auto colonScalar = [](const Value &v) -> double {
+                auto colonScalar = [](const Value &v) -> keel::f64 {
                     return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
                 };
-                double start = colonScalar(R[I.b]), stop = colonScalar(R[I.c]);
+                keel::f64 start = colonScalar(R[I.b]), stop = colonScalar(R[I.c]);
                 R[I.a] = Value::colonRangeTyped(start, stop, t, engine_.mr_);
                 break;
             }
@@ -1503,10 +1503,10 @@ enter_frame:
                     R[I.a] = Value::matrix(1, 0, t, engine_.mr_);
                     break;
                 }
-                auto colonScalar = [](const Value &v) -> double {
+                auto colonScalar = [](const Value &v) -> keel::f64 {
                     return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
                 };
-                double start = colonScalar(R[I.b]), step = colonScalar(R[I.c]),
+                keel::f64 start = colonScalar(R[I.b]), step = colonScalar(R[I.c]),
                        stop = colonScalar(R[I.e]);
                 R[I.a] = Value::colonRangeTyped(start, step, stop, t, engine_.mr_);
                 break;
@@ -1917,8 +1917,8 @@ enter_frame:
                     // Scalar broadcast into heap double: tight std::fill.
                     if (rhs.isScalar() && !rhs.isComplex()
                         && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()) {
-                        const double v = rhs.toScalar();
-                        double *d = dst.doubleDataMut();
+                        const keel::f64 v = rhs.toScalar();
+                        keel::f64 *d = dst.doubleDataMut();
                         std::fill_n(d, n, v);
                         break;
                     }
@@ -1947,7 +1947,7 @@ enter_frame:
                         && rhs.type() == ValueType::DOUBLE && !rhs.isComplex()) {
                         std::memcpy(dst.doubleDataMut(),
                                     rhs.doubleData(),
-                                    n * sizeof(double));
+                                    n * sizeof(keel::f64));
                         break;
                     }
 
@@ -2236,7 +2236,7 @@ enter_frame:
                             keel::usize v = keel::as<keel::usize>(iv.toScalar());
                             if (v > need[i]) need[i] = v;
                         } else if (iv.type() == ValueType::DOUBLE) {
-                            const double *d = iv.doubleData();
+                            const keel::f64 *d = iv.doubleData();
                             for (keel::usize k = 0; k < iv.numel(); ++k) {
                                 keel::usize v = keel::as<keel::usize>(d[k]);
                                 if (v > need[i]) need[i] = v;
@@ -4422,7 +4422,7 @@ enter_frame:
                 if (I.c != 0 && !R[I.c].isEmpty())
                     filter = R[I.c].asStringRef();
 
-                double code = 0;
+                keel::f64 code = 0;
 
                 auto hasLocalVar = [&]() -> bool {
                     for (const auto &[vn, reg] : chunk.varMap) {
@@ -5288,15 +5288,15 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
 
     // Inject nargin/nargout into function scope in O(1)
     if (funcChunk.narginReg < nregs)
-        newR[funcChunk.narginReg] = Value::scalar(keel::as<double>(userNargs), nullptr);
+        newR[funcChunk.narginReg] = Value::scalar(keel::as<keel::f64>(userNargs), nullptr);
     if (funcChunk.nargoutReg < nregs)
-        newR[funcChunk.nargoutReg] = Value::scalar(keel::as<double>(nargout), nullptr);
+        newR[funcChunk.nargoutReg] = Value::scalar(keel::as<keel::f64>(nargout), nullptr);
     if (funcChunk.narginReg == kInvalidReg && funcChunk.nargoutReg == kInvalidReg) {
         for (const auto &[vname, reg] : funcChunk.varMap) {
             if (vname == "nargin" && reg < nregs)
-                newR[reg] = Value::scalar(keel::as<double>(userNargs), nullptr);
+                newR[reg] = Value::scalar(keel::as<keel::f64>(userNargs), nullptr);
             else if (vname == "nargout" && reg < nregs)
-                newR[reg] = Value::scalar(keel::as<double>(nargout), nullptr);
+                newR[reg] = Value::scalar(keel::as<keel::f64>(nargout), nullptr);
         }
     }
 
@@ -5553,7 +5553,7 @@ void VM::forSetVar(Value &varReg, const ForState &fs)
         // Lazy colon range: compute scalar from start + index*step.
         // start/stop bounds are validated at FOR_INIT_RANGE time, so
         // here we just emit the value with no allocation.
-        const double v = fs.lazyStart + keel::as<double>(fs.index) * fs.lazyStep;
+        const keel::f64 v = fs.lazyStart + keel::as<keel::f64>(fs.index) * fs.lazyStep;
         if (varReg.isDoubleScalar())
             varReg.setScalarFast(v);
         else
@@ -5580,8 +5580,8 @@ void VM::forSetVar(Value &varReg, const ForState &fs)
         }
         keel::usize rows = fs.rows;
         auto col = Value::matrix(rows, 1, ValueType::DOUBLE, engine_.mr_);
-        double *dst = col.doubleDataMut();
-        const double *src = fs.data + fs.index * rows;
+        keel::f64 *dst = col.doubleDataMut();
+        const keel::f64 *src = fs.data + fs.index * rows;
         for (keel::usize r = 0; r < rows; ++r)
             dst[r] = src[r];
         varReg = std::move(col);
@@ -5764,8 +5764,8 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
 
     // 1-arg scalar fast path
     if (na == 1 && R[argBase].isDoubleScalar()) {
-        double v = R[argBase].scalarVal();
-        double result;
+        keel::f64 v = R[argBase].scalarVal();
+        keel::f64 result;
         bool handled = true;
         switch (bid) {
         case 0:  result = std::fabs(v); break;
@@ -5786,7 +5786,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         case 11: result = std::cos(v); break;
         case 12: result = std::tan(v); break;
         case 13:
-            result = std::isnan(v) ? std::numeric_limits<double>::quiet_NaN()
+            result = std::isnan(v) ? std::numeric_limits<keel::f64>::quiet_NaN()
                      : (v > 0)     ? 1.0
                      : (v < 0)     ? -1.0
                                    : 0.0;
@@ -5803,8 +5803,8 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
 
     // 2-arg scalar fast path
     if (na == 2 && R[argBase].isDoubleScalar() && R[argBase + 1].isDoubleScalar()) {
-        double a = R[argBase].scalarVal(), b = R[argBase + 1].scalarVal();
-        double result;
+        keel::f64 a = R[argBase].scalarVal(), b = R[argBase + 1].scalarVal();
+        keel::f64 result;
         bool handled = true;
         switch (bid) {
         case 20:

@@ -45,7 +45,7 @@ struct KVPayload : NativePayload
 {
     enum KeyKind { None, Str, Num } keyKind = None;
     keel::Array<keel::String> skeys; // when keyKind == Str
-    keel::Array<double>       nkeys; // when keyKind == Num
+    keel::Array<keel::f64>       nkeys; // when keyKind == Num
     keel::Array<Value>        vals;  // parallel to the active key vector
     bool         configured = false;
     keel::String keyType;            // KeyType label (containers.Map)
@@ -83,7 +83,7 @@ struct KVPayload : NativePayload
                 if (skeys[i] == s)
                     return keel::as<int>(i);
         } else if (keyKind == Num) {
-            double d = key.toScalar();
+            keel::f64 d = key.toScalar();
             for (keel::usize i = 0; i < nkeys.size(); ++i)
                 if (nkeys[i] == d)
                     return keel::as<int>(i);
@@ -337,7 +337,7 @@ void registerContainersRuntime(Engine &engine)
             [](Value &self, keel::ArrayRef<Value>, keel::usize,
                keel::MutArrayRef<Value> out, CallContext &ctx) {
                 if (!out.empty())
-                    out[0] = Value::scalar(keel::as<double>(containers::count(self)),
+                    out[0] = Value::scalar(keel::as<keel::f64>(containers::count(self)),
                                            ctx.engine->allocator());
             });
         dict.methods.put(keel::String::from("isKey"),
@@ -459,7 +459,7 @@ void registerContainersRuntime(Engine &engine)
             [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> out,
                CallContext &ctx) {
                 if (!out.empty())
-                    out[0] = Value::scalar(keel::as<double>(containers::count(self)),
+                    out[0] = Value::scalar(keel::as<keel::f64>(containers::count(self)),
                                            ctx.engine->allocator());
             });
         cm.methods.put(keel::String::from("remove"),
@@ -476,7 +476,7 @@ void registerContainersRuntime(Engine &engine)
             const KVPayload *p = require(self);
             auto *mr = ctx.engine->allocator();
             if (name == "Count") {
-                out = Value::scalar(keel::as<double>(p->count()), mr);
+                out = Value::scalar(keel::as<keel::f64>(p->count()), mr);
                 return true;
             }
             if (name == "KeyType") {
@@ -891,7 +891,7 @@ void registerContainersRuntime(Engine &engine)
         }
         if (allNumeric) {
             Value out = Value::matrix(nr, totalCols, ValueType::DOUBLE, mr);
-            double *dst = out.doubleDataMut();
+            keel::f64 *dst = out.doubleDataMut();
             keel::usize colOff = 0;
             for (const auto &s : sliced) {
                 keel::usize sc = s.dims().cols();
@@ -955,7 +955,7 @@ void registerContainersRuntime(Engine &engine)
             keel::String os;
             for (keel::usize j = 0; j < nc; ++j) {
                 if (j > 0) os.append("  ");
-                double d = col.elemAsDouble(row + j * nr);
+                keel::f64 d = col.elemAsDouble(row + j * nr);
                 if (std::isnan(d)) os.append("NaN");
                 else if (std::isinf(d)) os.append(d < 0 ? "-Inf" : "Inf");
                 else {
@@ -973,8 +973,8 @@ void registerContainersRuntime(Engine &engine)
 
     static auto compareColumnRows = [](const Value &col, keel::usize r1, keel::usize r2) -> int {
         if (col.isNumeric() || col.isLogical()) {
-            double a = col.elemAsDouble(r1);
-            double b = col.elemAsDouble(r2);
+            keel::f64 a = col.elemAsDouble(r1);
+            keel::f64 b = col.elemAsDouble(r2);
             if (std::isnan(a) && std::isnan(b)) return 0;
             if (std::isnan(a)) return 1; // NaNs sort last
             if (std::isnan(b)) return -1;
@@ -994,8 +994,8 @@ void registerContainersRuntime(Engine &engine)
                 return a.as_ref() < b.as_ref() ? -1 : (a.as_ref() > b.as_ref() ? 1 : 0);
             }
             if ((ca.isNumeric() || ca.isLogical()) && (cb.isNumeric() || cb.isLogical())) {
-                double a = ca.toScalar();
-                double b = cb.toScalar();
+                keel::f64 a = ca.toScalar();
+                keel::f64 b = cb.toScalar();
                 return (a < b) ? -1 : (a > b ? 1 : 0);
             }
         }
@@ -1004,8 +1004,8 @@ void registerContainersRuntime(Engine &engine)
             const auto *s2 = col.objectStateAt(r2);
             if (s1 && s1->native && s2 && s2->native) {
                 try {
-                    double a = s1->native->asDouble();
-                    double b = s2->native->asDouble();
+                    keel::f64 a = s1->native->asDouble();
+                    keel::f64 b = s2->native->asDouble();
                     if (std::isnan(a) && std::isnan(b)) return 0;
                     if (std::isnan(a)) return 1;
                     if (std::isnan(b)) return -1;
@@ -1065,7 +1065,7 @@ void registerContainersRuntime(Engine &engine)
                     if (iequalsTableOpt(vt, "double") || iequalsTableOpt(vt, "doublenan")) {
                         Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
                         if (iequalsTableOpt(vt, "doublenan"))
-                            std::fill_n(col.doubleDataMut(), nr, std::numeric_limits<double>::quiet_NaN());
+                            std::fill_n(col.doubleDataMut(), nr, std::numeric_limits<keel::f64>::quiet_NaN());
                         p->cols.push_back(std::move(col));
                     } else if (iequalsTableOpt(vt, "logical")) {
                         p->cols.push_back(Value::matrix(nr, 1, ValueType::LOGICAL, mr));
@@ -1496,9 +1496,9 @@ void registerContainersRuntime(Engine &engine)
             int dim = args.size() >= 1 ? keel::as<int>(std::llround(args[0].elemAsDouble(0))) : 0;
             int ndims = args.size() >= 2 ? keel::as<int>(std::llround(args[1].elemAsDouble(0))) : 2;
             if (ndims == 1 || dim == 0)
-                out[0] = Value::scalar(keel::as<double>(p->nrows), mr);
+                out[0] = Value::scalar(keel::as<keel::f64>(p->nrows), mr);
             else if (dim == 1)
-                out[0] = Value::scalar(keel::as<double>(p->width()), mr);
+                out[0] = Value::scalar(keel::as<keel::f64>(p->width()), mr);
             else
                 out[0] = Value::scalar(1.0, mr);
         });
@@ -1506,20 +1506,20 @@ void registerContainersRuntime(Engine &engine)
         c.methods.put(keel::String::from("height"),
             [](Value &self, keel::ArrayRef<Value>, keel::usize,
                keel::MutArrayRef<Value> out, CallContext &ctx) {
-            out[0] = Value::scalar(keel::as<double>(tableCst(self)->nrows),
+            out[0] = Value::scalar(keel::as<keel::f64>(tableCst(self)->nrows),
                                    ctx.engine->allocator());
         });
         c.methods.put(keel::String::from("width"),
             [](Value &self, keel::ArrayRef<Value>, keel::usize,
                keel::MutArrayRef<Value> out, CallContext &ctx) {
-            out[0] = Value::scalar(keel::as<double>(tableCst(self)->width()),
+            out[0] = Value::scalar(keel::as<keel::f64>(tableCst(self)->width()),
                                    ctx.engine->allocator());
         });
         c.methods.put(keel::String::from("numel"),
             [](Value &self, keel::ArrayRef<Value>, keel::usize,
                keel::MutArrayRef<Value> out, CallContext &ctx) {
             const TablePayload *p = tableCst(self);
-            out[0] = Value::scalar(keel::as<double>(p->nrows * p->width()),
+            out[0] = Value::scalar(keel::as<keel::f64>(p->nrows * p->width()),
                                    ctx.engine->allocator());
         });
         c.methods.put(keel::String::from("ndims"),
@@ -1541,7 +1541,7 @@ void registerContainersRuntime(Engine &engine)
             keel::usize len = (p->nrows == 0 || p->width() == 0)
                        ? 0
                        : std::max(p->nrows, p->width());
-            out[0] = Value::scalar(keel::as<double>(len), ctx.engine->allocator());
+            out[0] = Value::scalar(keel::as<keel::f64>(len), ctx.engine->allocator());
         });
         c.methods.put(keel::String::from("size"),
             [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
@@ -1550,22 +1550,22 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             if (!args.empty()) {
                 int d = argcheck::dimArg(args[0], "size");
-                double v = (d == 1) ? keel::as<double>(p->nrows)
-                         : (d == 2) ? keel::as<double>(p->width())
+                keel::f64 v = (d == 1) ? keel::as<keel::f64>(p->nrows)
+                         : (d == 2) ? keel::as<keel::f64>(p->width())
                                     : 1.0;
                 out[0] = Value::scalar(v, mr);
                 return;
             }
             if (nargout > 1) {
-                out[0] = Value::scalar(keel::as<double>(p->nrows), mr);
-                out[1] = Value::scalar(keel::as<double>(p->width()), mr);
+                out[0] = Value::scalar(keel::as<keel::f64>(p->nrows), mr);
+                out[1] = Value::scalar(keel::as<keel::f64>(p->width()), mr);
                 for (keel::usize i = 2; i < nargout; ++i)
                     out[i] = Value::scalar(1.0, mr);
                 return;
             }
             Value sz = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-            sz.doubleDataMut()[0] = keel::as<double>(p->nrows);
-            sz.doubleDataMut()[1] = keel::as<double>(p->width());
+            sz.doubleDataMut()[0] = keel::as<keel::f64>(p->nrows);
+            sz.doubleDataMut()[1] = keel::as<keel::f64>(p->width());
             out[0] = std::move(sz);
         });
 
@@ -1628,19 +1628,19 @@ void registerContainersRuntime(Engine &engine)
                 const Value &col = p->cols[j];
                 Value vs = Value::structure(mr);
                 Value sz = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-                sz.doubleDataMut()[0] = keel::as<double>(col.dims().rows());
-                sz.doubleDataMut()[1] = keel::as<double>(col.dims().cols());
+                sz.doubleDataMut()[0] = keel::as<keel::f64>(col.dims().rows());
+                sz.doubleDataMut()[1] = keel::as<keel::f64>(col.dims().cols());
                 vs.field("Size") = std::move(sz);
                 vs.field("Type") = col.isObject()
                                  ? Value::fromString(col.objectClassNameRef(), mr)
                                  : Value::fromString(mtypeName(col.type()), mr);
                 if (col.isNumeric() && col.numel() > 0) {
-                    double mn = std::numeric_limits<double>::infinity();
-                    double mx = -std::numeric_limits<double>::infinity();
-                    keel::Array<double> vals(alloc);
+                    keel::f64 mn = std::numeric_limits<keel::f64>::infinity();
+                    keel::f64 mx = -std::numeric_limits<keel::f64>::infinity();
+                    keel::Array<keel::f64> vals(alloc);
                     vals.reserve(col.numel());
                     for (keel::usize i = 0; i < col.numel(); ++i) {
-                        double d = col.elemAsDouble(i);
+                        keel::f64 d = col.elemAsDouble(i);
                         if (!std::isnan(d)) {
                             mn = std::min(mn, d);
                             mx = std::max(mx, d);
@@ -1650,7 +1650,7 @@ void registerContainersRuntime(Engine &engine)
                     if (!vals.empty()) {
                         std::sort(vals.begin(), vals.end());
                         keel::usize mid = vals.size() / 2;
-                        double med = (vals.size() % 2 == 1)
+                        keel::f64 med = (vals.size() % 2 == 1)
                                    ? vals[mid]
                                    : 0.5 * (vals[mid - 1] + vals[mid]);
                         vs.field("Min") = Value::scalar(mn, mr);
@@ -1728,7 +1728,7 @@ void registerContainersRuntime(Engine &engine)
             if (nargout >= 2) {
                 Value idx = Value::matrix(ord.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < ord.size(); ++i)
-                    idx.doubleDataMut()[i] = keel::as<double>(ord[i] + 1);
+                    idx.doubleDataMut()[i] = keel::as<keel::f64>(ord[i] + 1);
                 out[1] = std::move(idx);
             }
         });
@@ -1742,7 +1742,7 @@ void registerContainersRuntime(Engine &engine)
             if (args.empty())
                 throw Error("topkrows: requires k argument",
                             0, 0, "topkrows", "", "numkit:topkrows:nargin");
-            const double kd = args[0].toScalar();
+            const keel::f64 kd = args[0].toScalar();
             if (kd < 0.0 || kd != std::floor(kd))
                 throw Error("topkrows: k must be a non-negative integer",
                             0, 0, "topkrows", "", "numkit:topkrows:badK");
@@ -1823,7 +1823,7 @@ void registerContainersRuntime(Engine &engine)
             if (nargout >= 2) {
                 Value idx = Value::matrix(ord.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize r = 0; r < ord.size(); ++r)
-                    idx.doubleDataMut()[r] = keel::as<double>(ord[r] + 1);
+                    idx.doubleDataMut()[r] = keel::as<keel::f64>(ord[r] + 1);
                 out[1] = std::move(idx);
             }
         });
@@ -1995,7 +1995,7 @@ void registerContainersRuntime(Engine &engine)
             }
             Value gcCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
             for (keel::usize g = 0; g < ng; ++g)
-                gcCol.doubleDataMut()[g] = keel::as<double>(groupMembers[g].size());
+                gcCol.doubleDataMut()[g] = keel::as<keel::f64>(groupMembers[g].size());
             res->varNames.push_back(keel::String::from("GroupCount", alloc));
             res->cols.push_back(std::move(gcCol));
 
@@ -2003,32 +2003,32 @@ void registerContainersRuntime(Engine &engine)
                 for (keel::usize dc : dataCols) {
                     const Value &col = p->cols[dc];
                     Value statCol = Value::matrix(ng, 1, ValueType::DOUBLE, mr);
-                    double *dst = statCol.doubleDataMut();
+                    keel::f64 *dst = statCol.doubleDataMut();
                     for (keel::usize g = 0; g < ng; ++g) {
                         const auto &rows = groupMembers[g];
-                        keel::Array<double> vals(alloc);
+                        keel::Array<keel::f64> vals(alloc);
                         vals.reserve(rows.size());
                         for (keel::usize r : rows) {
                             if (col.isNumeric() && r < col.numel()) {
-                                double v = col.elemAsDouble(r);
+                                keel::f64 v = col.elemAsDouble(r);
                                 if (!std::isnan(v))
                                     vals.push_back(v);
                             }
                         }
-                        double val = std::numeric_limits<double>::quiet_NaN();
+                        keel::f64 val = std::numeric_limits<keel::f64>::quiet_NaN();
                         if (iequalsTableOpt(m, "sum")) {
                             val = 0.0;
-                            for (double v : vals) val += v;
+                            for (keel::f64 v : vals) val += v;
                         } else if (iequalsTableOpt(m, "nnz")) {
                             val = 0.0;
-                            for (double v : vals) if (v != 0.0) val += 1.0;
+                            for (keel::f64 v : vals) if (v != 0.0) val += 1.0;
                         } else if (iequalsTableOpt(m, "nummissing")) {
-                            val = keel::as<double>(rows.size() - vals.size());
+                            val = keel::as<keel::f64>(rows.size() - vals.size());
                         } else if (!vals.empty()) {
                             if (iequalsTableOpt(m, "mean")) {
-                                double s = 0.0;
-                                for (double v : vals) s += v;
-                                val = s / keel::as<double>(vals.size());
+                                keel::f64 s = 0.0;
+                                for (keel::f64 v : vals) s += v;
+                                val = s / keel::as<keel::f64>(vals.size());
                             } else if (iequalsTableOpt(m, "min")) {
                                 val = *std::min_element(vals.begin(), vals.end());
                             } else if (iequalsTableOpt(m, "max")) {
@@ -2038,12 +2038,12 @@ void registerContainersRuntime(Engine &engine)
                                 keel::usize n = vals.size();
                                 val = (n % 2 == 1) ? vals[n / 2] : 0.5 * (vals[n / 2 - 1] + vals[n / 2]);
                             } else if (iequalsTableOpt(m, "std") || iequalsTableOpt(m, "var")) {
-                                double s = 0.0;
-                                for (double v : vals) s += v;
-                                double mu = s / keel::as<double>(vals.size());
-                                double ss = 0.0;
-                                for (double v : vals) ss += (v - mu) * (v - mu);
-                                double vstat = (vals.size() > 1) ? ss / keel::as<double>(vals.size() - 1) : 0.0;
+                                keel::f64 s = 0.0;
+                                for (keel::f64 v : vals) s += v;
+                                keel::f64 mu = s / keel::as<keel::f64>(vals.size());
+                                keel::f64 ss = 0.0;
+                                for (keel::f64 v : vals) ss += (v - mu) * (v - mu);
+                                keel::f64 vstat = (vals.size() > 1) ? ss / keel::as<keel::f64>(vals.size() - 1) : 0.0;
                                 val = iequalsTableOpt(m, "std") ? std::sqrt(vstat) : vstat;
                             }
                         }
@@ -2319,16 +2319,16 @@ void registerContainersRuntime(Engine &engine)
                         const auto *s1 = lc.objectStateAt(lr);
                         const auto *s2 = rc.objectStateAt(rr);
                         if (s1 && s1->native && s2 && s2->native) {
-                            double d1 = s1->native->asDouble();
-                            double d2 = s2->native->asDouble();
+                            keel::f64 d1 = s1->native->asDouble();
+                            keel::f64 d2 = s2->native->asDouble();
                             if (std::isnan(d1) || std::isnan(d2) || keel::abs(d1 - d2) > 1e-9)
                                 return false;
                             continue;
                         }
                     }
                     if ((lc.isNumeric() || lc.isLogical()) && (rc.isNumeric() || rc.isLogical())) {
-                        double d1 = lc.elemAsDouble(lr);
-                        double d2 = rc.elemAsDouble(rr);
+                        keel::f64 d1 = lc.elemAsDouble(lr);
+                        keel::f64 d2 = rc.elemAsDouble(rr);
                         if (std::isnan(d1) || std::isnan(d2) || d1 != d2)
                             return false;
                         continue;
@@ -2371,13 +2371,13 @@ void registerContainersRuntime(Engine &engine)
             if (nargout >= 2 && outs.size() >= 2) {
                 Value ia = Value::matrix(lMatch.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < lMatch.size(); ++i)
-                    ia.doubleDataMut()[i] = keel::as<double>(lMatch[i] + 1);
+                    ia.doubleDataMut()[i] = keel::as<keel::f64>(lMatch[i] + 1);
                 outs[1] = std::move(ia);
             }
             if (nargout >= 3 && outs.size() >= 3) {
                 Value ib = Value::matrix(rMatch.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < rMatch.size(); ++i)
-                    ib.doubleDataMut()[i] = keel::as<double>(rMatch[i] + 1);
+                    ib.doubleDataMut()[i] = keel::as<keel::f64>(rMatch[i] + 1);
                 outs[2] = std::move(ib);
             }
         };
@@ -2449,7 +2449,7 @@ void registerContainersRuntime(Engine &engine)
             keel::usize nr = p->nrows;
             auto getYMD = [&](keel::usize r, int &y, int &m, int &q) {
                 const auto *st = p->rowTimes.objectStateAt(r);
-                double sd = (st && st->native) ? st->native->asDouble() : 0.0;
+                keel::f64 sd = (st && st->native) ? st->native->asDouble() : 0.0;
                 keel::i64 days = keel::as<keel::i64>(std::floor(sd - 719529.0));
                 keel::i64 z = days + 719468;
                 keel::i64 era = (z >= 0 ? z : z - 146096) / 146097;
@@ -2471,7 +2471,7 @@ void registerContainersRuntime(Engine &engine)
                 unsigned yoe = keel::as<unsigned>(yr - era * 400);
                 unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5;
                 unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-                double sd = keel::as<double>(era * 146097 + keel::as<keel::i64>(doe) - 719468) + 719529.0;
+                keel::f64 sd = keel::as<keel::f64>(era * 146097 + keel::as<keel::i64>(doe) - 719468) + 719529.0;
                 const auto *origSt = p->rowTimes.objectStateAt(0);
                 auto st = keel::make_arc_in<ObjectState>(alloc, alloc);
                 if (origSt) {
@@ -2520,23 +2520,23 @@ void registerContainersRuntime(Engine &engine)
             for (keel::usize j = 0; j < p->width(); ++j) {
                 const Value &col = p->cols[j];
                 Value outCol = Value::matrix(nb, 1, ValueType::DOUBLE, mr);
-                double *dst = outCol.doubleDataMut();
+                keel::f64 *dst = outCol.doubleDataMut();
                 for (keel::usize g = 0; g < nb; ++g) {
-                    keel::Array<double> vals(alloc);
+                    keel::Array<keel::f64> vals(alloc);
                     for (keel::usize r : buckets[g].rows) {
                         if (col.isNumeric() && r < col.numel()) {
-                            double v = col.elemAsDouble(r);
+                            keel::f64 v = col.elemAsDouble(r);
                             if (!std::isnan(v)) vals.push_back(v);
                         }
                     }
-                    double val = std::numeric_limits<double>::quiet_NaN();
+                    keel::f64 val = std::numeric_limits<keel::f64>::quiet_NaN();
                     if (!vals.empty()) {
                         if (iequalsTableOpt(method, "firstvalue")) val = vals.front();
                         else if (iequalsTableOpt(method, "lastvalue")) val = vals.back();
-                        else if (iequalsTableOpt(method, "sum")) { val = 0.0; for (double v : vals) val += v; }
+                        else if (iequalsTableOpt(method, "sum")) { val = 0.0; for (keel::f64 v : vals) val += v; }
                         else if (iequalsTableOpt(method, "min")) val = *std::min_element(vals.begin(), vals.end());
                         else if (iequalsTableOpt(method, "max")) val = *std::max_element(vals.begin(), vals.end());
-                        else { double s = 0.0; for (double v : vals) s += v; val = s / keel::as<double>(vals.size()); }
+                        else { keel::f64 s = 0.0; for (keel::f64 v : vals) s += v; val = s / keel::as<keel::f64>(vals.size()); }
                     }
                     dst[g] = val;
                 }
@@ -2569,18 +2569,18 @@ void registerContainersRuntime(Engine &engine)
             }
             if (tables.empty())
                 throw Error("synchronize: requires at least one timetable", 0, 0, "synchronize", "", "numkit:synchronize:minrhs");
-            auto getSd = [](const Value &rt, keel::usize r) -> double {
+            auto getSd = [](const Value &rt, keel::usize r) -> keel::f64 {
                 const auto *st = rt.objectStateAt(r);
-                return (st && st->native) ? st->native->asDouble() : std::numeric_limits<double>::quiet_NaN();
+                return (st && st->native) ? st->native->asDouble() : std::numeric_limits<keel::f64>::quiet_NaN();
             };
-            keel::Array<double> allSd(alloc);
+            keel::Array<keel::f64> allSd(alloc);
             keel::Array<Value> allDt(alloc);
             auto addTimes = [&](const Value &rt, keel::usize n) {
                 for (keel::usize r = 0; r < n; ++r) {
-                    double sd = getSd(rt, r);
+                    keel::f64 sd = getSd(rt, r);
                     if (std::isnan(sd)) continue;
                     bool found = false;
-                    for (double m : allSd) {
+                    for (keel::f64 m : allSd) {
                         if (keel::abs(m - sd) < 1e-6) { found = true; break; }
                     }
                     if (!found) {
@@ -2592,15 +2592,15 @@ void registerContainersRuntime(Engine &engine)
             for (const auto *tp : tables)
                 addTimes(tp->rowTimes, tp->nrows);
             if (intersectMode) {
-                keel::Array<double> filtSd(alloc);
+                keel::Array<keel::f64> filtSd(alloc);
                 keel::Array<Value> filtDt(alloc);
                 for (keel::usize k = 0; k < allSd.size(); ++k) {
-                    double sd = allSd[k];
+                    keel::f64 sd = allSd[k];
                     bool inAll = true;
                     for (const auto *tp : tables) {
                         bool inThis = false;
                         for (keel::usize r = 0; r < tp->nrows; ++r) {
-                            double tsd = getSd(tp->rowTimes, r);
+                            keel::f64 tsd = getSd(tp->rowTimes, r);
                             if (!std::isnan(tsd) && keel::abs(tsd - sd) < 1e-6) {
                                 inThis = true;
                                 break;
@@ -2628,7 +2628,7 @@ void registerContainersRuntime(Engine &engine)
             res->nrows = nr;
             keel::Array<Value> sortedDt(alloc);
             sortedDt.resize(nr);
-            keel::Array<double> sortedSd(alloc);
+            keel::Array<keel::f64> sortedSd(alloc);
             sortedSd.resize(nr);
             for (keel::usize i = 0; i < nr; ++i) {
                 sortedDt[i] = allDt[ord[i]];
@@ -2640,7 +2640,7 @@ void registerContainersRuntime(Engine &engine)
                 keel::Array<int> rowMap(alloc);
                 rowMap.assign(nr, -1);
                 for (keel::usize r = 0; r < tp->nrows; ++r) {
-                    double sd = getSd(tp->rowTimes, r);
+                    keel::f64 sd = getSd(tp->rowTimes, r);
                     for (keel::usize i = 0; i < nr; ++i) {
                         if (keel::abs(sortedSd[i] - sd) < 1e-6) {
                             rowMap[i] = keel::as<int>(r);
@@ -2654,11 +2654,11 @@ void registerContainersRuntime(Engine &engine)
                     res->varNames.push_back(std::move(vn));
                     const Value &src = tp->cols[j];
                     Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
-                    double *dst = col.doubleDataMut();
+                    keel::f64 *dst = col.doubleDataMut();
                     for (keel::usize i = 0; i < nr; ++i) {
                         dst[i] = (rowMap[i] >= 0 && src.isNumeric())
                                ? src.elemAsDouble(keel::as<keel::usize>(rowMap[i]))
-                               : std::numeric_limits<double>::quiet_NaN();
+                               : std::numeric_limits<keel::f64>::quiet_NaN();
                     }
                     res->cols.push_back(std::move(col));
                 }
@@ -2736,15 +2736,15 @@ void registerContainersRuntime(Engine &engine)
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             const Value &yIn = args[0];
-            keel::Array<double> y(alloc);
+            keel::Array<keel::f64> y(alloc);
             for (keel::usize i = 0; i < yIn.numel(); ++i) {
-                double v = yIn.elemAsDouble(i);
+                keel::f64 v = yIn.elemAsDouble(i);
                 if (!std::isnan(v))
                     y.push_back(v);
             }
             keel::String model = keel::String::from("AR", alloc);
             int lags = 0;
-            double alpha = 0.05;
+            keel::f64 alpha = 0.05;
             for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
                 if (!args[i].isChar() && !args[i].isString()) continue;
                 keel::String k = args[i].toString();
@@ -2764,37 +2764,37 @@ void registerContainersRuntime(Engine &engine)
             keel::usize aIdx = numNonDelta - 1;
 
             // Build X (T x numParams) and testY (T x 1) for t = p+1 .. N-1 (0-based)
-            keel::Array<double> X(alloc);
+            keel::Array<keel::f64> X(alloc);
             X.assign(T * numParams, 0.0);
-            keel::Array<double> testY(alloc);
+            keel::Array<keel::f64> testY(alloc);
             testY.assign(T, 0.0);
             for (keel::usize r = 0; r < T; ++r) {
                 keel::usize t = (p + 1) + r;
                 testY[r] = y[t];
                 keel::usize col = 0;
                 if (isARD || isTS) X[r + (col++) * T] = 1.0;
-                if (isTS)          X[r + (col++) * T] = keel::as<double>(r + 1);
+                if (isTS)          X[r + (col++) * T] = keel::as<keel::f64>(r + 1);
                 X[r + (col++) * T] = y[t - 1];
                 for (keel::usize k = 1; k <= p; ++k)
                     X[r + (col++) * T] = y[t - k] - y[t - k - 1];
             }
             // Solve normal equations (X'*X) * beta = X'*testY and invert X'*X
-            keel::Array<double> XtX(alloc);
+            keel::Array<keel::f64> XtX(alloc);
             XtX.assign(numParams * numParams, 0.0);
-            keel::Array<double> Xty(alloc);
+            keel::Array<keel::f64> Xty(alloc);
             Xty.assign(numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize r = 0; r < T; ++r)
                     Xty[i] += X[r + i * T] * testY[r];
                 for (keel::usize j = 0; j < numParams; ++j) {
-                    double s = 0.0;
+                    keel::f64 s = 0.0;
                     for (keel::usize r = 0; r < T; ++r)
                         s += X[r + i * T] * X[r + j * T];
                     XtX[i + j * numParams] = s;
                 }
             }
             // Gauss-Jordan to get inv(XtX) and beta
-            keel::Array<double> aug(alloc);
+            keel::Array<keel::f64> aug(alloc);
             aug.assign(numParams * 2 * numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize j = 0; j < numParams; ++j)
@@ -2810,44 +2810,44 @@ void registerContainersRuntime(Engine &engine)
                     for (keel::usize j = 0; j < 2 * numParams; ++j)
                         std::swap(aug[k * 2 * numParams + j], aug[piv * 2 * numParams + j]);
                 }
-                double diag = aug[k * 2 * numParams + k];
+                keel::f64 diag = aug[k * 2 * numParams + k];
                 for (keel::usize j = 0; j < 2 * numParams; ++j)
                     aug[k * 2 * numParams + j] /= diag;
                 for (keel::usize i = 0; i < numParams; ++i) {
                     if (i == k) continue;
-                    double f = aug[i * 2 * numParams + k];
+                    keel::f64 f = aug[i * 2 * numParams + k];
                     for (keel::usize j = 0; j < 2 * numParams; ++j)
                         aug[i * 2 * numParams + j] -= f * aug[k * 2 * numParams + j];
                 }
             }
-            keel::Array<double> beta(alloc);
+            keel::Array<keel::f64> beta(alloc);
             beta.assign(numParams, 0.0);
             for (keel::usize i = 0; i < numParams; ++i) {
                 for (keel::usize j = 0; j < numParams; ++j)
                     beta[i] += aug[i * (2 * numParams) + numParams + j] * Xty[j];
             }
-            double SSE = 0.0;
+            keel::f64 SSE = 0.0;
             for (keel::usize r = 0; r < T; ++r) {
-                double yhat = 0.0;
+                keel::f64 yhat = 0.0;
                 for (keel::usize j = 0; j < numParams; ++j)
                     yhat += X[r + j * T] * beta[j];
-                double e = testY[r] - yhat;
+                keel::f64 e = testY[r] - yhat;
                 SSE += e * e;
             }
-            double MSE = SSE / keel::as<double>(T - numParams);
-            double invXtX_aa = aug[aIdx * (2 * numParams) + numParams + aIdx];
-            double se_a = std::sqrt(MSE * invXtX_aa);
-            double testStat = (beta[aIdx] - 1.0) / se_a;
+            keel::f64 MSE = SSE / keel::as<keel::f64>(T - numParams);
+            keel::f64 invXtX_aa = aug[aIdx * (2 * numParams) + numParams + aIdx];
+            keel::f64 se_a = std::sqrt(MSE * invXtX_aa);
+            keel::f64 testStat = (beta[aIdx] - 1.0) / se_a;
 
-            static const double sampSizes[15] = {10,15,20,25,30,40,50,75,100,150,200,300,500,1000,10000};
-            static const double sigLevels[50] = {
+            static const keel::f64 sampSizes[15] = {10,15,20,25,30,40,50,75,100,150,200,300,500,1000,10000};
+            static const keel::f64 sigLevels[50] = {
                 0.001, 0.005, 0.010, 0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045,
                 0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095,
                 0.100, 0.125, 0.150, 0.175, 0.200, 0.800, 0.825, 0.850, 0.875, 0.900,
                 0.905, 0.910, 0.915, 0.920, 0.925, 0.930, 0.935, 0.940, 0.945, 0.950,
                 0.955, 0.960, 0.965, 0.970, 0.975, 0.980, 0.985, 0.990, 0.995, 0.999
             };
-            static const double cvAR[15][50] = {
+            static const keel::f64 cvAR[15][50] = {
                 {-3.9976,-3.1423,-2.7891,-2.5834,-2.4351,-2.3201,-2.2260,-2.1460,-2.0766,-2.0148,-1.9594,-1.9095,-1.8629,-1.8201,-1.7799,-1.7427,-1.7075,-1.6744,-1.6427,-1.6126,-1.5839,-1.4569,-1.3501,-1.2567,-1.1730,0.4848,0.5897,0.7056,0.8373,0.9913,1.0258,1.0621,1.0996,1.1392,1.1810,1.2254,1.2722,1.3230,1.3775,1.4361,1.5004,1.5720,1.6520,1.7437,1.8514,1.9818,2.1485,2.3836,2.7840,3.7494},
                 {-3.7444,-3.0262,-2.7138,-2.5289,-2.3954,-2.2909,-2.2044,-2.1305,-2.0659,-2.0083,-1.9560,-1.9084,-1.8648,-1.8239,-1.7858,-1.7501,-1.7161,-1.6841,-1.6537,-1.6248,-1.5970,-1.4738,-1.3690,-1.2773,-1.1950,0.4548,0.5589,0.6733,0.8024,0.9521,0.9856,1.0203,1.0568,1.0946,1.1352,1.1775,1.2225,1.2703,1.3218,1.3771,1.4378,1.5044,1.5790,1.6643,1.7627,1.8807,2.0310,2.2387,2.5818,3.3667},
                 {-3.6182,-2.9694,-2.6777,-2.5029,-2.3760,-2.2757,-2.1928,-2.1217,-2.0590,-2.0034,-1.9524,-1.9061,-1.8635,-1.8237,-1.7866,-1.7517,-1.7187,-1.6872,-1.6578,-1.6292,-1.6020,-1.4806,-1.3773,-1.2862,-1.2043,0.4428,0.5465,0.6604,0.7883,0.9363,0.9691,1.0033,1.0390,1.0768,1.1162,1.1577,1.2017,1.2485,1.2988,1.3529,1.4115,1.4756,1.5478,1.6301,1.7244,1.8376,1.9796,2.1742,2.4956,3.2078},
@@ -2864,7 +2864,7 @@ void registerContainersRuntime(Engine &engine)
                 {-3.2900,-2.8030,-2.5694,-2.4235,-2.3156,-2.2298,-2.1571,-2.0938,-2.0381,-1.9872,-1.9416,-1.8994,-1.8603,-1.8238,-1.7894,-1.7568,-1.7262,-1.6970,-1.6691,-1.6425,-1.6167,-1.5015,-1.4018,-1.3138,-1.2337,0.4040,0.5069,0.6193,0.7441,0.8883,0.9202,0.9531,0.9875,1.0232,1.0609,1.1006,1.1426,1.1868,1.2346,1.2856,1.3405,1.4000,1.4665,1.5405,1.6259,1.7268,1.8514,2.0181,2.2840,2.8320},
                 {-3.2864,-2.7999,-2.5662,-2.4229,-2.3155,-2.2289,-2.1562,-2.0936,-2.0376,-1.9873,-1.9416,-1.8994,-1.8604,-1.8241,-1.7898,-1.7575,-1.7268,-1.6977,-1.6697,-1.6430,-1.6175,-1.5022,-1.4025,-1.3144,-1.2343,0.4048,0.5074,0.6198,0.7448,0.8889,0.9208,0.9535,0.9878,1.0239,1.0614,1.1009,1.1424,1.1866,1.2336,1.2843,1.3388,1.3989,1.4646,1.5387,1.6239,1.7250,1.8489,2.0156,2.2816,2.8240}
             };
-            static const double cvARD[15][50] = {
+            static const keel::f64 cvARD[15][50] = {
                 {-6.1728,-4.8563,-4.3427,-4.0541,-3.8538,-3.6994,-3.5751,-3.4691,-3.3782,-3.2976,-3.2260,-3.1609,-3.1022,-3.0484,-2.9978,-2.9510,-2.9071,-2.8657,-2.8268,-2.7900,-2.7552,-2.6001,-2.4713,-2.3608,-2.2633,-0.7119,-0.6179,-0.5134,-0.3960,-0.2595,-0.2292,-0.1974,-0.1644,-0.1299,-0.0930,-0.0546,-0.0139,0.0303,0.0768,0.1279,0.1836,0.2433,0.3110,0.3881,0.4772,0.5851,0.7205,0.9090,1.2323,1.9914},
                 {-5.2336,-4.3409,-3.9642,-3.7444,-3.5882,-3.4673,-3.3673,-3.2817,-3.2073,-3.1422,-3.0831,-3.0287,-2.9793,-2.9341,-2.8917,-2.8519,-2.8148,-2.7791,-2.7453,-2.7132,-2.6830,-2.5474,-2.4334,-2.3345,-2.2459,-0.7656,-0.6733,-0.5711,-0.4560,-0.3226,-0.2929,-0.2618,-0.2295,-0.1954,-0.1593,-0.1218,-0.0820,-0.0395,0.0057,0.0547,0.1079,0.1666,0.2323,0.3054,0.3906,0.4916,0.6203,0.7972,1.0849,1.7257},
                 {-4.8765,-4.1350,-3.8106,-3.6175,-3.4789,-3.3702,-3.2803,-3.2034,-3.1356,-3.0750,-3.0215,-2.9724,-2.9270,-2.8848,-2.8452,-2.8083,-2.7736,-2.7405,-2.7093,-2.6793,-2.6507,-2.5243,-2.4173,-2.3231,-2.2388,-0.7911,-0.6996,-0.5989,-0.4851,-0.3515,-0.3221,-0.2915,-0.2594,-0.2259,-0.1907,-0.1531,-0.1139,-0.0723,-0.0276,0.0211,0.0730,0.1306,0.1943,0.2669,0.3512,0.4514,0.5753,0.7454,1.0240,1.6287},
@@ -2882,26 +2882,26 @@ void registerContainersRuntime(Engine &engine)
                 {-4.0932,-3.6446,-3.4307,-3.2987,-3.2005,-3.1217,-3.0563,-2.9990,-2.9483,-2.9028,-2.8610,-2.8227,-2.7875,-2.7544,-2.7231,-2.6940,-2.6663,-2.6395,-2.6142,-2.5899,-2.5666,-2.4615,-2.3713,-2.2904,-2.2174,-0.8630,-0.7756,-0.6782,-0.5669,-0.4378,-0.4094,-0.3796,-0.3481,-0.3153,-0.2814,-0.2455,-0.2073,-0.1672,-0.1238,-0.0778,-0.0275,0.0276,0.0898,0.1593,0.2395,0.3342,0.4515,0.6093,0.8588,1.3761}
             };
             const auto &cvTbl = isARD ? cvARD : cvAR;
-            double Td = keel::as<double>(T);
+            keel::f64 Td = keel::as<keel::f64>(T);
             keel::usize r0 = 0;
             while (r0 + 1 < 14 && sampSizes[r0 + 1] < Td) ++r0;
-            double tFrac = (Td <= sampSizes[0]) ? 0.0
+            keel::f64 tFrac = (Td <= sampSizes[0]) ? 0.0
                          : (Td >= sampSizes[14]) ? 1.0
                          : (Td - sampSizes[r0]) / (sampSizes[r0 + 1] - sampSizes[r0]);
-            double rowT[50];
+            keel::f64 rowT[50];
             for (keel::usize c = 0; c < 50; ++c)
                 rowT[c] = (1.0 - tFrac) * cvTbl[r0][c] + tFrac * cvTbl[r0 + 1][c];
 
             // Interpolate cValue at alpha
             keel::usize c0 = 0;
             while (c0 + 1 < 49 && sigLevels[c0 + 1] < alpha) ++c0;
-            double aFrac = (alpha <= sigLevels[0]) ? 0.0
+            keel::f64 aFrac = (alpha <= sigLevels[0]) ? 0.0
                          : (alpha >= sigLevels[49]) ? 1.0
                          : (alpha - sigLevels[c0]) / (sigLevels[c0 + 1] - sigLevels[c0]);
-            double cValue = (1.0 - aFrac) * rowT[c0] + aFrac * rowT[c0 + 1];
+            keel::f64 cValue = (1.0 - aFrac) * rowT[c0] + aFrac * rowT[c0 + 1];
 
             // Interpolate pValue at testStat
-            double pValue = 0.999;
+            keel::f64 pValue = 0.999;
             if (testStat <= rowT[0]) {
                 pValue = sigLevels[0];
             } else if (testStat >= rowT[49]) {
@@ -2909,7 +2909,7 @@ void registerContainersRuntime(Engine &engine)
             } else {
                 for (keel::usize c = 0; c < 49; ++c) {
                     if (testStat >= rowT[c] && testStat <= rowT[c + 1]) {
-                        double frac = (testStat - rowT[c]) / (rowT[c + 1] - rowT[c]);
+                        keel::f64 frac = (testStat - rowT[c]) / (rowT[c + 1] - rowT[c]);
                         pValue = (1.0 - frac) * sigLevels[c] + frac * sigLevels[c + 1];
                         break;
                     }
@@ -2940,17 +2940,17 @@ void registerContainersRuntime(Engine &engine)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "height");
             if (const TablePayload *p = tableCst(args[0]))
-                outs[0] = Value::scalar(keel::as<double>(p->nrows), ctx.engine->allocator());
+                outs[0] = Value::scalar(keel::as<keel::f64>(p->nrows), ctx.engine->allocator());
             else
-                outs[0] = Value::scalar(keel::as<double>(args[0].dims().rows()), ctx.engine->allocator());
+                outs[0] = Value::scalar(keel::as<keel::f64>(args[0].dims().rows()), ctx.engine->allocator());
         });
     engine.registerFunction("width",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 1, "width");
             if (const TablePayload *p = tableCst(args[0]))
-                outs[0] = Value::scalar(keel::as<double>(p->width()), ctx.engine->allocator());
+                outs[0] = Value::scalar(keel::as<keel::f64>(p->width()), ctx.engine->allocator());
             else
-                outs[0] = Value::scalar(keel::as<double>(args[0].dims().cols()), ctx.engine->allocator());
+                outs[0] = Value::scalar(keel::as<keel::f64>(args[0].dims().cols()), ctx.engine->allocator());
         });
 
     engine.registerFunction("table2array",
@@ -3801,11 +3801,11 @@ void registerContainersRuntime(Engine &engine)
         return rows;
     };
 
-    static auto tryParseCellDouble = [](const keel::String &s, double &out) -> bool {
+    static auto tryParseCellDouble = [](const keel::String &s, keel::f64 &out) -> bool {
         if (s.empty()) return false;
         const char *cs = s.c_str();
         char *end = nullptr;
-        double v = std::strtod(cs, &end);
+        keel::f64 v = std::strtod(cs, &end);
         if (end == cs) return false;
         while (*end != '\0' && keel::is_ascii_space(*end))
             ++end;
@@ -3892,7 +3892,7 @@ void registerContainersRuntime(Engine &engine)
             opts.field("SelectedVariableNames") = vnCell;
             opts.field("VariableTypes") = std::move(vtCell);
             opts.field("Sheet") = Value::fromString(sheetName, mr);
-            opts.field("SheetNum") = Value::scalar(keel::as<double>(sheetNum), mr);
+            opts.field("SheetNum") = Value::scalar(keel::as<keel::f64>(sheetNum), mr);
             opts.field("PreserveVariableNames") = Value::logicalScalar(preserveNames, mr);
             opts.field("VariableNamingRule") = Value::fromString(preserveNames ? "preserve" : "modify", mr);
             opts.field("TreatAsMissing") = Value::cell(0, 0, mr);
@@ -4008,7 +4008,7 @@ void registerContainersRuntime(Engine &engine)
                     const auto &cell = grid[r][c];
                     if (!cell.present || cell.text.empty() || isMissingToken(cell.text))
                         continue;
-                    double dummy = 0.0;
+                    keel::f64 dummy = 0.0;
                     if (!cell.isStr && tryParseCellDouble(cell.text, dummy))
                         ++numCount;
                     else
@@ -4018,11 +4018,11 @@ void registerContainersRuntime(Engine &engine)
                              || (numCount == 0 && strCount == 0);
                 if (isNumCol) {
                     Value col = Value::matrix(nrows, 1, ValueType::DOUBLE, mr);
-                    double *dst = col.doubleDataMut();
-                    const double nan = std::numeric_limits<double>::quiet_NaN();
+                    keel::f64 *dst = col.doubleDataMut();
+                    const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
                     for (keel::usize r = 1; r < maxR; ++r) {
                         const auto &cell = grid[r][c];
-                        double d = nan;
+                        keel::f64 d = nan;
                         if (cell.present && !cell.isStr && !cell.text.empty() && !isMissingToken(cell.text))
                             tryParseCellDouble(cell.text, d);
                         dst[r - 1] = d;
@@ -4052,7 +4052,7 @@ void registerContainersRuntime(Engine &engine)
                 for (keel::usize i = 0; i < A.numel(); ++i) {
                     keel::String mapped;
                     if (A.isNumeric() || A.isLogical()) {
-                        double av = A.elemAsDouble(i);
+                        keel::f64 av = A.elemAsDouble(i);
                         for (keel::usize k = 0; k < nset; ++k) {
                             if (vset.elemAsDouble(k) == av) {
                                 mapped = cnames[k].clone();
@@ -4138,7 +4138,7 @@ void registerContainersRuntime(Engine &engine)
                 const Value &col = p->cols[j];
                 keel::String ref = keel::format("{}{}", colLetters(j), rowNum);
                 if (col.isNumeric()) {
-                    double d = col.elemAsDouble(r);
+                    keel::f64 d = col.elemAsDouble(r);
                     if (std::isfinite(d))
                         keel::format_into(sh, "<c r=\"{}\"><v>%.15g</v></c>", ref, d);
                 } else {
@@ -4300,7 +4300,7 @@ void registerContainersRuntime(Engine &engine)
                         if (j > 0) os.push_back(',');
                         const Value &col = p->cols[j];
                         if (col.isNumeric()) {
-                            double d = col.elemAsDouble(r);
+                            keel::f64 d = col.elemAsDouble(r);
                             if (!std::isnan(d)) keel::format_into(os, "%.15g", d);
                         } else if (col.isString()) {
                             os.append(col.stringElem(r).as_ref());
@@ -4355,7 +4355,7 @@ void registerContainersRuntime(Engine &engine)
             keel::usize rMin = maxR, rMax = 0, cMin = maxC, cMax = 0;
             for (keel::usize r = 0; r < maxR; ++r) {
                 for (keel::usize c = 0; c < maxC; ++c) {
-                    double d = 0.0;
+                    keel::f64 d = 0.0;
                     if (grid[r][c].present && !grid[r][c].isStr
                         && tryParseCellDouble(grid[r][c].text, d)) {
                         rMin = std::min(rMin, r);
@@ -4368,12 +4368,12 @@ void registerContainersRuntime(Engine &engine)
             if (rMin < rMax && cMin < cMax) {
                 keel::usize nr = rMax - rMin, nc = cMax - cMin;
                 Value num = Value::matrix(nr, nc, ValueType::DOUBLE, mr);
-                double *dst = num.doubleDataMut();
-                const double nan = std::numeric_limits<double>::quiet_NaN();
+                keel::f64 *dst = num.doubleDataMut();
+                const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
                 for (keel::usize c = 0; c < nc; ++c) {
                     for (keel::usize r = 0; r < nr; ++r) {
                         const auto &cell = grid[rMin + r][cMin + c];
-                        double d = nan;
+                        keel::f64 d = nan;
                         if (cell.present && !cell.isStr)
                             tryParseCellDouble(cell.text, d);
                         dst[c * nr + r] = d;
@@ -4387,7 +4387,7 @@ void registerContainersRuntime(Engine &engine)
                 Value txt = Value::cell(maxR, maxC, mr);
                 for (keel::usize c = 0; c < maxC; ++c)
                     for (keel::usize r = 0; r < maxR; ++r) {
-                        double d = 0.0;
+                        keel::f64 d = 0.0;
                         bool isNum = grid[r][c].present && !grid[r][c].isStr
                                   && tryParseCellDouble(grid[r][c].text, d);
                         txt.cellAt(c * maxR + r) = Value::fromString(
@@ -4397,11 +4397,11 @@ void registerContainersRuntime(Engine &engine)
             }
             if (nargout >= 3 && outs.size() >= 3) {
                 Value rawOut = Value::cell(maxR, maxC, mr);
-                const double nan = std::numeric_limits<double>::quiet_NaN();
+                const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
                 for (keel::usize c = 0; c < maxC; ++c)
                     for (keel::usize r = 0; r < maxR; ++r) {
                         const auto &cell = grid[r][c];
-                        double d = 0.0;
+                        keel::f64 d = 0.0;
                         if (!cell.present || cell.text.empty())
                             rawOut.cellAt(c * maxR + r) = Value::scalar(nan, mr);
                         else if (!cell.isStr && tryParseCellDouble(cell.text, d))
@@ -4426,8 +4426,8 @@ void registerContainersRuntime(Engine &engine)
             argcheck::checkNargin(args.size(), 1, 8, "fitlm");
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
-            keel::Array<keel::Array<double>> Xcols(alloc);
-            keel::Array<double> yvec(alloc);
+            keel::Array<keel::Array<keel::f64>> Xcols(alloc);
+            keel::Array<keel::f64> yvec(alloc);
             keel::Array<keel::String> predNames(alloc);
             keel::usize N = 0;
 
@@ -4471,7 +4471,7 @@ void registerContainersRuntime(Engine &engine)
                 for (int pi : pIdx) {
                     predNames.push_back(tp->varNames[keel::as<keel::usize>(pi)].clone(alloc));
                     const Value &xc = tp->cols[keel::as<keel::usize>(pi)];
-                    keel::Array<double> col(alloc);
+                    keel::Array<keel::f64> col(alloc);
                     col.assign(N, 0.0);
                     for (keel::usize i = 0; i < N && i < xc.numel(); ++i)
                         col[i] = xc.elemAsDouble(i);
@@ -4487,7 +4487,7 @@ void registerContainersRuntime(Engine &engine)
                     yvec[i] = Y.elemAsDouble(i);
                 keel::usize xr = X.dims().rows(), xc = X.dims().cols();
                 if (xr == 1 && xc == N && N > 1) {
-                    keel::Array<double> col(alloc);
+                    keel::Array<keel::f64> col(alloc);
                     col.resize(N);
                     for (keel::usize i = 0; i < N; ++i)
                         col[i] = X.elemAsDouble(i);
@@ -4495,7 +4495,7 @@ void registerContainersRuntime(Engine &engine)
                     predNames.push_back(keel::String::from("x1", alloc));
                 } else {
                     for (keel::usize j = 0; j < xc; ++j) {
-                        keel::Array<double> col(alloc);
+                        keel::Array<keel::f64> col(alloc);
                         col.assign(N, 0.0);
                         for (keel::usize i = 0; i < N && i < xr; ++i)
                             col[i] = X.elemAsDouble(j * xr + i);
@@ -4507,29 +4507,29 @@ void registerContainersRuntime(Engine &engine)
 
             const keel::usize P = Xcols.size();
             const keel::usize K = P + 1;
-            keel::Array<double> XtX(alloc);
+            keel::Array<keel::f64> XtX(alloc);
             XtX.assign(K * K, 0.0);
-            keel::Array<double> Xty(alloc);
+            keel::Array<keel::f64> Xty(alloc);
             Xty.assign(K, 0.0);
             for (keel::usize i = 0; i < N; ++i) {
-                double yi = yvec[i];
+                keel::f64 yi = yvec[i];
                 if (!std::isfinite(yi)) continue;
                 bool ok = true;
                 for (keel::usize j = 0; j < P; ++j)
                     if (!std::isfinite(Xcols[j][i])) { ok = false; break; }
                 if (!ok) continue;
                 for (keel::usize r = 0; r < K; ++r) {
-                    double xr = (r == 0) ? 1.0 : Xcols[r - 1][i];
+                    keel::f64 xr = (r == 0) ? 1.0 : Xcols[r - 1][i];
                     Xty[r] += xr * yi;
                     for (keel::usize c = 0; c < K; ++c) {
-                        double xc = (c == 0) ? 1.0 : Xcols[c - 1][i];
+                        keel::f64 xc = (c == 0) ? 1.0 : Xcols[c - 1][i];
                         XtX[r * K + c] += xr * xc;
                     }
                 }
             }
             // Augment [XtX | I | Xty] to solve for beta and (XtX)^-1 simultaneously
             const keel::usize W = 2 * K + 1;
-            keel::Array<double> aug(alloc);
+            keel::Array<keel::f64> aug(alloc);
             aug.assign(K * W, 0.0);
             for (keel::usize r = 0; r < K; ++r) {
                 for (keel::usize c = 0; c < K; ++c)
@@ -4539,28 +4539,28 @@ void registerContainersRuntime(Engine &engine)
             }
             for (keel::usize p = 0; p < K; ++p) {
                 keel::usize piv = p;
-                double maxA = keel::abs(aug[p * W + p]);
+                keel::f64 maxA = keel::abs(aug[p * W + p]);
                 for (keel::usize r = p + 1; r < K; ++r) {
-                    double a = keel::abs(aug[r * W + p]);
+                    keel::f64 a = keel::abs(aug[r * W + p]);
                     if (a > maxA) { maxA = a; piv = r; }
                 }
                 if (piv != p) {
                     for (keel::usize c = 0; c < W; ++c)
                         std::swap(aug[p * W + c], aug[piv * W + c]);
                 }
-                double diag = aug[p * W + p];
+                keel::f64 diag = aug[p * W + p];
                 if (keel::abs(diag) < 1e-15) continue;
                 for (keel::usize c = p; c < W; ++c)
                     aug[p * W + c] /= diag;
                 for (keel::usize r = 0; r < K; ++r) {
                     if (r == p) continue;
-                    double f = aug[r * W + p];
+                    keel::f64 f = aug[r * W + p];
                     if (f == 0.0) continue;
                     for (keel::usize c = p; c < W; ++c)
                         aug[r * W + c] -= f * aug[p * W + c];
                 }
             }
-            keel::Array<double> beta(alloc), invDiag(alloc);
+            keel::Array<keel::f64> beta(alloc), invDiag(alloc);
             beta.assign(K, 0.0);
             invDiag.assign(K, 0.0);
             for (keel::usize r = 0; r < K; ++r) {
@@ -4570,28 +4570,28 @@ void registerContainersRuntime(Engine &engine)
 
             Value fitted = Value::matrix(N, 1, ValueType::DOUBLE, mr);
             Value rawRes = Value::matrix(N, 1, ValueType::DOUBLE, mr);
-            double *fitPtr = fitted.doubleDataMut();
-            double *resPtr = rawRes.doubleDataMut();
-            double ySum = 0.0;
+            keel::f64 *fitPtr = fitted.doubleDataMut();
+            keel::f64 *resPtr = rawRes.doubleDataMut();
+            keel::f64 ySum = 0.0;
             for (keel::usize i = 0; i < N; ++i) ySum += yvec[i];
-            double yMean = (N > 0) ? (ySum / keel::as<double>(N)) : 0.0;
-            double sse = 0.0, sst = 0.0;
+            keel::f64 yMean = (N > 0) ? (ySum / keel::as<keel::f64>(N)) : 0.0;
+            keel::f64 sse = 0.0, sst = 0.0;
             for (keel::usize i = 0; i < N; ++i) {
-                double yh = beta[0];
+                keel::f64 yh = beta[0];
                 for (keel::usize j = 0; j < P; ++j)
                     yh += beta[j + 1] * Xcols[j][i];
-                double ri = yvec[i] - yh;
+                keel::f64 ri = yvec[i] - yh;
                 fitPtr[i] = yh;
                 resPtr[i] = ri;
                 sse += ri * ri;
-                double dy = yvec[i] - yMean;
+                keel::f64 dy = yvec[i] - yMean;
                 sst += dy * dy;
             }
-            double dfe = (N > K) ? keel::as<double>(N - K) : 1.0;
-            double mse = sse / dfe;
-            double r2Ord = (sst > 0.0) ? (1.0 - sse / sst) : 1.0;
-            double r2Adj = (sst > 0.0 && N > K && N > 1)
-                         ? (1.0 - (sse / dfe) / (sst / keel::as<double>(N - 1)))
+            keel::f64 dfe = (N > K) ? keel::as<keel::f64>(N - K) : 1.0;
+            keel::f64 mse = sse / dfe;
+            keel::f64 r2Ord = (sst > 0.0) ? (1.0 - sse / sst) : 1.0;
+            keel::f64 r2Adj = (sst > 0.0 && N > K && N > 1)
+                         ? (1.0 - (sse / dfe) / (sst / keel::as<keel::f64>(N - 1)))
                          : r2Ord;
 
             Value estV = Value::matrix(K, 1, ValueType::DOUBLE, mr);
@@ -4599,9 +4599,9 @@ void registerContainersRuntime(Engine &engine)
             Value tV   = Value::matrix(K, 1, ValueType::DOUBLE, mr);
             Value pV   = Value::matrix(K, 1, ValueType::DOUBLE, mr);
             for (keel::usize r = 0; r < K; ++r) {
-                double se = std::sqrt(mse * invDiag[r]);
-                double ts = (se > 0.0) ? (beta[r] / se) : 0.0;
-                double pv = std::erfc(keel::abs(ts) / std::sqrt(2.0));
+                keel::f64 se = std::sqrt(mse * invDiag[r]);
+                keel::f64 ts = (se > 0.0) ? (beta[r] / se) : 0.0;
+                keel::f64 pv = std::erfc(keel::abs(ts) / std::sqrt(2.0));
                 estV.doubleDataMut()[r] = beta[r];
                 seV.doubleDataMut()[r]  = se;
                 tV.doubleDataMut()[r]   = ts;
@@ -4633,7 +4633,7 @@ void registerContainersRuntime(Engine &engine)
             mdl.field("MSE")             = Value::scalar(mse, mr);
             mdl.field("RMSE")            = Value::scalar(std::sqrt(mse), mr);
             mdl.field("DFE")             = Value::scalar(dfe, mr);
-            mdl.field("NumObservations") = Value::scalar(keel::as<double>(N), mr);
+            mdl.field("NumObservations") = Value::scalar(keel::as<keel::f64>(N), mr);
             mdl.field("PredictorNames")  = std::move(pNamesCell);
             outs[0] = std::move(mdl);
         });
@@ -4651,12 +4651,12 @@ void registerContainersRuntime(Engine &engine)
             const Value &est = coefs.field("Estimate");
             const keel::usize K = est.numel();
             const keel::usize P = (K > 0) ? (K - 1) : 0;
-            const double b0 = (K > 0) ? est.elemAsDouble(0) : 0.0;
+            const keel::f64 b0 = (K > 0) ? est.elemAsDouble(0) : 0.0;
 
             if (const TablePayload *tp = tableCst(Xnew)) {
                 const keel::usize M = tp->nrows;
                 Value ypred = Value::matrix(M, 1, ValueType::DOUBLE, mr);
-                double *yp = ypred.doubleDataMut();
+                keel::f64 *yp = ypred.doubleDataMut();
                 for (keel::usize i = 0; i < M; ++i) yp[i] = b0;
                 const Value *pNames = mdl.hasField("PredictorNames") ? &mdl.field("PredictorNames") : nullptr;
                 for (keel::usize j = 0; j < P; ++j) {
@@ -4667,7 +4667,7 @@ void registerContainersRuntime(Engine &engine)
                         colIdx = keel::as<int>(j);
                     if (colIdx >= 0 && keel::as<keel::usize>(colIdx) < tp->width()) {
                         const Value &col = tp->cols[keel::as<keel::usize>(colIdx)];
-                        double bj = est.elemAsDouble(j + 1);
+                        keel::f64 bj = est.elemAsDouble(j + 1);
                         for (keel::usize i = 0; i < M && i < col.numel(); ++i)
                             yp[i] += bj * col.elemAsDouble(i);
                     }
@@ -4678,8 +4678,8 @@ void registerContainersRuntime(Engine &engine)
 
             if (P <= 1 && (Xnew.dims().rows() == 1 || Xnew.dims().cols() == 1)) {
                 Value ypred = Value::matrix(Xnew.dims().rows(), Xnew.dims().cols(), ValueType::DOUBLE, mr);
-                double *yp = ypred.doubleDataMut();
-                double b1 = (P == 1) ? est.elemAsDouble(1) : 0.0;
+                keel::f64 *yp = ypred.doubleDataMut();
+                keel::f64 b1 = (P == 1) ? est.elemAsDouble(1) : 0.0;
                 for (keel::usize i = 0; i < Xnew.numel(); ++i)
                     yp[i] = b0 + b1 * Xnew.elemAsDouble(i);
                 outs[0] = std::move(ypred);
@@ -4689,9 +4689,9 @@ void registerContainersRuntime(Engine &engine)
             const keel::usize M = Xnew.dims().rows();
             const keel::usize xc = Xnew.dims().cols();
             Value ypred = Value::matrix(M, 1, ValueType::DOUBLE, mr);
-            double *yp = ypred.doubleDataMut();
+            keel::f64 *yp = ypred.doubleDataMut();
             for (keel::usize i = 0; i < M; ++i) {
-                double s = b0;
+                keel::f64 s = b0;
                 for (keel::usize j = 0; j < P && j < xc; ++j)
                     s += est.elemAsDouble(j + 1) * Xnew.elemAsDouble(j * M + i);
                 yp[i] = s;

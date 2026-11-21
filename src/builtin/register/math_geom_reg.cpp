@@ -84,7 +84,7 @@ void boundary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (yv.numel() != n)
         throw Error("boundary: x and y must have the same numel",
                      0, 0, "boundary", "", "numkit:boundary:shape");
-    double shrink = 0.0;
+    keel::f64 shrink = 0.0;
     if (args.size() >= 3) shrink = args[2].toScalar();
     if (!std::isfinite(shrink)) shrink = 0.0;
     if (shrink < 0) shrink = 0;
@@ -140,7 +140,7 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     // convention). Reconstruct hull coordinates from the index vector K.
     auto &fm = ctx.engine->figureManager();
     fm.prepareForPlot();
-    const double *k = K.doubleData();
+    const keel::f64 *k = K.doubleData();
     const keel::usize m = K.numel();
     keel::String xs(ctx.engine->allocator());
     keel::String ys(ctx.engine->allocator());
@@ -186,7 +186,7 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
     // Determine bin edges.
     int nx = 10, ny = 10;
-    keel::Array<double> xedges(mr), yedges(mr);
+    keel::Array<keel::f64> xedges(mr), yedges(mr);
     if (args.size() == 3) {
         if (args[2].numel() == 1) {
             nx = ny = (int)args[2].toScalar();
@@ -217,11 +217,11 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
     // Compute auto-edges if explicit ones not given.
     if (xedges.empty() || yedges.empty()) {
-        double xmn = xv.elemAsDouble(0), xmx = xmn;
-        double ymn = yv.elemAsDouble(0), ymx = ymn;
+        keel::f64 xmn = xv.elemAsDouble(0), xmx = xmn;
+        keel::f64 ymn = yv.elemAsDouble(0), ymx = ymn;
         for (keel::usize i = 1; i < n; ++i) {
-            const double X = xv.elemAsDouble(i);
-            const double Y = yv.elemAsDouble(i);
+            const keel::f64 X = xv.elemAsDouble(i);
+            const keel::f64 Y = yv.elemAsDouble(i);
             if (std::isfinite(X)) {
                 if (X < xmn) xmn = X;
                 if (X > xmx) xmx = X;
@@ -311,10 +311,10 @@ void griddata_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         const keel::usize cols = xqIn.numel();
         xqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
         yqExpanded = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
-        double *xd = xqExpanded.doubleDataMut();
-        double *yd = yqExpanded.doubleDataMut();
+        keel::f64 *xd = xqExpanded.doubleDataMut();
+        keel::f64 *yd = yqExpanded.doubleDataMut();
         for (keel::usize c = 0; c < cols; ++c) {
-            const double xv = xqIn.elemAsDouble(c);
+            const keel::f64 xv = xqIn.elemAsDouble(c);
             for (keel::usize r = 0; r < rows; ++r) {
                 xd[c * rows + r] = xv;
                 yd[c * rows + r] = yqIn.elemAsDouble(r);
@@ -359,7 +359,7 @@ void matchpairs_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 {
     argcheck::checkNargin(args.size(), 1, 3, "matchpairs");
     argcheck::checkNargin(args.size(), 2, 3, "matchpairs");
-    const double cU = args[1].toScalar();
+    const keel::f64 cU = args[1].toScalar();
     keel::String mode = keel::String::from("min", ctx.engine->allocator());
     if (args.size() >= 3 && args[2].isChar())
         mode = args[2].toString();
@@ -389,12 +389,12 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     Value K = Value::matrix(nQ, 1, ValueType::DOUBLE, mr);
     Value D = (nargout >= 2) ? Value::matrix(nQ, 1, ValueType::DOUBLE, mr) : Value();
     for (keel::usize q = 0; q < nQ; ++q) {
-        double bestDistSq = std::numeric_limits<double>::infinity();
+        keel::f64 bestDistSq = std::numeric_limits<keel::f64>::infinity();
         keel::usize bestIdx = 1;
         for (keel::usize p = 0; p < nPts; ++p) {
-            double dsq = 0.0;
+            keel::f64 dsq = 0.0;
             for (keel::usize d = 0; d < nDim; ++d) {
-                const double diff = PQ.elemAsDouble(q + d * nQ) - P.elemAsDouble(p + d * nPts);
+                const keel::f64 diff = PQ.elemAsDouble(q + d * nQ) - P.elemAsDouble(p + d * nPts);
                 dsq += diff * diff;
             }
             if (dsq < bestDistSq) {
@@ -402,7 +402,7 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 bestIdx = p + 1;
             }
         }
-        K.doubleDataMut()[q] = keel::as<double>(bestIdx);
+        K.doubleDataMut()[q] = keel::as<keel::f64>(bestIdx);
         if (nargout >= 2)
             D.doubleDataMut()[q] = std::sqrt(bestDistSq);
     }

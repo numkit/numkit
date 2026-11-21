@@ -92,9 +92,9 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             }
             if (allDigits) {
                 result = Value::matrix(rows, 1, ValueType::DOUBLE, mr);
-                double *dd = result.doubleDataMut();
+                keel::f64 *dd = result.doubleDataMut();
                 for (keel::usize r = 0; r < rows; ++r)
-                    dd[r] = keel::as<double>(cd[r] - '0');
+                    dd[r] = keel::as<keel::f64>(cd[r] - '0');
                 ok = true;
             }
         }
@@ -589,7 +589,7 @@ void dec2base_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
 {
     argcheck::checkNargin(args.size(), 1, 3, "dec2base");
     argcheck::checkNargin(args.size(), 2, 3, "dec2base");
-    const double bv = argcheck::expectedReal(args[1], 2, "base", "dec2base");
+    const keel::f64 bv = argcheck::expectedReal(args[1], 2, "base", "dec2base");
     argcheck::expectedInteger(bv, 2, "base", "dec2base");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "dec2base");
     const int base = keel::as<int>(bv);
@@ -603,7 +603,7 @@ void base2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
 {
     argcheck::checkNargin(args.size(), 1, 2, "base2dec");
     argcheck::checkNargin(args.size(), 2, 2, "base2dec");
-    const double bv = argcheck::expectedReal(args[1], 2, "base", "base2dec");
+    const keel::f64 bv = argcheck::expectedReal(args[1], 2, "base", "base2dec");
     argcheck::expectedInteger(bv, 2, "base", "base2dec");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "base2dec");
     const int base = keel::as<int>(bv);
@@ -615,7 +615,7 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     argcheck::checkNargin(args.size(), 1, 2, "rat");
     auto *mr = ctx.engine->allocator();
     const Value &x = args[0];
-    const double user_tol = (args.size() >= 2 && !args[1].isEmpty())
+    const keel::f64 user_tol = (args.size() >= 2 && !args[1].isEmpty())
                             ? args[1].toScalar() : -1.0;  // -1 ⇒ defaultRatTol per element
 
     if (nargout <= 1) {
@@ -636,26 +636,26 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     Value D = dims.is3D()
         ? Value::matrix3d(dims.rows(), dims.cols(), dims.pages(), ValueType::DOUBLE, mr)
         : Value::matrix(dims.rows(), dims.cols(), ValueType::DOUBLE, mr);
-    double *Nd = N.doubleDataMut();
-    double *Dd = D.doubleDataMut();
+    keel::f64 *Nd = N.doubleDataMut();
+    keel::f64 *Dd = D.doubleDataMut();
     for (keel::usize i = 0; i < n; ++i) {
-        const double v = x.elemAsDouble(i);
+        const keel::f64 v = x.elemAsDouble(i);
         if (!std::isfinite(v)) {
             // MATLAB returns NaN/NaN for NaN input, ±Inf/0 for ±Inf? Empirically
             // [n, d] = rat(NaN) → n=NaN, d=NaN; [n, d] = rat(Inf) → n=Inf, d=1.
             if (std::isnan(v)) {
-                Nd[i] = std::numeric_limits<double>::quiet_NaN();
-                Dd[i] = std::numeric_limits<double>::quiet_NaN();
+                Nd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+                Dd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
             } else {
                 Nd[i] = v;  // ±Inf
                 Dd[i] = 1.0;
             }
             continue;
         }
-        const double tol = (user_tol > 0) ? user_tol : defaultRatTol(v);
+        const keel::f64 tol = (user_tol > 0) ? user_tol : defaultRatTol(v);
         const auto exp = ratExpansion(v, tol);
-        Nd[i] = keel::as<double>(exp.p);
-        Dd[i] = keel::as<double>(exp.q);
+        Nd[i] = keel::as<keel::f64>(exp.p);
+        Dd[i] = keel::as<keel::f64>(exp.q);
     }
     outs[0] = std::move(N);
     outs[1] = std::move(D);

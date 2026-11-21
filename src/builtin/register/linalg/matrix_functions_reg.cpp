@@ -42,7 +42,7 @@ void sqrtm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
 void expmv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 3, "expmv");
-    const double t = args[0].toScalar();
+    const keel::f64 t = args[0].toScalar();
     outs[0] = expmv(t, args[1], args[2], ctx.engine->allocator());
 }
 

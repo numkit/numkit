@@ -112,12 +112,12 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
     return false;
 }
 
-keel::usize toSubIndex(double v, keel::usize maxAllowed, const char *fn)
+keel::usize toSubIndex(keel::f64 v, keel::usize maxAllowed, const char *fn)
 {
     if (!std::isfinite(v) || v < 1.0)
         throw Error(keel::format("{}: subscripts must be positive integers", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subRange", fn));
-    const double rounded = std::round(v);
+    const keel::f64 rounded = std::round(v);
     if (keel::abs(v - rounded) > 1e-9)
         throw Error(keel::format("{}: subscripts must be integer-valued", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subInt", fn));
@@ -145,11 +145,11 @@ keel::Array<keel::usize> resolveOutShape(const Value &subs, const keel::usize *u
     if (N == 0) {
         return keel::Array<keel::usize>(std::max<keel::usize>(D, 1), 0, mr);
     }
-    const double *p = subs.doubleData();
+    const keel::f64 *p = subs.doubleData();
     for (keel::usize c = 0; c < D; ++c) {
-        double mx = 0.0;
+        keel::f64 mx = 0.0;
         for (keel::usize r = 0; r < N; ++r) {
-            const double v = p[c * N + r];
+            const keel::f64 v = p[c * N + r];
             if (v > mx) mx = v;
         }
         shape[c] = toSubIndex(mx, 0, fn);
@@ -160,7 +160,7 @@ keel::Array<keel::usize> resolveOutShape(const Value &subs, const keel::usize *u
 keel::usize linearIndexFromSubs(const Value &subs, keel::usize r, keel::usize N, keel::usize D,
                            const keel::usize *shape, const char *fn)
 {
-    const double *p = subs.doubleData();
+    const keel::f64 *p = subs.doubleData();
     keel::usize idx = 0;
     keel::usize stride = 1;
     for (keel::usize c = 0; c < D; ++c) {
@@ -181,14 +181,14 @@ Value allocOutput(const keel::usize *shape, keel::usize nShape, keel::Allocator 
                             ValueType::DOUBLE, mr);
 }
 
-inline double readVal(const Value &vals, keel::usize i, bool valIsScalar)
+inline keel::f64 readVal(const Value &vals, keel::usize i, bool valIsScalar)
 {
     return valIsScalar ? vals.toScalar() : vals.doubleData()[i];
 }
 
 Value accumarrayGeneral(const Value &subs, const Value &vals,
                         keel::ArrayRef<keel::usize> outShape, const Value &handle,
-                        double fillVal, CallContext &ctx,
+                        keel::f64 fillVal, CallContext &ctx,
                         keel::Allocator *mr)
 {
     const char *fn = "accumarray";
@@ -211,7 +211,7 @@ Value accumarrayGeneral(const Value &subs, const Value &vals,
     if (shape.size() < D) shape.resize(D, 1);
     Value out = allocOutput(shape.data(), shape.size(), mr);
     const keel::usize total = out.numel();
-    double *dst = out.doubleDataMut();
+    keel::f64 *dst = out.doubleDataMut();
     if (total == 0) return out;
 
     auto lins = keel::Array<keel::usize>(N, scratch.allocator());
@@ -222,7 +222,7 @@ Value accumarrayGeneral(const Value &subs, const Value &vals,
     }
     auto off = keel::Array<keel::usize>(total + 1, 0, scratch.allocator());
     for (keel::usize i = 0; i < total; ++i) off[i + 1] = off[i] + cnt[i];
-    auto ordered = keel::Array<double>(N, scratch.allocator());
+    auto ordered = keel::Array<keel::f64>(N, scratch.allocator());
     auto cur = keel::Array<keel::usize>(total, 0, scratch.allocator());
     for (keel::usize r = 0; r < N; ++r) {
         const keel::usize c = lins[r];
@@ -252,9 +252,9 @@ keel::Array<keel::usize> parseSizeArg(const Value &sz, keel::Allocator *mr)
                      0, 0, "accumarray", "", "numkit:accumarray:sizeType");
     const keel::usize k = sz.numel();
     shape.resize(k);
-    const double *p = sz.doubleData();
+    const keel::f64 *p = sz.doubleData();
     for (keel::usize i = 0; i < k; ++i) {
-        const double v = p[i];
+        const keel::f64 v = p[i];
         if (!std::isfinite(v) || v < 0)
             throw Error("accumarray: sz entries must be non-negative integers",
                          0, 0, "accumarray", "", "numkit:accumarray:sizeRange");
@@ -286,7 +286,7 @@ void accumarray_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         if (!tryParseReducer(args[3], op)) customFn = &args[3];
     }
 
-    double fillVal = 0.0;
+    keel::f64 fillVal = 0.0;
     if (args.size() >= 5 && !args[4].isEmpty()) {
         if (!args[4].isScalar())
             throw Error("accumarray: fillval must be a scalar",
@@ -417,13 +417,13 @@ void register_datafun(Engine &engine) {
             // NaN if no positive element (MATLAB).
             const keel::usize rows = v.dims().rows(), cols = v.dims().cols();
             auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
-            const double *p = v.doubleData();
+            const keel::f64 *p = v.doubleData();
             for (keel::usize j = 0; j < cols; ++j) {
-                double best = std::nan("");
+                keel::f64 best = std::nan("");
                 for (keel::usize i = 0; i < rows; ++i) {
-                    double val = p[i + j * rows];
+                    keel::f64 val = p[i + j * rows];
                     if (val > 0.5) {
-                        best = keel::as<double>(i + 1);
+                        best = keel::as<keel::f64>(i + 1);
                         break;
                     }
                 }
@@ -464,12 +464,12 @@ void register_datafun(Engine &engine) {
                     outs[0] = std::move(Z);
                 } else {
                     Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
-                    double *zd = Z.doubleDataMut();
+                    keel::f64 *zd = Z.doubleDataMut();
                     for (keel::usize q2 = 0; q2 < Q; ++q2) {
                         for (keel::usize q1 = 0; q1 < Q; ++q1) {
-                            double acc = 0.0;
+                            keel::f64 acc = 0.0;
                             for (keel::usize r = 0; r < R; ++r) {
-                                const double diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
+                                const keel::f64 diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
                                 acc += diff * diff;
                             }
                             zd[q1 + q2 * Q] = std::sqrt(acc);
@@ -508,12 +508,12 @@ void register_datafun(Engine &engine) {
                 outs[0] = std::move(Z);
             } else {
                 Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
-                double *zd = Z.doubleDataMut();
+                keel::f64 *zd = Z.doubleDataMut();
                 for (keel::usize q = 0; q < Q; ++q) {
                     for (keel::usize s = 0; s < S; ++s) {
-                        double acc = 0.0;
+                        keel::f64 acc = 0.0;
                         for (keel::usize r = 0; r < R; ++r) {
-                            const double diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
+                            const keel::f64 diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
                             acc += diff * diff;
                         }
                         zd[s + q * S] = std::sqrt(acc);
@@ -626,7 +626,7 @@ void register_datafun(Engine &engine) {
                 const keel::usize n = args[1].numel();
                 sz.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
-                    const double d = args[1].elemAsDouble(i);
+                    const keel::f64 d = args[1].elemAsDouble(i);
                     if (d <= 0 || d != std::floor(d))
                         throw Error("fftn: size entries must be positive integers",
                                     0, 0, "fftn", "", "numkit:fftn:badSize");
@@ -645,7 +645,7 @@ void register_datafun(Engine &engine) {
                 const keel::usize n = args[1].numel();
                 sz.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
-                    const double d = args[1].elemAsDouble(i);
+                    const keel::f64 d = args[1].elemAsDouble(i);
                     if (d <= 0 || d != std::floor(d))
                         throw Error("ifftn: size entries must be positive integers",
                                     0, 0, "ifftn", "", "numkit:ifftn:badSize");
@@ -725,9 +725,9 @@ void register_datafun(Engine &engine) {
                 const keel::usize m = args[0].numel();
                 const keel::usize n = args[1].numel();
                 Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
-                double *kd = k.doubleDataMut();
+                keel::f64 *kd = k.doubleDataMut();
                 for (keel::usize c = 0; c < n; ++c) {
-                    const double vc = args[1].elemAsDouble(c);
+                    const keel::f64 vc = args[1].elemAsDouble(c);
                     for (keel::usize r = 0; r < m; ++r)
                         kd[r + c * m] = args[0].elemAsDouble(r) * vc;
                 }

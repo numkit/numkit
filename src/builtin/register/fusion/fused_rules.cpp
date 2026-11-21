@@ -122,7 +122,7 @@ bool isFusibleArray(const Value &v) {
 // (the coefficient → scale) and one real-double array of >= kFusionMinElems
 // (→ x). Bind them; return false (decline → fall back) otherwise. This is what
 // resolves `a.*x` vs `x.*a` at runtime without the matcher guessing.
-bool bindAffineProduct(const Value &c0, const Value &c1, double &scale,
+bool bindAffineProduct(const Value &c0, const Value &c1, keel::f64 &scale,
                        const Value *&x) {
     auto isArr = [](const Value &v) {
         return v.type() == ValueType::DOUBLE && !v.isComplex() &&
@@ -250,9 +250,9 @@ keel::Optional<keel::Array<const ASTNode *>> matchAffineSub(const ASTNode *node)
 // round), so each path is bit-identical to its per-op spelling (negation and
 // add/sub are the same exact IEEE op, both rounding twice overall).
 bool execAffine(const Value *ops, keel::usize n, Value &out,
-                keel::Allocator *mr, double bSign) {
+                keel::Allocator *mr, keel::f64 bSign) {
     if (n != 3) return false;
-    double scale = 0.0;
+    keel::f64 scale = 0.0;
     const Value *x = nullptr;
     if (bindAffineProduct(ops[0], ops[1], scale, x)) {
         const Value &leaf = ops[2];
@@ -312,9 +312,9 @@ keel::Optional<keel::Array<const ASTNode *>> matchAxpby(const ASTNode *node,
 // the additive operator: out = a*x + (bSign*b)*y, bit-identical to a.*x ± b.*y
 // ((-b)*y = -(b*y) exactly, so the sign fold does not change any rounding).
 bool execAxpby(const Value *ops, keel::usize n, Value &out,
-               keel::Allocator *mr, double bSign) {
+               keel::Allocator *mr, keel::f64 bSign) {
     if (n != 4) return false;
-    double a = 0.0, b = 0.0;
+    keel::f64 a = 0.0, b = 0.0;
     const Value *x = nullptr, *y = nullptr;
     if (bindAffineProduct(ops[0], ops[1], a, x) &&
         bindAffineProduct(ops[2], ops[3], b, y) &&
@@ -362,7 +362,7 @@ keel::Optional<keel::Array<const ASTNode *>> matchNegProd(const ASTNode *node) {
 bool execNegProd(const Value *ops, keel::usize n, Value &out,
                  keel::Allocator *mr) {
     if (n != 3) return false;
-    double coef = 0.0;
+    keel::f64 coef = 0.0;
     const Value *p = nullptr;
     if (bindAffineProduct(ops[1], ops[2], coef, p)) {
         const Value &leaf = ops[0];
@@ -487,8 +487,8 @@ bool execShiftScale(const Value *ops, keel::usize n, Value &out,
 enum class InnerKind;
 keel::Optional<keel::Array<const ASTNode *>> matchInner(const ASTNode *node,
                                                         InnerKind kind);
-bool bindInner(const Value *ops, keel::usize n, InnerKind kind, double &scale,
-               double &offset, const Value *&x);
+bool bindInner(const Value *ops, keel::usize n, InnerKind kind, keel::f64 &scale,
+               keel::f64 &offset, const Value *&x);
 bool bindInnerCx(const Value *ops, keel::usize n, InnerKind kind, keel::c64 &scale,
                  keel::c64 &offset, bool &affine, const Value *&x);
 
@@ -517,7 +517,7 @@ bool execAffineClamp(const Value *ops, keel::usize n, Value &out,
     if (n < 3) return false;                  // lo, hi, + >=1 inner operand
     const Value &lo = ops[0], &hi = ops[1];
     if (!isRealDoubleScalar(lo) || !isRealDoubleScalar(hi)) return false;
-    double scale = 0.0, offset = 0.0;
+    keel::f64 scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (!bindInner(&ops[2], n - 2, kind, scale, offset, x)) return false;
 
@@ -558,7 +558,7 @@ keel::Optional<keel::Array<const ASTNode *>> matchAbsDiff(const ASTNode *node) {
 // abs(<inner>) → |scale*x + offset|, inner decoded by bindInner.
 bool execAbsAffine(const Value *ops, keel::usize n, Value &out,
                    keel::Allocator *mr, InnerKind kind) {
-    double scale = 0.0, offset = 0.0;
+    keel::f64 scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
         out = ops::createLike(*x, ValueType::DOUBLE, mr);
@@ -678,8 +678,8 @@ keel::Optional<keel::Array<const ASTNode *>> matchInner(const ASTNode *node,
 // Decode evaluated operands for `kind` into (scale, offset, x). Every mapping is
 // bit-exact with the per-op spelling: ×1/+0 are exact, ±c is exact negation,
 // and `c-x` → scale -1 reproduces `c - x` exactly (negation + commute).
-bool bindInner(const Value *ops, keel::usize n, InnerKind kind, double &scale,
-               double &offset, const Value *&x) {
+bool bindInner(const Value *ops, keel::usize n, InnerKind kind, keel::f64 &scale,
+               keel::f64 &offset, const Value *&x) {
     switch (kind) {
         case InnerKind::ProductAdd:
         case InnerKind::ProductSub: {
@@ -803,7 +803,7 @@ keel::Optional<keel::Array<const ASTNode *>> matchDivArg(const ASTNode *node) {
 
 // Decode → (sub, div, x) for the (x-sub)/div kernel. `(c-x)/d` → (x-c)/(-d)
 // (exact: sign moves through the division).
-bool bindDivInner(const Value *ops, keel::usize n, double &sub, double &div,
+bool bindDivInner(const Value *ops, keel::usize n, keel::f64 &sub, keel::f64 &div,
                   const Value *&x) {
     if (n == 3) {
         const Value &A = ops[0], &B = ops[1], &d = ops[2];
@@ -849,7 +849,7 @@ bool bindDivInnerCx(const Value *ops, keel::usize n, keel::c64 &sub, keel::c64 &
 }
 
 // Any (x[i]-sub)/div < 0 — the decline predicate for sqrt/log of a div-inner.
-bool shiftDivAnyNegative(const double *x, double sub, double div, keel::usize n) {
+bool shiftDivAnyNegative(const keel::f64 *x, keel::f64 sub, keel::f64 div, keel::usize n) {
     for (keel::usize i = 0; i < n; ++i)
         if ((x[i] - sub) / div < 0.0) return true;
     return false;
@@ -875,7 +875,7 @@ bool execAffineClampDiv(const Value *ops, keel::usize n, Value &out,
     if (n < 3) return false;                   // lo, hi, + >=1 div-arg operand
     const Value &lo = ops[0], &hi = ops[1];
     if (!isRealDoubleScalar(lo) || !isRealDoubleScalar(hi)) return false;
-    double sub = 0.0, div = 0.0;
+    keel::f64 sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (!bindDivInner(&ops[2], n - 2, sub, div, x)) return false;
     out = ops::createLike(*x, ValueType::DOUBLE, mr);
@@ -901,7 +901,7 @@ const ASTNode *unaryCallArg(const ASTNode *node, const char *fname) {
 // True if any scale*x[i]+offset is < 0 (the affine the kernel will compute).
 // Used to decline sqrt of an affine that goes negative — MATLAB promotes the
 // whole array to complex there, which the per-op fallback reproduces.
-bool affineAnyNegative(const double *x, double scale, double offset,
+bool affineAnyNegative(const keel::f64 *x, keel::f64 scale, keel::f64 offset,
                        keel::usize n) {
     for (keel::usize i = 0; i < n; ++i)
         if (scale * x[i] + offset < 0.0) return true;
@@ -911,7 +911,7 @@ bool affineAnyNegative(const double *x, double scale, double offset,
 bool execUnaryAffine(const Value *ops, keel::usize n, Value &out,
                      keel::Allocator *mr, InnerKind kind,
                      numkit::ops::UnaryAffineFn fn) {
-    double scale = 0.0, offset = 0.0;
+    keel::f64 scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
         const keel::usize N = x->numel();
@@ -947,7 +947,7 @@ bool execUnaryAffine(const Value *ops, keel::usize n, Value &out,
 // f((x-sub)/div) for f ∈ {sqrt, floor, ceil}. sqrt declines on a negative inner.
 bool execUnaryDiv(const Value *ops, keel::usize n, Value &out,
                   keel::Allocator *mr, numkit::ops::UnaryAffineFn fn) {
-    double sub = 0.0, div = 0.0;
+    keel::f64 sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
         const keel::usize N = x->numel();
@@ -1022,7 +1022,7 @@ keel::Optional<keel::Array<const ASTNode *>> matchSqrtSumSq(const ASTNode *node)
 
 bool execSqAffine(const Value *ops, keel::usize n, Value &out,
                   keel::Allocator *mr, InnerKind kind) {
-    double scale = 0.0, offset = 0.0;
+    keel::f64 scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
         out = ops::createLike(*x, ValueType::DOUBLE, mr);
@@ -1101,7 +1101,7 @@ bool execSqDiff(const Value *ops, keel::usize n, Value &out,
 // rejects `./`), so sq_div never collides with sq_affine/sq_diff.
 bool execSqDivInner(const Value *ops, keel::usize n, Value &out,
                     keel::Allocator *mr) {
-    double sub = 0.0, div = 0.0;
+    keel::f64 sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
         out = ops::createLike(*x, ValueType::DOUBLE, mr);
@@ -1126,7 +1126,7 @@ bool execSqDivInner(const Value *ops, keel::usize n, Value &out,
 // asPureSub, so abs_div never collides with abs_affine / abs_diff.
 bool execAbsDivInner(const Value *ops, keel::usize n, Value &out,
                      keel::Allocator *mr) {
-    double sub = 0.0, div = 0.0;
+    keel::f64 sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
         out = ops::createLike(*x, ValueType::DOUBLE, mr);
@@ -1237,7 +1237,7 @@ bool execSoftThreshold(const Value *ops, keel::usize n, Value &out,
 // nk's promotion predicates exactly (same comparisons on the same value, so
 // the decline boundary aligns with where the per-op path goes complex). NaN
 // fails every comparison → stays "in domain" → f(NaN)=NaN, matching per-op.
-bool transOutsideRealDomain(numkit::ops::TransAffineFn fn, double v) {
+bool transOutsideRealDomain(numkit::ops::TransAffineFn fn, keel::f64 v) {
     using TF = numkit::ops::TransAffineFn;
     switch (fn) {
         case TF::Log: case TF::Log2: case TF::Log10: return v < 0.0;
@@ -1261,16 +1261,16 @@ bool transDomainRestricted(numkit::ops::TransAffineFn fn) {
 }
 
 // Any scale*x[i]+offset outside f's real domain (the affine the kernel computes).
-bool affineAnyOutsideDomain(numkit::ops::TransAffineFn fn, double scale,
-                            double offset, const double *x, keel::usize n) {
+bool affineAnyOutsideDomain(numkit::ops::TransAffineFn fn, keel::f64 scale,
+                            keel::f64 offset, const keel::f64 *x, keel::usize n) {
     for (keel::usize i = 0; i < n; ++i)
         if (transOutsideRealDomain(fn, scale * x[i] + offset)) return true;
     return false;
 }
 
 // Any (x[i]-sub)/div outside f's real domain.
-bool shiftDivAnyOutsideDomain(numkit::ops::TransAffineFn fn, double sub,
-                              double div, const double *x, keel::usize n) {
+bool shiftDivAnyOutsideDomain(numkit::ops::TransAffineFn fn, keel::f64 sub,
+                              keel::f64 div, const keel::f64 *x, keel::usize n) {
     for (keel::usize i = 0; i < n; ++i)
         if (transOutsideRealDomain(fn, (x[i] - sub) / div)) return true;
     return false;
@@ -1279,7 +1279,7 @@ bool shiftDivAnyOutsideDomain(numkit::ops::TransAffineFn fn, double sub,
 bool execTransAffine(const Value *ops, keel::usize n, Value &out,
                      keel::Allocator *mr, InnerKind kind,
                      numkit::ops::TransAffineFn fn) {
-    double scale = 0.0, offset = 0.0;
+    keel::f64 scale = 0.0, offset = 0.0;
     const Value *x = nullptr;
     if (bindInner(ops, n, kind, scale, offset, x)) {
         if (transDomainRestricted(fn) &&
@@ -1310,7 +1310,7 @@ bool execTransAffine(const Value *ops, keel::usize n, Value &out,
 // inner (MATLAB complex). Mirrors fusedTransAffine's bit-exactness.
 bool execTransDiv(const Value *ops, keel::usize n, Value &out,
                   keel::Allocator *mr, numkit::ops::TransAffineFn fn) {
-    double sub = 0.0, div = 0.0;
+    keel::f64 sub = 0.0, div = 0.0;
     const Value *x = nullptr;
     if (bindDivInner(ops, n, sub, div, x)) {
         if (transDomainRestricted(fn) &&

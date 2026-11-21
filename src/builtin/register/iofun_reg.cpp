@@ -78,7 +78,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
             return;
         }
         if (v.numel() == 1) {
-            double d = v.elemAsDouble(0);
+            keel::f64 d = v.elemAsDouble(0);
             if (!std::isfinite(d)) {
                 out.append("null");
                 return;
@@ -94,7 +94,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
             out.push_back('[');
             for (keel::usize i = 0; i < v.numel(); ++i) {
                 if (i > 0) out.push_back(',');
-                double d = v.elemAsDouble(i);
+                keel::f64 d = v.elemAsDouble(i);
                 if (!std::isfinite(d)) out.append("null");
                 else {
                     char buf[64];
@@ -111,7 +111,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
             out.push_back('[');
             for (keel::usize c = 0; c < C; ++c) {
                 if (c > 0) out.push_back(',');
-                double d = v.elemAsDouble(r + c * R);
+                keel::f64 d = v.elemAsDouble(r + c * R);
                 if (!std::isfinite(d)) out.append("null");
                 else {
                     char buf[64];
@@ -179,7 +179,7 @@ struct JsonParser {
         while (pos < s.size() && (keel::is_ascii_digit(s[pos]) || s[pos] == '-' || s[pos] == '+' || s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E')) {
             ++pos;
         }
-        double d = keel::parse_f64(s.substr(start, pos - start)).value_or(0.0);
+        keel::f64 d = keel::parse_f64(s.substr(start, pos - start)).value_or(0.0);
         return Value::scalar(d, mr);
     }
 

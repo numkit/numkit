@@ -235,9 +235,9 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             StrBuf sx, sy, sz;
             sx << '['; sy << '['; sz << '[';
             for (keel::usize i = 0; i < N; ++i) {
-                const double x = X.elemAsDouble(i);
-                const double y = Y.elemAsDouble(i);
-                const double z = Z.elemAsDouble(i);
+                const keel::f64 x = X.elemAsDouble(i);
+                const keel::f64 y = Y.elemAsDouble(i);
+                const keel::f64 z = Z.elemAsDouble(i);
                 if (i > 0) { sx << ",null,"; sy << ",null,"; sz << ",null,"; }
                 sx << x << ',' << x;
                 sy << y << ',' << y;
@@ -367,7 +367,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             //   area(x, Y, base)— optional baseline scalar
             const Value *xData = nullptr;
             const Value *yData = nullptr;
-            double baseline = 0.0;
+            keel::f64 baseline = 0.0;
             bool hasBase = false;
             if (nData == 1) {
                 yData = &args[0];
@@ -424,14 +424,14 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             // the topmost band (largest cumulative) is drawn first
             // and gets overdrawn from below — yielding visible bands
             // for c = Yc-1, Yc-2, ..., 0.
-            keel::Array<double> S;
+            keel::Array<keel::f64> S;
             S.resize(Yr * Yc, 0.0);
-            keel::Array<double> Ybuf;
+            keel::Array<keel::f64> Ybuf;
             Ybuf.resize(yData->numel());
             for (keel::usize i = 0; i < Ybuf.size(); ++i) Ybuf[i] = yData->elemAsDouble(i);
-            const double *Yp = Ybuf.data();
+            const keel::f64 *Yp = Ybuf.data();
             for (keel::usize r = 0; r < Yr; ++r) {
-                double acc = 0;
+                keel::f64 acc = 0;
                 for (keel::usize c = 0; c < Yc; ++c) {
                     acc += Yp[c * Yr + r];   // column-major
                     S[r * Yc + c] = acc;
@@ -519,7 +519,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             return;
         }
         const Value &fh = args[0];
-        double a = -5, b = 5;
+        keel::f64 a = -5, b = 5;
         if (args.size() >= 2 && args[1].numel() >= 2) {
             a = args[1].elemAsDouble(0);
             b = args[1].elemAsDouble(1);
@@ -530,7 +530,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         StrBuf xs, ys;
         xs << '['; ys << '[';
         for (int i = 0; i < N; ++i) {
-            const double x = a + (b - a) * i / (double)(N - 1);
+            const keel::f64 x = a + (b - a) * i / (keel::f64)(N - 1);
             Value xv = Value::scalar(x, mr);
             keel::StaticArray<Value, 1> argv{ xv };
             Value res;
@@ -540,8 +540,8 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             } catch (...) {
                 continue;       // f(x) blew up at this sample; skip
             }
-            const double yval = res.numel() >= 1 ? res.elemAsDouble(0) : std::nan("");
-            const double y = std::isfinite(yval) ? yval : std::nan("");
+            const keel::f64 yval = res.numel() >= 1 ? res.elemAsDouble(0) : std::nan("");
+            const keel::f64 y = std::isfinite(yval) ? yval : std::nan("");
             if (i) { xs << ','; ys << ','; }
             xs << x;
             if (std::isfinite(y)) ys << y;
@@ -582,19 +582,19 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // fcontour / fsurf / fmesh — sample f(x, y) on a grid then route
     // through the existing contour / surf paths. We stitch a Z matrix
     // value via Value::matrix and proxy the call.
-    auto sampleGrid = [](const Value &fh, double xa, double xb,
-                          double ya, double yb, int N,
+    auto sampleGrid = [](const Value &fh, keel::f64 xa, keel::f64 xb,
+                          keel::f64 ya, keel::f64 yb, int N,
                           GraphicsContext &gc) {
         auto *mr = gc.mr;
         Value Z = Value::matrix((keel::usize)N, (keel::usize)N, ValueType::DOUBLE, mr);
         for (int i = 0; i < N; ++i) {
-            const double y = ya + (yb - ya) * i / (double)(N - 1);
+            const keel::f64 y = ya + (yb - ya) * i / (keel::f64)(N - 1);
             for (int j = 0; j < N; ++j) {
-                const double x = xa + (xb - xa) * j / (double)(N - 1);
+                const keel::f64 x = xa + (xb - xa) * j / (keel::f64)(N - 1);
                 Value xv = Value::scalar(x, mr);
                 Value yv = Value::scalar(y, mr);
                 keel::StaticArray<Value, 2> argv{ xv, yv };
-                double r = std::nan("");
+                keel::f64 r = std::nan("");
                 try {
                     Value res = gc.callHandle(fh,
                         keel::ArrayRef<Value>(argv.data(), 2));
@@ -613,7 +613,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            double xa = -5, xb = 5, ya = -5, yb = 5;
+            keel::f64 xa = -5, xb = 5, ya = -5, yb = 5;
             if (args.size() >= 2 && args[1].numel() >= 4) {
                 xa = args[1].elemAsDouble(0);
                 xb = args[1].elemAsDouble(1);
@@ -630,9 +630,9 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
             Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
             for (int j = 0; j < N; ++j)
-                Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (double)(N - 1);
+                Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (keel::f64)(N - 1);
             for (int i = 0; i < N; ++i)
-                Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (double)(N - 1);
+                Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (keel::f64)(N - 1);
             // Forward to the engine-registered `contour` builtin so the
             // marching-squares body is reused as-is.
             keel::StaticArray<Value, 3> proxied{ Xv, Yv, Z };
@@ -648,7 +648,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             outs[0] = Value();
             return;
         }
-        double xa = -5, xb = 5, ya = -5, yb = 5;
+        keel::f64 xa = -5, xb = 5, ya = -5, yb = 5;
         if (args.size() >= 2 && args[1].numel() >= 4) {
             xa = args[1].elemAsDouble(0);
             xb = args[1].elemAsDouble(1);
@@ -665,9 +665,9 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
         Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
         for (int j = 0; j < N; ++j)
-            Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (double)(N - 1);
+            Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (keel::f64)(N - 1);
         for (int i = 0; i < N; ++i)
-            Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (double)(N - 1);
+            Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (keel::f64)(N - 1);
         keel::StaticArray<Value, 3> proxied{ Xv, Yv, Z };
         keel::StaticArray<Value, 1> outBuf;
         if (!gc.callBuiltin("surf", keel::ArrayRef<Value>(proxied.data(), 3), 0,
@@ -692,7 +692,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             const Value &fx = args[0];
             const Value &fy = args[1];
             const Value &fz = args[2];
-            double a = -5, b = 5;
+            keel::f64 a = -5, b = 5;
             if (args.size() >= 4 && args[3].numel() >= 2) {
                 a = args[3].elemAsDouble(0);
                 b = args[3].elemAsDouble(1);
@@ -703,10 +703,10 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             StrBuf xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
             for (int i = 0; i < N; ++i) {
-                const double t = a + (b - a) * i / (double)(N - 1);
+                const keel::f64 t = a + (b - a) * i / (keel::f64)(N - 1);
                 Value tv = Value::scalar(t, mr);
                 keel::StaticArray<Value, 1> argv{ tv };
-                double x = std::nan(""), y = std::nan(""), z = std::nan("");
+                keel::f64 x = std::nan(""), y = std::nan(""), z = std::nan("");
                 try {
                     x = gc.callHandle(fx,
                         keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
@@ -759,15 +759,15 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             outs[0] = Value(); return;
         }
 
-        keel::Array<double> Xs, Ys;
+        keel::Array<keel::f64> Xs, Ys;
         Xs.resize(Cx);
         Ys.resize(Ry);
         for (keel::usize c = 0; c < Cx; ++c) Xs[c] = Xv.elemAsDouble(c);
         for (keel::usize r = 0; r < Ry; ++r) Ys[r] = Yv.elemAsDouble(r);
-        const double xMin = Xs.front(), xMax = Xs.back();
-        const double yMin = Ys.front(), yMax = Ys.back();
-        const double dxAvg = (xMax - xMin) / (double)(Cx - 1);
-        const double dyAvg = (yMax - yMin) / (double)(Ry - 1);
+        const keel::f64 xMin = Xs.front(), xMax = Xs.back();
+        const keel::f64 yMin = Ys.front(), yMax = Ys.back();
+        const keel::f64 dxAvg = (xMax - xMin) / (keel::f64)(Cx - 1);
+        const keel::f64 dyAvg = (yMax - yMin) / (keel::f64)(Ry - 1);
 
         const auto Uat = [&](keel::usize r, keel::usize c) {
             return Uv.elemAsDouble(c * Ry + r);
@@ -778,7 +778,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
 
         // Bilinear interp at (x, y). Returns false if out-of-bounds or
         // a corner is non-finite.
-        const auto sampleField = [&](double x, double y, double &u, double &v) {
+        const auto sampleField = [&](keel::f64 x, keel::f64 y, keel::f64 &u, keel::f64 &v) {
             if (x < xMin || x > xMax || y < yMin || y > yMax) return false;
             // Locate cell index by binary search on Xs / Ys (uniform-
             // friendly but works for any monotonically-increasing grid).
@@ -788,41 +788,41 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             keel::usize r0 = 0;
             while (r0 + 1 < Ry && Ys[r0 + 1] <= y) ++r0;
             if (r0 + 1 >= Ry) r0 = Ry - 2;
-            const double xL = Xs[c0], xR = Xs[c0 + 1];
-            const double yT = Ys[r0], yB = Ys[r0 + 1];
-            const double tx = (xR > xL) ? (x - xL) / (xR - xL) : 0.0;
-            const double ty = (yB > yT) ? (y - yT) / (yB - yT) : 0.0;
-            const double u00 = Uat(r0,     c0);
-            const double u01 = Uat(r0,     c0 + 1);
-            const double u10 = Uat(r0 + 1, c0);
-            const double u11 = Uat(r0 + 1, c0 + 1);
-            const double v00 = Vat(r0,     c0);
-            const double v01 = Vat(r0,     c0 + 1);
-            const double v10 = Vat(r0 + 1, c0);
-            const double v11 = Vat(r0 + 1, c0 + 1);
+            const keel::f64 xL = Xs[c0], xR = Xs[c0 + 1];
+            const keel::f64 yT = Ys[r0], yB = Ys[r0 + 1];
+            const keel::f64 tx = (xR > xL) ? (x - xL) / (xR - xL) : 0.0;
+            const keel::f64 ty = (yB > yT) ? (y - yT) / (yB - yT) : 0.0;
+            const keel::f64 u00 = Uat(r0,     c0);
+            const keel::f64 u01 = Uat(r0,     c0 + 1);
+            const keel::f64 u10 = Uat(r0 + 1, c0);
+            const keel::f64 u11 = Uat(r0 + 1, c0 + 1);
+            const keel::f64 v00 = Vat(r0,     c0);
+            const keel::f64 v01 = Vat(r0,     c0 + 1);
+            const keel::f64 v10 = Vat(r0 + 1, c0);
+            const keel::f64 v11 = Vat(r0 + 1, c0 + 1);
             if (!std::isfinite(u00) || !std::isfinite(u01)
              || !std::isfinite(u10) || !std::isfinite(u11)
              || !std::isfinite(v00) || !std::isfinite(v01)
              || !std::isfinite(v10) || !std::isfinite(v11)) return false;
-            const double u0 = u00 * (1 - tx) + u01 * tx;
-            const double u1 = u10 * (1 - tx) + u11 * tx;
+            const keel::f64 u0 = u00 * (1 - tx) + u01 * tx;
+            const keel::f64 u1 = u10 * (1 - tx) + u11 * tx;
             u = u0 * (1 - ty) + u1 * ty;
-            const double v0 = v00 * (1 - tx) + v01 * tx;
-            const double v1 = v10 * (1 - tx) + v11 * tx;
+            const keel::f64 v0 = v00 * (1 - tx) + v01 * tx;
+            const keel::f64 v1 = v10 * (1 - tx) + v11 * tx;
             v = v0 * (1 - ty) + v1 * ty;
             return true;
         };
 
         // Build the seed list.
-        keel::Array<std::pair<double, double>> seeds;
+        keel::Array<std::pair<keel::f64, keel::f64>> seeds;
         if (autoSlice) {
             // 5×5 evenly spaced inside the grid (1 cell margin so the
             // first integration step has data on every side).
             const int nS = 5;
             for (int j = 0; j < nS; ++j) {
                 for (int i = 0; i < nS; ++i) {
-                    const double x = xMin + (xMax - xMin) * (i + 0.5) / nS;
-                    const double y = yMin + (yMax - yMin) * (j + 0.5) / nS;
+                    const keel::f64 x = xMin + (xMax - xMin) * (i + 0.5) / nS;
+                    const keel::f64 y = yMin + (yMax - yMin) * (j + 0.5) / nS;
                     seeds.emplace_back(x, y);
                 }
             }
@@ -838,32 +838,32 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         // RK4 trace from a single seed in `dir` ∈ {+1, -1}. Appends
         // points to xs/ys (with a leading null when we already have
         // points from a prior trace).
-        const double h = std::min(dxAvg, dyAvg) * 0.4;
+        const keel::f64 h = std::min(dxAvg, dyAvg) * 0.4;
         const int maxSteps = 800;
-        const double eps = 1e-9;
+        const keel::f64 eps = 1e-9;
 
-        const auto traceFrom = [&](double x0, double y0, int dir,
+        const auto traceFrom = [&](keel::f64 x0, keel::f64 y0, int dir,
                                    StrBuf &xs,
                                    StrBuf &ys, keel::usize &count) {
-            double x = x0, y = y0;
+            keel::f64 x = x0, y = y0;
             for (int step = 0; step < maxSteps; ++step) {
-                double u, v;
+                keel::f64 u, v;
                 if (!sampleField(x, y, u, v)) break;
-                const double mag = std::hypot(u, v);
+                const keel::f64 mag = std::hypot(u, v);
                 if (!std::isfinite(mag) || mag < eps) break;
                 if (count > 0) { xs << ','; ys << ','; }
                 xs << x; ys << y; ++count;
 
                 // RK4
-                double k1u, k1v;
+                keel::f64 k1u, k1v;
                 if (!sampleField(x, y, k1u, k1v)) break;
-                double k2u, k2v;
+                keel::f64 k2u, k2v;
                 if (!sampleField(x + dir * h * k1u / 2,
                                  y + dir * h * k1v / 2, k2u, k2v)) break;
-                double k3u, k3v;
+                keel::f64 k3u, k3v;
                 if (!sampleField(x + dir * h * k2u / 2,
                                  y + dir * h * k2v / 2, k3u, k3v)) break;
-                double k4u, k4v;
+                keel::f64 k4u, k4v;
                 if (!sampleField(x + dir * h * k3u,
                                  y + dir * h * k3v, k4u, k4v)) break;
                 x += dir * h * (k1u + 2 * k2u + 2 * k3u + k4u) / 6;
@@ -1166,10 +1166,10 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             fm.prepareForPlot();
 
             // Walk TRI column-major: row i, column k → T[k*M + i] (1-based).
-            keel::Array<double> Tbuf;
+            keel::Array<keel::f64> Tbuf;
             Tbuf.resize(TRI.numel());
             for (keel::usize i = 0; i < Tbuf.size(); ++i) Tbuf[i] = TRI.elemAsDouble(i);
-            const double *T = Tbuf.data();
+            const keel::f64 *T = Tbuf.data();
             StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
@@ -1226,7 +1226,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             const auto &yv = args[1];
             const keel::usize n = xv.numel();
             if (yv.numel() != n || n < 3) { outs[0] = Value(); return; }
-            keel::Array<double> X, Y;
+            keel::Array<keel::f64> X, Y;
             X.resize(n);
             Y.resize(n);
             for (keel::usize i = 0; i < n; ++i) {
@@ -1239,19 +1239,19 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 return (X[b]-X[a]) * (Y[c]-Y[a]) - (Y[b]-Y[a]) * (X[c]-X[a]);
             };
             auto inC = [&](keel::usize a, keel::usize b, keel::usize c, keel::usize p) {
-                const double ax=X[a]-X[p], ay=Y[a]-Y[p];
-                const double bx=X[b]-X[p], by=Y[b]-Y[p];
-                const double cx=X[c]-X[p], cy=Y[c]-Y[p];
-                const double a2=ax*ax+ay*ay;
-                const double b2=bx*bx+by*by;
-                const double c2=cx*cx+cy*cy;
+                const keel::f64 ax=X[a]-X[p], ay=Y[a]-Y[p];
+                const keel::f64 bx=X[b]-X[p], by=Y[b]-Y[p];
+                const keel::f64 cx=X[c]-X[p], cy=Y[c]-Y[p];
+                const keel::f64 a2=ax*ax+ay*ay;
+                const keel::f64 b2=bx*bx+by*by;
+                const keel::f64 c2=cx*cx+cy*cy;
                 return ax*(by*c2-cy*b2) - ay*(bx*c2-cx*b2) + a2*(bx*cy-cx*by);
             };
             keel::Array<keel::StaticArray<keel::usize, 3>> tris;
             for (keel::usize a = 0; a < n; ++a)
                 for (keel::usize b = a + 1; b < n; ++b)
                     for (keel::usize c = b + 1; c < n; ++c) {
-                        const double s = sa2(a, b, c);
+                        const keel::f64 s = sa2(a, b, c);
                         if (keel::abs(s) < 1e-15) continue;
                         keel::usize va=a, vb=b, vc=c;
                         if (s < 0) std::swap(vb, vc);
@@ -1263,26 +1263,26 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                         if (ok) tris.push_back({va, vb, vc});
                     }
             // Per-triangle circumcenter.
-            struct CC { double x, y; };
+            struct CC { keel::f64 x, y; };
             keel::Array<CC> ccs;
             ccs.resize(tris.size());
             for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
-                const double ax=X[T[0]], ay=Y[T[0]];
-                const double bx=X[T[1]], by=Y[T[1]];
-                const double cx=X[T[2]], cy=Y[T[2]];
-                const double d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
+                const keel::f64 ax=X[T[0]], ay=Y[T[0]];
+                const keel::f64 bx=X[T[1]], by=Y[T[1]];
+                const keel::f64 cx=X[T[2]], cy=Y[T[2]];
+                const keel::f64 d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
                 if (keel::abs(d) < 1e-15) { ccs[t] = {0, 0}; continue; }
-                const double ax2_ay2 = ax*ax + ay*ay;
-                const double bx2_by2 = bx*bx + by*by;
-                const double cx2_cy2 = cx*cx + cy*cy;
+                const keel::f64 ax2_ay2 = ax*ax + ay*ay;
+                const keel::f64 bx2_by2 = bx*bx + by*by;
+                const keel::f64 cx2_cy2 = cx*cx + cy*cy;
                 ccs[t].x = (ax2_ay2*(by-cy) + bx2_by2*(cy-ay) + cx2_cy2*(ay-by)) / d;
                 ccs[t].y = (ax2_ay2*(cx-bx) + bx2_by2*(ax-cx) + cx2_cy2*(bx-ax)) / d;
             }
             // Compute the input-points extent up-front — we need it
             // both for clipping unbounded ray endpoints and (later) for
             // setting xlim/ylim on the axes.
-            double xMin = X[0], xMax = X[0], yMin = Y[0], yMax = Y[0];
+            keel::f64 xMin = X[0], xMax = X[0], yMin = Y[0], yMax = Y[0];
             for (keel::usize i = 1; i < n; ++i) {
                 if (X[i] < xMin) xMin = X[i];
                 if (X[i] > xMax) xMax = X[i];
@@ -1292,10 +1292,10 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             // 25% margin gives boundary cells visible "wedge" room.
             // Smaller margin (10%) made the rays look chopped at data
             // edge; larger gives the MATLAB-style bounded-but-airy view.
-            const double xPad = std::max(0.1, (xMax - xMin) * 0.25);
-            const double yPad = std::max(0.1, (yMax - yMin) * 0.25);
-            const double clipXLo = xMin - xPad, clipXHi = xMax + xPad;
-            const double clipYLo = yMin - yPad, clipYHi = yMax + yPad;
+            const keel::f64 xPad = std::max(0.1, (xMax - xMin) * 0.25);
+            const keel::f64 yPad = std::max(0.1, (yMax - yMin) * 0.25);
+            const keel::f64 clipXLo = xMin - xPad, clipXHi = xMax + xPad;
+            const keel::f64 clipYLo = yMin - yPad, clipYHi = yMax + yPad;
 
             // Build edge-to-triangles list. Each Delaunay edge is shared
             // by exactly 1 triangle (= convex-hull edge → unbounded
@@ -1323,7 +1323,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             StrBuf xs, ys;
             xs << '['; ys << '[';
             bool first = true;
-            const auto emit = [&](double xa, double ya, double xb, double yb) {
+            const auto emit = [&](keel::f64 xa, keel::f64 ya, keel::f64 xb, keel::f64 yb) {
                 if (!first) { xs << ",null,"; ys << ",null,"; }
                 first = false;
                 xs << xa << ',' << xb;
@@ -1348,21 +1348,21 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                     const auto &T = tris[t];
                     const keel::usize third = (T[0] != u && T[0] != v) ? T[0]
                                        : (T[1] != u && T[1] != v) ? T[1] : T[2];
-                    const double ex = X[v] - X[u], ey = Y[v] - Y[u];
+                    const keel::f64 ex = X[v] - X[u], ey = Y[v] - Y[u];
                     // Perpendicular candidate (one of two normals).
-                    double nx = -ey, ny = ex;
+                    keel::f64 nx = -ey, ny = ex;
                     // Make it point AWAY from the third vertex.
-                    const double midX = 0.5 * (X[u] + X[v]);
-                    const double midY = 0.5 * (Y[u] + Y[v]);
-                    const double tx = X[third] - midX;
-                    const double ty = Y[third] - midY;
+                    const keel::f64 midX = 0.5 * (X[u] + X[v]);
+                    const keel::f64 midY = 0.5 * (Y[u] + Y[v]);
+                    const keel::f64 tx = X[third] - midX;
+                    const keel::f64 ty = Y[third] - midY;
                     if (nx * tx + ny * ty > 0) { nx = -nx; ny = -ny; }
                     // Extend the ray FAR — clipSeg will trim to the bbox.
-                    const double far = (clipXHi - clipXLo) + (clipYHi - clipYLo);
-                    const double nlen = std::sqrt(nx * nx + ny * ny);
+                    const keel::f64 far = (clipXHi - clipXLo) + (clipYHi - clipYLo);
+                    const keel::f64 nlen = std::sqrt(nx * nx + ny * ny);
                     if (nlen < 1e-15) { i = j; continue; }
-                    const double endX = ccs[t].x + (nx / nlen) * far;
-                    const double endY = ccs[t].y + (ny / nlen) * far;
+                    const keel::f64 endX = ccs[t].x + (nx / nlen) * far;
+                    const keel::f64 endY = ccs[t].y + (ny / nlen) * far;
                     emit(ccs[t].x, ccs[t].y, endX, endY);
                 }
                 i = j;
@@ -1419,7 +1419,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             fm.currentAxes().holdOn = true;
             auto *mr = gc.mr;
             auto xv = Value::matrix(1, C, ValueType::DOUBLE, mr);
-            for (keel::usize c = 0; c < C; ++c) xv.doubleDataMut()[c] = (double)(c + 1);
+            for (keel::usize c = 0; c < C; ++c) xv.doubleDataMut()[c] = (keel::f64)(c + 1);
             for (keel::usize r = 0; r < R; ++r) {
                 auto yv = Value::matrix(1, C, ValueType::DOUBLE, mr);
                 for (keel::usize c = 0; c < C; ++c)

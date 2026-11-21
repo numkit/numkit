@@ -74,7 +74,7 @@ void loadAscii(Engine &engine, Environment &env,
     // Parse each non-empty, non-comment line as whitespace-separated
     // doubles. MATLAB ignores '%' and '#' line comments.
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    keel::Array<keel::Array<double>> rows(scratch.allocator());
+    keel::Array<keel::Array<keel::f64>> rows(scratch.allocator());
     keel::String line(scratch.allocator());
     keel::usize p = 0;
     while (p <= content.size()) {
@@ -91,14 +91,14 @@ void loadAscii(Engine &engine, Environment &env,
         if (ws == line.size()) continue;
         if (line[ws] == '%' || line[ws] == '#') continue;
 
-        keel::Array<double> row(scratch.allocator());
+        keel::Array<keel::f64> row(scratch.allocator());
         keel::usize q = ws;
         while (q < line.size()) {
             while (q < line.size() && (keel::is_ascii_space(line[q]) || line[q] == ',')) ++q;
             if (q >= line.size()) break;
             const char *start = line.c_str() + q;
             char *endp = nullptr;
-            double v = std::strtod(start, &endp);
+            keel::f64 v = std::strtod(start, &endp);
             if (endp == start)
                 throw Error(keel::format("load: parse error near '{}'", line.substr(q)));
             row.push_back(v);
@@ -121,7 +121,7 @@ void loadAscii(Engine &engine, Environment &env,
         M = Value::scalar(rows[0][0], mr);
     } else {
         M = Value::matrix(nrows, cols, ValueType::DOUBLE, mr);
-        double *data = M.doubleDataMut();
+        keel::f64 *data = M.doubleDataMut();
         for (keel::usize r = 0; r < nrows; ++r)
             for (keel::usize c = 0; c < cols; ++c)
                 data[c * nrows + r] = rows[r][c];

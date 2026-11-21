@@ -106,13 +106,13 @@ keel::StringRef trimWs(keel::StringRef s)
     return s.substr(a, b - a);
 }
 
-bool tryParseDouble(keel::StringRef tok, double &out)
+bool tryParseDouble(keel::StringRef tok, keel::f64 &out)
 {
     if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
     keel::SmallString<128> buf(tok);
     char *endp = nullptr;
     errno = 0;
-    double val = std::strtod(buf.c_str(), &endp);
+    keel::f64 val = std::strtod(buf.c_str(), &endp);
     if (endp == buf.c_str() || errno == ERANGE)
         return false;
     // Trailing junk → not a clean number.
@@ -164,21 +164,21 @@ Value readmatrixFromString(keel::StringRef content, keel::Allocator *mr)
         auto toks = splitRow(lines[skip], scratch.allocator());
         bool anyNum = false;
         for (keel::StringRef t : toks) {
-            double dummy;
+            keel::f64 dummy;
             if (tryParseDouble(trimWs(t), dummy)) { anyNum = true; break; }
         }
         if (anyNum) break;
     }
 
-    keel::Array<keel::Array<double>> rows(scratch.allocator());
+    keel::Array<keel::Array<keel::f64>> rows(scratch.allocator());
     keel::usize maxCols = 0;
     for (keel::usize i = skip; i < lines.size(); ++i) {
         if (trimWs(lines[i]).empty()) continue;
         auto toks = splitRow(lines[i], scratch.allocator());
-        keel::Array<double> row(scratch.allocator());
+        keel::Array<keel::f64> row(scratch.allocator());
         row.reserve(toks.size());
         for (keel::StringRef t : toks) {
-            double v = 0.0;
+            keel::f64 v = 0.0;
             tryParseDouble(trimWs(t), v);     // unparseable → 0 (MATLAB compat)
             row.push_back(v);
         }
@@ -188,10 +188,10 @@ Value readmatrixFromString(keel::StringRef content, keel::Allocator *mr)
 
     const keel::usize R = rows.size();
     auto out = Value::matrix(R, maxCols, ValueType::DOUBLE, mr);
-    double *dst = out.doubleDataMut();
+    keel::f64 *dst = out.doubleDataMut();
     for (keel::usize r = 0; r < R; ++r) {
         for (keel::usize c = 0; c < maxCols; ++c) {
-            const double v = (c < rows[r].size()) ? rows[r][c] : 0.0;
+            const keel::f64 v = (c < rows[r].size()) ? rows[r][c] : 0.0;
             dst[c * R + r] = v;     // column-major
         }
     }
@@ -213,7 +213,7 @@ keel::String writematrixToString(const Value &m)
     for (keel::usize r = 0; r < R; ++r) {
         for (keel::usize c = 0; c < C; ++c) {
             if (c) out.push_back(',');
-            const double v = m.elemAsDouble(c * R + r);
+            const keel::f64 v = m.elemAsDouble(c * R + r);
             if (std::isfinite(v) && std::floor(v) == v && keel::abs(v) < 1e16) {
                 keel::format_into(out, "{}", keel::as<long long>(v));
             } else {

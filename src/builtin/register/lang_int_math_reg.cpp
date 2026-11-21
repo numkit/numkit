@@ -147,16 +147,16 @@ void gcd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     auto *mr = ctx.engine->allocator();
     outs[0] = gcd(args[0], args[1], mr);
     if (nargout >= 2)
-        outs[1] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
+        outs[1] = elementwiseDouble(args[0], args[1], [](keel::f64 xv, keel::f64 yv) {
             keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
-            return keel::as<double>(u);
+            return keel::as<keel::f64>(u);
         }, mr);
     if (nargout >= 3)
-        outs[2] = elementwiseDouble(args[0], args[1], [](double xv, double yv) {
+        outs[2] = elementwiseDouble(args[0], args[1], [](keel::f64 xv, keel::f64 yv) {
             keel::i64 u, v;
             extGcd(toInt64(xv), toInt64(yv), u, v);
-            return keel::as<double>(v);
+            return keel::as<keel::f64>(v);
         }, mr);
 }
 
@@ -180,7 +180,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
                 throw Error("bitcmp: unknown type name",
                              0, 0, "bitcmp", "", "numkit:bitcmp:badType");
         } else {
-            const double wv = argcheck::expectedReal(args[1], 2, "width", "bitcmp");
+            const keel::f64 wv = argcheck::expectedReal(args[1], 2, "width", "bitcmp");
             argcheck::expectedInteger(wv, 2, "width", "bitcmp");
             argcheck::expectedBetween(wv, 1, 64, 2, "width", "bitcmp");
             width = keel::as<int>(wv);

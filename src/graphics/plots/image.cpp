@@ -175,7 +175,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
             ds.originalCols = C;
             // Cast to uint8. uint8/uint16 etc. as-is (clamped); float
             // / logical → multiply by 255 then clamp.
-            const double scale = (vt == ValueType::DOUBLE
+            const keel::f64 scale = (vt == ValueType::DOUBLE
                                   || vt == ValueType::SINGLE
                                   || vt == ValueType::LOGICAL) ? 255.0 : 1.0;
             // Wire format always carries 4 bytes per pixel (RGBA). For
@@ -191,7 +191,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     for (keel::usize k = 0; k < numChannels; ++k) {
                         // column-major linear index: page * R*C + col * R + row
                         const keel::usize srcIdx = k * R * C + c * R + r;
-                        double v = I.elemAsDouble(srcIdx) * scale;
+                        keel::f64 v = I.elemAsDouble(srcIdx) * scale;
                         if (v < 0) v = 0;
                         else if (v > 255) v = 255;
                         ds.rgbBytes[outIdx + k] = keel::as<keel::u8>(v + 0.5);
@@ -266,7 +266,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
             // Grayscale path. Pick [cmin, cmax] from class default unless
             // overridden by `imshow(I, [lo hi])` (positional or
             // 'DisplayRange') or auto-ranged via `imshow(I, [])`.
-            double cmin = 0.0, cmax = 1.0;
+            keel::f64 cmin = 0.0, cmax = 1.0;
             if (vt == ValueType::UINT8) { cmin = 0; cmax = 255; }
             // logical / double / single → already [0, 1].
             bool autoRange = false;
@@ -279,10 +279,10 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                 }
             }
             if (autoRange) {
-                double mn = std::numeric_limits<double>::infinity();
-                double mx = -std::numeric_limits<double>::infinity();
+                keel::f64 mn = std::numeric_limits<keel::f64>::infinity();
+                keel::f64 mx = -std::numeric_limits<keel::f64>::infinity();
                 for (keel::usize i = 0; i < R * C; ++i) {
-                    double v = I.elemAsDouble(i);
+                    keel::f64 v = I.elemAsDouble(i);
                     if (std::isfinite(v)) {
                         if (v < mn) mn = v;
                         if (v > mx) mx = v;
@@ -299,15 +299,15 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
             ds.originalCols = C;
             ds.cminOrig = cmin;
             ds.cmaxOrig = cmax;
-            const double range = cmax - cmin;
-            const double qScale = (range > 0) ? 254.0 / range : 0.0;
+            const keel::f64 range = cmax - cmin;
+            const keel::f64 qScale = (range > 0) ? 254.0 / range : 0.0;
             ds.zQuantized.resize(R * C);
             for (keel::usize i = 0; i < R * C; ++i) {
-                const double v = I.elemAsDouble(i);
+                const keel::f64 v = I.elemAsDouble(i);
                 if (!std::isfinite(v)) {
                     ds.zQuantized[i] = 255;
                 } else {
-                    double t = (v - cmin) * qScale;
+                    keel::f64 t = (v - cmin) * qScale;
                     if (t < 0) t = 0;
                     else if (t > 254) t = 254;
                     ds.zQuantized[i] = keel::as<keel::u8>(t + 0.5);

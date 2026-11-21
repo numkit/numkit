@@ -63,19 +63,19 @@ void pagesvd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 void pagepinv_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pagepinv");
-    const double tol = (args.size() == 2) ? args[1].toScalar() : -1.0;
+    const keel::f64 tol = (args.size() == 2) ? args[1].toScalar() : -1.0;
     outs[0] = pagepinv(args[0], tol, ctx.engine->allocator());
 }
 
 void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "pagenorm");
-    double p = 2.0;
+    keel::f64 p = 2.0;
     if (args.size() == 2) {
         if (args[1].isChar() || args[1].isString()) {
             const keel::String s = args[1].toString();
             if      (s == "fro" || s == "Fro") p = -2.0; // sentinel
-            else if (s == "inf" || s == "Inf") p = std::numeric_limits<double>::infinity();
+            else if (s == "inf" || s == "Inf") p = std::numeric_limits<keel::f64>::infinity();
             else throw Error("pagenorm: string p must be 'fro' or 'inf'",
                              0, 0, "pagenorm", "", "numkit:pagenorm:badStringP");
         } else {
@@ -95,16 +95,16 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
             : keel::as<keel::usize>(args[0].dims().dim(2));
         Value out = (nd == 2) ? Value::matrix(1, 1, ValueType::DOUBLE, mr)
                               : Value::matrix3d(1, 1, pages, ValueType::DOUBLE, mr);
-        double *od = out.doubleDataMut();
+        keel::f64 *od = out.doubleDataMut();
         for (keel::usize pp = 0; pp < pages; ++pp) {
-            double s = 0.0;
+            keel::f64 s = 0.0;
             if (args[0].isComplex()) {
                 const keel::c64 *src = args[0].complexData() + pp * m * n;
                 for (keel::usize k = 0; k < m * n; ++k) s += detail::abs_sq(src[k]);
             } else {
                 const keel::usize base = pp * m * n;
                 for (keel::usize k = 0; k < m * n; ++k) {
-                    const double v = args[0].elemAsDouble(base + k);
+                    const keel::f64 v = args[0].elemAsDouble(base + k);
                     s += v * v;
                 }
             }
@@ -132,7 +132,7 @@ void pagelsqminnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, kee
 {
     argcheck::checkNargin(args.size(), 2, 3, "pagelsqminnorm");
     const bool have_tol = (args.size() == 3);
-    const double tol = have_tol ? args[2].toScalar() : 0.0;
+    const keel::f64 tol = have_tol ? args[2].toScalar() : 0.0;
     outs[0] = pagelsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->allocator());
 }
 

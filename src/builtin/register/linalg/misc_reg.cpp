@@ -23,7 +23,7 @@ void rref_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 {
     argcheck::checkNargin(args.size(), 1, 2, "rref");
     bool have_tol = (args.size() >= 2);
-    double tol = have_tol ? args[1].toScalar() : 0.0;
+    keel::f64 tol = have_tol ? args[1].toScalar() : 0.0;
     auto [R, jb] = rref(args[0], have_tol, tol, ctx.engine->allocator());
     outs[0] = R;
     if (nargout >= 2 && outs.size() >= 2) outs[1] = jb;

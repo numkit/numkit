@@ -125,7 +125,7 @@ inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,
 {
     switch (f) {
     case BuiltinFn::Numel:
-        return Value::scalar(keel::as<double>(v.numel()), mr);
+        return Value::scalar(keel::as<keel::f64>(v.numel()), mr);
     case BuiltinFn::Length:
         return ::numkit::builtin::length(v, mr);
     case BuiltinFn::Ndims:

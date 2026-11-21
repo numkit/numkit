@@ -4221,7 +4221,7 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
         if (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')) {
             const keel::String rest = keel::String::from(arg.substr(1));
             char *endPtr = nullptr;
-            double numVal = std::strtod(rest.c_str(), &endPtr);
+            keel::f64 numVal = std::strtod(rest.c_str(), &endPtr);
             const bool isNum = (endPtr != rest.c_str() && *endPtr == '\0');
             auto isIdent = [](keel::StringRef s) {
                 if (s.empty())

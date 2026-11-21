@@ -96,25 +96,25 @@ void heatmapImpl(
         const bool logColor = (fm.currentAxes().colorScale == "log");
         ds.colorScaleBaked = logColor;
 
-        const auto getRaw = [&](keel::usize idx) -> double {
+        const auto getRaw = [&](keel::usize idx) -> keel::f64 {
             if (C_arg->isComplex())
                 return keel::abs(C_arg->complexData()[idx]);
             return C_arg->elemAsDouble(idx);
         };
-        const auto getVal = [&](keel::usize idx) -> double {
-            const double r = getRaw(idx);
-            if (!std::isfinite(r)) return std::numeric_limits<double>::quiet_NaN();
+        const auto getVal = [&](keel::usize idx) -> keel::f64 {
+            const keel::f64 r = getRaw(idx);
+            if (!std::isfinite(r)) return std::numeric_limits<keel::f64>::quiet_NaN();
             if (!logColor) return r;
-            if (r <= 0.0) return std::numeric_limits<double>::quiet_NaN();
+            if (r <= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
             return std::log10(r);
         };
 
         // Pass 1: scan for cmin/cmax (skipping NaN/Inf). When logColor
         // is on these are already in log10 space.
-        double cmin = std::numeric_limits<double>::infinity();
-        double cmax = -std::numeric_limits<double>::infinity();
+        keel::f64 cmin = std::numeric_limits<keel::f64>::infinity();
+        keel::f64 cmax = -std::numeric_limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < rows * cols; ++i) {
-            const double v = getVal(i);
+            const keel::f64 v = getVal(i);
             if (std::isfinite(v)) {
                 if (v < cmin) cmin = v;
                 if (v > cmax) cmax = v;
@@ -133,8 +133,8 @@ void heatmapImpl(
                 auto ra = keel::parse_f64(s.substr(lb + 1, comma - lb - 1).trim());
                 auto rbv = keel::parse_f64(s.substr(comma + 1, rb - comma - 1).trim());
                 if (ra.is_ok() && rbv.is_ok()) {
-                    double a = ra.value();
-                    double b = rbv.value();
+                    keel::f64 a = ra.value();
+                    keel::f64 b = rbv.value();
                     if (logColor) {
                         if (a > 0 && b > 0) {
                             cmin = std::log10(a);
@@ -158,15 +158,15 @@ void heatmapImpl(
 
         // Pass 2: quantize every cell to uint8. Index 0..254 = data range,
         // 255 = NaN/Inf sentinel. Column-major to match MATLAB.
-        const double range = cmax - cmin;
-        const double qScale = (range > 0) ? 254.0 / range : 0.0;
+        const keel::f64 range = cmax - cmin;
+        const keel::f64 qScale = (range > 0) ? 254.0 / range : 0.0;
         ds.zQuantized.resize(rows * cols);
         for (keel::usize i = 0; i < rows * cols; ++i) {
-            const double v = getVal(i);
+            const keel::f64 v = getVal(i);
             if (!std::isfinite(v)) {
                 ds.zQuantized[i] = 255;
             } else {
-                double t = (v - cmin) * qScale;
+                keel::f64 t = (v - cmin) * qScale;
                 if (t < 0) t = 0;
                 else if (t > 254) t = 254;
                 ds.zQuantized[i] = keel::as<keel::u8>(t + 0.5);

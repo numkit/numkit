@@ -61,9 +61,9 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             Value f = toDoubleCopy(args[0], mr);
             Value x = toDoubleCopy(args[1], mr);
             Value res = Value::matrix(shape.rows(), shape.cols(), ValueType::DOUBLE, mr);
-            const double *fp = f.doubleData();
-            const double *xp = x.doubleData();
-            double *rp = res.doubleDataMut();
+            const keel::f64 *fp = f.doubleData();
+            const keel::f64 *xp = x.doubleData();
+            keel::f64 *rp = res.doubleDataMut();
             if (n == 1) {
                 rp[0] = 0.0;
             } else {
@@ -76,7 +76,7 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             return;
         }
         // Vector / 2-D matrix — unchanged fast paths.
-        double hx = 1.0, hy = 1.0;
+        keel::f64 hx = 1.0, hy = 1.0;
         if (args.size() >= 2) hx = args[1].toScalar();
         if (args.size() >= 3) hy = args[2].toScalar();
         else                  hy = hx;  // single spacing applies to both axes
@@ -94,7 +94,7 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     // N-D (3-D+) array: one gradient per dimension, up to nargout.
     const keel::usize nout = (nargout < 1) ? 1 : nargout;
     keel::ArenaTemp arena = keel::get_scratch(mr);
-    auto hs = keel::Array<double>(arena.allocator());
+    auto hs = keel::Array<keel::f64>(arena.allocator());
     const keel::usize nspac = (args.size() >= 2) ? args.size() - 1 : 0;
     if (nspac == 0) {
         hs.assign(nout, 1.0);
@@ -113,7 +113,7 @@ void del2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
 {
     argcheck::checkNargin(args.size(), 1, "del2");
     keel::Allocator *mr = ctx.engine->allocator();
-    double h = 1.0;
+    keel::f64 h = 1.0;
     if (args.size() >= 2) {
         if (!args[1].isScalar())
             throw Error("del2: coordinate-vector spacing is not supported in "
@@ -160,13 +160,13 @@ void cumtrapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     Value ys;
     if (!yIsC) ys = toDoubleCopy(y, mr);
     auto xs = toDoubleCopy(x, mr);
-    const double *xsrc = xs.doubleData();
+    const keel::f64 *xsrc = xs.doubleData();
 
     auto xMat = Value::matrix(rows, cols, ValueType::DOUBLE, mr);
-    double *dx = xMat.doubleDataMut();
+    keel::f64 *dx = xMat.doubleDataMut();
     const bool xIsVec = x.dims().isVector() || x.isScalar();
     if (x.dims().rows() == rows && x.dims().cols() == cols) {
-        std::memcpy(dx, xsrc, rows * cols * sizeof(double));   // per-element
+        std::memcpy(dx, xsrc, rows * cols * sizeof(keel::f64));   // per-element
     } else if (xIsVec && dim == 2 && x.numel() == cols) {
         for (keel::usize c = 0; c < cols; ++c)
             for (keel::usize r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[c];
@@ -220,9 +220,9 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     if (!isCallableHandleArg(args[0]))
         throw Error("integral: 1st argument must be a function handle",
                      0, 0, "integral", "", "numkit:integral:fnType");
-    const double a = args[1].toScalar();
-    const double b = args[2].toScalar();
-    double absTol = 1e-10;
+    const keel::f64 a = args[1].toScalar();
+    const keel::f64 b = args[2].toScalar();
+    keel::f64 absTol = 1e-10;
     for (keel::usize i = 3; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             throw Error("integral: expected option name (string)",
@@ -246,9 +246,9 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     outs[0] = integral(cb, a, b, absTol, ctx.engine->allocator());
 }
 
-static double integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOpt)
+static keel::f64 integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOpt)
 {
-    double absTol = 1e-10;
+    keel::f64 absTol = 1e-10;
     for (keel::usize i = firstOpt; i + 1 < args.size(); i += 2) {
         keel::String key = args[i].toString();
         for (char &c : key) c = keel::to_ascii_lower(c);
@@ -263,9 +263,9 @@ void integral2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
     if (!isCallableHandleArg(args[0]))
         throw Error("integral2: 1st argument must be a function handle",
                      0, 0, "integral2", "", "numkit:integral2:fnType");
-    const double a = args[1].toScalar(), b = args[2].toScalar();
-    const double c = args[3].toScalar(), d = args[4].toScalar();
-    const double absTol = integral2AbsTol(args, 5);
+    const keel::f64 a = args[1].toScalar(), b = args[2].toScalar();
+    const keel::f64 c = args[3].toScalar(), d = args[4].toScalar();
+    const keel::f64 absTol = integral2AbsTol(args, 5);
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {
@@ -283,10 +283,10 @@ void integral3_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
     if (!isCallableHandleArg(args[0]))
         throw Error("integral3: 1st argument must be a function handle",
                      0, 0, "integral3", "", "numkit:integral3:fnType");
-    const double a = args[1].toScalar(), b = args[2].toScalar();
-    const double c = args[3].toScalar(), d = args[4].toScalar();
-    const double e = args[5].toScalar(), f = args[6].toScalar();
-    const double absTol = integral2AbsTol(args, 7);
+    const keel::f64 a = args[1].toScalar(), b = args[2].toScalar();
+    const keel::f64 c = args[3].toScalar(), d = args[4].toScalar();
+    const keel::f64 e = args[5].toScalar(), f = args[6].toScalar();
+    const keel::f64 absTol = integral2AbsTol(args, 7);
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {
@@ -306,8 +306,8 @@ void quadgk_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     if (!isCallableHandleArg(args[0]))
         throw Error("quadgk: 1st argument must be a function handle",
                      0, 0, "quadgk", "", "numkit:quadgk:fnType");
-    const double a = args[1].toScalar(), b = args[2].toScalar();
-    const double absTol = integral2AbsTol(args, 3);
+    const keel::f64 a = args[1].toScalar(), b = args[2].toScalar();
+    const keel::f64 absTol = integral2AbsTol(args, 3);
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {
@@ -326,9 +326,9 @@ void quad2d_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     if (!isCallableHandleArg(args[0]))
         throw Error("quad2d: 1st argument must be a function handle",
                      0, 0, "quad2d", "", "numkit:quad2d:fnType");
-    const double a = args[1].toScalar(), b = args[2].toScalar();
-    const double c = args[3].toScalar(), d = args[4].toScalar();
-    const double absTol = integral2AbsTol(args, 5);
+    const keel::f64 a = args[1].toScalar(), b = args[2].toScalar();
+    const keel::f64 c = args[3].toScalar(), d = args[4].toScalar();
+    const keel::f64 absTol = integral2AbsTol(args, 5);
     auto handle = args[0];
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
                                keel::Allocator * /*mr*/) {

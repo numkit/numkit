@@ -47,10 +47,10 @@ void numericConstructor_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutAr
 }
 
 void double_reg(keel::ArrayRef<Value> args, keel::usize n, keel::MutArrayRef<Value> outs, CallContext &ctx)
-{ numericConstructor_reg<double, ValueType::DOUBLE>(args, n, outs, ctx); }
+{ numericConstructor_reg<keel::f64, ValueType::DOUBLE>(args, n, outs, ctx); }
 
 void single_reg(keel::ArrayRef<Value> args, keel::usize n, keel::MutArrayRef<Value> outs, CallContext &ctx)
-{ numericConstructor_reg<float, ValueType::SINGLE>(args, n, outs, ctx); }
+{ numericConstructor_reg<keel::f32, ValueType::SINGLE>(args, n, outs, ctx); }
 
 void int8_reg(keel::ArrayRef<Value> args, keel::usize n, keel::MutArrayRef<Value> outs, CallContext &ctx)
 { numericConstructor_reg<keel::i8, ValueType::INT8>(args, n, outs, ctx); }

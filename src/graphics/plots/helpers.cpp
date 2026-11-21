@@ -31,11 +31,11 @@ keel::String vecToJson(const Value &v)
         // plain double storage; elemAsDouble performs the same conversion
         // for the other numeric types.
         const bool fastDouble = v.isDoubleScalar() || v.isHeapDouble();
-        const double *fast = fastDouble ? v.doubleData() : nullptr;
+        const keel::f64 *fast = fastDouble ? v.doubleData() : nullptr;
         for (keel::usize i = 0; i < v.numel(); ++i) {
             if (i)
                 os << ",";
-            double val = fast ? fast[i] : v.elemAsDouble(i);
+            keel::f64 val = fast ? fast[i] : v.elemAsDouble(i);
             if (std::isnan(val))
                 os << "null";
             else if (std::isinf(val))
@@ -48,14 +48,14 @@ keel::String vecToJson(const Value &v)
     return os.take();
 }
 
-keel::String vecToJson(keel::ArrayRef<double> v)
+keel::String vecToJson(keel::ArrayRef<keel::f64> v)
 {
     StrBuf os;
     os << "[";
     for (keel::usize i = 0; i < v.size(); ++i) {
         if (i)
             os << ",";
-        double val = v[i];
+        keel::f64 val = v[i];
         if (std::isnan(val))
             os << "null";
         else if (std::isinf(val))
@@ -141,7 +141,7 @@ keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds)
     return nvStart;
 }
 
-void doubleToJson(StrBuf &os, double val)
+void doubleToJson(StrBuf &os, keel::f64 val)
 {
     if (std::isnan(val))
         os << "null";

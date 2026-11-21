@@ -214,30 +214,30 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
     return out;
 }
 
-double readMatScalarAsDouble(const keel::matfile::MatArray &arr, const keel::Array<keel::u8> &buf, keel::usize idx) noexcept
+keel::f64 readMatScalarAsDouble(const keel::matfile::MatArray &arr, const keel::Array<keel::u8> &buf, keel::usize idx) noexcept
 {
     switch (arr.kind) {
         case keel::matfile::MatClass::Double:
-            return reinterpret_cast<const double *>(buf.data())[idx];
+            return reinterpret_cast<const keel::f64 *>(buf.data())[idx];
         case keel::matfile::MatClass::Single:
-            return keel::as<double>(reinterpret_cast<const float *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::f32 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int8:
-            return keel::as<double>(reinterpret_cast<const keel::i8 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::i8 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint8:
         case keel::matfile::MatClass::Logical:
-            return keel::as<double>(buf[idx]);
+            return keel::as<keel::f64>(buf[idx]);
         case keel::matfile::MatClass::Int16:
-            return keel::as<double>(reinterpret_cast<const keel::i16 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::i16 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint16:
-            return keel::as<double>(reinterpret_cast<const keel::u16 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::u16 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int32:
-            return keel::as<double>(reinterpret_cast<const keel::i32 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::i32 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint32:
-            return keel::as<double>(reinterpret_cast<const keel::u32 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::u32 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Int64:
-            return keel::as<double>(reinterpret_cast<const keel::i64 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::i64 *>(buf.data())[idx]);
         case keel::matfile::MatClass::Uint64:
-            return keel::as<double>(reinterpret_cast<const keel::u64 *>(buf.data())[idx]);
+            return keel::as<keel::f64>(reinterpret_cast<const keel::u64 *>(buf.data())[idx]);
         default:
             return 0.0;
     }

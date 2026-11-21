@@ -51,9 +51,9 @@ keel::String resolveCsvPath(keel::StringRef rawPath)
 // cells map to 0.0 (matching MATLAB's csvread contract). Trailing \r
 // is stripped so CRLF files don't leak a carriage return into the last
 // cell's parse range.
-keel::Array<double> parseCsvLine(keel::Allocator *mr, keel::StringRef raw)
+keel::Array<keel::f64> parseCsvLine(keel::Allocator *mr, keel::StringRef raw)
 {
-    keel::Array<double> out(mr);
+    keel::Array<keel::f64> out(mr);
     keel::usize len = raw.size();
     if (len && raw[len - 1] == '\r')
         --len;
@@ -69,11 +69,11 @@ keel::Array<double> parseCsvLine(keel::Allocator *mr, keel::StringRef raw)
             }
             while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '\t'))
                 --n;
-            double v = 0.0;
+            keel::f64 v = 0.0;
             if (n > 0) {
                 keel::SmallString<64> cell(keel::StringRef(p, n), mr);
                 char *endp = nullptr;
-                double parsed = std::strtod(cell.c_str(), &endp);
+                keel::f64 parsed = std::strtod(cell.c_str(), &endp);
                 if (endp != cell.c_str())
                     v = parsed;
             }
@@ -93,7 +93,7 @@ Value csvreadFromStringImpl(keel::StringRef content, keel::usize skipRows, keel:
     // Outer + inner ScratchVec — uses-allocator construction propagates
     // the arena into each inner row that we move-construct from
     // `parseCsvLine`'s sliced result below.
-    keel::Array<keel::Array<double>> rows(scratch.allocator());
+    keel::Array<keel::Array<keel::f64>> rows(scratch.allocator());
     keel::usize lineNo = 0;
     keel::usize pos = 0;
     while (pos <= content.size()) {
@@ -114,8 +114,8 @@ Value csvreadFromStringImpl(keel::StringRef content, keel::usize skipRows, keel:
             break;
         ++lineNo;
 
-        keel::Array<double> cells = parseCsvLine(scratch.allocator(), line);
-        keel::Array<double> row(scratch.allocator());
+        keel::Array<keel::f64> cells = parseCsvLine(scratch.allocator(), line);
+        keel::Array<keel::f64> row(scratch.allocator());
         keel::usize endCol = haveRange ? keel::min(c2 + 1, cells.size()) : cells.size();
         if (c1 < endCol)
             row.assign(cells.slice(c1, endCol - c1));
@@ -140,7 +140,7 @@ Value csvreadFromStringImpl(keel::StringRef content, keel::usize skipRows, keel:
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
 
     auto M = Value::matrix(R, C, ValueType::DOUBLE, mr);
-    double *data = M.doubleDataMut();
+    keel::f64 *data = M.doubleDataMut();
     for (keel::usize r = 0; r < R; ++r) {
         const auto &row = rows[r];
         keel::usize n = keel::min(C, row.size());
@@ -176,7 +176,7 @@ keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC
     for (keel::usize r = 0; r < offR; ++r)
         out.push_back('\n');
 
-    auto writeCell = [&](double v) {
+    auto writeCell = [&](keel::f64 v) {
         char buf[32];
         int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
         if (len > 0)
@@ -189,7 +189,7 @@ keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC
         for (keel::usize c = 0; c < C; ++c) {
             if (c > 0)
                 out.push_back(',');
-            double v = 0.0;
+            keel::f64 v = 0.0;
             if (M.type() == ValueType::DOUBLE) {
                 v = M.isScalar() ? M.toScalar() : M(r, c);
             } else if (M.isLogical()) {

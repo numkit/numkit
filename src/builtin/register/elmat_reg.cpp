@@ -207,7 +207,7 @@ void register_elmat(Engine &engine) {
                 n = 1;
             }
             auto out = Value::matrix(m, n, ValueType::DOUBLE, mr);
-            double *p = out.doubleDataMut();
+            keel::f64 *p = out.doubleDataMut();
             auto &rng = ctx.engine->rng();
             for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::random::uniform_f64(rng, -1.0, 1.0);
             outs[0] = std::move(out);
@@ -269,7 +269,7 @@ void register_elmat(Engine &engine) {
             keel::usize outR = std::max(ar, br);
             keel::usize outC = std::max(ac, bc);
             auto res = Value::matrix(outR, outC, ValueType::DOUBLE, mr);
-            double *outData = res.doubleDataMut();
+            keel::f64 *outData = res.doubleDataMut();
             for (keel::usize c = 0; c < outC; ++c) {
                 keel::usize acIdx = (ac == 1) ? 0 : c;
                 keel::usize bcIdx = (bc == 1) ? 0 : c;
@@ -292,7 +292,7 @@ void register_elmat(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto *mr = ctx.engine->allocator();
             if (args.empty()) {
-                outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
+                outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
                 return;
             }
             const Value &x = args[0];
@@ -300,10 +300,10 @@ void register_elmat(Engine &engine) {
                 keel::String s = x.toString();
                 if (s == "single") {
                     Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
-                    out.singleDataMut()[0] = std::numeric_limits<float>::epsilon();
+                    out.singleDataMut()[0] = std::numeric_limits<keel::f32>::epsilon();
                     outs[0] = std::move(out);
                 } else if (s == "double") {
-                    outs[0] = Value::scalar(std::numeric_limits<double>::epsilon(), mr);
+                    outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
                 } else {
                     throw Error("eps: class name must be 'double' or 'single'",
                                 0, 0, "eps", "", "numkit:eps:invalidClassName");
@@ -324,31 +324,31 @@ void register_elmat(Engine &engine) {
             Value out = Value::matrixND(dArr, nd, outType, mr);
             const keel::usize n = x.numel();
             if (outType == ValueType::SINGLE) {
-                float *dst = out.singleDataMut();
+                keel::f32 *dst = out.singleDataMut();
                 for (keel::usize i = 0; i < n; ++i) {
-                    float v = x.isComplex()
-                        ? keel::as<float>(keel::abs(x.complexData()[i]))
-                        : keel::abs(keel::as<float>(x.elemAsDouble(i)));
+                    keel::f32 v = x.isComplex()
+                        ? keel::as<keel::f32>(keel::abs(x.complexData()[i]))
+                        : keel::abs(keel::as<keel::f32>(x.elemAsDouble(i)));
                     if (std::isnan(v) || std::isinf(v)) {
-                        dst[i] = std::numeric_limits<float>::quiet_NaN();
-                    } else if (v <= std::numeric_limits<float>::min()) {
-                        dst[i] = std::numeric_limits<float>::denorm_min();
+                        dst[i] = std::numeric_limits<keel::f32>::quiet_NaN();
+                    } else if (v <= std::numeric_limits<keel::f32>::min()) {
+                        dst[i] = std::numeric_limits<keel::f32>::denorm_min();
                     } else {
-                        dst[i] = std::nextafter(v, std::numeric_limits<float>::infinity()) - v;
+                        dst[i] = std::nextafter(v, std::numeric_limits<keel::f32>::infinity()) - v;
                     }
                 }
             } else {
-                double *dst = out.doubleDataMut();
+                keel::f64 *dst = out.doubleDataMut();
                 for (keel::usize i = 0; i < n; ++i) {
-                    double v = x.isComplex()
+                    keel::f64 v = x.isComplex()
                         ? keel::abs(x.complexData()[i])
                         : keel::abs(x.elemAsDouble(i));
                     if (std::isnan(v) || std::isinf(v)) {
-                        dst[i] = std::numeric_limits<double>::quiet_NaN();
-                    } else if (v <= std::numeric_limits<double>::min()) {
-                        dst[i] = std::numeric_limits<double>::denorm_min();
+                        dst[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+                    } else if (v <= std::numeric_limits<keel::f64>::min()) {
+                        dst[i] = std::numeric_limits<keel::f64>::denorm_min();
                     } else {
-                        dst[i] = std::nextafter(v, std::numeric_limits<double>::infinity()) - v;
+                        dst[i] = std::nextafter(v, std::numeric_limits<keel::f64>::infinity()) - v;
                     }
                 }
             }

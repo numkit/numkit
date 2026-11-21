@@ -60,7 +60,7 @@ void polyeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 namespace {
 
 // A == A' within tol (complex Hermitian: conj-transpose equality).
-bool isHermitianApprox(const Value &A, double tol)
+bool isHermitianApprox(const Value &A, keel::f64 tol)
 {
     if (A.dims().ndim() != 2 || A.dims().rows() != A.dims().cols())
         return false;
@@ -70,7 +70,7 @@ bool isHermitianApprox(const Value &A, double tol)
     for (keel::usize i = 0; i < n; ++i)
         for (keel::usize j = i + 1; j < n; ++j) {
             const keel::c64 a = d[i + j * n], b = d[j + i * n];
-            const double scale = std::max(1.0, std::max(keel::abs(a), keel::abs(b)));
+            const keel::f64 scale = std::max(1.0, std::max(keel::abs(a), keel::abs(b)));
             if (keel::abs(a - keel::conj(b)) > tol * scale)
                 return false;
         }
@@ -126,36 +126,36 @@ static Value leftEigenvectors(const Value &M, const Value &D,
     const keel::usize n = keel::as<keel::usize>(M.dims().dim(0));
     // Mᵀ.
     Value Mt = Value::matrix(n, n, ValueType::DOUBLE, mr);
-    double *mt = Mt.doubleDataMut();
+    keel::f64 *mt = Mt.doubleDataMut();
     for (keel::usize j = 0; j < n; ++j)
         for (keel::usize i = 0; i < n; ++i)
             mt[i + j * n] = M.elemAsDouble(j + i * n);   // Mᵀ(i,j) = M(j,i)
 
     auto [VL, DL] = eigVDAuto(Mt, mr);
 
-    keel::Array<double> d(mr);
+    keel::Array<keel::f64> d(mr);
     d.resize(n, 0.0);
-    keel::Array<double> dl(mr);
+    keel::Array<keel::f64> dl(mr);
     dl.resize(n, 0.0);
     for (keel::usize k = 0; k < n; ++k) d[k]  = D.elemAsDouble(k + k * n);
     for (keel::usize k = 0; k < n; ++k) dl[k] = DL.elemAsDouble(k + k * n);
 
-    const double *vld = VL.doubleData();
+    const keel::f64 *vld = VL.doubleData();
     Value W = Value::matrix(n, n, ValueType::DOUBLE, mr);
-    double *wd = W.doubleDataMut();
+    keel::f64 *wd = W.doubleDataMut();
     keel::Array<keel::u8> used(mr);
     used.resize(n, 0);
     for (keel::usize k = 0; k < n; ++k) {
         // Match D's k-th eigenvalue to the nearest unused eigenvalue of Mᵀ.
         keel::usize best = n;
-        double bestErr = std::numeric_limits<double>::infinity();
+        keel::f64 bestErr = std::numeric_limits<keel::f64>::infinity();
         for (keel::usize j = 0; j < n; ++j) {
             if (used[j]) continue;
-            const double e = std::fabs(dl[j] - d[k]);
+            const keel::f64 e = std::fabs(dl[j] - d[k]);
             if (e < bestErr) { bestErr = e; best = j; }
         }
         used[best] = 1;
-        double nrm = 0.0;
+        keel::f64 nrm = 0.0;
         for (keel::usize i = 0; i < n; ++i)
             nrm += vld[i + best * n] * vld[i + best * n];
         nrm = std::sqrt(nrm);

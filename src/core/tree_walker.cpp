@@ -283,8 +283,8 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
                 if (const auto *m = cls ? cls->methods.get("__end") : nullptr) {
                     Value self = *ctx.array;
                     Value eargs[2] = {
-                        Value::scalar(keel::as<double>(ctx.dimension), engine_.mr_),
-                        Value::scalar(keel::as<double>(ctx.ndims), engine_.mr_)};
+                        Value::scalar(keel::as<keel::f64>(ctx.dimension), engine_.mr_),
+                        Value::scalar(keel::as<keel::f64>(ctx.ndims), engine_.mr_)};
                     Value out[1];
                     CallContext cctx{&engine_, env};
                     (*m)(self, keel::ArrayRef<Value>(eargs, 2), 1,
@@ -294,7 +294,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
             }
             keel::usize sz = (ctx.ndims == 1) ? ctx.array->numel()
                                          : ctx.array->dims().dimSize(ctx.dimension);
-            return Value::scalar(keel::as<double>(sz), engine_.mr_);
+            return Value::scalar(keel::as<keel::f64>(sz), engine_.mr_);
         }
         throw std::runtime_error("'end' used outside of indexing context");
     }
@@ -2526,7 +2526,7 @@ Value TreeWalker::execColonExpr(const ASTNode *node, Environment *env)
     if (node->children.empty())
         return Value::fromString(":", engine_.mr_);
 
-    auto colonScalar = [](const Value &v) -> double {
+    auto colonScalar = [](const Value &v) -> keel::f64 {
         return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
     };
 
@@ -2612,10 +2612,10 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
 
     if (rangeVal.type() == ValueType::DOUBLE && rows == 1) {
         // Fast path: scalar iteration over row vector
-        const double *src = rangeVal.doubleData();
+        const keel::f64 *src = rangeVal.doubleData();
         env->set(varName, Value::scalar(0.0, engine_.mr_));
         Value *varPtr = env->get(varName);
-        double *slot = varPtr->doubleDataMut();
+        keel::f64 *slot = varPtr->doubleDataMut();
         for (keel::usize c = 0; c < count; ++c) {
             *slot = src[c];
             execNode(node->children[1].get(), env);
@@ -2848,7 +2848,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
         if (lhs) {
             const keel::String tail = keel::String::from(arg.substr(1));
             char *endp = nullptr;
-            const double parsedNum = std::strtod(tail.c_str(), &endp);
+            const keel::f64 parsedNum = std::strtod(tail.c_str(), &endp);
             const bool isNum = !tail.empty() && endp == tail.c_str() + tail.size();
             bool isIdent = !tail.empty()
                            && (keel::is_ascii_alpha(tail[0])
@@ -3440,8 +3440,8 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     if (func.usesNarginNargout) {
         keel::usize nout = std::max(func.returns.size(), keel::usize(1));
         localEnv.setLocal("nargin",
-                          Value::scalar(keel::as<double>(args.size()), engine_.mr_));
-        localEnv.setLocal("nargout", Value::scalar(keel::as<double>(nout), engine_.mr_));
+                          Value::scalar(keel::as<keel::f64>(args.size()), engine_.mr_));
+        localEnv.setLocal("nargout", Value::scalar(keel::as<keel::f64>(nout), engine_.mr_));
     }
 
     keel::Optional<DebugController::FrameGuard> dbgFrame;
@@ -3541,8 +3541,8 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     func.usesNarginNargout = 1;
     if (func.usesNarginNargout) {
         localEnv.setLocal("nargin",
-                          Value::scalar(keel::as<double>(args.size()), engine_.mr_));
-        localEnv.setLocal("nargout", Value::scalar(keel::as<double>(nout), engine_.mr_));
+                          Value::scalar(keel::as<keel::f64>(args.size()), engine_.mr_));
+        localEnv.setLocal("nargout", Value::scalar(keel::as<keel::f64>(nout), engine_.mr_));
     }
 
     for (auto &retName : func.returns)
@@ -3669,7 +3669,7 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
     // MATLAB seeds the constructor's output variable with a default instance.
     if (!func.returns.empty())
         localEnv.setLocal(func.returns[0], seed);
-    localEnv.setLocal("nargin", Value::scalar(keel::as<double>(args.size()), engine_.mr_));
+    localEnv.setLocal("nargin", Value::scalar(keel::as<keel::f64>(args.size()), engine_.mr_));
     localEnv.setLocal("nargout", Value::scalar(1.0, engine_.mr_));
 
     keel::Optional<FsContext::OriginFrame> originGuard;

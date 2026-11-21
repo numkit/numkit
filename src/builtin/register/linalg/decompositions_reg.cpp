@@ -106,7 +106,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
                 if (lower) sub = transposeSquare(roData(sub), k, mr);
             }
             outs[0] = detail::narrowDoubleToSingleIf(sub, wantSingle, mr);
-            outs[1] = Value::scalar(keel::as<double>(fail));
+            outs[1] = Value::scalar(keel::as<keel::f64>(fail));
             return;
         }
         if (lower) R = transposeSquare(roData(R), n, mr);
@@ -119,7 +119,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
              [](Value &v) { return v.complexDataMut(); },
              [&]() -> Value { return Value::complexMatrix(n, n, mr); });
     else
-        emit(static_cast<const double *>(nullptr),
+        emit(static_cast<const keel::f64 *>(nullptr),
              [](const Value &v) { return v.doubleData(); },
              [](Value &v) { return v.doubleDataMut(); },
              [&]() -> Value { return Value::matrix(n, n, ValueType::DOUBLE, mr); });
@@ -139,14 +139,14 @@ Value firstCols(const Value &A, keel::usize k, keel::Allocator *mr)
     }
     if (A.type() == ValueType::SINGLE) {
         auto out = Value::matrix(r, k, ValueType::SINGLE, mr);
-        const float *src = A.singleData();
-        float *dst = out.singleDataMut();
+        const keel::f32 *src = A.singleData();
+        keel::f32 *dst = out.singleDataMut();
         for (keel::usize i = 0; i < r * k; ++i) dst[i] = src[i];
         return out;
     }
     auto out = Value::matrix(r, k, ValueType::DOUBLE, mr);
-    const double *src = A.doubleData();
-    double *dst = out.doubleDataMut();
+    const keel::f64 *src = A.doubleData();
+    keel::f64 *dst = out.doubleDataMut();
     for (keel::usize i = 0; i < r * k; ++i) dst[i] = src[i];
     return out;
 }
@@ -165,16 +165,16 @@ Value topLeftBlock(const Value &A, keel::usize kr, keel::usize kc, keel::Allocat
     }
     if (A.type() == ValueType::SINGLE) {
         auto out = Value::matrix(kr, kc, ValueType::SINGLE, mr);
-        const float *src = A.singleData();
-        float *dst = out.singleDataMut();
+        const keel::f32 *src = A.singleData();
+        keel::f32 *dst = out.singleDataMut();
         for (keel::usize c = 0; c < kc; ++c)
             for (keel::usize i = 0; i < kr; ++i)
                 dst[c * kr + i] = src[c * r + i];
         return out;
     }
     auto out = Value::matrix(kr, kc, ValueType::DOUBLE, mr);
-    const double *src = A.doubleData();
-    double *dst = out.doubleDataMut();
+    const keel::f64 *src = A.doubleData();
+    keel::f64 *dst = out.doubleDataMut();
     for (keel::usize c = 0; c < kc; ++c)
         for (keel::usize i = 0; i < kr; ++i)
             dst[c * kr + i] = src[c * r + i];
@@ -185,15 +185,15 @@ Value permMatrixToVector(const Value &P, keel::Allocator *mr)
 {
     const keel::usize n = P.dims().rows();
     auto p = Value::matrix(1, n, ValueType::DOUBLE, mr);
-    double *out = p.doubleDataMut();
+    keel::f64 *out = p.doubleDataMut();
     for (keel::usize i = 0; i < n; ++i) {
         keel::usize col = 0;
-        double best = -1.0;
+        keel::f64 best = -1.0;
         for (keel::usize j = 0; j < n; ++j) {
-            const double v = P.elemAsDouble(j * n + i);
+            const keel::f64 v = P.elemAsDouble(j * n + i);
             if (v > best) { best = v; col = j; }
         }
-        out[i] = keel::as<double>(col + 1);
+        out[i] = keel::as<keel::f64>(col + 1);
     }
     return p;
 }
@@ -288,12 +288,12 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         outs[1] = std::move(R);
         if (vectorP) {
             Value p = Value::matrix(1, n, ValueType::DOUBLE, mr);
-            double *pd = p.doubleDataMut();
-            for (keel::usize k = 0; k < n; ++k) pd[k] = keel::as<double>(perm[k] + 1);
+            keel::f64 *pd = p.doubleDataMut();
+            for (keel::usize k = 0; k < n; ++k) pd[k] = keel::as<keel::f64>(perm[k] + 1);
             outs[2] = std::move(p);
         } else {
             Value P = Value::matrix(n, n, ValueType::DOUBLE, mr);
-            double *Pd = P.doubleDataMut();
+            keel::f64 *Pd = P.doubleDataMut();
             std::fill(Pd, Pd + n * n, 0.0);
             for (keel::usize k = 0; k < n; ++k) Pd[perm[k] + k * n] = 1.0;
             outs[2] = detail::narrowDoubleToSingleIf(P, args[0].type() == ValueType::SINGLE, mr);
@@ -361,7 +361,7 @@ void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             throw Error("qrinsert: orient must be 'col' or 'row'",
                         0, 0, "qrinsert", "", "numkit:qrinsert:badOrient");
     }
-    const double kd = args[2].toScalar();
+    const keel::f64 kd = args[2].toScalar();
     if (kd < 1.0 || kd != std::floor(kd))
         throw Error("qrinsert: k must be a positive integer",
                     0, 0, "qrinsert", "", "numkit:qrinsert:badK");
@@ -386,7 +386,7 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             throw Error("qrdelete: orient must be 'col' or 'row'",
                         0, 0, "qrdelete", "", "numkit:qrdelete:badOrient");
     }
-    const double kd = args[2].toScalar();
+    const keel::f64 kd = args[2].toScalar();
     if (kd < 1.0 || kd != std::floor(kd))
         throw Error("qrdelete: k must be a positive integer",
                     0, 0, "qrdelete", "", "numkit:qrdelete:badK");
@@ -531,7 +531,7 @@ void svds_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
 void svdsketch_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "svdsketch");
-    double tol = (args.size() >= 2 && !args[1].isEmpty()) ? args[1].toScalar() : 1e-6;
+    keel::f64 tol = (args.size() >= 2 && !args[1].isEmpty()) ? args[1].toScalar() : 1e-6;
     auto [U, S, V] = svdsketch(args[0], tol, ctx.engine->allocator());
     outs[0] = std::move(U);
     if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(S);

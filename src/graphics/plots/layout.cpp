@@ -66,7 +66,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             // The bundle adapter wraps this id into a matlab.ui.Figure
             // handle object (kHandleReturning wrap). Always emit the id —
             // MATLAB binds a bare `figure` statement's Figure into `ans`.
-            outs[0] = Value::scalar(keel::as<double>(id), mr);
+            outs[0] = Value::scalar(keel::as<keel::f64>(id), mr);
         });
     regCore("layout", "close",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
@@ -157,7 +157,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 return;
             }
         }
-        double lo = 0.0, hi = 1.0;
+        keel::f64 lo = 0.0, hi = 1.0;
         bool parsed = false;
         if (!limJson.empty()) {
             keel::usize b = limJson.find('[');
@@ -174,7 +174,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             }
         }
         if (!parsed) {
-            double dmin = 1e300, dmax = -1e300;
+            keel::f64 dmin = 1e300, dmax = -1e300;
             for (const auto &ds : fm.currentAxes().datasets) {
                 const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
                 const char *base = j.c_str();
@@ -182,7 +182,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 while (pos < j.size()) {
                     if (keel::is_ascii_digit(j[pos]) || j[pos] == '-' || j[pos] == '+') {
                         char *endptr = nullptr;
-                        double v = std::strtod(base + pos, &endptr);
+                        keel::f64 v = std::strtod(base + pos, &endptr);
                         if (endptr && endptr > base + pos && std::isfinite(v)) {
                             if (v < dmin) dmin = v;
                             if (v > dmax) dmax = v;
@@ -195,10 +195,10 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             }
             if (dmin <= dmax) {
                 if (dmax > dmin) {
-                    const double span = dmax - dmin;
-                    const double p10 = std::pow(10.0, std::floor(std::log10(span)));
-                    const double s = span / p10;
-                    const double step = (s <= 1.5) ? 0.2 * p10
+                    const keel::f64 span = dmax - dmin;
+                    const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
+                    const keel::f64 s = span / p10;
+                    const keel::f64 step = (s <= 1.5) ? 0.2 * p10
                                       : (s <= 3.0) ? 0.5 * p10
                                       : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                    : 2.0 * p10;
@@ -234,7 +234,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     regCore("layout", "colordef",
         [](keel::ArrayRef<Value> /*args*/, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (nargout >= 1)
-                outs[0] = Value::scalar(keel::as<double>(gc.fm.current().id));
+                outs[0] = Value::scalar(keel::as<keel::f64>(gc.fm.current().id));
             else
                 outs[0] = Value();
         });
@@ -874,9 +874,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) {
                 auto cm = Value::matrix(64, 3, ValueType::DOUBLE, gc.mr);
-                double *p = cm.doubleDataMut();
+                keel::f64 *p = cm.doubleDataMut();
                 for (keel::usize i = 0; i < 64; ++i) {
-                    const double v = keel::as<double>(i) / 63.0;
+                    const keel::f64 v = keel::as<keel::f64>(i) / 63.0;
                     p[i] = v;
                     p[64 + i] = v;
                     p[128 + i] = v;
@@ -906,9 +906,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 for (keel::usize r = 0; r < R; ++r) {
                     if (r) os << ",";
                     // Column-major: M(r, c) = data[c * R + r].
-                    const double rv = M.elemAsDouble(0 * R + r);
-                    const double gv = M.elemAsDouble(1 * R + r);
-                    const double bv = M.elemAsDouble(2 * R + r);
+                    const keel::f64 rv = M.elemAsDouble(0 * R + r);
+                    const keel::f64 gv = M.elemAsDouble(1 * R + r);
+                    const keel::f64 bv = M.elemAsDouble(2 * R + r);
                     os << "[" << rv << "," << gv << "," << bv << "]";
                 }
                 os << "]";
@@ -1179,7 +1179,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     reg("layout", "ytickformat", tickFormatReg(&AxesState::yTickFormat));
     reg("layout", "ztickformat", tickFormatReg(&AxesState::zTickFormat));
     // xtickangle / ytickangle — rotation of tick labels in degrees.
-    auto tickAngleReg = [](double AxesState::*field) {
+    auto tickAngleReg = [](keel::f64 AxesState::*field) {
         return [field](keel::ArrayRef<Value> args, keel::usize nargout,
                        keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
@@ -1214,9 +1214,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             return;
         }
         if (args[0].numel() >= 3) {
-            const double dx = args[0].elemAsDouble(0);
-            const double dy = args[0].elemAsDouble(1);
-            const double dz = args[0].elemAsDouble(2);
+            const keel::f64 dx = args[0].elemAsDouble(0);
+            const keel::f64 dy = args[0].elemAsDouble(1);
+            const keel::f64 dz = args[0].elemAsDouble(2);
             if (keel::abs(dx - dy) < 1e-9 && keel::abs(dy - dz) < 1e-9
                 && fm.currentAxes().axisMode.empty()) {
                 fm.currentAxes().axisMode.assign("equal");
@@ -1371,7 +1371,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             fm.current().modified = true;
             fm.emitModified();
             // Return 1-based dataset index as a scalar handle.
-            outs[0] = Value::scalar((double)(ax.animatedDatasetIdx + 1), mr);
+            outs[0] = Value::scalar((keel::f64)(ax.animatedDatasetIdx + 1), mr);
         });
     reg("layout", "addpoints",
         [rebuildAnimatedJson](keel::ArrayRef<Value> args, keel::usize nargout,
@@ -1439,9 +1439,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             auto yv = Value::matrix(1, n, ValueType::DOUBLE, mr);
             if (n > 0) {
                 std::memcpy(xv.doubleDataMut(), ds.animatedX.data(),
-                            n * sizeof(double));
+                            n * sizeof(keel::f64));
                 std::memcpy(yv.doubleDataMut(), ds.animatedY.data(),
-                            n * sizeof(double));
+                            n * sizeof(keel::f64));
             }
             outs[0] = std::move(xv);
             if (nargout >= 2) outs[1] = std::move(yv);
@@ -1483,7 +1483,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             (void)nargout;
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
-            double az = 0, el = 0;
+            keel::f64 az = 0, el = 0;
             bool ok = false;
             // view(2) / view(3) — preset top-down / default 3-D views.
             keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;

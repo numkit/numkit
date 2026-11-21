@@ -34,7 +34,7 @@ void lsqminnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 {
     argcheck::checkNargin(args.size(), 2, 3, "lsqminnorm");
     bool have_tol = (args.size() >= 3);
-    double tol = have_tol ? args[2].toScalar() : 0.0;
+    keel::f64 tol = have_tol ? args[2].toScalar() : 0.0;
     outs[0] = lsqminnorm(args[0], args[1], have_tol, tol, ctx.engine->allocator());
 }
 
@@ -52,11 +52,11 @@ void lsqnonneg_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nargout >= 3 && outs.size() >= 3)
         outs[2] = R.residual;
     if (nargout >= 4 && outs.size() >= 4)
-        outs[3] = Value::scalar(keel::as<double>(R.exitflag), mr);
+        outs[3] = Value::scalar(keel::as<keel::f64>(R.exitflag), mr);
     if (nargout >= 5 && outs.size() >= 5) {
         Value out_struct = Value::structure(mr);
         out_struct.field("iterations") =
-            Value::scalar(keel::as<double>(R.iterations), mr);
+            Value::scalar(keel::as<keel::f64>(R.iterations), mr);
         out_struct.field("algorithm") =
             Value::fromString(R.algorithm, mr);
         out_struct.field("message") =

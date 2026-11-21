@@ -110,13 +110,13 @@ void register_strfun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             keel::String pat = args[0].toString();
             bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
-            keel::Array<double> hits(mr);
+            keel::Array<keel::f64> hits(mr);
             const Value &arr = args[1];
             if (arr.isCell() || arr.isString()) {
                 for (keel::usize i = 0; i < arr.numel(); ++i) {
                     keel::String s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
                     bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(keel::as<double>(i + 1));
+                    if (m) hits.push_back(keel::as<keel::f64>(i + 1));
                 }
             } else if (arr.isChar()) {
                 keel::usize R = arr.dims().rows(), C = arr.dims().cols();
@@ -127,7 +127,7 @@ void register_strfun(Engine &engine) {
                         s.push_back(keel::as<char>(arr.charData()[c * R + r]));
                     while (exact && !s.empty() && s.back() == ' ') s.pop_back();
                     bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(keel::as<double>(r + 1));
+                    if (m) hits.push_back(keel::as<keel::f64>(r + 1));
                 }
             }
             if (hits.empty()) {

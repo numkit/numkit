@@ -73,9 +73,9 @@ bool isTfStruct(const Value &v) {
 }
 
 struct TfPoly {
-    keel::Array<double> num;
-    keel::Array<double> den;
-    double Ts = 0.0;
+    keel::Array<keel::f64> num;
+    keel::Array<keel::f64> den;
+    keel::f64 Ts = 0.0;
 };
 
 bool toTfPoly(const Value &v, TfPoly &out) {
@@ -100,25 +100,25 @@ bool toTfPoly(const Value &v, TfPoly &out) {
     return false;
 }
 
-keel::Array<double> polyStrip(keel::ArrayRef<double> p) {
+keel::Array<keel::f64> polyStrip(keel::ArrayRef<keel::f64> p) {
     keel::usize i = 0;
     while (i + 1 < p.size() && p[i] == 0.0) ++i;
     if (i >= p.size()) return {0.0};
-    return keel::Array<double>(p.slice(i));
+    return keel::Array<keel::f64>(p.slice(i));
 }
 
-keel::Array<double> polyMul(keel::ArrayRef<double> a, keel::ArrayRef<double> b) {
+keel::Array<keel::f64> polyMul(keel::ArrayRef<keel::f64> a, keel::ArrayRef<keel::f64> b) {
     if (a.empty() || b.empty()) return {0.0};
-    keel::Array<double> c(a.size() + b.size() - 1, 0.0);
+    keel::Array<keel::f64> c(a.size() + b.size() - 1, 0.0);
     for (keel::usize i = 0; i < a.size(); ++i)
         for (keel::usize j = 0; j < b.size(); ++j)
             c[i + j] += a[i] * b[j];
     return polyStrip(c);
 }
 
-keel::Array<double> polyAdd(keel::ArrayRef<double> a, keel::ArrayRef<double> b, double sign) {
+keel::Array<keel::f64> polyAdd(keel::ArrayRef<keel::f64> a, keel::ArrayRef<keel::f64> b, keel::f64 sign) {
     const keel::usize n = std::max(a.size(), b.size());
-    keel::Array<double> c(n, 0.0);
+    keel::Array<keel::f64> c(n, 0.0);
     for (keel::usize i = 0; i < a.size(); ++i)
         c[n - a.size() + i] += a[i];
     for (keel::usize i = 0; i < b.size(); ++i)
@@ -126,15 +126,15 @@ keel::Array<double> polyAdd(keel::ArrayRef<double> a, keel::ArrayRef<double> b, 
     return polyStrip(c);
 }
 
-Value buildTfValue(keel::ArrayRef<double> num, keel::ArrayRef<double> den,
-                   double Ts, keel::Allocator *mr) {
-    keel::Array<double> ns = polyStrip(num);
-    keel::Array<double> ds = polyStrip(den);
+Value buildTfValue(keel::ArrayRef<keel::f64> num, keel::ArrayRef<keel::f64> den,
+                   keel::f64 Ts, keel::Allocator *mr) {
+    keel::Array<keel::f64> ns = polyStrip(num);
+    keel::Array<keel::f64> ds = polyStrip(den);
     const keel::usize len = std::max(ns.size(), ds.size());
     Value nv = Value::matrix(1, len, ValueType::DOUBLE, mr);
     Value dv = Value::matrix(1, len, ValueType::DOUBLE, mr);
-    double *nd = nv.doubleDataMut();
-    double *dd = dv.doubleDataMut();
+    keel::f64 *nd = nv.doubleDataMut();
+    keel::f64 *dd = dv.doubleDataMut();
     std::fill(nd, nd + len, 0.0);
     std::fill(dd, dd + len, 0.0);
     for (keel::usize i = 0; i < ns.size(); ++i) nd[len - ns.size() + i] = ns[i];
@@ -152,13 +152,13 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
     if (!isTfStruct(a) && !isTfStruct(b)) return false;
     TfPoly pa, pb;
     if (!toTfPoly(a, pa)) return false;
-    const double Ts = isTfStruct(a) ? pa.Ts : (isTfStruct(b) ? (b.hasField("Ts") ? b.field("Ts").toScalar() : 0.0) : 0.0);
+    const keel::f64 Ts = isTfStruct(a) ? pa.Ts : (isTfStruct(b) ? (b.hasField("Ts") ? b.field("Ts").toScalar() : 0.0) : 0.0);
     if (op == '^') {
         if (!isTfStruct(a) || !b.isScalar() || !b.isNumeric() || b.isComplex()) return false;
-        const double expVal = b.toScalar();
+        const keel::f64 expVal = b.toScalar();
         const int k = keel::as<int>(expVal);
-        if (keel::as<double>(k) != expVal) return false;
-        keel::Array<double> num = {1.0}, den = {1.0};
+        if (keel::as<keel::f64>(k) != expVal) return false;
+        keel::Array<keel::f64> num = {1.0}, den = {1.0};
         const int ak = keel::abs(k);
         const auto &baseN = (k >= 0) ? pa.num : pa.den;
         const auto &baseD = (k >= 0) ? pa.den : pa.num;
@@ -171,7 +171,7 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
     }
     if (!toTfPoly(b, pb)) return false;
     if (op == '+' || op == '-') {
-        const double sgn = (op == '+') ? 1.0 : -1.0;
+        const keel::f64 sgn = (op == '+') ? 1.0 : -1.0;
         if (pa.den == pb.den) {
             out = buildTfValue(polyAdd(pa.num, pb.num, sgn), pa.den, Ts, mr);
         } else {
@@ -247,7 +247,7 @@ void BuiltinLibrary::registerUnaryOps(Engine &engine)
         if (isTfStruct(a)) {
             TfPoly pa;
             if (toTfPoly(a, pa)) {
-                for (double &c : pa.num) c = -c;
+                for (keel::f64 &c : pa.num) c = -c;
                 return buildTfValue(pa.num, pa.den, pa.Ts, engine.allocator());
             }
         }

@@ -414,14 +414,14 @@ Value mat2cell(const Value &x, const Value &rowSizesV, const Value &colSizesV, k
                      0, 0, "mat2cell", "", "numkit:mat2cell:colSum");
 
     auto c = Value::cell(rowS.size(), colS.size(), mr);
-    const double *src = x.doubleData();
+    const keel::f64 *src = x.doubleData();
     keel::usize rowOff = 0;
     for (keel::usize i = 0; i < rowS.size(); ++i) {
         keel::usize colOff = 0;
         for (keel::usize j = 0; j < colS.size(); ++j) {
             const keel::usize br = rowS[i], bc = colS[j];
             auto block = Value::matrix(br, bc, ValueType::DOUBLE, mr);
-            double *dst = block.doubleDataMut();
+            keel::f64 *dst = block.doubleDataMut();
             for (keel::usize cc = 0; cc < bc; ++cc)
                 for (keel::usize rr = 0; rr < br; ++rr)
                     dst[cc * br + rr] = src[(colOff + cc) * R + (rowOff + rr)];
@@ -594,22 +594,22 @@ static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
     Value out = allocMatrixShape(d, outT, mr);
     for (keel::usize i = 0; i < n; ++i) {
         const Value e = C.cellAt(i);
-        double val = 0.0;
+        keel::f64 val = 0.0;
         if (name == "isempty")          val = (e.isEmpty() || e.numel() == 0) ? 1.0 : 0.0;
         else if (name == "islogical")   val = e.isLogical() ? 1.0 : 0.0;
         else if (name == "isreal")      val = e.isComplex() ? 0.0 : 1.0;
-        else if (name == "ndims")       val = keel::as<double>(e.dims().ndim());
-        else if (name == "prodofsize")  val = keel::as<double>(e.numel());
+        else if (name == "ndims")       val = keel::as<keel::f64>(e.dims().ndim());
+        else if (name == "prodofsize")  val = keel::as<keel::f64>(e.numel());
         else if (name == "length") {
             if (e.numel() == 0) val = 0.0;
             else {
                 keel::usize mx = 0; const auto &ed = e.dims();
                 for (int k = 0; k < ed.ndim(); ++k)
                     if (ed.dim(k) > mx) mx = ed.dim(k);
-                val = keel::as<double>(mx);
+                val = keel::as<keel::f64>(mx);
             }
         }
-        else if (isSize)                val = keel::as<double>(e.dims().dim(sizeDim - 1));
+        else if (isSize)                val = keel::as<keel::f64>(e.dims().dim(sizeDim - 1));
         else if (isIsclass)             val = (clsName == hf::classNameOf(e)) ? 1.0 : 0.0;
         if (wantLogical) out.logicalDataMut()[i] = (val != 0.0) ? 1 : 0;
         else             out.doubleDataMut()[i]  = val;

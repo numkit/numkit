@@ -142,15 +142,15 @@ ValueType resolveNativeOutType(ValueType inType, const char *fn)
 }
 
 template <typename T>
-inline T toOutT(double v)
+inline T toOutT(keel::f64 v)
 {
     if constexpr (std::is_floating_point_v<T>) {
         return static_cast<T>(v);
     } else {
         if (std::isnan(v)) return T{};
         v = std::round(v);
-        constexpr double lo = keel::as<double>(std::numeric_limits<T>::min());
-        constexpr double hi = keel::as<double>(std::numeric_limits<T>::max());
+        constexpr keel::f64 lo = keel::as<keel::f64>(std::numeric_limits<T>::min());
+        constexpr keel::f64 hi = keel::as<keel::f64>(std::numeric_limits<T>::max());
         if (v < lo) return std::numeric_limits<T>::min();
         if (v > hi) return std::numeric_limits<T>::max();
         return static_cast<T>(v);
@@ -161,7 +161,7 @@ template <typename T>
 inline Value makeNativeScalar(T v, ValueType outType, keel::Allocator *mr)
 {
     if (outType == ValueType::DOUBLE)
-        return Value::scalar(keel::as<double>(v), mr);
+        return Value::scalar(keel::as<keel::f64>(v), mr);
     auto r = Value::matrix(1, 1, outType, mr);
     static_cast<T *>(r.rawDataMut())[0] = v;
     return r;
@@ -183,7 +183,7 @@ void typedReduceAlongDim(const Value &x, int redDim, T *dst,
     for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
     auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
-        double acc = init;
+        keel::f64 acc = init;
         for (keel::usize k = 0; k < sliceLen; ++k)
             acc = accumOp(acc, x.elemAsDouble(baseOff + k * stride));
         return finalize(acc, sliceLen);
@@ -219,11 +219,11 @@ Value reduceTypedAll(const Value &x, ValueType outType, keel::Allocator *mr,
 {
     if (x.isEmpty()) {
         // Empty input: scalar reduce → identity (sum=0, prod=1, mean=NaN).
-        const T v = finalize(keel::as<double>(init), 0);
+        const T v = finalize(keel::as<keel::f64>(init), 0);
         return makeNativeScalar<T>(v, outType, mr);
     }
     if (x.isScalar() || x.dims().isVector()) {
-        double acc = init;
+        keel::f64 acc = init;
         for (keel::usize i = 0; i < x.numel(); ++i)
             acc = accumOp(acc, x.elemAsDouble(i));
         return makeNativeScalar<T>(finalize(acc, x.numel()), outType, mr);
@@ -270,34 +270,34 @@ Value reduceTypedAlongDim(const Value &x, int dim, ValueType outType, keel::Allo
 // typed path (DOUBLE/SINGLE/integer outputs), the complex one feeds the
 // COMPLEX path.
 struct SumOp {
-    static constexpr double init = 0.0;
-    static double accum(double a, double b) { return a + b; }
+    static constexpr keel::f64 init = 0.0;
+    static keel::f64 accum(keel::f64 a, keel::f64 b) { return a + b; }
     template<typename T>
-    static T finalize(double acc, keel::usize /*n*/) { return toOutT<T>(acc); }
+    static T finalize(keel::f64 acc, keel::usize /*n*/) { return toOutT<T>(acc); }
     static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
     static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
     static keel::c64 cFinalize(keel::c64 acc, keel::usize /*n*/) { return acc; }
 };
 struct ProdOp {
-    static constexpr double init = 1.0;
-    static double accum(double a, double b) { return a * b; }
+    static constexpr keel::f64 init = 1.0;
+    static keel::f64 accum(keel::f64 a, keel::f64 b) { return a * b; }
     template<typename T>
-    static T finalize(double acc, keel::usize /*n*/) { return toOutT<T>(acc); }
+    static T finalize(keel::f64 acc, keel::usize /*n*/) { return toOutT<T>(acc); }
     static keel::c64 cInit() { return keel::c64(1.0, 0.0); }
     static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a * b; }
     static keel::c64 cFinalize(keel::c64 acc, keel::usize /*n*/) { return acc; }
 };
 struct MeanOp {
-    static constexpr double init = 0.0;
-    static double accum(double a, double b) { return a + b; }
+    static constexpr keel::f64 init = 0.0;
+    static keel::f64 accum(keel::f64 a, keel::f64 b) { return a + b; }
     template<typename T>
-    static T finalize(double acc, keel::usize n) {
-        return toOutT<T>(n == 0 ? std::nan("") : acc / keel::as<double>(n));
+    static T finalize(keel::f64 acc, keel::usize n) {
+        return toOutT<T>(n == 0 ? std::nan("") : acc / keel::as<keel::f64>(n));
     }
     static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
     static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
     static keel::c64 cFinalize(keel::c64 acc, keel::usize n) {
-        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / keel::as<double>(n);
+        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / keel::as<keel::f64>(n);
     }
 };
 
@@ -308,7 +308,7 @@ template <typename T, typename Init, typename AccumOp, typename Finalize>
 Value reduceAllElementsScalar(const Value &x, ValueType outType, keel::Allocator *mr,
                                Init init, AccumOp accumOp, Finalize finalize)
 {
-    double acc = init;
+    keel::f64 acc = init;
     const keel::usize n = x.numel();
     for (keel::usize i = 0; i < n; ++i)
         acc = accumOp(acc, x.elemAsDouble(i));
@@ -458,8 +458,8 @@ Value runNativeReduction(const Value &x, int dim, ValueType outType, keel::Alloc
                                 Op::init, Op::accum, Op::template finalize<T>);
     };
     switch (outType) {
-    case ValueType::DOUBLE: return run(double  {});
-    case ValueType::SINGLE: return run(float   {});
+    case ValueType::DOUBLE: return run(keel::f64  {});
+    case ValueType::SINGLE: return run(keel::f32   {});
     case ValueType::INT8:   return run(keel::i8  {});
     case ValueType::INT16:  return run(keel::i16 {});
     case ValueType::INT32:  return run(keel::i32 {});
@@ -511,7 +511,7 @@ inline StringFlag classifyStringFlag(const Value &v)
 // For COMPLEX, an element is NaN if either its real or imag part is NaN.
 
 template <typename Op>
-inline void nanAccumDouble(double &acc, keel::usize &count, double v)
+inline void nanAccumDouble(keel::f64 &acc, keel::usize &count, keel::f64 v)
 {
     if (std::isnan(v)) return;
     acc = Op::accum(acc, v);
@@ -519,11 +519,11 @@ inline void nanAccumDouble(double &acc, keel::usize &count, double v)
 }
 
 template <typename T, typename Op>
-inline T nanFinalize(double acc, keel::usize nonNanCount)
+inline T nanFinalize(keel::f64 acc, keel::usize nonNanCount)
 {
     if constexpr (std::is_same_v<Op, MeanOp>)
         return toOutT<T>(nonNanCount == 0 ? std::nan("")
-                                          : acc / keel::as<double>(nonNanCount));
+                                          : acc / keel::as<keel::f64>(nonNanCount));
     else
         // sum: empty → 0 (matches MATLAB nansum). prod: empty → 1.
         return toOutT<T>(acc);
@@ -541,7 +541,7 @@ void nanReduceAlongDim(const Value &x, int redDim, T *dst)
     for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
     auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
-        double acc = Op::init;
+        keel::f64 acc = Op::init;
         keel::usize count = 0;
         for (keel::usize k = 0; k < sliceLen; ++k)
             nanAccumDouble<Op>(acc, count, x.elemAsDouble(baseOff + k * stride));
@@ -562,7 +562,7 @@ Value nanReduceAll(const Value &x, ValueType outType, keel::Allocator *mr)
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, outType, mr);
     if (x.isScalar() || x.dims().isVector()) {
-        double acc = Op::init;
+        keel::f64 acc = Op::init;
         keel::usize count = 0;
         for (keel::usize i = 0; i < x.numel(); ++i)
             nanAccumDouble<Op>(acc, count, x.elemAsDouble(i));
@@ -600,7 +600,7 @@ Value nanReduceAlongDimImpl(const Value &x, int dim, ValueType outType, keel::Al
 template <typename T, typename Op>
 Value nanReduceAllElementsScalar(const Value &x, ValueType outType, keel::Allocator *mr)
 {
-    double acc = Op::init;
+    keel::f64 acc = Op::init;
     keel::usize count = 0;
     for (keel::usize i = 0; i < x.numel(); ++i)
         nanAccumDouble<Op>(acc, count, x.elemAsDouble(i));
@@ -620,8 +620,8 @@ Value runNanReduction(const Value &x, int dim, ValueType outType, keel::Allocato
             : nanReduceAll<T, Op>(x, outType, mr);
     };
     switch (outType) {
-    case ValueType::DOUBLE: return run(double  {});
-    case ValueType::SINGLE: return run(float   {});
+    case ValueType::DOUBLE: return run(keel::f64  {});
+    case ValueType::SINGLE: return run(keel::f32   {});
     case ValueType::INT8:   return run(keel::i8  {});
     case ValueType::INT16:  return run(keel::i16 {});
     case ValueType::INT32:  return run(keel::i32 {});
@@ -653,7 +653,7 @@ Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
     auto finalizeOne = [](keel::c64 acc, keel::usize count) -> keel::c64 {
         if constexpr (std::is_same_v<Op, MeanOp>)
             return count == 0 ? keel::c64(std::nan(""), 0.0)
-                              : acc / keel::as<double>(count);
+                              : acc / keel::as<keel::f64>(count);
         else
             return acc;
     };
@@ -931,10 +931,10 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
     }
 
     Value out = idx;
-    double *dst = out.doubleDataMut();
+    keel::f64 *dst = out.doubleDataMut();
     const keel::usize total = out.numel();
     for (keel::usize q = 0; q < total; ++q) {
-        double v = dst[q];
+        keel::f64 v = dst[q];
         if (!std::isfinite(v) || v < 1.0) continue;
         keel::usize k = keel::as<keel::usize>(v) - 1;
 
@@ -954,7 +954,7 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
             redOff += coord * st;
         }
 
-        dst[q] = keel::as<double>(1 + baseOff + redOff);
+        dst[q] = keel::as<keel::f64>(1 + baseOff + redOff);
     }
     return out;
 }
@@ -1097,8 +1097,8 @@ void linspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
 {
     argcheck::checkNargin(args.size(), 1, 3, "linspace");
     argcheck::checkNargin(args.size(), 2, 3, "linspace");
-    const double a = args[0].toScalar();
-    const double b = args[1].toScalar();
+    const keel::f64 a = args[0].toScalar();
+    const keel::f64 b = args[1].toScalar();
     const keel::usize n = (args.size() >= 3)
         ? argcheck::roundLength(args[2], 3, "n", "linspace") : 100u;
     outs[0] = linspace(a, b, n, ctx.engine->allocator());
@@ -1108,8 +1108,8 @@ void logspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
 {
     argcheck::checkNargin(args.size(), 1, 3, "logspace");
     argcheck::checkNargin(args.size(), 2, 3, "logspace");
-    const double a = args[0].toScalar();
-    const double b = args[1].toScalar();
+    const keel::f64 a = args[0].toScalar();
+    const keel::f64 b = args[1].toScalar();
     const keel::usize n = (args.size() >= 3)
         ? argcheck::roundLength(args[2], 3, "n", "logspace") : 50u;
     outs[0] = logspace(a, b, n, ctx.engine->allocator());

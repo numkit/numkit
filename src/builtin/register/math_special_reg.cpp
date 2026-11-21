@@ -49,39 +49,39 @@ NUMKIT_UNARY_ADAPTER(expint,  expint)
 
 namespace {
 
-double polygammaScalar(int k, double x)
+keel::f64 polygammaScalar(int k, keel::f64 x)
 {
     if (std::isnan(x)) return x;
     if (x <= 0.0 && x == std::floor(x)) {
-        return (k % 2 == 1) ? std::numeric_limits<double>::infinity()
-                            : -std::numeric_limits<double>::infinity();
+        return (k % 2 == 1) ? std::numeric_limits<keel::f64>::infinity()
+                            : -std::numeric_limits<keel::f64>::infinity();
     }
-    double factK = 1.0;
-    for (int i = 2; i <= k; ++i) factK *= keel::as<double>(i);
-    const double sign = (k % 2 == 1) ? 1.0 : -1.0;
+    keel::f64 factK = 1.0;
+    for (int i = 2; i <= k; ++i) factK *= keel::as<keel::f64>(i);
+    const keel::f64 sign = (k % 2 == 1) ? 1.0 : -1.0;
 
-    double r = 0.0;
-    double y = x;
+    keel::f64 r = 0.0;
+    keel::f64 y = x;
     while (y < 12.0) {
         r += sign * factK / std::pow(y, k + 1);
         y += 1.0;
     }
-    const double invY = 1.0 / y;
-    const double invY2 = invY * invY;
-    const double yk = std::pow(invY, k);
-    const double factKm1 = factK / keel::as<double>(k);
+    const keel::f64 invY = 1.0 / y;
+    const keel::f64 invY2 = invY * invY;
+    const keel::f64 yk = std::pow(invY, k);
+    const keel::f64 factKm1 = factK / keel::as<keel::f64>(k);
 
     // Bernoulli numbers B_2..B_10
-    static constexpr double B[5] = {
+    static constexpr keel::f64 B[5] = {
         1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0
     };
-    double series = factKm1 + 0.5 * factK * invY;
-    double powY2 = invY2;
-    double binomNum = factKm1; // (2m + k - 1)! / (2m)! starts at (k - 1)! for m = 0
+    keel::f64 series = factKm1 + 0.5 * factK * invY;
+    keel::f64 powY2 = invY2;
+    keel::f64 binomNum = factKm1; // (2m + k - 1)! / (2m)! starts at (k - 1)! for m = 0
     for (int m = 1; m <= 5; ++m) {
         const int twoM = 2 * m;
-        binomNum *= keel::as<double>((twoM + k - 2) * (twoM + k - 1))
-                  / keel::as<double>((twoM - 1) * twoM);
+        binomNum *= keel::as<keel::f64>((twoM + k - 2) * (twoM + k - 1))
+                  / keel::as<keel::f64>((twoM - 1) * twoM);
         series += B[m - 1] * binomNum * powY2;
         powY2 *= invY2;
     }
@@ -98,7 +98,7 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
         outs[0] = psi(args[0], mr);
         return;
     }
-    const double kv = argcheck::expectedReal(args[0], 1, "k", "psi");
+    const keel::f64 kv = argcheck::expectedReal(args[0], 1, "k", "psi");
     argcheck::expectedInteger(kv, 1, "k", "psi");
     argcheck::expectedNonNegative(kv, 1, "k", "psi");
     const int k = keel::as<int>(kv);
@@ -108,14 +108,14 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     }
     const Value &X = args[1];
     Value out = ops::createLike(X, ValueType::DOUBLE, mr);
-    double *od = out.doubleDataMut();
+    keel::f64 *od = out.doubleDataMut();
     for (keel::usize i = 0; i < X.numel(); ++i)
         od[i] = polygammaScalar(k, X.elemAsDouble(i));
     if (X.type() == ValueType::SINGLE) {
         Value sOut = ops::createLike(X, ValueType::SINGLE, mr);
-        float *sd = sOut.singleDataMut();
+        keel::f32 *sd = sOut.singleDataMut();
         for (keel::usize i = 0; i < X.numel(); ++i)
-            sd[i] = keel::as<float>(od[i]);
+            sd[i] = keel::as<keel::f32>(od[i]);
         outs[0] = std::move(sOut);
     } else {
         outs[0] = std::move(out);
@@ -156,7 +156,7 @@ void legendre_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
 {
     argcheck::checkNargin(args.size(), 1, 3, "legendre");
     argcheck::checkNargin(args.size(), 2, 3, "legendre");
-    const double nv = argcheck::expectedReal(args[0], 1, "n", "legendre");
+    const keel::f64 nv = argcheck::expectedReal(args[0], 1, "n", "legendre");
     argcheck::expectedInteger(nv, 1, "n", "legendre");
     argcheck::expectedNonNegative(nv, 1, "n", "legendre");
     const int n = keel::as<int>(nv);
