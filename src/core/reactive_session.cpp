@@ -204,11 +204,11 @@ keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
     keel::Array<keel::Array<keel::usize>> sccs;
     if (!n)
         return sccs;
-    keel::Array<int> idx(n, -1), low(n, 0);
+    keel::Array<keel::i32> idx(n, -1), low(n, 0);
     keel::Array<char> on(n, 0);
     keel::Array<keel::usize> st;
     keel::Array<std::pair<keel::usize, keel::usize>> frames;   // {v, next-child}
-    int ctr = 0;
+    keel::i32 ctr = 0;
     for (keel::usize r = 0; r < n; ++r) {
         if (idx[r] != -1)
             continue;
@@ -246,7 +246,7 @@ keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
             frames.pop_back();
             if (!frames.empty())
                 low[frames.back().first] =
-                    std::min(low[frames.back().first], (int)lv);
+                    std::min(low[frames.back().first], (keel::i32)lv);
         }
     }
     return sccs;

@@ -24,8 +24,8 @@ namespace numkit {
 // NativePayload carrying the FigureManager handle-registry id.
 struct GraphicsHandlePayload : public NativePayload
 {
-    int handleId = 0;
-    int numericValue = 0;
+    keel::i32 handleId = 0;
+    keel::i32 numericValue = 0;
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
         auto *res = alloc ? alloc : keel::default_allocator();
@@ -41,7 +41,7 @@ struct GraphicsHandlePayload : public NativePayload
 // Payload-based (not class-name-based): class(h) reports the MATLAB
 // class (matlab.graphics.chart.primitive.Line, …), so the class name is
 // NOT a discriminator — the payload is.
-inline int graphicsHandleIdOf(const Value &v)
+inline keel::i32 graphicsHandleIdOf(const Value &v)
 {
     if (!v.isObject())
         return -1;
@@ -54,7 +54,7 @@ inline int graphicsHandleIdOf(const Value &v)
 
 // Handle object Value wrapping registry id `id` with MATLAB class name
 // `className` (that string is what class()/isa() report).
-inline Value makeGraphicsHandleValue(keel::StringRef className, int id,
+inline Value makeGraphicsHandleValue(keel::StringRef className, keel::i32 id,
                                      keel::Allocator *mr = nullptr)
 {
     auto *res = mr ? mr : keel::default_allocator();
@@ -65,8 +65,8 @@ inline Value makeGraphicsHandleValue(keel::StringRef className, int id,
     return Value::object(className, keel::move(st), /*isHandle=*/true, res);
 }
 
-inline Value makeGraphicsHandleValue(keel::StringRef className, int id,
-                                     int numericVal,
+inline Value makeGraphicsHandleValue(keel::StringRef className, keel::i32 id,
+                                     keel::i32 numericVal,
                                      keel::Allocator *mr = nullptr)
 {
     auto *res = mr ? mr : keel::default_allocator();

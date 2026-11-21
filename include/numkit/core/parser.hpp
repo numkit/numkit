@@ -55,14 +55,14 @@ private:
     // — Позиция в исходнике —
     struct SourceLoc
     {
-        int line;
-        int col;
+        keel::i32 line;
+        keel::i32 col;
     };
     SourceLoc loc() const;
 
     // — Утилиты навигации по токенам —
     const Token &current() const;
-    const Token &peekToken(int off = 0) const;
+    const Token &peekToken(keel::i32 off = 0) const;
     bool isAtEnd() const;
     bool check(TokenType t) const;
     bool match(TokenType t);
@@ -91,7 +91,7 @@ private:
     bool isTerminator(std::initializer_list<TokenType> terminators) const;
 
     // — Безопасный парсинг числа —
-    static keel::f64 parseDouble(keel::StringRef text, int line, int col);
+    static keel::f64 parseDouble(keel::StringRef text, keel::i32 line, keel::i32 col);
 
     // — Command-style calls (clear all, grid on, cd dir, etc.) —
     bool isCommandStyleCall() const;

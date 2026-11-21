@@ -120,7 +120,7 @@ public:
         return { f.chunk, f.R };
     }
 
-    int callDepth() const;
+    keel::i32 callDepth() const;
 
     keel::StringRef currentMethodClass() const
     {
@@ -131,10 +131,10 @@ public:
         return !frames_.empty() && frames_.back().isCtor;
     }
 
-    void setMaxRecursionDepth(int d) { maxRecursion_ = d; }
+    void setMaxRecursionDepth(keel::i32 d) { maxRecursion_ = d; }
 
-    Environment *callerEnvAtDepth(int n);
-    void assignInCallerFrame(int n, keel::StringRef name, const Value &val);
+    Environment *callerEnvAtDepth(keel::i32 n);
+    void assignInCallerFrame(keel::i32 n, keel::StringRef name, const Value &val);
 
     Environment *inheritedScope_ = nullptr;
     bool inReentrantEval_ = false;
@@ -286,7 +286,7 @@ public:
     keel::Array<PausedState *> activePausedStates_;
 private:
 
-    int maxRecursion_ = 200;
+    keel::i32 maxRecursion_ = 200;
 
     // Per-chunk call target inline cache (user functions + external builtins)
     keel::HashMap<const BytecodeChunk *, keel::Array<CallCacheEntry>> chunkCallCache_;

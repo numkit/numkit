@@ -68,9 +68,9 @@ void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     } else {
         tiles.reserve(args.size() - 1);
         for (keel::usize i = 1; i < args.size(); ++i) {
-            const keel::f64 d = argcheck::expectedReal(args[i], int(i) + 1, "tile", "repmat");
-            argcheck::expectedInteger(d, int(i) + 1, "tile", "repmat");
-            argcheck::expectedNonNegative(d, int(i) + 1, "tile", "repmat");
+            const keel::f64 d = argcheck::expectedReal(args[i], keel::i32(i) + 1, "tile", "repmat");
+            argcheck::expectedInteger(d, keel::i32(i) + 1, "tile", "repmat");
+            argcheck::expectedNonNegative(d, keel::i32(i) + 1, "tile", "repmat");
             tiles.push_back(keel::as<keel::usize>(d));
         }
     }
@@ -79,7 +79,7 @@ void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     // kernel. Anything else (higher rank, longer tile vector, or non-
     // DOUBLE type) goes through repmatND.
     const auto &inDims = args[0].dims();
-    const int outNdim = std::max(inDims.ndim(), keel::as<int>(tiles.size()));
+    const keel::i32 outNdim = std::max(inDims.ndim(), keel::as<keel::i32>(tiles.size()));
     if (outNdim <= 3 && tiles.size() <= 3 && args[0].type() == ValueType::DOUBLE) {
         const keel::usize m = tiles[0];
         const keel::usize n = tiles.size() >= 2 ? tiles[1] : 1;
@@ -107,7 +107,7 @@ void rot90_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
                CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rot90");
-    int k = (args.size() >= 2 && !args[1].isEmpty())
+    keel::i32 k = (args.size() >= 2 && !args[1].isEmpty())
                 ? argcheck::expectedInteger(
                       argcheck::expectedReal(args[1], 2, "k", "rot90"), 2, "k", "rot90")
                 : 1;
@@ -131,13 +131,13 @@ void circshift_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
         // circshift(X, K, dim): shift by K ONLY along dimension `dim`. The
         // previous code ignored args[2] and always shifted dim 1.
         if (args.size() >= 3 && !args[2].isEmpty()) {
-            const int dim = argcheck::dimArg(args[2], "circshift");
+            const keel::i32 dim = argcheck::dimArg(args[2], "circshift");
             if (dim < 1)
                 throw Error("circshift: dim must be a positive integer",
                              0, 0, "circshift", "", "numkit:circshift:badDim");
             keel::ArenaTemp scratch = keel::get_scratch(mr);
             auto shifts = keel::Array<keel::i64>(dim, scratch.allocator());
-            for (int i = 0; i < dim; ++i) shifts[i] = 0;
+            for (keel::i32 i = 0; i < dim; ++i) shifts[i] = 0;
             shifts[dim - 1] = kk;
             outs[0] = numkit::narrowComplex(circshiftND(args[0],
                                   keel::ArrayRef<keel::i64>(shifts.data(), dim), mr), ctx.engine->allocator());
@@ -163,7 +163,7 @@ void circshift_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
                     keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 1, 2, #name);                      \
-        int k = (args.size() >= 2 && !args[1].isEmpty())                       \
+        keel::i32 k = (args.size() >= 2 && !args[1].isEmpty())                       \
                     ? argcheck::expectedInteger(                              \
                           argcheck::expectedReal(args[1], 2, "k", #name),      \
                           2, "k", #name)                                       \
@@ -180,7 +180,7 @@ void flip_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
               CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "flip");
-    int dim = (args.size() >= 2 && !args[1].isEmpty())
+    keel::i32 dim = (args.size() >= 2 && !args[1].isEmpty())
                   ? argcheck::dimArg(args[1], "flip")
                   : 0;
     outs[0] = numkit::narrowComplex(flip(args[0], dim, ctx.engine->allocator()), ctx.engine->allocator());
@@ -211,7 +211,7 @@ void sub2ind_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
 
 // paddata / trimdata / resize adapters.
 struct ResizeOpts {
-    int dim = 0;
+    keel::i32 dim = 0;
     keel::String side{"trailing"};
     keel::f64 fillValue = 0.0;
 };
@@ -240,28 +240,28 @@ ResizeOpts parseResizeOpts(keel::ArrayRef<Value> args, bool allowFill, const cha
     for (keel::usize i = 2; i < args.size(); i += 2) {
         const keel::usize keyIdx = allowFill
             ? argcheck::expectedChoice(args[i], {"dimension", "side", "fillvalue"},
-                                       keel::as<int>(i + 1), "Name", fn)
+                                       keel::as<keel::i32>(i + 1), "Name", fn)
             : argcheck::expectedChoice(args[i], {"dimension", "side"},
-                                       keel::as<int>(i + 1), "Name", fn);
+                                       keel::as<keel::i32>(i + 1), "Name", fn);
         const Value &val = args[i + 1];
         if (keyIdx == 0) {
             if (val.isChar() || val.isString()) {
                 argcheck::expectedChoice(val, {"auto"},
-                                         keel::as<int>(i + 2), "Dimension", fn);
+                                         keel::as<keel::i32>(i + 2), "Dimension", fn);
                 opts.dim = 0;
             } else {
-                const keel::f64 dv = argcheck::expectedReal(val, keel::as<int>(i + 2), "Dimension", fn);
-                opts.dim = argcheck::expectedInteger(dv, keel::as<int>(i + 2), "Dimension", fn);
-                argcheck::expectedPositive(dv, keel::as<int>(i + 2), "Dimension", fn);
+                const keel::f64 dv = argcheck::expectedReal(val, keel::as<keel::i32>(i + 2), "Dimension", fn);
+                opts.dim = argcheck::expectedInteger(dv, keel::as<keel::i32>(i + 2), "Dimension", fn);
+                argcheck::expectedPositive(dv, keel::as<keel::i32>(i + 2), "Dimension", fn);
             }
         } else if (keyIdx == 1) {
             static const char *const kSides[] = {"trailing", "leading", "both", "right", "left"};
             const keel::usize sideIdx = argcheck::expectedChoice(
                 val, {"trailing", "leading", "both", "right", "left"},
-                keel::as<int>(i + 2), "Side", fn);
+                keel::as<keel::i32>(i + 2), "Side", fn);
             opts.side.assign(kSides[sideIdx]);
         } else if (keyIdx == 2) {
-            opts.fillValue = argcheck::expectedReal(val, keel::as<int>(i + 2), "FillValue", fn);
+            opts.fillValue = argcheck::expectedReal(val, keel::as<keel::i32>(i + 2), "FillValue", fn);
         }
     }
     return opts;

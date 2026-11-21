@@ -125,7 +125,7 @@ struct StyleParts {
 struct TextExtras {
     Rgb color{0, 0, 0};
     keel::f64 fontSize = 10;
-    int halign = 0;          // 0 left, 1 center, 2 right
+    keel::i32 halign = 0;          // 0 left, 1 center, 2 right
 };
 
 // One MATLAB colour spec → Rgb. Accepts the linespec short letters,
@@ -166,7 +166,7 @@ inline bool textColorSpec(keel::StringRef v, Rgb &out)
         return true;
     }
     keel::f64 ch[3] = {0, 0, 0};
-    int n = 0;
+    keel::i32 n = 0;
     keel::usize i = 0;
     while (i < s.size() && n < 3) {
         keel::usize e = i;
@@ -328,7 +328,7 @@ inline const NamedPaletteHex kNamedPaletteHex[] = {
 };
 
 // Parsed-once 256x3 RGB tables, keyed by name (lowercase).
-const keel::u8 *namedPalette(keel::StringRef name, int &n)
+const keel::u8 *namedPalette(keel::StringRef name, keel::i32 &n)
 {
     static constexpr keel::usize kNumPalettes =
         sizeof(kNamedPaletteHex) / sizeof(kNamedPaletteHex[0]);
@@ -409,7 +409,7 @@ struct Cmd {
     // qLo + idx/254*(qHi-qLo). climLo/climHi is the display window
     // (CLim; auto = [qLo,qHi]).
     keel::Array<keel::u8> img;
-    int imgW = 0, imgH = 0;
+    keel::i32 imgW = 0, imgH = 0;
     keel::f64 ix0 = 0, ix1 = 1, iy0 = 0, iy1 = 1;
     keel::f64 qLo = 0, qHi = 1;
     keel::f64 climLo = 0, climHi = 1;
@@ -428,8 +428,8 @@ inline keel::Array<keel::u8> imageCmdRgb(const Cmd &c)
 {
     keel::f64 sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
     keel::f64 sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
-    int pw = std::max(1, (int)std::lround(sx1 - sx0));
-    int ph = std::max(1, (int)std::lround(sy1 - sy0));
+    keel::i32 pw = std::max(1, (keel::i32)std::lround(sx1 - sx0));
+    keel::i32 ph = std::max(1, (keel::i32)std::lround(sy1 - sy0));
     keel::Array<keel::u8> buf;
     buf.resize((keel::usize)pw * ph * 3, 255);
 
@@ -442,24 +442,24 @@ inline keel::Array<keel::u8> imageCmdRgb(const Cmd &c)
     keel::Array<Rgb> custom;
     if (!c.cmapCustom.empty())
         custom = parseCustomPalette(c.cmapCustom);
-    int nPal = 256;
+    keel::i32 nPal = 256;
     const keel::u8 *pal = c.cmapCustom.empty()
         ? namedPalette(c.cmap, nPal) : nullptr;
     if (!custom.empty())
-        nPal = (int)custom.size();
+        nPal = (keel::i32)custom.size();
 
-    for (int py = 0; py < ph; ++py) {
+    for (keel::i32 py = 0; py < ph; ++py) {
         keel::f64 cy = sy0 + py + 0.5;
         keel::f64 v = c.ys[0] <= c.ys[1] ? frac(sy0, sy1, cy)
                                       : 1.0 - frac(sy0, sy1, cy);
-        int row = (int)(v * c.imgH);
+        keel::i32 row = (keel::i32)(v * c.imgH);
         if (row < 0) row = 0;
         if (row >= c.imgH) row = c.imgH - 1;
-        for (int px = 0; px < pw; ++px) {
+        for (keel::i32 px = 0; px < pw; ++px) {
             keel::f64 cx = sx0 + px + 0.5;
             keel::f64 u = c.xs[0] <= c.xs[1] ? frac(sx0, sx1, cx)
                                           : 1.0 - frac(sx0, sx1, cx);
-            int col = (int)(u * c.imgW);
+            keel::i32 col = (keel::i32)(u * c.imgW);
             if (col < 0) col = 0;
             if (col >= c.imgW) col = c.imgW - 1;
             Rgb rgb(255, 255, 255);
@@ -468,13 +468,13 @@ inline keel::Array<keel::u8> imageCmdRgb(const Cmd &c)
                 rgb = Rgb(c.img[o], c.img[o + 1], c.img[o + 2]);
             } else {
                 keel::u8 idx = c.img[(keel::usize)col * c.imgH + row];
-                int e = 0;   // NaN sentinel and t<=0 both give entry 1
+                keel::i32 e = 0;   // NaN sentinel and t<=0 both give entry 1
                 if (idx != 255) {
                     keel::f64 val = c.qLo + (idx / 254.0) * (c.qHi - c.qLo);
                     keel::f64 t = (val - c.climLo) / (c.climHi - c.climLo);
                     if (t < 0) t = 0;
                     if (t > 1) t = 1;
-                    e = (int)std::lround(t * (nPal - 1));
+                    e = (keel::i32)std::lround(t * (nPal - 1));
                     if (e < 0) e = 0;
                     if (e >= nPal) e = nPal - 1;
                 }
@@ -504,7 +504,7 @@ void parseNestedDoubles(keel::StringRef j, keel::Array<keel::f64> &out,
     rows = cols = 0;
     keel::usize i = 0;
     keel::usize colCount = 0;
-    int depth = 0;
+    keel::i32 depth = 0;
     while (i < j.size()) {
         char c = j[i];
         if (c == '[') {
@@ -548,7 +548,7 @@ void parseNestedDoubles(keel::StringRef j, keel::Array<keel::f64> &out,
 // MATLAB-exact auto ticks (probe-verified R2025b, portion 34): target
 // 10 intervals, ladder breakpoints 1/2/5 — [0,10]→step 1 (11 ticks),
 // [0,3]→step 0.5 (7), [0,7]→step 1 (8).
-keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target)
+keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, keel::i32 target)
 {
     keel::Array<keel::f64> major;
     keel::f64 range = mx - mn;
@@ -564,7 +564,7 @@ keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, int target)
                 : norm <= 5.0 ? 5 * pow : 10 * pow;
     for (keel::f64 v = std::ceil(mn / step) * step; v <= mx + step * 1e-6; v += step) {
         char buf[64];
-        int n = std::snprintf(buf, sizeof buf, "%f", v);
+        keel::i32 n = std::snprintf(buf, sizeof buf, "%f", v);
         if (n > 12)
             buf[12] = '\0';
         major.push_back(std::strtod(buf, nullptr));
@@ -577,9 +577,9 @@ keel::Array<keel::f64> logTicks(keel::f64 mn, keel::f64 mx)
     keel::Array<keel::f64> major;
     if (!(mn > 0) || !(mx > mn))
         return major;
-    int lmin = (int)std::floor(std::log10(mn));
-    int lmax = (int)std::ceil(std::log10(mx));
-    for (int p = lmin; p <= lmax; ++p) {
+    keel::i32 lmin = (keel::i32)std::floor(std::log10(mn));
+    keel::i32 lmax = (keel::i32)std::ceil(std::log10(mx));
+    for (keel::i32 p = lmin; p <= lmax; ++p) {
         keel::f64 base = std::pow(10.0, p);
         if (base >= mn && base <= mx)
             major.push_back(base);
@@ -857,7 +857,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                     continue;
                 keel::f64 rn = ((rv - rlo) / (rhi - rlo)) * R;
                 keel::Array<keel::f64> rx, ry;
-                for (int k = 0; k <= 64; ++k) {
+                for (keel::i32 k = 0; k <= 64; ++k) {
                     keel::f64 a = 2.0 * kPi * k / 64.0;
                     rx.push_back(cx + rn * std::cos(a));
                     ry.push_back(cy - rn * std::sin(a));
@@ -868,7 +868,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                 addText(out, tickLabel(rv), lx + 3, ly, ax.fontSize * 0.9, kTextCol);
             }
             keel::Array<keel::f64> ox, oy;
-            for (int k = 0; k <= 64; ++k) {
+            for (keel::i32 k = 0; k <= 64; ++k) {
                 keel::f64 a = 2.0 * kPi * k / 64.0;
                 ox.push_back(cx + R * std::cos(a));
                 oy.push_back(cy - R * std::sin(a));
@@ -878,7 +878,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             if (!ax.thetaticksJson.empty()) {
                 tticks = parseVec(ax.thetaticksJson);
             } else {
-                for (int d = 0; d < 360; d += 30)
+                for (keel::i32 d = 0; d < 360; d += 30)
                     tticks.push_back((keel::f64)d);
             }
             keel::Array<keel::String> ttLab;
@@ -939,7 +939,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                     keel::Array<keel::f64> wx, wy;
                     wx.push_back(cx);
                     wy.push_back(cy);
-                    for (int s = 0; s <= 6; ++s) {
+                    for (keel::i32 s = 0; s <= 6; ++s) {
                         keel::f64 th = tv[k] - bw * 0.45 + (bw * 0.9 * s) / 6.0;
                         keel::f64 px, py;
                         polarPt(th, rv[k], px, py);
@@ -985,7 +985,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
     keel::Array<keel::Array<keel::f64>> xs, ys;
     xs.resize(ax.datasets.size());
     ys.resize(ax.datasets.size());
-    int imgDatasets = 0, seriesDatasets = 0;
+    keel::i32 imgDatasets = 0, seriesDatasets = 0;
 
     // Image data rect (probe-verified MATLAB R2025b, portion 35). The
     // wire xJson/yJson are "[1,C]"/"[1,R]" ranges by default, a
@@ -1191,8 +1191,8 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
         c.kind = Cmd::IMAGE;
         if (ds.type == "imagesc") {
             c.img = ds.zQuantized.clone();
-            c.imgW = (int)cols;
-            c.imgH = (int)rows;
+            c.imgW = (keel::i32)cols;
+            c.imgH = (keel::i32)rows;
             c.qLo = ds.cminOrig;
             c.qHi = ds.cmaxOrig;
             auto cl = figdetail::parseFlatDoubles(ax.climJson);
@@ -1207,8 +1207,8 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             c.cmapCustom = ax.customColormapJson.clone();
         } else {
             c.img = ds.rgbBytes.clone();
-            c.imgW = (int)cols;
-            c.imgH = (int)rows;
+            c.imgW = (keel::i32)cols;
+            c.imgH = (keel::i32)rows;
             c.rgbDirect = true;
         }
         c.ix0 = xe0;
@@ -1312,7 +1312,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             keel::Array<Rgb> custom3;
             if (!ax.customColormapJson.empty())
                 custom3 = parseCustomPalette(ax.customColormapJson);
-            int nPal3 = 256;
+            keel::i32 nPal3 = 256;
             const keel::u8 *pal3 =
                 custom3.empty()
                     ? namedPalette(ax.colormapName.empty()
@@ -1320,14 +1320,14 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                                        : ax.colormapName.as_ref(), nPal3)
                     : nullptr;
             if (!custom3.empty())
-                nPal3 = (int)custom3.size();
+                nPal3 = (keel::i32)custom3.size();
             auto zColor = [&](keel::f64 z) -> Rgb {
                 if (!std::isfinite(z))
                     z = clo3;
                 keel::f64 t = (z - clo3) / (chi3 - clo3);
                 if (t < 0) t = 0;
                 if (t > 1) t = 1;
-                int e = (int)std::lround(t * (nPal3 - 1));
+                keel::i32 e = (keel::i32)std::lround(t * (nPal3 - 1));
                 if (e < 0) e = 0;
                 if (e >= nPal3) e = nPal3 - 1;
                 return pal3 ? Rgb(pal3[e * 3], pal3[e * 3 + 1],
@@ -1369,7 +1369,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             // Fit the projected unit cube into the plot rect.
             keel::f64 minSx = 1e300, maxSx = -1e300, minSy = 1e300,
                    maxSy = -1e300;
-            for (int corner = 0; corner < 8; ++corner) {
+            for (keel::i32 corner = 0; corner < 8; ++corner) {
                 keel::f64 sx, sy, d;
                 proj(corner & 1 ? xhi3 : xlo3, corner & 2 ? yhi3 : ylo3,
                      corner & 4 ? zhi3 : zlo3, sx, sy, d);
@@ -1395,19 +1395,19 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             if (ax.axisVisible) {
                 const keel::f64 bx[2] = {xlo3, xhi3}, by[2] = {ylo3, yhi3},
                              bz[2] = {zlo3, zhi3};
-                for (int axis = 0; axis < 3; ++axis)
-                    for (int f1 = 0; f1 <= 1; ++f1)
-                        for (int f2 = 0; f2 <= 1; ++f2) {
+                for (keel::i32 axis = 0; axis < 3; ++axis)
+                    for (keel::i32 f1 = 0; f1 <= 1; ++f1)
+                        for (keel::i32 f2 = 0; f2 <= 1; ++f2) {
                             keel::f64 q0[3], q1[3];
-                            int o1 = (axis + 1) % 3, o2 = (axis + 2) % 3;
+                            keel::i32 o1 = (axis + 1) % 3, o2 = (axis + 2) % 3;
                             keel::f64 fd0[3] = {0, 0, 0}, fd1[3] = {0, 0, 0};
                             fd0[axis] = 0; fd1[axis] = 1;
                             fd0[o1] = f1; fd1[o1] = f1;
                             fd0[o2] = f2; fd1[o2] = f2;
-                            keel::f64 w0[3] = {bx[(int)fd0[0]], by[(int)fd0[1]],
-                                            bz[(int)fd0[2]]};
-                            keel::f64 w1[3] = {bx[(int)fd1[0]], by[(int)fd1[1]],
-                                            bz[(int)fd1[2]]};
+                            keel::f64 w0[3] = {bx[(keel::i32)fd0[0]], by[(keel::i32)fd0[1]],
+                                            bz[(keel::i32)fd0[2]]};
+                            keel::f64 w1[3] = {bx[(keel::i32)fd1[0]], by[(keel::i32)fd1[1]],
+                                            bz[(keel::i32)fd1[2]]};
                             (void)q0; (void)q1;
                             keel::f64 s0x, s0y, d0, s1x, s1y, d1;
                             proj(w0[0], w0[1], w0[2], s0x, s0y, d0);
@@ -1442,7 +1442,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                         keel::f64 zs[4] = {z00, z01, z11, z10};
                         Q q;
                         q.depth = 0;
-                        for (int k = 0; k < 4; ++k) {
+                        for (keel::i32 k = 0; k < 4; ++k) {
                             keel::f64 sx, sy, d;
                             proj(xs[k], ys[k], zs[k], sx, sy, d);
                             q.px[k] = PX(sx);
@@ -1627,8 +1627,8 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                 addLine(out, {x0p, x1p}, {yTop, yTop}, edge, 0.75, false);
             }
         } else if (t == "bar") {
-            const int groups = (int)n;
-            const int series = 1;
+            const keel::i32 groups = (keel::i32)n;
+            const keel::i32 series = 1;
             for (keel::usize k = 0; k < n; ++k) {
                 keel::f64 slot = groups > 1 ? (xhi - xlo) / (groups - 1) : 1;
                 keel::f64 w = std::min(slot * 0.8, (plot.x1 - plot.x0) * 0.05) / series;
@@ -1839,7 +1839,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
         keel::Array<Rgb> customPal;
         if (!ax.customColormapJson.empty())
             customPal = parseCustomPalette(ax.customColormapJson);
-        int nPal = 256;
+        keel::i32 nPal = 256;
         const keel::u8 *pal =
             customPal.empty()
                 ? namedPalette(ax.colormapName.empty()
@@ -1850,7 +1850,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
         auto entryColor = [&](keel::f64 t) -> Rgb {
             if (t < 0) t = 0;
             if (t > 1) t = 1;
-            int e = (int)std::lround(t * (nPal - 1));
+            keel::i32 e = (keel::i32)std::lround(t * (nPal - 1));
             if (e < 0) e = 0;
             if (e >= nPal) e = nPal - 1;
             if (pal)
@@ -1872,12 +1872,12 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             sh = thick;
             sy = cbSide == "north" ? plot.y0 - 8 - thick : plot.y1 + 8;
         }
-        int pw = std::max(1, (int)std::lround(sw));
-        int ph = std::max(1, (int)std::lround(sh));
+        keel::i32 pw = std::max(1, (keel::i32)std::lround(sw));
+        keel::i32 ph = std::max(1, (keel::i32)std::lround(sh));
         keel::Array<keel::u8> grad;
         grad.resize((keel::usize)pw * ph * 4, 255);
-        for (int py = 0; py < ph; ++py)
-            for (int px = 0; px < pw; ++px) {
+        for (keel::i32 py = 0; py < ph; ++py)
+            for (keel::i32 px = 0; px < pw; ++px) {
                 keel::f64 t = vert ? 1.0 - (py + 0.5) / ph
                                 : (px + 0.5) / pw;
                 Rgb c = entryColor(t);
@@ -1964,15 +1964,15 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
 
 // Full figure → display list. Subplot grid tiling; single axes uses the
 // whole canvas.
-inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, int W,
-                                            int H)
+inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, keel::i32 W,
+                                            keel::i32 H)
 {
     keel::Array<Cmd> out;
-    int rows = std::max(1, fig.subplotRows);
-    int cols = std::max(1, fig.subplotCols);
+    keel::i32 rows = std::max(1, fig.subplotRows);
+    keel::i32 cols = std::max(1, fig.subplotCols);
     // Order axes by subplotIndex (1-based reading order) when gridded.
     keel::Array<const AxesState *> ordered;
-    for (int p = 1; p <= rows * cols; ++p)
+    for (keel::i32 p = 1; p <= rows * cols; ++p)
         for (const auto &ax : fig.axes)
             if (ax.subplotIndex == p) {
                 ordered.push_back(&ax);
@@ -1982,8 +1982,8 @@ inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, int W,
         for (const auto &ax : fig.axes)
             ordered.push_back(&ax);
     for (keel::usize i = 0; i < ordered.size(); ++i) {
-        int r = rows > 1 || cols > 1 ? (int)i / cols : 0;
-        int c = rows > 1 || cols > 1 ? (int)i % cols : 0;
+        keel::i32 r = rows > 1 || cols > 1 ? (keel::i32)i / cols : 0;
+        keel::i32 c = rows > 1 || cols > 1 ? (keel::i32)i % cols : 0;
         Rect box;
         box.x0 = 10 + c * (W - 20.0) / cols + 6;
         box.x1 = 10 + (c + 1) * (W - 20.0) / cols - 6;
@@ -2051,7 +2051,7 @@ inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, int W,
             keel::f64 cx = (ax0 + ax1) / 2, cy = (ay0 + ay1) / 2;
             keel::f64 rx = keel::abs(ax1 - ax0) / 2, ry = keel::abs(ay1 - ay0) / 2;
             keel::Array<keel::f64> ex, ey;
-            for (int k = 0; k <= 64; ++k) {
+            for (keel::i32 k = 0; k <= 64; ++k) {
                 keel::f64 t = 2 * 3.14159265358979323846 * k / 64.0;
                 ex.push_back(cx + rx * std::cos(t));
                 ey.push_back(cy + ry * std::sin(t));
@@ -2073,7 +2073,7 @@ inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, int W,
 // for SVG (a data: URL). The figure layer stays free of codec code —
 // the bundle export glue supplies a PNG+base64 implementation; without
 // one, SVG export skips IMAGE cmds (raster export always renders them).
-keel::String renderFigureSvg(const FigureState &fig, int W, int H,
+keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
                              const SvgImageEmbedder &embed)
 {
     keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
@@ -2100,7 +2100,7 @@ keel::String renderFigureSvg(const FigureState &fig, int W, int H,
     };
     auto appendF = [](keel::String &dst, keel::f64 v) {
         char b[64];
-        int n = std::snprintf(b, sizeof b, "%f", v);
+        keel::i32 n = std::snprintf(b, sizeof b, "%f", v);
         if (n > 0) dst.append(keel::StringRef(b, keel::as<keel::usize>(n)));
     };
     for (const Cmd &c : cmds) {
@@ -2108,12 +2108,12 @@ keel::String renderFigureSvg(const FigureState &fig, int W, int H,
             if (!embed)
                 continue;   // no codec available — skip (PNG path renders)
             keel::Array<keel::u8> buf = imageCmdRgb(c);
-            int pw = std::max(1, (int)std::lround(std::max(c.xs[0], c.xs[1])
+            keel::i32 pw = std::max(1, (keel::i32)std::lround(std::max(c.xs[0], c.xs[1])
                                                   - std::min(c.xs[0], c.xs[1])));
-            int ph = std::max(1, (int)std::lround(std::max(c.ys[0], c.ys[1])
+            keel::i32 ph = std::max(1, (keel::i32)std::lround(std::max(c.ys[0], c.ys[1])
                                                   - std::min(c.ys[0], c.ys[1])));
-            long ix = std::lround(std::min(c.xs[0], c.xs[1]));
-            long iy = std::lround(std::min(c.ys[0], c.ys[1]));
+            keel::i64 ix = std::lround(std::min(c.xs[0], c.xs[1]));
+            keel::i64 iy = std::lround(std::min(c.ys[0], c.ys[1]));
             keel::String href = embed(buf.as_ref(), pw, ph);
             s.append(keel::format(
                 "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" "
@@ -2213,7 +2213,7 @@ keel::String renderFigureSvg(const FigureState &fig, int W, int H,
     return s;
 }
 
-keel::String renderFigureEps(const FigureState &fig, int W, int H)
+keel::String renderFigureEps(const FigureState &fig, keel::i32 W, keel::i32 H)
 {
     keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
     keel::String s = keel::format(
@@ -2240,8 +2240,8 @@ keel::String renderFigureEps(const FigureState &fig, int W, int H)
             keel::Array<keel::u8> rgb = imageCmdRgb(c);
             keel::f64 sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
             keel::f64 sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
-            int pw = std::max(1, (int)std::lround(sx1 - sx0));
-            int ph = std::max(1, (int)std::lround(sy1 - sy0));
+            keel::i32 pw = std::max(1, (keel::i32)std::lround(sx1 - sx0));
+            keel::i32 ph = std::max(1, (keel::i32)std::lround(sy1 - sy0));
             std::snprintf(buf, sizeof buf,
                           "gsave %.1f %.1f translate %.1f %.1f scale %d %d 8 [%d 0 0 -%d 0 %d] {<",
                           sx0, H - sy1, sx1 - sx0, sy1 - sy0, pw, ph, pw, ph, ph);
@@ -2278,7 +2278,7 @@ keel::String renderFigureEps(const FigureState &fig, int W, int H)
     return s;
 }
 
-keel::String renderFigurePdf(const FigureState &fig, int W, int H)
+keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
 {
     keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
     keel::String stream = keel::format("1 1 1 rg 0 0 {} {} re f\n", W, H);
@@ -2298,8 +2298,8 @@ keel::String renderFigurePdf(const FigureState &fig, int W, int H)
             keel::Array<keel::u8> rgb = imageCmdRgb(c);
             keel::f64 sx0 = std::min(c.xs[0], c.xs[1]), sx1 = std::max(c.xs[0], c.xs[1]);
             keel::f64 sy0 = std::min(c.ys[0], c.ys[1]), sy1 = std::max(c.ys[0], c.ys[1]);
-            int pw = std::max(1, (int)std::lround(sx1 - sx0));
-            int ph = std::max(1, (int)std::lround(sy1 - sy0));
+            keel::i32 pw = std::max(1, (keel::i32)std::lround(sx1 - sx0));
+            keel::i32 ph = std::max(1, (keel::i32)std::lround(sy1 - sy0));
             std::snprintf(buf, sizeof buf,
                           "q %.1f 0 0 %.1f %.1f %.1f cm BI /W %d /H %d /CS /RGB /BPC 8 /F /AHx ID ",
                           sx1 - sx0, sy1 - sy0, sx0, H - sy1, pw, ph);
@@ -2352,7 +2352,7 @@ keel::String renderFigurePdf(const FigureState &fig, int W, int H)
     keel::usize xref = pdf.size();
     pdf.append("xref\n0 6\n0000000000 65535 f \n");
     keel::usize offs[5] = {off1, off2, off3, off4, off5};
-    for (int i = 0; i < 5; ++i) {
+    for (keel::i32 i = 0; i < 5; ++i) {
         std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", offs[i]);
         pdf.append(buf);
     }
@@ -2412,12 +2412,12 @@ inline const keel::u8 *font5x7(char c)
 class Raster
 {
 public:
-    Raster(int w, int h) : w_(w), h_(h)
+    Raster(keel::i32 w, keel::i32 h) : w_(w), h_(h)
     {
         px_.resize(keel::as<keel::usize>(w) * keel::as<keel::usize>(h) * 3, 255);
     }
 
-    void px(int x, int y, Rgb c)
+    void px(keel::i32 x, keel::i32 y, Rgb c)
     {
         if (x < 0 || y < 0 || x >= w_ || y >= h_)
             return;
@@ -2434,11 +2434,11 @@ public:
         keel::f64 len = std::hypot(x1 - x0, y1 - y0);
         if (len < 1e-9)
             return;
-        int steps = (int)std::ceil(len * 2);
+        keel::i32 steps = (keel::i32)std::ceil(len * 2);
         keel::f64 dashOn = 7, dashOff = 5;
         keel::f64 run = 0;
-        int side = (int)std::max(1.0, std::round(wd));
-        for (int i = 0; i <= steps; ++i) {
+        keel::i32 side = (keel::i32)std::max(1.0, std::round(wd));
+        for (keel::i32 i = 0; i <= steps; ++i) {
             keel::f64 t = (keel::f64)i / steps;
             keel::f64 x = x0 + (x1 - x0) * t;
             keel::f64 y = y0 + (y1 - y0) * t;
@@ -2448,9 +2448,9 @@ public:
                 if (m > dashOn)
                     continue;
             }
-            for (int dx = 0; dx < side; ++dx)
-                for (int dy = 0; dy < side; ++dy)
-                    px((int)x + dx - side / 2, (int)y + dy - side / 2, c);
+            for (keel::i32 dx = 0; dx < side; ++dx)
+                for (keel::i32 dy = 0; dy < side; ++dy)
+                    px((keel::i32)x + dx - side / 2, (keel::i32)y + dy - side / 2, c);
         }
     }
 
@@ -2466,7 +2466,7 @@ public:
                 ymn = std::min(ymn, y);
                 ymx = std::max(ymx, y);
             }
-            for (int y = (int)std::floor(ymn); y <= (int)std::ceil(ymx); ++y) {
+            for (keel::i32 y = (keel::i32)std::floor(ymn); y <= (keel::i32)std::ceil(ymx); ++y) {
                 keel::Array<keel::f64> xi;
                 for (keel::usize i = 0; i < xs.size(); ++i) {
                     keel::usize j = (i + 1) % xs.size();
@@ -2478,7 +2478,7 @@ public:
                 }
                 std::sort(xi.begin(), xi.end());
                 for (keel::usize k = 0; k + 1 < xi.size(); k += 2)
-                    for (int x = (int)std::ceil(xi[k]); x <= (int)xi[k + 1]; ++x)
+                    for (keel::i32 x = (keel::i32)std::ceil(xi[k]); x <= (keel::i32)xi[k + 1]; ++x)
                         px(x, y, c);
             }
         } else {
@@ -2490,32 +2490,32 @@ public:
 
     void marker(keel::f64 x, keel::f64 y, keel::f64 size, Rgb c, keel::StringRef k)
     {
-        int r = (int)std::max(2.0, size / 2);
+        keel::i32 r = (keel::i32)std::max(2.0, size / 2);
         if (k == "s") {
-            for (int dy = -r; dy <= r; ++dy)
-                for (int dx = -r; dx <= r; ++dx)
-                    px((int)x + dx, (int)y + dy, c);
+            for (keel::i32 dy = -r; dy <= r; ++dy)
+                for (keel::i32 dx = -r; dx <= r; ++dx)
+                    px((keel::i32)x + dx, (keel::i32)y + dy, c);
         } else if (k == "+" || k == "x") {
-            for (int d = -r; d <= r; ++d) {
-                px((int)x + d, (int)y, c);
-                px((int)x, (int)y + d, c);
+            for (keel::i32 d = -r; d <= r; ++d) {
+                px((keel::i32)x + d, (keel::i32)y, c);
+                px((keel::i32)x, (keel::i32)y + d, c);
                 if (k == "x") {
-                    px((int)x + d, (int)y + d, c);
-                    px((int)x + d, (int)y - d, c);
+                    px((keel::i32)x + d, (keel::i32)y + d, c);
+                    px((keel::i32)x + d, (keel::i32)y - d, c);
                 }
             }
         } else {   // o . * ^ v < > p h → outline circle (+ rays for *)
-            for (int a = 0; a < 360; a += 2) {
+            for (keel::i32 a = 0; a < 360; a += 2) {
                 keel::f64 rad = a * 3.14159265358979 / 180.0;
-                px((int)std::lround(x + r * std::cos(rad)),
-                   (int)std::lround(y + r * std::sin(rad)), c);
+                px((keel::i32)std::lround(x + r * std::cos(rad)),
+                   (keel::i32)std::lround(y + r * std::sin(rad)), c);
             }
             if (k == "*")
-                for (int d = -r - 1; d <= r + 1; ++d) {
-                    px((int)x + d, (int)y, c);
-                    px((int)x, (int)y + d, c);
-                    px((int)x + d, (int)y + d, c);
-                    px((int)x + d, (int)y - d, c);
+                for (keel::i32 d = -r - 1; d <= r + 1; ++d) {
+                    px((keel::i32)x + d, (keel::i32)y, c);
+                    px((keel::i32)x, (keel::i32)y + d, c);
+                    px((keel::i32)x + d, (keel::i32)y + d, c);
+                    px((keel::i32)x + d, (keel::i32)y - d, c);
                 }
         }
     }
@@ -2525,18 +2525,18 @@ public:
     void text(keel::f64 x, keel::f64 y, keel::StringRef s, keel::f64 fontSize, Rgb c,
               bool rot90)
     {
-        int scale = std::max(1, (int)std::lround(fontSize / 7.0));
+        keel::i32 scale = std::max(1, (keel::i32)std::lround(fontSize / 7.0));
         if (!rot90) {
             keel::f64 cx = x;
             for (char ch : s) {
                 const keel::u8 *g = font5x7(ch);
-                for (int col = 0; col < 5; ++col)
-                    for (int row = 0; row < 7; ++row)
+                for (keel::i32 col = 0; col < 5; ++col)
+                    for (keel::i32 row = 0; row < 7; ++row)
                         if (g[col] & (1 << row))
-                            for (int sx = 0; sx < scale; ++sx)
-                                for (int sy = 0; sy < scale; ++sy)
-                                    px((int)cx + col * scale + sx,
-                                       (int)y + row * scale + sy, c);
+                            for (keel::i32 sx = 0; sx < scale; ++sx)
+                                for (keel::i32 sy = 0; sy < scale; ++sy)
+                                    px((keel::i32)cx + col * scale + sx,
+                                       (keel::i32)y + row * scale + sy, c);
                 cx += 6 * scale;
             }
         } else {
@@ -2545,13 +2545,13 @@ public:
             keel::f64 cy = y;
             for (keel::usize i = s.size(); i-- > 0;) {
                 const keel::u8 *g = font5x7(s[i]);
-                for (int row = 0; row < 7; ++row)
-                    for (int col = 0; col < 5; ++col)
+                for (keel::i32 row = 0; row < 7; ++row)
+                    for (keel::i32 col = 0; col < 5; ++col)
                         if (g[col] & (1 << row))
-                            for (int sx = 0; sx < scale; ++sx)
-                                for (int sy = 0; sy < scale; ++sy)
-                                    px((int)x + (6 - row) * scale + sx,
-                                       (int)cy - (5 - col) * scale - sy, c);
+                            for (keel::i32 sx = 0; sx < scale; ++sx)
+                                for (keel::i32 sy = 0; sy < scale; ++sy)
+                                    px((keel::i32)x + (6 - row) * scale + sx,
+                                       (keel::i32)cy - (5 - col) * scale - sy, c);
                 cy -= 6 * scale;
             }
         }
@@ -2559,15 +2559,15 @@ public:
 
     // Blit a top-down RGB buffer (pw×ph×3) at pixel (x0,y0). Used by the
     // IMAGE cmd; the buffer is already at on-screen resolution.
-    void image(int x0, int y0, keel::ArrayRef<keel::u8> buf, int pw,
-               int ph)
+    void image(keel::i32 x0, keel::i32 y0, keel::ArrayRef<keel::u8> buf, keel::i32 pw,
+               keel::i32 ph)
     {
-        for (int y = 0; y < ph; ++y) {
-            int dy = y0 + y;
+        for (keel::i32 y = 0; y < ph; ++y) {
+            keel::i32 dy = y0 + y;
             if (dy < 0 || dy >= h_)
                 continue;
-            for (int x = 0; x < pw; ++x) {
-                int dx = x0 + x;
+            for (keel::i32 x = 0; x < pw; ++x) {
+                keel::i32 dx = x0 + x;
                 if (dx < 0 || dx >= w_)
                     continue;
                 keel::usize src = ((keel::usize)y * pw + x) * 3;
@@ -2581,17 +2581,17 @@ public:
 
     const keel::Array<keel::u8> &bytes() const { return px_; }
     keel::Array<keel::u8> takeBytes() { return keel::move(px_); }
-    int width() const { return w_; }
-    int height() const { return h_; }
+    keel::i32 width() const { return w_; }
+    keel::i32 height() const { return h_; }
 
 private:
-    int w_, h_;
+    keel::i32 w_, h_;
     keel::Array<keel::u8> px_;
 };
 
 // Render to a top-down RGB buffer (H×W×3 bytes).
 keel::Array<keel::u8> renderFigureRgb(const FigureState &fig,
-                                      int W, int H)
+                                      keel::i32 W, keel::i32 H)
 {
     Raster r(W, H);
     for (const Cmd &c : renderFigureDisplay(fig, W, H)) {
@@ -2614,12 +2614,12 @@ keel::Array<keel::u8> renderFigureRgb(const FigureState &fig,
             break;
         case Cmd::IMAGE: {
             keel::Array<keel::u8> buf = imageCmdRgb(c);
-            int pw = std::max(1, (int)std::lround(std::max(c.xs[0], c.xs[1])
+            keel::i32 pw = std::max(1, (keel::i32)std::lround(std::max(c.xs[0], c.xs[1])
                                                   - std::min(c.xs[0], c.xs[1])));
-            int ph = std::max(1, (int)std::lround(std::max(c.ys[0], c.ys[1])
+            keel::i32 ph = std::max(1, (keel::i32)std::lround(std::max(c.ys[0], c.ys[1])
                                                   - std::min(c.ys[0], c.ys[1])));
-            r.image((int)std::lround(std::min(c.xs[0], c.xs[1])),
-                    (int)std::lround(std::min(c.ys[0], c.ys[1])), buf, pw, ph);
+            r.image((keel::i32)std::lround(std::min(c.xs[0], c.xs[1])),
+                    (keel::i32)std::lround(std::min(c.ys[0], c.ys[1])), buf, pw, ph);
             break;
         }
         }

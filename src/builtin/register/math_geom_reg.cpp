@@ -185,18 +185,18 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     }
 
     // Determine bin edges.
-    int nx = 10, ny = 10;
+    keel::i32 nx = 10, ny = 10;
     keel::Array<keel::f64> xedges(mr), yedges(mr);
     if (args.size() == 3) {
         if (args[2].numel() == 1) {
-            nx = ny = (int)args[2].toScalar();
+            nx = ny = (keel::i32)args[2].toScalar();
         } else if (args[2].numel() >= 2) {
             // Could be [nx ny] (length 2) or explicit edges
             // (length > 2). MATLAB disambiguates by exactness; we
             // follow the same heuristic.
             if (args[2].numel() == 2) {
-                nx = (int)args[2].elemAsDouble(0);
-                ny = (int)args[2].elemAsDouble(1);
+                nx = (keel::i32)args[2].elemAsDouble(0);
+                ny = (keel::i32)args[2].elemAsDouble(1);
             } else {
                 xedges.resize(args[2].numel());
                 for (keel::usize i = 0; i < xedges.size(); ++i)
@@ -235,17 +235,17 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         if (ymx == ymn) ymx = ymn + 1.0;
         if (xedges.empty()) {
             xedges.resize(nx + 1);
-            for (int i = 0; i <= nx; ++i)
+            for (keel::i32 i = 0; i <= nx; ++i)
                 xedges[i] = xmn + (xmx - xmn) * i / nx;
         }
         if (yedges.empty()) {
             yedges.resize(ny + 1);
-            for (int i = 0; i <= ny; ++i)
+            for (keel::i32 i = 0; i <= ny; ++i)
                 yedges[i] = ymn + (ymx - ymn) * i / ny;
         }
     }
-    nx = (int)xedges.size() - 1;
-    ny = (int)yedges.size() - 1;
+    nx = (keel::i32)xedges.size() - 1;
+    ny = (keel::i32)yedges.size() - 1;
     if (nx < 1 || ny < 1) {
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
         return;

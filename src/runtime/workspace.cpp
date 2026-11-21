@@ -316,7 +316,7 @@ void registerWorkspaceRuntime(Engine &engine)
             if (args.size() != 1)
                 throw std::runtime_error("inputname: requires one argument (k)");
             keel::f64 kd = args[0].toScalar();
-            int k = keel::as<int>(kd);
+            keel::i32 k = keel::as<keel::i32>(kd);
             if (keel::as<keel::f64>(k) != kd || k < 1)
                 throw std::runtime_error("inputname: k must be a positive integer");
             keel::String name = ctx.engine->inputName(k);
@@ -472,9 +472,9 @@ void registerWorkspaceRuntime(Engine &engine)
                                     for (keel::usize idx = 0; idx < valid.size(); ++idx) {
                                         const auto &entry = valid[idx];
                                         const auto &d = entry.val->dims();
-                                        const int nd = keel::max(2, d.ndim());
+                                        const keel::i32 nd = keel::max(2, d.ndim());
                                         Value sz = Value::matrix(1, keel::as<keel::usize>(nd), ValueType::DOUBLE, mr);
-                                        for (int k = 0; k < nd; ++k)
+                                        for (keel::i32 k = 0; k < nd; ++k)
                                             sz.doubleDataMut()[k] = keel::as<keel::f64>(d.dim(k));
                                         keel::StringRef classStr = entry.val->isSingleComplex()
                                             ? keel::StringRef("single")

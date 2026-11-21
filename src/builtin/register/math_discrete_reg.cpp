@@ -71,7 +71,7 @@ static Value narrowUniqueClass(const Value &d, ValueType vt,
         char *dst = r.charDataMut();
         const keel::usize n = d.numel();
         for (keel::usize i = 0; i < n; ++i)
-            dst[i] = keel::as<char>(keel::as<int>(d.elemAsDouble(i)));
+            dst[i] = keel::as<char>(keel::as<keel::i32>(d.elemAsDouble(i)));
         return r;
     }
     return doubleToIntegerExact(d, vt, mr);   // INT8..UINT64

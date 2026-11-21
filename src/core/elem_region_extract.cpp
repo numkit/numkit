@@ -19,15 +19,15 @@ namespace depdetail {
 struct AxisRange
 {
     enum Kind { FULL, RANGE, UNRESOLVED } kind = FULL;
-    long long lo = 0, hi = 0;
+    keel::i64 lo = 0, hi = 0;
 };
 
-static bool literalInt(const ASTNode *n, long long &out)
+static bool literalInt(const ASTNode *n, keel::i64 &out)
 {
     if (!n || n->type != NodeType::NUMBER_LITERAL
         || std::floor(n->numValue) != n->numValue)
         return false;
-    out = (long long)n->numValue;
+    out = (keel::i64)n->numValue;
     return true;
 }
 
@@ -43,16 +43,16 @@ AxisRange axisOf(const ASTNode *n)
             return AxisRange{AxisRange::FULL, 0, 0};       // ':'
         if (nv > 3)
             return AxisRange{AxisRange::UNRESOLVED, 0, 0};
-        long long v[3] = {0, 0, 0};
+        keel::i64 v[3] = {0, 0, 0};
         for (keel::usize k = 0; k < nv; ++k)
             if (!literalInt(n->children[k].get(), v[k]))
                 return AxisRange{AxisRange::UNRESOLVED, 0, 0};
-        long long lo = v[0], hi = (nv == 2) ? v[1] : v[2];
+        keel::i64 lo = v[0], hi = (nv == 2) ? v[1] : v[2];
         if (lo > hi)
             std::swap(lo, hi);
         return AxisRange{AxisRange::RANGE, lo, hi};
     }
-    long long x = 0;
+    keel::i64 x = 0;
     if (literalInt(n, x))
         return AxisRange{AxisRange::RANGE, x, x};
     return AxisRange{AxisRange::UNRESOLVED, 0, 0};

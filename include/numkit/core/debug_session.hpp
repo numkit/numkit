@@ -139,7 +139,7 @@ public:
 
     // Get error message (valid when start/resume returned after an exception).
     const keel::String &errorMessage() const { return errorMsg_; }
-    int errorLine() const { return errorLine_; }
+    keel::i32 errorLine() const { return errorLine_; }
 
     bool isActive() const { return active_; }
 
@@ -181,7 +181,7 @@ private:
 
     // Error state
     keel::String errorMsg_;
-    int errorLine_ = 0;
+    keel::i32 errorLine_ = 0;
 
     // Observer — always returns Stop so the VM pauses at every event
     class SessionObserver : public DebugObserver

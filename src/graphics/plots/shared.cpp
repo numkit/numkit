@@ -187,7 +187,7 @@ void heatmapImpl(
                 zs << "[";
                 for (keel::usize c = 0; c < cols; ++c) {
                     if (c) zs << ",";
-                    zs << keel::as<int>(ds.zQuantized[c * rows + r]);
+                    zs << keel::as<keel::i32>(ds.zQuantized[c * rows + r]);
                 }
                 zs << "]";
             }
@@ -210,8 +210,8 @@ void heatmapImpl(
                     if (ocol) zs << ",";
                     const keel::usize c0 = ocol * dc;
                     const keel::usize c1 = std::min(cols, c0 + dc);
-                    int sum = 0;
-                    int n = 0;
+                    keel::i32 sum = 0;
+                    keel::i32 n = 0;
                     for (keel::usize c = c0; c < c1; ++c) {
                         for (keel::usize r = r0; r < r1; ++r) {
                             const keel::u8 q = ds.zQuantized[c * rows + r];

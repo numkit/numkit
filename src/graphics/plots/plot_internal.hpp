@@ -10,6 +10,7 @@
 
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/graphics/graphics_context.hpp>  // GraphicsContext, PlotEntry, GraphicsFn
@@ -56,52 +57,36 @@ struct StrBuf {
         buf.append(s.as_ref());
         return *this;
     }
-    StrBuf &operator<<(int v)
+    StrBuf &operator<<(keel::i32 v)
     {
         char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%d", v);
+        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%d", v);
         if (n > 0)
             buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
-    StrBuf &operator<<(unsigned int v)
+    StrBuf &operator<<(keel::u32 v)
     {
         char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%u", v);
+        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%u", v);
         if (n > 0)
             buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;
     }
-    StrBuf &operator<<(long v)
+    StrBuf &operator<<(keel::i64 v)
     {
         char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%ld", v);
+        keel::usize n = keel::format_i64(tmp, sizeof(tmp), v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, n));
         return *this;
     }
-    StrBuf &operator<<(unsigned long v)
+    StrBuf &operator<<(keel::u64 v)
     {
         char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%lu", v);
+        keel::usize n = keel::format_u64(tmp, sizeof(tmp), v);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
-        return *this;
-    }
-    StrBuf &operator<<(long long v)
-    {
-        char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%lld", v);
-        if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
-        return *this;
-    }
-    StrBuf &operator<<(unsigned long long v)
-    {
-        char tmp[32];
-        int n = std::snprintf(tmp, sizeof(tmp), "%llu", v);
-        if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, n));
         return *this;
     }
     StrBuf &operator<<(keel::f32 v)
@@ -111,7 +96,7 @@ struct StrBuf {
     StrBuf &operator<<(keel::f64 v)
     {
         char tmp[64];
-        int n = std::snprintf(tmp, sizeof(tmp), "%.6g", v);
+        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%.6g", v);
         if (n > 0)
             buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
         return *this;

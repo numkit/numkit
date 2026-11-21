@@ -39,7 +39,7 @@ namespace numkit::vecdim {
 // Entries beyond the input's rank are kept (they reduce as singletons);
 // duplicates and non-vector shapes are rejected here, non-positive /
 // fractional entries by argcheck::dimArg per element.
-inline keel::SmallArray<int, 8> parseDimSet(const Value &a, keel::StringRef fn)
+inline keel::SmallArray<keel::i32, 8> parseDimSet(const Value &a, keel::StringRef fn)
 {
     if (!a.dims().isVector())
         throw Error(keel::format("{}: dimension argument must be a "
@@ -48,11 +48,11 @@ inline keel::SmallArray<int, 8> parseDimSet(const Value &a, keel::StringRef fn)
                                  fn, argcheck::detail::dimsStr(a)),
                     0, 0, fn, "",
                     keel::format_small<96>("numkit:{}:dimNotVector", fn));
-    keel::SmallArray<int, 8> set;
+    keel::SmallArray<keel::i32, 8> set;
     set.reserve(a.numel());
     for (keel::usize i = 0; i < a.numel(); ++i)
         set.push_back(argcheck::dimArg(a.elemAsDouble(i), fn));
-    keel::SmallArray<int, 8> sorted = set.clone();
+    keel::SmallArray<keel::i32, 8> sorted = set.clone();
     std::sort(sorted.begin(), sorted.end());
     for (keel::usize i = 1; i < sorted.size(); ++i)
         if (sorted[i] == sorted[i - 1])
@@ -66,21 +66,21 @@ inline keel::SmallArray<int, 8> parseDimSet(const Value &a, keel::StringRef fn)
 
 // Real rank of x per the reference semantics: every array is at least
 // 2-D (a row vector has a dimension 2).
-inline int realRank(const Value &x)
+inline keel::i32 realRank(const Value &x)
 {
     return std::max(2, x.dims().ndim());
 }
 
 // True when every real dimension of x is listed. Extra entries beyond
 // the rank don't affect coverage.
-inline bool coversAllDims(keel::ArrayRef<int> set, const Value &x)
+inline bool coversAllDims(keel::ArrayRef<keel::i32> set, const Value &x)
 {
-    const int rank = realRank(x);
+    const keel::i32 rank = realRank(x);
     keel::SmallArray<char, 16> seen(keel::as<keel::usize>(rank) + 1, '\0');
-    for (int d : set)
+    for (keel::i32 d : set)
         if (d <= rank)
             seen[keel::as<keel::usize>(d)] = 1;
-    for (int d = 1; d <= rank; ++d)
+    for (keel::i32 d = 1; d <= rank; ++d)
         if (!seen[keel::as<keel::usize>(d)])
             return false;
     return true;
@@ -89,29 +89,29 @@ inline bool coversAllDims(keel::ArrayRef<int> set, const Value &x)
 // Collapse the listed dims into one trailing reduction dim: out has the
 // non-listed sizes (original order) followed by prod(listed real sizes).
 // Reduce along the LAST dim of the result. Type-preserving.
-inline Value collapseDims(const Value &x, keel::ArrayRef<int> set,
+inline Value collapseDims(const Value &x, keel::ArrayRef<keel::i32> set,
                           keel::Allocator *mr)
 {
-    const int nd = x.dims().ndim();
+    const keel::i32 nd = x.dims().ndim();
     keel::SmallArray<char, 16> listed(keel::as<keel::usize>(nd) + 1, '\0');
-    for (int d : set)
+    for (keel::i32 d : set)
         if (d <= nd)
             listed[keel::as<keel::usize>(d)] = 1;
-    keel::SmallArray<int, 8> order;          // non-listed first, listed last
+    keel::SmallArray<keel::i32, 8> order;          // non-listed first, listed last
     order.reserve(nd);
     keel::usize red = 1;                     // product of the listed real sizes
-    for (int d = 1; d <= nd; ++d)
+    for (keel::i32 d = 1; d <= nd; ++d)
         if (!listed[keel::as<keel::usize>(d)])
             order.push_back(d);
-    for (int d = 1; d <= nd; ++d)
+    for (keel::i32 d = 1; d <= nd; ++d)
         if (listed[keel::as<keel::usize>(d)])
             red *= x.dims().dim(d - 1);
-    for (int d = 1; d <= nd; ++d)
+    for (keel::i32 d = 1; d <= nd; ++d)
         if (listed[keel::as<keel::usize>(d)])
             order.push_back(d);
-    Value p = builtin::permute(x, keel::ArrayRef<int>(order.data(), order.size()), mr);
+    Value p = builtin::permute(x, keel::ArrayRef<keel::i32>(order.data(), order.size()), mr);
     keel::SmallArray<keel::usize, 8> shape;
-    for (int d = 1; d <= nd; ++d)
+    for (keel::i32 d = 1; d <= nd; ++d)
         if (!listed[keel::as<keel::usize>(d)])
             shape.push_back(x.dims().dim(d - 1));
     if (shape.empty())               // every real dim listed
@@ -126,16 +126,16 @@ inline Value collapseDims(const Value &x, keel::ArrayRef<int> set,
 // unit axes never changes the column-major order, so a plain reshape of
 // the reduced value suffices (regardless of whether the kernel kept or
 // dropped the reduced trailing singleton).
-inline Value expandReduced(Value reduced, const Value &x, keel::ArrayRef<int> set,
+inline Value expandReduced(Value reduced, const Value &x, keel::ArrayRef<keel::i32> set,
                            keel::Allocator *mr)
 {
-    const int nd = x.dims().ndim();
+    const keel::i32 nd = x.dims().ndim();
     keel::SmallArray<char, 16> listed(keel::as<keel::usize>(nd) + 1, '\0');
-    for (int d : set)
+    for (keel::i32 d : set)
         if (d <= nd)
             listed[keel::as<keel::usize>(d)] = 1;
     keel::SmallArray<keel::usize, 8> shape;
-    for (int d = 1; d <= nd; ++d)
+    for (keel::i32 d = 1; d <= nd; ++d)
         shape.push_back(listed[keel::as<keel::usize>(d)] ? 1 : x.dims().dim(d - 1));
     while (shape.size() > 2 && shape.back() == 1)
         shape.pop_back();

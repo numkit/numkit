@@ -389,7 +389,7 @@ void register_general(Engine &engine) {
                                 auto &fm = ctx.engine->figureManager();
                                 bool anyFigureClosed = false;
                                 for (const auto &a : args) {
-                                    const int hid = graphicsHandleIdOf(a);
+                                    const keel::i32 hid = graphicsHandleIdOf(a);
                                     if (hid >= 0) {
                                         auto *rec = fm.findHandle(hid);
                                         if (!rec)
@@ -697,10 +697,10 @@ void register_general(Engine &engine) {
                 auto v = Value::matrix(1, n, ValueType::DOUBLE, mr);
                 if (n == 0) return v;
                 keel::f64 *d = v.doubleDataMut();
-                const long start = (n % 2 == 0) ? -keel::as<long>(n)
-                                                : -keel::as<long>(n) + 1;
+                const keel::i64 start = (n % 2 == 0) ? -keel::as<keel::i64>(n)
+                                                : -keel::as<keel::i64>(n) + 1;
                 for (keel::usize i = 0; i < n; ++i)
-                    d[i] = keel::as<keel::f64>(start + 2 * keel::as<long>(i))
+                    d[i] = keel::as<keel::f64>(start + 2 * keel::as<keel::i64>(i))
                          / keel::as<keel::f64>(n);
                 return v;
             };
@@ -821,7 +821,7 @@ void register_general(Engine &engine) {
     engine.registerFunction("lsline",
         [](keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (nargout >= 1) {
-                const int hid = ctx.engine->figureManager().createHandle(
+                const keel::i32 hid = ctx.engine->figureManager().createHandle(
                     "line", "matlab.graphics.chart.primitive.Line");
                 outs[0] = makeGraphicsHandleValue(
                     "matlab.graphics.chart.primitive.Line", hid, ctx.engine->allocator());

@@ -373,8 +373,8 @@ public:
         bool debugStop = false;
         keel::String errorMessage;
         keel::String errorId;      // numkit:<fn>:<tag> when the thrower set one
-        int errorLine = 0;
-        int errorCol = 0;
+        keel::i32 errorLine = 0;
+        keel::i32 errorCol = 0;
         keel::String errorFunc;
         keel::String errorContext;  // e.g. "in call to 'sin'"
     };
@@ -416,7 +416,7 @@ public:
     using InputProvider = keel::Function<keel::String()>;
     void setInputProvider(InputProvider p) { inputProvider_ = keel::move(p); }
     const InputProvider &inputProvider() const { return inputProvider_; }
-    void setMaxRecursionDepth(int depth);
+    void setMaxRecursionDepth(keel::i32 depth);
 
     keel::Array<keel::String> workspaceVarNames() const;
     void outputText(keel::StringRef s);
@@ -605,12 +605,12 @@ public:
     // Backend-aware: VM walks frames_, lazy-allocating frame.env on the
     // way; TW walks its own activeFrames_ stack maintained via RAII
     // guards around callUserFunction.
-    Environment *callerEnv(int n = 0);
+    Environment *callerEnv(keel::i32 n = 0);
 
     // Number of user-function frames between the running builtin and
     // the top-level. 0 means the builtin was called directly from a
     // top-level script (caller is workspaceEnv).
-    int callerDepth() const;
+    keel::i32 callerDepth() const;
 
     // Variable assignment in the n-th caller's scope. Writes the value
     // such that the caller can subsequently read it back. In VM mode,
@@ -680,7 +680,7 @@ public:
     // outside any user-function call, or when k is out of range.
     // Backed by per-CALL-site metadata recorded by the compiler / TW
     // call sites.
-    keel::String inputName(int k);
+    keel::String inputName(keel::i32 k);
 
     // ── Virtual filesystem ────────────────────────────────────
     //
@@ -959,7 +959,7 @@ private:
     // compiledFuncs_ / userFuncs_ (a TreeWalker-executed literal that
     // re-used a low id used to shadow a compiled chunk and run a
     // foreign body — bugs/opened/core/anon-table-resolution-corruption.md).
-    std::atomic<int> anonNameCounter_{0};
+    std::atomic<keel::i32> anonNameCounter_{0};
 
     keel::UniquePtr<Compiler> compiler_;
 

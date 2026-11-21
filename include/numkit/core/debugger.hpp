@@ -129,16 +129,16 @@ class BreakpointManager
 public:
     struct Breakpoint
     {
-        int id = 0;
+        keel::i32 id = 0;
         keel::u16 line = 0;
         bool enabled = true;
         keel::String condition; // empty = unconditional; else a boolean expr
     };
 
-    int addBreakpoint(keel::u16 line);
-    int addBreakpoint(keel::u16 line, keel::StringRef condition);
-    void removeBreakpoint(int id);
-    void enableBreakpoint(int id, bool enabled);
+    keel::i32 addBreakpoint(keel::u16 line);
+    keel::i32 addBreakpoint(keel::u16 line, keel::StringRef condition);
+    void removeBreakpoint(keel::i32 id);
+    void enableBreakpoint(keel::i32 id, bool enabled);
     void clearAll();
     bool shouldBreak(keel::u16 line) const;
     // Condition text of the enabled breakpoint at `line` (empty if none or
@@ -148,7 +148,7 @@ public:
 
 private:
     keel::Array<Breakpoint> breakpoints_;
-    int nextId_ = 1;
+    keel::i32 nextId_ = 1;
     mutable keel::HashMap<keel::u16, keel::usize> lineIndex_;
     mutable bool indexDirty_ = true;
     void rebuildIndex() const;
@@ -180,7 +180,7 @@ public:
 
     // Called by backend on source line change.
     // Returns false if Stop requested.
-    bool checkLine(keel::u16 line, keel::u16 col, int callDepth);
+    bool checkLine(keel::u16 line, keel::u16 col, keel::i32 callDepth);
 
     // Call stack management
     void pushFrame(StackFrame frame);
@@ -222,7 +222,7 @@ public:
     DebugContext makeContext() const;
 
     // Set action for resume after pause (called before re-entering dispatch loop)
-    void setResumeAction(DebugAction action, int callDepth);
+    void setResumeAction(DebugAction action, keel::i32 callDepth);
 
     // Restore lastLine_ (used after debug eval to avoid re-triggering on the same line)
     void setLastLine(keel::u16 line) { lastLine_ = line; }
@@ -232,10 +232,10 @@ private:
     BreakpointManager *bpm_;
     keel::Array<StackFrame> callStack_;
     DebugAction stepAction_ = DebugAction::Continue;
-    int stepDepth_ = 0;
+    keel::i32 stepDepth_ = 0;
     keel::u16 lastLine_ = 0;
 
-    void applyAction(DebugAction action, int callDepth);
+    void applyAction(DebugAction action, keel::i32 callDepth);
 };
 
 // ============================================================

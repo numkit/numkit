@@ -36,10 +36,10 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
                 return nullptr; // shape error -> synchronous path reports it
         auto *mr = eng.allocator();
         // Bucket indices by group id (sorted).
-        keel::HashMap<int, keel::Array<keel::usize>> buckets;
+        keel::HashMap<keel::i32, keel::Array<keel::usize>> buckets;
         for (keel::usize i = 0; i < n; ++i)
-            buckets.get_or_insert(keel::as<int>(G.elemAsDouble(i))).push_back(i);
-        keel::Array<int> gids;
+            buckets.get_or_insert(keel::as<keel::i32>(G.elemAsDouble(i))).push_back(i);
+        keel::Array<keel::i32> gids;
         gids.reserve(buckets.size());
         for (auto [k, v] : buckets) {
             (void)v;
@@ -49,7 +49,7 @@ struct SplitapplyCallbackBuiltin : CallbackBuiltin
 
         auto groups = keel::make_arc<keel::Array<keel::Array<keel::usize>>>();
         groups->reserve(gids.size());
-        for (int gid : gids) {
+        for (keel::i32 gid : gids) {
             if (auto *arr = buckets.get(gid))
                 groups->push_back(keel::move(*arr));
         }

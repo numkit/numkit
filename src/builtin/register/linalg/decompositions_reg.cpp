@@ -400,7 +400,7 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
 void cholupdate_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 3, "cholupdate");
-    int sign = 1;
+    keel::i32 sign = 1;
     if (args.size() == 3) {
         if (args[2].isChar() || args[2].isString()) {
             keel::String s = args[2].toString();
@@ -491,8 +491,8 @@ void eigs_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     keel::usize k = 6;
     if (args.size() > kIdx && !args[kIdx].isEmpty() && !args[kIdx].isStruct()) {
         k = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
-            argcheck::expectedReal(args[kIdx], keel::as<int>(kIdx + 1), "k", "eigs"),
-            keel::as<int>(kIdx + 1), "k", "eigs"));
+            argcheck::expectedReal(args[kIdx], keel::as<keel::i32>(kIdx + 1), "k", "eigs"),
+            keel::as<keel::i32>(kIdx + 1), "k", "eigs"));
     }
 
     Value sigma;

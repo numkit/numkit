@@ -35,7 +35,7 @@ FsContext::OpenFile *requireReadFid(FsContext &fs, keel::ArrayRef<Value> args, c
 {
     if (args.empty() || !args[0].isScalar())
         throw Error(keel::format("{}: file identifier required", fn));
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error(keel::format("{}: invalid file identifier", fn));
@@ -78,7 +78,7 @@ void fopen(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
         be = numkit::ops::parseEndian(args[2].toString().as_ref(), "fopen");
     }
-    int fid = fs.openFile(path.as_ref(), mode.as_ref());
+    keel::i32 fid = fs.openFile(path.as_ref(), mode.as_ref());
     if (fid >= 0 && be) {
         if (auto *f = fs.findFile(fid))
             f->mode.append(";be");
@@ -102,7 +102,7 @@ void fclose(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
 
     if (!args[0].isScalar())
         throw Error("fclose: argument must be a numeric fid or 'all'");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     bool ok = fs.closeFile(fid);
     outs[0] = Value::scalar(ok ? 0.0 : -1.0, mr);
 }
@@ -158,7 +158,7 @@ void feof(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArray
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("feof: file identifier required");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f)
         throw Error("feof: invalid file identifier");
@@ -169,7 +169,7 @@ void ferror(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ferror: file identifier required");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f)
         throw Error("ferror: invalid file identifier");
@@ -188,7 +188,7 @@ void ftell(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("ftell: file identifier required");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f) {
         outs[0] = Value::scalar(-1.0, mr);
@@ -206,12 +206,12 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
     if (args.size() < 2 || !args[0].isScalar() || !args[1].isScalar())
         return fail();
 
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         return fail();
 
-    long long offset = keel::as<long long>(args[1].toScalar());
+    keel::i64 offset = keel::as<keel::i64>(args[1].toScalar());
 
     // Origin: defaults to 'bof' when omitted. Accepts either a string
     // ('bof'/'cof'/'eof') or the int codes -1/0/1 used by some
@@ -225,7 +225,7 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
             else if (o == "eof") origin = EOFO;
             else return fail();
         } else if (args[2].isScalar()) {
-            int o = keel::as<int>(args[2].toScalar());
+            keel::i32 o = keel::as<keel::i32>(args[2].toScalar());
             if (o == -1) origin = BOF;
             else if (o == 0) origin = COF;
             else if (o == 1) origin = EOFO;
@@ -235,12 +235,12 @@ void fseek(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArra
         }
     }
 
-    long long base = 0;
+    keel::i64 base = 0;
     if (origin == BOF) base = 0;
-    else if (origin == COF) base = keel::as<long long>(f->cursor);
-    else base = keel::as<long long>(f->buffer.size());
+    else if (origin == COF) base = keel::as<keel::i64>(f->cursor);
+    else base = keel::as<keel::i64>(f->buffer.size());
 
-    long long target = base + offset;
+    keel::i64 target = base + offset;
     if (target < 0 || keel::as<keel::usize>(target) > f->buffer.size())
         return fail();
 
@@ -253,7 +253,7 @@ void frewind(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutAr
     (void)mr;
     if (args.empty() || !args[0].isScalar())
         throw Error("frewind: file identifier required");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error("frewind: invalid file identifier");
@@ -266,7 +266,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
 {
     if (args.empty() || !args[0].isScalar())
         throw Error("fread: file identifier required");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forRead)
         throw Error("fread: invalid file identifier");
@@ -284,7 +284,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     auto precOpt = numkit::ops::parsePrecision(precStr.as_ref());
     if (!precOpt)
         throw Error(keel::format("fread: unsupported precision '{}'", precStr));
-    int kind = precOpt->first;
+    keel::i32 kind = precOpt->first;
     keel::usize bsize = precOpt->second;
 
     keel::usize skip = 0;
@@ -354,7 +354,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
 {
     if (args.size() < 2 || !args[0].isScalar())
         throw Error("fwrite: requires (fid, array [, precision [, machineformat]])");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = fs.findFile(fid);
     if (!f || !f->forWrite)
         throw Error("fwrite: invalid file identifier");
@@ -368,7 +368,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     auto precOpt = numkit::ops::parsePrecision(precStr.as_ref());
     if (!precOpt)
         throw Error(keel::format("fwrite: unsupported precision '{}'", precStr));
-    int kind = precOpt->first;
+    keel::i32 kind = precOpt->first;
     keel::usize bsize = precOpt->second;
 
     bool be = (f->mode.find(";be") != keel::kInvalidIndex);

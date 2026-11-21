@@ -74,14 +74,14 @@ keel::Array<keel::String> DebugContext::variableNames() const
 // BreakpointManager
 // ============================================================
 
-int BreakpointManager::addBreakpoint(keel::u16 line)
+keel::i32 BreakpointManager::addBreakpoint(keel::u16 line)
 {
     return addBreakpoint(line, keel::StringRef{});
 }
 
-int BreakpointManager::addBreakpoint(keel::u16 line, keel::StringRef condition)
+keel::i32 BreakpointManager::addBreakpoint(keel::u16 line, keel::StringRef condition)
 {
-    int id = nextId_++;
+    keel::i32 id = nextId_++;
     breakpoints_.push_back({id, line, true, keel::String::from(condition)});
     indexDirty_ = true;
     return id;
@@ -99,7 +99,7 @@ keel::String BreakpointManager::conditionForLine(keel::u16 line) const
     return breakpoints_[*idx].condition.clone();
 }
 
-void BreakpointManager::removeBreakpoint(int id)
+void BreakpointManager::removeBreakpoint(keel::i32 id)
 {
     for (keel::usize i = breakpoints_.size(); i-- > 0;) {
         if (breakpoints_[i].id == id)
@@ -108,7 +108,7 @@ void BreakpointManager::removeBreakpoint(int id)
     indexDirty_ = true;
 }
 
-void BreakpointManager::enableBreakpoint(int id, bool enabled)
+void BreakpointManager::enableBreakpoint(keel::i32 id, bool enabled)
 {
     for (auto &bp : breakpoints_) {
         if (bp.id == id) {
@@ -156,7 +156,7 @@ void DebugController::reset(DebugAction initialAction)
     lastLine_ = 0;
 }
 
-bool DebugController::checkLine(keel::u16 line, keel::u16 col, int callDepth)
+bool DebugController::checkLine(keel::u16 line, keel::u16 col, keel::i32 callDepth)
 {
     if (line == 0 || line == lastLine_)
         return true;
@@ -244,14 +244,14 @@ DebugContext DebugController::makeContext() const
     return makeContext(frame.line, frame.col);
 }
 
-void DebugController::setResumeAction(DebugAction action, int callDepth)
+void DebugController::setResumeAction(DebugAction action, keel::i32 callDepth)
 {
     applyAction(action, callDepth);
     // Don't reset lastLine_ — we want the current pause line to be skipped
     // so we don't immediately re-trigger on the same line.
 }
 
-void DebugController::applyAction(DebugAction action, int callDepth)
+void DebugController::applyAction(DebugAction action, keel::i32 callDepth)
 {
     switch (action) {
     case DebugAction::Continue:

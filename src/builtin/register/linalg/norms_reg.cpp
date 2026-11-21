@@ -67,7 +67,7 @@ void vecnorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 {
     argcheck::checkNargin(args.size(), 1, 3, "vecnorm");
     keel::f64 p = 2.0;
-    int dim = 0;
+    keel::i32 dim = 0;
     if (args.size() >= 2) p = args[1].toScalar();
     if (args.size() >= 3) dim = argcheck::dimArg(args[2], "vecnorm");
     outs[0] = vecnorm(args[0], p, dim, ctx.engine->allocator());

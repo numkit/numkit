@@ -31,12 +31,12 @@ namespace detail {
 
 namespace {
 
-keel::Array<int> permFromValue(const Value &v, keel::Allocator *mr)
+keel::Array<keel::i32> permFromValue(const Value &v, keel::Allocator *mr)
 {
-    keel::Array<int> p(mr);
+    keel::Array<keel::i32> p(mr);
     p.reserve(v.numel());
     for (keel::usize i = 0; i < v.numel(); ++i)
-        p.push_back(keel::as<int>(v.doubleData()[i]));
+        p.push_back(keel::as<keel::i32>(v.doubleData()[i]));
     return p;
 }
 
@@ -50,7 +50,7 @@ void permute_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     auto *mr = ctx.engine->allocator();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto perm = permFromValue(args[1], scratch.allocator());
-    outs[0] = permute(args[0], keel::ArrayRef<int>(perm.data(), perm.size()), mr);
+    outs[0] = permute(args[0], keel::ArrayRef<keel::i32>(perm.data(), perm.size()), mr);
 }
 
 void ipermute_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
@@ -61,7 +61,7 @@ void ipermute_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     auto *mr = ctx.engine->allocator();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto perm = permFromValue(args[1], scratch.allocator());
-    outs[0] = ipermute(args[0], keel::ArrayRef<int>(perm.data(), perm.size()), mr);
+    outs[0] = ipermute(args[0], keel::ArrayRef<keel::i32>(perm.data(), perm.size()), mr);
 }
 
 void squeeze_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
@@ -75,7 +75,7 @@ void cat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
              CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "cat");
-    const int dim = argcheck::dimArg(args[0], "cat");
+    const keel::i32 dim = argcheck::dimArg(args[0], "cat");
     // Pass &args[1] as the start of the values array.
     outs[0] = cat(dim, args.slice(1), ctx.engine->allocator());
 }
@@ -92,7 +92,7 @@ void shiftdim_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, 2, "shiftdim");
     auto *mr = ctx.engine->allocator();
     if (args.size() >= 2 && !args[1].isEmpty()) {
-        const int n = argcheck::expectedInteger(
+        const keel::i32 n = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "n", "shiftdim"), 2, "n", "shiftdim");
         outs[0] = shiftdim(args[0], n, mr);
         return;

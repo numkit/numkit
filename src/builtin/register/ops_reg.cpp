@@ -156,13 +156,13 @@ bool tryTfBinaryOp(char op, const Value &a, const Value &b,
     if (op == '^') {
         if (!isTfStruct(a) || !b.isScalar() || !b.isNumeric() || b.isComplex()) return false;
         const keel::f64 expVal = b.toScalar();
-        const int k = keel::as<int>(expVal);
+        const keel::i32 k = keel::as<keel::i32>(expVal);
         if (keel::as<keel::f64>(k) != expVal) return false;
         keel::Array<keel::f64> num = {1.0}, den = {1.0};
-        const int ak = keel::abs(k);
+        const keel::i32 ak = keel::abs(k);
         const auto &baseN = (k >= 0) ? pa.num : pa.den;
         const auto &baseD = (k >= 0) ? pa.den : pa.num;
-        for (int i = 0; i < ak; ++i) {
+        for (keel::i32 i = 0; i < ak; ++i) {
             num = polyMul(num, baseN);
             den = polyMul(den, baseD);
         }

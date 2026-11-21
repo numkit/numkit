@@ -40,7 +40,7 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     keel::Allocator *mr = engine.allocator();
     if (args.size() < 2 || !args[0].isScalar() || !args[1].isChar())
         throw Error("fscanf: requires (fid, format [, size])");
-    int fid = keel::as<int>(args[0].toScalar());
+    keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
     auto *f = engine.findFile(fid);
     if (!f || !f->forRead)
         throw Error("fscanf: invalid file identifier");
@@ -99,7 +99,7 @@ struct TextscanOptions
     keel::f64 emptyValue = std::numeric_limits<keel::f64>::quiet_NaN();
 };
 
-struct TextscanConv { char spec; bool suppress; int width; };
+struct TextscanConv { char spec; bool suppress; keel::i32 width; };
 
 struct StagedNum { keel::usize col; keel::f64 val; };
 struct StagedStr { keel::usize col; keel::String val; };
@@ -115,7 +115,7 @@ keel::Array<TextscanConv> parseTextscanFormat(keel::StringRef fmt, keel::Allocat
         ++i;
         bool suppress = false;
         if (i < fmt.size() && fmt[i] == '*') { suppress = true; ++i; }
-        int width = -1;
+        keel::i32 width = -1;
         while (i < fmt.size() && keel::is_ascii_digit(fmt[i])) {
             if (width < 0) width = 0;
             width = width * 10 + (fmt[i] - '0');
@@ -157,7 +157,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
         ownedInput = args[0].toString();
         input = ownedInput.as_ref();
     } else if (args[0].isScalar()) {
-        int fid = keel::as<int>(args[0].toScalar());
+        keel::i32 fid = keel::as<keel::i32>(args[0].toScalar());
         srcFile = engine.findFile(fid);
         if (!srcFile || !srcFile->forRead)
             throw Error("textscan: invalid file identifier");
@@ -447,7 +447,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                 continue;
             }
 
-            if (c.width > 0 && keel::as<int>(tok.size()) > c.width)
+            if (c.width > 0 && keel::as<keel::i32>(tok.size()) > c.width)
                 tok = tok.substr(0, keel::as<keel::usize>(c.width));
 
             if (c.spec == 's') {
@@ -462,24 +462,24 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             keel::f64 v = 0.0;
             switch (c.spec) {
             case 'd': case 'i': {
-                long long iv = std::strtoll(start, &endp, 10);
+                keel::i64 iv = std::strtoll(start, &endp, 10);
                 v = keel::as<keel::f64>(iv);
                 break;
             }
             case 'u': {
-                unsigned long long uv = std::strtoull(start, &endp, 10);
+                keel::u64 uv = std::strtoull(start, &endp, 10);
                 v = keel::as<keel::f64>(uv);
                 break;
             }
             case 'f': case 'e': case 'g': case 'E': case 'G':
                 v = std::strtod(start, &endp); break;
             case 'x': case 'X': {
-                unsigned long long uv = std::strtoull(start, &endp, 16);
+                keel::u64 uv = std::strtoull(start, &endp, 16);
                 v = keel::as<keel::f64>(uv);
                 break;
             }
             case 'o': {
-                unsigned long long uv = std::strtoull(start, &endp, 8);
+                keel::u64 uv = std::strtoull(start, &endp, 8);
                 v = keel::as<keel::f64>(uv);
                 break;
             }

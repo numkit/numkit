@@ -71,16 +71,16 @@ struct ASTBranch
 struct ASTNode
 {
     NodeType type;
-    int line = 0;
-    int col = 0;
-    int endLine = 0; // line of closing 'end' keyword (for loops, if, switch, etc.)
+    keel::i32 line = 0;
+    keel::i32 col = 0;
+    keel::i32 endLine = 0; // line of closing 'end' keyword (for loops, if, switch, etc.)
     // Position one past the last character of the statement's TEXTUAL
     // form (so e.g. for `a = 1;` endCol points to col after `;`).
     // Populated by the parser for simple statements via
     // consumeStmtTerminator() right when the trailing ';' / ',' token
     // is consumed. Stays 0 when no terminator was present — callers
     // (graph view) treat 0 as "slice to end of line".
-    int endCol  = 0;
+    keel::i32 endCol  = 0;
 
     keel::String strValue;
     keel::f64 numValue = 0;
@@ -115,7 +115,7 @@ struct ASTNode
 };
 
 ASTNodePtr makeNode(NodeType t);
-ASTNodePtr makeNode(NodeType t, int line, int col);
+ASTNodePtr makeNode(NodeType t, keel::i32 line, keel::i32 col);
 ASTNodePtr cloneNode(const ASTNode *src);
 
 // Walk a chain of FIELD_ACCESS nodes rooted at an IDENTIFIER and produce

@@ -55,8 +55,8 @@
 #ifdef _WIN32
 extern "C" {
 __declspec(dllimport) void *__stdcall GetDC(void *hWnd);
-__declspec(dllimport) int __stdcall ReleaseDC(void *hWnd, void *hDC);
-__declspec(dllimport) int __stdcall GetDeviceCaps(void *hdc, int index);
+__declspec(dllimport) keel::i32 __stdcall ReleaseDC(void *hWnd, void *hDC);
+__declspec(dllimport) keel::i32 __stdcall GetDeviceCaps(void *hdc, keel::i32 index);
 }
 #endif
 
@@ -371,7 +371,7 @@ StyleParts parseStyle(keel::StringRef s)
 keel::String rgbToHex(const Value &v)
 {
     auto clamp255 = [](keel::f64 d) {
-        int i = keel::as<int>(d * 255.0 + 0.5);
+        keel::i32 i = keel::as<keel::i32>(d * 255.0 + 0.5);
         if (i < 0) i = 0;
         if (i > 255) i = 255;
         return i;
@@ -475,7 +475,7 @@ keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
     } else {
         lo = +INFINITY;
         hi = -INFINITY;
-        int imgDatasets = 0, seriesDatasets = 0;
+        keel::i32 imgDatasets = 0, seriesDatasets = 0;
         for (const auto &ds : ax->datasets) {
             if (!ds.visible)
                 continue;
@@ -739,13 +739,13 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (const keel::String *hit = rec->props.get(name))
             return decodeProp(*hit, mr);
         const FigureState *fig = fm.figureOf(rec->figureId);
-        int m = (fig && fig->subplotRows >= 1) ? fig->subplotRows : 1;
-        int n = (fig && fig->subplotCols >= 1) ? fig->subplotCols : 1;
-        int p = (ax && ax->subplotIndex >= 1) ? ax->subplotIndex : 1;
+        keel::i32 m = (fig && fig->subplotRows >= 1) ? fig->subplotRows : 1;
+        keel::i32 n = (fig && fig->subplotCols >= 1) ? fig->subplotCols : 1;
+        keel::i32 p = (ax && ax->subplotIndex >= 1) ? ax->subplotIndex : 1;
         keel::f64 left = 0.13, bottom = 0.11, width = 0.775, height = 0.815;
         if (m > 1 || n > 1) {
-            int r = (p - 1) / n;
-            int c = (p - 1) % n;
+            keel::i32 r = (p - 1) / n;
+            keel::i32 c = (p - 1) % n;
             keel::f64 stepX = 0.775 / (n - 0.24);
             keel::f64 stepY = 0.815 / (m - 0.28);
             width  = (n == 1) ? 0.775 : 0.76 * stepX;
@@ -926,7 +926,7 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 }
 
 // ── Handle record lookup helpers (create-or-reuse) ───────────────────
-int handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
+keel::i32 handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
 {
     for (auto [id, r] : fm.handles())
         if (&r == rec)
@@ -935,7 +935,7 @@ int handleIdOfRecord(FigureManager &fm, FigureManager::HandleRecord *rec)
 }
 
 FigureManager::HandleRecord *findRecordBy(FigureManager &fm, const char *type,
-                                          int figureId, keel::usize axesIndex)
+                                          keel::i32 figureId, keel::usize axesIndex)
 {
     for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == type && rec.figureId == figureId
@@ -947,24 +947,24 @@ FigureManager::HandleRecord *findRecordBy(FigureManager &fm, const char *type,
 Value makeAxesHandle(FigureManager &fm, keel::Allocator *mr)
 {
     FigureState &fig = fm.current();
-    const int fid = fm.currentFigureId();
+    const keel::i32 fid = fm.currentFigureId();
     const keel::usize aidx = keel::as<keel::usize>(fig.currentAxes);
     if (auto *rec = findRecordBy(fm, "axes", fid, aidx))
         return makeGraphicsHandleValue(kAxesClass, handleIdOfRecord(fm, rec), mr);
-    const int id = fm.createHandle("axes", kAxesClass);
+    const keel::i32 id = fm.createHandle("axes", kAxesClass);
     return makeGraphicsHandleValue(kAxesClass, id, mr);
 }
 
-Value makeFigureHandleFor(FigureManager &fm, int figureId,
+Value makeFigureHandleFor(FigureManager &fm, keel::i32 figureId,
                           keel::Allocator *mr)
 {
     if (auto *rec = findRecordBy(fm, "figure", figureId, 0))
         return makeGraphicsHandleValue(kFigureClass, handleIdOfRecord(fm, rec), figureId, mr);
     // createHandle stamps the CURRENT figure — switch, create, switch back.
-    const int saved = fm.currentFigureId();
+    const keel::i32 saved = fm.currentFigureId();
     if (saved != figureId)
         fm.setFigure(figureId);
-    const int id = fm.createHandle("figure", kFigureClass);
+    const keel::i32 id = fm.createHandle("figure", kFigureClass);
     if (saved != figureId)
         fm.setFigure(saved);
     return makeGraphicsHandleValue(kFigureClass, id, figureId, mr);
@@ -978,35 +978,35 @@ Value makeFigureHandle(FigureManager &fm, keel::Allocator *mr)
 
 // Axes handle at an EXPLICIT index (gcf.Children addresses non-current
 // subplot cells too).
-Value makeAxesHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex,
+Value makeAxesHandleFor(FigureManager &fm, keel::i32 figureId, keel::usize axesIndex,
                         keel::Allocator *mr)
 {
     if (auto *rec = findRecordBy(fm, "axes", figureId, axesIndex))
         return makeGraphicsHandleValue(kAxesClass, handleIdOfRecord(fm, rec), mr);
-    const int id = fm.createHandleAt(figureId, axesIndex, "axes", kAxesClass);
+    const keel::i32 id = fm.createHandleAt(figureId, axesIndex, "axes", kAxesClass);
     return makeGraphicsHandleValue(kAxesClass, id, mr);
 }
 
 // Text handle bound to a label slot ("sgtitle" is figure-scoped: kNoAxes
 // so scoped axes sweeps keep it alive while clf/close invalidate it).
-Value makeTextHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex,
+Value makeTextHandleFor(FigureManager &fm, keel::i32 figureId, keel::usize axesIndex,
                         keel::StringRef slot, keel::Allocator *mr)
 {
     for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == "text" && rec.figureId == figureId
             && rec.slot == slot && rec.axesIndex == axesIndex)
             return makeGraphicsHandleValue(kTextClass, id, mr);
-    const int id = fm.createHandleAt(figureId, axesIndex, "text", kTextClass,
+    const keel::i32 id = fm.createHandleAt(figureId, axesIndex, "text", kTextClass,
                                      slot);
     return makeGraphicsHandleValue(kTextClass, id, mr);
 }
 
-Value makeLegendHandleFor(FigureManager &fm, int figureId, keel::usize axesIndex,
+Value makeLegendHandleFor(FigureManager &fm, keel::i32 figureId, keel::usize axesIndex,
                           keel::Allocator *mr)
 {
     if (auto *rec = findRecordBy(fm, "legend", figureId, axesIndex))
         return makeGraphicsHandleValue(kLegendClass, handleIdOfRecord(fm, rec), mr);
-    const int id = fm.createHandleAt(figureId, axesIndex, "legend", kLegendClass);
+    const keel::i32 id = fm.createHandleAt(figureId, axesIndex, "legend", kLegendClass);
     return makeGraphicsHandleValue(kLegendClass, id, mr);
 }
 
@@ -1017,14 +1017,14 @@ Value makeRootHandle(FigureManager &fm, keel::Allocator *mr)
     for (auto [id, rec] : fm.handles())
         if (!rec.deleted && rec.type == "root")
             return makeGraphicsHandleValue(kRootClass, id, mr);
-    const int id = fm.createHandleAt(0, FigureManager::HandleRecord::kNoAxes,
+    const keel::i32 id = fm.createHandleAt(0, FigureManager::HandleRecord::kNoAxes,
                                      "root", kRootClass);
     return makeGraphicsHandleValue(kRootClass, id, mr);
 }
 
 // Array of handles (gcf.Children / groot.Children).
 Value makeHandleArray(keel::StringRef className,
-                      keel::ArrayRef<int> ids,
+                      keel::ArrayRef<keel::i32> ids,
                       keel::Allocator *mr)
 {
     if (ids.empty())
@@ -1032,7 +1032,7 @@ Value makeHandleArray(keel::StringRef className,
     auto *res = mr ? mr : keel::default_allocator();
     keel::Array<keel::Arc<ObjectState>> states(res);
     states.reserve(ids.size());
-    for (int id : ids) {
+    for (keel::i32 id : ids) {
         auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
         payload->handleId = id;
         auto st = keel::make_arc_in<ObjectState>(res, res);
@@ -1107,10 +1107,10 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
     if (rec->type == "root") {
         if (name == "Type")   return str("root");
         if (name == "Children") {
-            keel::Array<int> ids;
+            keel::Array<keel::i32> ids;
             for (const auto &[fid, fig] : fm.figures()) {
                 (void)fig;
-                int hid = -1;
+                keel::i32 hid = -1;
                 for (auto [id, r] : fm.handles())
                     if (!r.deleted && r.type == "figure" && r.figureId == fid) {
                         hid = id;
@@ -1190,9 +1190,9 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Children") {
             FigureState *fig = fm.figureOf(rec->figureId);
             const keel::usize n = fig ? fig->axes.size() : 0;
-            keel::Array<int> ids;
+            keel::Array<keel::i32> ids;
             for (keel::usize k = 0; k < n; ++k) {
-                int hid = -1;
+                keel::i32 hid = -1;
                 for (auto [id, r] : fm.handles())
                     if (!r.deleted && r.type == "axes"
                         && r.figureId == rec->figureId && r.axesIndex == k) {
@@ -1315,7 +1315,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                 };
                 keel::usize hp = s.find("color=#");
                 if (hp != keel::kInvalidIndex) {
-                    unsigned R = 0, G = 0, B = 0;
+                    keel::u32 R = 0, G = 0, B = 0;
                     if (std::sscanf(s.c_str() + hp + 7, "%02x%02x%02x", &R,
                                     &G, &B)
                         == 3)
@@ -1349,7 +1349,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     }
                     if (cand.size() > 1 && cand[0] == '#'
                         && cand.size() >= 7) {
-                        unsigned R = 0, G = 0, B = 0;
+                        keel::u32 R = 0, G = 0, B = 0;
                         if (std::sscanf(cand.c_str() + 1, "%02x%02x%02x",
                                         &R, &G, &B)
                             == 3)
@@ -1531,7 +1531,7 @@ void registerHandleAccessors(Engine &engine)
                 keel::ArrayRef<Value> args, keel::usize nargout,
                 keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty()) { outs[0] = Value(); return; }
-            const int id = graphicsHandleIdOf(args[0]);
+            const keel::i32 id = graphicsHandleIdOf(args[0]);
             if (id < 0) { outs[0] = Value(); return; }
             auto *rec = engine.figureManager().findHandle(id);
             if (!rec)
@@ -1654,7 +1654,7 @@ void registerHandleAccessors(Engine &engine)
                 keel::ArrayRef<Value> args, keel::usize,
                 keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty()) { outs[0] = Value(); return; }
-            const int id = graphicsHandleIdOf(args[0]);
+            const keel::i32 id = graphicsHandleIdOf(args[0]);
             if (id < 0) {
                 if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
                     keel::String lprop = args[1].toString();
@@ -1672,9 +1672,9 @@ void registerHandleAccessors(Engine &engine)
                         keel::f64 w = 1920.0, h = 1080.0;
 #ifdef _WIN32
                         if (void *hdc = GetDC(nullptr)) {
-                            const int physW = GetDeviceCaps(hdc, 118); // DESKTOPHORZRES
-                            const int physH = GetDeviceCaps(hdc, 117); // DESKTOPVERTRES
-                            const int logW  = GetDeviceCaps(hdc, 8);   // HORZRES
+                            const keel::i32 physW = GetDeviceCaps(hdc, 118); // DESKTOPHORZRES
+                            const keel::i32 physH = GetDeviceCaps(hdc, 117); // DESKTOPVERTRES
+                            const keel::i32 logW  = GetDeviceCaps(hdc, 8);   // HORZRES
                             ReleaseDC(nullptr, hdc);
                             if (physW > 0 && physH > 0 && logW > 0) {
                                 const keel::f64 scale = std::round((keel::as<keel::f64>(physW) / keel::as<keel::f64>(logW)) * 4.0) / 4.0;
@@ -1808,12 +1808,12 @@ void registerHandleAccessors(Engine &engine)
             auto *mr = ctx.engine->allocator();
 
             // Scope: an optional leading handle narrows the search.
-            int scopeFig = -1;      // -1 = root scope
-            int scopeAxes = -1;
-            int scopeSelf = -1;      // chart-handle self-scope
+            keel::i32 scopeFig = -1;      // -1 = root scope
+            keel::i32 scopeAxes = -1;
+            keel::i32 scopeSelf = -1;      // chart-handle self-scope
             keel::usize first = 0;
             if (!args.empty()) {
-                int hid = graphicsHandleIdOf(args[0]);
+                keel::i32 hid = graphicsHandleIdOf(args[0]);
                 if (hid >= 0) {
                     auto *rec = fm.findHandle(hid);
                     if (rec) {
@@ -1821,7 +1821,7 @@ void registerHandleAccessors(Engine &engine)
                             scopeFig = rec->figureId;
                         else if (rec->type == "axes") {
                             scopeFig = rec->figureId;
-                            scopeAxes = (int)rec->axesIndex;
+                            scopeAxes = (keel::i32)rec->axesIndex;
                         } else {
                             // chart/text/legend handle: returns
                             // the handle itself (no children modeled).
@@ -1829,7 +1829,7 @@ void registerHandleAccessors(Engine &engine)
                                 && args[1].isChar()) {
                                 // has filters — evaluate them on itself
                                 scopeFig = rec->figureId;
-                                scopeAxes = (int)rec->axesIndex;
+                                scopeAxes = (keel::i32)rec->axesIndex;
                                 scopeSelf = hid;
                             } else {
                                 outs[0] = args[0];
@@ -1881,7 +1881,7 @@ void registerHandleAccessors(Engine &engine)
                 return keel::StringRef("line");
             };
 
-            keel::Array<int> hits;
+            keel::Array<keel::i32> hits;
             for (auto kv : fm.handles()) {
                 auto *rec = &kv.value;
                 if (!rec || rec->deleted)
@@ -2002,7 +2002,7 @@ void registerHandleAccessors(Engine &engine)
                 keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = engine.figureManager();
-            const int id = graphicsHandleIdOf(args[0]);
+            const keel::i32 id = graphicsHandleIdOf(args[0]);
             auto *rec = id >= 0 ? fm.findHandle(id) : nullptr;
             bool ok = rec != nullptr;
             if (ok && args.size() >= 2
@@ -2067,7 +2067,7 @@ void registerHandleAccessors(Engine &engine)
                 keel::MutArrayRef<Value> outs, CallContext &) {
             if (args.empty()) { outs[0] = Value(); return; }
             auto &fm = engine.figureManager();
-            const int id = graphicsHandleIdOf(args[0]);
+            const keel::i32 id = graphicsHandleIdOf(args[0]);
             outs[0] = Value::logicalScalar(
                 id >= 0 && fm.findHandle(id) != nullptr);
         };
@@ -2123,12 +2123,12 @@ void registerGraphicsClasses(Engine &engine)
             } else if (recTypeRef == "axes") {
                 h = makeAxesHandle(fm, mr);
             } else if (recTypeRef == "text") {
-                const int fid = fm.currentFigureId();
+                const keel::i32 fid = fm.currentFigureId();
                 const keel::usize aidx = keel::as<keel::usize>(fm.current().currentAxes);
-                const int id = fm.createHandleAt(fid, aidx, "text", kTextClass);
+                const keel::i32 id = fm.createHandleAt(fid, aidx, "text", kTextClass);
                 h = makeGraphicsHandleValue(kTextClass, id, mr);
             } else if (recTypeRef == "legend") {
-                const int fid = fm.currentFigureId();
+                const keel::i32 fid = fm.currentFigureId();
                 const keel::usize aidx = keel::as<keel::usize>(fm.current().currentAxes);
                 h = makeLegendHandleFor(fm, fid, aidx, mr);
             } else if (recTypeRef == "root") {
@@ -2148,10 +2148,10 @@ void registerGraphicsClasses(Engine &engine)
                     ds.yJson.assign("[0,1]");
                 }
                 ax.datasets.push_back(keel::move(ds));
-                const int id = fm.createHandle(recTypeRef, clsName, dsIdx);
+                const keel::i32 id = fm.createHandle(recTypeRef, clsName, dsIdx);
                 h = makeGraphicsHandleValue(clsName, id, mr);
             }
-            const int hid = graphicsHandleIdOf(h);
+            const keel::i32 hid = graphicsHandleIdOf(h);
             if (auto *rec = fm.findHandle(hid)) {
                 for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
                     if (args[i].isChar() || args[i].isString())
@@ -2167,7 +2167,7 @@ void registerGraphicsClasses(Engine &engine)
         // same render-effect.
         cls.propGet = [&engine](const Value &self, keel::StringRef name,
                                 Value &out, CallContext &) -> bool {
-            const int id = graphicsHandleIdOf(self);
+            const keel::i32 id = graphicsHandleIdOf(self);
             if (id < 0)
                 return false;
             auto *rec = engine.figureManager().findHandle(id);
@@ -2182,7 +2182,7 @@ void registerGraphicsClasses(Engine &engine)
         };
         cls.propSet = [&engine](Value &self, keel::StringRef name,
                                 const Value &val, CallContext &) -> bool {
-            const int id = graphicsHandleIdOf(self);
+            const keel::i32 id = graphicsHandleIdOf(self);
             if (id < 0)
                 return false;
             auto *rec = engine.figureManager().findHandle(id);
@@ -2212,7 +2212,7 @@ void registerGraphicsClasses(Engine &engine)
             outs[0] = Value::logicalScalar(!eq);
         });
         cls.dispText = [&engine](const Value &self) -> keel::String {
-            const int id = graphicsHandleIdOf(self);
+            const keel::i32 id = graphicsHandleIdOf(self);
             auto *rec = id >= 0 ? engine.figureManager().findHandle(id) : nullptr;
             if (!rec)
                 return keel::String::from("  deleted handle\n");
@@ -2342,11 +2342,11 @@ void GraphicsLibrary::install(Engine &engine)
                         const keel::StringRef hClass(hitType->className);
                         const bool isSurfOrContour =
                             (hType == "surface" || hType == "contour");
-                        const int nnew = isSurfOrContour
+                        const keel::i32 nnew = isSurfOrContour
                                              ? 1
-                                             : keel::as<int>(after - base);
+                                             : keel::as<keel::i32>(after - base);
                         if (nnew == 1) {
-                            const int id = fm.createHandle(hType, hClass, base);
+                            const keel::i32 id = fm.createHandle(hType, hClass, base);
                             if (isSurfOrContour) {
                                 const Value *zArg = nullptr;
                                 if (args.size() == 1 || args.size() == 2) {
@@ -2380,8 +2380,8 @@ void GraphicsLibrary::install(Engine &engine)
                                             : keel::default_allocator();
                             keel::Array<keel::Arc<ObjectState>> states(res);
                             states.reserve(nnew);
-                            for (int i = 0; i < nnew; ++i) {
-                                const int id = fm.createHandle(
+                            for (keel::i32 i = 0; i < nnew; ++i) {
+                                const keel::i32 id = fm.createHandle(
                                     hType, hClass,
                                     base + keel::as<keel::usize>(i));
                                 auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
@@ -2403,7 +2403,7 @@ void GraphicsLibrary::install(Engine &engine)
                     if (name == "figure" || name == "gcf") {
                         outs[0] = makeFigureHandle(fm, mr);
                         if (name == "figure" && args.size() >= 2 && (args[0].isChar() || args[0].isString())) {
-                            int hid = graphicsHandleIdOf(outs[0]);
+                            keel::i32 hid = graphicsHandleIdOf(outs[0]);
                             if (auto *rec = fm.findHandle(hid)) {
                                 for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
                                     if (args[i].isChar() || args[i].isString())
@@ -2462,7 +2462,7 @@ void GraphicsLibrary::install(Engine &engine)
     engine.registerFunction("", "uicontrol",
         [](keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             auto &fm = ctx.engine->figureManager();
-            const int id = fm.createHandleAt(
+            const keel::i32 id = fm.createHandleAt(
                 fm.currentFigureId(), FigureManager::HandleRecord::kNoAxes,
                 "text", kTextClass);
             outs[0] = makeGraphicsHandleValue(kTextClass, id, ctx.engine->allocator());

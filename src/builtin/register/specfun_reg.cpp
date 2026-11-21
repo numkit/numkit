@@ -122,7 +122,7 @@ void register_specfun(Engine &engine) {
                 if (ax <= 4.0) {
                     si = ax;
                     keel::f64 p = ax;
-                    for (int k = 1; k < 60; ++k) {
+                    for (keel::i32 k = 1; k < 60; ++k) {
                         p *= -ax * ax / (keel::as<keel::f64>(2 * k) * keel::as<keel::f64>(2 * k + 1));
                         keel::f64 term = p / keel::as<keel::f64>(2 * k + 1);
                         si += term;
@@ -131,7 +131,7 @@ void register_specfun(Engine &engine) {
                 } else {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
-                    for (int k = 120; k >= 1; --k) {
+                    for (keel::i32 k = 120; k >= 1; --k) {
                         keel::f64 kk = keel::as<keel::f64>(k);
                         cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
                     }
@@ -160,7 +160,7 @@ void register_specfun(Engine &engine) {
                 if (ax <= 4.0) {
                     keel::f64 ci = kGamma + std::log(ax);
                     keel::f64 p = 1.0;
-                    for (int k = 1; k < 60; ++k) {
+                    for (keel::i32 k = 1; k < 60; ++k) {
                         p *= -ax * ax / (keel::as<keel::f64>(2 * k - 1) * keel::as<keel::f64>(2 * k));
                         keel::f64 term = p / keel::as<keel::f64>(2 * k);
                         ci += term;
@@ -170,7 +170,7 @@ void register_specfun(Engine &engine) {
                 } else {
                     keel::c64 z(0.0, ax);
                     keel::c64 cf(0.0, 0.0);
-                    for (int k = 120; k >= 1; --k) {
+                    for (keel::i32 k = 120; k >= 1; --k) {
                         keel::f64 kk = keel::as<keel::f64>(k);
                         cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
                     }
@@ -208,12 +208,12 @@ void register_specfun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "lambertw");
             auto *mr = ctx.engine->allocator();
-            int branch = 0;
+            keel::i32 branch = 0;
             const Value &x = (args.size() == 2) ? args[1] : args[0];
             if (args.size() == 2)
                 branch = argcheck::expectedInteger(
                     argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
-            auto evalLambertW = [](int k, keel::f64 z) -> keel::f64 {
+            auto evalLambertW = [](keel::i32 k, keel::f64 z) -> keel::f64 {
                 if (std::isnan(z)) return z;
                 const keel::f64 negInvE = -1.0 / std::exp(1.0);
                 if (k == 0) {
@@ -231,7 +231,7 @@ void register_specfun(Engine &engine) {
                         keel::f64 lz = std::log(z);
                         w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
                     }
-                    for (int it = 0; it < 50; ++it) {
+                    for (keel::i32 it = 0; it < 50; ++it) {
                         keel::f64 ew = std::exp(w);
                         keel::f64 wew = w * ew;
                         keel::f64 f = wew - z;
@@ -249,7 +249,7 @@ void register_specfun(Engine &engine) {
                     if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
                     keel::f64 w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
                                           : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
-                    for (int it = 0; it < 50; ++it) {
+                    for (keel::i32 it = 0; it < 50; ++it) {
                         keel::f64 ew = std::exp(w);
                         keel::f64 f = w * ew - z;
                         if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;

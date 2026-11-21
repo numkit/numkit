@@ -155,7 +155,7 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
     // `ty` (count). Used by polarhistogram (type="bar") and the
     // legacy rose (type="rose"); the only difference is the
     // dataset `type` tag and the default bin count.
-    auto computeAngularHistogram = [](const Value &theta, int nbins,
+    auto computeAngularHistogram = [](const Value &theta, keel::i32 nbins,
                                       keel::String &txOut, keel::String &tyOut) {
         const keel::f64 TAU = 2 * 3.14159265358979323846;
         const keel::f64 bw  = TAU / nbins;
@@ -166,14 +166,14 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
             if (!std::isfinite(t)) continue;
             t = std::fmod(t, TAU);
             if (t < 0) t += TAU;
-            int b = (int)(t / bw);
+            keel::i32 b = (keel::i32)(t / bw);
             if (b >= nbins) b = nbins - 1;
             if (b < 0) b = 0;
             counts[keel::as<keel::usize>(b)] += 1;
         }
         StrBuf tx, ty;
         tx << '['; ty << '[';
-        for (int i = 0; i < nbins; ++i) {
+        for (keel::i32 i = 0; i < nbins; ++i) {
             if (i) { tx << ','; ty << ','; }
             tx << (bw * (i + 0.5));    // bin centre
             ty << counts[keel::as<keel::usize>(i)];
@@ -191,8 +191,8 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
-            int nbins = (args.size() >= 2 && args[1].numel() == 1)
-                        ? std::max(1, (int)args[1].toScalar())
+            keel::i32 nbins = (args.size() >= 2 && args[1].numel() == 1)
+                        ? std::max(1, (keel::i32)args[1].toScalar())
                         : 36;   // 10° bins by default
             keel::String tx, ty;
             computeAngularHistogram(args[0], nbins, tx, ty);
@@ -277,8 +277,8 @@ void buildPolarPlots(keel::Array<PlotEntry> &table)
                                   keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
             if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
-            int nbins = (args.size() >= 2 && args[1].numel() == 1)
-                        ? std::max(1, (int)args[1].toScalar())
+            keel::i32 nbins = (args.size() >= 2 && args[1].numel() == 1)
+                        ? std::max(1, (keel::i32)args[1].toScalar())
                         : 20;
             keel::String tx, ty;
             computeAngularHistogram(args[0], nbins, tx, ty);

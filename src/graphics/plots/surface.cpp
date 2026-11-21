@@ -264,7 +264,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         if (!std::isfinite(vmn)) { vmn = 0; vmx = 1; }
         const keel::f64 vmid = (vmn + vmx) * 0.5;
 
-        const auto rgbForValue = [&](keel::f64 L) -> keel::StaticArray<int, 3> {
+        const auto rgbForValue = [&](keel::f64 L) -> keel::StaticArray<keel::i32, 3> {
             const keel::f64 t = (vmx == vmn) ? 0.5 : (L - vmn) / (vmx - vmn);
             const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const keel::f64 Cr = 0.6;
@@ -278,9 +278,9 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             else if (H < 5) { r1 = Xc; g1 = 0;  b1 = Cr; }
             else            { r1 = Cr; g1 = 0;  b1 = Xc; }
             const keel::f64 m = 0.5 - Cr / 2.0;
-            return { (int)((r1 + m) * 255),
-                     (int)((g1 + m) * 255),
-                     (int)((b1 + m) * 255) };
+            return { (keel::i32)((r1 + m) * 255),
+                     (keel::i32)((g1 + m) * 255),
+                     (keel::i32)((b1 + m) * 255) };
         };
         // Index of the volume in column-major + page-major order: the
         // value at logical (i_row, j_col, k_page) is at
@@ -460,7 +460,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
     // is a 12-bit mask of edges crossed by the surface; triTable[i][k]
     // gives -1-terminated runs of triangle vertex indices in [0, 11]
     // referring to the cube's edges.
-    static const int kMcEdgeTable[256] = {
+    static const keel::i32 kMcEdgeTable[256] = {
         0x0,0x109,0x203,0x30a,0x406,0x50f,0x605,0x70c,0x80c,0x905,0xa0f,0xb06,0xc0a,0xd03,0xe09,0xf00,
         0x190,0x99,0x393,0x29a,0x596,0x49f,0x795,0x69c,0x99c,0x895,0xb9f,0xa96,0xd9a,0xc93,0xf99,0xe90,
         0x230,0x339,0x33,0x13a,0x636,0x73f,0x435,0x53c,0xa3c,0xb35,0x83f,0x936,0xe3a,0xf33,0xc39,0xd30,
@@ -478,7 +478,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         0xe90,0xf99,0xc93,0xd9a,0xa96,0xb9f,0x895,0x99c,0x69c,0x795,0x49f,0x596,0x29a,0x393,0x99,0x190,
         0xf00,0xe09,0xd03,0xc0a,0xb06,0xa0f,0x905,0x80c,0x70c,0x605,0x50f,0x406,0x30a,0x203,0x109,0x0
     };
-    static const int kMcTriTable[256][16] = {
+    static const keel::i32 kMcTriTable[256][16] = {
         {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
         {0,8,3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
         {0,1,9,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
@@ -797,12 +797,12 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         // Cube corner offsets matching Bourke's convention. Corner k
         // ↔ (di, dj, dk) where di stripe X axis, dj stripe Y axis, dk
         // stripe Z axis (depth).
-        static const int kCornerDX[8] = {0, 1, 1, 0, 0, 1, 1, 0};
-        static const int kCornerDY[8] = {0, 0, 1, 1, 0, 0, 1, 1};
-        static const int kCornerDZ[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+        static const keel::i32 kCornerDX[8] = {0, 1, 1, 0, 0, 1, 1, 0};
+        static const keel::i32 kCornerDY[8] = {0, 0, 1, 1, 0, 0, 1, 1};
+        static const keel::i32 kCornerDZ[8] = {0, 0, 0, 0, 1, 1, 1, 1};
         // Edges connect pairs of corners. edgeCorners[edge] = (a, b).
-        static const int kEdge0[12] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3};
-        static const int kEdge1[12] = {1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7};
+        static const keel::i32 kEdge0[12] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3};
+        static const keel::i32 kEdge1[12] = {1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7};
 
         StrBuf xs, ys, zs;
         xs << '['; ys << '['; zs << '[';
@@ -824,24 +824,24 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                     cv[6] = Vat(i + 1, j + 1, k + 1);
                     cv[7] = Vat(i + 1, j,     k + 1);
                     bool anyNan = false;
-                    for (int c = 0; c < 8; ++c)
+                    for (keel::i32 c = 0; c < 8; ++c)
                         if (!std::isfinite(cv[c])) { anyNan = true; break; }
                     if (anyNan) continue;
-                    int code = 0;
-                    for (int c = 0; c < 8; ++c) if (cv[c] < iso) code |= (1 << c);
-                    const int em = kMcEdgeTable[code];
+                    keel::i32 code = 0;
+                    for (keel::i32 c = 0; c < 8; ++c) if (cv[c] < iso) code |= (1 << c);
+                    const keel::i32 em = kMcEdgeTable[code];
                     if (em == 0) continue;
                     // Compute the world coords of the cube's corners.
-                    auto cornerXYZ = [&](int c) {
+                    auto cornerXYZ = [&](keel::i32 c) {
                         const keel::usize ic = i + (keel::usize)kCornerDY[c];
                         const keel::usize jc = j + (keel::usize)kCornerDX[c];
                         const keel::usize kc = k + (keel::usize)kCornerDZ[c];
                         return keel::StaticArray<keel::f64, 3>{Xs[jc], Ys[ic], Zs[kc]};
                     };
                     keel::StaticArray<keel::f64, 3> verts[12] = {};
-                    for (int e = 0; e < 12; ++e) {
+                    for (keel::i32 e = 0; e < 12; ++e) {
                         if (!(em & (1 << e))) continue;
-                        const int a = kEdge0[e], b = kEdge1[e];
+                        const keel::i32 a = kEdge0[e], b = kEdge1[e];
                         const auto pA = cornerXYZ(a);
                         const auto pB = cornerXYZ(b);
                         const keel::f64 va = cv[a], vb = cv[b];
@@ -858,9 +858,9 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                     // first vertex picks up its leading comma in the
                     // "if(!first)" branch — yielding the correct
                     // "v,v,v,null,v,v,v,null,…" sequence.
-                    const int *tri = kMcTriTable[code];
-                    for (int t = 0; tri[t] != -1; t += 3) {
-                        for (int v = 0; v < 3; ++v) {
+                    const keel::i32 *tri = kMcTriTable[code];
+                    for (keel::i32 t = 0; tri[t] != -1; t += 3) {
+                        for (keel::i32 v = 0; v < 3; ++v) {
                             if (!first) { xs << ','; ys << ','; zs << ','; }
                             first = false;
                             const auto &p = verts[tri[t + v]];
@@ -892,9 +892,9 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         }
         if (!std::isfinite(vmn)) { vmn = 0; vmx = 1; }
         const keel::f64 t = (vmx == vmn) ? 0.5 : (iso - vmn) / (vmx - vmn);
-        const int rcomp = (int)std::clamp(t * 255.0,        0.0, 255.0);
-        const int gcomp = (int)std::clamp(120.0,            0.0, 255.0);
-        const int bcomp = (int)std::clamp((1 - t) * 255.0,  0.0, 255.0);
+        const keel::i32 rcomp = (keel::i32)std::clamp(t * 255.0,        0.0, 255.0);
+        const keel::i32 gcomp = (keel::i32)std::clamp(120.0,            0.0, 255.0);
+        const keel::i32 bcomp = (keel::i32)std::clamp((1 - t) * 255.0,  0.0, 255.0);
         char buf[64];
         std::snprintf(buf, sizeof buf,
                       "color=#%02x%02x%02x;fillOpacity=0.85;smoothNormals=1",
@@ -1050,7 +1050,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         StrBuf xs, ys, zs;
         xs << '['; ys << '['; zs << '[';
         bool first = true;
-        constexpr int kRingN = 6;
+        constexpr keel::i32 kRingN = 6;
 
         for (const auto &c : cones) {
             const keel::f64 mag = std::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
@@ -1077,7 +1077,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             const keel::f64 apexZ = bz + az * scale;
             // Build the 6-vertex base ring.
             keel::StaticArray<keel::f64, kRingN> rx, ry, rz;
-            for (int n = 0; n < kRingN; ++n) {
+            for (keel::i32 n = 0; n < kRingN; ++n) {
                 const keel::f64 theta = (2 * M_PI) * n / kRingN;
                 const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
                 rx[n] = bx + coneRad * (e1x * cs + e2x * sn);
@@ -1096,14 +1096,14 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                 xs << ",null"; ys << ",null"; zs << ",null";
             };
             // Side triangles: apex - ring[n] - ring[(n+1)%N]
-            for (int n = 0; n < kRingN; ++n) {
-                const int n1 = (n + 1) % kRingN;
+            for (keel::i32 n = 0; n < kRingN; ++n) {
+                const keel::i32 n1 = (n + 1) % kRingN;
                 tri(apexX, apexY, apexZ,
                     rx[n], ry[n], rz[n],
                     rx[n1], ry[n1], rz[n1]);
             }
             // Cap fan: ring[0] - ring[k] - ring[k+1] for k = 1..N-2
-            for (int n = 1; n + 1 < kRingN; ++n) {
+            for (keel::i32 n = 1; n + 1 < kRingN; ++n) {
                 tri(rx[0],     ry[0],     rz[0],
                     rx[n + 1], ry[n + 1], rz[n + 1],
                     rx[n],     ry[n],     rz[n]);
@@ -1221,8 +1221,8 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         const keel::f64 dz = (P > 1) ? keel::abs(Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
         const keel::f64 smallStep = std::min({dx, dy, dz});
         const keel::f64 tubeR = smallStep * 0.18;
-        constexpr int kMaxSteps = 80;
-        constexpr int kRingN    = 8;
+        constexpr keel::i32 kMaxSteps = 80;
+        constexpr keel::i32 kRingN    = 8;
 
         const keel::usize nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
         for (keel::usize s = 0; s < nSeeds; ++s) {
@@ -1230,7 +1230,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             keel::f64 xq = sxV->elemAsDouble(s);
             keel::f64 yq = syV->elemAsDouble(s);
             keel::f64 zq = szV->elemAsDouble(s);
-            for (int step = 0; step < kMaxSteps; ++step) {
+            for (keel::i32 step = 0; step < kMaxSteps; ++step) {
                 if (!inRange(xq, yq, zq)) break;
                 path.push_back({xq, yq, zq});
                 keel::f64 u, v, w;
@@ -1287,7 +1287,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                     tan[2] * e1[0] - tan[0] * e1[2],
                     tan[0] * e1[1] - tan[1] * e1[0],
                 };
-                for (int n = 0; n < kRingN; ++n) {
+                for (keel::i32 n = 0; n < kRingN; ++n) {
                     const keel::f64 theta = (2 * M_PI) * n / kRingN;
                     const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
                     rings[i][n] = {
@@ -1309,8 +1309,8 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                 xs << ",null"; ys << ",null"; zs << ",null";
             };
             for (keel::usize i = 0; i + 1 < rings.size(); ++i) {
-                for (int n = 0; n < kRingN; ++n) {
-                    const int n1 = (n + 1) % kRingN;
+                for (keel::i32 n = 0; n < kRingN; ++n) {
+                    const keel::i32 n1 = (n + 1) % kRingN;
                     const auto &A = rings[i][n];
                     const auto &B = rings[i + 1][n];
                     const auto &C = rings[i + 1][n1];
@@ -1378,7 +1378,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             StrBuf sty;
             if (levels_arg) {
                 if (levels_arg->numel() == 1) {
-                    sty << "n=" << (int)levels_arg->toScalar();
+                    sty << "n=" << (keel::i32)levels_arg->toScalar();
                 } else {
                     sty << "levels=[";
                     for (keel::usize i = 0; i < levels_arg->numel(); ++i) {

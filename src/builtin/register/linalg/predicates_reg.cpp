@@ -54,9 +54,9 @@ void isbanded_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 3, 3, "isbanded");
-    long lower = argcheck::expectedInteger(
+    keel::i64 lower = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "lower", "isbanded"), 2, "lower", "isbanded");
-    long upper = argcheck::expectedInteger(
+    keel::i64 upper = argcheck::expectedInteger(
         argcheck::expectedReal(args[2], 3, "upper", "isbanded"), 3, "upper", "isbanded");
     outs[0] = isbanded(args[0], lower, upper, ctx.engine->allocator());
 }

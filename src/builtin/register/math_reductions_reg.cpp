@@ -171,16 +171,16 @@ inline Value makeNativeScalar(T v, ValueType outType, keel::Allocator *mr)
 // stride math (mirrors round-3 minMaxAlongDim). `accumOp` accumulates a
 // double over the slice; `finalize` converts (sum, sliceLen) to T.
 template <typename T, typename Init, typename AccumOp, typename Finalize>
-void typedReduceAlongDim(const Value &x, int redDim, T *dst,
+void typedReduceAlongDim(const Value &x, keel::i32 redDim, T *dst,
                          Init init, AccumOp accumOp, Finalize finalize)
 {
     const auto &d = x.dims();
-    const int redAxis = redDim - 1;
+    const keel::i32 redAxis = redDim - 1;
     const keel::usize sliceLen = d.dim(redAxis);
     keel::usize B = 1;
-    for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
+    for (keel::i32 i = 0; i < redAxis; ++i) B *= d.dim(i);
     keel::usize O = 1;
-    for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
+    for (keel::i32 i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
     auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
         keel::f64 acc = init;
@@ -202,12 +202,12 @@ void typedReduceAlongDim(const Value &x, int redDim, T *dst,
     }
 }
 
-inline Value allocReduceOutput(const Value &x, int redDim, ValueType outType, keel::Allocator *mr)
+inline Value allocReduceOutput(const Value &x, keel::i32 redDim, ValueType outType, keel::Allocator *mr)
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
         keel::ArenaTemp scratch = keel::get_scratch(mr);
         auto shape = numkit::ops::outShapeForDimND(x, redDim, scratch.allocator());
-        return Value::matrixND(shape.data(), (int) shape.size(), outType, mr);
+        return Value::matrixND(shape.data(), (keel::i32) shape.size(), outType, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);
     return createMatrix(outShape, outType, mr);
@@ -228,7 +228,7 @@ Value reduceTypedAll(const Value &x, ValueType outType, keel::Allocator *mr,
             acc = accumOp(acc, x.elemAsDouble(i));
         return makeNativeScalar<T>(finalize(acc, x.numel()), outType, mr);
     }
-    const int redDim = numkit::ops::firstNonSingletonDim(x);
+    const keel::i32 redDim = numkit::ops::firstNonSingletonDim(x);
     Value out = allocReduceOutput(x, redDim, outType, mr);
     typedReduceAlongDim<T>(x, redDim, static_cast<T *>(out.rawDataMut()),
                            init, accumOp, finalize);
@@ -236,7 +236,7 @@ Value reduceTypedAll(const Value &x, ValueType outType, keel::Allocator *mr,
 }
 
 template <typename T, typename Init, typename AccumOp, typename Finalize>
-Value reduceTypedAlongDim(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
+Value reduceTypedAlongDim(const Value &x, keel::i32 dim, ValueType outType, keel::Allocator *mr,
                            Init init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty() && x.dims().ndim() < 4) {
@@ -328,29 +328,29 @@ inline keel::c64 readElemAsComplex(const Value &x, keel::usize i, bool typeMatch
     return keel::c64(x.elemAsDouble(i), 0.0);
 }
 
-inline Value allocComplexReduceOutput(const Value &x, int redDim, keel::Allocator *mr)
+inline Value allocComplexReduceOutput(const Value &x, keel::i32 redDim, keel::Allocator *mr)
 {
     if (x.dims().ndim() >= 4 && redDim >= 1 && redDim <= x.dims().ndim()) {
         keel::ArenaTemp scratch = keel::get_scratch(mr);
         auto shape = numkit::ops::outShapeForDimND(x, redDim, scratch.allocator());
-        return Value::matrixND(shape.data(), (int) shape.size(), ValueType::COMPLEX, mr);
+        return Value::matrixND(shape.data(), (keel::i32) shape.size(), ValueType::COMPLEX, mr);
     }
     auto outShape = numkit::ops::outShapeForDim(x, redDim);
     return createMatrix(outShape, ValueType::COMPLEX, mr);
 }
 
 template <typename AccumOp, typename Finalize>
-void complexReduceAlongDim(const Value &x, int redDim, keel::c64 *dst,
+void complexReduceAlongDim(const Value &x, keel::i32 redDim, keel::c64 *dst,
                            keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
     const auto &d = x.dims();
-    const int redAxis = redDim - 1;
+    const keel::i32 redAxis = redDim - 1;
     const keel::usize sliceLen = d.dim(redAxis);
     keel::usize B = 1;
-    for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
+    for (keel::i32 i = 0; i < redAxis; ++i) B *= d.dim(i);
     keel::usize O = 1;
-    for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
+    for (keel::i32 i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
     auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> keel::c64 {
         keel::c64 acc = init;
@@ -385,14 +385,14 @@ Value reduceComplexAll(const Value &x, keel::Allocator *mr,
             acc = accumOp(acc, readElemAsComplex(x, i, typeMatches));
         return Value::complexScalar(finalize(acc, x.numel()), mr);
     }
-    const int redDim = numkit::ops::firstNonSingletonDim(x);
+    const keel::i32 redDim = numkit::ops::firstNonSingletonDim(x);
     Value out = allocComplexReduceOutput(x, redDim, mr);
     complexReduceAlongDim(x, redDim, out.complexDataMut(), init, accumOp, finalize);
     return out;
 }
 
 template <typename AccumOp, typename Finalize>
-Value reduceComplexAlongDim(const Value &x, int dim, keel::Allocator *mr,
+Value reduceComplexAlongDim(const Value &x, keel::i32 dim, keel::Allocator *mr,
                              keel::c64 init, AccumOp accumOp, Finalize finalize)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
@@ -431,7 +431,7 @@ Value reduceComplexAllElementsScalar(const Value &x, keel::Allocator *mr,
 }
 
 template <typename Op>
-Value runComplexReduction(const Value &x, int dim, keel::Allocator *mr, bool isAll = false)
+Value runComplexReduction(const Value &x, keel::i32 dim, keel::Allocator *mr, bool isAll = false)
 {
     Value r = isAll
         ? reduceComplexAllElementsScalar(x, mr, Op::cInit(), Op::cAccum, Op::cFinalize)
@@ -443,7 +443,7 @@ Value runComplexReduction(const Value &x, int dim, keel::Allocator *mr, bool isA
 }
 
 template <typename Op>
-Value runNativeReduction(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
+Value runNativeReduction(const Value &x, keel::i32 dim, ValueType outType, keel::Allocator *mr,
                           bool isAll = false)
 {
     auto run = [&](auto tag) {
@@ -530,15 +530,15 @@ inline T nanFinalize(keel::f64 acc, keel::usize nonNanCount)
 }
 
 template <typename T, typename Op>
-void nanReduceAlongDim(const Value &x, int redDim, T *dst)
+void nanReduceAlongDim(const Value &x, keel::i32 redDim, T *dst)
 {
     const auto &d = x.dims();
-    const int redAxis = redDim - 1;
+    const keel::i32 redAxis = redDim - 1;
     const keel::usize sliceLen = d.dim(redAxis);
     keel::usize B = 1;
-    for (int i = 0; i < redAxis; ++i) B *= d.dim(i);
+    for (keel::i32 i = 0; i < redAxis; ++i) B *= d.dim(i);
     keel::usize O = 1;
-    for (int i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
+    for (keel::i32 i = redAxis + 1; i < d.ndim(); ++i) O *= d.dim(i);
 
     auto reduceSlice = [&](keel::usize baseOff, keel::usize stride) -> T {
         keel::f64 acc = Op::init;
@@ -568,14 +568,14 @@ Value nanReduceAll(const Value &x, ValueType outType, keel::Allocator *mr)
             nanAccumDouble<Op>(acc, count, x.elemAsDouble(i));
         return makeNativeScalar<T>(nanFinalize<T, Op>(acc, count), outType, mr);
     }
-    const int redDim = numkit::ops::firstNonSingletonDim(x);
+    const keel::i32 redDim = numkit::ops::firstNonSingletonDim(x);
     Value out = allocReduceOutput(x, redDim, outType, mr);
     nanReduceAlongDim<T, Op>(x, redDim, static_cast<T *>(out.rawDataMut()));
     return out;
 }
 
 template <typename T, typename Op>
-Value nanReduceAlongDimImpl(const Value &x, int dim, ValueType outType, keel::Allocator *mr)
+Value nanReduceAlongDimImpl(const Value &x, keel::i32 dim, ValueType outType, keel::Allocator *mr)
 {
     if (x.isEmpty() && x.dims().ndim() < 4)
         return Value::matrix(0, 0, outType, mr);
@@ -608,7 +608,7 @@ Value nanReduceAllElementsScalar(const Value &x, ValueType outType, keel::Alloca
 }
 
 template <typename Op>
-Value runNanReduction(const Value &x, int dim, ValueType outType, keel::Allocator *mr,
+Value runNanReduction(const Value &x, keel::i32 dim, ValueType outType, keel::Allocator *mr,
                        bool isAll = false)
 {
     auto run = [&](auto tag) {
@@ -644,7 +644,7 @@ inline bool isComplexNaN(keel::c64 c)
 }
 
 template <typename Op>
-Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
+Value runComplexNanReduction(const Value &x, keel::i32 dim, keel::Allocator *mr,
                               bool isAll = false)
 {
     const bool typeMatches = (x.type() == ValueType::COMPLEX);
@@ -672,17 +672,17 @@ Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
     if (isAll || x.isScalar() || x.dims().isVector()) {
         return Value::complexScalar(reduceRange(0, 1, x.numel()), mr);
     }
-    const int d = (dim > 0) ? dim : numkit::ops::firstNonSingletonDim(x);
+    const keel::i32 d = (dim > 0) ? dim : numkit::ops::firstNonSingletonDim(x);
     Value out = allocComplexReduceOutput(x, d, mr);
     keel::c64 *dst = out.complexDataMut();
 
     const auto &dd = x.dims();
-    const int redAxis = d - 1;
+    const keel::i32 redAxis = d - 1;
     const keel::usize sliceLen = dd.dim(redAxis);
     keel::usize B = 1;
-    for (int i = 0; i < redAxis; ++i) B *= dd.dim(i);
+    for (keel::i32 i = 0; i < redAxis; ++i) B *= dd.dim(i);
     keel::usize O = 1;
-    for (int i = redAxis + 1; i < dd.ndim(); ++i) O *= dd.dim(i);
+    for (keel::i32 i = redAxis + 1; i < dd.ndim(); ++i) O *= dd.dim(i);
 
     if (B == 1) {
         for (keel::usize o = 0; o < O; ++o)
@@ -696,11 +696,11 @@ Value runComplexNanReduction(const Value &x, int dim, keel::Allocator *mr,
 }
 
 struct ReductionFlags {
-    int          dim     = 0;
+    keel::i32          dim     = 0;
     bool         isAll   = false;
     OutTypeMode  outMode = OutTypeMode::Default;
     bool         omitNan = false;
-    keel::SmallArray<int, 8> dimSet;   // partial vecdim (full coverage -> isAll)
+    keel::SmallArray<keel::i32, 8> dimSet;   // partial vecdim (full coverage -> isAll)
 };
 
 // Parse args[1..] and populate the reduction-flag struct. Each kind of
@@ -789,7 +789,7 @@ Value dispatchReductionAdapter(keel::ArrayRef<Value> args, const char *fn,
 
     // One selection pipeline, run either on the raw input or on the
     // vecdim-collapsed view — every type/nan combination carries over.
-    auto run = [&](const Value &x, int dim, bool isAll) -> Value {
+    auto run = [&](const Value &x, keel::i32 dim, bool isAll) -> Value {
         // COMPLEX input always preserves complex type. Branch on omitnan.
         if (inT == ValueType::COMPLEX)
             return f.omitNan ? nanCFn(x, dim, isAll)
@@ -821,7 +821,7 @@ Value dispatchReductionAdapter(keel::ArrayRef<Value> args, const char *fn,
     if (!f.dimSet.empty()) {
         Value c = vecdim::collapseDims(args[0], f.dimSet, mr);
         return vecdim::expandReduced(
-            run(c, keel::as<int>(c.dims().ndim()), false),
+            run(c, keel::as<keel::i32>(c.dims().ndim()), false),
             args[0], f.dimSet, mr);
     }
     return run(args[0], f.dim, f.isAll);
@@ -837,26 +837,26 @@ Value dispatchReductionAdapter(keel::ArrayRef<Value> args, const char *fn,
             throw Error(#name ": requires at least 1 argument",                  \
                          0, 0, #name, "", "numkit:" #name ":nargin");                  \
         outs[0] = dispatchReductionAdapter(args, #name, ctx.engine->allocator(),                           \
-            [&](const Value &x, int dim, bool isAll) {                           \
+            [&](const Value &x, keel::i32 dim, bool isAll) {                           \
                 if (isAll)                                                        \
                     return runNativeReduction<op>(x, 0, ValueType::DOUBLE,            \
                                                   ctx.engine->allocator(), true);\
                 return (dim > 0) ? fn(x, dim, ctx.engine->allocator())            \
                                  : fn(x, ctx.engine->allocator());                \
             },                                                                    \
-            [&](const Value &x, int dim, ValueType outT, bool isAll) {               \
+            [&](const Value &x, keel::i32 dim, ValueType outT, bool isAll) {               \
                 return runNativeReduction<op>(x, dim, outT,                       \
                                               ctx.engine->allocator(), isAll);   \
             },                                                                    \
-            [&](const Value &x, int dim, bool isAll) {                           \
+            [&](const Value &x, keel::i32 dim, bool isAll) {                           \
                 return runComplexReduction<op>(x, dim,                            \
                                                ctx.engine->allocator(), isAll);  \
             },                                                                    \
-            [&](const Value &x, int dim, ValueType outT, bool isAll) {               \
+            [&](const Value &x, keel::i32 dim, ValueType outT, bool isAll) {               \
                 return runNanReduction<op>(x, dim, outT,                          \
                                            ctx.engine->allocator(), isAll);      \
             },                                                                    \
-            [&](const Value &x, int dim, bool isAll) {                           \
+            [&](const Value &x, keel::i32 dim, bool isAll) {                           \
                 return runComplexNanReduction<op>(x, dim,                         \
                                                   ctx.engine->allocator(), isAll);\
             });                                                                   \
@@ -907,21 +907,21 @@ keel::usize stripTrailingMaxMinFlags(keel::ArrayRef<Value> args, bool &omitNan, 
 // Convert slice-relative 1-based indices `idx` (along the sorted listed
 // dimensions `redDims`) into 1-based column-major linear indices into `a0`.
 Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
-                          keel::ArrayRef<int> redDims,
+                          keel::ArrayRef<keel::i32> redDims,
                           keel::Allocator *mr)
 {
     (void)mr;
     if (idx.isEmpty()) return idx;
-    const int nd = std::max(2, a0.dims().ndim());
+    const keel::i32 nd = std::max(2, a0.dims().ndim());
     keel::SmallArray<char, 16> listed(keel::as<keel::usize>(nd) + 1, '\0');
-    for (int d : redDims)
+    for (keel::i32 d : redDims)
         if (d >= 1 && d <= nd)
             listed[keel::as<keel::usize>(d)] = 1;
 
     keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> nonListedDims;
     keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> listedDims;
     keel::usize stride = 1;
-    for (int d = 1; d <= nd; ++d) {
+    for (keel::i32 d = 1; d <= nd; ++d) {
         keel::usize sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
         if (listed[keel::as<keel::usize>(d)])
             listedDims.emplace_back(sz, stride);
@@ -993,8 +993,8 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             return;
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
-    int dim = 0;
-    keel::SmallArray<int, 8> vecdimSet;
+    keel::i32 dim = 0;
+    keel::SmallArray<keel::i32, 8> vecdimSet;
     if (n >= 3 && !args[2].isEmpty()) {
         if (args[2].numel() > 1)
             vecdimSet = vecdim::parseDimSet(args[2], "max");
@@ -1008,8 +1008,8 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                         0, 0, "max", "", "numkit:max:vecdimLinear");
         Value c = vecdim::collapseDims(a0, vecdimSet, mr);
         auto [val, idx] = omitNan
-            ? maxOmitNan(c, keel::as<int>(c.dims().ndim()), mr)
-            : max(c, keel::as<int>(c.dims().ndim()), mr);
+            ? maxOmitNan(c, keel::as<keel::i32>(c.dims().ndim()), mr)
+            : max(c, keel::as<keel::i32>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
@@ -1021,9 +1021,9 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     outs[0] = std::move(val);
     if (nargout > 1) {
         if (linear) {
-            int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
-            int redArr[1] = {effDim};
-            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<int>(redArr, 1), mr);
+            keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            keel::i32 redArr[1] = {effDim};
+            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {
             outs[1] = std::move(idx);
         }
@@ -1055,8 +1055,8 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             return;
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
-    int dim = 0;
-    keel::SmallArray<int, 8> vecdimSet;
+    keel::i32 dim = 0;
+    keel::SmallArray<keel::i32, 8> vecdimSet;
     if (n >= 3 && !args[2].isEmpty()) {
         if (args[2].numel() > 1)
             vecdimSet = vecdim::parseDimSet(args[2], "min");
@@ -1070,8 +1070,8 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                         0, 0, "min", "", "numkit:min:vecdimLinear");
         Value c = vecdim::collapseDims(a0, vecdimSet, mr);
         auto [val, idx] = omitNan
-            ? minOmitNan(c, keel::as<int>(c.dims().ndim()), mr)
-            : min(c, keel::as<int>(c.dims().ndim()), mr);
+            ? minOmitNan(c, keel::as<keel::i32>(c.dims().ndim()), mr)
+            : min(c, keel::as<keel::i32>(c.dims().ndim()), mr);
         outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
@@ -1083,9 +1083,9 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     outs[0] = std::move(val);
     if (nargout > 1) {
         if (linear) {
-            int effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
-            int redArr[1] = {effDim};
-            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<int>(redArr, 1), mr);
+            keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            keel::i32 redArr[1] = {effDim};
+            outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {
             outs[1] = std::move(idx);
         }

@@ -177,7 +177,7 @@ Value allocOutput(const keel::usize *shape, keel::usize nShape, keel::Allocator 
         return Value::matrix(shape[0], 1, ValueType::DOUBLE, mr);
     if (nShape == 2)
         return Value::matrix(shape[0], shape[1], ValueType::DOUBLE, mr);
-    return Value::matrixND(shape, keel::as<int>(nShape),
+    return Value::matrixND(shape, keel::as<keel::i32>(nShape),
                             ValueType::DOUBLE, mr);
 }
 
@@ -527,7 +527,7 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("fft",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 3, "fft");
-            int n = -1, dim = 0;
+            keel::i32 n = -1, dim = 0;
             if (args.size() >= 2 && !args[1].isEmpty())
                 n = argcheck::expectedInteger(
                     argcheck::expectedReal(args[1], 2, "n", "fft"), 2, "n", "fft");
@@ -552,7 +552,7 @@ void register_datafun(Engine &engine) {
                                 0, 0, "ifft", "", "numkit:ifft:badOption");
                 --nargs;
             }
-            int n = -1, dim = 0;
+            keel::i32 n = -1, dim = 0;
             if (nargs >= 2 && !args[1].isEmpty())
                 n = argcheck::expectedInteger(
                     argcheck::expectedReal(args[1], 2, "n", "ifft"), 2, "n", "ifft");
@@ -569,7 +569,7 @@ void register_datafun(Engine &engine) {
             if (args.size() == 2)
                 throw Error("fft2: requires 1 or 3 arguments (got 2 — specify both m and n)",
                             0, 0, "fft2", "", "numkit:fft2:nargin");
-            int m = -1, n = -1;
+            keel::i32 m = -1, n = -1;
             if (args.size() >= 2 && !args[1].isEmpty())
                 m = argcheck::expectedInteger(
                     argcheck::expectedReal(args[1], 2, "m", "fft2"), 2, "m", "fft2");
@@ -598,7 +598,7 @@ void register_datafun(Engine &engine) {
             if (nargs == 2)
                 throw Error("ifft2: requires 1 or 3 numeric arguments (got 2 — specify both m and n)",
                             0, 0, "ifft2", "", "numkit:ifft2:nargin");
-            int m = -1, n = -1;
+            keel::i32 m = -1, n = -1;
             if (nargs >= 2 && !args[1].isEmpty())
                 m = argcheck::expectedInteger(
                     argcheck::expectedReal(args[1], 2, "m", "ifft2"), 2, "m", "ifft2");
@@ -665,7 +665,7 @@ void register_datafun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "fftshift");
             if (args.size() >= 2) {
-                const int dim = argcheck::dimArg(args[1], "fftshift");
+                const keel::i32 dim = argcheck::dimArg(args[1], "fftshift");
                 if (dim < 1 || dim > 3)
                     throw Error("fftshift: dim must be 1, 2, or 3",
                                 0, 0, "fftshift", "", "numkit:fftshift:dim");
@@ -679,7 +679,7 @@ void register_datafun(Engine &engine) {
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             argcheck::checkNargin(args.size(), 1, 2, "ifftshift");
             if (args.size() >= 2) {
-                const int dim = argcheck::dimArg(args[1], "ifftshift");
+                const keel::i32 dim = argcheck::dimArg(args[1], "ifftshift");
                 if (dim < 1 || dim > 3)
                     throw Error("ifftshift: dim must be 1, 2, or 3",
                                 0, 0, "ifftshift", "", "numkit:ifftshift:dim");

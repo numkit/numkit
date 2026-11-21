@@ -44,10 +44,10 @@ keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
     // First-arg-is-fid disambiguation: MATLAB allows both
     //   fprintf(format, …)  and  fprintf(fid, format, …)
     // We detect the latter via "leading numeric scalar followed by char".
-    int fid = 1;
+    keel::i32 fid = 1;
     keel::usize fmtIdx = 0;
     if (args.size() >= 2 && args[0].isScalar() && args[1].isChar()) {
-        fid = keel::as<int>(args[0].toScalar());
+        fid = keel::as<keel::i32>(args[0].toScalar());
         fmtIdx = 1;
     }
     if (!args[fmtIdx].isChar())

@@ -58,18 +58,18 @@ public:
     keel::String resolveRemoteRef(const PackageTarget &target, bool forceHead = false) const;
 
     // CLI and runtime commands
-    int install(keel::StringRef target, bool verbose = true, bool forceHead = false);
-    int installMany(keel::ArrayRef<keel::String> targets, bool installAll = false,
+    keel::i32 install(keel::StringRef target, bool verbose = true, bool forceHead = false);
+    keel::i32 installMany(keel::ArrayRef<keel::String> targets, bool installAll = false,
                     bool verbose = true, bool forceHead = false);
-    int update(keel::ArrayRef<keel::String> names = {}, bool verbose = true,
+    keel::i32 update(keel::ArrayRef<keel::String> names = {}, bool verbose = true,
                bool forceHead = false);
-    int list(keel::String &out) const;
-    int list(std::FILE *out = stdout) const;
-    int avail(keel::String &out, const Engine *engine = nullptr) const;
-    int avail(std::FILE *out = stdout, const Engine *engine = nullptr) const;
-    int build(keel::StringRef dir = ".", bool verbose = true);
-    int remove(keel::StringRef name);
-    int load(keel::StringRef name, Engine &engine, keel::StringRef targetNamespace = "");
+    keel::i32 list(keel::String &out) const;
+    keel::i32 list(std::FILE *out = stdout) const;
+    keel::i32 avail(keel::String &out, const Engine *engine = nullptr) const;
+    keel::i32 avail(std::FILE *out = stdout, const Engine *engine = nullptr) const;
+    keel::i32 build(keel::StringRef dir = ".", bool verbose = true);
+    keel::i32 remove(keel::StringRef name);
+    keel::i32 load(keel::StringRef name, Engine &engine, keel::StringRef targetNamespace = "");
 
     const keel::String &modulesDir() const { return modulesDir_; }
     const keel::String &cacheDir() const { return cacheDir_; }

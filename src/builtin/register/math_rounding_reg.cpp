@@ -57,7 +57,7 @@ void round_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         outs[0] = round(args[0], mr);
         return;
     }
-    const int n = argcheck::expectedInteger(
+    const keel::i32 n = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "digits", "round"), 2, "digits", "round");
     bool significant = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {

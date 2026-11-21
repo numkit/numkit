@@ -56,12 +56,12 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                         0, 0, "splitapply", "", "numkit:splitapply:shape");
     }
 
-    keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
-    keel::Array<int> gids(mr);
+    keel::HashMap<keel::i32, keel::Array<keel::usize>> buckets(mr);
+    keel::Array<keel::i32> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 gd = G.elemAsDouble(i);
         if (std::isnan(gd)) continue;
-        int gid = keel::as<int>(gd);
+        keel::i32 gid = keel::as<keel::i32>(gd);
         if (gid <= 0) continue;
         auto *existing = buckets.get(gid);
         if (!existing) {
@@ -86,7 +86,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     keel::f64 *rd = result.doubleDataMut();
 
     keel::usize gIdx = 0;
-    for (int gid : gids) {
+    for (keel::i32 gid : gids) {
         const auto &idxs = *buckets.get(gid);
         keel::Array<Value> callArgs(nIn, mr);
         for (keel::usize k = 0; k < nIn; ++k) {
@@ -163,11 +163,11 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         // Group rows using findgroups
         FindgroupsResult fg = findgroups(G, mr);
         const keel::usize n = G.numel();
-        keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
-        keel::Array<int> gids(mr);
+        keel::HashMap<keel::i32, keel::Array<keel::usize>> buckets(mr);
+        keel::Array<keel::i32> gids(mr);
         for (keel::usize i = 0; i < n; ++i) {
             keel::f64 v = fg.G.elemAsDouble(i);
-            int gid = std::isnan(v) ? 0 : keel::as<int>(v);
+            keel::i32 gid = std::isnan(v) ? 0 : keel::as<keel::i32>(v);
             auto *existing = buckets.get(gid);
             if (!existing) {
                 gids.push_back(gid);
@@ -191,7 +191,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         };
 
         for (keel::usize c = 0; c < nCols; ++c) {
-            for (int gid : gids) {
+            for (keel::i32 gid : gids) {
                 const auto &rows = *buckets.get(gid);
                 const keel::usize kn = rows.size();
                 if (kn == 0) continue;
@@ -251,11 +251,11 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     FindgroupsResult fg = findgroups(G, mr);
     const keel::usize n = G.numel();
-    keel::HashMap<int, keel::Array<keel::usize>> buckets(mr);
-    keel::Array<int> gids(mr);
+    keel::HashMap<keel::i32, keel::Array<keel::usize>> buckets(mr);
+    keel::Array<keel::i32> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = fg.G.elemAsDouble(i);
-        int gid = std::isnan(v) ? 0 : keel::as<int>(v);
+        keel::i32 gid = std::isnan(v) ? 0 : keel::as<keel::i32>(v);
         auto *existing = buckets.get(gid);
         if (!existing) {
             gids.push_back(gid);
@@ -273,7 +273,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         return A.elemAsDouble(r + c * nRows);
     };
 
-    for (int gid : gids) {
+    for (keel::i32 gid : gids) {
         const auto &rows = *buckets.get(gid);
         const keel::usize kn = rows.size();
         if (kn == 0) continue;

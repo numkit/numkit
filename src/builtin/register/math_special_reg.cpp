@@ -49,7 +49,7 @@ NUMKIT_UNARY_ADAPTER(expint,  expint)
 
 namespace {
 
-keel::f64 polygammaScalar(int k, keel::f64 x)
+keel::f64 polygammaScalar(keel::i32 k, keel::f64 x)
 {
     if (std::isnan(x)) return x;
     if (x <= 0.0 && x == std::floor(x)) {
@@ -57,7 +57,7 @@ keel::f64 polygammaScalar(int k, keel::f64 x)
                             : -std::numeric_limits<keel::f64>::infinity();
     }
     keel::f64 factK = 1.0;
-    for (int i = 2; i <= k; ++i) factK *= keel::as<keel::f64>(i);
+    for (keel::i32 i = 2; i <= k; ++i) factK *= keel::as<keel::f64>(i);
     const keel::f64 sign = (k % 2 == 1) ? 1.0 : -1.0;
 
     keel::f64 r = 0.0;
@@ -78,8 +78,8 @@ keel::f64 polygammaScalar(int k, keel::f64 x)
     keel::f64 series = factKm1 + 0.5 * factK * invY;
     keel::f64 powY2 = invY2;
     keel::f64 binomNum = factKm1; // (2m + k - 1)! / (2m)! starts at (k - 1)! for m = 0
-    for (int m = 1; m <= 5; ++m) {
-        const int twoM = 2 * m;
+    for (keel::i32 m = 1; m <= 5; ++m) {
+        const keel::i32 twoM = 2 * m;
         binomNum *= keel::as<keel::f64>((twoM + k - 2) * (twoM + k - 1))
                   / keel::as<keel::f64>((twoM - 1) * twoM);
         series += B[m - 1] * binomNum * powY2;
@@ -101,7 +101,7 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     const keel::f64 kv = argcheck::expectedReal(args[0], 1, "k", "psi");
     argcheck::expectedInteger(kv, 1, "k", "psi");
     argcheck::expectedNonNegative(kv, 1, "k", "psi");
-    const int k = keel::as<int>(kv);
+    const keel::i32 k = keel::as<keel::i32>(kv);
     if (k == 0) {
         outs[0] = psi(args[1], mr);
         return;
@@ -159,7 +159,7 @@ void legendre_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     const keel::f64 nv = argcheck::expectedReal(args[0], 1, "n", "legendre");
     argcheck::expectedInteger(nv, 1, "n", "legendre");
     argcheck::expectedNonNegative(nv, 1, "n", "legendre");
-    const int n = keel::as<int>(nv);
+    const keel::i32 n = keel::as<keel::i32>(nv);
     outs[0] = legendre(n, args[1], ctx.engine->allocator());
 }
 
@@ -190,7 +190,7 @@ void besselh_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
         outs[0] = besselh(args[0], 1, args[1], mr);
         return;
     }
-    const int k = argcheck::expectedInteger(
+    const keel::i32 k = argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "k", "besselh"), 2, "k", "besselh");
     outs[0] = besselh(args[0], k, args[2], mr);
 }
@@ -212,7 +212,7 @@ void airy_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         outs[0] = airy(0, args[0], mr);  // default Ai
         return;
     }
-    int k = argcheck::expectedOneOf(
+    keel::i32 k = argcheck::expectedOneOf(
         argcheck::expectedReal(args[0], 1, "k", "airy"), {0, 1, 2, 3}, 1, "k", "airy");
     outs[0] = airy(k, args[1], mr);
 }

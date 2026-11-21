@@ -111,7 +111,7 @@ void Lexer::error(keel::StringRef msg)
     error(msg, line_, col_);
 }
 
-void Lexer::error(keel::StringRef msg, int line, int col)
+void Lexer::error(keel::StringRef msg, keel::i32 line, keel::i32 col)
 {
     keel::String err = keel::format("{} at line {} col {}", msg, line, col);
     throw std::runtime_error(err.c_str());
@@ -122,9 +122,9 @@ void Lexer::error(keel::StringRef msg, int line, int col)
 Lexer::Lexer(keel::StringRef source)
 {
     if (source.size() >= 3
-        && keel::as<unsigned char>(source[0]) == 0xEF
-        && keel::as<unsigned char>(source[1]) == 0xBB
-        && keel::as<unsigned char>(source[2]) == 0xBF) {
+        && keel::as<keel::u8>(source[0]) == 0xEF
+        && keel::as<keel::u8>(source[1]) == 0xBB
+        && keel::as<keel::u8>(source[2]) == 0xBF) {
         source = source.substr(3);
     }
     if (source.find('\r') != keel::kInvalidIndex) {
@@ -148,9 +148,9 @@ char Lexer::peek() const
     return pos_ < src_.size() ? src_[pos_] : '\0';
 }
 
-char Lexer::peek(int offset) const
+char Lexer::peek(keel::i32 offset) const
 {
-    long long p = keel::as<long long>(pos_) + offset;
+    keel::i64 p = keel::as<keel::i64>(pos_) + offset;
     if (p < 0 || keel::as<keel::usize>(p) >= src_.size())
         return '\0';
     return src_[keel::as<keel::usize>(p)];
@@ -170,16 +170,16 @@ char Lexer::advance()
     return c;
 }
 
-void Lexer::addToken(TokenType type, keel::StringRef val, int line, int col)
+void Lexer::addToken(TokenType type, keel::StringRef val, keel::i32 line, keel::i32 col)
 {
     tokens_.push_back(Token{type, keel::String::from(val), line, col, line_, col_});
 }
 
 // ─── bracket tracking ──────────────────────────────────────────────────
 
-int Lexer::bracketDepth() const
+keel::i32 Lexer::bracketDepth() const
 {
-    return keel::as<int>(bracketStack_.size());
+    return keel::as<keel::i32>(bracketStack_.size());
 }
 
 bool Lexer::inMatrixContext() const
@@ -290,7 +290,7 @@ void Lexer::insertImplicitComma()
     if (!inMatrixContext() || tokens_.empty())
         return;
 
-    int prevIdx = keel::as<int>(tokens_.size()) - 1;
+    keel::i32 prevIdx = keel::as<keel::i32>(tokens_.size()) - 1;
     while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
         --prevIdx;
     if (prevIdx < 0)
@@ -301,8 +301,8 @@ void Lexer::insertImplicitComma()
         return;
 
     if (prev == TokenType::RPAREN) {
-        int depth = 0;
-        for (int i = prevIdx; i >= 0; --i) {
+        keel::i32 depth = 0;
+        for (keel::i32 i = prevIdx; i >= 0; --i) {
             if (tokens_[i].type == TokenType::RPAREN)
                 depth++;
             else if (tokens_[i].type == TokenType::LPAREN)
@@ -368,7 +368,7 @@ void Lexer::skipBlockComment()
     // COMMENT token spanning the whole block. The parser silently
     // skips COMMENT tokens; downstream tools (script-graph viewer,
     // formatters, doc extractors) recover the original text.
-    int startLine = line_, startCol = col_;
+    keel::i32 startLine = line_, startCol = col_;
     keel::usize startPos = pos_;
 
     advance(); // '%'
@@ -379,7 +379,7 @@ void Lexer::skipBlockComment()
     if (pos_ < src_.size())
         advance(); // '\n'
 
-    int depth = 1;
+    keel::i32 depth = 1;
     while (pos_ < src_.size() && depth > 0) {
         if (peek() == '%' && peek(1) == '}' && isAtLineStart(pos_)) {
             depth--;
@@ -430,7 +430,7 @@ void Lexer::skipSpacesAndComments()
                 // Line comment `% ...` — emit as a COMMENT token so
                 // downstream consumers (script-graph viewer, future
                 // formatters) can position around it. Parser ignores.
-                int startLine = line_, startCol = col_;
+                keel::i32 startLine = line_, startCol = col_;
                 keel::usize startPos = pos_;
                 while (pos_ < src_.size() && peek() != '\n')
                     advance();
@@ -459,7 +459,7 @@ void Lexer::skipSpacesAndComments()
 
 // ─── underscore validation in numbers ───────────────────────────────────
 
-void Lexer::validateUnderscores(keel::usize start, keel::usize end, int startLine, int startCol)
+void Lexer::validateUnderscores(keel::usize start, keel::usize end, keel::i32 startLine, keel::i32 startCol)
 {
     if (start >= end)
         return;
@@ -480,8 +480,8 @@ void Lexer::validateUnderscores(keel::usize start, keel::usize end, int startLin
 
 void Lexer::readNumber()
 {
-    int startLine = line_;
-    int startCol = col_;
+    keel::i32 startLine = line_;
+    keel::i32 startCol = col_;
     keel::usize start = pos_;
 
     // ── Hex: 0x... ──
@@ -628,7 +628,7 @@ void Lexer::readNumber()
 
 // ─── read single-quoted string ──────────────────────────────────────────
 
-void Lexer::readString(int startLine, int startCol)
+void Lexer::readString(keel::i32 startLine, keel::i32 startCol)
 {
     advance();
     keel::String s;
@@ -654,7 +654,7 @@ void Lexer::readString(int startLine, int startCol)
 
 // ─── read double-quoted string (with escape sequences) ──────────────────
 
-void Lexer::readDoubleQuotedString(int startLine, int startCol)
+void Lexer::readDoubleQuotedString(keel::i32 startLine, keel::i32 startCol)
 {
     advance();
     keel::String s;
@@ -723,8 +723,8 @@ void Lexer::readDoubleQuotedString(int startLine, int startCol)
 
 void Lexer::readIdentifier()
 {
-    int startLine = line_;
-    int startCol = col_;
+    keel::i32 startLine = line_;
+    keel::i32 startCol = col_;
     keel::usize start = pos_;
 
     while (pos_ < src_.size() && (isAlnum(peek()) || peek() == '_'))
@@ -741,8 +741,8 @@ bool Lexer::readOperator()
     char c = peek();
     char c2 = peek(1);
 
-    int startLine = line_;
-    int startCol = col_;
+    keel::i32 startLine = line_;
+    keel::i32 startCol = col_;
 
     auto twoChar = [&](TokenType t, const char *s) {
         advance();
@@ -854,12 +854,12 @@ keel::Array<Token> Lexer::tokenize()
         char c = peek();
 
         if (c == '\n') {
-            int nl = line_;
-            int nc = col_;
+            keel::i32 nl = line_;
+            keel::i32 nc = col_;
 
             if (bracketDepth() > 0) {
                 if (inMatrixContext()) {
-                    int prevIdx = keel::as<int>(tokens_.size()) - 1;
+                    keel::i32 prevIdx = keel::as<keel::i32>(tokens_.size()) - 1;
                     while (prevIdx >= 0 && tokens_[prevIdx].type == TokenType::COMMENT)
                         --prevIdx;
                     if (prevIdx >= 0 && isValueToken(tokens_[prevIdx].type)) {
@@ -882,7 +882,7 @@ keel::Array<Token> Lexer::tokenize()
 
         if (c == '\'') {
             if (isTransposeContext()) {
-                int al = line_, ac = col_;
+                keel::i32 al = line_, ac = col_;
                 advance();
                 addToken(TokenType::APOSTROPHE, "'", al, ac);
                 continue;

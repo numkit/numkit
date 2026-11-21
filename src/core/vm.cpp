@@ -260,7 +260,7 @@ void VM::ensureRegStackCapacity(keel::usize needed)
 // (0-15) and binary (20-25) ids in Compiler::resolveBuiltinId; holes (16-19)
 // are nullptr. Shared by describeInstruction (error text) and execCallBuiltin
 // (generic external fallback) so the two can never drift out of sync.
-static const char *builtinIdName(int bid)
+static const char *builtinIdName(keel::i32 bid)
 {
     static const char *kNames[] = {
         "abs",   "floor", "ceil",  "round", "fix",   "sqrt",  "exp",   "log",
@@ -268,7 +268,7 @@ static const char *builtinIdName(int bid)
         nullptr, nullptr, nullptr, nullptr, "mod",   "rem",   "max",   "min",
         "pow",   "atan2",
     };
-    constexpr int n = keel::as<int>(sizeof(kNames) / sizeof(kNames[0]));
+    constexpr keel::i32 n = keel::as<keel::i32>(sizeof(kNames) / sizeof(kNames[0]));
     return (bid >= 0 && bid < n) ? kNames[bid] : nullptr;
 }
 
@@ -418,9 +418,9 @@ static void importChunkGlobalsAndPersistents(Engine &engine, Environment &global
     }
 }
 
-int VM::callDepth() const
+keel::i32 VM::callDepth() const
 {
-    int d = 0;
+    keel::i32 d = 0;
     for (const auto &f : frames_) {
         if (!f.isScriptFrame)
             ++d;
@@ -895,7 +895,7 @@ enter_frame:
             case OpCode::LOAD_END: {
                 // a=dst, b=arrReg, c=dim (0-based), d=ndims
                 const Value &arr = R[I.b];
-                int ndims = I.d;
+                keel::i32 ndims = I.d;
                 if (arr.isObject()) {
                     const BuiltinClass *cls = engine_.findClass(arr.objectClassNameRef());
                     if (cls) {
@@ -1212,7 +1212,7 @@ enter_frame:
                     if (rule.execute(&R[I.b], I.c, fout, engine_.mr_)) {
                         engine_.noteFusionHit();
                         R[I.a] = std::move(fout);
-                        ip += keel::as<int>(I.e) + 1;
+                        ip += keel::as<keel::i32>(I.e) + 1;
                         continue;
                     }
                 }
@@ -1491,7 +1491,7 @@ enter_frame:
                 ValueType ta = R[I.b].type(), tb = R[I.c].type(), tc = R[I.e].type();
                 ValueType t = ValueType::DOUBLE;
                 ValueType nondefs[3] = {ta, tb, tc};
-                for (int k = 0; k < 3; ++k) {
+                for (keel::i32 k = 0; k < 3; ++k) {
                     if (nondefs[k] == ValueType::DOUBLE) continue;
                     if (t == ValueType::DOUBLE) t = nondefs[k];
                     else if (t != nondefs[k])
@@ -2115,12 +2115,12 @@ enter_frame:
                                            engine_.mr_);
                 } else {
                     // ND read (≥4): CELL handled by indexGetND directly now.
-                    const int nd = keel::as<int>(ndims);
+                    const keel::i32 nd = keel::as<keel::i32>(ndims);
                     const keel::usize ndu = keel::as<keel::usize>(nd);
                     keel::Array<keel::Array<keel::usize>> idxLists(ndu);
                     keel::Array<const keel::usize *> idxPtrs(ndu);
                     keel::Array<keel::usize> idxCounts(ndu);
-                    for (int i = 0; i < nd; ++i) {
+                    for (keel::i32 i = 0; i < nd; ++i) {
                         const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
                         idxLists[i] = Value::resolveIndices(R[base + i], lim);
                         idxPtrs[i] = idxLists[i].data();
@@ -2175,7 +2175,7 @@ enter_frame:
                     keel::usize maxC = colIds.maxPlusOne(R[I.a].dims().cols());
                     keel::usize maxP = pageIds.maxPlusOne(R[I.a].dims().pages());
                     if (R[I.a].isEmpty() && (!val.isScalar() || (R[I.a].dims().rows() == 0 && R[I.a].dims().cols() == 0 && !val.isEmpty()))) {
-                        const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
+                        const keel::i32 nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
                         const keel::usize nonColonProd = (riColon ? 1 : rowIds.count)
                                                   * (ciColon ? 1 : colIds.count)
                                                   * (piColon ? 1 : pageIds.count);
@@ -2189,16 +2189,16 @@ enter_frame:
                             maxP = val.dims().pages();
                         } else if (nColons > 0) {
                             keel::usize rCursor = 0;
-                            int colonsLeft = nColons;
+                            keel::i32 colonsLeft = nColons;
                             auto nextRhsDim = [&]() -> keel::usize {
                                 while (rCursor < keel::as<keel::usize>(val.dims().ndim())
-                                       && val.dims().dim(keel::as<int>(rCursor)) == 1
+                                       && val.dims().dim(keel::as<keel::i32>(rCursor)) == 1
                                        && (keel::as<keel::usize>(val.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
                                     ++rCursor;
                                 }
                                 --colonsLeft;
                                 return (rCursor < keel::as<keel::usize>(val.dims().ndim()))
-                                           ? val.dims().dim(keel::as<int>(rCursor++))
+                                           ? val.dims().dim(keel::as<keel::i32>(rCursor++))
                                            : 1;
                             };
                             if (riColon) maxR = nextRhsDim();
@@ -2220,16 +2220,16 @@ enter_frame:
                 } else {
                     // ND write (≥4): grow the target *first* so the
                     // subsequent resolveIndices bounds checks succeed.
-                    const int nd = keel::as<int>(ndims);
-                    const int curNd = R[I.a].dims().ndim();
-                    const int newNd = std::max(nd, curNd);
+                    const keel::i32 nd = keel::as<keel::i32>(ndims);
+                    const keel::i32 curNd = R[I.a].dims().ndim();
+                    const keel::i32 newNd = std::max(nd, curNd);
                     keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
-                    for (int i = 0; i < newNd; ++i)
+                    for (keel::i32 i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
                     auto isColon = [](const Value &v) {
                         return v.isChar() && v.numel() == 1 && v.charData()[0] == ':';
                     };
-                    for (int i = 0; i < nd; ++i) {
+                    for (keel::i32 i = 0; i < nd; ++i) {
                         const Value &iv = R[base + i];
                         if (isColon(iv) || iv.isLogical()) continue;
                         if (iv.isDoubleScalar()) {
@@ -2244,7 +2244,7 @@ enter_frame:
                         }
                     }
                     bool grow = (newNd > curNd);
-                    for (int i = 0; i < curNd && !grow; ++i)
+                    for (keel::i32 i = 0; i < curNd && !grow; ++i)
                         if (need[i] > R[I.a].dims().dim(i)) grow = true;
                     if (grow)
                         R[I.a].resizeND(need.data(), newNd, engine_.mr_);
@@ -2253,7 +2253,7 @@ enter_frame:
                     keel::Array<keel::Array<keel::usize>> idxLists(ndu);
                     keel::Array<const keel::usize *> idxPtrs(ndu);
                     keel::Array<keel::usize> idxCounts(ndu);
-                    for (int i = 0; i < nd; ++i) {
+                    for (keel::i32 i = 0; i < nd; ++i) {
                         const keel::usize lim = (i < R[I.a].dims().ndim()) ? R[I.a].dims().dim(i) : 1;
                         idxLists[i] = Value::resolveIndices(R[base + i], lim);
                         idxPtrs[i] = idxLists[i].data();
@@ -2289,7 +2289,7 @@ enter_frame:
                 keel::Array<const keel::usize *> perDimPtrs(ndims);
                 keel::Array<keel::usize> perDimCount(ndims);
                 const auto &srcDims = R[I.a].dims();
-                const int srcNd = srcDims.ndim();
+                const keel::i32 srcNd = srcDims.ndim();
                 for (keel::u16 i = 0; i < ndims; ++i) {
                     const keel::usize lim = (i < srcNd) ? srcDims.dim(i) : 1;
                     perDim[i] = Value::resolveIndices(R[base + i], lim);
@@ -2491,11 +2491,11 @@ enter_frame:
                     obj = Value::structArray(0, 0, engine_.allocator());
                 if (!obj.isStruct())
                     throw std::runtime_error("Indexed assignment on a non-struct value");
-                const int nargs = I.e;
+                const keel::i32 nargs = I.e;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
                     throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
-                for (int k = 0; k < nargs; ++k)
+                for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.c + k].toScalar());
                 keel::usize linear;
                 if (nargs == 1) {
@@ -2514,11 +2514,11 @@ enter_frame:
                     obj = Value::structArray(0, 0, engine_.allocator());
                 if (!obj.isStruct())
                     throw std::runtime_error("Indexed assignment on a non-struct value");
-                const int nargs = I.c;
+                const keel::i32 nargs = I.c;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
                     throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
-                for (int k = 0; k < nargs; ++k)
+                for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.b + k].toScalar());
                 keel::usize linear;
                 if (nargs == 1) {
@@ -2651,7 +2651,7 @@ enter_frame:
                 // a=childReg, b=cellReg, c=idxBase, e=nargs
                 Value &cell = R[I.b];
                 if (cell.isCell() && cell.heapRefCount() == 1 && !R[I.a].isObject()) {
-                    const int nargs = I.e;
+                    const keel::i32 nargs = I.e;
                     if (nargs > 0 && nargs <= Dims::kMaxRank) {
                         keel::usize linear = 0;
                         if (nargs == 1) {
@@ -2659,7 +2659,7 @@ enter_frame:
                         } else {
                             const auto &d = cell.dims();
                             keel::usize stride = 1;
-                            for (int k = 0; k < nargs; ++k) {
+                            for (keel::i32 k = 0; k < nargs; ++k) {
                                 keel::usize ck = Value::checkedScalarIndex(R[I.c + k].toScalar());
                                 linear += ck * stride;
                                 stride *= d.dim(k);
@@ -2799,9 +2799,9 @@ enter_frame:
             }
             case OpCode::CELL_GET_OR_CREATE: {
                 Value &cell = R[I.b];
-                const int nargs = I.e;
+                const keel::i32 nargs = I.e;
                 keel::usize coords[Dims::kMaxRank];
-                for (int k = 0; k < nargs; ++k)
+                for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.c + k].toScalar());
                 keel::usize linear = cell.growCellTo(coords, nargs, engine_.allocator());
                 R[I.a] = cell.cellAt(linear);
@@ -3039,12 +3039,12 @@ enter_frame:
                     keel::Array<keel::usize> coords(ndims);
                     for (keel::u16 i = 0; i < ndims; ++i)
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
-                    const int curNd = R[I.a].dims().ndim();
-                    const int newNd = std::max(keel::as<int>(ndims), curNd);
+                    const keel::i32 curNd = R[I.a].dims().ndim();
+                    const keel::i32 newNd = std::max(keel::as<keel::i32>(ndims), curNd);
                     keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
-                    for (int i = 0; i < newNd; ++i)
+                    for (keel::i32 i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
-                    bool grow = (keel::as<int>(ndims) > curNd);
+                    bool grow = (keel::as<keel::i32>(ndims) > curNd);
                     for (keel::u16 i = 0; i < ndims; ++i) {
                         if (coords[i] + 1 > need[i]) {
                             need[i] = coords[i] + 1;
@@ -3333,7 +3333,7 @@ enter_frame:
                     auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
                         if (chunk.parentFuncName.empty())
                             return keel::kNullOpt;
-                        for (int fi = keel::as<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                 continue;
@@ -3346,10 +3346,10 @@ enter_frame:
                                 }
                             }
                         }
-                        for (int psi = keel::as<int>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
+                        for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
                             const VM::PausedState *ps = activePausedStates_[psi];
                             if (!ps) continue;
-                            for (int fi = keel::as<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                            for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                 const CallFrame &pf = ps->frames[fi];
                                 if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                     continue;
@@ -4307,7 +4307,7 @@ enter_frame:
                     if (!chunk.parentFuncName.empty()) {
                         const keel::String &nn = chunk.strings[I.d];
                         bool foundInParent = false;
-                        for (int fi = keel::as<int>(frames_.size()) - 2; fi >= 0; --fi) {
+                        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
                             const CallFrame &pf = frames_[fi];
                             if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                 continue;
@@ -4325,10 +4325,10 @@ enter_frame:
                                 break;
                         }
                         if (!foundInParent) {
-                            for (int psi = keel::as<int>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
+                            for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
                                 const VM::PausedState *ps = activePausedStates_[psi];
                                 if (!ps) continue;
-                                for (int fi = keel::as<int>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                                for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
                                     const CallFrame &pf = ps->frames[fi];
                                     if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
                                         continue;
@@ -4534,7 +4534,7 @@ enter_frame:
 
             default:
                 throw std::runtime_error(
-                    keel::format("VM: unimplemented opcode {}", (int) I.op).c_str());
+                    keel::format("VM: unimplemented opcode {}", (keel::i32) I.op).c_str());
 
             } // switch
             ++ip;
@@ -4915,10 +4915,10 @@ Environment *VM::materializeFrameEnv(CallFrame &f, const Value *frameRegs)
     return f.env.get();
 }
 
-Environment *VM::callerEnvAtDepth(int n)
+Environment *VM::callerEnvAtDepth(keel::i32 n)
 {
     if (n < 0) n = 0;
-    int seen = 0;
+    keel::i32 seen = 0;
     for (keel::usize fi = frames_.size(); fi-- > 0;) {
         auto &f = frames_[fi];
         if (f.isScriptFrame)
@@ -4946,10 +4946,10 @@ Environment *VM::callerEnvAtDepth(int n)
     return &engine_.workspaceEnv();
 }
 
-void VM::assignInCallerFrame(int n, keel::StringRef name, const Value &val)
+void VM::assignInCallerFrame(keel::i32 n, keel::StringRef name, const Value &val)
 {
     if (n < 0) n = 0;
-    int seen = 0;
+    keel::i32 seen = 0;
     for (keel::usize fi = frames_.size(); fi-- > 0;) {
         auto &f = frames_[fi];
         if (f.isScriptFrame)
@@ -5935,14 +5935,14 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
             R[dstReg] = mv.indexGet2D(rids.data(), rids.size(), cids.data(), cids.size(),
                                    engine_.mr_);
         } else {
-            const int nd = keel::as<int>(na);
+            const keel::i32 nd = keel::as<keel::i32>(na);
             keel::Array<keel::Array<keel::usize>> lists;
             lists.resize(nd);
             keel::Array<const keel::usize *> ptrs;
             ptrs.resize(nd);
             keel::Array<keel::usize> counts;
             counts.resize(nd);
-            for (int i = 0; i < nd; ++i) {
+            for (keel::i32 i = 0; i < nd; ++i) {
                 const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
                 lists[i] = Value::resolveIndices(AB[i], lim);
                 ptrs[i] = lists[i].data();
@@ -6186,14 +6186,14 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
         }
     } else {
         // ND indexing fallback for na >= 4. CELL handled by indexGetND.
-        const int nd = keel::as<int>(na);
+        const keel::i32 nd = keel::as<keel::i32>(na);
         keel::Array<keel::Array<keel::usize>> idxLists;
         idxLists.resize(nd);
         keel::Array<const keel::usize *> idxPtrs;
         idxPtrs.resize(nd);
         keel::Array<keel::usize> idxCounts;
         idxCounts.resize(nd);
-        for (int i = 0; i < nd; ++i) {
+        for (keel::i32 i = 0; i < nd; ++i) {
             const keel::usize lim = (i < mv.dims().ndim()) ? mv.dims().dim(i) : 1;
             idxLists[i] = Value::resolveIndices(AB[i], lim);
             idxPtrs[i] = idxLists[i].data();

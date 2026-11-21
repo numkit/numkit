@@ -23,10 +23,10 @@ public:
     explicit TreeWalker(Engine &engine);
 
     Value execute(const ASTNode *ast, Environment *env);
-    void setMaxRecursionDepth(int d) { maxRecursionDepth_ = d; }
+    void setMaxRecursionDepth(keel::i32 d) { maxRecursionDepth_ = d; }
 
     // True when executing inside a user function (not top-level script)
-    int callDepth() const { return currentRecursionDepth_; }
+    keel::i32 callDepth() const { return currentRecursionDepth_; }
 
     // Active call stack (parallel to C++ recursion of callUserFunction).
     // Maintained via FrameGuard RAII so it stays in sync across exception
@@ -86,14 +86,14 @@ private:
     Engine &engine_;
 
     FlowSignal flowSignal_ = FlowSignal::NONE;
-    int currentRecursionDepth_ = 0;
-    int maxRecursionDepth_ = 500;
+    keel::i32 currentRecursionDepth_ = 0;
+    keel::i32 maxRecursionDepth_ = 500;
 
     struct IndexContext
     {
         const Value *array = nullptr;
-        int dimension = 0;
-        int ndims = 1;
+        keel::i32 dimension = 0;
+        keel::i32 ndims = 1;
     };
     keel::Array<IndexContext> indexContextStack_;
 
@@ -171,7 +171,7 @@ private:
     class RecursionGuard
     {
     public:
-        RecursionGuard(int &depth, int maxDepth)
+        RecursionGuard(keel::i32 &depth, keel::i32 maxDepth)
             : depth_(depth)
         {
             if (++depth_ > maxDepth) {
@@ -184,7 +184,7 @@ private:
         RecursionGuard &operator=(const RecursionGuard &) = delete;
 
     private:
-        int &depth_;
+        keel::i32 &depth_;
     };
 
     // Display helpers
@@ -271,12 +271,12 @@ private:
     // Indexing helpers
     bool tryResolveScalarIndex(const ASTNode *indexExpr,
                                const Value &array,
-                               int dim,
-                               int ndims,
+                               keel::i32 dim,
+                               keel::i32 ndims,
                                Environment *env,
                                keel::usize &outIdx);
     keel::Array<keel::usize> resolveIndex(
-        const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env);
+        const ASTNode *indexExpr, const Value &array, keel::i32 dim, keel::i32 ndims, Environment *env);
     Value execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env);
     keel::Array<Value> execCallMulti(const ASTNode *node, Environment *env, keel::usize nout);
     Value callFuncHandle(const Value &handle, keel::ArrayRef<Value> args, Environment *env,

@@ -60,7 +60,7 @@ namespace { Value castDoubleToSingle(const Value &src, keel::Allocator *mr)
     else if (src.dims().ndim() > 3) {
         const auto &dimsRef = src.dims();
         keel::usize dimsBuf[Dims::kMaxRank];
-        for (int i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
+        for (keel::i32 i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
         dst = Value::matrixND(dimsBuf, dimsRef.ndim(), ValueType::SINGLE, mr);
     } else
         dst = Value::matrix(src.dims().rows(), src.dims().cols(),
@@ -104,7 +104,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         }
         if (flag == "twister") {
             keel::u32 mt[ops::MatlabMT19937::STATE_SIZE];
-            int idx = 0;
+            keel::i32 idx = 0;
             rngRef.engine().getState(mt, idx);
             auto st = Value::matrix(625, 1, ValueType::UINT32, ctx.engine->allocator());
             keel::u32 *d = st.uint32DataMut();
@@ -153,7 +153,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                 keel::u32 mt[ops::MatlabMT19937::STATE_SIZE];
                 for (keel::usize i = 0; i < 624; ++i)
                     mt[i] = keel::as<keel::u32>(dimArgs[1].elemAsDouble(i));
-                const int idx = keel::as<int>(dimArgs[1].elemAsDouble(624));
+                const keel::i32 idx = keel::as<keel::i32>(dimArgs[1].elemAsDouble(624));
                 rngRef.setLegacyTwisterRandState(mt, idx);
                 outs[0] = Value();
                 return;
@@ -262,7 +262,7 @@ namespace { Value castDoubleToType(const Value &src, ValueType t, keel::Allocato
     else if (src.dims().ndim() > 3) {
         const auto &dimsRef = src.dims();
         keel::usize dimsBuf[Dims::kMaxRank];
-        for (int i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
+        for (keel::i32 i = 0; i < dimsRef.ndim(); ++i) dimsBuf[i] = dimsRef.dim(i);
         dst = Value::matrixND(dimsBuf, dimsRef.ndim(), t, mr);
     } else
         dst = Value::matrix(src.dims().rows(), src.dims().cols(), t, mr);
@@ -335,7 +335,7 @@ void randi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             if (imin > imax)
                 throw Error("randi: low bound must be <= high bound",
                             0, 0, "randi", "", "numkit:randi:badRange");
-            auto m = Value::matrixND(dims.data(), keel::as<int>(dims.size()),
+            auto m = Value::matrixND(dims.data(), keel::as<keel::i32>(dims.size()),
                                       ValueType::DOUBLE, mr);
             const keel::f64 span = keel::as<keel::f64>(imax - imin + 1);
             for (keel::usize i = 0; i < m.numel(); ++i)

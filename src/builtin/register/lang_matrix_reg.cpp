@@ -177,12 +177,12 @@ void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
         const keel::usize len = std::max({ni, nj, nv});
         keel::usize M = 0, N = 0;
         for (keel::usize k = 0; k < ni; ++k) {
-            long long r = keel::as<long long>(vi.elemAsDouble(k));
-            if (r > keel::as<long long>(M)) M = keel::as<keel::usize>(r);
+            keel::i64 r = keel::as<keel::i64>(vi.elemAsDouble(k));
+            if (r > keel::as<keel::i64>(M)) M = keel::as<keel::usize>(r);
         }
         for (keel::usize k = 0; k < nj; ++k) {
-            long long c = keel::as<long long>(vj.elemAsDouble(k));
-            if (c > keel::as<long long>(N)) N = keel::as<keel::usize>(c);
+            keel::i64 c = keel::as<keel::i64>(vj.elemAsDouble(k));
+            if (c > keel::as<keel::i64>(N)) N = keel::as<keel::usize>(c);
         }
         if (args.size() >= 5) {
             M = argcheck::arrayDim(args[3], "sparse");
@@ -211,18 +211,18 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // 1 or 2 arguments: [B, d] = spdiags(A) or B = spdiags(A, d)
     if (args.size() <= 2) {
         const Value &A = args[0];
-        const long long m = keel::as<long long>(A.dims().rows());
-        const long long n = keel::as<long long>(A.dims().cols());
-        const long long pLen = std::min(m, n);
+        const keel::i64 m = keel::as<keel::i64>(A.dims().rows());
+        const keel::i64 n = keel::as<keel::i64>(A.dims().cols());
+        const keel::i64 pLen = std::min(m, n);
 
-        keel::Array<long long> diags(mr);
+        keel::Array<keel::i64> diags(mr);
         if (args.size() == 1) {
-            for (long long k = -(m - 1); k <= n - 1; ++k) {
+            for (keel::i64 k = -(m - 1); k <= n - 1; ++k) {
                 bool anyNz = false;
-                const long long iStart = std::max(0LL, -k);
-                const long long iEnd = std::min(m - 1, n - 1 - k);
-                for (long long i = iStart; i <= iEnd; ++i) {
-                    const long long j = i + k;
+                const keel::i64 iStart = std::max(keel::i64{0}, -k);
+                const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+                for (keel::i64 i = iStart; i <= iEnd; ++i) {
+                    const keel::i64 j = i + k;
                     if (A.elemAsDouble(keel::as<keel::usize>(i + j * m)) != 0.0) {
                         anyNz = true;
                         break;
@@ -234,19 +234,19 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             const Value &dVal = args[1];
             diags.resize(dVal.numel());
             for (keel::usize idx = 0; idx < dVal.numel(); ++idx)
-                diags[idx] = keel::as<long long>(dVal.elemAsDouble(idx));
+                diags[idx] = keel::as<keel::i64>(dVal.elemAsDouble(idx));
         }
 
         const keel::usize numD = diags.size();
         Value B = Value::matrix(keel::as<keel::usize>(pLen), numD, ValueType::DOUBLE, mr);
         keel::f64 *bd = B.doubleDataMut();
         for (keel::usize col = 0; col < numD; ++col) {
-            const long long k = diags[col];
-            const long long iStart = std::max(0LL, -k);
-            const long long iEnd = std::min(m - 1, n - 1 - k);
-            for (long long i = iStart; i <= iEnd; ++i) {
-                const long long j = i + k;
-                const long long rowB = (m >= n) ? j : i;
+            const keel::i64 k = diags[col];
+            const keel::i64 iStart = std::max(keel::i64{0}, -k);
+            const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+            for (keel::i64 i = iStart; i <= iEnd; ++i) {
+                const keel::i64 j = i + k;
+                const keel::i64 rowB = (m >= n) ? j : i;
                 if (rowB >= 0 && rowB < pLen)
                     bd[keel::as<keel::usize>(rowB) + col * keel::as<keel::usize>(pLen)] =
                         A.elemAsDouble(keel::as<keel::usize>(i + j * m));
@@ -266,35 +266,35 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // 3 or 4 arguments: A = spdiags(B, d, A_old) or A = spdiags(B, d, m, n)
     const Value &B = args[0];
     const Value &dVal = args[1];
-    long long m = 0, n = 0;
+    keel::i64 m = 0, n = 0;
     Value out;
     if (args.size() == 3) {
         const Value &Aold = args[2];
-        m = keel::as<long long>(Aold.dims().rows());
-        n = keel::as<long long>(Aold.dims().cols());
+        m = keel::as<keel::i64>(Aold.dims().rows());
+        n = keel::as<keel::i64>(Aold.dims().cols());
         out = Value::matrix(keel::as<keel::usize>(m), keel::as<keel::usize>(n), ValueType::DOUBLE, mr);
         keel::f64 *od = out.doubleDataMut();
         for (keel::usize idx = 0; idx < Aold.numel(); ++idx)
             od[idx] = Aold.elemAsDouble(idx);
     } else {
-        m = keel::as<long long>(argcheck::arrayDim(args[2], "spdiags"));
-        n = keel::as<long long>(argcheck::arrayDim(args[3], "spdiags"));
+        m = keel::as<keel::i64>(argcheck::arrayDim(args[2], "spdiags"));
+        n = keel::as<keel::i64>(argcheck::arrayDim(args[3], "spdiags"));
         out = Value::matrix(keel::as<keel::usize>(m), keel::as<keel::usize>(n), ValueType::DOUBLE, mr);
     }
 
     keel::f64 *od = out.doubleDataMut();
-    const long long bRows = keel::as<long long>(B.dims().rows());
-    const long long bCols = keel::as<long long>(B.dims().cols());
+    const keel::i64 bRows = keel::as<keel::i64>(B.dims().rows());
+    const keel::i64 bCols = keel::as<keel::i64>(B.dims().cols());
     const keel::usize numD = dVal.numel();
-    for (keel::usize col = 0; col < numD && keel::as<long long>(col) < bCols; ++col) {
-        const long long k = keel::as<long long>(dVal.elemAsDouble(col));
-        const long long iStart = std::max(0LL, -k);
-        const long long iEnd = std::min(m - 1, n - 1 - k);
-        for (long long i = iStart; i <= iEnd; ++i) {
-            const long long j = i + k;
-            const long long rowB = (m >= n) ? j : i;
+    for (keel::usize col = 0; col < numD && keel::as<keel::i64>(col) < bCols; ++col) {
+        const keel::i64 k = keel::as<keel::i64>(dVal.elemAsDouble(col));
+        const keel::i64 iStart = std::max(keel::i64{0}, -k);
+        const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+        for (keel::i64 i = iStart; i <= iEnd; ++i) {
+            const keel::i64 j = i + k;
+            const keel::i64 rowB = (m >= n) ? j : i;
             const keel::f64 val = (rowB >= 0 && rowB < bRows)
-                                   ? B.elemAsDouble(keel::as<keel::usize>(rowB + keel::as<long long>(col) * bRows))
+                                   ? B.elemAsDouble(keel::as<keel::usize>(rowB + keel::as<keel::i64>(col) * bRows))
                                    : 0.0;
             od[keel::as<keel::usize>(i + j * m)] = val;
         }
@@ -780,13 +780,13 @@ void size_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         for (keel::usize i = 0; i < nargout && i < outs.size(); ++i) {
             keel::f64 v;
             if (i + 1 < nargout) {
-                v = keel::as<keel::f64>(dims.dim(keel::as<int>(i)));
+                v = keel::as<keel::f64>(dims.dim(keel::as<keel::i32>(i)));
             } else {
                 // Last requested output: multiply remaining dims (if any).
                 keel::usize prod = 1;
-                for (int j = keel::as<int>(i); j < dims.ndim(); ++j)
+                for (keel::i32 j = keel::as<keel::i32>(i); j < dims.ndim(); ++j)
                     prod *= dims.dim(j);
-                if (dims.ndim() <= keel::as<int>(i)) prod = 1;
+                if (dims.ndim() <= keel::as<keel::i32>(i)) prod = 1;
                 v = keel::as<keel::f64>(prod);
             }
             outs[i] = Value::scalar(v, mr);
@@ -840,7 +840,7 @@ keel::Array<keel::usize> parseReshapeDims(const Value &x, keel::ArrayRef<Value> 
         // dimension inference from x.numel().
         const keel::usize dimCount = sizeArgs.size();
         dims.assign(dimCount, 1);
-        int inferPos = -1;
+        keel::i32 inferPos = -1;
         keel::usize knownProd = 1;
         for (keel::usize i = 0; i < dimCount; ++i) {
             if (sizeArgs[i].isEmpty()) {
@@ -849,7 +849,7 @@ keel::Array<keel::usize> parseReshapeDims(const Value &x, keel::ArrayRef<Value> 
                                 "inferred with []; found a second one.",
                                  0, 0, "reshape", "",
                                  "numkit:reshape:multipleInferred");
-                inferPos = keel::as<int>(i);
+                inferPos = keel::as<keel::i32>(i);
             } else {
                 dims[i] = argcheck::reshapeSize(
                     argcheck::reshapeSizeArg(sizeArgs[i], "reshape"),
@@ -1015,7 +1015,7 @@ void pagemtimes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
 void diag_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "diag");
-    long k = 0;
+    keel::i64 k = 0;
     if (args.size() >= 2)
         k = argcheck::expectedInteger(
             argcheck::expectedReal(args[1], 2, "k", "diag"), 2, "k", "diag");
@@ -1029,7 +1029,7 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     // sort(X[, dim][, direction]): a numeric trailing arg is the dim, a
     // string is the direction ('ascend' default / 'descend'). MATLAB
     // accepts sort(X,direction) and sort(X,dim,direction).
-    int dim = -1;
+    keel::i32 dim = -1;
     bool descend = false;
     NanPlace nanPlace = NanPlace::Auto;
     auto lower = [](keel::StringRef sv) {
@@ -1105,7 +1105,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, "sortrows");
     keel::Allocator *mr = ctx.engine->allocator();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    auto cols = keel::Array<int>(scratch.allocator());
+    auto cols = keel::Array<keel::i32>(scratch.allocator());
 
     // 'ascend' (false) / 'descend' (true), case-insensitive.
     auto dirDescend = [](keel::StringRef sv) -> bool {
@@ -1146,15 +1146,15 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             if (dirs.size() == 1) {
                 const bool d = dirs[0] != 0;
                 for (keel::usize k = 1; k <= C; ++k)
-                    cols.push_back(d ? -keel::as<int>(k) : keel::as<int>(k));
+                    cols.push_back(d ? -keel::as<keel::i32>(k) : keel::as<keel::i32>(k));
             } else {
                 if (dirs.size() != C)
                     throw Error("sortrows: number of directions must match the "
                                 "number of columns",
                                  0, 0, "sortrows", "", "numkit:sortrows:dirCount");
                 for (keel::usize k = 0; k < C; ++k)
-                    cols.push_back(dirs[k] ? -keel::as<int>(k + 1)
-                                           : keel::as<int>(k + 1));
+                    cols.push_back(dirs[k] ? -keel::as<keel::i32>(k + 1)
+                                           : keel::as<keel::i32>(k + 1));
             }
         } else {
             cols.reserve(c.numel());
@@ -1163,7 +1163,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                 if (v != std::floor(v))
                     throw Error("sortrows: column index must be an integer",
                                  0, 0, "sortrows", "", "numkit:sortrows:badCol");
-                cols.push_back(keel::as<int>(v));
+                cols.push_back(keel::as<keel::i32>(v));
             }
             // Optional direction argument: sortrows(A, cols, direction[s]).
             // Re-signs the listed columns by direction (overriding any sign in
@@ -1178,7 +1178,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                 if (dirs.size() == 1) {
                     const bool d = dirs[0] != 0;
                     for (auto &cc : cols) {
-                        const int a = cc < 0 ? -cc : cc;
+                        const keel::i32 a = cc < 0 ? -cc : cc;
                         cc = d ? -a : a;
                     }
                 } else {
@@ -1187,14 +1187,14 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                                     "the number of sort columns",
                                      0, 0, "sortrows", "", "numkit:sortrows:dirCount");
                     for (keel::usize i = 0; i < cols.size(); ++i) {
-                        const int a = cols[i] < 0 ? -cols[i] : cols[i];
+                        const keel::i32 a = cols[i] < 0 ? -cols[i] : cols[i];
                         cols[i] = dirs[i] ? -a : a;
                     }
                 }
             }
         }
     }
-    auto [sorted, idx] = sortrows(args[0], keel::ArrayRef<int>(cols.data(), cols.size()), mr);
+    auto [sorted, idx] = sortrows(args[0], keel::ArrayRef<keel::i32>(cols.data(), cols.size()), mr);
     outs[0] = std::move(sorted);
     if (nargout > 1)
         outs[1] = std::move(idx);
@@ -1400,7 +1400,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         }
         const keel::usize outCount = std::min(D, outs.size());
         for (keel::usize m = 0; m < outCount; ++m) {
-            Value G = Value::matrixND(shape.data(), keel::as<int>(D), ValueType::DOUBLE, mr);
+            Value G = Value::matrixND(shape.data(), keel::as<keel::i32>(D), ValueType::DOUBLE, mr);
             keel::f64 *gd = G.doubleDataMut();
             const keel::usize stride_m = strides[m];
             for (keel::usize lin = 0; lin < total; ++lin) {
@@ -1438,7 +1438,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     const keel::usize wantOut = std::max<keel::usize>(1, nargout);
     const keel::usize outCount = std::min({wantOut, D, outs.size()});
     for (keel::usize m = 0; m < outCount; ++m) {
-        Value G = Value::matrixND(shape.data(), keel::as<int>(D), ValueType::DOUBLE, mr);
+        Value G = Value::matrixND(shape.data(), keel::as<keel::i32>(D), ValueType::DOUBLE, mr);
         keel::f64 *gd = G.doubleDataMut();
         const keel::usize stride_m = strides[m];
         const keel::usize len_m = shape[m];
@@ -1464,7 +1464,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
 namespace {
 
 void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *fn,
-                    int &dim, bool &reverse, bool &include_nan)
+                    keel::i32 &dim, bool &reverse, bool &include_nan)
 {
     dim = 0;
     reverse = false;
@@ -1497,16 +1497,16 @@ void parseCumDirNan(keel::ArrayRef<Value> args, keel::usize start, const char *f
 // (already same-shape) `src` input. Used to implement 'includenan'
 // for cummax/cummin: once a NaN is hit in src along the operating
 // dim, every subsequent output entry is set to NaN.
-void propagateNanFromSrc(Value &out, const Value &src, int dim1Based)
+void propagateNanFromSrc(Value &out, const Value &src, keel::i32 dim1Based)
 {
     const auto &dd = out.dims();
-    const int nd = dd.ndim();
-    const int d = dim1Based;
+    const keel::i32 nd = dd.ndim();
+    const keel::i32 d = dim1Based;
     if (d < 1 || d > nd) return;
     keel::usize inner = 1;
-    for (int i = 0; i < d - 1; ++i) inner *= dd.dim(i);
+    for (keel::i32 i = 0; i < d - 1; ++i) inner *= dd.dim(i);
     keel::usize outer = 1;
-    for (int i = d; i < nd; ++i) outer *= dd.dim(i);
+    for (keel::i32 i = d; i < nd; ++i) outer *= dd.dim(i);
     const keel::usize L = dd.dim(d - 1);
     const keel::f64 qnan = std::numeric_limits<keel::f64>::quiet_NaN();
     // Complex cummax/cummin (out + src both COMPLEX): an element is "missing"
@@ -1554,28 +1554,28 @@ template <typename Fn>
 Value runCumWithFlags(const Value &x, keel::ArrayRef<Value> args, const char *fn,
                       Fn impl, keel::Allocator *mr)
 {
-    int dim; bool reverse; bool include_nan;
+    keel::i32 dim; bool reverse; bool include_nan;
     parseCumDirNan(args, 1, fn, dim, reverse, include_nan);
     Value src = x;
     if (reverse) src = flip(src, dim, mr);
     Value out = (dim > 0) ? impl(src, dim, mr) : impl(src, 0, mr);
     if (include_nan) {
         // Determine effective dim (firstNonSingleton when dim=0).
-        int effDim = dim;
+        keel::i32 effDim = dim;
         if (effDim <= 0) {
             const auto &dd = out.dims();
             effDim = 1;
-            for (int k = 0; k < dd.ndim(); ++k)
+            for (keel::i32 k = 0; k < dd.ndim(); ++k)
                 if (dd.dim(k) > 1) { effDim = k + 1; break; }
         }
         propagateNanFromSrc(out, src, effDim);
     }
     if (reverse) {
-        int effDim = dim;
+        keel::i32 effDim = dim;
         if (effDim <= 0) {
             const auto &dd = out.dims();
             effDim = 1;
-            for (int k = 0; k < dd.ndim(); ++k)
+            for (keel::i32 k = 0; k < dd.ndim(); ++k)
                 if (dd.dim(k) > 1) { effDim = k + 1; break; }
         }
         out = flip(out, effDim, mr);
@@ -1589,7 +1589,7 @@ void cummax_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
 {
     argcheck::checkNargin(args.size(), 1, 4, "cummax");
     outs[0] = numkit::narrowComplex(
-        runCumWithFlags(args[0], args, "cummax", [](const Value &v, int d, keel::Allocator *mr) {
+        runCumWithFlags(args[0], args, "cummax", [](const Value &v, keel::i32 d, keel::Allocator *mr) {
             return cummax(v, d, mr);
         }, ctx.engine->allocator()),
         ctx.engine->allocator());
@@ -1599,7 +1599,7 @@ void cummin_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
 {
     argcheck::checkNargin(args.size(), 1, 4, "cummin");
     outs[0] = numkit::narrowComplex(
-        runCumWithFlags(args[0], args, "cummin", [](const Value &v, int d, keel::Allocator *mr) {
+        runCumWithFlags(args[0], args, "cummin", [](const Value &v, keel::i32 d, keel::Allocator *mr) {
             return cummin(v, d, mr);
         }, ctx.engine->allocator()),
         ctx.engine->allocator());
@@ -1615,7 +1615,7 @@ namespace {
 Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
                    const char *fn, keel::Allocator *mr)
 {
-    int dim = 0; bool reverse = false; bool omitnan = false;
+    keel::i32 dim = 0; bool reverse = false; bool omitnan = false;
     keel::usize i = 1;
     if (i < args.size() && !args[i].isEmpty()
         && !args[i].isChar() && !args[i].isString()) {
@@ -1632,11 +1632,11 @@ Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
         else if (s == "includenan") omitnan = false;
     }
     // Effective (1-based) dim: first non-singleton when unspecified.
-    int effDim = dim;
+    keel::i32 effDim = dim;
     if (effDim <= 0) {
         const auto &dd = x.dims();
         effDim = 1;
-        for (int k = 0; k < dd.ndim(); ++k)
+        for (keel::i32 k = 0; k < dd.ndim(); ++k)
             if (dd.dim(k) > 1) { effDim = k + 1; break; }
     }
     Value src = x;
@@ -1674,8 +1674,8 @@ void cumprod_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
 void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "diff");
-    int n = 1;
-    int dim = 0;
+    keel::i32 n = 1;
+    keel::i32 dim = 0;
     if (args.size() >= 2 && !args[1].isEmpty()) {
         // MATLAB: the difference order N must be a positive integer scalar
         // (a zero, negative, fractional or non-scalar order is an error).
@@ -1686,7 +1686,7 @@ void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         if (!std::isfinite(nv) || nv != std::floor(nv) || nv < 1.0)
             throw Error("diff: Difference order N must be a positive integer scalar",
                          0, 0, "diff", "", "numkit:diff:badOrder");
-        n = keel::as<int>(nv);
+        n = keel::as<keel::i32>(nv);
     }
     if (args.size() >= 3 && !args[2].isEmpty())
         dim = argcheck::dimArg(args[2], "diff");
@@ -1699,7 +1699,7 @@ void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                     keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
     {                                                                          \
         argcheck::checkNargin(args.size(), 1, 2, #name); \
-        int dim = 0;                                                           \
+        keel::i32 dim = 0;                                                           \
         if (args.size() >= 2 && !args[1].isEmpty())                            \
             dim = argcheck::dimArg(args[1], #name);                        \
         outs[0] = fn(args[0], dim, ctx.engine->allocator());                   \

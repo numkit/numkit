@@ -166,7 +166,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     argcheck::checkNargin(args.size(), 1, 2, "bitcmp");
     auto *mr = ctx.engine->allocator();
 
-    int width = 0;
+    keel::i32 width = 0;
     keel::String explicitType(mr);  // empty = inferred or default
 
     if (args.size() >= 2 && !args[1].isEmpty()) {
@@ -183,7 +183,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
             const keel::f64 wv = argcheck::expectedReal(args[1], 2, "width", "bitcmp");
             argcheck::expectedInteger(wv, 2, "width", "bitcmp");
             argcheck::expectedBetween(wv, 1, 64, 2, "width", "bitcmp");
-            width = keel::as<int>(wv);
+            width = keel::as<keel::i32>(wv);
         }
     } else {
         // 1-arg form: width / class is inferred from the input type.

@@ -145,7 +145,7 @@ void Compiler::preImportGlobals(const ASTNode *ast)
         // Import any defined value (including `[]` empty matrices, which
         // are legal MATLAB values). Only unset / deleted slots get skipped.
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
-            if (nextReg_ >= keel::as<int>(kInvalidReg))
+            if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
                 throw std::runtime_error(
                     "Compiler: register limit exceeded (>65534 registers in chunk)");
             keel::u16 r = keel::as<keel::u16>(nextReg_++);
@@ -181,7 +181,7 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
             continue;
         if (engine_.isReservedName(name))
             continue; // reserved/pseudo-vars are looked up on demand
-        if (nextReg_ >= keel::as<int>(kInvalidReg))
+        if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
             throw std::runtime_error(
                 "Compiler: register limit exceeded (>65534 registers in chunk)");
         keel::u16 r = keel::as<keel::u16>(nextReg_++);
@@ -392,8 +392,8 @@ keel::u16 Compiler::varRegLookup(keel::StringRef name, bool preloadReserved)
 {
     if (const keel::u16 *found = varRegisters_.get(name))
         return *found;
-    int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
-    if (allocReg >= keel::as<int>(kInvalidReg))
+    keel::i32 allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
+    if (allocReg >= keel::as<keel::i32>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(allocReg);
@@ -426,8 +426,8 @@ keel::u16 Compiler::varRegLookup(keel::StringRef name, bool preloadReserved)
 
 keel::u16 Compiler::allocPinnedReg()
 {
-    int allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
-    if (allocReg >= keel::as<int>(kInvalidReg))
+    keel::i32 allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
+    if (allocReg >= keel::as<keel::i32>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(allocReg);
@@ -575,7 +575,7 @@ keel::u16 Compiler::tempReg()
     // Bytecode reg fields are uint16_t — max 256 distinct slots (0..255).
     // numRegisters is uint16_t, so its count must fit too: cap at 255.
     // Throw early rather than wrap nextReg_ and silently corrupt slot 0+.
-    if (nextReg_ >= keel::as<int>(kInvalidReg))
+    if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
         throw std::runtime_error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(nextReg_++);
@@ -862,7 +862,7 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
     default:
         throw std::runtime_error(
             keel::format("Compiler: unsupported node type {}",
-                         keel::as<int>(node->type)).c_str());
+                         keel::as<keel::i32>(node->type)).c_str());
     }
 }
 
@@ -894,11 +894,11 @@ keel::u16 Compiler::compileBlock(const ASTNode *node)
     // following `r + undef` re-allocated S for `undef`, so ASSERT_DEF
     // saw R[S]=1 and never threw — turning the expected outer-catch
     // into a silent computation of `r + 1`.)
-    const int entryNext = nextReg_;
+    const keel::i32 entryNext = nextReg_;
     keel::u16 last = 0;
     for (auto &child : node->children) {
         last = compileNode(child.get());
-        const int floor = entryNext > maxVarReg_ ? entryNext : maxVarReg_;
+        const keel::i32 floor = entryNext > maxVarReg_ ? entryNext : maxVarReg_;
         if (nextReg_ > floor) {
             nextReg_ = floor;
             constRegCache_.clear();
@@ -1013,8 +1013,8 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
             // statement-boundary release does not later free a slot
             // that still holds the variable's value.
             varRegisters_.put(lhs->strValue.clone(), src);
-            if (keel::as<int>(src) + 1 > maxVarReg_)
-                maxVarReg_ = keel::as<int>(src) + 1;
+            if (keel::as<keel::i32>(src) + 1 > maxVarReg_)
+                maxVarReg_ = keel::as<keel::i32>(src) + 1;
             dst = src;
             // No instruction emitted, no reclaim needed — src IS the variable now
         } else if (canEliminate && varPtr) {
@@ -1232,7 +1232,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
     if (callNode->children[0]->type == NodeType::SUPERCLASS_REF) {
         keel::u16 outBase = reserveRegs(nout);
         compileSuperCall(callNode, callNode->children[0].get(),
-                         keel::as<int>(outBase), keel::as<keel::u16>(nout));
+                         keel::as<keel::i32>(outBase), keel::as<keel::u16>(nout));
         distribute(outBase);
         if (complex)
             return nout ? outBase : 0;
@@ -1560,7 +1560,7 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
     // emits FUSE_EWISE + the normally compiled op as fallback. After the
     // short-circuit ops (never fusable); a matched node has an array operand so
     // it can't constant-fold, so checking here vs. below is equivalent.
-    if (int r = tryCompileFused(node); r >= 0) return keel::as<keel::u16>(r);
+    if (keel::i32 r = tryCompileFused(node); r >= 0) return keel::as<keel::u16>(r);
 
     // Constant folding: both operands are number literals → compute at compile time
     if (node->children[0]->type == NodeType::NUMBER_LITERAL
@@ -2195,8 +2195,8 @@ keel::u16 Compiler::compileTryCatch(const ASTNode *node)
     // Compile try body (track activeTryDepth_ so break/continue inside try pop TRY_END)
     {
         struct TryDepthGuard {
-            int &depth;
-            explicit TryDepthGuard(int &d) : depth(d) { ++depth; }
+            keel::i32 &depth;
+            explicit TryDepthGuard(keel::i32 &d) : depth(d) { ++depth; }
             ~TryDepthGuard() { --depth; }
         } tryDepthGuard(activeTryDepth_);
         compileNode(node->children[0].get());
@@ -2254,14 +2254,14 @@ keel::u16 Compiler::compileWhile(const ASTNode *node)
     keel::usize loopStart = currentPos();
 
     // Compile condition
-    const int condMark = nextReg_;
+    const keel::i32 condMark = nextReg_;
     keel::u16 condReg = compileNode(node->children[0].get());
 
     // JMP_FALSE to end (placeholder)
     keel::usize exitPos = currentPos();
     emitAD(OpCode::JMP_FALSE, condReg, 0);
 
-    const int condFloor = condMark > maxVarReg_ ? condMark : maxVarReg_;
+    const keel::i32 condFloor = condMark > maxVarReg_ ? condMark : maxVarReg_;
     if (nextReg_ > condFloor)
         nextReg_ = condFloor;
 
@@ -2300,8 +2300,8 @@ keel::u16 Compiler::compileBreak(const ASTNode * /*node*/)
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: break outside of loop");
 
-    int triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
-    for (int i = 0; i < triesToPop; ++i)
+    keel::i32 triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
+    for (keel::i32 i = 0; i < triesToPop; ++i)
         emitA(OpCode::TRY_END, 0);
 
     if (loopStack_.back().isForLoop) {
@@ -2317,8 +2317,8 @@ keel::u16 Compiler::compileContinue(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
         throw std::runtime_error("Compiler: continue outside of loop");
-    int triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
-    for (int i = 0; i < triesToPop; ++i)
+    keel::i32 triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
+    for (keel::i32 i = 0; i < triesToPop; ++i)
         emitA(OpCode::TRY_END, 0);
     loopStack_.back().continuePatches.push_back(currentPos());
     emitD(OpCode::JMP, 0);
@@ -2554,11 +2554,11 @@ keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
         if (row->children.size() > kLiteralBlockMax) {
             keel::u16 dst = tempReg();
             emitA(OpCode::LOAD_EMPTY, dst);
-            const int mark = nextReg_;
+            const keel::i32 mark = nextReg_;
             for (auto &elem : row->children) {
                 keel::u16 v = compileNode(elem.get());
                 emitAB(OpCode::HORZCAT_APPEND, dst, v);
-                const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
+                const keel::i32 floor = mark > maxVarReg_ ? mark : maxVarReg_;
                 if (nextReg_ > floor) {
                     nextReg_ = floor;
                     constRegCache_.clear();
@@ -2598,11 +2598,11 @@ keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
     if (rowCount > kLiteralBlockMax) {
         keel::u16 dst = tempReg();
         emitA(OpCode::LOAD_EMPTY, dst);
-        const int mark = nextReg_;
+        const keel::i32 mark = nextReg_;
         for (auto &row : node->children) {
             keel::u16 rr = compileRow(row.get());
             emitAB(OpCode::VERTCAT_APPEND, dst, rr);
-            const int floor = mark > maxVarReg_ ? mark : maxVarReg_;
+            const keel::i32 floor = mark > maxVarReg_ ? mark : maxVarReg_;
             if (nextReg_ > floor) {
                 nextReg_ = floor;
                 constRegCache_.clear();
@@ -2702,7 +2702,7 @@ keel::u16 Compiler::compileIndexAssign(const ASTNode *node)
 }
 
 keel::u16 Compiler::compileIndexStore(const ASTNode *lhs, const ASTNode *rhs,
-                                    int inValReg, bool suppress)
+                                    keel::i32 inValReg, bool suppress)
 {
     // lhs = CALL or INDEX node; rhs = RHS expr (used only when valReg < 0)
 
@@ -2887,7 +2887,7 @@ keel::u16 Compiler::compileFieldAssign(const ASTNode *node)
 }
 
 keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
-                                    int inValReg, bool suppress)
+                                    keel::i32 inValReg, bool suppress)
 {
     // lhs = FIELD_ACCESS node; rhs = RHS expr (used only when valReg < 0)
 
@@ -3145,7 +3145,7 @@ keel::u16 Compiler::compileCellAssign(const ASTNode *node)
 }
 
 keel::u16 Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
-                                   int inValReg, bool suppress)
+                                   keel::i32 inValReg, bool suppress)
 {
     // lhs = CELL_INDEX node; rhs = RHS expr (used only when inValReg < 0)
     auto *target = lhs->children[0].get();
@@ -3209,7 +3209,7 @@ keel::u16 Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
 void Compiler::compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool suppress)
 {
     if (target->type != NodeType::IDENTIFIER && needsGeneralLValuePath(target)) {
-        compileLValueStore(target, nullptr, keel::as<int>(valReg), suppress);
+        compileLValueStore(target, nullptr, keel::as<keel::i32>(valReg), suppress);
         return;
     }
     switch (target->type) {
@@ -3275,7 +3275,7 @@ bool Compiler::needsGeneralLValuePath(const ASTNode *lhs) const
         return lhs->children[0]->type != NodeType::IDENTIFIER;
     case NodeType::FIELD_ACCESS: {
         const ASTNode *cur = lhs;
-        int fieldChainLen = 0;
+        keel::i32 fieldChainLen = 0;
         while (cur->type == NodeType::FIELD_ACCESS) {
             ++fieldChainLen;
             cur = cur->children[0].get();
@@ -3324,7 +3324,7 @@ struct LvAcc
 } // namespace
 
 keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
-                                     int inValReg, bool suppress)
+                                     keel::i32 inValReg, bool suppress)
 {
     // ── Flatten the accessor chain (root → outermost) ──
     keel::Array<LvAcc> acc;
@@ -3617,7 +3617,7 @@ keel::u16 Compiler::compileFused(const ASTNode *node, keel::usize ruleIdx,
     return res;
 }
 
-int Compiler::tryCompileFused(const ASTNode *node)
+keel::i32 Compiler::tryCompileFused(const ASTNode *node)
 {
     if (inFusionFallback_ || !engine_.fusionEnabled() || nextReg_ >= 65000)
         return -1;
@@ -3668,7 +3668,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     // Element-wise fusion fast path: if `node` matches a registered idiom, emit
     // FUSE_EWISE + the normally compiled idiom as fallback.
-    if (int r = tryCompileFused(node); r >= 0) return keel::as<keel::u16>(r);
+    if (keel::i32 r = tryCompileFused(node); r >= 0) return keel::as<keel::u16>(r);
 
     auto *funcNode = node->children[0].get();
 
@@ -4226,11 +4226,11 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
             auto isIdent = [](keel::StringRef s) {
                 if (s.empty())
                     return false;
-                unsigned char c0 = keel::as<unsigned char>(s[0]);
+                keel::u8 c0 = keel::as<keel::u8>(s[0]);
                 if (!keel::is_ascii_alpha(c0) && c0 != '_')
                     return false;
                 for (keel::usize k = 1; k < s.size(); ++k) {
-                    unsigned char ck = keel::as<unsigned char>(s[k]);
+                    keel::u8 ck = keel::as<keel::u8>(s[k]);
                     if (!keel::is_ascii_alnum(ck) && ck != '_')
                         return false;
                 }
@@ -4494,7 +4494,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     }
 
     // Case 2: @(params) expr — anonymous function with possible closure capture.
-    int id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
     keel::String anonName = keel::format("__anon_{}", id);
 
     // Build a synthetic function AST node
@@ -4721,7 +4721,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
 }
 
 keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
-                                   int explicitOutBase, keel::u16 nout)
+                                   keel::i32 explicitOutBase, keel::u16 nout)
 {
     const keel::String &base = superRef->strValue;
     const ASTNode *lhs = superRef->children[0].get();
@@ -5095,14 +5095,14 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
         keel::HashMap<keel::String, keel::u16> savedAllScopeUpvalBoxRegs;
         keel::HashMap<keel::String, NestedFuncInfo> savedNestedFuncInfo;
         const EnclosingLexicalContext *savedPendingLexicalCtx;
-        int savedNextReg;
-        int savedPeakReg;
-        int savedMaxVarReg;
+        keel::i32 savedNextReg;
+        keel::i32 savedPeakReg;
+        keel::i32 savedMaxVarReg;
         bool savedTopLevel;
         bool savedInFunctionBody;
         bool savedInFusionFallback;
         keel::u16 savedNargoutContext;
-        int savedActiveTryDepth;
+        keel::i32 savedActiveTryDepth;
         keel::u16 savedIdxArr;
         keel::u16 savedIdxDim;
         keel::u16 savedIdxNdims;
@@ -5680,9 +5680,9 @@ keel::String Compiler::disassemble(const BytecodeChunk &chunk)
 {
     keel::String os = keel::format("=== {} (regs={} params={} returns={}) ===\n",
                                    chunk.name,
-                                   (int) chunk.numRegisters,
-                                   (int) chunk.numParams,
-                                   (int) chunk.numReturns);
+                                   (keel::i32) chunk.numRegisters,
+                                   (keel::i32) chunk.numParams,
+                                   (keel::i32) chunk.numReturns);
 
     auto opName = [](OpCode op) -> const char * {
         switch (op) {
@@ -5936,11 +5936,11 @@ keel::String Compiler::disassemble(const BytecodeChunk &chunk)
         os.append(keel::format("[{}] {} a={} b={} c={} d={} e={}",
                                i,
                                opName(ins.op),
-                               (int) ins.a,
-                               (int) ins.b,
-                               (int) ins.c,
+                               (keel::i32) ins.a,
+                               (keel::i32) ins.b,
+                               (keel::i32) ins.c,
                                ins.d,
-                               (int) ins.e));
+                               (keel::i32) ins.e));
 
         if (ins.op == OpCode::LOAD_CONST
             && ins.d >= 0

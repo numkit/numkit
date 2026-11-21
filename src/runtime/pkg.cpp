@@ -43,7 +43,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                 if (s != "--all" && s != "-a") names.push_back(keel::move(s));
             }
         }
-        int rc = pm.update(names.as_ref());
+        keel::i32 rc = pm.update(names.as_ref());
         if (rc != 0) {
             throw Error("pkg update failed");
         }
@@ -79,7 +79,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             if (s == "--all" || s == "-a") installAll = true;
             else targets.push_back(keel::move(s));
         }
-        int rc = pm.installMany(targets.as_ref(), installAll);
+        keel::i32 rc = pm.installMany(targets.as_ref(), installAll);
         if (rc != 0) {
             throw Error("pkg install failed");
         }
@@ -103,7 +103,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         } else if (args.size() > 4) {
             throw Error("pkg load: too many arguments");
         }
-        int rc = pm.load(name.as_ref(), *ctx.engine, targetNs.as_ref());
+        keel::i32 rc = pm.load(name.as_ref(), *ctx.engine, targetNs.as_ref());
         if (rc != 0) {
             throw Error(keel::format("pkg load failed for '{}'", name));
         }
@@ -112,7 +112,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             throw Error("pkg remove: requires a package name argument");
         }
         keel::String name = args[1].toString();
-        int rc = pm.remove(name.as_ref());
+        keel::i32 rc = pm.remove(name.as_ref());
         if (rc != 0) {
             throw Error(keel::format("pkg remove failed for '{}'", name));
         }
@@ -120,7 +120,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         keel::String dir = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
                                ? args[1].toString()
                                : keel::String::from(".");
-        int rc = pm.build(dir.as_ref());
+        keel::i32 rc = pm.build(dir.as_ref());
         if (rc != 0) {
             throw Error(keel::format("pkg build failed for directory '{}'", dir));
         }

@@ -35,7 +35,7 @@ Value createMatrix(const Dims &dims, ValueType vt, keel::Allocator *mr)
         return Value::matrix3d(dims.dim(0), dims.dim(1), dims.dim(2), vt, mr);
     } else {
         keel::usize d[Dims::kMaxRank];
-        for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
+        for (keel::i32 i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
         return Value::matrixND(d, dims.ndims(), vt, mr);
     }
 }
@@ -59,7 +59,7 @@ Value createCell(const Dims &dims, keel::Allocator *mr)
         return Value::cell3D(dims.dim(0), dims.dim(1), dims.dim(2), mr);
     } else {
         keel::usize d[Dims::kMaxRank];
-        for (int i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
+        for (keel::i32 i = 0; i < dims.ndims(); ++i) d[i] = dims.dim(i);
         return Value::cellND(d, dims.ndims(), mr);
     }
 }
@@ -115,8 +115,8 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
         }
         const Dims &d = v.dims();
         keel::usize dimsBuf[Dims::kMaxRank];
-        const int nd = d.ndims();
-        for (int i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
+        const keel::i32 nd = d.ndims();
+        for (keel::i32 i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
         keel::matfile::MatArray cell = keel::matfile::MatArray::make_cell(
             keel::ArrayRef<keel::usize>(dimsBuf, keel::as<keel::usize>(nd)), alloc);
         for (keel::usize i = 0; i < v.numel(); ++i) {
@@ -133,10 +133,10 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
 
     const Dims &d = v.dims();
     keel::usize dimsBuf[Dims::kMaxRank];
-    int nd = d.ndims();
+    keel::i32 nd = d.ndims();
     while (nd > 2 && d.dim(nd - 1) == 1) --nd;
     if (nd < 2) nd = 2;
-    for (int i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
+    for (keel::i32 i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
     const keel::ArrayRef<keel::usize> dimsRef(dimsBuf, keel::as<keel::usize>(nd));
     const keel::usize numElems = d.numel();
 
@@ -248,9 +248,9 @@ Value matArrayToValue(const keel::matfile::MatArray &arr, keel::Allocator *mr)
     if (arr.rank() > keel::as<keel::usize>(Dims::kMaxRank)) {
         throw Error("load: MAT5 array rank exceeds maximum supported rank");
     }
-    const int nd = arr.rank() < 2 ? 2 : keel::as<int>(arr.rank());
+    const keel::i32 nd = arr.rank() < 2 ? 2 : keel::as<keel::i32>(arr.rank());
     keel::usize d[Dims::kMaxRank];
-    for (int i = 0; i < nd; ++i) {
+    for (keel::i32 i = 0; i < nd; ++i) {
         d[i] = (keel::as<keel::usize>(i) < arr.rank()) ? arr.dims[keel::as<keel::usize>(i)] : keel::usize{1};
     }
     const Dims shape(d, nd);
@@ -358,7 +358,7 @@ Value matArrayToValue(const keel::matfile::MatArray &arr, keel::Allocator *mr)
 void saveMat(Engine &engine, Environment &env,
              keel::StringRef filename,
              keel::ArrayRef<keel::String> varnames,
-             int matVersion)
+             keel::i32 matVersion)
 {
     auto resolved = engine.resolvePath(filename);
     if (!resolved.fs)

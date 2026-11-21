@@ -74,8 +74,8 @@ void TreeWalker::displayValue(keel::StringRef name, const Value &val)
 // Returns true and sets `outIdx` if the index expression evaluates to a scalar integer.
 bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
                                        const Value &array,
-                                       int dim,
-                                       int ndims,
+                                       keel::i32 dim,
+                                       keel::i32 ndims,
                                        Environment *env,
                                        keel::usize &outIdx)
 {
@@ -91,9 +91,9 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
             keel::usize sz;
             if (ndims == 1) {
                 sz = array.numel();
-            } else if (dim == ndims - 1 && array.dims().ndim() > keel::as<int>(ndims)) {
+            } else if (dim == ndims - 1 && array.dims().ndim() > keel::as<keel::i32>(ndims)) {
                 sz = 1;
-                for (int d = dim; d < array.dims().ndim(); ++d)
+                for (keel::i32 d = dim; d < array.dims().ndim(); ++d)
                     sz *= array.dims().dimSize(d);
             } else {
                 sz = array.dims().dimSize(dim);
@@ -114,7 +114,7 @@ bool TreeWalker::tryResolveScalarIndex(const ASTNode *indexExpr,
 }
 
 keel::Array<keel::usize> TreeWalker::resolveIndex(
-    const ASTNode *indexExpr, const Value &array, int dim, int ndims, Environment *env)
+    const ASTNode *indexExpr, const Value &array, keel::i32 dim, keel::i32 ndims, Environment *env)
 {
     IndexContextGuard guard(indexContextStack_, {&array, dim, ndims});
 
@@ -128,7 +128,7 @@ keel::Array<keel::usize> TreeWalker::resolveIndex(
             sz = array.numel();
         } else if (dim == ndims - 1 && array.dims().ndim() > ndims) {
             sz = 1;
-            for (int d = dim; d < array.dims().ndim(); ++d)
+            for (keel::i32 d = dim; d < array.dims().ndim(); ++d)
                 sz *= array.dims().dimSize(d);
         } else {
             sz = array.dims().dimSize(dim);
@@ -561,7 +561,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
             args.reserve(nargs + 1);
             for (keel::usize i = 0; i < nargs; ++i) {
                 IndexContextGuard guard(indexContextStack_,
-                                        {var, keel::as<int>(i), keel::as<int>(nargs)});
+                                        {var, keel::as<keel::i32>(i), keel::as<keel::i32>(nargs)});
                 args.push_back(execNode(lhs->children[i + 1].get(), env));
             }
             args.push_back(rhs);
@@ -602,12 +602,12 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 const ASTNode *sub = lhs->children[d + 1].get();
                 if ((var->isUnset() || var->isEmpty())
                     && sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
-                    const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(keel::as<int>(d));
+                    const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(keel::as<keel::i32>(d));
                     perDim[d].resize(n);
                     for (keel::usize k = 0; k < n; ++k) perDim[d][k] = k;
                 } else {
                     perDim[d] = resolveIndex(sub, *var,
-                                             keel::as<int>(d), keel::as<int>(nargs), env);
+                                             keel::as<keel::i32>(d), keel::as<keel::i32>(nargs), env);
                 }
             }
             engine_.objectStoreSlice(*var, perDim, rhs, env);
@@ -759,7 +759,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         for (auto p : pageIdx)
             maxP = std::max(maxP, p + 1);
         if (var->isEmpty() && (!rhs.isScalar() || (var->dims().rows() == 0 && var->dims().cols() == 0 && !rhs.isEmpty()))) {
-            const int nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
+            const keel::i32 nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
             const keel::usize nonColonProd = (riColon ? 1 : rowIdx.size())
                                       * (ciColon ? 1 : colIdx.size())
                                       * (piColon ? 1 : pageIdx.size());
@@ -773,16 +773,16 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 maxP = rhs.dims().pages();
             } else if (nColons > 0) {
                 keel::usize rCursor = 0;
-                int colonsLeft = nColons;
+                keel::i32 colonsLeft = nColons;
                 auto nextRhsDim = [&]() -> keel::usize {
                     while (rCursor < keel::as<keel::usize>(rhs.dims().ndim())
-                           && rhs.dims().dim(keel::as<int>(rCursor)) == 1
+                           && rhs.dims().dim(keel::as<keel::i32>(rCursor)) == 1
                            && (keel::as<keel::usize>(rhs.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
                         ++rCursor;
                     }
                     --colonsLeft;
                     return (rCursor < keel::as<keel::usize>(rhs.dims().ndim()))
-                               ? rhs.dims().dim(keel::as<int>(rCursor++))
+                               ? rhs.dims().dim(keel::as<keel::i32>(rCursor++))
                                : 1;
                 };
                 if (riColon) maxR = nextRhsDim();
@@ -811,11 +811,11 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     } else {
         // ND assign: nargs >= 4. indexSetND auto-grows the target rank
         // (and per-axis size) to fit any out-of-range subscripts.
-        const int nd = keel::as<int>(nargs);
+        const keel::i32 nd = keel::as<keel::i32>(nargs);
         keel::Array<keel::Array<keel::usize>> idxLists(keel::as<keel::usize>(nd));
         keel::Array<const keel::usize *> idxPtrs(nd);
         keel::Array<keel::usize> idxCounts(nd);
-        for (int i = 0; i < nd; ++i) {
+        for (keel::i32 i = 0; i < nd; ++i) {
             idxLists[i] = resolveIndex(lhs->children[i + 1].get(), *var, i, nd, env);
             idxPtrs[i] = idxLists[i].data();
             idxCounts[i] = idxLists[i].size();
@@ -871,11 +871,11 @@ Value &TreeWalker::resolveCellSlot(const ASTNode *node, Environment *env)
     keel::Array<keel::usize> coords(nidx);
     for (keel::usize i = 0; i < nidx; ++i) {
         IndexContextGuard guard(indexContextStack_,
-                                {var, keel::as<int>(i), keel::as<int>(nidx)});
+                                {var, keel::as<keel::i32>(i), keel::as<keel::i32>(nidx)});
         Value v = execNode(node->children[i + 1].get(), env);
         coords[i] = Value::checkedScalarIndex(v.toScalar());
     }
-    keel::usize linear = var->growCellTo(coords.data(), keel::as<int>(nidx), engine_.mr_);
+    keel::usize linear = var->growCellTo(coords.data(), keel::as<keel::i32>(nidx), engine_.mr_);
     return var->cellAt(linear);
 }
 
@@ -902,7 +902,7 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
         keel::Array<keel::usize> coords(nargs);
         for (keel::usize a = 0; a < nargs; ++a) {
             IndexContextGuard guard(indexContextStack_,
-                                    {var, keel::as<int>(a), keel::as<int>(nargs)});
+                                    {var, keel::as<keel::i32>(a), keel::as<keel::i32>(nargs)});
             Value v = execNode(objNode->children[a + 1].get(), env);
             coords[a] = Value::checkedScalarIndex(v.toScalar());
         }
@@ -911,7 +911,7 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
             linear = coords[0];
             var->growStructArrayTo(linear, engine_.mr_); // preserves row/col vector shape
         } else {
-            linear = var->growStructArrayND(coords.data(), keel::as<int>(nargs),
+            linear = var->growStructArrayND(coords.data(), keel::as<keel::i32>(nargs),
                                             engine_.mr_);
         }
 
@@ -999,7 +999,7 @@ void TreeWalker::execCellAssign(const ASTNode *lhs, const Value &rhs, Environmen
                 args.reserve(nidx + 1);
                 for (keel::usize i = 0; i < nidx; ++i) {
                     IndexContextGuard guard(indexContextStack_,
-                                            {&baseObj, keel::as<int>(i), keel::as<int>(nidx)});
+                                            {&baseObj, keel::as<keel::i32>(i), keel::as<keel::i32>(nidx)});
                     args.push_back(execNode(lhs->children[i + 1].get(), env));
                 }
                 args.push_back(rhs);
@@ -1362,12 +1362,12 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
         keel::Array<keel::usize> perDimCount(nargs);
         for (keel::usize i = 0; i < nargs; ++i) {
             perDim[i] = resolveIndex(lhs->children[i + 1].get(), *var,
-                                     keel::as<int>(i), keel::as<int>(nargs), env);
+                                     keel::as<keel::i32>(i), keel::as<keel::i32>(nargs), env);
             perDimPtrs[i]  = perDim[i].data();
             perDimCount[i] = perDim[i].size();
         }
         var->indexDeleteND(perDimPtrs.data(), perDimCount.data(),
-                           keel::as<int>(nargs), engine_.mr_);
+                           keel::as<keel::i32>(nargs), engine_.mr_);
     }
     return Value();
 }
@@ -1426,7 +1426,7 @@ Value TreeWalker::execBinaryOp(const ASTNode *node, Environment *env)
     // declined kernel falls back to the normal per-op path below.
     if (engine_.fusionEnabled()) {
         const ASTNode *probe = node;
-        int spineDepth = 0;
+        keel::i32 spineDepth = 0;
         while (probe->type == NodeType::BINARY_OP && ++spineDepth <= 5)
             probe = probe->children[0].get();
         if (spineDepth <= 5) {
@@ -1845,7 +1845,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
                 args.reserve(nsub);
                 for (keel::usize i = 0; i < nsub; ++i) {
                     IndexContextGuard guard(indexContextStack_,
-                                            {var, keel::as<int>(i), keel::as<int>(nsub)});
+                                            {var, keel::as<keel::i32>(i), keel::as<keel::i32>(nsub)});
                     Value v = execNodeExpand(node->children[i + 1].get(), env);
                     if (v.isCsl())
                         for (keel::usize k = 0; k < v.cslCount(); ++k)
@@ -2048,11 +2048,11 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
     }
     // ND read: nargs >= 4
     {
-        const int nd = keel::as<int>(nargs);
+        const keel::i32 nd = keel::as<keel::i32>(nargs);
         keel::Array<keel::Array<keel::usize>> idxLists(keel::as<keel::usize>(nd));
         keel::Array<const keel::usize *> idxPtrs(nd);
         keel::Array<keel::usize> idxCounts(nd);
-        for (int i = 0; i < nd; ++i) {
+        for (keel::i32 i = 0; i < nd; ++i) {
             idxLists[i] = resolveIndex(callNode->children[i + 1].get(), var, i, nd, env);
             idxPtrs[i] = idxLists[i].data();
             idxCounts[i] = idxLists[i].size();
@@ -2107,15 +2107,15 @@ Value TreeWalker::execCellIndex(const ASTNode *node, Environment *env)
     // ND brace-cell read (nidx ≥ 4): column-major linear index, bounds-checked.
     keel::Array<keel::usize> coords(nidx);
     for (keel::usize i = 0; i < nidx; ++i) {
-        IndexContextGuard guard(indexContextStack_, {&obj, keel::as<int>(i),
-                                                     keel::as<int>(nidx)});
+        IndexContextGuard guard(indexContextStack_, {&obj, keel::as<keel::i32>(i),
+                                                     keel::as<keel::i32>(nidx)});
         Value v = execNode(node->children[i + 1].get(), env);
         coords[i] = Value::checkedScalarIndex(v.toScalar());
     }
     const auto &d = obj.dims();
     keel::usize idx = 0, stride = 1;
     for (keel::usize i = 0; i < nidx; ++i) {
-        const keel::usize lim = (keel::as<int>(i) < d.ndim()) ? d.dim(keel::as<int>(i)) : 1;
+        const keel::usize lim = (keel::as<keel::i32>(i) < d.ndim()) ? d.dim(keel::as<keel::i32>(i)) : 1;
         if (coords[i] >= lim) {
             auto msg = keel::format("Cell index out of bounds (dim {}: {} > {})",
                                     i + 1, coords[i] + 1, lim);
@@ -2142,7 +2142,7 @@ keel::Array<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
             args.reserve(nidx);
             for (keel::usize i = 0; i < nidx; ++i) {
                 IndexContextGuard guard(indexContextStack_,
-                                        {&obj, keel::as<int>(i), keel::as<int>(nidx)});
+                                        {&obj, keel::as<keel::i32>(i), keel::as<keel::i32>(nidx)});
                 args.push_back(execNode(node->children[i + 1].get(), env));
             }
             Value outBuf[1];
@@ -2936,7 +2936,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     if (!node->strValue.empty() && node->children.empty()) {
         if (env) {
             if (const UserFunction *nf = env->findNestedFunc(node->strValue)) {
-                int nid = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+                keel::i32 nid = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
                 keel::String nestedHandleId = keel::format("__nested_fh_{}", nid);
                 UserFunction escaped = nf->clone();
                 if (!escaped.closureEnv)
@@ -2955,7 +2955,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     // Engine-wide counter (shared with the VM compiler) — see the comment
     // on Engine::anonNameCounter_: a TreeWalker-executed literal must never
     // mint an id a compiled chunk already owns.
-    int id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
     keel::String anonName = keel::format("__anon_{}", id);
 
     UserFunction uf;

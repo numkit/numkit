@@ -150,7 +150,7 @@ void cumtrapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     // cumtrapz(X, Y, dim): X is a coordinate vector of length size(Y,dim)
     // (MATLAB), broadcast across the other dimension. nk also accepts
     // an X matrix the same size as Y (per-element spacing — extension).
-    const int dim = argcheck::dimArg(args[2], "cumtrapz");
+    const keel::i32 dim = argcheck::dimArg(args[2], "cumtrapz");
     const Value &x = args[0], &y = args[1];
     if (x.type() == ValueType::COMPLEX)
         throw Error("cumtrapz: the X coordinate must be real",
@@ -196,11 +196,11 @@ void gk15_nodes_reg(keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, kee
     Value xk = Value::matrix(1, 15, ValueType::DOUBLE, mr);
     Value wk = Value::matrix(1, 15, ValueType::DOUBLE, mr);
     Value wg = Value::matrix(1, 7, ValueType::DOUBLE, mr);
-    for (int i = 0; i < 15; ++i) {
+    for (keel::i32 i = 0; i < 15; ++i) {
         xk.doubleDataMut()[i] = kKronrodX[i];
         wk.doubleDataMut()[i] = kKronrodW[i];
     }
-    for (int i = 0; i < 7; ++i)
+    for (keel::i32 i = 0; i < 7; ++i)
         wg.doubleDataMut()[i] = kGaussW[i];
     if (outs.size() >= 1) outs[0] = std::move(xk);
     if (outs.size() >= 2) outs[1] = std::move(wk);
@@ -364,7 +364,7 @@ void trapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         return;
     }
     // trapz(X, Y, dim): integrate Y along dim with X spacing.
-    const int dim = argcheck::dimArg(args[2], "trapz");
+    const keel::i32 dim = argcheck::dimArg(args[2], "trapz");
     const keel::usize along = (dim != 2) ? a1.dims().rows() : a1.dims().cols();
     if (a0.numel() != along)
         throw Error("trapz: numel(x) must match size(y, dim)",

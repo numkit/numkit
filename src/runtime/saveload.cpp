@@ -33,7 +33,7 @@ void loadAscii(Engine &engine, Environment &env,
 void saveMat(Engine &engine, Environment &env,
              keel::StringRef filename,
              keel::ArrayRef<keel::String> varnames,
-             int matVersion);
+             keel::i32 matVersion);
 
 void loadMat(Engine &engine, Environment &env,
              keel::StringRef filename,
@@ -74,7 +74,7 @@ void save(Engine &engine, Environment &env, keel::ArrayRef<Value> args)
     // matVersion follows MATLAB-flag convention: 4 = MAT4, 5/6 = MAT5,
     // 7 = MAT5 + zlib. `-mat` alone (no version suffix) defaults to 5.
     // Whichever `-vN` appears last wins (mirrors MATLAB).
-    int matVersion = 5;
+    keel::i32 matVersion = 5;
 
     keel::ArenaTemp scratch = keel::get_scratch(engine.allocator());
     keel::Array<keel::String> varnames(scratch.allocator());

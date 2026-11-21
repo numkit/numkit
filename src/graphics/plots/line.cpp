@@ -455,7 +455,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             const keel::String xJsonStr = xs.take();
 
             // Emit datasets c = Yc-1 down to 0 (topmost band first).
-            for (long long cc = (long long)Yc - 1; cc >= 0; --cc) {
+            for (keel::i64 cc = (keel::i64)Yc - 1; cc >= 0; --cc) {
                 DatasetInfo ds;
                 ds.type.assign("area");
                 ds.xJson = xJsonStr.clone();
@@ -524,12 +524,12 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             a = args[1].elemAsDouble(0);
             b = args[1].elemAsDouble(1);
         }
-        const int N = 200;
+        const keel::i32 N = 200;
         auto *mr = gc.mr;
 
         StrBuf xs, ys;
         xs << '['; ys << '[';
-        for (int i = 0; i < N; ++i) {
+        for (keel::i32 i = 0; i < N; ++i) {
             const keel::f64 x = a + (b - a) * i / (keel::f64)(N - 1);
             Value xv = Value::scalar(x, mr);
             keel::StaticArray<Value, 1> argv{ xv };
@@ -583,13 +583,13 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
     // through the existing contour / surf paths. We stitch a Z matrix
     // value via Value::matrix and proxy the call.
     auto sampleGrid = [](const Value &fh, keel::f64 xa, keel::f64 xb,
-                          keel::f64 ya, keel::f64 yb, int N,
+                          keel::f64 ya, keel::f64 yb, keel::i32 N,
                           GraphicsContext &gc) {
         auto *mr = gc.mr;
         Value Z = Value::matrix((keel::usize)N, (keel::usize)N, ValueType::DOUBLE, mr);
-        for (int i = 0; i < N; ++i) {
+        for (keel::i32 i = 0; i < N; ++i) {
             const keel::f64 y = ya + (yb - ya) * i / (keel::f64)(N - 1);
-            for (int j = 0; j < N; ++j) {
+            for (keel::i32 j = 0; j < N; ++j) {
                 const keel::f64 x = xa + (xb - xa) * j / (keel::f64)(N - 1);
                 Value xv = Value::scalar(x, mr);
                 Value yv = Value::scalar(y, mr);
@@ -624,14 +624,14 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 xb = args[1].elemAsDouble(1);
                 ya = xa; yb = xb;
             }
-            const int N = 30;
+            const keel::i32 N = 30;
             auto *mr = gc.mr;
             Value Z = sampleGrid(args[0], xa, xb, ya, yb, N, gc);
             Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
             Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
-            for (int j = 0; j < N; ++j)
+            for (keel::i32 j = 0; j < N; ++j)
                 Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (keel::f64)(N - 1);
-            for (int i = 0; i < N; ++i)
+            for (keel::i32 i = 0; i < N; ++i)
                 Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (keel::f64)(N - 1);
             // Forward to the engine-registered `contour` builtin so the
             // marching-squares body is reused as-is.
@@ -659,14 +659,14 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             xb = args[1].elemAsDouble(1);
             ya = xa; yb = xb;
         }
-        const int N = 30;
+        const keel::i32 N = 30;
         auto *mr = gc.mr;
         Value Z = sampleGrid(args[0], xa, xb, ya, yb, N, gc);
         Value Xv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
         Value Yv = Value::matrix(1, (keel::usize)N, ValueType::DOUBLE, mr);
-        for (int j = 0; j < N; ++j)
+        for (keel::i32 j = 0; j < N; ++j)
             Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (keel::f64)(N - 1);
-        for (int i = 0; i < N; ++i)
+        for (keel::i32 i = 0; i < N; ++i)
             Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (keel::f64)(N - 1);
         keel::StaticArray<Value, 3> proxied{ Xv, Yv, Z };
         keel::StaticArray<Value, 1> outBuf;
@@ -697,12 +697,12 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 a = args[3].elemAsDouble(0);
                 b = args[3].elemAsDouble(1);
             }
-            const int N = 200;
+            const keel::i32 N = 200;
             auto *mr = gc.mr;
 
             StrBuf xs, ys, zs;
             xs << '['; ys << '['; zs << '[';
-            for (int i = 0; i < N; ++i) {
+            for (keel::i32 i = 0; i < N; ++i) {
                 const keel::f64 t = a + (b - a) * i / (keel::f64)(N - 1);
                 Value tv = Value::scalar(t, mr);
                 keel::StaticArray<Value, 1> argv{ tv };
@@ -818,9 +818,9 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         if (autoSlice) {
             // 5×5 evenly spaced inside the grid (1 cell margin so the
             // first integration step has data on every side).
-            const int nS = 5;
-            for (int j = 0; j < nS; ++j) {
-                for (int i = 0; i < nS; ++i) {
+            const keel::i32 nS = 5;
+            for (keel::i32 j = 0; j < nS; ++j) {
+                for (keel::i32 i = 0; i < nS; ++i) {
                     const keel::f64 x = xMin + (xMax - xMin) * (i + 0.5) / nS;
                     const keel::f64 y = yMin + (yMax - yMin) * (j + 0.5) / nS;
                     seeds.emplace_back(x, y);
@@ -839,14 +839,14 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         // points to xs/ys (with a leading null when we already have
         // points from a prior trace).
         const keel::f64 h = std::min(dxAvg, dyAvg) * 0.4;
-        const int maxSteps = 800;
+        const keel::i32 maxSteps = 800;
         const keel::f64 eps = 1e-9;
 
-        const auto traceFrom = [&](keel::f64 x0, keel::f64 y0, int dir,
+        const auto traceFrom = [&](keel::f64 x0, keel::f64 y0, keel::i32 dir,
                                    StrBuf &xs,
                                    StrBuf &ys, keel::usize &count) {
             keel::f64 x = x0, y = y0;
-            for (int step = 0; step < maxSteps; ++step) {
+            for (keel::i32 step = 0; step < maxSteps; ++step) {
                 keel::f64 u, v;
                 if (!sampleField(x, y, u, v)) break;
                 const keel::f64 mag = std::hypot(u, v);
@@ -1306,7 +1306,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             edgeTris.reserve(tris.size() * 3);
             for (keel::usize t = 0; t < tris.size(); ++t) {
                 const auto &T = tris[t];
-                for (int e = 0; e < 3; ++e) {
+                for (keel::i32 e = 0; e < 3; ++e) {
                     keel::usize u = T[e], v = T[(e + 1) % 3];
                     if (u > v) std::swap(u, v);
                     edgeTris.push_back(EdgeTri{u, v, t});

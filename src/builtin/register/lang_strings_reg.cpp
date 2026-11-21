@@ -202,7 +202,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     for (keel::usize k = optStart; k + 1 < args.size(); k += 2) {
         keel::String name = args[k].toString();
         std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char ch) { return keel::to_ascii_lower(ch); });
+                       [](keel::u8 ch) { return keel::to_ascii_lower(ch); });
         if (name == "collapsedelimiters")
             collapse = !args[k + 1].isEmpty() && args[k + 1].toScalar() != 0.0;
         // DelimiterType='RegularExpression' is not supported (literal only).
@@ -315,7 +315,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 {
     argcheck::checkNargin(args.size(), 1, 3, "mat2str");
     auto *mr = ctx.engine->allocator();
-    int prec = 15;
+    keel::i32 prec = 15;
     bool withClass = false;
     // Trailing args (in any order): a numeric precision, and/or the literal
     // 'class' flag which wraps the output with the class name
@@ -325,7 +325,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         if (a.type() == ValueType::CHAR || a.isString()) {
             keel::String s = a.toString();
             std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char ch) { return keel::to_ascii_lower(ch); });
+                           [](keel::u8 ch) { return keel::to_ascii_lower(ch); });
             if (s == "class") withClass = true;
         } else if (!a.isEmpty()) {
             prec = argcheck::expectedInteger(
@@ -502,10 +502,10 @@ bool parseBetweenBoundaries(keel::ArrayRef<Value> args, keel::usize startIdx, co
         argcheck::checkNargin(args.size(), startIdx, startIdx, fn);
     }
     argcheck::expectedChoice(args[startIdx], {"boundaries"},
-                             keel::as<int>(startIdx + 1), "Name", fn);
+                             keel::as<keel::i32>(startIdx + 1), "Name", fn);
     const keel::usize b = argcheck::expectedChoice(
         args[startIdx + 1], {"inclusive", "exclusive"},
-        keel::as<int>(startIdx + 2), "Boundaries", fn);
+        keel::as<keel::i32>(startIdx + 2), "Boundaries", fn);
     return b == 0;
 }
 
@@ -546,7 +546,7 @@ void replaceBetween_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayR
 void dec2bin_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "dec2bin");
-    int n = (args.size() >= 2 && !args[1].isEmpty())
+    keel::i32 n = (args.size() >= 2 && !args[1].isEmpty())
               ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "n", "dec2bin"), 2, "n", "dec2bin") : 0;
     outs[0] = dec2bin(args[0], n, ctx.engine->allocator());
@@ -555,7 +555,7 @@ void dec2bin_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 void dec2hex_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "dec2hex");
-    int n = (args.size() >= 2 && !args[1].isEmpty())
+    keel::i32 n = (args.size() >= 2 && !args[1].isEmpty())
               ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "n", "dec2hex"), 2, "n", "dec2hex") : 0;
     outs[0] = dec2hex(args[0], n, ctx.engine->allocator());
@@ -592,8 +592,8 @@ void dec2base_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     const keel::f64 bv = argcheck::expectedReal(args[1], 2, "base", "dec2base");
     argcheck::expectedInteger(bv, 2, "base", "dec2base");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "dec2base");
-    const int base = keel::as<int>(bv);
-    const int len  = (args.size() >= 3 && !args[2].isEmpty())
+    const keel::i32 base = keel::as<keel::i32>(bv);
+    const keel::i32 len  = (args.size() >= 3 && !args[2].isEmpty())
                        ? argcheck::expectedInteger(
         argcheck::expectedReal(args[2], 3, "len", "dec2base"), 3, "len", "dec2base") : 0;
     outs[0] = dec2base(args[0], base, len, ctx.engine->allocator());
@@ -606,7 +606,7 @@ void base2dec_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     const keel::f64 bv = argcheck::expectedReal(args[1], 2, "base", "base2dec");
     argcheck::expectedInteger(bv, 2, "base", "base2dec");
     argcheck::expectedBetween(bv, 2, 36, 2, "base", "base2dec");
-    const int base = keel::as<int>(bv);
+    const keel::i32 base = keel::as<keel::i32>(bv);
     outs[0] = base2dec(args[0], base, ctx.engine->allocator());
 }
 
@@ -664,7 +664,7 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
 void rats_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 2, "rats");
-    int len = (args.size() >= 2 && !args[1].isEmpty())
+    keel::i32 len = (args.size() >= 2 && !args[1].isEmpty())
                   ? argcheck::expectedInteger(
         argcheck::expectedReal(args[1], 2, "len", "rats"), 2, "len", "rats") : 13;
     outs[0] = rats(args[0], len, ctx.engine->allocator());

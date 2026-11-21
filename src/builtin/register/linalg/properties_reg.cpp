@@ -62,7 +62,7 @@ void cond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         return;
     }
     const Value &p = args[1];
-    int p_kind = 2;
+    keel::i32 p_kind = 2;
     if (p.isChar() || p.isString()) {
         const keel::String s = p.toString();
         if      (s == "fro" || s == "Fro") p_kind = 4;

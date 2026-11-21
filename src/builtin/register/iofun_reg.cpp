@@ -31,7 +31,7 @@ namespace numkit::builtin::detail {
 
 static void jsonEscapeAppend(keel::StringRef s, keel::String &out) {
     out.push_back('\"');
-    for (unsigned char c : s) {
+    for (keel::u8 c : s) {
         if (c == '\"') out.append("\\\"");
         else if (c == '\\') out.append("\\\\");
         else if (c == '\n') out.append("\\n");

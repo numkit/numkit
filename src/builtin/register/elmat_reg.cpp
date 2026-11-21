@@ -313,14 +313,14 @@ void register_elmat(Engine &engine) {
             const ValueType outType = (x.type() == ValueType::SINGLE) ? ValueType::SINGLE : ValueType::DOUBLE;
             if (x.isEmpty()) {
                 keel::usize dArr[Dims::kMaxRank];
-                int nd = x.dims().ndims();
-                for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+                keel::i32 nd = x.dims().ndims();
+                for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
                 outs[0] = Value::matrixND(dArr, nd, outType, mr);
                 return;
             }
             keel::usize dArr[Dims::kMaxRank];
-            int nd = x.dims().ndims();
-            for (int d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+            keel::i32 nd = x.dims().ndims();
+            for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
             Value out = Value::matrixND(dArr, nd, outType, mr);
             const keel::usize n = x.numel();
             if (outType == ValueType::SINGLE) {

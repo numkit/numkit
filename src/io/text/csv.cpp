@@ -178,7 +178,7 @@ keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC
 
     auto writeCell = [&](keel::f64 v) {
         char buf[32];
-        int len = std::snprintf(buf, sizeof(buf), "%.15g", v);
+        keel::i32 len = std::snprintf(buf, sizeof(buf), "%.15g", v);
         if (len > 0)
             out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
     };

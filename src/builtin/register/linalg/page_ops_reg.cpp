@@ -85,7 +85,7 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     auto *mr = ctx.engine->allocator();
     if (p == -2.0) {
         detail::requireDoubleInput(args[0], "pagenorm");
-        const int nd = args[0].dims().ndim();
+        const keel::i32 nd = args[0].dims().ndim();
         if (nd < 2 || nd > 3)
             throw Error("pagenorm: input must be 2-D or 3-D",
                         0, 0, "pagenorm", "", "numkit:pagenorm:badDim");

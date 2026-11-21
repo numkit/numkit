@@ -264,9 +264,9 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::usize L = 0;
     while (L < args.size() && isData(args[L])) ++L;
 
-    int maxNd = 2;
+    keel::i32 maxNd = 2;
     for (keel::usize i = 0; i < L; ++i) {
-        const int nd = args[i].dims().is3D() ? 3
+        const keel::i32 nd = args[i].dims().is3D() ? 3
                      : (args[i].dims().ndim() <= 2 ? 2 : args[i].dims().ndim());
         if (nd > maxNd) maxNd = nd;
     }
@@ -280,9 +280,9 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         return;
     }
 
-    const int N = (maxNd >= 4) ? maxNd
-                : (L >= 5 && (L % 2 == 1) ? keel::as<int>((L - 1) / 2)
-                                          : keel::as<int>(L - 1));
+    const keel::i32 N = (maxNd >= 4) ? maxNd
+                : (L >= 5 && (L % 2 == 1) ? keel::as<keel::i32>((L - 1) / 2)
+                                          : keel::as<keel::i32>(L - 1));
     if (N < 4 || (L != keel::as<keel::usize>(N + 1) && L != keel::as<keel::usize>(2 * N + 1))) {
         throw Error("interpn: invalid number of arguments for N-D interpolation",
                      0, 0, "interpn", "", "numkit:interpn:nargin");
@@ -310,7 +310,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::usize> vShape(N, sa);
     keel::Array<keel::usize> vStrides(N, keel::usize(1), sa);
     keel::usize strideAcc = 1;
-    for (int d = 0; d < N; ++d) {
+    for (keel::i32 d = 0; d < N; ++d) {
         const keel::usize sd = (d < V.dims().ndim()) ? keel::as<keel::usize>(V.dims().dim(d)) : 1;
         if (sd < 2)
             throw Error("interpn: each dimension of V must have length >= 2",
@@ -323,7 +323,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // Extract 1-D grid coordinate vectors along each axis d = 0..N-1.
     keel::Array<keel::Array<keel::f64>> grids(sa);
     grids.reserve(N);
-    for (int d = 0; d < N; ++d) {
+    for (keel::i32 d = 0; d < N; ++d) {
         const keel::usize sd = vShape[keel::as<keel::usize>(d)];
         keel::Array<keel::f64> gdVec(sd, sa);
         if (!hasGrids) {
@@ -347,7 +347,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const Value &Xq0 = args[qStart];
     const keel::usize nQuery = Xq0.numel();
     keel::Array<keel::usize> outShape(Xq0.dims().ndim(), sa);
-    for (int k = 0; k < Xq0.dims().ndim(); ++k)
+    for (keel::i32 k = 0; k < Xq0.dims().ndim(); ++k)
         outShape[keel::as<keel::usize>(k)] = keel::as<keel::usize>(Xq0.dims().dim(k));
     Value out = Value::matrixND(outShape.data(), Xq0.dims().ndim(), ValueType::DOUBLE,
                                 mr);
@@ -359,7 +359,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     for (keel::usize q = 0; q < nQuery; ++q) {
         bool outOfBounds = false;
-        for (int d = 0; d < N; ++d) {
+        for (keel::i32 d = 0; d < N; ++d) {
             const Value &Xqd = args[qStart + keel::as<keel::usize>(d)];
             const keel::f64 xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
             const auto &g = grids[keel::as<keel::usize>(d)];
@@ -380,7 +380,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         }
         if (isNearest) {
             keel::usize lin = 0;
-            for (int d = 0; d < N; ++d) {
+            for (keel::i32 d = 0; d < N; ++d) {
                 const keel::usize pick = idx0[keel::as<keel::usize>(d)]
                                   + (frac[keel::as<keel::usize>(d)] >= 0.5 ? 1 : 0);
                 lin += pick * vStrides[keel::as<keel::usize>(d)];
@@ -391,7 +391,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             for (keel::usize mask = 0; mask < nCorners; ++mask) {
                 keel::f64 w = 1.0;
                 keel::usize lin = 0;
-                for (int d = 0; d < N; ++d) {
+                for (keel::i32 d = 0; d < N; ++d) {
                     const bool hi = ((mask >> d) & 1u) != 0;
                     const keel::f64 fd = frac[keel::as<keel::usize>(d)];
                     w *= hi ? fd : (1.0 - fd);

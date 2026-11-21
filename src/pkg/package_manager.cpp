@@ -192,9 +192,9 @@ sys::ProcessResult runArgvOwned(keel::ArrayRef<keel::String> ownedArgs)
 }
 
 struct SemVerTag {
-    int major = 0;
-    int minor = 0;
-    int patch = 0;
+    keel::i32 major = 0;
+    keel::i32 minor = 0;
+    keel::i32 patch = 0;
     keel::String raw;  // e.g. "v1.0.0"
 
     bool operator<(const SemVerTag &o) const
@@ -212,7 +212,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
         return false;
 
     keel::StringRef rem = tag.substr(1);
-    keel::SmallArray<int, 4> nums;
+    keel::SmallArray<keel::i32, 4> nums;
     while (true) {
         keel::usize dot = rem.find('.');
         keel::StringRef part = (dot == keel::kInvalidIndex) ? rem : rem.substr(0, dot);
@@ -224,7 +224,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
         auto parsed = keel::parse_i64(part);
         if (!parsed.is_ok())
             return false;
-        nums.push_back(keel::as<int>(*parsed));
+        nums.push_back(keel::as<keel::i32>(*parsed));
         if (dot == keel::kInvalidIndex)
             break;
         rem = rem.substr(dot + 1);
@@ -243,7 +243,7 @@ bool parseSemVerTag(keel::StringRef tag, SemVerTag &out)
 bool hasControlChars(keel::StringRef s)
 {
     for (char chRaw : s) {
-        unsigned char ch = keel::as<unsigned char>(chRaw);
+        keel::u8 ch = keel::as<keel::u8>(chRaw);
         if (ch < 0x20 || ch == 0x7F)
             return true;
     }
@@ -255,7 +255,7 @@ bool isValidPackageName(keel::StringRef name)
     if (name.empty() || name == "." || name == ".." || name[0] == '-')
         return false;
     for (char chRaw : name) {
-        unsigned char ch = keel::as<unsigned char>(chRaw);
+        keel::u8 ch = keel::as<keel::u8>(chRaw);
         if (!(keel::is_ascii_alnum(ch) || ch == '_' || ch == '-' || ch == '.'))
             return false;
     }
@@ -641,7 +641,7 @@ keel::String PackageManager::locateSharedLibrary(keel::StringRef buildDir, keel:
     return found;
 }
 
-int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forceHead)
+keel::i32 PackageManager::install(keel::StringRef targetInput, bool verbose, bool forceHead)
 {
     PkgLockGuard pkgLock(modulesDir_);
     if (!pkgLock.ok()) return 1;
@@ -825,7 +825,7 @@ int PackageManager::install(keel::StringRef targetInput, bool verbose, bool forc
     return 0;
 }
 
-int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool installAll,
+keel::i32 PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool installAll,
                                 bool verbose, bool forceHead)
 {
     PkgLockGuard pkgLock(modulesDir_);
@@ -848,7 +848,7 @@ int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool insta
         return 1;
     }
 
-    int failures = 0;
+    keel::i32 failures = 0;
     for (keel::usize i = 0; i < listToInstall.size(); ++i) {
         if (listToInstall.size() > 1 && verbose) {
             keel::print("\n[{}/{}] ", i + 1, listToInstall.size());
@@ -866,7 +866,7 @@ int PackageManager::installMany(keel::ArrayRef<keel::String> targets, bool insta
     return failures == 0 ? 0 : 1;
 }
 
-int PackageManager::update(keel::ArrayRef<keel::String> names, bool verbose, bool forceHead)
+keel::i32 PackageManager::update(keel::ArrayRef<keel::String> names, bool verbose, bool forceHead)
 {
     PkgLockGuard pkgLock(modulesDir_);
     if (!pkgLock.ok()) return 1;
@@ -900,8 +900,8 @@ int PackageManager::update(keel::ArrayRef<keel::String> names, bool verbose, boo
     }
 
     auto gitTool = sys::findGit();
-    int failures = 0;
-    int updatedCount = 0;
+    keel::i32 failures = 0;
+    keel::i32 updatedCount = 0;
 
     for (const auto &pkg : toCheck) {
         keel::StringRef targetSpec = pkg.gitUrl.empty() ? pkg.name.as_ref() : pkg.gitUrl.as_ref();
@@ -970,7 +970,7 @@ keel::Array<InstalledPackage> PackageManager::scanInstalled(const Engine *engine
     return pkgs;
 }
 
-int PackageManager::list(keel::String &out) const
+keel::i32 PackageManager::list(keel::String &out) const
 {
     auto pkgs = scanInstalled();
     keel::format_into(out, "Installed NumKit packages ({}):\n", modulesDir_);
@@ -994,10 +994,10 @@ int PackageManager::list(keel::String &out) const
     return 0;
 }
 
-int PackageManager::list(std::FILE *out) const
+keel::i32 PackageManager::list(std::FILE *out) const
 {
     keel::String buf;
-    int rc = list(buf);
+    keel::i32 rc = list(buf);
     if (out && !buf.empty()) {
         std::fwrite(buf.data(), 1, buf.size(), out);
         std::fflush(out);
@@ -1005,7 +1005,7 @@ int PackageManager::list(std::FILE *out) const
     return rc;
 }
 
-int PackageManager::avail(keel::String &out, const Engine *engine) const
+keel::i32 PackageManager::avail(keel::String &out, const Engine *engine) const
 {
     auto installed = scanInstalled(engine);
     out.append("Official NumKit Toolboxes:\n");
@@ -1032,10 +1032,10 @@ int PackageManager::avail(keel::String &out, const Engine *engine) const
     return 0;
 }
 
-int PackageManager::avail(std::FILE *out, const Engine *engine) const
+keel::i32 PackageManager::avail(std::FILE *out, const Engine *engine) const
 {
     keel::String buf;
-    int rc = avail(buf, engine);
+    keel::i32 rc = avail(buf, engine);
     if (out && !buf.empty()) {
         std::fwrite(buf.data(), 1, buf.size(), out);
         std::fflush(out);
@@ -1043,7 +1043,7 @@ int PackageManager::avail(std::FILE *out, const Engine *engine) const
     return rc;
 }
 
-int PackageManager::build(keel::StringRef dir, bool verbose)
+keel::i32 PackageManager::build(keel::StringRef dir, bool verbose)
 {
     auto cmakeTool = sys::findCMake();
     if (!cmakeTool.found) {
@@ -1090,7 +1090,7 @@ int PackageManager::build(keel::StringRef dir, bool verbose)
     return 0;
 }
 
-int PackageManager::remove(keel::StringRef nameInput)
+keel::i32 PackageManager::remove(keel::StringRef nameInput)
 {
     PkgLockGuard pkgLock(modulesDir_);
     if (!pkgLock.ok()) return 1;
@@ -1124,7 +1124,7 @@ int PackageManager::remove(keel::StringRef nameInput)
     return 0;
 }
 
-int PackageManager::load(keel::StringRef nameInput, Engine &engine, keel::StringRef targetNamespace)
+keel::i32 PackageManager::load(keel::StringRef nameInput, Engine &engine, keel::StringRef targetNamespace)
 {
     keel::StringRef name = nameInput;
     if (name.starts_with("numkit-")) {

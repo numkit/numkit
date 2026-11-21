@@ -14,7 +14,7 @@ ASTNodePtr makeNode(NodeType t)
     return keel::make_unique<ASTNode>(t);
 }
 
-ASTNodePtr makeNode(NodeType t, int line, int col)
+ASTNodePtr makeNode(NodeType t, keel::i32 line, keel::i32 col)
 {
     auto node = keel::make_unique<ASTNode>(t);
     node->line = line;

@@ -76,7 +76,7 @@ inline keel::String serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
         if (std::isnan(x)) out.append("null");
         else if (std::isinf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
         else {
-            int n = std::snprintf(buf, sizeof(buf), "%.17g", x);
+            keel::i32 n = std::snprintf(buf, sizeof(buf), "%.17g", x);
             if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
         }
     }
@@ -90,19 +90,19 @@ inline keel::String serializeFlatDoubles(const keel::Array<keel::f64> &v) {
 
 inline void appendDouble(keel::String &out, keel::f64 v) {
     char buf[64];
-    int n = std::snprintf(buf, sizeof(buf), "%.6g", v);
+    keel::i32 n = std::snprintf(buf, sizeof(buf), "%.6g", v);
     if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
-inline void appendInt(keel::String &out, int v) {
+inline void appendInt(keel::String &out, keel::i32 v) {
     char buf[32];
-    int n = std::snprintf(buf, sizeof(buf), "%d", v);
+    keel::i32 n = std::snprintf(buf, sizeof(buf), "%d", v);
     if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
 inline void appendUsize(keel::String &out, keel::usize v) {
     char buf[32];
-    int n = std::snprintf(buf, sizeof(buf), "%zu", v);
+    keel::i32 n = std::snprintf(buf, sizeof(buf), "%zu", v);
     if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
 }
 
@@ -398,7 +398,7 @@ struct AxesState
     // -1 = no animated line yet. addpoints / clearpoints / getpoints
     // act on this dataset (nk doesn't model graphics handles, so
     // animatedline operations target the axes' single active line).
-    int animatedDatasetIdx = -1;
+    keel::i32 animatedDatasetIdx = -1;
     // Axis direction. MATLAB: set(gca, 'XDir'/'YDir', 'normal'|'reverse').
     // 'normal' (default) is left-to-right / bottom-to-top. 'reverse'
     // flips. axis('ij') is shorthand for yDir='reverse'.
@@ -461,9 +461,9 @@ struct AxesState
     keel::String rticklabelsJson;
 
     // Position in subplot grid (1-based), 0 = not a subplot
-    int subplotIndex = 0;
-    int subplotRows = 0;
-    int subplotCols = 0;
+    keel::i32 subplotIndex = 0;
+    keel::i32 subplotRows = 0;
+    keel::i32 subplotCols = 0;
 
     AxesState clone(keel::Allocator *alloc = nullptr) const
     {
@@ -546,16 +546,16 @@ struct AxesState
 
 struct FigureState
 {
-    int id = 1;
+    keel::i32 id = 1;
     bool modified = false;
 
     // Subplot grid: 0 = no subplots (single axes)
-    int subplotRows = 0;
-    int subplotCols = 0;
+    keel::i32 subplotRows = 0;
+    keel::i32 subplotCols = 0;
 
     // All axes in this figure; for non-subplot figures, size == 1
     keel::Array<AxesState> axes;
-    int currentAxes = 0; // index into axes[]
+    keel::i32 currentAxes = 0; // index into axes[]
 
     // linkaxes mode for the figure's subplot cells. Empty / "off" = no
     // link. "x" / "y" / "xy" = pan/zoom propagates across all cells on
@@ -623,7 +623,7 @@ struct FigureState
 
 struct FigureEntry
 {
-    int id = 0;
+    keel::i32 id = 0;
     FigureState state;
 
     FigureEntry clone(keel::Allocator *alloc = nullptr) const
@@ -668,7 +668,7 @@ public:
         keel::String type;      // "line", "stem", … | "axes" | "figure"
                                 // | "text" | "legend" | "root"
         keel::String className; // "matlab.graphics.chart.primitive.Line"
-        int figureId = 0;
+        keel::i32 figureId = 0;
         // kNoAxes marks figure-scoped records (sgtitle Text) — scoped
         // axes sweeps (prepareForPlot) leave them alone; full-figure
         // sweeps (clf/close) invalidate them.
@@ -706,7 +706,7 @@ public:
 
     // Chart record for the dataset just pushed at `datasetIndex` of the
     // CURRENT axes; non-chart records of the current figure/axes.
-    int createHandle(keel::StringRef type, keel::StringRef className,
+    keel::i32 createHandle(keel::StringRef type, keel::StringRef className,
                      keel::usize datasetIndex = HandleRecord::kNoDataset,
                      keel::StringRef slot = "")
     {
@@ -719,11 +719,11 @@ public:
     // Fully-explicit form (root records pass figureId 0 + kNoAxes;
     // sgtitle passes the figure + kNoAxes; gcf.Children addresses
     // non-current axes).
-    int createHandleAt(int figureId, keel::usize axesIndex, keel::StringRef type,
+    keel::i32 createHandleAt(keel::i32 figureId, keel::usize axesIndex, keel::StringRef type,
                        keel::StringRef className, keel::StringRef slot = "",
                        keel::usize datasetIndex = HandleRecord::kNoDataset)
     {
-        const int id = nextHandleId_++;
+        const keel::i32 id = nextHandleId_++;
         HandleRecord rec;
         rec.type = keel::String::from(type);
         rec.className = keel::String::from(className);
@@ -735,7 +735,7 @@ public:
         return id;
     }
 
-    HandleRecord *findHandle(int id)
+    HandleRecord *findHandle(keel::i32 id)
     {
         HandleRecord *rec = handleRegistry_.get(id);
         if (!rec || rec->deleted)
@@ -743,7 +743,7 @@ public:
         return rec;
     }
 
-    void deleteHandle(int id)
+    void deleteHandle(keel::i32 id)
     {
         HandleRecord *recPtr = handleRegistry_.get(id);
         if (!recPtr || recPtr->deleted)
@@ -754,7 +754,7 @@ public:
         // Remove the dataset from its axes so the render no longer
         // carries it; reindex the surviving chart handles of that axes
         // (their dataset slots shift down by one).
-        const int figId = recPtr->figureId;
+        const keel::i32 figId = recPtr->figureId;
         const keel::usize axIdx = recPtr->axesIndex;
         const keel::usize dsIdx = recPtr->datasetIndex;
         DatasetInfo *ds = datasetOf(*recPtr);
@@ -778,7 +778,7 @@ public:
 
     // Remove one axes from a figure (delete(axesHandle)). Reindexes the
     // surviving records' axesIndex; marks the figure modified.
-    void removeAxes(int figureId, keel::usize axesIndex)
+    void removeAxes(keel::i32 figureId, keel::usize axesIndex)
     {
         FigureState *fig = findFigure_(figureId);
         if (!fig || axesIndex >= fig->axes.size())
@@ -788,7 +788,7 @@ public:
                 && rec.axesIndex == axesIndex)
                 rec.deleted = true;
         fig->axes.remove_at(axesIndex);
-        if (fig->currentAxes >= keel::as<int>(axesIndex)
+        if (fig->currentAxes >= keel::as<keel::i32>(axesIndex)
             && fig->currentAxes > 0)
             --fig->currentAxes;
         for (auto [hid, rec] : handleRegistry_) {
@@ -822,12 +822,12 @@ public:
         return &fig->axes[rec.axesIndex];
     }
 
-    FigureState *figureOf(int figureId)
+    FigureState *figureOf(keel::i32 figureId)
     {
         return findFigure_(figureId);
     }
 
-    void markFigureModified(int figureId)
+    void markFigureModified(keel::i32 figureId)
     {
         if (FigureState *fig = findFigure_(figureId))
             fig->modified = true;
@@ -843,7 +843,7 @@ public:
     //                                               (axesIdx=k,  F, F)
     // Stale handles then read as deleted, exactly like MATLAB handles
     // over a cleared axes.
-    void invalidateHandles(int figureId, int axesIdx,
+    void invalidateHandles(keel::i32 figureId, keel::i32 axesIdx,
                            bool includeAxesRecord, bool includeFigureRecord)
     {
         for (auto [hid, rec] : handleRegistry_) {
@@ -859,7 +859,7 @@ public:
         }
     }
 
-    keel::HashMap<int, HandleRecord> &handles() { return handleRegistry_; }
+    keel::HashMap<keel::i32, HandleRecord> &handles() { return handleRegistry_; }
 
 
     /** Set the output callback for figure/close markers.
@@ -886,7 +886,7 @@ public:
     // decimation (Phase 1) keeps full zoom detail; at/above it the engine
     // ships a small preview + retains raw x/y for getSeriesDisplayTile.
     static constexpr keel::usize kSeriesPreviewThreshold = 1000000; // points
-    static constexpr int         kSeriesPreviewCols      = 2000;    // preview cols
+    static constexpr keel::i32         kSeriesPreviewCols      = 2000;    // preview cols
 
     void pushDataset(DatasetInfo ds)
     {
@@ -929,9 +929,9 @@ public:
         ds.sxLo = xlo; ds.sxHi = xhi; ds.syLo = ylo; ds.syHi = yhi;
     }
 
-    int newFigure()
+    keel::i32 newFigure()
     {
-        int id = 1;
+        keel::i32 id = 1;
         while (findFigure_(id) != nullptr)
             id++;
         currentFigure_ = id;
@@ -939,24 +939,24 @@ public:
         return id;
     }
 
-    int setFigure(int n)
+    keel::i32 setFigure(keel::i32 n)
     {
         currentFigure_ = n;
         (void)getOrCreateFigure_(n);
         return n;
     }
 
-    int currentFigureId() const { return currentFigure_; }
+    keel::i32 currentFigureId() const { return currentFigure_; }
 
     /** subplot(m,n,p) — set grid and switch to axes at position p */
-    void setSubplot(int m, int n, int p)
+    void setSubplot(keel::i32 m, keel::i32 n, keel::i32 p)
     {
         auto &fig = current();
         fig.subplotRows = m;
         fig.subplotCols = n;
 
         // Find the axes for this subplot position
-        for (int i = 0; i < keel::as<int>(fig.axes.size()); ++i) {
+        for (keel::i32 i = 0; i < keel::as<keel::i32>(fig.axes.size()); ++i) {
             auto &cand = fig.axes[keel::as<keel::usize>(i)];
             if (cand.subplotIndex == p
                 && (cand.subplotRows == 0
@@ -970,7 +970,7 @@ public:
         // call adopts its slot instead of ghosting it, so
         // gcf.Children counts match MATLAB
         // (bugs/closed/graphics/subplot-replaces-default-axes.md).
-        for (int i = 0; i < keel::as<int>(fig.axes.size()); ++i) {
+        for (keel::i32 i = 0; i < keel::as<keel::i32>(fig.axes.size()); ++i) {
             auto &cand = fig.axes[keel::as<keel::usize>(i)];
             if (cand.subplotIndex == 0) {
                 invalidateHandles(fig.id, i,
@@ -990,7 +990,7 @@ public:
         ax.subplotRows = m;
         ax.subplotCols = n;
         fig.axes.push_back(keel::move(ax));
-        fig.currentAxes = keel::as<int>(fig.axes.size()) - 1;
+        fig.currentAxes = keel::as<keel::i32>(fig.axes.size()) - 1;
     }
 
     void prepareForPlot()
@@ -1040,9 +1040,9 @@ public:
             // Preserve fields that "survive a fresh plot" — subplot position
             // and colorScale (the latter so `colorscale('log'); imagesc(M)`
             // bakes log into the new dataset's quantization).
-            int savedSubplot = ax.subplotIndex;
-            int savedSubplotRows = ax.subplotRows;
-            int savedSubplotCols = ax.subplotCols;
+            keel::i32 savedSubplot = ax.subplotIndex;
+            keel::i32 savedSubplotRows = ax.subplotRows;
+            keel::i32 savedSubplotCols = ax.subplotCols;
             keel::String savedColorScale = keel::move(ax.colorScale);
             ax = AxesState{};
             ax.subplotIndex = savedSubplot;
@@ -1528,7 +1528,7 @@ public:
         }
     }
 
-    void closeFigure(int id)
+    void closeFigure(keel::i32 id)
     {
         invalidateHandles(id, -1, /*axes records*/ true, /*figure record*/ true);
         eraseFigure_(id);
@@ -1541,7 +1541,7 @@ public:
     }
 
     /** Close and emit notification marker */
-    void closeFigureNotify(int id)
+    void closeFigureNotify(keel::i32 id)
     {
         closeFigure(id);
         keel::String marker = keel::format("__FIGURE_CLOSE__:{}\n", id);
@@ -1552,7 +1552,7 @@ public:
 
     void closeCurrentNotify()
     {
-        int id = currentFigure_;
+        keel::i32 id = currentFigure_;
         closeCurrent();
         keel::String marker = keel::format("__FIGURE_CLOSE__:{}\n", id);
         emitRawOutput_(marker);
@@ -1586,7 +1586,7 @@ public:
         keel::usize datasetCount = 0;
     };
     struct FigureAxesCheckpoint {
-        int id = 0;
+        keel::i32 id = 0;
         keel::Array<AxesCheckpoint> axes;
 
         FigureAxesCheckpoint clone(keel::Allocator *alloc = nullptr) const
@@ -1639,15 +1639,15 @@ public:
     // to `width` columns. algo: 0=M4 (default), 1=LTTB, 2=none. Empty when
     // the dataset isn't a downsampled series or indices are out of range —
     // the frontend refines zoom detail without ever shipping the full array.
-    DecimatedSeries getSeriesDisplayTile(int figId, int axIdx, int dsIdx,
-                                         keel::f64 x0, keel::f64 x1, int width, int algo) const
+    DecimatedSeries getSeriesDisplayTile(keel::i32 figId, keel::i32 axIdx, keel::i32 dsIdx,
+                                         keel::f64 x0, keel::f64 x1, keel::i32 width, keel::i32 algo) const
     {
         DecimatedSeries out;
         const FigureState *fig = findFigure_(figId);
         if (!fig) return out;
-        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return out;
+        if (axIdx < 0 || axIdx >= keel::as<keel::i32>(fig->axes.size())) return out;
         const auto &ax = fig->axes[keel::as<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= keel::as<int>(ax.datasets.size())) return out;
+        if (dsIdx < 0 || dsIdx >= keel::as<keel::i32>(ax.datasets.size())) return out;
         const auto &ds = ax.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.xRaw.empty() || ds.xRaw.size() != ds.yRaw.size()) return out;
         // Build the coarse LOD levels once, then pick the cheapest level for
@@ -1666,10 +1666,10 @@ public:
                            x0, x1, width, a);
     }
 
-    bool getFigureDisplayTile(int figId, int axIdx, int dsIdx,
+    bool getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel::i32 dsIdx,
                               keel::f64 srcR0, keel::f64 srcC0,
                               keel::f64 srcH, keel::f64 srcW,
-                              int displayH, int displayW,
+                              keel::i32 displayH, keel::i32 displayW,
                               bool xLog, bool yLog,
                               keel::u8 *out) const
     {
@@ -1677,9 +1677,9 @@ public:
 
         const FigureState *fig = findFigure_(figId);
         if (!fig) return false;
-        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return false;
+        if (axIdx < 0 || axIdx >= keel::as<keel::i32>(fig->axes.size())) return false;
         const auto &axState = fig->axes[keel::as<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= keel::as<int>(axState.datasets.size())) return false;
+        if (dsIdx < 0 || dsIdx >= keel::as<keel::i32>(axState.datasets.size())) return false;
         const auto &ds = axState.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
@@ -1707,9 +1707,9 @@ public:
         const keel::f64 rStep0 = (srcR1 - srcR0) / displayH;
         const keel::f64 cStep0 = (srcC1 - srcC0) / displayW;
         const keel::f64 minStep = std::min(rStep0, cStep0);
-        int level = 0;
+        keel::i32 level = 0;
         if (minStep > 1.5) {
-            level = keel::as<int>(std::floor(std::log2(minStep)));
+            level = keel::as<keel::i32>(std::floor(std::log2(minStep)));
             if (level < 0) level = 0;
             if (level > 10) level = 10;
         }
@@ -1722,7 +1722,7 @@ public:
             lvlData = ds.zQuantized.data();
             lvlRows = fullRows;
             lvlCols = fullCols;
-        } else if (level <= keel::as<int>(ds.lodLevels.size())) {
+        } else if (level <= keel::as<keel::i32>(ds.lodLevels.size())) {
             lvlData = ds.lodLevels[keel::as<keel::usize>(level - 1)].data();
             lvlRows = ds.lodDims[keel::as<keel::usize>(level - 1)].first;
             lvlCols = ds.lodDims[keel::as<keel::usize>(level - 1)].second;
@@ -1742,30 +1742,30 @@ public:
         const keel::f64 lvlC1 = srcC1 / scaleFactor;
         const keel::f64 rStep = (lvlR1 - lvlR0) / displayH;
         const keel::f64 cStep = (lvlC1 - lvlC0) / displayW;
-        const int rBlock = std::max(1, keel::as<int>(std::ceil(rStep)));
-        const int cBlock = std::max(1, keel::as<int>(std::ceil(cStep)));
+        const keel::i32 rBlock = std::max(1, keel::as<keel::i32>(std::ceil(rStep)));
+        const keel::i32 cBlock = std::max(1, keel::as<keel::i32>(std::ceil(cStep)));
 
         // Log-ratios computed in level coords (log preserves ratios).
         const keel::f64 yLogRatio = yLog ? std::log(lvlR1 / lvlR0) : 0.0;
         const keel::f64 xLogRatio = xLog ? std::log(lvlC1 / lvlC0) : 0.0;
 
-        for (int orow = 0; orow < displayH; ++orow) {
+        for (keel::i32 orow = 0; orow < displayH; ++orow) {
             const keel::f64 v = (orow + 0.5) / displayH;
             const keel::f64 rCenter = yLog
                 ? lvlR0 * std::exp(v * yLogRatio)
                 : lvlR0 + v * (lvlR1 - lvlR0);
-            const int rA = std::max(0, keel::as<int>(rCenter) - rBlock / 2);
-            const int rB = std::min(keel::as<int>(lvlRows), rA + rBlock);
-            for (int ocol = 0; ocol < displayW; ++ocol) {
+            const keel::i32 rA = std::max(0, keel::as<keel::i32>(rCenter) - rBlock / 2);
+            const keel::i32 rB = std::min(keel::as<keel::i32>(lvlRows), rA + rBlock);
+            for (keel::i32 ocol = 0; ocol < displayW; ++ocol) {
                 const keel::f64 u = (ocol + 0.5) / displayW;
                 const keel::f64 cCenter = xLog
                     ? lvlC0 * std::exp(u * xLogRatio)
                     : lvlC0 + u * (lvlC1 - lvlC0);
-                const int cA = std::max(0, keel::as<int>(cCenter) - cBlock / 2);
-                const int cB = std::min(keel::as<int>(lvlCols), cA + cBlock);
-                int sum = 0, n = 0;
-                for (int cc = cA; cc < cB; ++cc) {
-                    for (int rr = rA; rr < rB; ++rr) {
+                const keel::i32 cA = std::max(0, keel::as<keel::i32>(cCenter) - cBlock / 2);
+                const keel::i32 cB = std::min(keel::as<keel::i32>(lvlCols), cA + cBlock);
+                keel::i32 sum = 0, n = 0;
+                for (keel::i32 cc = cA; cc < cB; ++cc) {
+                    for (keel::i32 rr = rA; rr < rB; ++rr) {
                         const keel::u8 q = lvlData[keel::as<keel::usize>(cc) * lvlRows + keel::as<keel::usize>(rr)];
                         if (q != 255) { sum += q; ++n; }
                     }
@@ -1786,9 +1786,9 @@ public:
      * Stops early if a level would shrink below 32×32 (further pooling is
      * useless detail-wise) or if memory allocation throws.
      */
-    void ensureLOD(const DatasetInfo &ds, int targetLevel) const
+    void ensureLOD(const DatasetInfo &ds, keel::i32 targetLevel) const
     {
-        while (keel::as<int>(ds.lodLevels.size()) < targetLevel) {
+        while (keel::as<keel::i32>(ds.lodLevels.size()) < targetLevel) {
             keel::usize pRows, pCols;
             const keel::u8 *parent;
             if (ds.lodLevels.empty()) {
@@ -1813,7 +1813,7 @@ public:
                 for (keel::usize rr = 0; rr < cRows; ++rr) {
                     const keel::usize pr0 = 2 * rr;
                     const keel::usize pr1 = std::min(pRows, pr0 + 2);
-                    int sum = 0, n = 0;
+                    keel::i32 sum = 0, n = 0;
                     for (keel::usize pc = pc0; pc < pc1; ++pc) {
                         for (keel::usize pr = pr0; pr < pr1; ++pr) {
                             const keel::u8 q = parent[pc * pRows + pr];
@@ -1837,8 +1837,8 @@ public:
      * Stage C uses getFigureDisplayTile instead — that one resamples to
      * display-pixel grid in one pass.
      */
-    bool getFigureTile(int figId, int axIdx, int dsIdx,
-                       int r0, int c0, int h, int w, int lod,
+    bool getFigureTile(keel::i32 figId, keel::i32 axIdx, keel::i32 dsIdx,
+                       keel::i32 r0, keel::i32 c0, keel::i32 h, keel::i32 w, keel::i32 lod,
                        keel::Array<keel::u8> &out,
                        keel::usize &outRows, keel::usize &outCols) const
     {
@@ -1848,9 +1848,9 @@ public:
 
         const FigureState *fig = findFigure_(figId);
         if (!fig) return false;
-        if (axIdx < 0 || axIdx >= keel::as<int>(fig->axes.size())) return false;
+        if (axIdx < 0 || axIdx >= keel::as<keel::i32>(fig->axes.size())) return false;
         const auto &axState = fig->axes[keel::as<keel::usize>(axIdx)];
-        if (dsIdx < 0 || dsIdx >= keel::as<int>(axState.datasets.size())) return false;
+        if (dsIdx < 0 || dsIdx >= keel::as<keel::i32>(axState.datasets.size())) return false;
         const auto &ds = axState.datasets[keel::as<keel::usize>(dsIdx)];
         if (ds.zQuantized.empty() || ds.type != "imagesc") return false;
 
@@ -1887,8 +1887,8 @@ public:
             for (keel::usize ocol = 0; ocol < oW; ++ocol) {
                 const keel::usize cA = keel::as<keel::usize>(c0) + ocol * L;
                 const keel::usize cB = std::min(cEnd, cA + L);
-                int sum = 0;
-                int n = 0;
+                keel::i32 sum = 0;
+                keel::i32 n = 0;
                 for (keel::usize cc = cA; cc < cB; ++cc) {
                     for (keel::usize rr = rA; rr < rB; ++rr) {
                         const keel::u8 q = ds.zQuantized[cc * fullRows + rr];
@@ -1910,7 +1910,7 @@ public:
     }
 
 private:
-    FigureState *findFigure_(int id)
+    FigureState *findFigure_(keel::i32 id)
     {
         for (auto &entry : figures_)
             if (entry.id == id)
@@ -1918,7 +1918,7 @@ private:
         return nullptr;
     }
 
-    const FigureState *findFigure_(int id) const
+    const FigureState *findFigure_(keel::i32 id) const
     {
         for (const auto &entry : figures_)
             if (entry.id == id)
@@ -1926,7 +1926,7 @@ private:
         return nullptr;
     }
 
-    FigureState &getOrCreateFigure_(int id)
+    FigureState &getOrCreateFigure_(keel::i32 id)
     {
         keel::usize pos = 0;
         while (pos < figures_.size() && figures_[pos].id < id)
@@ -1944,7 +1944,7 @@ private:
         return figures_[pos].state;
     }
 
-    void eraseFigure_(int id)
+    void eraseFigure_(keel::i32 id)
     {
         for (keel::usize i = 0; i < figures_.size(); ++i) {
             if (figures_[i].id == id) {
@@ -1965,10 +1965,10 @@ private:
     }
 
     keel::Array<FigureEntry> figures_;
-    int currentFigure_ = 1;
+    keel::i32 currentFigure_ = 1;
     OutputFunc outputFunc_;
-    int nextHandleId_ = 1;
-    keel::HashMap<int, HandleRecord> handleRegistry_;
+    keel::i32 nextHandleId_ = 1;
+    keel::HashMap<keel::i32, HandleRecord> handleRegistry_;
     keel::usize chartCallBase_ = 0;
 };
 

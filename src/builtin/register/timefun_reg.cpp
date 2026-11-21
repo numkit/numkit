@@ -49,9 +49,9 @@ inline keel::i64 daysFromCivil(keel::i64 y, keel::i64 m, keel::i64 d) noexcept
     m = mAdj;
     y -= (m <= 2) ? 1 : 0;
     const keel::i64 era = (y >= 0 ? y : y - 399) / 400;
-    const unsigned yoe = keel::as<unsigned>(y - era * 400);
-    const unsigned doy = (153 * (keel::as<unsigned>(m) + (m > 2 ? -3 : 9)) + 2) / 5 + 0;
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const keel::u32 yoe = keel::as<keel::u32>(y - era * 400);
+    const keel::u32 doy = (153 * (keel::as<keel::u32>(m) + (m > 2 ? -3 : 9)) + 2) / 5 + 0;
+    const keel::u32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + keel::as<keel::i64>(doe) - 719468 + (d - 1);
 }
 
@@ -59,11 +59,11 @@ inline void civilFromDays(keel::i64 z, keel::i64 &y, keel::i64 &m, keel::i64 &d)
 {
     z += 719468;
     const keel::i64 era = (z >= 0 ? z : z - 146096) / 146097;
-    const unsigned doe = keel::as<unsigned>(z - era * 146097);
-    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const keel::u32 doe = keel::as<keel::u32>(z - era * 146097);
+    const keel::u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     y = keel::as<keel::i64>(yoe) + era * 400;
-    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const unsigned mp = (5 * doy + 2) / 153;
+    const keel::u32 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const keel::u32 mp = (5 * doy + 2) / 153;
     d = keel::as<keel::i64>(doy - (153 * mp + 2) / 5 + 1);
     m = keel::as<keel::i64>(mp) + (mp < 10 ? 3 : -9);
     y += (m <= 2) ? 1 : 0;
@@ -163,12 +163,12 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
         f = anyTimeInArray ? keel::StringRef("dd-MMM-uuuu HH:mm:ss") : keel::StringRef("dd-MMM-uuuu");
     }
     char y4[16], m2[8], d2[8], h2[8], mi2[8], s2[16];
-    std::snprintf(y4, sizeof(y4), "%04lld", keel::as<long long>(c.year));
-    std::snprintf(m2, sizeof(m2), "%02lld", keel::as<long long>(c.month));
-    std::snprintf(d2, sizeof(d2), "%02lld", keel::as<long long>(c.day));
-    std::snprintf(h2, sizeof(h2), "%02lld", keel::as<long long>(c.hour));
-    std::snprintf(mi2, sizeof(mi2), "%02lld", keel::as<long long>(c.minute));
-    int wholeSec = keel::as<int>(std::floor(c.second + 1e-9));
+    std::snprintf(y4, sizeof(y4), "%04lld", keel::as<keel::i64>(c.year));
+    std::snprintf(m2, sizeof(m2), "%02lld", keel::as<keel::i64>(c.month));
+    std::snprintf(d2, sizeof(d2), "%02lld", keel::as<keel::i64>(c.day));
+    std::snprintf(h2, sizeof(h2), "%02lld", keel::as<keel::i64>(c.hour));
+    std::snprintf(mi2, sizeof(mi2), "%02lld", keel::as<keel::i64>(c.minute));
+    keel::i32 wholeSec = keel::as<keel::i32>(std::floor(c.second + 1e-9));
     keel::f64 fracSec = c.second - wholeSec;
     std::snprintf(s2, sizeof(s2), "%02d", wholeSec);
     const char *mmm = (c.month >= 1 && c.month <= 12) ? kMonthShort[c.month - 1] : "Jan";
@@ -193,15 +193,15 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
             i += 4;
         } else if (matchAt(i, "uu") || matchAt(i, "yy")) {
             char y2[8];
-            std::snprintf(y2, sizeof(y2), "%02lld", keel::as<long long>(c.year % 100));
+            std::snprintf(y2, sizeof(y2), "%02lld", keel::as<keel::i64>(c.year % 100));
             res.append(y2);
             i += 2;
         } else if (matchAt(i, "QQQ")) {
-            int q = keel::as<int>((c.month - 1) / 3 + 1);
+            keel::i32 q = keel::as<keel::i32>((c.month - 1) / 3 + 1);
             keel::format_into(res, "Q{}", q);
             i += 3;
         } else if (matchAt(i, "QQ")) {
-            int q = keel::as<int>((c.month - 1) / 3 + 1);
+            keel::i32 q = keel::as<keel::i32>((c.month - 1) / 3 + 1);
             keel::format_into(res, "Q{}", q);
             i += 2;
         } else if (matchAt(i, "MMM")) {
@@ -220,7 +220,7 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
             res.append(mi2);
             i += 2;
         } else if (matchAt(i, "ss.SSS")) {
-            int ms = keel::as<int>(std::round(fracSec * 1000.0));
+            keel::i32 ms = keel::as<keel::i32>(std::round(fracSec * 1000.0));
             char msBuf[16];
             std::snprintf(msBuf, sizeof(msBuf), "%s.%03d", s2, ms);
             res.append(msBuf);
@@ -262,13 +262,13 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
         while (*p && keel::is_ascii_space(*p))
             ++p;
     };
-    auto readInt = [&](const char *&p, int &out) -> bool {
+    auto readInt = [&](const char *&p, keel::i32 &out) -> bool {
         skipWs(p);
         char *ep = nullptr;
-        long val = std::strtol(p, &ep, 10);
+        keel::i64 val = std::strtol(p, &ep, 10);
         if (ep == p)
             return false;
-        out = keel::as<int>(val);
+        out = keel::as<keel::i32>(val);
         p = ep;
         return true;
     };
@@ -291,7 +291,7 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     };
 
     // Try ISO YYYY-MM-DD [HH:MM:SS[.fff]] or YYYY/MM/DD
-    int y = 0, m = 0, d = 0, hh = 0, mi = 0;
+    keel::i32 y = 0, m = 0, d = 0, hh = 0, mi = 0;
     keel::f64 sec = 0.0;
     char sep1 = 0, sep2 = 0;
     {
@@ -315,7 +315,7 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     // Delegate to existing datenum parser (handles dd-MMM-yyyy, MM/dd/yyyy, etc.)
     {
         const char *p = s.c_str();
-        int a = 0, b = 0, c = 0;
+        keel::i32 a = 0, b = 0, c = 0;
         char c1 = 0, c2 = 0;
         if (readInt(p, a) && readChar(p, c1) && readInt(p, b) && readChar(p, c2) && readInt(p, c)
             && (c1 == '/' || c1 == '-') && c1 == c2 && c >= 1000 && a >= 1 && a <= 12 && b >= 1 && b <= 31) {
@@ -523,16 +523,16 @@ inline keel::String formatDurationElem(keel::f64 sec, keel::StringRef fmt)
     if (ms == 0) {
         std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld",
                       neg ? "-" : "",
-                      keel::as<long long>(hh),
-                      keel::as<long long>(mm),
-                      keel::as<long long>(ss));
+                      keel::as<keel::i64>(hh),
+                      keel::as<keel::i64>(mm),
+                      keel::as<keel::i64>(ss));
     } else {
         std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld.%03lld",
                       neg ? "-" : "",
-                      keel::as<long long>(hh),
-                      keel::as<long long>(mm),
-                      keel::as<long long>(ss),
-                      keel::as<long long>(ms));
+                      keel::as<keel::i64>(hh),
+                      keel::as<keel::i64>(mm),
+                      keel::as<keel::i64>(ss),
+                      keel::as<keel::i64>(ms));
     }
     return keel::String::from(buf);
 }
@@ -580,7 +580,7 @@ inline Dims broadcastDims(const Value &a, const Value &b, const char *fnName)
         keel::format("numkit:{}:DimMismatch: Arrays have incompatible sizes for this operation.", fnName).c_str());
 }
 
-inline Value extractDatetimeComponent(const Value &self, int comp, keel::Allocator *mr)
+inline Value extractDatetimeComponent(const Value &self, keel::i32 comp, keel::Allocator *mr)
 {
     const keel::usize n = self.objectCount();
     auto compOf = [&](keel::f64 sd) -> keel::f64 {
@@ -611,7 +611,7 @@ inline Value extractDatetimeComponent(const Value &self, int comp, keel::Allocat
     return out;
 }
 
-inline void mutateDatetimeComponent(Value &self, int comp, const Value &val)
+inline void mutateDatetimeComponent(Value &self, keel::i32 comp, const Value &val)
 {
     const keel::usize n = self.objectCount();
     const keel::usize nv = val.numel();
@@ -844,7 +844,7 @@ void register_timefun(Engine &engine) {
                 keel::i64 f = keel::as<keel::i64>(std::floor(dval)) - 2;
                 keel::i64 r = f % 7;
                 if (r < 0) r += 7;
-                int dayIdx = keel::as<int>(r) + 1;
+                keel::i32 dayIdx = keel::as<keel::i32>(r) + 1;
                 outs[1] = Value::fromString(wantLong ? kLong[dayIdx - 1] : kShort[dayIdx - 1], mr);
             }
         });
@@ -1296,7 +1296,7 @@ void register_timefun(Engine &engine) {
         dur.ops.put(keel::String("rdivide", clsAlloc), durScale(true));
         dur.ops.put(keel::String("mrdivide", clsAlloc), durScale(true));
 
-        auto durCmp = [](int mode) -> ObjectMethod {
+        auto durCmp = [](keel::i32 mode) -> ObjectMethod {
             return [mode](Value &, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                           CallContext &ctx) {
                 auto *mr = ctx.engine->allocator();
@@ -1846,7 +1846,7 @@ void register_timefun(Engine &engine) {
         };
 
         // Component extractor methods: year(d), month(d), day(d), hour(d), minute(d), second(d), quarter(d)
-        auto addCompMethod = [&](const char *mname, int comp) {
+        auto addCompMethod = [&](const char *mname, keel::i32 comp) {
             dt.methods.put(keel::String(mname, clsAlloc),
                            [comp](Value &self, keel::ArrayRef<Value>, keel::usize,
                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
@@ -2188,9 +2188,9 @@ void register_timefun(Engine &engine) {
                 if (unit == "year" || unit == "years") {
                     sds[i] = isEnd ? composeSerialDay(c.year, 12, 31) : composeSerialDay(c.year, 1, 1);
                 } else if (unit == "quarter" || unit == "quarters") {
-                    int q = (c.month - 1) / 3 + 1;
-                    int mStart = (q - 1) * 3 + 1;
-                    int mEnd = q * 3;
+                    keel::i32 q = (c.month - 1) / 3 + 1;
+                    keel::i32 mStart = (q - 1) * 3 + 1;
+                    keel::i32 mEnd = q * 3;
                     sds[i] = isEnd ? composeSerialDay(c.year, mEnd, daysInMonth(c.year, mEnd))
                                    : composeSerialDay(c.year, mStart, 1);
                 } else if (unit == "month" || unit == "months") {
@@ -2605,7 +2605,7 @@ void register_timefun(Engine &engine) {
                                         p0 ? p0->timeZone.as_ref() : keel::StringRef(""), mr);
         });
 
-        auto dtCmp = [](int mode) -> ObjectMethod {
+        auto dtCmp = [](keel::i32 mode) -> ObjectMethod {
             return [mode](Value &, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                           CallContext &ctx) {
                 auto *mr = ctx.engine->allocator();

@@ -1391,7 +1391,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                 if (const Value *vp = st->props.get(p.name);
                     vp && vp->isScalar() && vp->type() == ValueType::DOUBLE) {
                     char numBuf[64];
-                    int n = std::snprintf(numBuf, sizeof(numBuf), "%f", vp->toScalar());
+                    keel::i32 n = std::snprintf(numBuf, sizeof(numBuf), "%f", vp->toScalar());
                     if (n > 0) {
                         body.append(": ");
                         body.append(keel::StringRef(numBuf, keel::as<keel::usize>(n)));
@@ -1911,7 +1911,7 @@ static bool walkImportCandidates_(keel::StringRef name,
     // guards cyclic imports (`import a as b; import b as a`)
     // (bugs/closed/core/import-alias-chain.md).
     auto resolveAliasHeads = [&](keel::String s) -> keel::String {
-        for (int hop = 0; hop < 8; ++hop) {
+        for (keel::i32 hop = 0; hop < 8; ++hop) {
             keel::String next = s.clone();
             eachVisibleImport([&](const Import &imp) {
                 if (imp.alias.empty())
@@ -2139,15 +2139,15 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                                                 : full;
                     for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
                         if (namespaceOrder_[i] == topNs)
-                            return keel::as<int>(i);
-                    return keel::as<int>(namespaceOrder_.size());
+                            return keel::as<keel::i32>(i);
+                    return keel::as<keel::i32>(namespaceOrder_.size());
                 };
                 const keel::String *best = nullptr;
-                int bestRank = INT_MAX;
+                keel::i32 bestRank = INT_MAX;
                 for (const auto &full : *vec) {
                     if (!allowBareFromFull(full))
                         continue;
-                    int r = rankOf(full);
+                    keel::i32 r = rankOf(full);
                     if (r < bestRank) {
                         bestRank = r;
                         best = &full;
@@ -2218,15 +2218,15 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
                                     : full;
         for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
             if (namespaceOrder_[i] == topNs)
-                return keel::as<int>(i);
-        return keel::as<int>(namespaceOrder_.size());
+                return keel::as<keel::i32>(i);
+        return keel::as<keel::i32>(namespaceOrder_.size());
     };
     const keel::String *best = nullptr;
-    int bestRank = INT_MAX;
+    keel::i32 bestRank = INT_MAX;
     for (const auto &full : *vec) {
         if (!allowBareFromFull(full))
             continue;
-        int r = rankOf(full);
+        keel::i32 r = rankOf(full);
         if (r < bestRank) {
             bestRank = r;
             best = &full;
@@ -2287,7 +2287,7 @@ Engine::OutputFunc Engine::swapOutputFunc(OutputFunc f)
     return old;
 }
 
-void Engine::setMaxRecursionDepth(int d)
+void Engine::setMaxRecursionDepth(keel::i32 d)
 {
     treeWalker_->setMaxRecursionDepth(d);
     vm_->setMaxRecursionDepth(d);
@@ -3138,23 +3138,23 @@ bool Engine::isInsideFunctionCall() const
 
 // ── Frame stack introspection ───────────────────────────────────
 
-int Engine::callerDepth() const
+keel::i32 Engine::callerDepth() const
 {
     if (vm_ && backend_ == Backend::VM)
         return vm_->callDepth();
     if (treeWalker_)
-        return keel::as<int>(treeWalker_->activeFrames().size());
+        return keel::as<keel::i32>(treeWalker_->activeFrames().size());
     return 0;
 }
 
-Environment *Engine::callerEnv(int n)
+Environment *Engine::callerEnv(keel::i32 n)
 {
     if (n < 0) n = 0;
     if (vm_ && backend_ == Backend::VM)
         return vm_->callerEnvAtDepth(n);
     if (treeWalker_) {
         const auto &frames = treeWalker_->activeFrames();
-        if (n < keel::as<int>(frames.size()))
+        if (n < keel::as<keel::i32>(frames.size()))
             return frames[frames.size() - 1 - n].env;
         return workspaceEnv_.get();
     }
@@ -3209,7 +3209,7 @@ keel::String Engine::getEnvVar(keel::StringRef name) const
     return numkit::envGet(name);
 }
 
-keel::String Engine::inputName(int k)
+keel::String Engine::inputName(keel::i32 k)
 {
     if (k < 1)
         throw std::runtime_error("inputname: argument index must be >= 1");
@@ -3219,7 +3219,7 @@ keel::String Engine::inputName(int k)
 
     if (vm_ && backend_ == Backend::VM) {
         const auto names = vm_->currentFrameCallerArgNames();
-        if (k > keel::as<int>(names.size()))
+        if (k > keel::as<keel::i32>(names.size()))
             return {};  // beyond known names: arg wasn't recorded
         return names[k - 1].clone();
     }
@@ -3227,7 +3227,7 @@ keel::String Engine::inputName(int k)
         const auto &frames = treeWalker_->activeFrames();
         if (frames.empty()) return {};
         const auto &names = frames.back().callerArgNames;
-        if (k > keel::as<int>(names.size()))
+        if (k > keel::as<keel::i32>(names.size()))
             return {};
         return names[k - 1].clone();
     }
@@ -3435,7 +3435,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
                 if (!(keel::is_ascii_alnum(c) || c == '_'))
                     { isIdent = false; break; }
         if (!isNum && !isIdent) continue;
-        const int ln = node->line, cl = node->col;
+        const keel::i32 ln = node->line, cl = node->col;
         const bool suppress = node->suppressOutput;
         auto ident = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
         ident->strValue = name.clone();

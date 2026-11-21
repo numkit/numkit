@@ -42,7 +42,7 @@ void saveAscii(Engine &engine, Environment &env,
             for (keel::usize c = 0; c < cols; ++c) {
                 if (c > 0) out.push_back(' ');
                 char buf[32];
-                int len = std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
+                keel::i32 len = std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
                 if (len > 0)
                     out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
             }

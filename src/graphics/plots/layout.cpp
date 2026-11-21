@@ -46,10 +46,10 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             (void)nargout;
             auto *mr = gc.mr;
             auto &fm = gc.fm;
-            int id;
+            keel::i32 id;
             if (args.empty() || args[0].isChar() || args[0].isString()) {
                 id = fm.newFigure();
-            } else if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
+            } else if (const keel::i32 hid = graphicsHandleIdOf(args[0]); hid >= 0) {
                 // figure(f) with a Figure handle — make its figure current.
                 auto *rec = fm.findHandle(hid);
                 if (!rec || rec->type != "figure")
@@ -58,7 +58,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 id = rec->figureId;
                 fm.setFigure(id);
             } else {
-                id = keel::as<int>(args[0].toScalar());
+                id = keel::as<keel::i32>(args[0].toScalar());
                 fm.setFigure(id);
             }
             fm.current().modified = true;
@@ -79,7 +79,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             } else if (args[0].isObject()) {
                 for (keel::usize k = 0; k < args[0].objectCount(); ++k) {
                     Value elem = args[0].objectSubArray({k}, gc.mr);
-                    const int hid = graphicsHandleIdOf(elem);
+                    const keel::i32 hid = graphicsHandleIdOf(elem);
                     if (hid < 0) continue;
                     auto *rec = fm.findHandle(hid);
                     if (!rec)
@@ -91,7 +91,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 }
             } else if (args[0].isNumeric()) {
                 for (keel::usize k = 0; k < args[0].numel(); ++k) {
-                    int id = keel::as<int>(args[0].elemAsDouble(k));
+                    keel::i32 id = keel::as<keel::i32>(args[0].elemAsDouble(k));
                     fm.closeFigureNotify(id);
                 }
             }
@@ -101,7 +101,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)args;
             if (nargout >= 1) {
-                const int hid = gc.fm.createHandleAt(
+                const keel::i32 hid = gc.fm.createHandleAt(
                     0, FigureManager::HandleRecord::kNoAxes, "waitbar", "matlab.ui.Figure");
                 outs[0] = makeGraphicsHandleValue("matlab.ui.Figure", hid, gc.mr);
             } else {
@@ -243,27 +243,27 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             (void)nargout;
             auto &fm = gc.fm;
             if (args.size() == 1 && !args[0].isEmpty()) {
-                if (const int hid = graphicsHandleIdOf(args[0]); hid >= 0) {
+                if (const keel::i32 hid = graphicsHandleIdOf(args[0]); hid >= 0) {
                     if (auto *rec = fm.findHandle(hid)) {
                         if (rec->figureId > 0) fm.setFigure(rec->figureId);
                         if (rec->axesIndex < fm.current().axes.size()) {
-                            fm.current().currentAxes = keel::as<int>(rec->axesIndex);
+                            fm.current().currentAxes = keel::as<keel::i32>(rec->axesIndex);
                         }
                     }
                     outs[0] = Value();
                     return;
                 }
-                int mnp = 0;
+                keel::i32 mnp = 0;
                 if (args[0].isChar() || args[0].isString()) {
                     auto r = keel::parse_i64(args[0].toString().as_ref().trim());
-                    if (r.is_ok()) mnp = keel::as<int>(r.value());
+                    if (r.is_ok()) mnp = keel::as<keel::i32>(r.value());
                 } else {
-                    mnp = keel::as<int>(args[0].elemAsDouble(0));
+                    mnp = keel::as<keel::i32>(args[0].elemAsDouble(0));
                 }
                 if (mnp >= 111 && mnp <= 999) {
-                    int m = mnp / 100;
-                    int n = (mnp / 10) % 10;
-                    int p = mnp % 10;
+                    keel::i32 m = mnp / 100;
+                    keel::i32 n = (mnp / 10) % 10;
+                    keel::i32 p = mnp % 10;
                     if (m >= 1 && n >= 1 && p >= 1 && p <= m * n) {
                         fm.setSubplot(m, n, p);
                     }
@@ -275,9 +275,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            int m = keel::as<int>(args[0].elemAsDouble(0));
-            int n = keel::as<int>(args[1].elemAsDouble(0));
-            int p = keel::as<int>(args[2].elemAsDouble(0));
+            keel::i32 m = keel::as<keel::i32>(args[0].elemAsDouble(0));
+            keel::i32 n = keel::as<keel::i32>(args[1].elemAsDouble(0));
+            keel::i32 p = keel::as<keel::i32>(args[2].elemAsDouble(0));
             fm.setSubplot(m, n, p);
             outs[0] = Value();
         });
@@ -289,9 +289,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
     reg("layout", "tiledlayout",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
-            int m = 1, n = 1;
-            if (args.size() >= 1 && !args[0].isChar()) m = (int)args[0].toScalar();
-            if (args.size() >= 2 && !args[1].isChar()) n = (int)args[1].toScalar();
+            keel::i32 m = 1, n = 1;
+            if (args.size() >= 1 && !args[0].isChar()) m = (keel::i32)args[0].toScalar();
+            if (args.size() >= 2 && !args[1].isChar()) n = (keel::i32)args[1].toScalar();
             if (m < 1) m = 1;
             if (n < 1) n = 1;
             auto &fm = gc.fm;
@@ -314,12 +314,12 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 outs[0] = Value();
                 return;
             }
-            const int total = fig.subplotRows * fig.subplotCols;
+            const keel::i32 total = fig.subplotRows * fig.subplotCols;
             // Determine target cell. With a numeric arg, jump to that
             // cell (1-based); else advance by 1 from the current.
-            int target = fig.currentAxes + 2;   // (currentAxes is 0-based)
+            keel::i32 target = fig.currentAxes + 2;   // (currentAxes is 0-based)
             if (!args.empty() && !args[0].isChar()) {
-                target = (int)args[0].toScalar();
+                target = (keel::i32)args[0].toScalar();
             }
             if (target < 1) target = 1;
             if (target > total) target = total;
@@ -447,9 +447,9 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 }
                 if (cv.isNumeric() && cv.numel() >= 3) {
                     std::snprintf(buf, sizeof buf, "#%02x%02x%02x",
-                                  (unsigned)(cv.elemAsDouble(0) * 255 + 0.5),
-                                  (unsigned)(cv.elemAsDouble(1) * 255 + 0.5),
-                                  (unsigned)(cv.elemAsDouble(2) * 255 + 0.5));
+                                  (keel::u32)(cv.elemAsDouble(0) * 255 + 0.5),
+                                  (keel::u32)(cv.elemAsDouble(1) * 255 + 0.5),
+                                  (keel::u32)(cv.elemAsDouble(2) * 255 + 0.5));
                     hexOut.assign(buf);
                     return true;
                 }
@@ -1367,7 +1367,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             rebuildAnimatedJson(ds);
             auto &ax = fm.currentAxes();
             ax.datasets.push_back(std::move(ds));
-            ax.animatedDatasetIdx = (int)ax.datasets.size() - 1;
+            ax.animatedDatasetIdx = (keel::i32)ax.datasets.size() - 1;
             fm.current().modified = true;
             fm.emitModified();
             // Return 1-based dataset index as a scalar handle.
@@ -1489,7 +1489,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             keel::usize idx = (args.size() >= 2 && graphicsHandleIdOf(args[0]) >= 0) ? 1 : 0;
             if (idx >= args.size()) { outs[0] = Value(); return; }
             if (args.size() - idx == 1 && args[idx].numel() == 1 && !args[idx].isChar()) {
-                const int n = (int)args[idx].toScalar();
+                const keel::i32 n = (keel::i32)args[idx].toScalar();
                 if (n == 2) { az = 0;     el = 90; ok = true; }    // top-down
                 else if (n == 3) { az = -37.5; el = 30; ok = true; } // default 3-D
             }
@@ -1545,7 +1545,7 @@ FigureManager::FigureCheckpoint FigureManager::checkpointFigures() const
 
 void FigureManager::restoreFigures(const FigureCheckpoint &cp)
 {
-    auto find = [&cp](int id) -> const keel::Array<AxesCheckpoint> * {
+    auto find = [&cp](keel::i32 id) -> const keel::Array<AxesCheckpoint> * {
         for (const auto &p : cp.figures)
             if (p.id == id)
                 return &p.axes;
@@ -1558,7 +1558,7 @@ void FigureManager::restoreFigures(const FigureCheckpoint &cp)
     // re-creates whatever the script actually needs.
     for (keel::usize idx = 0; idx < figures_.size();) {
         if (!find(figures_[idx].id)) {
-            const int id = figures_[idx].id;
+            const keel::i32 id = figures_[idx].id;
             for (auto [hid, rec] : handleRegistry_)
                 if (rec.figureId == id)
                     rec.deleted = true;

@@ -90,7 +90,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
         }
         const Value &I = *img0;
         const auto &dims = I.dims();
-        const int nd = dims.ndims();
+        const keel::i32 nd = dims.ndims();
         const keel::usize R = dims.rows();
         const keel::usize C = dims.cols();
 
@@ -214,10 +214,10 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
                         const keel::usize off = (r * C + c) * bytesPerPixel;
-                        zs << "[" << keel::as<int>(ds.rgbBytes[off])
-                           << "," << keel::as<int>(ds.rgbBytes[off + 1])
-                           << "," << keel::as<int>(ds.rgbBytes[off + 2])
-                           << "," << keel::as<int>(ds.rgbBytes[off + 3]) << "]";
+                        zs << "[" << keel::as<keel::i32>(ds.rgbBytes[off])
+                           << "," << keel::as<keel::i32>(ds.rgbBytes[off + 1])
+                           << "," << keel::as<keel::i32>(ds.rgbBytes[off + 2])
+                           << "," << keel::as<keel::i32>(ds.rgbBytes[off + 3]) << "]";
                     }
                     zs << "]";
                 }
@@ -236,8 +236,8 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                         if (ocol) zs << ",";
                         const keel::usize c0 = ocol * step;
                         const keel::usize c1 = std::min(C, c0 + step);
-                        int sumR = 0, sumG = 0, sumB = 0, sumA = 0;
-                        int n = 0;
+                        keel::i32 sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+                        keel::i32 n = 0;
                         for (keel::usize rr = r0; rr < r1; ++rr) {
                             for (keel::usize cc = c0; cc < c1; ++cc) {
                                 const keel::usize off = (rr * C + cc) * bytesPerPixel;
@@ -323,7 +323,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                     zs << "[";
                     for (keel::usize c = 0; c < C; ++c) {
                         if (c) zs << ",";
-                        zs << keel::as<int>(ds.zQuantized[c * R + r]);
+                        zs << keel::as<keel::i32>(ds.zQuantized[c * R + r]);
                     }
                     zs << "]";
                 }
@@ -342,7 +342,7 @@ void buildImagePlots(keel::Array<PlotEntry> &table)
                         if (ocol) zs << ",";
                         const keel::usize c0 = ocol * step;
                         const keel::usize c1 = std::min(C, c0 + step);
-                        int sum = 0, n = 0;
+                        keel::i32 sum = 0, n = 0;
                         for (keel::usize cc = c0; cc < c1; ++cc) {
                             for (keel::usize rr = r0; rr < r1; ++rr) {
                                 const keel::u8 q = ds.zQuantized[cc * R + rr];

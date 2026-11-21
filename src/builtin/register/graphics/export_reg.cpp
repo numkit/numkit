@@ -54,7 +54,7 @@ const char kBase64[] =
 figrender::SvgImageEmbedder svgPngEmbedder(
     keel::Allocator *mr)
 {
-    return [mr](keel::ArrayRef<keel::u8> rgb, int w, int h) -> keel::String {
+    return [mr](keel::ArrayRef<keel::u8> rgb, keel::i32 w, keel::i32 h) -> keel::String {
         const keel::usize Hp = (keel::usize)h, Wp = (keel::usize)w;
         Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
         keel::u8 *d = A.uint8DataMut();
@@ -103,7 +103,7 @@ figrender::SvgImageEmbedder svgPngEmbedder(
 const FigureState *targetFigure(Engine &engine, const Value &v)
 {
     auto &fm = engine.figureManager();
-    const int hid = graphicsHandleIdOf(v);
+    const keel::i32 hid = graphicsHandleIdOf(v);
     if (hid >= 0) {
         auto *rec = fm.findHandle(hid);
         if (!rec)
@@ -111,7 +111,7 @@ const FigureState *targetFigure(Engine &engine, const Value &v)
         return fm.figureOf(rec->figureId);
     }
     if (v.isScalar())
-        return fm.figureOf((int)v.toScalar());
+        return fm.figureOf((keel::i32)v.toScalar());
     return nullptr;
 }
 
@@ -119,7 +119,7 @@ struct ExportArgs {
     const FigureState *fig = nullptr;
     keel::String path;
     keel::String ext;       // from filename or explicit format
-    int dpi = 150;          // MATLAB png default; scales the 840×630 base
+    keel::i32 dpi = 150;          // MATLAB png default; scales the 840×630 base
 };
 
 // Shared argument walk for all three entry points: a handle/number
@@ -196,8 +196,8 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
         throw std::runtime_error(keel::format("{}: no figure to export", who).c_str());
     // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
-    const int W = std::max(64, (int)(840.0 * ea.dpi / 150.0));
-    const int H = std::max(64, (int)(630.0 * ea.dpi / 150.0));
+    const keel::i32 W = std::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
+    const keel::i32 H = std::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)
@@ -320,7 +320,7 @@ void registerFigureExport(Engine &engine)
             const FigureState *fig = nullptr;
             if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
             if (!fig) fig = &ctx.engine->figureManager().current();
-            const int W = 560, H = 420;
+            const keel::i32 W = 560, H = 420;
             keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
             const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
             Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
@@ -433,20 +433,20 @@ void registerFigureExport(Engine &engine)
                     keel::f64 *d = C.doubleDataMut();
                     if (paletteName == "jet") {
                         std::fill(d, d + 3 * m, 0.0);
-                        const int mi = keel::as<int>(m);
-                        const int n = (mi + 3) / 4;
-                        const int ulen = n + (n - 1) + n;
-                        auto u_at = [&](int idx1) -> keel::f64 {
+                        const keel::i32 mi = keel::as<keel::i32>(m);
+                        const keel::i32 n = (mi + 3) / 4;
+                        const keel::i32 ulen = n + (n - 1) + n;
+                        auto u_at = [&](keel::i32 idx1) -> keel::f64 {
                             if (idx1 <= n) return keel::f64(idx1) / keel::f64(n);
                             if (idx1 <= 2 * n - 1) return 1.0;
                             return keel::f64(2 * n - 1 + n - (idx1 - 1)) / keel::f64(n);
                         };
-                        const int gbase = (n + 1) / 2 - (mi % 4 == 1 ? 1 : 0);
-                        int rcount = 0, gcount = 0, bcount = 0;
-                        for (int k = 1; k <= ulen; ++k) {
-                            const int g = gbase + k;
-                            const int r = g + n;
-                            const int b = g - n;
+                        const keel::i32 gbase = (n + 1) / 2 - (mi % 4 == 1 ? 1 : 0);
+                        keel::i32 rcount = 0, gcount = 0, bcount = 0;
+                        for (keel::i32 k = 1; k <= ulen; ++k) {
+                            const keel::i32 g = gbase + k;
+                            const keel::i32 r = g + n;
+                            const keel::i32 b = g - n;
                             if (r >= 1 && r <= mi) {
                                 ++rcount;
                                 d[0 * m + keel::as<keel::usize>(r - 1)] = u_at(rcount);
@@ -457,10 +457,10 @@ void registerFigureExport(Engine &engine)
                             }
                             if (b >= 1 && b <= mi) ++bcount;
                         }
-                        int bsofar = 0;
-                        for (int k = 1; k <= ulen; ++k) {
-                            const int g = gbase + k;
-                            const int b = g - n;
+                        keel::i32 bsofar = 0;
+                        for (keel::i32 k = 1; k <= ulen; ++k) {
+                            const keel::i32 g = gbase + k;
+                            const keel::i32 b = g - n;
                             if (b >= 1 && b <= mi) {
                                 ++bsofar;
                                 d[2 * m + keel::as<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
@@ -477,19 +477,19 @@ void registerFigureExport(Engine &engine)
                             d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
                         }
                     } else if (paletteName == "hot") {
-                        const int mi = keel::as<int>(m);
-                        const int n = (3 * mi) / 8;
-                        for (int i = 0; i < mi; ++i) {
+                        const keel::i32 mi = keel::as<keel::i32>(m);
+                        const keel::i32 n = (3 * mi) / 8;
+                        for (keel::i32 i = 0; i < mi; ++i) {
                             d[i]         = (i < n) ? keel::f64(i + 1) / keel::f64(n) : 1.0;
                             d[i + m]     = (i < n) ? 0.0 : (i < 2 * n ? keel::f64(i - n + 1) / keel::f64(n) : 1.0);
                             d[i + 2 * m] = (i < 2 * n) ? 0.0 : keel::f64(i - 2 * n + 1) / keel::f64(mi - 2 * n);
                         }
                     } else {
-                        int tableN = 256;
+                        keel::i32 tableN = 256;
                         const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
                         for (keel::usize i = 0; i < m; ++i) {
                             keel::f64 t = (m == 1) ? 0.0 : keel::as<keel::f64>(i) / keel::as<keel::f64>(m - 1);
-                            int idx = std::min(tableN - 1, std::max(0, keel::as<int>(std::lround(t * (tableN - 1)))));
+                            keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(std::lround(t * (tableN - 1)))));
                             d[i]         = tbl[idx * 3 + 0] / 255.0;
                             d[i + m]     = tbl[idx * 3 + 1] / 255.0;
                             d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;

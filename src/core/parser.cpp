@@ -79,23 +79,23 @@ const Token &Parser::current() const
     return tokens_[pos_];
 }
 
-const Token &Parser::peekToken(int off) const
+const Token &Parser::peekToken(keel::i32 off) const
 {
     // COMMENT-aware lookahead: COMMENT tokens are transparent at the
     // parser level so peekToken(1) returns the next *real* token,
     // not the comment between current and next. Negative offsets do
     // the mirrored skip-backwards.
-    long long p = keel::as<long long>(pos_);
+    keel::i64 p = keel::as<keel::i64>(pos_);
     if (off == 0) {
-        if (p < 0 || p >= keel::as<long long>(tokens_.size())) return tokens_.back();
+        if (p < 0 || p >= keel::as<keel::i64>(tokens_.size())) return tokens_.back();
         return tokens_[keel::as<keel::usize>(p)];
     }
-    const int dir   = (off > 0) ? 1 : -1;
-    const int steps = (off > 0) ? off : -off;
-    for (int s = 0; s < steps; ++s) {
+    const keel::i32 dir   = (off > 0) ? 1 : -1;
+    const keel::i32 steps = (off > 0) ? off : -off;
+    for (keel::i32 s = 0; s < steps; ++s) {
         do {
             p += dir;
-            if (p < 0 || p >= keel::as<long long>(tokens_.size()))
+            if (p < 0 || p >= keel::as<keel::i64>(tokens_.size()))
                 return tokens_.back();
         } while (tokens_[keel::as<keel::usize>(p)].type == TokenType::COMMENT);
     }
@@ -131,7 +131,7 @@ Token Parser::consume(TokenType t, keel::StringRef msg)
     if (msg.empty()) {
         keel::String err = keel::format(
             "Parse error at line {} col {}: expected token type {}, got '{}'",
-            current().line, current().col, keel::as<int>(t), current().value);
+            current().line, current().col, keel::as<keel::i32>(t), current().value);
         throw std::runtime_error(err.c_str());
     }
     keel::String err = keel::format(
@@ -187,7 +187,7 @@ bool Parser::isTerminator(std::initializer_list<TokenType> terminators) const
 // Обрабатывает hex (0x), binary (0b), octal (0o), подчёркивания
 // ============================================================
 
-keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
+keel::f64 Parser::parseDouble(keel::StringRef text, keel::i32 line, keel::i32 col)
 {
     // Убираем подчёркивания и суффикс i/j (для мнимых)
     keel::String clean;
@@ -218,7 +218,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
             throwInvalid();
         char *end = nullptr;
         errno = 0;
-        unsigned long long val = std::strtoull(start, &end, 2);
+        keel::u64 val = std::strtoull(start, &end, 2);
         if (end == start || *end != '\0' || errno == ERANGE)
             throwInvalid();
         return keel::as<keel::f64>(val);
@@ -231,7 +231,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, int line, int col)
             throwInvalid();
         char *end = nullptr;
         errno = 0;
-        unsigned long long val = std::strtoull(start, &end, 8);
+        keel::u64 val = std::strtoull(start, &end, 8);
         if (end == start || *end != '\0' || errno == ERANGE)
             throwInvalid();
         return keel::as<keel::f64>(val);
@@ -264,10 +264,10 @@ ASTNodePtr Parser::parse()
     }
 
     // Check for duplicate function definitions
-    keel::HashMap<keel::String, int> funcNames;
+    keel::HashMap<keel::String, keel::i32> funcNames;
     for (auto &child : block->children) {
         if (child && child->type == NodeType::FUNCTION_DEF) {
-            if (const int *firstLine = funcNames.get(child->strValue)) {
+            if (const keel::i32 *firstLine = funcNames.get(child->strValue)) {
                 keel::String err = keel::format(
                     "Duplicate function '{}' (first defined at line {}, redefined at line {})",
                     child->strValue, *firstLine, child->line);
@@ -386,11 +386,11 @@ bool Parser::isCommandStyleCall() const
     // `N/2`) by requiring whitespace between the command head and the
     // operator AND the operand being glued to the operator.
     if (next.type == TokenType::MINUS || next.type == TokenType::SLASH) {
-        const int headEnd = current().endCol > 0 ? current().endCol
-                                                 : current().col + keel::as<int>(current().value.size());
+        const keel::i32 headEnd = current().endCol > 0 ? current().endCol
+                                                 : current().col + keel::as<keel::i32>(current().value.size());
         const Token &operand = peekToken(2);
-        const int nextEnd = next.endCol > 0 ? next.endCol
-                                            : next.col + keel::as<int>(next.value.size());
+        const keel::i32 nextEnd = next.endCol > 0 ? next.endCol
+                                            : next.col + keel::as<keel::i32>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
@@ -404,11 +404,11 @@ bool Parser::isCommandStyleCall() const
     // Relative path in command form: e.g. `load ../sampleEEGdata` or `load ./foo`
     if (next.type == TokenType::DOT || next.type == TokenType::DOT_SLASH
         || next.type == TokenType::DOT_BACKSLASH) {
-        const int headEnd = current().endCol > 0 ? current().endCol
-                                                 : current().col + keel::as<int>(current().value.size());
+        const keel::i32 headEnd = current().endCol > 0 ? current().endCol
+                                                 : current().col + keel::as<keel::i32>(current().value.size());
         const Token &operand = peekToken(2);
-        const int nextEnd = next.endCol > 0 ? next.endCol
-                                            : next.col + keel::as<int>(next.value.size());
+        const keel::i32 nextEnd = next.endCol > 0 ? next.endCol
+                                            : next.col + keel::as<keel::i32>(next.value.size());
         return next.line == current().line
             && next.col > headEnd
             && operand.line == next.line
@@ -507,11 +507,11 @@ ASTNodePtr Parser::parseCommandStyleCall()
     // Tokens don't carry whitespace, but they carry (line, col, value),
     // so a gap between the previous token's end column and the next
     // token's start column reconstructs the space that splits arguments.
-    int cmdLine = ln;
+    keel::i32 cmdLine = ln;
     bool haveArg = false;
     keel::String argStr;
-    int argLine = 0, argCol = 0;
-    int prevEnd = -1; // col just past the source text of the previous token
+    keel::i32 argLine = 0, argCol = 0;
+    keel::i32 prevEnd = -1; // col just past the source text of the previous token
 
     auto tokenEndCol = [](const Token &t) {
         if (t.endCol > 0)
@@ -519,8 +519,8 @@ ASTNodePtr Parser::parseCommandStyleCall()
         // Quoted strings store the UNQUOTED value but span the quotes in
         // the source (opening quote at t.col, closing after the value).
         if (t.type == TokenType::STRING || t.type == TokenType::DQSTRING)
-            return t.col + keel::as<int>(t.value.size()) + 1;
-        return t.col + keel::as<int>(t.value.size()) - 1;
+            return t.col + keel::as<keel::i32>(t.value.size()) + 1;
+        return t.col + keel::as<keel::i32>(t.value.size()) - 1;
     };
     auto flushArg = [&]() {
         if (!haveArg)
@@ -906,7 +906,7 @@ bool Parser::probeHasOutputSignature() const
 {
     if (current().type == TokenType::LBRACKET) {
         keel::usize probe = pos_ + 1;
-        int depth = 1;
+        keel::i32 depth = 1;
         while (probe < tokens_.size() && depth > 0) {
             if (tokens_[probe].type == TokenType::END_OF_INPUT)
                 break;
@@ -1006,7 +1006,7 @@ ASTNodePtr Parser::parseClassDef()
         if (!check(TokenType::LPAREN))
             return attrs;
         advance(); // (
-        int depth = 1;
+        keel::i32 depth = 1;
         while (depth > 0 && !isAtEnd()) {
             if (check(TokenType::LPAREN))
                 ++depth;
@@ -1068,7 +1068,7 @@ ASTNodePtr Parser::parseClassDef()
                 auto prop = makeNode(NodeType::CLASSDEF_PROPERTY, pln, pcl);
                 prop->strValue = consume(TokenType::IDENTIFIER, "property name").value;
                 if (current().line == pln && match(TokenType::LPAREN)) {
-                    int depth = 1;
+                    keel::i32 depth = 1;
                     while (!isAtEnd() && depth > 0) {
                         if (check(TokenType::LPAREN)) ++depth;
                         else if (check(TokenType::RPAREN)) --depth;
@@ -1081,7 +1081,7 @@ ASTNodePtr Parser::parseClassDef()
                         advance();
                 }
                 if (current().line == pln && match(TokenType::LBRACE)) {
-                    int depth = 1;
+                    keel::i32 depth = 1;
                     while (!isAtEnd() && depth > 0) {
                         if (check(TokenType::LBRACE)) ++depth;
                         else if (check(TokenType::RBRACE)) --depth;

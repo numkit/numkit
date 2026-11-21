@@ -157,15 +157,15 @@ private:
     keel::HashMap<keel::String, keel::u16> varRegisters_;
     // nextReg_ is `int` so we can detect overflow (>= kInvalidReg = 65535)
     // before it wraps.
-    int nextReg_ = 0;
+    keel::i32 nextReg_ = 0;
     // High-water mark for nextReg_ across the chunk. Used at end of
     // compilation to size the runtime register file.
-    int peakReg_ = 0;
+    keel::i32 peakReg_ = 0;
     // Highest variable register reserved so far (exclusive). Slots
     // [0, maxVarReg_) are pinned to variables and never reclaimable;
     // [maxVarReg_, nextReg_) are transient temps that compileBlock
     // releases between statements.
-    int maxVarReg_ = 0;
+    keel::i32 maxVarReg_ = 0;
     bool isTopLevel_ = false;
     bool inFunctionBody_ = false;
     // True while compiling a fusion idiom's fallback path (the normal compile),
@@ -175,7 +175,7 @@ private:
     // emitting the fallback path of FUSE_EWISE so operands never evaluate twice.
     keel::HashMap<const ASTNode *, keel::u16> fusedOperandRegs_;
     keel::u16 nargoutContext_ = 1; // expected number of outputs (0=statement, 1=expression)
-    int activeTryDepth_ = 0;      // active enclosing TRY_BEGIN depth in current chunk
+    keel::i32 activeTryDepth_ = 0;      // active enclosing TRY_BEGIN depth in current chunk
 
     // Provenance context for anonymous functions compiled as part of a
     // NAMED function's body. Managed by AnonOriginSentry.
@@ -217,7 +217,7 @@ private:
     // Script-lexical compiled functions.
     keel::HashMap<keel::String, BytecodeChunk> scriptLocalCompiledFuncs_;
     keel::Array<keel::HashMap<keel::String, BytecodeChunk>> savedScriptLocalCompiledFuncs_;
-    int scriptDepth_ = 0;
+    keel::i32 scriptDepth_ = 0;
 
     keel::u16 varRegWrite(keel::StringRef name);
     keel::u16 varRegRead(keel::StringRef name);
@@ -280,18 +280,18 @@ private:
     keel::u16 compileCellAssign(const ASTNode *node);
 
     keel::u16 compileFieldStore(const ASTNode *lhs, const ASTNode *rhsNode,
-                               int inValReg, bool suppress);
+                               keel::i32 inValReg, bool suppress);
     keel::u16 compileCellStore(const ASTNode *lhs, const ASTNode *rhsNode,
-                              int inValReg, bool suppress);
+                              keel::i32 inValReg, bool suppress);
     keel::u16 compileIndexStore(const ASTNode *lhs, const ASTNode *rhsNode,
-                               int inValReg, bool suppress);
+                               keel::i32 inValReg, bool suppress);
     void compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool suppress);
 
     bool needsGeneralLValuePath(const ASTNode *lhs) const;
     keel::u16 compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNode,
-                                int inValReg, bool suppress);
+                                keel::i32 inValReg, bool suppress);
     keel::u16 compileSuperCall(const ASTNode *callNode, const ASTNode *superRef,
-                              int explicitOutBase, keel::u16 nout);
+                              keel::i32 explicitOutBase, keel::u16 nout);
     keel::u16 compileAnonFunc(const ASTNode *node);
     void collectFreeVars(const ASTNode *node,
                          keel::ArrayRef<keel::String> params,
@@ -307,7 +307,7 @@ private:
     keel::u16 compileIndexAssign(const ASTNode *node);
 
     keel::u16 compileCall(const ASTNode *node);
-    int tryCompileFused(const ASTNode *node);
+    keel::i32 tryCompileFused(const ASTNode *node);
     keel::u16 compileFused(const ASTNode *node, keel::usize ruleIdx,
                           keel::ArrayRef<const ASTNode *> operands);
     keel::u16 compileCommandCall(const ASTNode *node);
@@ -369,7 +369,7 @@ private:
         keel::Array<keel::usize> breakPatches;
         keel::Array<keel::usize> continuePatches;
         bool isForLoop = false;
-        int tryDepthAtEntry = 0;
+        keel::i32 tryDepthAtEntry = 0;
     };
     keel::Array<LoopContext> loopStack_;
 };

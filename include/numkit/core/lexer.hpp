@@ -84,10 +84,10 @@ struct Token
 {
     TokenType type = TokenType::END_OF_INPUT;
     keel::String value;
-    int line = 0;
-    int col = 0;
-    int endLine = 0;
-    int endCol = 0;
+    keel::i32 line = 0;
+    keel::i32 col = 0;
+    keel::i32 endLine = 0;
+    keel::i32 endCol = 0;
 
     Token clone(keel::Allocator *alloc = nullptr) const
     {
@@ -111,16 +111,16 @@ public:
 private:
     keel::String src_;
     keel::usize pos_ = 0;
-    int line_ = 1;
-    int col_ = 1;
+    keel::i32 line_ = 1;
+    keel::i32 col_ = 1;
     keel::Array<Token> tokens_;
     keel::Array<char> bracketStack_;
 
     char peek() const;
-    char peek(int offset) const;
+    char peek(keel::i32 offset) const;
     char advance();
 
-    int bracketDepth() const;
+    keel::i32 bracketDepth() const;
     bool inMatrixContext() const;
     void pushBracket(char open);
     void popBracket(char expected);
@@ -130,21 +130,21 @@ private:
 
     void skipSpacesAndComments();
     void skipBlockComment();
-    void addToken(TokenType type, keel::StringRef val, int line, int col);
+    void addToken(TokenType type, keel::StringRef val, keel::i32 line, keel::i32 col);
     bool isValueToken(TokenType t) const;
     bool isTransposeContext() const;
 
     void readNumber();
-    void validateUnderscores(keel::usize start, keel::usize end, int startLine, int startCol);
-    void readString(int startLine, int startCol);
-    void readDoubleQuotedString(int startLine, int startCol);
+    void validateUnderscores(keel::usize start, keel::usize end, keel::i32 startLine, keel::i32 startCol);
+    void readString(keel::i32 startLine, keel::i32 startCol);
+    void readDoubleQuotedString(keel::i32 startLine, keel::i32 startCol);
     void readIdentifier();
     bool readOperator();
 
     void insertImplicitComma();
 
     [[noreturn]] void error(keel::StringRef msg);
-    [[noreturn]] void error(keel::StringRef msg, int line, int col);
+    [[noreturn]] void error(keel::StringRef msg, keel::i32 line, keel::i32 col);
 
     static bool isDigit(char c);
     static bool isAlpha(char c);
