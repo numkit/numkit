@@ -862,7 +862,7 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
     default:
         throw std::runtime_error(
             keel::format("Compiler: unsupported node type {}",
-                         static_cast<int>(node->type)).c_str());
+                         keel::as<int>(node->type)).c_str());
     }
 }
 

@@ -131,7 +131,7 @@ Token Parser::consume(TokenType t, keel::StringRef msg)
     if (msg.empty()) {
         keel::String err = keel::format(
             "Parse error at line {} col {}: expected token type {}, got '{}'",
-            current().line, current().col, static_cast<int>(t), current().value);
+            current().line, current().col, keel::as<int>(t), current().value);
         throw std::runtime_error(err.c_str());
     }
     keel::String err = keel::format(
