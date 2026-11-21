@@ -11,7 +11,6 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>

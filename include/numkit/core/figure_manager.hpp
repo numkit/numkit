@@ -102,7 +102,7 @@ inline void appendInt(keel::String &out, int v) {
 
 inline void appendUsize(keel::String &out, keel::usize v) {
     char buf[32];
-    int n = std::snprintf(buf, sizeof(buf), "%zu", static_cast<std::size_t>(v));
+    int n = std::snprintf(buf, sizeof(buf), "%zu", v);
     if (n > 0) out.append(keel::StringRef(buf, static_cast<keel::usize>(n)));
 }
 

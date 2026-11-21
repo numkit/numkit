@@ -91,7 +91,15 @@ Value values(const Value &m, keel::Allocator *mr = nullptr);
 } // namespace numkit::runtime
 
 namespace numkit::containers {
-using namespace ::numkit::runtime::containers;
+using ::numkit::runtime::containers::map;
+using ::numkit::runtime::containers::dictionary;
+using ::numkit::runtime::containers::set;
+using ::numkit::runtime::containers::get;
+using ::numkit::runtime::containers::isKey;
+using ::numkit::runtime::containers::remove;
+using ::numkit::runtime::containers::count;
+using ::numkit::runtime::containers::keys;
+using ::numkit::runtime::containers::values;
 
 /// @}
 }

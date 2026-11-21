@@ -17,7 +17,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -262,7 +262,7 @@ void geoForward(const char *target, keel::ArrayRef<Value> args,
     proxied.push_back(args[1]);   // lon → X
     proxied.push_back(args[0]);   // lat → Y
     for (keel::usize i = 2; i < args.size(); ++i) proxied.push_back(args[i]);
-    std::array<Value, 4> outBuf;
+    keel::StaticArray<Value, 4> outBuf;
     if (!gc.callBuiltin(target, keel::ArrayRef<Value>(proxied.data(), proxied.size()), 0,
                         keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
     // Add convenience axis labels so the "no basemap" output is
@@ -277,7 +277,7 @@ void geoForward(const char *target, keel::ArrayRef<Value> args,
 
 void delegateTo(const char *target, keel::ArrayRef<Value> args,
                      keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
-    std::array<Value, 1> outBuf;
+    keel::StaticArray<Value, 1> outBuf;
     if (!gc.callBuiltin(target, args, 0, keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
     outs[0] = Value();
 }

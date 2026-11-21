@@ -15,7 +15,7 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -198,7 +198,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 auto sub = Value::matrix(kn, 1, ValueType::DOUBLE, mr);
                 double *sd = sub.doubleDataMut();
                 for (keel::usize j = 0; j < kn; ++j) sd[j] = Aget(rows[j], c);
-                std::array<Value, 1> callArgs{sub};
+                keel::StaticArray<Value, 1> callArgs{sub};
                 Value r = ctx.engine->callFunctionHandle(
                     methodV, keel::ArrayRef<Value>(callArgs.data(), 1), ctx.env);
                 const keel::usize rn = r.numel();
@@ -284,7 +284,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         for (keel::usize c = 0; c < nCols; ++c)
             for (keel::usize j = 0; j < kn; ++j)
                 sd[j + c * kn] = Aget(rows[j], c);
-        std::array<Value, 1> callArgs{sub};
+        keel::StaticArray<Value, 1> callArgs{sub};
         Value r = ctx.engine->callFunctionHandle(
             pred, keel::ArrayRef<Value>(callArgs.data(), 1), ctx.env);
         const keel::usize rn = r.numel();

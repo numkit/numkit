@@ -14,7 +14,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -1576,7 +1576,7 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             proxied.push_back(keel::move(Xjit));
             proxied.push_back(yv);
             for (keel::usize i = 2; i < args.size(); ++i) proxied.push_back(args[i]);
-            std::array<Value, 1> outBuf;
+            keel::StaticArray<Value, 1> outBuf;
             gc.callBuiltin("scatter", keel::ArrayRef<Value>(proxied.data(), proxied.size()), 0,
                            keel::MutArrayRef<Value>(outBuf.data(), 1));
             outs[0] = Value();
@@ -1700,8 +1700,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             if (args.empty()) { outs[0] = Value(); return; }
             // Forward to heatmap (cellLabel default on, no Colormap).
-            std::array<Value, 1> outBuf;
-            std::array<Value, 1> proxied{ args[0] };
+            keel::StaticArray<Value, 1> outBuf;
+            keel::StaticArray<Value, 1> proxied{ args[0] };
             if (!gc.callBuiltin("heatmap", keel::ArrayRef<Value>(proxied.data(), 1), 0,
                                 keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             auto &fm = gc.fm;

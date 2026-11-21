@@ -12,7 +12,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -170,7 +170,7 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
                     const Pt B   = { interp(xL, xR, v_bl, v_br, L), yB };
                     const Pt Le  = { xL, interp(yT, yB, v_tl, v_bl, L) };
 
-                    std::array<std::pair<Pt, Pt>, 2> segs;
+                    keel::StaticArray<std::pair<Pt, Pt>, 2> segs;
                     int nseg = 0;
                     switch (code) {
                         case 1:  case 14: segs[nseg++] = { Le, T }; break;

@@ -13,7 +13,7 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -91,7 +91,7 @@ void boundary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (shrink > 1) shrink = 1;
     // shrink == 0 → convex hull (use existing impl).
     if (shrink == 0.0 || n < 4) {
-        std::array<Value, 2> proxied{ args[0], args[1] };
+        keel::StaticArray<Value, 2> proxied{ args[0], args[1] };
         convhull_reg(keel::ArrayRef<Value>(proxied.data(), 2), nargout, outs, ctx);
         return;
     }

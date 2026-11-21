@@ -13,7 +13,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -264,7 +264,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
         if (!std::isfinite(vmn)) { vmn = 0; vmx = 1; }
         const double vmid = (vmn + vmx) * 0.5;
 
-        const auto rgbForValue = [&](double L) -> std::array<int, 3> {
+        const auto rgbForValue = [&](double L) -> keel::StaticArray<int, 3> {
             const double t = (vmx == vmn) ? 0.5 : (L - vmn) / (vmx - vmn);
             const double Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const double Cr = 0.6;
@@ -836,9 +836,9 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                         const keel::usize ic = i + (keel::usize)kCornerDY[c];
                         const keel::usize jc = j + (keel::usize)kCornerDX[c];
                         const keel::usize kc = k + (keel::usize)kCornerDZ[c];
-                        return std::array<double, 3>{Xs[jc], Ys[ic], Zs[kc]};
+                        return keel::StaticArray<double, 3>{Xs[jc], Ys[ic], Zs[kc]};
                     };
-                    std::array<double, 3> verts[12] = {};
+                    keel::StaticArray<double, 3> verts[12] = {};
                     for (int e = 0; e < 12; ++e) {
                         if (!(em & (1 << e))) continue;
                         const int a = kEdge0[e], b = kEdge1[e];
@@ -1076,7 +1076,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             const double apexY = by + ay * scale;
             const double apexZ = bz + az * scale;
             // Build the 6-vertex base ring.
-            std::array<double, kRingN> rx, ry, rz;
+            keel::StaticArray<double, kRingN> rx, ry, rz;
             for (int n = 0; n < kRingN; ++n) {
                 const double theta = (2 * M_PI) * n / kRingN;
                 const double cs = std::cos(theta), sn = std::sin(theta);
@@ -1226,7 +1226,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
 
         const keel::usize nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
         for (keel::usize s = 0; s < nSeeds; ++s) {
-            keel::Array<std::array<double, 3>> path;
+            keel::Array<keel::StaticArray<double, 3>> path;
             double xq = sxV->elemAsDouble(s);
             double yq = syV->elemAsDouble(s);
             double zq = szV->elemAsDouble(s);
@@ -1250,11 +1250,11 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
             xs << '['; ys << '['; zs << '[';
             bool first = true;
             // Pre-compute ring vertices per path point.
-            keel::Array<std::array<std::array<double, 3>, kRingN>> rings;
+            keel::Array<keel::StaticArray<keel::StaticArray<double, 3>, kRingN>> rings;
             rings.resize(path.size());
-            std::array<double, 3> prevE1 = {0, 0, 1};
+            keel::StaticArray<double, 3> prevE1 = {0, 0, 1};
             for (keel::usize i = 0; i < path.size(); ++i) {
-                std::array<double, 3> tan;
+                keel::StaticArray<double, 3> tan;
                 if (i + 1 < path.size()) {
                     tan = { path[i + 1][0] - path[i][0],
                             path[i + 1][1] - path[i][1],
@@ -1268,7 +1268,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                 if (tn > 0) { tan[0] /= tn; tan[1] /= tn; tan[2] /= tn; }
                 // Project prevE1 onto plane ⊥ tan and renormalise.
                 const double dot = tan[0] * prevE1[0] + tan[1] * prevE1[1] + tan[2] * prevE1[2];
-                std::array<double, 3> e1 = {
+                keel::StaticArray<double, 3> e1 = {
                     prevE1[0] - dot * tan[0],
                     prevE1[1] - dot * tan[1],
                     prevE1[2] - dot * tan[2],
@@ -1282,7 +1282,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                 }
                 if (e1n > 0) { e1[0] /= e1n; e1[1] /= e1n; e1[2] /= e1n; }
                 prevE1 = e1;
-                std::array<double, 3> e2 = {
+                keel::StaticArray<double, 3> e2 = {
                     tan[1] * e1[2] - tan[2] * e1[1],
                     tan[2] * e1[0] - tan[0] * e1[2],
                     tan[0] * e1[1] - tan[1] * e1[0],
@@ -1298,9 +1298,9 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                 }
             }
             // Connect consecutive rings with quads (split into 2 tris).
-            const auto tri = [&](const std::array<double, 3> &A,
-                                 const std::array<double, 3> &B,
-                                 const std::array<double, 3> &C) {
+            const auto tri = [&](const keel::StaticArray<double, 3> &A,
+                                 const keel::StaticArray<double, 3> &B,
+                                 const keel::StaticArray<double, 3> &C) {
                 if (!first) { xs << ','; ys << ','; zs << ','; }
                 first = false;
                 xs << A[0] << ',' << B[0] << ',' << C[0];
@@ -1409,7 +1409,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
                               keel::ArrayRef<Value> args, keel::usize nargout,
                               keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
         (void)nargout;
-        std::array<Value, 1> tmp;
+        keel::StaticArray<Value, 1> tmp;
         if (!gc.callBuiltin(base, args, 0, keel::MutArrayRef<Value>(tmp.data(), 1))) { outs[0] = Value(); return; }
         // Hold on so contour3 doesn't clear the axes.
         gc.fm.currentAxes().holdOn = true;
@@ -1538,7 +1538,7 @@ void buildSurfacePlots(keel::Array<PlotEntry> &table)
     reg("surface", "surfl",
         [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
             (void)nargout;
-            std::array<Value, 1> outBuf;
+            keel::StaticArray<Value, 1> outBuf;
             if (!gc.callBuiltin("surf", args, 0, keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             auto &fm = gc.fm;
             fm.currentAxes().camlightPos.assign("headlight");

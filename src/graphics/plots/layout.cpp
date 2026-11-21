@@ -16,7 +16,7 @@
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -389,7 +389,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
             keel::String type = args[0].toString();
             for (auto &c : type) c = keel::to_ascii_lower(c);
-            static const std::array<const char *, 6> kTypes = {
+            static const keel::StaticArray<const char *, 6> kTypes = {
                 "line", "arrow", "textarrow", "ellipse", "rectangle",
                 "textbox"};
             bool okType = false;
@@ -598,7 +598,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         //   north, south, east, west, best, none,
         //   northeast, northwest, southeast, southwest,
         //   plus the same with `outside` suffix.
-        static const std::array<const char *, 19> kAllowed{
+        static const keel::StaticArray<const char *, 19> kAllowed{
             "north", "south", "east", "west", "best", "none",
             "northeast", "northwest", "southeast", "southwest",
             "northoutside", "southoutside", "eastoutside", "westoutside",
@@ -669,7 +669,7 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                     ++i;  // skip the value
                     continue;
                 }
-                static const std::array<const char *, 23> kLegendProps{
+                static const keel::StaticArray<const char *, 23> kLegendProps{
                     "orientation", "numcolumns", "numcolumnsmode",
                     "fontsize", "fontname", "fontweight", "fontangle", "fontunits",
                     "interpreter", "box", "color", "edgecolor", "textcolor",

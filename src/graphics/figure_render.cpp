@@ -31,7 +31,7 @@
 #include <numkit/core/figure_manager.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -74,9 +74,9 @@ struct Rgb {
 
 // Series palette — the SAME hexes the IDE renderer's KIND_PALETTE uses,
 // so saveas output matches the on-screen figure.
-inline const std::array<Rgb, 8> &palette()
+inline const keel::StaticArray<Rgb, 8> &palette()
 {
-    static const std::array<Rgb, 8> p = {{
+    static const keel::StaticArray<Rgb, 8> p = {{
         Rgb(0x7f, 0xd9, 0x9a), Rgb(0x5f, 0xb3, 0xd4), Rgb(0xe9, 0xb8, 0x70),
         Rgb(0x9b, 0x8c, 0xf2), Rgb(0xe2, 0x6a, 0x6a), Rgb(0xd4, 0xa5, 0xe6),
         Rgb(0xf2, 0xa3, 0x7e), Rgb(0x6f, 0xcf, 0xbf),
@@ -333,7 +333,7 @@ const keel::u8 *namedPalette(keel::StringRef name, int &n)
     static constexpr keel::usize kNumPalettes =
         sizeof(kNamedPaletteHex) / sizeof(kNamedPaletteHex[0]);
     static const auto tables = [] {
-        std::array<std::array<keel::u8, 256 * 3>, kNumPalettes> t{};
+        keel::StaticArray<keel::StaticArray<keel::u8, 256 * 3>, kNumPalettes> t{};
         auto hexNibble = [](char c) -> keel::u8 {
             if (c >= '0' && c <= '9') return static_cast<keel::u8>(c - '0');
             if (c >= 'a' && c <= 'f') return static_cast<keel::u8>(10 + c - 'a');
@@ -2353,7 +2353,7 @@ keel::String renderFigurePdf(const FigureState &fig, int W, int H)
     pdf.append("xref\n0 6\n0000000000 65535 f \n");
     keel::usize offs[5] = {off1, off2, off3, off4, off5};
     for (int i = 0; i < 5; ++i) {
-        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", static_cast<std::size_t>(offs[i]));
+        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", offs[i]);
         pdf.append(buf);
     }
     pdf.append(keel::format("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref));

@@ -13,7 +13,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <array>
+#include <keel/static_array.h>
 #include <climits>
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -532,7 +532,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
         for (int i = 0; i < N; ++i) {
             const double x = a + (b - a) * i / (double)(N - 1);
             Value xv = Value::scalar(x, mr);
-            std::array<Value, 1> argv{ xv };
+            keel::StaticArray<Value, 1> argv{ xv };
             Value res;
             try {
                 res = gc.callHandle(fh,
@@ -593,7 +593,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 const double x = xa + (xb - xa) * j / (double)(N - 1);
                 Value xv = Value::scalar(x, mr);
                 Value yv = Value::scalar(y, mr);
-                std::array<Value, 2> argv{ xv, yv };
+                keel::StaticArray<Value, 2> argv{ xv, yv };
                 double r = std::nan("");
                 try {
                     Value res = gc.callHandle(fh,
@@ -635,8 +635,8 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (double)(N - 1);
             // Forward to the engine-registered `contour` builtin so the
             // marching-squares body is reused as-is.
-            std::array<Value, 3> proxied{ Xv, Yv, Z };
-            std::array<Value, 1> outBuf;
+            keel::StaticArray<Value, 3> proxied{ Xv, Yv, Z };
+            keel::StaticArray<Value, 1> outBuf;
             if (!gc.callBuiltin("contour", keel::ArrayRef<Value>(proxied.data(), 3), 0,
                                 keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
             outs[0] = Value();
@@ -668,8 +668,8 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             Xv.doubleDataMut()[j] = xa + (xb - xa) * j / (double)(N - 1);
         for (int i = 0; i < N; ++i)
             Yv.doubleDataMut()[i] = ya + (yb - ya) * i / (double)(N - 1);
-        std::array<Value, 3> proxied{ Xv, Yv, Z };
-        std::array<Value, 1> outBuf;
+        keel::StaticArray<Value, 3> proxied{ Xv, Yv, Z };
+        keel::StaticArray<Value, 1> outBuf;
         if (!gc.callBuiltin("surf", keel::ArrayRef<Value>(proxied.data(), 3), 0,
                             keel::MutArrayRef<Value>(outBuf.data(), 1))) { outs[0] = Value(); return; }
         outs[0] = Value();
@@ -705,7 +705,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             for (int i = 0; i < N; ++i) {
                 const double t = a + (b - a) * i / (double)(N - 1);
                 Value tv = Value::scalar(t, mr);
-                std::array<Value, 1> argv{ tv };
+                keel::StaticArray<Value, 1> argv{ tv };
                 double x = std::nan(""), y = std::nan(""), z = std::nan("");
                 try {
                     x = gc.callHandle(fx,
@@ -1247,7 +1247,7 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 const double c2=cx*cx+cy*cy;
                 return ax*(by*c2-cy*b2) - ay*(bx*c2-cx*b2) + a2*(bx*cy-cx*by);
             };
-            keel::Array<std::array<keel::usize, 3>> tris;
+            keel::Array<keel::StaticArray<keel::usize, 3>> tris;
             for (keel::usize a = 0; a < n; ++a)
                 for (keel::usize b = a + 1; b < n; ++b)
                     for (keel::usize c = b + 1; c < n; ++c) {
@@ -1378,8 +1378,8 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
             edgeDs.style.assign("color=#5fb3d4");
             fm.pushDataset(keel::move(edgeDs));
             // Scatter the input points on top.
-            std::array<Value, 2> ptArgs{ xv, yv };
-            std::array<Value, 1> outBuf;
+            keel::StaticArray<Value, 2> ptArgs{ xv, yv };
+            keel::StaticArray<Value, 1> outBuf;
             {
                 const bool wasHold = fm.currentAxes().holdOn;
                 fm.currentAxes().holdOn = true;
@@ -1424,8 +1424,8 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 auto yv = Value::matrix(1, C, ValueType::DOUBLE, mr);
                 for (keel::usize c = 0; c < C; ++c)
                     yv.doubleDataMut()[c] = T.elemAsDouble(c * R + r);
-                std::array<Value, 2> proxied{ xv, yv };
-                std::array<Value, 1> outBuf;
+                keel::StaticArray<Value, 2> proxied{ xv, yv };
+                keel::StaticArray<Value, 1> outBuf;
                 gc.callBuiltin("plot", keel::ArrayRef<Value>(proxied.data(), 2), 0,
                                keel::MutArrayRef<Value>(outBuf.data(), 1));
             }
