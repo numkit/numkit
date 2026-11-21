@@ -64,71 +64,71 @@ Value createCell(const Dims &dims, keel::Allocator *mr)
     }
 }
 
-keel::MatClass valueTypeToMatClass(ValueType vt) noexcept
+keel::mat::MatClass valueTypeToMatClass(ValueType vt) noexcept
 {
     switch (vt) {
-        case ValueType::DOUBLE:  return keel::MatClass::Double;
-        case ValueType::SINGLE:  return keel::MatClass::Single;
-        case ValueType::INT8:    return keel::MatClass::Int8;
-        case ValueType::UINT8:   return keel::MatClass::Uint8;
-        case ValueType::INT16:   return keel::MatClass::Int16;
-        case ValueType::UINT16:  return keel::MatClass::Uint16;
-        case ValueType::INT32:   return keel::MatClass::Int32;
-        case ValueType::UINT32:  return keel::MatClass::Uint32;
-        case ValueType::INT64:   return keel::MatClass::Int64;
-        case ValueType::UINT64:  return keel::MatClass::Uint64;
-        case ValueType::LOGICAL: return keel::MatClass::Logical;
-        case ValueType::CHAR:    return keel::MatClass::Char;
-        case ValueType::COMPLEX: return keel::MatClass::Double;
-        case ValueType::CELL:    return keel::MatClass::Cell;
-        case ValueType::STRUCT:  return keel::MatClass::Struct;
-        case ValueType::OBJECT:  return keel::MatClass::Object;
-        default:                 return keel::MatClass::Double;
+        case ValueType::DOUBLE:  return keel::mat::MatClass::Double;
+        case ValueType::SINGLE:  return keel::mat::MatClass::Single;
+        case ValueType::INT8:    return keel::mat::MatClass::Int8;
+        case ValueType::UINT8:   return keel::mat::MatClass::Uint8;
+        case ValueType::INT16:   return keel::mat::MatClass::Int16;
+        case ValueType::UINT16:  return keel::mat::MatClass::Uint16;
+        case ValueType::INT32:   return keel::mat::MatClass::Int32;
+        case ValueType::UINT32:  return keel::mat::MatClass::Uint32;
+        case ValueType::INT64:   return keel::mat::MatClass::Int64;
+        case ValueType::UINT64:  return keel::mat::MatClass::Uint64;
+        case ValueType::LOGICAL: return keel::mat::MatClass::Logical;
+        case ValueType::CHAR:    return keel::mat::MatClass::Char;
+        case ValueType::COMPLEX: return keel::mat::MatClass::Double;
+        case ValueType::CELL:    return keel::mat::MatClass::Cell;
+        case ValueType::STRUCT:  return keel::mat::MatClass::Struct;
+        case ValueType::OBJECT:  return keel::mat::MatClass::Object;
+        default:                 return keel::mat::MatClass::Double;
     }
 }
 
-ValueType matClassToValueType(keel::MatClass kind) noexcept
+ValueType matClassToValueType(keel::mat::MatClass kind) noexcept
 {
     switch (kind) {
-        case keel::MatClass::Double:  return ValueType::DOUBLE;
-        case keel::MatClass::Single:  return ValueType::SINGLE;
-        case keel::MatClass::Int8:    return ValueType::INT8;
-        case keel::MatClass::Uint8:   return ValueType::UINT8;
-        case keel::MatClass::Int16:   return ValueType::INT16;
-        case keel::MatClass::Uint16:  return ValueType::UINT16;
-        case keel::MatClass::Int32:   return ValueType::INT32;
-        case keel::MatClass::Uint32:  return ValueType::UINT32;
-        case keel::MatClass::Int64:   return ValueType::INT64;
-        case keel::MatClass::Uint64:  return ValueType::UINT64;
-        case keel::MatClass::Logical: return ValueType::LOGICAL;
-        case keel::MatClass::Char:    return ValueType::CHAR;
+        case keel::mat::MatClass::Double:  return ValueType::DOUBLE;
+        case keel::mat::MatClass::Single:  return ValueType::SINGLE;
+        case keel::mat::MatClass::Int8:    return ValueType::INT8;
+        case keel::mat::MatClass::Uint8:   return ValueType::UINT8;
+        case keel::mat::MatClass::Int16:   return ValueType::INT16;
+        case keel::mat::MatClass::Uint16:  return ValueType::UINT16;
+        case keel::mat::MatClass::Int32:   return ValueType::INT32;
+        case keel::mat::MatClass::Uint32:  return ValueType::UINT32;
+        case keel::mat::MatClass::Int64:   return ValueType::INT64;
+        case keel::mat::MatClass::Uint64:  return ValueType::UINT64;
+        case keel::mat::MatClass::Logical: return ValueType::LOGICAL;
+        case keel::mat::MatClass::Char:    return ValueType::CHAR;
         default:                      return ValueType::DOUBLE;
     }
 }
 
-keel::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
+keel::mat::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
 {
     if (v.type() == ValueType::STRING) {
         if (v.numel() <= 1) {
-            return keel::MatArray::from_string(
+            return keel::mat::MatArray::from_string(
                 v.numel() == 1 ? v.stringElem(0).as_ref() : keel::StringRef(""), alloc);
         }
         const Dims &d = v.dims();
         keel::usize dimsBuf[Dims::kMaxRank];
         const int nd = d.ndims();
         for (int i = 0; i < nd; ++i) dimsBuf[i] = d.dim(i);
-        keel::MatArray cell = keel::MatArray::make_cell(
+        keel::mat::MatArray cell = keel::mat::MatArray::make_cell(
             keel::ArrayRef<keel::usize>(dimsBuf, static_cast<keel::usize>(nd)), alloc);
         for (keel::usize i = 0; i < v.numel(); ++i) {
-            *cell.cell_mut(i) = keel::MatArray::from_string(v.stringElem(i).as_ref(), alloc);
+            *cell.cell_mut(i) = keel::mat::MatArray::from_string(v.stringElem(i).as_ref(), alloc);
         }
         return cell;
     }
 
     if (v.isFuncHandle()) {
         const keel::usize zdims[2] = {0, 0};
-        return keel::MatArray::make_dense(
-            keel::MatClass::Double, keel::ArrayRef<keel::usize>(zdims, 2), false, alloc);
+        return keel::mat::MatArray::make_dense(
+            keel::mat::MatClass::Double, keel::ArrayRef<keel::usize>(zdims, 2), false, alloc);
     }
 
     const Dims &d = v.dims();
@@ -141,7 +141,7 @@ keel::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
     const keel::usize numElems = d.numel();
 
     if (v.type() == ValueType::CELL) {
-        keel::MatArray cell = keel::MatArray::make_cell(dimsRef, alloc);
+        keel::mat::MatArray cell = keel::mat::MatArray::make_cell(dimsRef, alloc);
         for (keel::usize i = 0; i < numElems; ++i) {
             *cell.cell_mut(i) = valueToMatArray(v.cellAt(i), alloc);
         }
@@ -169,10 +169,10 @@ keel::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
         fnameRefs.reserve(fnames.size());
         for (keel::usize fi = 0; fi < fnames.size(); ++fi) fnameRefs.push_back(fnames[fi].as_ref());
 
-        keel::MatArray out = (v.type() == ValueType::OBJECT)
-            ? keel::MatArray::make_object(v.objectClassNameRef(), dimsRef,
+        keel::mat::MatArray out = (v.type() == ValueType::OBJECT)
+            ? keel::mat::MatArray::make_object(v.objectClassNameRef(), dimsRef,
                                           keel::ArrayRef<keel::StringRef>(fnameRefs.data(), fnameRefs.size()), alloc)
-            : keel::MatArray::make_struct(dimsRef,
+            : keel::mat::MatArray::make_struct(dimsRef,
                                           keel::ArrayRef<keel::StringRef>(fnameRefs.data(), fnameRefs.size()), alloc);
 
         for (keel::usize ei = 0; ei < numElems; ++ei) {
@@ -196,54 +196,54 @@ keel::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
     }
 
     if (v.type() == ValueType::CHAR) {
-        return keel::MatArray::from_ascii(dimsRef, keel::StringRef(v.charData(), numElems), alloc);
+        return keel::mat::MatArray::from_ascii(dimsRef, keel::StringRef(v.charData(), numElems), alloc);
     }
 
     if (v.type() == ValueType::COMPLEX) {
-        return keel::MatArray::from_c64(dimsRef, keel::ArrayRef<keel::c64>(v.complexData(), numElems), alloc);
+        return keel::mat::MatArray::from_c64(dimsRef, keel::ArrayRef<keel::c64>(v.complexData(), numElems), alloc);
     }
 
     if (v.type() == ValueType::LOGICAL) {
-        return keel::MatArray::from_logical(dimsRef, keel::ArrayRef<keel::u8>(v.logicalData(), numElems), alloc);
+        return keel::mat::MatArray::from_logical(dimsRef, keel::ArrayRef<keel::u8>(v.logicalData(), numElems), alloc);
     }
 
-    keel::MatArray out = keel::MatArray::make_dense(valueTypeToMatClass(v.type()), dimsRef, false, alloc);
+    keel::mat::MatArray out = keel::mat::MatArray::make_dense(valueTypeToMatClass(v.type()), dimsRef, false, alloc);
     if (v.rawBytes() > 0 && out.data.size() >= v.rawBytes()) {
         std::memcpy(out.data.data(), v.rawData(), v.rawBytes());
     }
     return out;
 }
 
-double readMatScalarAsDouble(const keel::MatArray &arr, const keel::Array<keel::u8> &buf, keel::usize idx) noexcept
+double readMatScalarAsDouble(const keel::mat::MatArray &arr, const keel::Array<keel::u8> &buf, keel::usize idx) noexcept
 {
     switch (arr.kind) {
-        case keel::MatClass::Double:
+        case keel::mat::MatClass::Double:
             return reinterpret_cast<const double *>(buf.data())[idx];
-        case keel::MatClass::Single:
+        case keel::mat::MatClass::Single:
             return static_cast<double>(reinterpret_cast<const float *>(buf.data())[idx]);
-        case keel::MatClass::Int8:
+        case keel::mat::MatClass::Int8:
             return static_cast<double>(reinterpret_cast<const keel::i8 *>(buf.data())[idx]);
-        case keel::MatClass::Uint8:
-        case keel::MatClass::Logical:
+        case keel::mat::MatClass::Uint8:
+        case keel::mat::MatClass::Logical:
             return static_cast<double>(buf[idx]);
-        case keel::MatClass::Int16:
+        case keel::mat::MatClass::Int16:
             return static_cast<double>(reinterpret_cast<const keel::i16 *>(buf.data())[idx]);
-        case keel::MatClass::Uint16:
+        case keel::mat::MatClass::Uint16:
             return static_cast<double>(reinterpret_cast<const keel::u16 *>(buf.data())[idx]);
-        case keel::MatClass::Int32:
+        case keel::mat::MatClass::Int32:
             return static_cast<double>(reinterpret_cast<const keel::i32 *>(buf.data())[idx]);
-        case keel::MatClass::Uint32:
+        case keel::mat::MatClass::Uint32:
             return static_cast<double>(reinterpret_cast<const keel::u32 *>(buf.data())[idx]);
-        case keel::MatClass::Int64:
+        case keel::mat::MatClass::Int64:
             return static_cast<double>(reinterpret_cast<const keel::i64 *>(buf.data())[idx]);
-        case keel::MatClass::Uint64:
+        case keel::mat::MatClass::Uint64:
             return static_cast<double>(reinterpret_cast<const keel::u64 *>(buf.data())[idx]);
         default:
             return 0.0;
     }
 }
 
-Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
+Value matArrayToValue(const keel::mat::MatArray &arr, keel::Allocator *mr)
 {
     if (arr.rank() > static_cast<keel::usize>(Dims::kMaxRank)) {
         throw Error("load: MAT5 array rank exceeds maximum supported rank");
@@ -256,17 +256,17 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
     const Dims shape(d, nd);
     const keel::usize numElems = shape.numel();
 
-    if (arr.kind == keel::MatClass::Cell) {
+    if (arr.kind == keel::mat::MatClass::Cell) {
         Value result = createCell(shape, mr);
         for (keel::usize i = 0; i < numElems; ++i) {
-            if (const keel::MatArray *c = arr.cell(i)) {
+            if (const keel::mat::MatArray *c = arr.cell(i)) {
                 result.cellAt(i) = matArrayToValue(*c, mr);
             }
         }
         return result;
     }
 
-    if (arr.kind == keel::MatClass::Struct) {
+    if (arr.kind == keel::mat::MatClass::Struct) {
         Value result;
         if (numElems == 1 && shape.ndims() <= 2) {
             result = Value::structure(mr);
@@ -282,7 +282,7 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
                 result.setFieldAll(fnames[fi], Value{});
             } else {
                 for (keel::usize ei = 0; ei < numElems; ++ei) {
-                    if (const keel::MatArray *fv = arr.field(ei, fi)) {
+                    if (const keel::mat::MatArray *fv = arr.field(ei, fi)) {
                         result.setField(ei, fnames[fi], matArrayToValue(*fv, mr));
                     }
                 }
@@ -291,7 +291,7 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
         return result;
     }
 
-    if (arr.kind == keel::MatClass::Object) {
+    if (arr.kind == keel::mat::MatClass::Object) {
         auto *res = mr ? mr : keel::default_allocator();
         const keel::String className = keel::String::from(arr.object_class_name(), res);
         const auto fnames = arr.field_names();
@@ -301,7 +301,7 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
         if (numElems == 1 && shape.ndims() <= 2) {
             auto st = keel::make_arc_in<ObjectState>(res, res);
             for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                if (const keel::MatArray *fv = arr.field(0, fi)) {
+                if (const keel::mat::MatArray *fv = arr.field(0, fi)) {
                     st->props.put(fnames[fi].clone(res), matArrayToValue(*fv, mr));
                 }
             }
@@ -312,7 +312,7 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
         for (keel::usize ei = 0; ei < numElems; ++ei) {
             auto st = keel::make_arc_in<ObjectState>(res, res);
             for (keel::usize fi = 0; fi < fnames.size(); ++fi) {
-                if (const keel::MatArray *fv = arr.field(ei, fi)) {
+                if (const keel::mat::MatArray *fv = arr.field(ei, fi)) {
                     st->props.put(fnames[fi].clone(res), matArrayToValue(*fv, mr));
                 }
             }
@@ -321,7 +321,7 @@ Value matArrayToValue(const keel::MatArray &arr, keel::Allocator *mr)
         return Value::objectArray(className, shape, keel::move(states), false, mr);
     }
 
-    if (arr.kind == keel::MatClass::Char) {
+    if (arr.kind == keel::mat::MatClass::Char) {
         Value result = createMatrix(shape, ValueType::CHAR, mr);
         char *out = result.charDataMut();
         const auto u16s = arr.as_utf16();
@@ -373,26 +373,26 @@ void saveMat(Engine &engine, Environment &env,
     }
 
     keel::ArenaTemp scratch = keel::get_scratch(engine.allocator());
-    keel::Array<keel::MatVar> vars(scratch.allocator());
+    keel::Array<keel::mat::MatVar> vars(scratch.allocator());
     vars.reserve(names.size());
     for (const auto &nm : names) {
         Value *v = env.get(nm);
         if (!v) throw Error(keel::format("save: variable '{}' not found", nm));
-        vars.push_back(keel::MatVar(nm.clone(scratch.allocator()),
+        vars.push_back(keel::mat::MatVar(nm.clone(scratch.allocator()),
                                     valueToMatArray(*v, scratch.allocator())));
     }
 
-    keel::MatWriteOptions opts;
+    keel::mat::MatWriteOptions opts;
     opts.allocator = scratch.allocator();
     if (matVersion == 4) {
-        opts.version = keel::MatVersion::V4;
+        opts.version = keel::mat::MatVersion::V4;
     } else if (matVersion == 7) {
-        opts.version = keel::MatVersion::V7;
+        opts.version = keel::mat::MatVersion::V7;
     } else {
-        opts.version = keel::MatVersion::V6;
+        opts.version = keel::mat::MatVersion::V6;
     }
 
-    auto encoded = keel::mat_encode(keel::ArrayRef<keel::MatVar>(vars.data(), vars.size()), opts);
+    auto encoded = keel::mat::mat_encode(keel::ArrayRef<keel::mat::MatVar>(vars.data(), vars.size()), opts);
     if (!encoded.is_ok()) {
         throw Error("save: failed to encode .mat file");
     }
@@ -425,11 +425,11 @@ void loadMat(Engine &engine, Environment &env,
         throw Error("load: file too short or empty");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    keel::MatReadOptions opts;
+    keel::mat::MatReadOptions opts;
     opts.max_rank = static_cast<keel::usize>(Dims::kMaxRank);
     opts.allocator = scratch.allocator();
 
-    auto decoded = keel::mat_decode(
+    auto decoded = keel::mat::mat_decode(
         keel::ArrayRef<keel::u8>(reinterpret_cast<const keel::u8 *>(bytes.data()), bytes.size()),
         opts);
     if (!decoded.is_ok()) {

@@ -86,7 +86,7 @@ if(NOT TARGET keel::mat)
     FetchContent_Declare(
         keel_mat
         GIT_REPOSITORY https://github.com/keelcpp/mat.git
-        GIT_TAG        e655e2ebd16fa149620424b6de085650e8d4bfc6
+        GIT_TAG        161a43d22bb1eea0fa3ce8085603e658198ff3b9
     )
     FetchContent_MakeAvailable(keel_mat)
 endif()

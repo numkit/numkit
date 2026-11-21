@@ -87,13 +87,13 @@ Value splinePp(const Value &x, const Value &y, keel::Allocator *mr)
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     const keel::usize nm1 = n - 1;
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    (void)keel::spline_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+    (void)keel::interp::spline_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
                                 {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }
 
 // 2-arg `pchip(x, y)` returns a pp struct (piecewise polynomial form)
-// usable with `ppval`, delegating coefficient construction to keel::pchip_pp_coefs.
+// usable with `ppval`, delegating coefficient construction to keel::interp::pchip_pp_coefs.
 Value pchipPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
     const keel::usize n = x.numel();
@@ -107,12 +107,12 @@ Value pchipPp(const Value &x, const Value &y, keel::Allocator *mr)
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     const keel::usize nm1 = n - 1;
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    (void)keel::pchip_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+    (void)keel::interp::pchip_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
                                {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }
 
-// 2-arg `makima(x, y)` returns a pp struct, delegating to keel::makima_pp_coefs.
+// 2-arg `makima(x, y)` returns a pp struct, delegating to keel::interp::makima_pp_coefs.
 Value makimaPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
     const keel::usize n = x.numel();
@@ -126,7 +126,7 @@ Value makimaPp(const Value &x, const Value &y, keel::Allocator *mr)
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     const keel::usize nm1 = n - 1;
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    (void)keel::makima_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+    (void)keel::interp::makima_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
                                 {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }

@@ -209,7 +209,7 @@ void register_elmat(Engine &engine) {
             auto out = Value::matrix(m, n, ValueType::DOUBLE, mr);
             double *p = out.doubleDataMut();
             auto &rng = ctx.engine->rng();
-            for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::uniform_f64(rng, -1.0, 1.0);
+            for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::random::uniform_f64(rng, -1.0, 1.0);
             outs[0] = std::move(out);
         });
 
