@@ -85,47 +85,15 @@ Value splinePp(const Value &x, const Value &y, keel::Allocator *mr)
                      0, 0, "spline", "", "numkit:spline:tooFewPoints");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    const double *xd = x.doubleData();
-    const double *yd = y.doubleData();
-
-    // Reuse interpSpline's not-a-knot sigma helper. See BUGS.md #22.
     const keel::usize nm1 = n - 1;
-    keel::Array<double> h(nm1, scratch.allocator());
-    for (keel::usize i = 0; i < nm1; ++i) h[i] = xd[i + 1] - xd[i];
-    auto sigma = computeSplineSigma(xd, yd, n, h.data(), scratch.allocator());
-
-    // Build [nm1 x 4] coefficient matrix in column-major order.
-    // For each interval i, with dx = x - xd[i] in [0, h_i]:
-    //   y(dx) = a*dx^3 + b*dx^2 + c*dx + d
-    //   a = (sigma_{i+1} - sigma_i) / (6 * h_i)
-    //   b = sigma_i / 2
-    //   c = (y_{i+1} - y_i) / h_i - h_i * (2*sigma_i + sigma_{i+1}) / 6
-    //   d = y_i
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    double *cp = coefs.doubleDataMut();
-    for (keel::usize i = 0; i < nm1; ++i) {
-        const double hi = h[i];
-        const double a  = (sigma[i + 1] - sigma[i]) / (6.0 * hi);
-        const double b  = sigma[i] / 2.0;
-        const double c  = (yd[i + 1] - yd[i]) / hi
-                          - hi * (2.0 * sigma[i] + sigma[i + 1]) / 6.0;
-        const double d  = yd[i];
-        cp[i + 0 * nm1] = a;   // col 0
-        cp[i + 1 * nm1] = b;
-        cp[i + 2 * nm1] = c;
-        cp[i + 3 * nm1] = d;
-    }
+    (void)keel::spline_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+                                {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }
 
 // 2-arg `pchip(x, y)` returns a pp struct (piecewise polynomial form)
-// usable with `ppval`, mirroring spline(x, y). Uses the same shape-
-// preserving derivatives as the value-form interpPchip, then converts the
-// cubic Hermite segments to MATLAB's [pieces x 4] coefficient layout in
-// powers of dx = x - breaks(i):  a*dx^3 + b*dx^2 + c*dx + d with
-//   a = (d_i + d_{i+1} - 2*delta_i) / h_i^2
-//   b = (3*delta_i - 2*d_i - d_{i+1}) / h_i
-//   c = d_i,  d = y_i        (delta_i = (y_{i+1}-y_i)/h_i)
+// usable with `ppval`, delegating coefficient construction to keel::pchip_pp_coefs.
 Value pchipPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
     const keel::usize n = x.numel();
@@ -137,66 +105,14 @@ Value pchipPp(const Value &x, const Value &y, keel::Allocator *mr)
                      0, 0, "pchip", "", "numkit:pchip:tooFewPoints");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    const double *xd = x.doubleData();
-    const double *yd = y.doubleData();
     const keel::usize nm1 = n - 1;
-
-    keel::Array<double> h(nm1, scratch.allocator()), delta(nm1, scratch.allocator());
-    for (keel::usize i = 0; i < nm1; ++i) {
-        h[i] = xd[i + 1] - xd[i];
-        delta[i] = (yd[i + 1] - yd[i]) / h[i];
-    }
-
-    // Shape-preserving slopes d[0..n-1] (identical to interpPchip).
-    keel::Array<double> d(n, 0.0, scratch.allocator());
-    if (n == 2) {
-        d[0] = delta[0];
-        d[1] = delta[0];                       // 2 points → a straight line
-    } else {
-        for (keel::usize i = 1; i < nm1; ++i) {
-            if (delta[i - 1] * delta[i] <= 0.0) {
-                d[i] = 0.0;
-            } else {
-                const double w1 = 2.0 * h[i] + h[i - 1];
-                const double w2 = h[i] + 2.0 * h[i - 1];
-                d[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
-            }
-        }
-        d[0] = ((2.0 * h[0] + h[1]) * delta[0] - h[0] * delta[1]) / (h[0] + h[1]);
-        if (d[0] * delta[0] < 0.0)
-            d[0] = 0.0;
-        else if (delta[0] * delta[1] < 0.0 && keel::abs(d[0]) > keel::abs(3.0 * delta[0]))
-            d[0] = 3.0 * delta[0];
-        d[nm1] = ((2.0 * h[nm1 - 1] + h[nm1 - 2]) * delta[nm1 - 1]
-                  - h[nm1 - 1] * delta[nm1 - 2]) / (h[nm1 - 1] + h[nm1 - 2]);
-        if (d[nm1] * delta[nm1 - 1] < 0.0)
-            d[nm1] = 0.0;
-        else if (delta[nm1 - 2] * delta[nm1 - 1] < 0.0
-                 && keel::abs(d[nm1]) > keel::abs(3.0 * delta[nm1 - 1]))
-            d[nm1] = 3.0 * delta[nm1 - 1];
-    }
-
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    double *cp = coefs.doubleDataMut();
-    for (keel::usize i = 0; i < nm1; ++i) {
-        const double hi = h[i];
-        const double a  = (d[i] + d[i + 1] - 2.0 * delta[i]) / (hi * hi);
-        const double b  = (3.0 * delta[i] - 2.0 * d[i] - d[i + 1]) / hi;
-        const double c  = d[i];
-        const double dd = yd[i];
-        cp[i + 0 * nm1] = a;
-        cp[i + 1 * nm1] = b;
-        cp[i + 2 * nm1] = c;
-        cp[i + 3 * nm1] = dd;
-    }
+    (void)keel::pchip_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+                               {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }
 
-// 2-arg `makima(x, y)` returns a pp struct, mirroring spline/pchip. Uses
-// the same modified-Akima derivatives as the value-form interpMakima,
-// then the identical cubic-Hermite → dx-power coefficient conversion as
-// pchipPp (makima and pchip share the Hermite basis; only the slopes d_i
-// differ).
+// 2-arg `makima(x, y)` returns a pp struct, delegating to keel::makima_pp_coefs.
 Value makimaPp(const Value &x, const Value &y, keel::Allocator *mr)
 {
     const keel::usize n = x.numel();
@@ -208,53 +124,10 @@ Value makimaPp(const Value &x, const Value &y, keel::Allocator *mr)
                      0, 0, "makima", "", "numkit:makima:tooFewPoints");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
-    const double *xd = x.doubleData();
-    const double *yd = y.doubleData();
     const keel::usize nm1 = n - 1;
-
-    keel::Array<double> h(nm1, scratch.allocator()), delta(nm1, scratch.allocator());
-    for (keel::usize i = 0; i < nm1; ++i) {
-        h[i] = xd[i + 1] - xd[i];
-        delta[i] = (yd[i + 1] - yd[i]) / h[i];
-    }
-
-    keel::Array<double> d(n, 0.0, scratch.allocator());
-    if (n == 2) {
-        d[0] = delta[0];
-        d[1] = delta[0];                       // 2 points → a straight line
-    } else {
-        // Slopes m[-2..n] with Akima's quadratic extrapolation, offset 2.
-        keel::Array<double> mExt(n + 3, scratch.allocator());
-        for (keel::usize i = 0; i < nm1; ++i) mExt[2 + i] = delta[i];
-        mExt[1] = 2.0 * mExt[2] - mExt[3];
-        mExt[0] = 2.0 * mExt[1] - mExt[2];
-        mExt[2 + nm1]     = 2.0 * mExt[2 + nm1 - 1] - mExt[2 + nm1 - 2];
-        mExt[2 + nm1 + 1] = 2.0 * mExt[2 + nm1]     - mExt[2 + nm1 - 1];
-        for (keel::usize i = 0; i < n; ++i) {
-            const double ml2 = mExt[i];
-            const double ml1 = mExt[i + 1];
-            const double mr1 = mExt[i + 2];
-            const double mr2 = mExt[i + 3];
-            const double w1 = keel::abs(mr2 - mr1) + keel::abs(mr2 + mr1) * 0.5;
-            const double w2 = keel::abs(ml1 - ml2) + keel::abs(ml1 + ml2) * 0.5;
-            const double wsum = w1 + w2;
-            d[i] = (wsum == 0.0) ? 0.0 : (w1 * ml1 + w2 * mr1) / wsum;
-        }
-    }
-
     auto coefs = Value::matrix(nm1, 4, ValueType::DOUBLE, mr);
-    double *cp = coefs.doubleDataMut();
-    for (keel::usize i = 0; i < nm1; ++i) {
-        const double hi = h[i];
-        const double a  = (d[i] + d[i + 1] - 2.0 * delta[i]) / (hi * hi);
-        const double b  = (3.0 * delta[i] - 2.0 * d[i] - d[i + 1]) / hi;
-        const double c  = d[i];
-        const double dd = yd[i];
-        cp[i + 0 * nm1] = a;
-        cp[i + 1 * nm1] = b;
-        cp[i + 2 * nm1] = c;
-        cp[i + 3 * nm1] = dd;
-    }
+    (void)keel::makima_pp_coefs({x.doubleData(), n}, {y.doubleData(), n},
+                                {coefs.doubleDataMut(), nm1 * 4}, scratch.allocator());
     return mkpp(x, coefs, mr);
 }
 
