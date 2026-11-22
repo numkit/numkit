@@ -1147,7 +1147,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (hit)
             return decodeProp(*hit, mr);
         keel::String low = name.clone();
-        for (char &ch : low) ch = keel::to_ascii_lower(ch);
+        low.to_ascii_lower_in_place();
         if (low == "screensize") {
             Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
             v.doubleDataMut()[0] = 1.0; v.doubleDataMut()[1] = 1.0;
@@ -1736,8 +1736,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
     if (id < 0) {
         if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
             keel::String lprop = args[1].toString();
-            for (char &ch : lprop)
-                ch = keel::to_ascii_lower(ch);
+            lprop.to_ascii_lower_in_place();
             if (lprop == "pointerlocation") {
                 Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
@@ -1922,8 +1921,7 @@ void findobj_reg(keel::ArrayRef<Value> args, keel::usize,
         if (!args[i].isChar())
             continue;
         keel::String key = args[i].toString();
-        for (auto &c : key)
-            c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "-property" && i + 1 < args.size()
             && args[i + 1].isChar()) {
             Filt f;

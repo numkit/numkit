@@ -228,7 +228,7 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
             throw Error("integral: expected option name (string)",
                          0, 0, "integral", "", "numkit:integral:badFlag");
         keel::String key = args[i].toString();
-        for (char &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "abstol") {
             absTol = args[i + 1].toScalar();
         } else {
@@ -251,7 +251,7 @@ static keel::f64 integral2AbsTol(keel::ArrayRef<Value> args, keel::usize firstOp
     keel::f64 absTol = 1e-10;
     for (keel::usize i = firstOpt; i + 1 < args.size(); i += 2) {
         keel::String key = args[i].toString();
-        for (char &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "abstol") absTol = args[i + 1].toScalar();
     }
     return absTol;

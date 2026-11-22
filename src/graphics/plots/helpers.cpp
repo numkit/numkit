@@ -109,8 +109,7 @@ void parsePlotArgs(keel::ArrayRef<Value> args, keel::usize startIdx, DatasetInfo
         if (!args[i].isChar() && !args[i].isString())
             continue;
         keel::String key = args[i].toString();
-        for (auto &c : key)
-            c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "linewidth")
             ds.lineWidth = args[i + 1].toScalar();
         else if (key == "markersize")

@@ -15,11 +15,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -106,8 +102,7 @@ void plot_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         while (i + 1 < args.size() && args[i].isChar()
                && !isSpec(args[i])) {
             keel::String key = args[i].toString();
-            for (auto &c : key)
-                c = keel::to_ascii_lower(c);
+            key.to_ascii_lower_in_place();
             if (key == "linewidth")
                 ds.lineWidth = args[i + 1].toScalar();
             else if (key == "markersize")
@@ -209,8 +204,7 @@ void plot3Impl(
         while (i + 1 < args.size() && args[i].isChar()
                && !isSpec(args[i])) {
             keel::String key = args[i].toString();
-            for (auto &c : key)
-                c = keel::to_ascii_lower(c);
+            key.to_ascii_lower_in_place();
             if (key == "linewidth")
                 ds.lineWidth = args[i + 1].toScalar();
             else if (key == "markersize")
@@ -1094,8 +1088,7 @@ void logPlotImpl(const char *xscale, const char *yscale,
         while (i + 1 < args.size() && args[i].isChar()
                && !isLogPlotSpec(args[i])) {
             keel::String key = args[i].toString();
-            for (auto &c : key)
-                c = keel::to_ascii_lower(c);
+            key.to_ascii_lower_in_place();
             if (key == "linewidth")
                 ds.lineWidth = args[i + 1].toScalar();
             else if (key == "markersize")
@@ -1529,7 +1522,7 @@ void line_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     for (; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString()) continue;
         keel::String key = args[i].toString();
-        for (auto &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "xdata" && args[i + 1].isNumeric())
             ds.xJson = vecToJson(args[i + 1]);
         else if (key == "ydata" && args[i + 1].isNumeric())

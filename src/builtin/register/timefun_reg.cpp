@@ -731,7 +731,7 @@ void pause_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     if (!args.empty() && (args[0].isChar() || args[0].isString())) {
         const char *prev = pauseEnabled ? "on" : "off";
         keel::String mode = args[0].toString();
-        for (char &c : mode) c = keel::to_ascii_lower(c);
+        mode.to_ascii_lower_in_place();
         if (mode == "off") pauseEnabled = false;
         else if (mode == "on") pauseEnabled = true;
         if (nargout > 0 || mode == "query") {
@@ -829,8 +829,7 @@ void weekday_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         bool wantLong = false;
         if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
             keel::String fmt = args[1].toString();
-            for (auto &c : fmt)
-                c = keel::to_ascii_lower(c);
+            fmt.to_ascii_lower_in_place();
             if (fmt == "long")
                 wantLong = true;
             else if (fmt != "short")
@@ -1094,7 +1093,7 @@ void register_timefun(Engine &engine) {
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
                 keel::String k = args[nPos - 2].toString();
-                for (auto &ch : k) ch = keel::to_ascii_lower(ch);
+                k.to_ascii_lower_in_place();
                 if (k == "format") {
                     fmt = args[nPos - 1].toString();
                     nPos -= 2;
@@ -1660,7 +1659,7 @@ void register_timefun(Engine &engine) {
             keel::usize nPos = args.size();
             while (nPos >= 2 && (args[nPos - 2].isChar() || args[nPos - 2].isString())) {
                 keel::String kl = args[nPos - 2].toString();
-                for (auto &ch : kl) ch = keel::to_ascii_lower(ch);
+                kl.to_ascii_lower_in_place();
                 if (kl == "format") {
                     fmt = args[nPos - 1].toString();
                     nPos -= 2;
@@ -1669,7 +1668,7 @@ void register_timefun(Engine &engine) {
                     nPos -= 2;
                 } else if (kl == "convertfrom") {
                     convFrom = args[nPos - 1].toString();
-                    for (auto &ch : convFrom) ch = keel::to_ascii_lower(ch);
+                    convFrom.to_ascii_lower_in_place();
                     nPos -= 2;
                 } else if (kl == "timezone") {
                     tz = args[nPos - 1].toString();
@@ -2231,9 +2230,8 @@ void register_timefun(Engine &engine) {
             auto *mr = ctx.engine->allocator();
             keel::String rule = args[0].toString();
             keel::String unit = args[1].toString();
-            for (auto &ch : rule) ch = keel::to_ascii_lower(ch);
-            for (auto &ch : unit) ch = keel::to_ascii_lower(ch);
-            bool isEnd = (rule == "end");
+            rule.to_ascii_lower_in_place();
+            unit.to_ascii_lower_in_place();bool isEnd = (rule == "end");
             const keel::usize n = self.objectCount();
             keel::Array<keel::f64> sds(mr);
             sds.resize(n);
@@ -2279,7 +2277,7 @@ void register_timefun(Engine &engine) {
             bool desc = false;
             if (!args.empty() && (args[0].isChar() || args[0].isString())) {
                 keel::String dir = args[0].toString();
-                for (auto &ch : dir) ch = keel::to_ascii_lower(ch);
+                dir.to_ascii_lower_in_place();
                 desc = (dir == "descend");
             }
             keel::Array<keel::usize> order(mr);
@@ -2400,7 +2398,7 @@ void register_timefun(Engine &engine) {
             for (const auto &a : args) {
                 if (a.isChar() || a.isString()) {
                     keel::String s = a.toString();
-                    for (auto &ch : s) ch = keel::to_ascii_lower(ch);
+                    s.to_ascii_lower_in_place();
                     if (s == "stable") stable = true;
                 }
             }
@@ -2476,7 +2474,7 @@ void register_timefun(Engine &engine) {
             for (keel::usize k = 1; k < args.size(); ++k) {
                 if (args[k].isChar() || args[k].isString()) {
                     keel::String s = args[k].toString();
-                    for (auto &ch : s) ch = keel::to_ascii_lower(ch);
+                    s.to_ascii_lower_in_place();
                     if (s == "stable") stable = true;
                 }
             }

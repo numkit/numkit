@@ -13,11 +13,7 @@
 
 #include <algorithm>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -89,7 +85,7 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     for (keel::usize i = nvStart; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar()) continue;
         keel::String key = args[i].toString();
-        for (auto &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "displayrange")    rangeArg = &args[i + 1];
         else if (key == "xdata")      xDataArg = &args[i + 1];
         else if (key == "ydata")      yDataArg = &args[i + 1];

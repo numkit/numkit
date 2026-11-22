@@ -201,8 +201,7 @@ void strsplit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     }
     for (keel::usize k = optStart; k + 1 < args.size(); k += 2) {
         keel::String name = args[k].toString();
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](keel::u8 ch) { return keel::to_ascii_lower(ch); });
+        name.to_ascii_lower_in_place();
         if (name == "collapsedelimiters")
             collapse = !args[k + 1].isEmpty() && args[k + 1].toScalar() != 0.0;
         // DelimiterType='RegularExpression' is not supported (literal only).
@@ -247,7 +246,7 @@ static bool parseIgnoreCaseOption(keel::ArrayRef<Value> args, keel::usize optSta
     for (keel::usize i = optStart; i + 1 < args.size(); ++i) {
         if (!args[i].isChar() && !args[i].isString()) continue;
         keel::String k = args[i].toString();
-        for (char &c : k) c = keel::to_ascii_lower(c);
+        k.to_ascii_lower_in_place();
         if (k == "ignorecase")
             return args[i + 1].toBool();
     }
@@ -324,8 +323,7 @@ void mat2str_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         const Value &a = args[k];
         if (a.type() == ValueType::CHAR || a.isString()) {
             keel::String s = a.toString();
-            std::transform(s.begin(), s.end(), s.begin(),
-                           [](keel::u8 ch) { return keel::to_ascii_lower(ch); });
+            s.to_ascii_lower_in_place();
             if (s == "class") withClass = true;
         } else if (!a.isEmpty()) {
             prec = argcheck::expectedInteger(

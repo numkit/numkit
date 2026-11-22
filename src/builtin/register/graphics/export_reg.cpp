@@ -40,8 +40,7 @@ keel::String lowerExtOf(keel::StringRef path)
     if (dot == keel::kInvalidIndex)
         return keel::String{};
     keel::String e = keel::String::from(path.substr(dot + 1));
-    for (char &c : e)
-        c = keel::to_ascii_lower(c);
+    e.to_ascii_lower_in_place();
     return e;
 }
 
@@ -147,8 +146,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             continue;   // numeric noise (e.g. ignored Name-Value values)
         keel::String s = a.toString();
         keel::String sl = s.clone();
-        for (char &c : sl)
-            c = keel::to_ascii_lower(c);
+        sl.to_ascii_lower_in_place();
         if (!s.empty() && s[0] == '-') {
             // print-style flags: -dpng / -dsvg / -r150 / -ochr…
             if (sl.size() > 2 && sl[1] == 'd')
@@ -161,16 +159,11 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         }
         // A char with an extension that is not a known bare FORMAT is
         // the filename; a bare known format is a format override.
-        static const char *kFormats[] = {"png", "svg", "jpg", "jpeg",
-                                         "bmp", "tga", "pnm", "ppm",
-                                         "tif", "tiff", "pdf", "eps",
-                                         "epsc", "eps2", "epsc2"};
-        bool isBareFormat = false;
-        for (const char *f : kFormats)
-            if (sl == f) {
-                isBareFormat = true;
-                break;
-            }
+        static constexpr keel::StringRef kFormats[] = {
+            "png", "svg", "jpg", "jpeg", "bmp", "tga", "pnm", "ppm",
+            "tif", "tiff", "pdf", "eps", "epsc", "eps2", "epsc2",
+        };
+        const bool isBareFormat = sl.is_one_of(keel::ArrayRef<keel::StringRef>(kFormats));
         if (!havePath && !isBareFormat) {
             out.path = keel::move(s);
             havePath = true;
@@ -215,12 +208,12 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
                               figrender::renderFigurePdf(*ea.fig, W, H));
         return;
     }
-    if (ea.ext == "eps" || ea.ext == "epsc" || ea.ext == "eps2" || ea.ext == "epsc2") {
+    if (ea.ext.is_one_of({"eps", "epsc", "eps2", "epsc2"})) {
         rp.fs->writeFile(rp.path,
                          figrender::renderFigureEps(*ea.fig, W, H));
         return;
     }
-    if (ea.ext == "fig" || ea.ext == "emf" || ea.ext == "hdf") {
+    if (ea.ext.is_one_of({"fig", "emf", "hdf"})) {
         throw std::runtime_error(keel::format(
             "{}: format '.{}' is not supported yet (supported: .png .svg .jpg "
             ".bmp .tga .pnm .tif) — bugs/opened/graphics/figure-export-gaps.md",

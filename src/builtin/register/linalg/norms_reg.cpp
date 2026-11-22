@@ -32,11 +32,11 @@ void norm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     const Value &p = args[1];
     if (p.isChar() || p.isString()) {
         const auto s = p.toString();
-        if (s == "fro" || s == "Fro") {
+        if (s.equals_ignore_ascii_case("fro")) {
             outs[0] = norm_fro(args[0], mr);
             return;
         }
-        if (s == "inf" || s == "Inf") {
+        if (s.equals_ignore_ascii_case("inf")) {
             outs[0] = norm_inf(args[0], mr);
             return;
         }

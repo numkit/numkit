@@ -176,7 +176,7 @@ void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     for (keel::usize i = 1; i < args.size(); ++i) {
         if (args[i].type() == ValueType::CHAR) {
             keel::String s = args[i].toString();
-            for (char &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "matrix") wantMatrix = true;
             else if (s == "vector") { /* default for the 1-output form */ }
             else if (s == "chol" || s == "qz" || s == "nobalance") { /* accept */ }

@@ -2,6 +2,7 @@
 // Parameterized: runs on both TreeWalker and VM backends
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include "dual_engine_fixture.hpp"
 
 using namespace m_test;
@@ -380,10 +381,10 @@ TEST_P(BuiltinTest, InverseReciprocalTrig)
 {
     EXPECT_NEAR(evalScalar("asec(1);"), 0.0, 1e-12);
     EXPECT_NEAR(evalScalar("asec(2);"), std::acos(0.5), 1e-12);
-    EXPECT_NEAR(evalScalar("acsc(1);"), M_PI / 2, 1e-12);
+    EXPECT_NEAR(evalScalar("acsc(1);"), keel::kPi / 2, 1e-12);
     EXPECT_NEAR(evalScalar("acsc(2);"), std::asin(0.5), 1e-12);
-    EXPECT_NEAR(evalScalar("acot(1);"), M_PI / 4, 1e-12);
-    EXPECT_NEAR(evalScalar("acot(0);"), M_PI / 2, 1e-12);
+    EXPECT_NEAR(evalScalar("acot(1);"), keel::kPi / 4, 1e-12);
+    EXPECT_NEAR(evalScalar("acot(0);"), keel::kPi / 2, 1e-12);
     EXPECT_NEAR(evalScalar("asech(1);"), 0.0, 1e-12);
     EXPECT_NEAR(evalScalar("acsch(1);"), std::asinh(1.0), 1e-12);
     EXPECT_NEAR(evalScalar("acoth(2);"), std::atanh(0.5), 1e-12);
@@ -439,7 +440,7 @@ TEST_P(BuiltinTest, CartSphRoundtrip)
 {
     // (1, 1, 1) → az = pi/4, el = atan2(1, sqrt(2)), r = sqrt(3).
     eval("[a, e, r] = cart2sph(1, 1, 1);");
-    EXPECT_NEAR(getVar("a"), M_PI / 4, 1e-12);
+    EXPECT_NEAR(getVar("a"), keel::kPi / 4, 1e-12);
     EXPECT_NEAR(getVar("e"), std::atan2(1.0, std::sqrt(2.0)), 1e-12);
     EXPECT_NEAR(getVar("r"), std::sqrt(3.0), 1e-12);
     // sph2cart inverse.
@@ -751,7 +752,7 @@ TEST_P(BuiltinTest, FminbndScalar)
     EXPECT_NEAR(getVar("y"), 3.0, 1e-4);
     // Min of cos(x) on [0, 2*pi] is at x=pi.
     eval("y2 = fminbnd(@cos, 0, 6);");
-    EXPECT_NEAR(getVar("y2"), M_PI, 1e-4);
+    EXPECT_NEAR(getVar("y2"), keel::kPi, 1e-4);
 }
 
 TEST_P(BuiltinTest, FminsearchVector)
@@ -862,7 +863,7 @@ TEST_P(BuiltinTest, ErfcinvErfcx)
     // adds the (1 - 0.5/x² + ...) correction, so the leading-order
     // approximation matches only to ~2e-6 absolute / ~2e-4 relative.
     EXPECT_NEAR(evalScalar("erfcx(50);"),
-                1.0 / (50.0 * std::sqrt(M_PI)), 5e-6);
+                1.0 / (50.0 * std::sqrt(keel::kPi)), 5e-6);
 }
 
 TEST_P(BuiltinTest, ConvertContainedStringsToChars)
@@ -1128,8 +1129,8 @@ TEST_P(BuiltinTest, EllipKE)
 {
     // K(0) = π/2, E(0) = π/2.
     eval("[K, E] = ellipke(0);");
-    EXPECT_NEAR(getVar("K"), M_PI / 2, 1e-12);
-    EXPECT_NEAR(getVar("E"), M_PI / 2, 1e-12);
+    EXPECT_NEAR(getVar("K"), keel::kPi / 2, 1e-12);
+    EXPECT_NEAR(getVar("E"), keel::kPi / 2, 1e-12);
     // K(1) = Inf, E(1) = 1.
     eval("[K1, E1] = ellipke(1);");
     EXPECT_TRUE(std::isinf(getVar("K1")));
@@ -1208,10 +1209,10 @@ TEST_P(BuiltinTest, BetaBetaln)
     // B(2, 3) = 1/12.
     EXPECT_NEAR(evalScalar("beta(2, 3);"), 1.0 / 12.0, 1e-12);
     // B(0.5, 0.5) = pi.
-    EXPECT_NEAR(evalScalar("beta(0.5, 0.5);"), M_PI, 1e-12);
+    EXPECT_NEAR(evalScalar("beta(0.5, 0.5);"), keel::kPi, 1e-12);
     // betaln consistency.
     EXPECT_NEAR(evalScalar("betaln(2, 3);"), std::log(1.0 / 12.0), 1e-12);
-    EXPECT_NEAR(evalScalar("exp(betaln(0.5, 0.5));"), M_PI, 1e-12);
+    EXPECT_NEAR(evalScalar("exp(betaln(0.5, 0.5));"), keel::kPi, 1e-12);
 }
 
 TEST_P(BuiltinTest, ExpintAndPsi)
@@ -2138,8 +2139,8 @@ TEST_P(BuiltinTest, CartPolVectorized)
     ASSERT_EQ(t->numel(), 3u);
     ASSERT_EQ(r->numel(), 3u);
     EXPECT_NEAR(t->doubleData()[0], std::atan2(4.0, 3.0), 1e-12);
-    EXPECT_NEAR(t->doubleData()[1], M_PI / 2,             1e-12);
-    EXPECT_NEAR(t->doubleData()[2], M_PI,                 1e-12);
+    EXPECT_NEAR(t->doubleData()[1], keel::kPi / 2,             1e-12);
+    EXPECT_NEAR(t->doubleData()[2], keel::kPi,                 1e-12);
     EXPECT_NEAR(r->doubleData()[0], 5.0, 1e-12);
     EXPECT_NEAR(r->doubleData()[1], 1.0, 1e-12);
     EXPECT_NEAR(r->doubleData()[2], 1.0, 1e-12);

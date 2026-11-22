@@ -55,7 +55,7 @@ namespace numkit::builtin::detail {
 namespace {
 
 keel::f64 evalPosCi(keel::f64 ax) {
-    constexpr keel::f64 kGamma = 0.57721566490153286060651209;
+    constexpr keel::f64 kGamma = keel::kEulerGamma;
     if (ax <= 4.0) {
         keel::f64 ci = kGamma + std::log(ax);
         keel::f64 p = 1.0;
@@ -158,7 +158,7 @@ void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
     keel::f64 *dst = out.doubleDataMut();
     const keel::usize n = x.numel();
-    constexpr keel::f64 kPi2 = 1.57079632679489661923;
+    constexpr keel::f64 kPi2 = keel::kHalfPi;
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = x.elemAsDouble(i);
         if (std::isnan(v)) { dst[i] = v; continue; }
@@ -203,7 +203,7 @@ void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     for (keel::usize i = 0; i < n; ++i) {
         if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
     }
-    constexpr keel::f64 kPi = 3.14159265358979323846;
+    constexpr keel::f64 kPi = keel::kPi;
     if (!hasNeg) {
         Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
         keel::f64 *dst = out.doubleDataMut();

@@ -11,6 +11,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
+#include <keel/math.h>
 #include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -109,7 +110,7 @@ Engine::~Engine()
 
 void Engine::reinstallConstants()
 {
-    constantsEnv_->set("pi", Value::scalar(3.14159265358979323846, mr_));
+    constantsEnv_->set("pi", Value::scalar(keel::kPi, mr_));
     // `nan` / `NaN` / `inf` / `Inf` are MATLAB built-in functions, not
     // constants. Bare `nan` calls nan() → scalar NaN; `nan(M, N)` calls
     // nan(M, N) → MxN matrix of NaN; `nan(M, N, 'single')` returns

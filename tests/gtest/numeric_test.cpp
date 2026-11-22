@@ -1,6 +1,7 @@
 // toolboxes/builtin/tests/numeric_test.cpp
 // Phase 7: hypot/nthroot/expm1/log1p/gcd/lcm/bit*
 
+#include <keel/math.h>
 #include "dual_engine_fixture.hpp"
 #include <cmath>
 
@@ -235,8 +236,8 @@ TEST_P(NumericTest, DecicOde15iAndBvpinitBvp4c)
     eval("bc_bvp  = @(ya, yb) [ya(1); yb(1) - 1];");
     eval("solinit = bvpinit(linspace(0, pi/2, 10), [0; 1]);");
     eval("sol = bvp4c(ode_bvp, bc_bvp, solinit);");
-    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 1);"), std::sin(M_PI / 4.0), 1e-4);
-    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 2);"), std::cos(M_PI / 4.0), 1e-4);
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 1);"), std::sin(keel::kPi / 4.0), 1e-4);
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 2);"), std::cos(keel::kPi / 4.0), 1e-4);
 }
 
 INSTANTIATE_DUAL(NumericTest);

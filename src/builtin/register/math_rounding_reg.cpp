@@ -62,7 +62,7 @@ void round_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     bool significant = false;
     if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
         keel::String s = args[2].toString();
-        for (char &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if      (s == "significant") significant = true;
         else if (s == "decimals")    significant = false;
         else

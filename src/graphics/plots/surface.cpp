@@ -15,11 +15,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -1079,7 +1075,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         // Build the 6-vertex base ring.
         keel::StaticArray<keel::f64, kRingN> rx, ry, rz;
         for (keel::i32 n = 0; n < kRingN; ++n) {
-            const keel::f64 theta = (2 * M_PI) * n / kRingN;
+            const keel::f64 theta = (2 * keel::kPi) * n / kRingN;
             const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
             rx[n] = bx + coneRad * (e1x * cs + e2x * sn);
             ry[n] = by + coneRad * (e1y * cs + e2y * sn);
@@ -1290,7 +1286,7 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 tan[0] * e1[1] - tan[1] * e1[0],
             };
             for (keel::i32 n = 0; n < kRingN; ++n) {
-                const keel::f64 theta = (2 * M_PI) * n / kRingN;
+                const keel::f64 theta = (2 * keel::kPi) * n / kRingN;
                 const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
                 rings[i][n] = {
                     path[i][0] + tubeR * (e1[0] * cs + e2[0] * sn),
@@ -1482,7 +1478,7 @@ void camlight_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     keel::String pos = keel::String::from("headlight");
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "left" || s == "right" || s == "headlight") pos = keel::move(s);
     }
     fm.currentAxes().camlightPos = keel::move(pos);
@@ -1510,7 +1506,7 @@ void lighting_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     keel::String m = keel::String::from("gouraud");
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "flat" || s == "gouraud" || s == "phong" || s == "none")
             m = keel::move(s);
     }
@@ -1528,7 +1524,7 @@ void material_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     keel::String m;
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "shiny" || s == "metal" || s == "dull") m = keel::move(s);
     }
     fm.currentAxes().materialPreset = keel::move(m);

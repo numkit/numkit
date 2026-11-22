@@ -7,16 +7,13 @@
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
+#include <keel/math.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -31,7 +28,7 @@ using namespace numkit::detail;
 void computeAngularHistogram(const Value &theta, keel::i32 nbins,
                              keel::String &txOut, keel::String &tyOut)
 {
-    const keel::f64 TAU = 2 * 3.14159265358979323846;
+    const keel::f64 TAU = keel::kTau;
     const keel::f64 bw  = TAU / nbins;
     keel::Array<keel::f64> counts(nbins, 0.0);
     const keel::usize N = theta.numel();

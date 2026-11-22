@@ -18,11 +18,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -404,7 +400,7 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
 {
     if (args.empty() || !args[0].isChar()) { outs[0] = Value(); return; }
     keel::String type = args[0].toString();
-    for (auto &c : type) c = keel::to_ascii_lower(c);
+    type.to_ascii_lower_in_place();
     static const keel::StaticArray<const char *, 6> kTypes = {
         "line", "arrow", "textarrow", "ellipse", "rectangle",
         "textbox"};
@@ -445,7 +441,7 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
         char buf[8];
         if (cv.isChar()) {
             keel::String s = cv.toString();
-            for (auto &ch : s) ch = keel::to_ascii_lower(ch);
+            s.to_ascii_lower_in_place();
             static const std::pair<const char *, const char *> kMap[] = {
                 {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                 {"k", "#000000"}, {"w", "#ffffff"}, {"y", "#ffff00"},
@@ -478,7 +474,7 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
         if (!args[i].isChar())
             continue;
         keel::String key = args[i].toString();
-        for (auto &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         if (key == "string" && args[i + 1].isChar()) {
             an.text = args[i + 1].toString();
         } else if (key == "color") {
@@ -521,7 +517,7 @@ void text_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     };
     for (keel::usize i = strIdx + 1; i + 1 < args.size(); i += 2) {
         keel::String key = argStr(args[i]);
-        for (auto &c : key) c = keel::to_ascii_lower(c);
+        key.to_ascii_lower_in_place();
         const Value &val = args[i + 1];
         if (key == "color") {
             if (val.isChar() || val.isString()) {
@@ -539,7 +535,7 @@ void text_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             addExtra(fs.as_ref());
         } else if (key == "horizontalalignment" && val.isChar()) {
             keel::String a = argStr(val);
-            for (auto &c : a) c = keel::to_ascii_lower(c);
+            a.to_ascii_lower_in_place();
             if (a == "left" || a == "center" || a == "right") {
                 keel::String kv = keel::format("halign={}", a);
                 addExtra(kv.as_ref());
@@ -593,7 +589,7 @@ void grid_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         ax.gridMajor = !ax.gridMajor;
     } else if (args[idx].isChar() || args[idx].isString()) {
         keel::String arg = argStr(args[idx]);
-        for (auto &c : arg) c = keel::to_ascii_lower(c);
+        arg.to_ascii_lower_in_place();
         if      (arg == "on")    { ax.gridMajor = true; }
         else if (arg == "off")   { ax.gridMajor = false; ax.gridMinor = false; }
         else if (arg == "minor") { ax.gridMinor = !ax.gridMinor; }
@@ -703,7 +699,7 @@ void legend_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
         if (isLegendProp && i + 1 < args.size()) {
             if (sLower == "box" && (args[i + 1].isChar() || args[i + 1].isString())) {
                 keel::String bv = args[i + 1].toString();
-                for (char &c : bv) c = keel::to_ascii_lower(c);
+                bv.to_ascii_lower_in_place();
                 ax.legendBoxOn = (bv != "off");
             }
             ++i;  // skip property value
@@ -910,7 +906,7 @@ void colormap_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     auto &ax = fm.currentAxes();
     if (args[0].isChar()) {
         keel::String name = args[0].toString();
-        for (auto &c : name) c = keel::to_ascii_lower(c);
+        name.to_ascii_lower_in_place();
         ax.colormapName = keel::move(name);
         ax.customColormapJson.clear();
     } else {
@@ -953,7 +949,7 @@ void colorscale_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
         fm.currentAxes().colorScale.assign("linear");
     } else if (args[0].isChar()) {
         keel::String mode = args[0].toString();
-        for (auto &c : mode) c = keel::to_ascii_lower(c);
+        mode.to_ascii_lower_in_place();
         if (mode == "log" || mode == "linear") {
             fm.currentAxes().colorScale = keel::move(mode);
         }
@@ -973,7 +969,7 @@ auto &fm = gc.fm;
 keel::String mode = keel::String::from("linear");
 if (!args.empty() && args[0].isChar()) {
     keel::String m = args[0].toString();
-    for (auto &c : m) c = keel::to_ascii_lower(c);
+    m.to_ascii_lower_in_place();
     if (m == "log" || m == "linear") mode = keel::move(m);
 }
 auto &ax = fm.currentAxes();
@@ -1003,7 +999,7 @@ void yyaxis_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     keel::String side = keel::String::from("left");
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "left" || s == "right") side = keel::move(s);
     }
     ax.yyEnabled = true;
@@ -1062,7 +1058,7 @@ void interactionToggle(keel::String AxesState::*field,
     keel::String mode = keel::String::from("on");
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "on" || s == "off") mode = keel::move(s);
     }
     gc.fm.currentAxes().*field = keel::move(mode);
@@ -1099,7 +1095,7 @@ if (args.empty()) {
 }
 if (args[0].isChar()) {
     keel::String s = args[0].toString();
-    for (auto &c : s) c = keel::to_ascii_lower(c);
+    s.to_ascii_lower_in_place();
     if (s == "auto") {
         (ax.*field).clear();
         ax.*autoFlag = true;   // MATLAB XTickMode 'auto'
@@ -1246,7 +1242,7 @@ void aspectImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.empty()) { outs[0] = Value(); return; }
     if (args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "auto") {
             fm.currentAxes().axisMode.clear();
             fm.current().modified = true;
@@ -1281,7 +1277,7 @@ void box_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         ax.boxOn = !ax.boxOn;
     } else if (args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if      (s == "on")  ax.boxOn = true;
         else if (s == "off") ax.boxOn = false;
     }
@@ -1323,7 +1319,7 @@ void cla_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     // 'reset' arg: also clear axis config + scales.
     if (!args.empty() && args[0].isChar()) {
         keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "reset") {
             ax.title.clear(); ax.subtitle.clear();
             ax.xlabel.clear(); ax.ylabel.clear();

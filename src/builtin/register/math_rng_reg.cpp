@@ -380,7 +380,7 @@ void register_randstream(Engine &engine)
         for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
             if (!args[i].isChar() && !args[i].isString()) continue;
             keel::String k = args[i].toString();
-            if (k == "Seed" || k == "seed")
+            if (k.equals_ignore_ascii_case("seed"))
                 seedVal = keel::as<keel::u64>(std::max(0.0, args[i + 1].toScalar()));
         }
         payload->rng.seed(seedVal);

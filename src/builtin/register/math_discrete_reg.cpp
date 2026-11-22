@@ -134,8 +134,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             throw Error("unique: extra arguments must be string flags",
                          0, 0, "unique", "", "numkit:unique:badArg");
         keel::String s = a.toString();
-        for (char &c : s)
-            c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "rows") useRows = true;
         else if (s == "stable") stable = true;
         else if (s == "sorted") stable = false;
@@ -293,8 +292,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     auto lower = [](keel::StringRef sv) {
         keel::String s(sv);
-        for (char &c : s)
-            c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         return s;
     };
     auto requireNumBins = [](keel::f64 v) {
@@ -513,7 +511,7 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         for (keel::usize i = 2; i < args.size(); ++i)
             if (args[i].isChar() || args[i].isString()) {
                 keel::String s = args[i].toString();
-                for (auto &c : s) c = keel::to_ascii_lower(c);
+                s.to_ascii_lower_in_place();
                 if (s == "rows") rows = true;
             }
         if (rows) {
@@ -559,7 +557,7 @@ bool wantsStable(keel::ArrayRef<Value> args, keel::usize start)
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             keel::String s = args[i].toString();
-            for (auto &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "stable") return true;
         }
     }
@@ -657,7 +655,7 @@ bool wantsRows(keel::ArrayRef<Value> args, keel::usize start)
     for (keel::usize i = start; i < args.size(); ++i) {
         if (args[i].isChar() || args[i].isString()) {
             keel::String s = args[i].toString();
-            for (auto &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "rows") return true;
         }
     }

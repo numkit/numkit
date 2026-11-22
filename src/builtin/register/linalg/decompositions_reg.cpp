@@ -61,7 +61,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
             throw Error("chol: option must be 'lower' or 'upper'",
                         0, 0, "chol", "", "numkit:chol:BadOpt");
         keel::String s = args[i].toString();
-        for (char &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if      (s == "lower") lower = true;
         else if (s == "upper") lower = false;
         else
@@ -207,7 +207,7 @@ bool wantsEcon(keel::ArrayRef<Value> args, const char *fn)
     const Value &o = args[1];
     if (o.type() == ValueType::CHAR) {
         keel::String s = o.toString();
-        for (char &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "econ") return true;
         throw Error(keel::format("{}: unknown option '{}'", fn, s),
                     0, 0, fn, "", keel::format_small<64>("numkit:{}:badOption", fn));
@@ -230,7 +230,7 @@ void lu_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
             throw Error("lu: second argument must be the flag 'vector'",
                         0, 0, "lu", "", "numkit:lu:badArg");
         keel::String s = args[1].toString();
-        for (char &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         if (s == "vector") vectorP = true;
         else if (s == "matrix") vectorP = false;
         else throw Error(keel::format("lu: unknown option '{}'", s),
@@ -259,7 +259,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         const Value &o = args[i];
         if (o.type() == ValueType::CHAR || o.isString()) {
             keel::String s = o.toString();
-            for (char &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "econ")        econ = true;
             else if (s == "vector") vectorP = true;
             else if (s == "matrix") vectorP = false;

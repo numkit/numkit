@@ -52,7 +52,7 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
         const Value &e = args[4];
         if (e.isChar() || e.isString()) {
             keel::String es = e.toString();
-            for (char &c : es) c = keel::to_ascii_lower(c);
+            es.to_ascii_lower_in_place();
             if (es == "extrap")
                 mode = Interp1Extrap::Method;
             else
@@ -295,7 +295,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::String method = keel::String::from("linear");
     if (L < args.size() && (args[L].isChar() || args[L].isString())) {
         method = args[L].toString();
-        for (char &c : method) c = keel::to_ascii_lower(c);
+        method.to_ascii_lower_in_place();
     }
     const bool isNearest = (method == "nearest");
     if (!isNearest && method != "linear") {

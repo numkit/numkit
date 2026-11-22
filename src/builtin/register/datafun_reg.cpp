@@ -469,7 +469,7 @@ void ifft_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
     bool symmetric = false;
     if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
         keel::String flag = args[nargs - 1].toString();
-        for (char &c : flag) c = keel::to_ascii_lower(c);
+        flag.to_ascii_lower_in_place();
         if (flag == "symmetric") symmetric = true;
         else if (flag == "nonsymmetric") symmetric = false;
         else
@@ -512,7 +512,7 @@ void ifft2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     bool symmetric = false;
     if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
         keel::String flag = args[nargs - 1].toString();
-        for (char &c : flag) c = keel::to_ascii_lower(c);
+        flag.to_ascii_lower_in_place();
         if (flag == "symmetric") symmetric = true;
         else if (flag == "nonsymmetric") symmetric = false;
         else

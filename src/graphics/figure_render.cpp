@@ -782,8 +782,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
     // Colorbar reserves space on its side (MATLAB eastoutside shrinks the
     // axes to ~0.68 width; we reserve strip + ticks + labels).
     keel::String cbSide = ax.colorbarLocation.clone();
-    for (char &c : cbSide)
-        c = keel::to_ascii_lower(c);
+    cbSide.to_ascii_lower_in_place();
     if (cbSide.size() > 7
         && cbSide.substr(cbSide.size() - 7) == "outside")
         cbSide = keel::String::from(cbSide.substr(0, cbSide.size() - 7));
@@ -819,7 +818,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
     };
 
     if (ax.polar) {
-        const keel::f64 kPi = 3.14159265358979323846;
+        const keel::f64 kPi = keel::kPi;
         keel::f64 rlo = 0.0, rhi = 0.0;
         for (const auto &ds : ax.datasets) {
             if (!ds.visible)
@@ -1343,8 +1342,8 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                     elDeg = vv[1];
                 }
             }
-            const keel::f64 az = azDeg * 3.14159265358979323846 / 180.0;
-            const keel::f64 el = elDeg * 3.14159265358979323846 / 180.0;
+            const keel::f64 az = azDeg * keel::kPi / 180.0;
+            const keel::f64 el = elDeg * keel::kPi / 180.0;
             const keel::f64 sAz = std::sin(az), cAz = std::cos(az);
             const keel::f64 sEl = std::sin(el), cEl = std::cos(el);
             auto norm3 = [&](keel::f64 v, keel::f64 lo, keel::f64 hi) {
@@ -2052,7 +2051,7 @@ inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, keel::i32 W,
             keel::f64 rx = keel::abs(ax1 - ax0) / 2, ry = keel::abs(ay1 - ay0) / 2;
             keel::Array<keel::f64> ex, ey;
             for (keel::i32 k = 0; k <= 64; ++k) {
-                keel::f64 t = 2 * 3.14159265358979323846 * k / 64.0;
+                keel::f64 t = keel::kTau * k / 64.0;
                 ex.push_back(cx + rx * std::cos(t));
                 ey.push_back(cy + ry * std::sin(t));
             }
@@ -2506,7 +2505,7 @@ public:
             }
         } else {   // o . * ^ v < > p h → outline circle (+ rays for *)
             for (keel::i32 a = 0; a < 360; a += 2) {
-                keel::f64 rad = a * 3.14159265358979 / 180.0;
+                keel::f64 rad = a * keel::kPi / 180.0;
                 px((keel::i32)std::lround(x + r * std::cos(rad)),
                    (keel::i32)std::lround(y + r * std::sin(rad)), c);
             }

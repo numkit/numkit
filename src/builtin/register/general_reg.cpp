@@ -565,13 +565,8 @@ void format_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
             "shortg", "longg", "shorte", "longe",
             "shorteng", "longeng", "rat", "hex", "bank", "+", "default"
         };
-        keel::String s = args[0].toString();
-        for (auto &c : s) c = keel::to_ascii_lower(c);
-        bool ok = false;
-        for (keel::StringRef k : kKnown) {
-            if (s == k) { ok = true; break; }
-        }
-        if (!ok)
+        const keel::String s = args[0].toString();
+        if (!s.is_one_of_ignore_ascii_case(keel::ArrayRef<keel::StringRef>(kKnown)))
             throw std::runtime_error(
                 keel::format("format: unrecognised format spec '{}'", s).c_str());
     }
@@ -631,8 +626,7 @@ void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     bool whole = false;
     if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
         keel::String s = args[1].toString();
-        for (auto &c : s)
-            c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         whole = (s == "whole");
     }
     auto *mr = ctx.engine->allocator();

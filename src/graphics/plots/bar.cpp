@@ -17,11 +17,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#define _USE_MATH_DEFINES
 #include <cmath>
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -60,7 +56,7 @@ void bar_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     for (keel::usize i = nvStart; i < args.size(); ++i) {
         if (args[i].isChar()) {
             keel::String s = args[i].toString();
-            for (auto &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "stacked" || s == "grouped"
                 || s == "histc"  || s == "hist") {
                 mode = keel::move(s);
@@ -417,7 +413,7 @@ void histfit_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         if (g) { fx << ','; fy << ','; }
         const keel::f64 xg = mn + (mx - mn) * g / (gridN - 1);
         const keel::f64 pdf = std::exp(-0.5 * std::pow((xg - mean) / sdSafe, 2))
-                         / (sdSafe * std::sqrt(2 * 3.14159265358979323846));
+                         / (sdSafe * keel::kSqrt2Pi);
         fx << xg; fy << (pdf * scale);
     }
     fx << ']'; fy << ']';
@@ -593,7 +589,7 @@ void scatter_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     for (keel::usize k = 2; k < args.size(); ++k) {
         if (args[k].isChar()) {
             keel::String s = args[k].toString();
-            for (auto &c : s) c = keel::to_ascii_lower(c);
+            s.to_ascii_lower_in_place();
             if (s == "filled") { ds.style.assign("filled=1"); break; }
         }
     }
@@ -705,7 +701,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
 
     auto lowerStr = [](keel::StringRef sv) {
         keel::String s(sv);
-        for (auto &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         return s;
     };
 
@@ -1053,7 +1049,7 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         "#bcbd22", "#17becf",
     };
 
-    const keel::f64 TAU = 2 * 3.14159265358979323846;
+    const keel::f64 TAU = keel::kTau;
     const keel::i32 arcSamples = 24;          // vertices per wedge arc
     const keel::f64 tiltY = tilt3d ? 0.4 : 1.0;   // pie3 squashes Y
 
@@ -1314,7 +1310,7 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
                 const keel::f64 t = (y - v) / bw;
                 s += std::exp(-0.5 * t * t);
             }
-            s /= (col.size() * bw * std::sqrt(2 * 3.14159265358979323846));
+            s /= (col.size() * bw * keel::kSqrt2Pi);
             ys[keel::as<keel::usize>(g)] = y;
             den[keel::as<keel::usize>(g)] = s;
             if (s > maxD) maxD = s;
@@ -1614,15 +1610,14 @@ void heatmap_plot(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value>
         if (a[i].isChar()) {
             if (i + 1 < a.size()) {
                 keel::String key = a[i].toString();
-                for (auto &cc : key)
-                    cc = keel::to_ascii_lower(cc);
+                key.to_ascii_lower_in_place();
                 if (key == "colormap" && a[i + 1].isChar()) {
                     cmap = a[i + 1].toString();
                     ++i; continue;
                 }
                 if (key == "celllabel" && a[i + 1].isChar()) {
                     keel::String v = a[i + 1].toString();
-                    for (auto &cc : v) cc = keel::to_ascii_lower(cc);
+                    v.to_ascii_lower_in_place();
                     cellLabel = (v != "off");
                     ++i; continue;
                 }

@@ -188,7 +188,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     TextscanOptions opts{scratch.allocator()};
     auto lower = [](keel::StringRef sr) {
         keel::String s = keel::String::from(sr);
-        for (char &c : s) c = keel::to_ascii_lower(c);
+        s.to_ascii_lower_in_place();
         return s;
     };
     while (argIdx + 1 < args.size()) {

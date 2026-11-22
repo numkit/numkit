@@ -74,8 +74,8 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     if (args.size() == 2) {
         if (args[1].isChar() || args[1].isString()) {
             const keel::String s = args[1].toString();
-            if      (s == "fro" || s == "Fro") p = -2.0; // sentinel
-            else if (s == "inf" || s == "Inf") p = std::numeric_limits<keel::f64>::infinity();
+            if      (s.equals_ignore_ascii_case("fro")) p = -2.0; // sentinel
+            else if (s.equals_ignore_ascii_case("inf")) p = std::numeric_limits<keel::f64>::infinity();
             else throw Error("pagenorm: string p must be 'fro' or 'inf'",
                              0, 0, "pagenorm", "", "numkit:pagenorm:badStringP");
         } else {

@@ -109,8 +109,7 @@ inline bool isStringArg(const Value &v)
 OutTypeMode parseOutTypeMode(const Value &arg, const char *fn)
 {
     keel::String s = arg.toString();
-    for (char &c : s)
-        c = keel::to_ascii_lower(c);
+    s.to_ascii_lower_in_place();
     if (s == "default") return OutTypeMode::Default;
     if (s == "double")  return OutTypeMode::Double;
     if (s == "native")  return OutTypeMode::Native;
@@ -477,8 +476,7 @@ Value runNativeReduction(const Value &x, keel::i32 dim, ValueType outType, keel:
 inline keel::String lowercaseStr(const Value &v)
 {
     keel::String s = v.toString();
-    for (char &c : s)
-        c = keel::to_ascii_lower(c);
+    s.to_ascii_lower_in_place();
     return s;
 }
 
