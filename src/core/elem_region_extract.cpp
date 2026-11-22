@@ -1,9 +1,9 @@
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
 
-#include <cmath>
 #include <utility>
 
 namespace numkit {
@@ -25,7 +25,7 @@ struct AxisRange
 static bool literalInt(const ASTNode *n, keel::i64 &out)
 {
     if (!n || n->type != NodeType::NUMBER_LITERAL
-        || std::floor(n->numValue) != n->numValue)
+        || keel::floor(n->numValue) != n->numValue)
         return false;
     out = (keel::i64)n->numValue;
     return true;

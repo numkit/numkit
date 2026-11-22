@@ -20,7 +20,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <cstring>
 #include <exception>
 
 namespace numkit::runtime {
@@ -209,7 +208,7 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
 
     keel::matfile::MatArray out = keel::matfile::MatArray::make_dense(valueTypeToMatClass(v.type()), dimsRef, false, alloc);
     if (v.rawBytes() > 0 && out.data.size() >= v.rawBytes()) {
-        std::memcpy(out.data.data(), v.rawData(), v.rawBytes());
+        keel::mem_copy(out.data.data(), v.rawData(), v.rawBytes());
     }
     return out;
 }
@@ -344,7 +343,7 @@ Value matArrayToValue(const keel::matfile::MatArray &arr, keel::Allocator *mr)
     Value result = createMatrix(shape, vt, mr);
     const keel::usize copyBytes = keel::min(result.rawBytes(), arr.data.size());
     if (copyBytes > 0) {
-        std::memcpy(result.rawDataMut(), arr.data.data(), copyBytes);
+        keel::mem_copy(result.rawDataMut(), arr.data.data(), copyBytes);
     }
     return result;
 }

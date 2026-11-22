@@ -4,6 +4,7 @@
 // groupsummary, grouptransform, groupfilter, splitapply).
 
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/core.h>
 #include <keel/hash_map.h>
 #include <keel/ref.h>
@@ -16,9 +17,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit::builtin::detail {
@@ -60,7 +58,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     keel::Array<keel::i32> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 gd = G.elemAsDouble(i);
-        if (std::isnan(gd)) continue;
+        if (keel::is_nan(gd)) continue;
         keel::i32 gid = keel::as<keel::i32>(gd);
         if (gid <= 0) continue;
         auto *existing = buckets.get(gid);
@@ -167,7 +165,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::Array<keel::i32> gids(mr);
         for (keel::usize i = 0; i < n; ++i) {
             keel::f64 v = fg.G.elemAsDouble(i);
-            keel::i32 gid = std::isnan(v) ? 0 : keel::as<keel::i32>(v);
+            keel::i32 gid = keel::is_nan(v) ? 0 : keel::as<keel::i32>(v);
             auto *existing = buckets.get(gid);
             if (!existing) {
                 gids.push_back(gid);
@@ -184,7 +182,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                               : Value::matrix(nRows, nCols, ValueType::DOUBLE, mr);
         keel::f64 *bd = B.doubleDataMut();
         for (keel::usize i = 0; i < nRows * nCols; ++i)
-            bd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+            bd[i] = keel::Limits<keel::f64>::quiet_nan();
 
         auto Aget = [&](keel::usize r, keel::usize c) {
             return A.elemAsDouble(r + c * nRows);
@@ -255,7 +253,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::Array<keel::i32> gids(mr);
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = fg.G.elemAsDouble(i);
-        keel::i32 gid = std::isnan(v) ? 0 : keel::as<keel::i32>(v);
+        keel::i32 gid = keel::is_nan(v) ? 0 : keel::as<keel::i32>(v);
         auto *existing = buckets.get(gid);
         if (!existing) {
             gids.push_back(gid);

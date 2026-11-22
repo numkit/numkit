@@ -205,7 +205,7 @@ keel::String encodeProp(const Value &v)
             for (keel::usize c = 0; c < C; ++c) {
                 if (c) s.push_back(',');
                 const keel::f64 x = v.elemAsDouble(c * R + r);
-                if (std::isfinite(x)) s.append(formatPropDouble(x));
+                if (keel::is_finite(x)) s.append(formatPropDouble(x));
                 else s.append("null");
             }
             s.push_back(']');
@@ -474,8 +474,8 @@ keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
             hi = v[1];
         }
     } else {
-        lo = +INFINITY;
-        hi = -INFINITY;
+        lo = +keel::kInf;
+        hi = -keel::kInf;
         keel::i32 imgDatasets = 0, seriesDatasets = 0;
         for (const auto &ds : ax->datasets) {
             if (!ds.visible)
@@ -502,7 +502,7 @@ keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
             ++seriesDatasets;
             const keel::String &j = axis == 'x' ? ds.xJson : ds.yJson;
             for (keel::f64 v : figdetail::parseFlatDoubles(j))
-                if (std::isfinite(v)) {
+                if (keel::is_finite(v)) {
                     lo = std::min(lo, v);
                     hi = std::max(hi, v);
                 }
@@ -697,7 +697,7 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             if (!ds.visible) continue;
             const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
             for (keel::f64 v : figdetail::parseFlatDoubles(j)) {
-                if (std::isfinite(v)) {
+                if (keel::is_finite(v)) {
                     if (v < dmin) dmin = v;
                     if (v > dmax) dmax = v;
                 }
@@ -706,14 +706,14 @@ Value axesGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (dmin <= dmax) {
             if (dmax > dmin) {
                 const keel::f64 span = dmax - dmin;
-                const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
+                const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(span)));
                 const keel::f64 s = span / p10;
                 const keel::f64 step = (s <= 1.5) ? 0.2 * p10
                                   : (s <= 3.0) ? 0.5 * p10
                                   : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                : 2.0 * p10;
-                lo = std::floor(dmin / step + 1e-12) * step;
-                hi = std::ceil(dmax / step - 1e-12) * step;
+                lo = keel::floor(dmin / step + 1e-12) * step;
+                hi = keel::ceil(dmax / step - 1e-12) * step;
             } else {
                 lo = dmin - 1.0;
                 hi = dmin + 1.0;
@@ -1754,7 +1754,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
                     const keel::i32 logW  = GetDeviceCaps(hdc, 8);   // HORZRES
                     ReleaseDC(nullptr, hdc);
                     if (physW > 0 && physH > 0 && logW > 0) {
-                        const keel::f64 scale = std::round((keel::as<keel::f64>(physW) / keel::as<keel::f64>(logW)) * 4.0) / 4.0;
+                        const keel::f64 scale = keel::round((keel::as<keel::f64>(physW) / keel::as<keel::f64>(logW)) * 4.0) / 4.0;
                         w = (scale > 0.0) ? (keel::as<keel::f64>(physW) / scale) : keel::as<keel::f64>(logW);
                         h = (scale > 0.0) ? (keel::as<keel::f64>(physH) / scale) : keel::as<keel::f64>(physH);
                     }

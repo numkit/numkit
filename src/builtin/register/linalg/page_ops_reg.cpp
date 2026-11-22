@@ -8,6 +8,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/complex.h>
@@ -19,9 +20,7 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <utility>
 
 namespace numkit::linalg {
@@ -75,7 +74,7 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
         if (args[1].isChar() || args[1].isString()) {
             const keel::String s = args[1].toString();
             if      (s.equals_ignore_ascii_case("fro")) p = -2.0; // sentinel
-            else if (s.equals_ignore_ascii_case("inf")) p = std::numeric_limits<keel::f64>::infinity();
+            else if (s.equals_ignore_ascii_case("inf")) p = keel::Limits<keel::f64>::infinity();
             else throw Error("pagenorm: string p must be 'fro' or 'inf'",
                              0, 0, "pagenorm", "", "numkit:pagenorm:badStringP");
         } else {
@@ -108,7 +107,7 @@ void pagenorm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
                     s += v * v;
                 }
             }
-            od[pp] = std::sqrt(s);
+            od[pp] = keel::sqrt(s);
         }
         outs[0] = detail::narrowDoubleToSingleIf(out, args[0].type() == ValueType::SINGLE, mr);
         return;

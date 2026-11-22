@@ -4,6 +4,7 @@
 // JSON/parse helpers come from plot_internal.hpp.
 
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -13,10 +14,7 @@
 
 #include <algorithm>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -215,16 +213,16 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             }
         }
         if (autoRange) {
-            keel::f64 mn = std::numeric_limits<keel::f64>::infinity();
-            keel::f64 mx = -std::numeric_limits<keel::f64>::infinity();
+            keel::f64 mn = keel::Limits<keel::f64>::infinity();
+            keel::f64 mx = -keel::Limits<keel::f64>::infinity();
             for (keel::usize i = 0; i < R * C; ++i) {
                 keel::f64 v = I.elemAsDouble(i);
-                if (std::isfinite(v)) {
+                if (keel::is_finite(v)) {
                     if (v < mn) mn = v;
                     if (v > mx) mx = v;
                 }
             }
-            if (!std::isfinite(mn)) { mn = 0; mx = 1; }
+            if (!keel::is_finite(mn)) { mn = 0; mx = 1; }
             cmin = mn; cmax = mx;
         }
         DatasetInfo ds;
@@ -238,7 +236,7 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         ds.zQuantized.resize(R * C);
         for (keel::usize i = 0; i < R * C; ++i) {
             const keel::f64 v = I.elemAsDouble(i);
-            if (!std::isfinite(v)) {
+            if (!keel::is_finite(v)) {
                 ds.zQuantized[i] = 255;
             } else {
                 keel::f64 t = (v - cmin) * qScale;

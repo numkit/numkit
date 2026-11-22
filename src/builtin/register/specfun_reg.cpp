@@ -9,8 +9,6 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <cmath>
-#include <limits>
 
 // Each registered adapter in specfun/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {
@@ -57,7 +55,7 @@ namespace {
 keel::f64 evalPosCi(keel::f64 ax) {
     constexpr keel::f64 kGamma = keel::kEulerGamma;
     if (ax <= 4.0) {
-        keel::f64 ci = kGamma + std::log(ax);
+        keel::f64 ci = kGamma + keel::log(ax);
         keel::f64 p = 1.0;
         for (keel::i32 k = 1; k < 60; ++k) {
             p *= -ax * ax / (keel::as<keel::f64>(2 * k - 1) * keel::as<keel::f64>(2 * k));
@@ -76,29 +74,29 @@ keel::f64 evalPosCi(keel::f64 ax) {
     keel::c64 h = 1.0 / (z + 1.0 + cf);
     keel::f64 f = -h.imag();
     keel::f64 g = h.real();
-    return f * std::sin(ax) - g * std::cos(ax);
+    return f * keel::sin(ax) - g * keel::cos(ax);
 }
 
 keel::f64 evalLambertW(keel::i32 k, keel::f64 z) {
-    if (std::isnan(z)) return z;
-    const keel::f64 negInvE = -1.0 / std::exp(1.0);
+    if (keel::is_nan(z)) return z;
+    const keel::f64 negInvE = -1.0 / keel::exp(1.0);
     if (k == 0) {
         if (z == 0.0) return 0.0;
-        if (std::isinf(z) && z > 0.0) return z;
-        if (z < negInvE) return std::numeric_limits<keel::f64>::quiet_NaN();
+        if (keel::is_inf(z) && z > 0.0) return z;
+        if (z < negInvE) return keel::Limits<keel::f64>::quiet_nan();
         if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
         keel::f64 w;
         if (z < -0.3) {
-            keel::f64 p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
+            keel::f64 p = keel::sqrt(2.0 * (keel::exp(1.0) * z + 1.0));
             w = -1.0 + p - p * p / 3.0;
         } else if (z < 1.0) {
             w = z * (1.0 - z + 1.5 * z * z) / (1.0 + 0.5 * z * z);
         } else {
-            keel::f64 lz = std::log(z);
-            w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
+            keel::f64 lz = keel::log(z);
+            w = lz - (lz > 0.0 ? keel::log(lz) : 0.0);
         }
         for (keel::i32 it = 0; it < 50; ++it) {
-            keel::f64 ew = std::exp(w);
+            keel::f64 ew = keel::exp(w);
             keel::f64 wew = w * ew;
             keel::f64 f = wew - z;
             if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
@@ -112,12 +110,12 @@ keel::f64 evalLambertW(keel::i32 k, keel::f64 z) {
         return w;
     }
     if (k == -1) {
-        if (z < negInvE || z >= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
+        if (z < negInvE || z >= 0.0) return keel::Limits<keel::f64>::quiet_nan();
         if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
-        keel::f64 w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
-                                 : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
+        keel::f64 w = (z > -0.2) ? (keel::log(-z) - keel::log(-keel::log(-z)))
+                                 : (-1.0 - keel::sqrt(2.0 * (keel::exp(1.0) * z + 1.0)));
         for (keel::i32 it = 0; it < 50; ++it) {
-            keel::f64 ew = std::exp(w);
+            keel::f64 ew = keel::exp(w);
             keel::f64 f = w * ew - z;
             if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
             keel::f64 wp1 = w + 1.0;
@@ -129,7 +127,7 @@ keel::f64 evalLambertW(keel::i32 k, keel::f64 z) {
         }
         return w;
     }
-    return std::numeric_limits<keel::f64>::quiet_NaN();
+    return keel::Limits<keel::f64>::quiet_nan();
 }
 
 void heaviside_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -142,7 +140,7 @@ void heaviside_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     const keel::usize n = x.numel();
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = x.elemAsDouble(i);
-        if (std::isnan(v)) dst[i] = v;
+        if (keel::is_nan(v)) dst[i] = v;
         else if (v < 0.0)  dst[i] = 0.0;
         else if (v == 0.0) dst[i] = 0.5;
         else               dst[i] = 1.0;
@@ -161,8 +159,8 @@ void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     constexpr keel::f64 kPi2 = keel::kHalfPi;
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = x.elemAsDouble(i);
-        if (std::isnan(v)) { dst[i] = v; continue; }
-        if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
+        if (keel::is_nan(v)) { dst[i] = v; continue; }
+        if (keel::is_inf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
         if (v == 0.0) { dst[i] = 0.0; continue; }
         keel::f64 sgn = (v < 0.0) ? -1.0 : 1.0;
         keel::f64 ax = keel::abs(v);
@@ -186,7 +184,7 @@ void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
             keel::c64 h = 1.0 / (z + 1.0 + cf);
             keel::f64 f = -h.imag();
             keel::f64 g = h.real();
-            si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
+            si = kPi2 - f * keel::cos(ax) - g * keel::sin(ax);
         }
         dst[i] = sgn * si;
     }
@@ -209,9 +207,9 @@ void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
         keel::f64 *dst = out.doubleDataMut();
         for (keel::usize i = 0; i < n; ++i) {
             keel::f64 v = x.elemAsDouble(i);
-            if (std::isnan(v)) dst[i] = v;
-            else if (v == 0.0) dst[i] = -std::numeric_limits<keel::f64>::infinity();
-            else if (std::isinf(v)) dst[i] = 0.0;
+            if (keel::is_nan(v)) dst[i] = v;
+            else if (v == 0.0) dst[i] = -keel::Limits<keel::f64>::infinity();
+            else if (keel::is_inf(v)) dst[i] = 0.0;
             else dst[i] = evalPosCi(v);
         }
         outs[0] = std::move(out);
@@ -220,9 +218,9 @@ void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
         auto *dst = out.complexDataMut();
         for (keel::usize i = 0; i < n; ++i) {
             keel::f64 v = x.elemAsDouble(i);
-            if (std::isnan(v)) dst[i] = {v, v};
-            else if (v == 0.0) dst[i] = {-std::numeric_limits<keel::f64>::infinity(), 0.0};
-            else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
+            if (keel::is_nan(v)) dst[i] = {v, v};
+            else if (v == 0.0) dst[i] = {-keel::Limits<keel::f64>::infinity(), 0.0};
+            else if (keel::is_inf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
             else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
         }
         outs[0] = std::move(out);

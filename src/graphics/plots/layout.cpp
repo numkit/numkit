@@ -4,6 +4,8 @@
 // JSON/parse helpers come from plot_internal.hpp.
 
 #include <keel/array.h>
+#include <keel/algo.h>
+#include <keel/memory.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/math.h>
@@ -18,11 +20,8 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -176,7 +175,7 @@ void queryOrSetLim(FigureManager &fm, keel::String &limJson,
                 (axisChar == 'x') ? &ds.xRaw : (axisChar == 'y' ? &ds.yRaw : nullptr);
             if (raw && !raw->empty()) {
                 for (keel::f64 v : *raw) {
-                    if (std::isfinite(v)) {
+                    if (keel::is_finite(v)) {
                         if (v < dmin) dmin = v;
                         if (v > dmax) dmax = v;
                     }
@@ -190,7 +189,7 @@ void queryOrSetLim(FigureManager &fm, keel::String &limJson,
                 if (keel::is_ascii_digit(j[pos]) || j[pos] == '-' || j[pos] == '+') {
                     char *endptr = nullptr;
                     keel::f64 v = std::strtod(base + pos, &endptr);
-                    if (endptr && endptr > base + pos && std::isfinite(v)) {
+                    if (endptr && endptr > base + pos && keel::is_finite(v)) {
                         if (v < dmin) dmin = v;
                         if (v > dmax) dmax = v;
                         pos = keel::as<keel::usize>(endptr - base);
@@ -207,14 +206,14 @@ void queryOrSetLim(FigureManager &fm, keel::String &limJson,
                     hi = dmax;
                 } else {
                     const keel::f64 span = dmax - dmin;
-                    const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
+                    const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(span)));
                     const keel::f64 s = span / p10;
                     const keel::f64 step = (s <= 1.5) ? 0.2 * p10
                                       : (s <= 3.0) ? 0.5 * p10
                                       : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
                                                    : 2.0 * p10;
-                    lo = std::floor(dmin / step + 1e-12) * step;
-                    hi = std::ceil(dmax / step - 1e-12) * step;
+                    lo = keel::floor(dmin / step + 1e-12) * step;
+                    hi = keel::ceil(dmax / step - 1e-12) * step;
                 }
             } else {
                 lo = dmin - 1.0;
@@ -1477,10 +1476,8 @@ void getpoints_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
     auto xv = Value::matrix(1, n, ValueType::DOUBLE, mr);
     auto yv = Value::matrix(1, n, ValueType::DOUBLE, mr);
     if (n > 0) {
-        std::memcpy(xv.doubleDataMut(), ds.animatedX.data(),
-                    n * sizeof(keel::f64));
-        std::memcpy(yv.doubleDataMut(), ds.animatedY.data(),
-                    n * sizeof(keel::f64));
+        keel::copy_n(xv.doubleDataMut(), ds.animatedX.data(), n);
+        keel::copy_n(yv.doubleDataMut(), ds.animatedY.data(), n);
     }
     outs[0] = std::move(xv);
     if (nargout >= 2) outs[1] = std::move(yv);

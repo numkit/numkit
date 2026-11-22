@@ -307,8 +307,8 @@ TEST_P(BuiltinTest, DegreeTrig)
     EXPECT_DOUBLE_EQ(evalScalar("tand(180);"),  0.0);
     EXPECT_NEAR(evalScalar("tand(45);"), 1.0, 1e-12);
     // tan(±90°) is ±Inf.
-    EXPECT_TRUE(std::isinf(evalScalar("tand(90);")));
-    EXPECT_TRUE(std::isinf(evalScalar("tand(-90);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("tand(90);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("tand(-90);")));
     // Inverses return degrees.
     EXPECT_NEAR(evalScalar("asind(1);"),  90.0, 1e-12);
     EXPECT_NEAR(evalScalar("asind(0);"),   0.0, 1e-12);
@@ -358,9 +358,9 @@ TEST_P(BuiltinTest, ReciprocalTrigHyperbolic)
 {
     EXPECT_NEAR(evalScalar("sech(0);"), 1.0, 1e-12);
     EXPECT_NEAR(evalScalar("sech(1);"), 0.6480542736638853, 1e-12);
-    EXPECT_TRUE(std::isinf(evalScalar("csch(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("csch(0);")));
     EXPECT_NEAR(evalScalar("csch(1);"), 0.8509181282393216, 1e-12);
-    EXPECT_TRUE(std::isinf(evalScalar("coth(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("coth(0);")));
     EXPECT_NEAR(evalScalar("coth(1);"), 1.3130352854993313, 1e-12);
 }
 
@@ -368,26 +368,26 @@ TEST_P(BuiltinTest, ReciprocalTrigDegree)
 {
     EXPECT_NEAR(evalScalar("secd(0);"),    1.0, 1e-12);
     EXPECT_NEAR(evalScalar("secd(180);"), -1.0, 1e-12);
-    EXPECT_TRUE(std::isinf(evalScalar("secd(90);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("secd(90);")));
     EXPECT_NEAR(evalScalar("cscd(90);"),  1.0, 1e-12);
     EXPECT_NEAR(evalScalar("cscd(-90);"),-1.0, 1e-12);
-    EXPECT_TRUE(std::isinf(evalScalar("cscd(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("cscd(0);")));
     EXPECT_NEAR(evalScalar("cotd(45);"),  1.0, 1e-12);
     EXPECT_NEAR(evalScalar("cotd(135);"),-1.0, 1e-12);
-    EXPECT_TRUE(std::isinf(evalScalar("cotd(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("cotd(0);")));
 }
 
 TEST_P(BuiltinTest, InverseReciprocalTrig)
 {
     EXPECT_NEAR(evalScalar("asec(1);"), 0.0, 1e-12);
-    EXPECT_NEAR(evalScalar("asec(2);"), std::acos(0.5), 1e-12);
+    EXPECT_NEAR(evalScalar("asec(2);"), keel::acos(0.5), 1e-12);
     EXPECT_NEAR(evalScalar("acsc(1);"), keel::kPi / 2, 1e-12);
-    EXPECT_NEAR(evalScalar("acsc(2);"), std::asin(0.5), 1e-12);
+    EXPECT_NEAR(evalScalar("acsc(2);"), keel::asin(0.5), 1e-12);
     EXPECT_NEAR(evalScalar("acot(1);"), keel::kPi / 4, 1e-12);
     EXPECT_NEAR(evalScalar("acot(0);"), keel::kPi / 2, 1e-12);
     EXPECT_NEAR(evalScalar("asech(1);"), 0.0, 1e-12);
-    EXPECT_NEAR(evalScalar("acsch(1);"), std::asinh(1.0), 1e-12);
-    EXPECT_NEAR(evalScalar("acoth(2);"), std::atanh(0.5), 1e-12);
+    EXPECT_NEAR(evalScalar("acsch(1);"), keel::asinh(1.0), 1e-12);
+    EXPECT_NEAR(evalScalar("acoth(2);"), keel::atanh(0.5), 1e-12);
     EXPECT_NEAR(evalScalar("asecd(1);"),  0.0, 1e-12);
     EXPECT_NEAR(evalScalar("asecd(2);"), 60.0, 1e-12);
     EXPECT_NEAR(evalScalar("acscd(1);"), 90.0, 1e-12);
@@ -415,7 +415,7 @@ TEST_P(BuiltinTest, ReciprocalTrigOutOfDomainComplex)
 TEST_P(BuiltinTest, CartPolarRoundtrip)
 {
     eval("[t, r] = cart2pol(3, 4);");
-    EXPECT_NEAR(getVar("t"), std::atan2(4.0, 3.0), 1e-12);
+    EXPECT_NEAR(getVar("t"), keel::atan2(4.0, 3.0), 1e-12);
     EXPECT_NEAR(getVar("r"), 5.0, 1e-12);
     // pol2cart inverse.
     eval("[xv, yv] = pol2cart(t, r);");
@@ -427,7 +427,7 @@ TEST_P(BuiltinTest, CartPolar3DPassthrough)
 {
     // 3-arg cart2pol/pol2cart treat z as a passthrough (cylindrical).
     eval("[t, r, z] = cart2pol(3, 4, 7);");
-    EXPECT_NEAR(getVar("t"), std::atan2(4.0, 3.0), 1e-12);
+    EXPECT_NEAR(getVar("t"), keel::atan2(4.0, 3.0), 1e-12);
     EXPECT_NEAR(getVar("r"), 5.0, 1e-12);
     EXPECT_NEAR(getVar("z"), 7.0, 1e-12);
     eval("[a, b, c] = pol2cart(t, r, z);");
@@ -441,8 +441,8 @@ TEST_P(BuiltinTest, CartSphRoundtrip)
     // (1, 1, 1) → az = pi/4, el = atan2(1, sqrt(2)), r = sqrt(3).
     eval("[a, e, r] = cart2sph(1, 1, 1);");
     EXPECT_NEAR(getVar("a"), keel::kPi / 4, 1e-12);
-    EXPECT_NEAR(getVar("e"), std::atan2(1.0, std::sqrt(2.0)), 1e-12);
-    EXPECT_NEAR(getVar("r"), std::sqrt(3.0), 1e-12);
+    EXPECT_NEAR(getVar("e"), keel::atan2(1.0, keel::sqrt(2.0)), 1e-12);
+    EXPECT_NEAR(getVar("r"), keel::sqrt(3.0), 1e-12);
     // sph2cart inverse.
     eval("[xv, yv, zv] = sph2cart(a, e, r);");
     EXPECT_NEAR(getVar("xv"), 1.0, 1e-12);
@@ -849,8 +849,8 @@ TEST_P(BuiltinTest, ErfcinvErfcx)
     // erfcinv(1) = 0 (since erfc(0) = 1).
     EXPECT_NEAR(evalScalar("erfcinv(1);"), 0.0, 1e-12);
     // erfcinv(2) = -Inf, erfcinv(0) = +Inf.
-    EXPECT_TRUE(std::isinf(evalScalar("erfcinv(0);")));
-    EXPECT_TRUE(std::isinf(evalScalar("erfcinv(2);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("erfcinv(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("erfcinv(2);")));
     // Round-trip: erfc(erfcinv(0.5)) ≈ 0.5.
     EXPECT_NEAR(evalScalar("erfc(erfcinv(0.5));"), 0.5, 1e-10);
 
@@ -858,12 +858,12 @@ TEST_P(BuiltinTest, ErfcinvErfcx)
     EXPECT_NEAR(evalScalar("erfcx(0);"), 1.0, 1e-12);
     // erfcx(1) ≈ exp(1) * erfc(1).
     EXPECT_NEAR(evalScalar("erfcx(1);"),
-                std::exp(1.0) * std::erfc(1.0), 1e-10);
+                keel::exp(1.0) * keel::erfc(1.0), 1e-10);
     // Large x: erfcx(50) ≈ 1/(x·sqrt(π)) to leading order. Our series
     // adds the (1 - 0.5/x² + ...) correction, so the leading-order
     // approximation matches only to ~2e-6 absolute / ~2e-4 relative.
     EXPECT_NEAR(evalScalar("erfcx(50);"),
-                1.0 / (50.0 * std::sqrt(keel::kPi)), 5e-6);
+                1.0 / (50.0 * keel::sqrt(keel::kPi)), 5e-6);
 }
 
 TEST_P(BuiltinTest, ConvertContainedStringsToChars)
@@ -1133,7 +1133,7 @@ TEST_P(BuiltinTest, EllipKE)
     EXPECT_NEAR(getVar("E"), keel::kPi / 2, 1e-12);
     // K(1) = Inf, E(1) = 1.
     eval("[K1, E1] = ellipke(1);");
-    EXPECT_TRUE(std::isinf(getVar("K1")));
+    EXPECT_TRUE(keel::is_inf(getVar("K1")));
     EXPECT_NEAR(getVar("E1"), 1.0, 1e-12);
     // K(0.5) ≈ 1.854074677301372, E(0.5) ≈ 1.350643881047676.
     eval("[Km, Em] = ellipke(0.5);");
@@ -1163,8 +1163,8 @@ TEST_P(BuiltinTest, BesselFamily)
 TEST_P(BuiltinTest, GammaInc)
 {
     // P(1, x) = 1 - exp(-x).
-    EXPECT_NEAR(evalScalar("gammainc(1, 1);"),  1.0 - std::exp(-1.0), 1e-12);
-    EXPECT_NEAR(evalScalar("gammainc(0.5, 1);"),1.0 - std::exp(-0.5), 1e-12);
+    EXPECT_NEAR(evalScalar("gammainc(1, 1);"),  1.0 - keel::exp(-1.0), 1e-12);
+    EXPECT_NEAR(evalScalar("gammainc(0.5, 1);"),1.0 - keel::exp(-0.5), 1e-12);
     // P(a, 0) = 0.
     EXPECT_DOUBLE_EQ(evalScalar("gammainc(0, 2);"), 0.0);
     // P(2, ∞) approaches 1.
@@ -1192,7 +1192,7 @@ TEST_P(BuiltinTest, Legendre)
     eval("p1 = legendre(1, 0.5);");
     auto *p1 = getVarPtr("p1");
     EXPECT_NEAR(p1->doubleData()[0],  0.5, 1e-12);
-    EXPECT_NEAR(p1->doubleData()[1], -std::sqrt(0.75), 1e-12);
+    EXPECT_NEAR(p1->doubleData()[1], -keel::sqrt(0.75), 1e-12);
     // P_2(1) = 1 for all m, except P_2^m(1) = 0 for m > 0.
     eval("p2 = legendre(2, 1);");
     auto *p2 = getVarPtr("p2");
@@ -1211,7 +1211,7 @@ TEST_P(BuiltinTest, BetaBetaln)
     // B(0.5, 0.5) = pi.
     EXPECT_NEAR(evalScalar("beta(0.5, 0.5);"), keel::kPi, 1e-12);
     // betaln consistency.
-    EXPECT_NEAR(evalScalar("betaln(2, 3);"), std::log(1.0 / 12.0), 1e-12);
+    EXPECT_NEAR(evalScalar("betaln(2, 3);"), keel::log(1.0 / 12.0), 1e-12);
     EXPECT_NEAR(evalScalar("exp(betaln(0.5, 0.5));"), keel::kPi, 1e-12);
 }
 
@@ -1224,7 +1224,7 @@ TEST_P(BuiltinTest, ExpintAndPsi)
     // E1(5) ≈ 0.001148295591742
     EXPECT_NEAR(evalScalar("expint(5);"), 0.001148295591742, 1e-12);
     // E1(0) = +Inf.
-    EXPECT_TRUE(std::isinf(evalScalar("expint(0);")));
+    EXPECT_TRUE(keel::is_inf(evalScalar("expint(0);")));
 
     // psi(1) = -γ ≈ -0.5772156649015329
     EXPECT_NEAR(evalScalar("psi(1);"), -0.5772156649015329, 1e-10);
@@ -1232,7 +1232,7 @@ TEST_P(BuiltinTest, ExpintAndPsi)
     EXPECT_NEAR(evalScalar("psi(2);"), 1.0 - 0.5772156649015329, 1e-10);
     // psi(0.5) = -γ - 2*ln(2).
     EXPECT_NEAR(evalScalar("psi(0.5);"),
-                -0.5772156649015329 - 2.0 * std::log(2.0), 1e-10);
+                -0.5772156649015329 - 2.0 * keel::log(2.0), 1e-10);
 }
 
 // ── String utils — Pack 18 ────────────────────────────────────
@@ -2138,7 +2138,7 @@ TEST_P(BuiltinTest, CartPolVectorized)
     auto *r = getVarPtr("r");
     ASSERT_EQ(t->numel(), 3u);
     ASSERT_EQ(r->numel(), 3u);
-    EXPECT_NEAR(t->doubleData()[0], std::atan2(4.0, 3.0), 1e-12);
+    EXPECT_NEAR(t->doubleData()[0], keel::atan2(4.0, 3.0), 1e-12);
     EXPECT_NEAR(t->doubleData()[1], keel::kPi / 2,             1e-12);
     EXPECT_NEAR(t->doubleData()[2], keel::kPi,                 1e-12);
     EXPECT_NEAR(r->doubleData()[0], 5.0, 1e-12);
@@ -2848,14 +2848,14 @@ TEST_P(DisplayTest, ObjectArrayIndexedPropAssignAndBarMetrics)
 
     // Complex-valued ODE integration via ode45 / ode23 preserves imaginary sign and converges.
     eval("[tc, yc] = ode45(@(t, y) (-0.5 + 2i) * y, [0 0.5 1.0], 1 + 1i);");
-    const double expRe = std::exp(-0.5) * (std::cos(2.0) - std::sin(2.0));
-    const double expIm = std::exp(-0.5) * (std::cos(2.0) + std::sin(2.0));
+    const double expRe = keel::exp(-0.5) * (keel::cos(2.0) - keel::sin(2.0));
+    const double expIm = keel::exp(-0.5) * (keel::cos(2.0) + keel::sin(2.0));
     EXPECT_NEAR(evalScalar("real(yc(end))"), expRe, 1e-3);
     EXPECT_NEAR(evalScalar("imag(yc(end))"), expIm, 1e-3);
 
     eval("[tc2, yc2] = ode23(@(t, y) 1i * y, [0 1.0], 1 + 0i);");
-    EXPECT_NEAR(evalScalar("real(yc2(end))"), std::cos(1.0), 1e-2);
-    EXPECT_NEAR(evalScalar("imag(yc2(end))"), std::sin(1.0), 1e-2);
+    EXPECT_NEAR(evalScalar("real(yc2(end))"), keel::cos(1.0), 1e-2);
+    EXPECT_NEAR(evalScalar("imag(yc2(end))"), keel::sin(1.0), 1e-2);
 
     // sound and refreshdata are registered headless no-ops.
     eval("sound([0 0.1 0]); refreshdata(HG, 'caller');");

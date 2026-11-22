@@ -2,6 +2,7 @@
 //
 // CallContext register half (Phase 2b multi-block split).
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -22,11 +23,8 @@
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -128,7 +126,7 @@ void polyfitCore(const keel::f64 *xx, const keel::f64 *yd, keel::usize m, keel::
     auto V = keel::Array<keel::f64>(m * keel::as<keel::usize>(np), scratch.allocator());
     for (keel::usize i = 0; i < m; ++i)
         for (keel::i32 j = 0; j < np; ++j)
-            V[keel::as<keel::usize>(j) * m + i] = std::pow(xx[i], deg - j);
+            V[keel::as<keel::usize>(j) * m + i] = keel::pow(xx[i], deg - j);
 
     auto VtV = keel::Array<keel::f64>(keel::as<keel::usize>(np) * np, scratch.allocator());  // col-major
     for (keel::i32 r = 0; r < np; ++r)
@@ -183,7 +181,7 @@ void polyfitCore(const keel::f64 *xx, const keel::f64 *yd, keel::usize m, keel::
         keel::f64 d = VtV[keel::as<keel::usize>(j) * np + j];
         for (keel::i32 k = 0; k < j; ++k)
             d -= Rout[k + j * np] * Rout[k + j * np];
-        d = (d > 0.0) ? std::sqrt(d) : 0.0;
+        d = (d > 0.0) ? keel::sqrt(d) : 0.0;
         Rout[j + j * np] = d;
         for (keel::i32 i = j + 1; i < np; ++i) {
             keel::f64 s = VtV[keel::as<keel::usize>(i) * np + j];  // symmetric
@@ -201,7 +199,7 @@ void polyfitCore(const keel::f64 *xx, const keel::f64 *yd, keel::usize m, keel::
         const keel::f64 e = yd[i] - yi;
         ss += e * e;
     }
-    normr = std::sqrt(ss);
+    normr = keel::sqrt(ss);
     df = (m > keel::as<keel::usize>(np)) ? keel::as<keel::f64>(m - np) : 0.0;
 }
 
@@ -241,7 +239,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         mu0 = s / keel::as<keel::f64>(m);
         keel::f64 v = 0.0;
         for (keel::usize i = 0; i < m; ++i) { const keel::f64 d = xraw[i] - mu0; v += d * d; }
-        mu1 = (m > 1) ? std::sqrt(v / keel::as<keel::f64>(m - 1)) : 0.0;
+        mu1 = (m > 1) ? keel::sqrt(v / keel::as<keel::f64>(m - 1)) : 0.0;
         if (mu1 == 0.0) mu1 = 1.0;            // constant x → avoid /0
         for (keel::usize i = 0; i < m; ++i) xx[i] = (xraw[i] - mu0) / mu1;
     } else {
@@ -259,8 +257,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     Value S = Value::structure(mr);
     auto Rmat = Value::matrix(np, np, ValueType::DOUBLE, mr);
-    std::memcpy(Rmat.doubleDataMut(), Rbuf.data(),
-                keel::as<keel::usize>(np) * np * sizeof(keel::f64));
+    keel::copy_n(Rmat.doubleDataMut(), Rbuf.data(), keel::as<keel::usize>(np) * np);
     S.setFieldAll("R", Rmat);
     S.setFieldAll("df", Value::scalar(df, mr));
     S.setFieldAll("normr", Value::scalar(normr, mr));
@@ -325,14 +322,14 @@ void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::f64 *dd = delta.doubleDataMut();
     const keel::f64 *xd = xUsed.doubleData();
     const keel::usize nx = xUsed.numel();
-    const keel::f64 scale = (df > 0.0) ? normr / std::sqrt(df) : 0.0;
+    const keel::f64 scale = (df > 0.0) ? normr / keel::sqrt(df) : 0.0;
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);
     auto vrow = keel::Array<keel::f64>(np, scratch.allocator());
     auto erow = keel::Array<keel::f64>(np, scratch.allocator());
     for (keel::usize i = 0; i < nx; ++i) {
         for (keel::usize j = 0; j < np; ++j)
-            vrow[j] = std::pow(xd[i], keel::as<keel::f64>(deg - keel::as<keel::i32>(j)));
+            vrow[j] = keel::pow(xd[i], keel::as<keel::f64>(deg - keel::as<keel::i32>(j)));
         // Solve e·R = v with R upper-triangular: e[c] = (v[c] - Σ_{k<c} e[k]·R[k][c]) / R[c][c].
         for (keel::usize c = 0; c < np; ++c) {
             keel::f64 s = vrow[c];
@@ -342,7 +339,7 @@ void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         }
         keel::f64 ss = 0.0;
         for (keel::usize j = 0; j < np; ++j) ss += erow[j] * erow[j];
-        dd[i] = scale * std::sqrt(1.0 + ss);
+        dd[i] = scale * keel::sqrt(1.0 + ss);
     }
     outs[1] = std::move(delta);
 }

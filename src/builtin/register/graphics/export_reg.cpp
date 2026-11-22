@@ -12,6 +12,7 @@
 // in bugs/opened/graphics/figure-export-gaps.md, never silent.
 
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/memory.h>
@@ -27,7 +28,6 @@
 #include <numkit/value/argcheck.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 
 namespace numkit {
@@ -442,7 +442,7 @@ void evalColormap(const char *cname, keel::ArrayRef<Value> args,
             const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
             for (keel::usize i = 0; i < m; ++i) {
                 keel::f64 t = (m == 1) ? 0.0 : keel::as<keel::f64>(i) / keel::as<keel::f64>(m - 1);
-                keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(std::lround(t * (tableN - 1)))));
+                keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(keel::round_i64(t * (tableN - 1)))));
                 d[i]         = tbl[idx * 3 + 0] / 255.0;
                 d[i + m]     = tbl[idx * 3 + 1] / 255.0;
                 d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;

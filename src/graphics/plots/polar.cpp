@@ -13,10 +13,7 @@
 
 #include <algorithm>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -34,8 +31,8 @@ void computeAngularHistogram(const Value &theta, keel::i32 nbins,
     const keel::usize N = theta.numel();
     for (keel::usize i = 0; i < N; ++i) {
         keel::f64 t = theta.elemAsDouble(i);
-        if (!std::isfinite(t)) continue;
-        t = std::fmod(t, TAU);
+        if (!keel::is_finite(t)) continue;
+        t = keel::fmod(t, TAU);
         if (t < 0) t += TAU;
         keel::i32 b = (keel::i32)(t / bw);
         if (b >= nbins) b = nbins - 1;
@@ -100,8 +97,8 @@ void compass_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     tx << '['; ry << '[';
     const auto emit = [&](keel::f64 u, keel::f64 v, bool first) {
         if (!first) { tx << ','; ry << ','; }
-        tx << std::atan2(v, u);
-        ry << std::hypot(u, v);
+        tx << keel::atan2(v, u);
+        ry << keel::hypot(u, v);
     };
     keel::usize N = 0;
     keel::usize nvStart = 1;

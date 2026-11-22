@@ -1,5 +1,6 @@
 // src/core/tree_walker_expr.cpp
 #include <keel/array.h>
+#include <keel/memory.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_set.h>
@@ -15,11 +16,8 @@
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <limits>
 
 namespace numkit {
 
@@ -1010,7 +1008,7 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
         keel::usize totalRows = strs.size();
         auto result = Value::matrix(totalRows, maxCols, ValueType::CHAR, engine_.mr_);
         char *dst = result.charDataMut();
-        std::memset(dst, ' ', totalRows * maxCols);
+        keel::mem_set(dst, ' ', totalRows * maxCols);
         for (keel::usize row = 0; row < totalRows; ++row) {
             const auto &s = strs[row];
             for (keel::usize c = 0; c < s.size(); ++c)

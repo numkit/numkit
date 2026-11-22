@@ -14,10 +14,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -66,11 +63,11 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             for (keel::usize r = 0; r < R; ++r) Ys[r] = (keel::f64)(r + 1);
         }
 
-        keel::f64 zmn = std::numeric_limits<keel::f64>::infinity();
-        keel::f64 zmx = -std::numeric_limits<keel::f64>::infinity();
+        keel::f64 zmn = keel::Limits<keel::f64>::infinity();
+        keel::f64 zmx = -keel::Limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < R * C; ++i) {
             const keel::f64 v = Z_arg->elemAsDouble(i);
-            if (std::isfinite(v)) {
+            if (keel::is_finite(v)) {
                 if (v < zmn) zmn = v;
                 if (v > zmx) zmx = v;
             }
@@ -110,7 +107,7 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const keel::f64 Cr = 0.6;
             const keel::f64 H = Hd / 60.0;
-            const keel::f64 Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
+            const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));
             keel::f64 r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -140,8 +137,8 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                     const keel::f64 v_tr = Zat(r,     c + 1);
                     const keel::f64 v_bl = Zat(r + 1, c);
                     const keel::f64 v_br = Zat(r + 1, c + 1);
-                    if (!std::isfinite(v_tl) || !std::isfinite(v_tr)
-                     || !std::isfinite(v_bl) || !std::isfinite(v_br)) continue;
+                    if (!keel::is_finite(v_tl) || !keel::is_finite(v_tr)
+                     || !keel::is_finite(v_bl) || !keel::is_finite(v_br)) continue;
                     keel::i32 code = 0;
                     if (v_tl > L) code |= 1;
                     if (v_tr > L) code |= 2;
@@ -238,11 +235,11 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             for (keel::usize r = 0; r < R; ++r) Ys[r] = (keel::f64)(r + 1);
         }
 
-        keel::f64 zmn = std::numeric_limits<keel::f64>::infinity();
-        keel::f64 zmx = -std::numeric_limits<keel::f64>::infinity();
+        keel::f64 zmn = keel::Limits<keel::f64>::infinity();
+        keel::f64 zmx = -keel::Limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < R * C; ++i) {
             const keel::f64 v = Z_arg->elemAsDouble(i);
-            if (std::isfinite(v)) {
+            if (keel::is_finite(v)) {
                 if (v < zmn) zmn = v;
                 if (v > zmx) zmx = v;
             }
@@ -283,7 +280,7 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
             const keel::f64 Cr = 0.6;
             const keel::f64 H = Hd / 60.0;
-            const keel::f64 Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
+            const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));
             keel::f64 r1 = 0, g1 = 0, b1 = 0;
             if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
             else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -341,8 +338,8 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                     const keel::f64 v_tr = Zat(r,     c + 1);
                     const keel::f64 v_br = Zat(r + 1, c + 1);
                     const keel::f64 v_bl = Zat(r + 1, c);
-                    if (!std::isfinite(v_tl) || !std::isfinite(v_tr)
-                     || !std::isfinite(v_bl) || !std::isfinite(v_br)) continue;
+                    if (!keel::is_finite(v_tl) || !keel::is_finite(v_tr)
+                     || !keel::is_finite(v_bl) || !keel::is_finite(v_br)) continue;
                     keel::i32 code = 0;
                     if (v_tl >= L) code |= 1;
                     if (v_tr >= L) code |= 2;

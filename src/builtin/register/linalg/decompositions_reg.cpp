@@ -13,6 +13,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/array.h>
@@ -35,7 +36,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <tuple>
 #include <type_traits>
@@ -362,7 +362,7 @@ void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                         0, 0, "qrinsert", "", "numkit:qrinsert:badOrient");
     }
     const keel::f64 kd = args[2].toScalar();
-    if (kd < 1.0 || kd != std::floor(kd))
+    if (kd < 1.0 || kd != keel::floor(kd))
         throw Error("qrinsert: k must be a positive integer",
                     0, 0, "qrinsert", "", "numkit:qrinsert:badK");
     auto [Q1, R1] = isRow
@@ -387,7 +387,7 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                         0, 0, "qrdelete", "", "numkit:qrdelete:badOrient");
     }
     const keel::f64 kd = args[2].toScalar();
-    if (kd < 1.0 || kd != std::floor(kd))
+    if (kd < 1.0 || kd != keel::floor(kd))
         throw Error("qrdelete: k must be a positive integer",
                     0, 0, "qrdelete", "", "numkit:qrdelete:badK");
     auto [Q1, R1] = isRow

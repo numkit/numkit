@@ -2,6 +2,7 @@
 // Parameterized: runs on both TreeWalker and VM backends
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include "dual_engine_fixture.hpp"
 
 using namespace m_test;
@@ -759,7 +760,7 @@ TEST_P(SortFindTest, SortDescendAndNaNPlacement)
     auto *y = getVarPtr("y");
     auto *ii = getVarPtr("i");
     ASSERT_NE(y, nullptr); ASSERT_NE(ii, nullptr);
-    EXPECT_TRUE(std::isnan(y->doubleData()[0]));   // NaN first (descend)
+    EXPECT_TRUE(keel::is_nan(y->doubleData()[0]));   // NaN first (descend)
     EXPECT_DOUBLE_EQ(y->doubleData()[1], 3.0);
     EXPECT_DOUBLE_EQ(y->doubleData()[2], 2.0);
     EXPECT_DOUBLE_EQ(y->doubleData()[3], 1.0);
@@ -771,7 +772,7 @@ TEST_P(SortFindTest, SortDescendAndNaNPlacement)
     ASSERT_NE(ya, nullptr);
     EXPECT_DOUBLE_EQ(ya->doubleData()[0], 1.0);
     EXPECT_DOUBLE_EQ(ya->doubleData()[2], 3.0);
-    EXPECT_TRUE(std::isnan(ya->doubleData()[3]));
+    EXPECT_TRUE(keel::is_nan(ya->doubleData()[3]));
     // dim + direction: sort(X, 2, 'descend') along rows.
     eval("yd = sort([3 1 4 1 5], 2, 'descend');");
     auto *yd = getVarPtr("yd");
@@ -788,7 +789,7 @@ TEST_P(SortFindTest, SortMissingPlacement)
     eval("yf = sort([3 NaN 1 2], 'MissingPlacement', 'first');");
     auto *yf = getVarPtr("yf");
     ASSERT_NE(yf, nullptr);
-    EXPECT_TRUE(std::isnan(yf->doubleData()[0]));
+    EXPECT_TRUE(keel::is_nan(yf->doubleData()[0]));
     EXPECT_DOUBLE_EQ(yf->doubleData()[1], 1.0);
     EXPECT_DOUBLE_EQ(yf->doubleData()[3], 3.0);
     // descending + 'last' -> NaN at the end.
@@ -796,7 +797,7 @@ TEST_P(SortFindTest, SortMissingPlacement)
     auto *yl = getVarPtr("yl");
     ASSERT_NE(yl, nullptr);
     EXPECT_DOUBLE_EQ(yl->doubleData()[0], 3.0);
-    EXPECT_TRUE(std::isnan(yl->doubleData()[3]));
+    EXPECT_TRUE(keel::is_nan(yl->doubleData()[3]));
     // index output follows the NaN placement: [5 NaN 1] first -> idx [2 3 1].
     eval("[s, i] = sort([5 NaN 1], 'MissingPlacement', 'first');");
     auto *ii = getVarPtr("i");
@@ -808,7 +809,7 @@ TEST_P(SortFindTest, SortMissingPlacement)
     eval("ya = sort([3 NaN 1 2], 'MissingPlacement', 'auto');");
     auto *ya = getVarPtr("ya");
     ASSERT_NE(ya, nullptr);
-    EXPECT_TRUE(std::isnan(ya->doubleData()[3]));   // ascending auto -> NaN last
+    EXPECT_TRUE(keel::is_nan(ya->doubleData()[3]));   // ascending auto -> NaN last
 }
 
 // Complex sort: MATLAB orders by magnitude |z|, ties by phase angle arg(z)
@@ -851,7 +852,7 @@ TEST_P(SortFindTest, SortComplexByMagnitudeThenAngle)
     eval("n = sort([1+1i, NaN, 2]);");
     auto *n = getVarPtr("n");
     ASSERT_NE(n, nullptr);
-    EXPECT_TRUE(std::isnan(n->complexData()[2].real()));
+    EXPECT_TRUE(keel::is_nan(n->complexData()[2].real()));
 }
 
 TEST_P(SortFindTest, FindRowVectorReturnsRow)
@@ -1077,7 +1078,7 @@ TEST_P(SortFindTest, SortrowsNaNGoesToBottom)
     // [1 5], [2 1], [NaN 3]
     EXPECT_DOUBLE_EQ((*S)(0, 0), 1.0);
     EXPECT_DOUBLE_EQ((*S)(1, 0), 2.0);
-    EXPECT_TRUE(std::isnan((*S)(2, 0)));
+    EXPECT_TRUE(keel::is_nan((*S)(2, 0)));
 }
 
 // Complex sortrows: order rows lexicographically; each column compares by
@@ -1297,9 +1298,9 @@ TEST_P(SortFindTest, NonzerosNanCountsAsNonzero)
     eval("v = nonzeros([0 NaN 0 1 NaN]);");
     auto *v = getVarPtr("v");
     EXPECT_EQ(v->numel(), 3u);
-    EXPECT_TRUE(std::isnan(v->doubleData()[0]));
+    EXPECT_TRUE(keel::is_nan(v->doubleData()[0]));
     EXPECT_DOUBLE_EQ(v->doubleData()[1], 1.0);
-    EXPECT_TRUE(std::isnan(v->doubleData()[2]));
+    EXPECT_TRUE(keel::is_nan(v->doubleData()[2]));
 }
 
 TEST_P(SortFindTest, Nonzeros3DColumnMajor)

@@ -5,6 +5,7 @@
 // engine-free in numkit::builtin (integration.cpp).
 
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -23,7 +24,6 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <cstring>
 
 namespace numkit::builtin {
 // ── Engine adapters ──────────────────────────────────────────────────
@@ -166,7 +166,7 @@ void cumtrapz_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     keel::f64 *dx = xMat.doubleDataMut();
     const bool xIsVec = x.dims().isVector() || x.isScalar();
     if (x.dims().rows() == rows && x.dims().cols() == cols) {
-        std::memcpy(dx, xsrc, rows * cols * sizeof(keel::f64));   // per-element
+        keel::copy_n(dx, xsrc, rows * cols);   // per-element
     } else if (xIsVec && dim == 2 && x.numel() == cols) {
         for (keel::usize c = 0; c < cols; ++c)
             for (keel::usize r = 0; r < rows; ++r) dx[c * rows + r] = xsrc[c];

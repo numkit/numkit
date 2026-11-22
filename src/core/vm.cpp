@@ -1,5 +1,6 @@
 // src/vm.cpp
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/complex.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -15,10 +16,7 @@
 #include <numkit/value/index.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -776,7 +774,7 @@ enter_frame:
                 if (isArithScalar(R[I.b]) && isArithScalar(R[I.c])) {
                     keel::f64 base = asScalar(R[I.b]);
                     keel::f64 exp = asScalar(R[I.c]);
-                    if (base < 0.0 && exp != std::floor(exp)) {
+                    if (base < 0.0 && exp != keel::floor(exp)) {
                         // negative base ^ non-integer exp -> complex; defer to power().
                         R[I.a] = binarySlowPath(I.op, R[I.b], R[I.c]);
                     } else {
@@ -786,11 +784,11 @@ enter_frame:
                         else if (exp == 3.0)
                             result = base * base * base;
                         else if (exp == 0.5)
-                            result = std::sqrt(base);
+                            result = keel::sqrt(base);
                         else if (exp == -1.0)
                             result = 1.0 / base;
                         else
-                            result = std::pow(base, exp);
+                            result = keel::pow(base, exp);
                         R[I.a].setScalarFast(result);
                     }
                 } else
@@ -814,7 +812,7 @@ enter_frame:
             case OpCode::POW_SS: {
                 keel::f64 base = R[I.b].scalarVal();
                 keel::f64 exp = R[I.c].scalarVal();
-                if (base < 0.0 && exp != std::floor(exp)) {
+                if (base < 0.0 && exp != keel::floor(exp)) {
                     // negative base ^ non-integer exp -> complex; defer to power().
                     R[I.a] = binarySlowPath(OpCode::EPOW, R[I.b], R[I.c]);
                     break;
@@ -825,11 +823,11 @@ enter_frame:
                 else if (exp == 3.0)
                     result = base * base * base;
                 else if (exp == 0.5)
-                    result = std::sqrt(base);
+                    result = keel::sqrt(base);
                 else if (exp == -1.0)
                     result = 1.0 / base;
                 else
-                    result = std::pow(base, exp);
+                    result = keel::pow(base, exp);
                 R[I.a].setScalarFast(result);
                 break;
             }
@@ -927,7 +925,7 @@ enter_frame:
             case OpCode::AND:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
-                    if (std::isnan(bv) || std::isnan(cv))
+                    if (keel::is_nan(bv) || keel::is_nan(cv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 && cv != 0.0);
                 } else
@@ -937,7 +935,7 @@ enter_frame:
             case OpCode::OR:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
-                    if (std::isnan(bv) || std::isnan(cv))
+                    if (keel::is_nan(bv) || keel::is_nan(cv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 || cv != 0.0);
                 } else
@@ -959,7 +957,7 @@ enter_frame:
             case OpCode::NOT:
                 if (R[I.b].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal();
-                    if (std::isnan(bv))
+                    if (keel::is_nan(bv))
                         throw std::runtime_error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv == 0.0);
                 } else

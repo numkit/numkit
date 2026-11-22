@@ -30,10 +30,8 @@
 #include <numkit/value/object.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
 #include <numeric>
 #include <stdexcept>
 
@@ -755,8 +753,8 @@ static auto formatTableCell = [](const Value &col, keel::usize row) -> keel::Str
         for (keel::usize j = 0; j < nc; ++j) {
             if (j > 0) os.append("  ");
             keel::f64 d = col.elemAsDouble(row + j * nr);
-            if (std::isnan(d)) os.append("NaN");
-            else if (std::isinf(d)) os.append(d < 0 ? "-Inf" : "Inf");
+            if (keel::is_nan(d)) os.append("NaN");
+            else if (keel::is_inf(d)) os.append(d < 0 ? "-Inf" : "Inf");
             else {
                 if (d == 0.0) d = 0.0;
                 keel::format_into(os, "%g", d);
@@ -774,9 +772,9 @@ static auto compareColumnRows = [](const Value &col, keel::usize r1, keel::usize
     if (col.isNumeric() || col.isLogical()) {
         keel::f64 a = col.elemAsDouble(r1);
         keel::f64 b = col.elemAsDouble(r2);
-        if (std::isnan(a) && std::isnan(b)) return 0;
-        if (std::isnan(a)) return 1; // NaNs sort last
-        if (std::isnan(b)) return -1;
+        if (keel::is_nan(a) && keel::is_nan(b)) return 0;
+        if (keel::is_nan(a)) return 1; // NaNs sort last
+        if (keel::is_nan(b)) return -1;
         return (a < b) ? -1 : (a > b ? 1 : 0);
     }
     if (col.isString()) {
@@ -805,9 +803,9 @@ static auto compareColumnRows = [](const Value &col, keel::usize r1, keel::usize
             try {
                 keel::f64 a = s1->native->asDouble();
                 keel::f64 b = s2->native->asDouble();
-                if (std::isnan(a) && std::isnan(b)) return 0;
-                if (std::isnan(a)) return 1;
-                if (std::isnan(b)) return -1;
+                if (keel::is_nan(a) && keel::is_nan(b)) return 0;
+                if (keel::is_nan(a)) return 1;
+                if (keel::is_nan(b)) return -1;
                 return (keel::abs(a - b) <= 1e-12) ? 0 : ((a < b) ? -1 : 1);
             } catch (...) {}
         }
@@ -865,7 +863,7 @@ void innerjoinImpl(const TablePayload *lp, const TablePayload *rp,
                 if (s1 && s1->native && s2 && s2->native) {
                     keel::f64 d1 = s1->native->asDouble();
                     keel::f64 d2 = s2->native->asDouble();
-                    if (std::isnan(d1) || std::isnan(d2) || keel::abs(d1 - d2) > 1e-9)
+                    if (keel::is_nan(d1) || keel::is_nan(d2) || keel::abs(d1 - d2) > 1e-9)
                         return false;
                     continue;
                 }
@@ -873,7 +871,7 @@ void innerjoinImpl(const TablePayload *lp, const TablePayload *rp,
             if ((lc.isNumeric() || lc.isLogical()) && (rc.isNumeric() || rc.isLogical())) {
                 keel::f64 d1 = lc.elemAsDouble(lr);
                 keel::f64 d2 = rc.elemAsDouble(rr);
-                if (std::isnan(d1) || std::isnan(d2) || d1 != d2)
+                if (keel::is_nan(d1) || keel::is_nan(d2) || d1 != d2)
                     return false;
                 continue;
             }
@@ -936,7 +934,7 @@ keel::Arc<TablePayload> retimeOne(const TablePayload *p, keel::StringRef newTime
     auto getYMD = [&](keel::usize r, keel::i32 &y, keel::i32 &m, keel::i32 &q) {
         const auto *st = p->rowTimes.objectStateAt(r);
         keel::f64 sd = (st && st->native) ? st->native->asDouble() : 0.0;
-        keel::i64 days = keel::as<keel::i64>(std::floor(sd - 719529.0));
+        keel::i64 days = keel::as<keel::i64>(keel::floor(sd - 719529.0));
         keel::i64 z = days + 719468;
         keel::i64 era = (z >= 0 ? z : z - 146096) / 146097;
         keel::u32 doe = keel::as<keel::u32>(z - era * 146097);
@@ -1012,10 +1010,10 @@ keel::Arc<TablePayload> retimeOne(const TablePayload *p, keel::StringRef newTime
             for (keel::usize r : buckets[g].rows) {
                 if (col.isNumeric() && r < col.numel()) {
                     keel::f64 v = col.elemAsDouble(r);
-                    if (!std::isnan(v)) vals.push_back(v);
+                    if (!keel::is_nan(v)) vals.push_back(v);
                 }
             }
-            keel::f64 val = std::numeric_limits<keel::f64>::quiet_NaN();
+            keel::f64 val = keel::Limits<keel::f64>::quiet_nan();
             if (!vals.empty()) {
                 if (iequalsTableOpt(method, "firstvalue")) val = vals.front();
                 else if (iequalsTableOpt(method, "lastvalue")) val = vals.back();
@@ -1048,14 +1046,14 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
         throw Error("synchronize: requires at least one timetable", 0, 0, "synchronize", "", "numkit:synchronize:minrhs");
     auto getSd = [](const Value &rt, keel::usize r) -> keel::f64 {
         const auto *st = rt.objectStateAt(r);
-        return (st && st->native) ? st->native->asDouble() : std::numeric_limits<keel::f64>::quiet_NaN();
+        return (st && st->native) ? st->native->asDouble() : keel::Limits<keel::f64>::quiet_nan();
     };
     keel::Array<keel::f64> allSd(alloc);
     keel::Array<Value> allDt(alloc);
     auto addTimes = [&](const Value &rt, keel::usize n) {
         for (keel::usize r = 0; r < n; ++r) {
             keel::f64 sd = getSd(rt, r);
-            if (std::isnan(sd)) continue;
+            if (keel::is_nan(sd)) continue;
             bool found = false;
             for (keel::f64 m : allSd) {
                 if (keel::abs(m - sd) < 1e-6) { found = true; break; }
@@ -1078,7 +1076,7 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
                 bool inThis = false;
                 for (keel::usize r = 0; r < tp->nrows; ++r) {
                     keel::f64 tsd = getSd(tp->rowTimes, r);
-                    if (!std::isnan(tsd) && keel::abs(tsd - sd) < 1e-6) {
+                    if (!keel::is_nan(tsd) && keel::abs(tsd - sd) < 1e-6) {
                         inThis = true;
                         break;
                     }
@@ -1135,7 +1133,7 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
             for (keel::usize i = 0; i < nr; ++i) {
                 dst[i] = (rowMap[i] >= 0 && src.isNumeric())
                        ? src.elemAsDouble(keel::as<keel::usize>(rowMap[i]))
-                       : std::numeric_limits<keel::f64>::quiet_NaN();
+                       : keel::Limits<keel::f64>::quiet_nan();
             }
             res->cols.push_back(std::move(col));
         }
@@ -1177,7 +1175,7 @@ void adftest_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::f64> y(alloc);
     for (keel::usize i = 0; i < yIn.numel(); ++i) {
         keel::f64 v = yIn.elemAsDouble(i);
-        if (!std::isnan(v))
+        if (!keel::is_nan(v))
             y.push_back(v);
     }
     keel::String model = keel::String::from("AR", alloc);
@@ -1274,7 +1272,7 @@ void adftest_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
     keel::f64 MSE = SSE / keel::as<keel::f64>(T - numParams);
     keel::f64 invXtX_aa = aug[aIdx * (2 * numParams) + numParams + aIdx];
-    keel::f64 se_a = std::sqrt(MSE * invXtX_aa);
+    keel::f64 se_a = keel::sqrt(MSE * invXtX_aa);
     keel::f64 testStat = (beta[aIdx] - 1.0) / se_a;
 
     static const keel::f64 sampSizes[15] = {10,15,20,25,30,40,50,75,100,150,200,300,500,1000,10000};
@@ -2455,7 +2453,7 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
         if (isNumCol) {
             Value col = Value::matrix(nrows, 1, ValueType::DOUBLE, mr);
             keel::f64 *dst = col.doubleDataMut();
-            const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
+            const keel::f64 nan = keel::Limits<keel::f64>::quiet_nan();
             for (keel::usize r = 1; r < maxR; ++r) {
                 const auto &cell = grid[r][c];
                 keel::f64 d = nan;
@@ -2575,7 +2573,7 @@ static auto buildXlsxBytes = [](const TablePayload *p) -> keel::String {
             keel::String ref = keel::format("{}{}", colLetters(j), rowNum);
             if (col.isNumeric()) {
                 keel::f64 d = col.elemAsDouble(r);
-                if (std::isfinite(d))
+                if (keel::is_finite(d))
                     keel::format_into(sh, "<c r=\"{}\"><v>%.15g</v></c>", ref, d);
             } else {
                 keel::String sv;
@@ -2737,13 +2735,13 @@ void writetable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
                 const Value &col = p->cols[j];
                 if (col.isNumeric()) {
                     keel::f64 d = col.elemAsDouble(r);
-                    if (!std::isnan(d)) keel::format_into(os, "%.15g", d);
+                    if (!keel::is_nan(d)) keel::format_into(os, "%.15g", d);
                 } else if (col.isString()) {
                     os.append(col.stringElem(r).as_ref());
                 } else if (col.isCell()) {
                     const Value &el = col.cellAt(r);
                     if (el.isChar() || el.isString()) os.append(el.toString().as_ref());
-                    else if (el.isNumeric() && el.isScalar() && !std::isnan(el.toScalar()))
+                    else if (el.isNumeric() && el.isScalar() && !keel::is_nan(el.toScalar()))
                         keel::format_into(os, "%.15g", el.toScalar());
                 } else {
                     os.append(formatTableCell(col, r).as_ref());
@@ -2805,7 +2803,7 @@ void xlsread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         keel::usize nr = rMax - rMin, nc = cMax - cMin;
         Value num = Value::matrix(nr, nc, ValueType::DOUBLE, mr);
         keel::f64 *dst = num.doubleDataMut();
-        const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
+        const keel::f64 nan = keel::Limits<keel::f64>::quiet_nan();
         for (keel::usize c = 0; c < nc; ++c) {
             for (keel::usize r = 0; r < nr; ++r) {
                 const auto &cell = grid[rMin + r][cMin + c];
@@ -2833,7 +2831,7 @@ void xlsread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     }
     if (nargout >= 3 && outs.size() >= 3) {
         Value rawOut = Value::cell(maxR, maxC, mr);
-        const keel::f64 nan = std::numeric_limits<keel::f64>::quiet_NaN();
+        const keel::f64 nan = keel::Limits<keel::f64>::quiet_nan();
         for (keel::usize c = 0; c < maxC; ++c)
             for (keel::usize r = 0; r < maxR; ++r) {
                 const auto &cell = grid[r][c];
@@ -2949,10 +2947,10 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     Xty.assign(K, 0.0);
     for (keel::usize i = 0; i < N; ++i) {
         keel::f64 yi = yvec[i];
-        if (!std::isfinite(yi)) continue;
+        if (!keel::is_finite(yi)) continue;
         bool ok = true;
         for (keel::usize j = 0; j < P; ++j)
-            if (!std::isfinite(Xcols[j][i])) { ok = false; break; }
+            if (!keel::is_finite(Xcols[j][i])) { ok = false; break; }
         if (!ok) continue;
         for (keel::usize r = 0; r < K; ++r) {
             keel::f64 xr = (r == 0) ? 1.0 : Xcols[r - 1][i];
@@ -3035,9 +3033,9 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     Value tV   = Value::matrix(K, 1, ValueType::DOUBLE, mr);
     Value pV   = Value::matrix(K, 1, ValueType::DOUBLE, mr);
     for (keel::usize r = 0; r < K; ++r) {
-        keel::f64 se = std::sqrt(mse * invDiag[r]);
+        keel::f64 se = keel::sqrt(mse * invDiag[r]);
         keel::f64 ts = (se > 0.0) ? (beta[r] / se) : 0.0;
-        keel::f64 pv = std::erfc(keel::abs(ts) / std::sqrt(2.0));
+        keel::f64 pv = keel::erfc(keel::abs(ts) / keel::sqrt(2.0));
         estV.doubleDataMut()[r] = beta[r];
         seV.doubleDataMut()[r]  = se;
         tV.doubleDataMut()[r]   = ts;
@@ -3067,7 +3065,7 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     mdl.field("Fitted")          = std::move(fitted);
     mdl.field("Residuals")       = std::move(resStruct);
     mdl.field("MSE")             = Value::scalar(mse, mr);
-    mdl.field("RMSE")            = Value::scalar(std::sqrt(mse), mr);
+    mdl.field("RMSE")            = Value::scalar(keel::sqrt(mse), mr);
     mdl.field("DFE")             = Value::scalar(dfe, mr);
     mdl.field("NumObservations") = Value::scalar(keel::as<keel::f64>(N), mr);
     mdl.field("PredictorNames")  = std::move(pNamesCell);
@@ -3395,8 +3393,8 @@ void registerContainersRuntime(Engine &engine)
                 if (!szVal.isNumeric() || szVal.numel() != 2)
                     throw Error("table: 'Size' must be a 2-element numeric vector [numRows, numVars]",
                                 0, 0, "table", "", "numkit:table:invalidSize");
-                keel::usize nr = keel::as<keel::usize>(std::max(0.0, std::round(szVal.elemAsDouble(0))));
-                keel::usize nc = keel::as<keel::usize>(std::max(0.0, std::round(szVal.elemAsDouble(1))));
+                keel::usize nr = keel::as<keel::usize>(std::max(0.0, keel::round(szVal.elemAsDouble(0))));
+                keel::usize nc = keel::as<keel::usize>(std::max(0.0, keel::round(szVal.elemAsDouble(1))));
                 p->nrows = nr;
                 keel::Array<keel::String> vtypes(alloc);
                 keel::Array<keel::String> vnames(alloc);
@@ -3424,7 +3422,7 @@ void registerContainersRuntime(Engine &engine)
                     if (iequalsTableOpt(vt, "double") || iequalsTableOpt(vt, "doublenan")) {
                         Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
                         if (iequalsTableOpt(vt, "doublenan"))
-                            std::fill_n(col.doubleDataMut(), nr, std::numeric_limits<keel::f64>::quiet_NaN());
+                            std::fill_n(col.doubleDataMut(), nr, keel::Limits<keel::f64>::quiet_nan());
                         p->cols.push_back(std::move(col));
                     } else if (iequalsTableOpt(vt, "logical")) {
                         p->cols.push_back(Value::matrix(nr, 1, ValueType::LOGICAL, mr));
@@ -3852,8 +3850,8 @@ void registerContainersRuntime(Engine &engine)
                keel::MutArrayRef<Value> out, CallContext &ctx) {
             const TablePayload *p = tableCst(self);
             auto *mr = ctx.engine->allocator();
-            keel::i32 dim = args.size() >= 1 ? keel::as<keel::i32>(std::llround(args[0].elemAsDouble(0))) : 0;
-            keel::i32 ndims = args.size() >= 2 ? keel::as<keel::i32>(std::llround(args[1].elemAsDouble(0))) : 2;
+            keel::i32 dim = args.size() >= 1 ? keel::as<keel::i32>(keel::round_i64(args[0].elemAsDouble(0))) : 0;
+            keel::i32 ndims = args.size() >= 2 ? keel::as<keel::i32>(keel::round_i64(args[1].elemAsDouble(0))) : 2;
             if (ndims == 1 || dim == 0)
                 out[0] = Value::scalar(keel::as<keel::f64>(p->nrows), mr);
             else if (dim == 1)
@@ -3994,13 +3992,13 @@ void registerContainersRuntime(Engine &engine)
                                  ? Value::fromString(col.objectClassNameRef(), mr)
                                  : Value::fromString(mtypeName(col.type()), mr);
                 if (col.isNumeric() && col.numel() > 0) {
-                    keel::f64 mn = std::numeric_limits<keel::f64>::infinity();
-                    keel::f64 mx = -std::numeric_limits<keel::f64>::infinity();
+                    keel::f64 mn = keel::Limits<keel::f64>::infinity();
+                    keel::f64 mx = -keel::Limits<keel::f64>::infinity();
                     keel::Array<keel::f64> vals(alloc);
                     vals.reserve(col.numel());
                     for (keel::usize i = 0; i < col.numel(); ++i) {
                         keel::f64 d = col.elemAsDouble(i);
-                        if (!std::isnan(d)) {
+                        if (!keel::is_nan(d)) {
                             mn = std::min(mn, d);
                             mx = std::max(mx, d);
                             vals.push_back(d);
@@ -4102,7 +4100,7 @@ void registerContainersRuntime(Engine &engine)
                 throw Error("topkrows: requires k argument",
                             0, 0, "topkrows", "", "numkit:topkrows:nargin");
             const keel::f64 kd = args[0].toScalar();
-            if (kd < 0.0 || kd != std::floor(kd))
+            if (kd < 0.0 || kd != keel::floor(kd))
                 throw Error("topkrows: k must be a non-negative integer",
                             0, 0, "topkrows", "", "numkit:topkrows:badK");
             const keel::usize kTake = std::min(keel::as<keel::usize>(kd), p->nrows);
@@ -4216,7 +4214,7 @@ void registerContainersRuntime(Engine &engine)
                     return false;
                 if (col.isNumeric()) {
                     for (keel::usize colC = 0; colC < nc; ++colC)
-                        if (std::isnan(col.elemAsDouble(r + colC * nr)))
+                        if (keel::is_nan(col.elemAsDouble(r + colC * nr)))
                             return true;
                     return false;
                 }
@@ -4233,7 +4231,7 @@ void registerContainersRuntime(Engine &engine)
                             return true;
                         if ((el.isChar() || el.isString()) && el.toString().empty())
                             return true;
-                        if (el.isNumeric() && el.isScalar() && std::isnan(el.toScalar()))
+                        if (el.isNumeric() && el.isScalar() && keel::is_nan(el.toScalar()))
                             return true;
                     }
                     return false;
@@ -4370,11 +4368,11 @@ void registerContainersRuntime(Engine &engine)
                         for (keel::usize r : rows) {
                             if (col.isNumeric() && r < col.numel()) {
                                 keel::f64 v = col.elemAsDouble(r);
-                                if (!std::isnan(v))
+                                if (!keel::is_nan(v))
                                     vals.push_back(v);
                             }
                         }
-                        keel::f64 val = std::numeric_limits<keel::f64>::quiet_NaN();
+                        keel::f64 val = keel::Limits<keel::f64>::quiet_nan();
                         if (iequalsTableOpt(m, "sum")) {
                             val = 0.0;
                             for (keel::f64 v : vals) val += v;
@@ -4403,7 +4401,7 @@ void registerContainersRuntime(Engine &engine)
                                 keel::f64 ss = 0.0;
                                 for (keel::f64 v : vals) ss += (v - mu) * (v - mu);
                                 keel::f64 vstat = (vals.size() > 1) ? ss / keel::as<keel::f64>(vals.size() - 1) : 0.0;
-                                val = iequalsTableOpt(m, "std") ? std::sqrt(vstat) : vstat;
+                                val = iequalsTableOpt(m, "std") ? keel::sqrt(vstat) : vstat;
                             }
                         }
                         dst[g] = val;
@@ -4729,7 +4727,7 @@ void registerContainersRuntime(Engine &engine)
                     const Value &col = p->cols[j];
                     for (keel::usize i = 0; i < nr; ++i) {
                         bool miss = false;
-                        if (col.isNumeric() && i < col.numel()) miss = std::isnan(col.elemAsDouble(i));
+                        if (col.isNumeric() && i < col.numel()) miss = keel::is_nan(col.elemAsDouble(i));
                         else if (col.isString() && i < col.numel()) miss = col.stringElem(i).empty();
                         dst[i + j * nr] = miss ? 1 : 0;
                     }

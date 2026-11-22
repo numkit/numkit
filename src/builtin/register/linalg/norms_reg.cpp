@@ -8,6 +8,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <numkit/linalg/norms.hpp>
 
@@ -16,7 +17,6 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 
-#include <cmath>
 
 namespace numkit::linalg {
 namespace detail {
@@ -44,7 +44,7 @@ void norm_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                     0, 0, "norm", "", "numkit:norm:badStringP");
     }
     const keel::f64 pv = p.toScalar();
-    if (std::isinf(pv)) {
+    if (keel::is_inf(pv)) {
         if (pv > 0.0) {
             outs[0] = norm_inf(args[0], mr);
             return;

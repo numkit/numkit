@@ -18,11 +18,9 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <limits>
 #include <stdexcept>
 #include <tuple>
 
@@ -86,12 +84,12 @@ inline keel::i64 daysInMonth(keel::i64 y, keel::i64 m) noexcept
 inline keel::f64 composeSerialDay(keel::f64 Y, keel::f64 M, keel::f64 D,
                                keel::f64 H = 0.0, keel::f64 MI = 0.0, keel::f64 S = 0.0) noexcept
 {
-    if (std::isnan(Y) || std::isnan(M) || std::isnan(D)
-        || std::isnan(H) || std::isnan(MI) || std::isnan(S))
-        return std::numeric_limits<keel::f64>::quiet_NaN();
-    keel::i64 yi = keel::as<keel::i64>(std::floor(Y));
-    keel::i64 mi = keel::as<keel::i64>(std::floor(M));
-    keel::i64 di = keel::as<keel::i64>(std::floor(D));
+    if (keel::is_nan(Y) || keel::is_nan(M) || keel::is_nan(D)
+        || keel::is_nan(H) || keel::is_nan(MI) || keel::is_nan(S))
+        return keel::Limits<keel::f64>::quiet_nan();
+    keel::i64 yi = keel::as<keel::i64>(keel::floor(Y));
+    keel::i64 mi = keel::as<keel::i64>(keel::floor(M));
+    keel::i64 di = keel::as<keel::i64>(keel::floor(D));
     keel::f64 fracD = (D - keel::as<keel::f64>(di))
                    + (H * 3600.0 + MI * 60.0 + S) / kSecondsPerDay;
     keel::i64 daysSince1970 = daysFromCivil(yi, mi, di);
@@ -108,15 +106,15 @@ struct CivilDateTime
 inline CivilDateTime decomposeSerialDay(keel::f64 serialDay) noexcept
 {
     CivilDateTime out;
-    if (!std::isfinite(serialDay)) {
+    if (!keel::is_finite(serialDay)) {
         out.isNaT = true;
         return out;
     }
     // Round to nearest millisecond to avoid FP drift in H:MI:S extraction
     keel::f64 shifted = serialDay - kEpochSerialDay;
-    keel::i64 wholeDays = keel::as<keel::i64>(std::floor(shifted));
+    keel::i64 wholeDays = keel::as<keel::i64>(keel::floor(shifted));
     keel::f64 remSec = (shifted - keel::as<keel::f64>(wholeDays)) * kSecondsPerDay;
-    keel::f64 roundedMs = std::round(remSec * 1000.0);
+    keel::f64 roundedMs = keel::round(remSec * 1000.0);
     if (roundedMs >= 86400000.0) {
         wholeDays += 1;
         roundedMs -= 86400000.0;
@@ -136,8 +134,8 @@ inline CivilDateTime decomposeSerialDay(keel::f64 serialDay) noexcept
 inline keel::f64 addCalendarMonths(keel::f64 serialDay, keel::i64 deltaMonths,
                                 keel::i64 deltaDays, keel::f64 deltaSeconds) noexcept
 {
-    if (!std::isfinite(serialDay))
-        return std::numeric_limits<keel::f64>::quiet_NaN();
+    if (!keel::is_finite(serialDay))
+        return keel::Limits<keel::f64>::quiet_nan();
     CivilDateTime c = decomposeSerialDay(serialDay);
     keel::i64 m0 = (c.month - 1) + deltaMonths;
     keel::i64 yNew = c.year + (m0 >= 0 ? m0 / 12 : (m0 - 11) / 12);
@@ -168,7 +166,7 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
     std::snprintf(d2, sizeof(d2), "%02lld", keel::as<keel::i64>(c.day));
     std::snprintf(h2, sizeof(h2), "%02lld", keel::as<keel::i64>(c.hour));
     std::snprintf(mi2, sizeof(mi2), "%02lld", keel::as<keel::i64>(c.minute));
-    keel::i32 wholeSec = keel::as<keel::i32>(std::floor(c.second + 1e-9));
+    keel::i32 wholeSec = keel::as<keel::i32>(keel::floor(c.second + 1e-9));
     keel::f64 fracSec = c.second - wholeSec;
     std::snprintf(s2, sizeof(s2), "%02d", wholeSec);
     const char *mmm = (c.month >= 1 && c.month <= 12) ? kMonthShort[c.month - 1] : "Jan";
@@ -220,7 +218,7 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
             res.append(mi2);
             i += 2;
         } else if (matchAt(i, "ss.SSS")) {
-            keel::i32 ms = keel::as<keel::i32>(std::round(fracSec * 1000.0));
+            keel::i32 ms = keel::as<keel::i32>(keel::round(fracSec * 1000.0));
             char msBuf[16];
             std::snprintf(msBuf, sizeof(msBuf), "%s.%03d", s2, ms);
             res.append(msBuf);
@@ -245,18 +243,18 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
         --end;
     keel::String s = keel::String::from(raw.substr(start, end - start), mr);
     if (s.empty() || s == "NaT")
-        return std::numeric_limits<keel::f64>::quiet_NaN();
+        return keel::Limits<keel::f64>::quiet_nan();
     keel::String sl = s.clone();
     for (keel::usize i = 0; i < sl.size(); ++i)
         sl[i] = keel::to_ascii_lower(sl[i]);
     if (sl == "now")
         return numkit::builtin::now();
     if (sl == "today")
-        return std::floor(numkit::builtin::now());
+        return keel::floor(numkit::builtin::now());
     if (sl == "yesterday")
-        return std::floor(numkit::builtin::now()) - 1.0;
+        return keel::floor(numkit::builtin::now()) - 1.0;
     if (sl == "tomorrow")
-        return std::floor(numkit::builtin::now()) + 1.0;
+        return keel::floor(numkit::builtin::now()) + 1.0;
 
     auto skipWs = [](const char *&p) {
         while (*p && keel::is_ascii_space(*p))
@@ -327,7 +325,7 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
         Value dn = numkit::builtin::datenum(keel::ArrayRef<Value>(&sv, 1), mr);
         return dn.toScalar();
     } catch (...) {
-        return std::numeric_limits<keel::f64>::quiet_NaN();
+        return keel::Limits<keel::f64>::quiet_nan();
     }
 }
 
@@ -499,7 +497,7 @@ inline Value makeCalDurArray(const Dims &dims, keel::ArrayRef<CalDurElemPayload>
 
 inline keel::String formatDurationElem(keel::f64 sec, keel::StringRef fmt)
 {
-    if (!std::isfinite(sec))
+    if (!keel::is_finite(sec))
         return keel::String::from("NaN");
     if (fmt == "s" || fmt == "sec")
         return keel::format("%g sec", sec);
@@ -513,7 +511,7 @@ inline keel::String formatDurationElem(keel::f64 sec, keel::StringRef fmt)
         return keel::format("%g yr", sec / kSecondsPerYear);
     bool neg = sec < 0.0;
     keel::f64 a = keel::abs(sec);
-    keel::i64 totalMs = keel::as<keel::i64>(std::round(a * 1000.0));
+    keel::i64 totalMs = keel::as<keel::i64>(keel::round(a * 1000.0));
     keel::i64 wholeSec = totalMs / 1000;
     keel::i64 ms = totalMs % 1000;
     keel::i64 hh = wholeSec / 3600;
@@ -586,7 +584,7 @@ inline Value extractDatetimeComponent(const Value &self, keel::i32 comp, keel::A
     auto compOf = [&](keel::f64 sd) -> keel::f64 {
         CivilDateTime c = decomposeSerialDay(sd);
         if (c.isNaT)
-            return std::numeric_limits<keel::f64>::quiet_NaN();
+            return keel::Limits<keel::f64>::quiet_nan();
         switch (comp) {
         case 0: return keel::as<keel::f64>(c.year);
         case 1: return keel::as<keel::f64>(c.month);
@@ -600,13 +598,13 @@ inline Value extractDatetimeComponent(const Value &self, keel::i32 comp, keel::A
     };
     if (n == 1) {
         const auto *p = dtElem(self, 0);
-        return Value::scalar(compOf(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN()), mr);
+        return Value::scalar(compOf(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan()), mr);
     }
     Value out = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
     keel::f64 *dst = out.doubleDataMut();
     for (keel::usize i = 0; i < n; ++i) {
         const auto *p = dtElem(self, i);
-        dst[i] = compOf(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN());
+        dst[i] = compOf(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan());
     }
     return out;
 }
@@ -703,7 +701,7 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
     items.resize(n);
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = x.elemAsDouble(i);
-        if (!std::isfinite(v) || std::floor(v) != v)
+        if (!keel::is_finite(v) || keel::floor(v) != v)
             throw std::runtime_error(
                 keel::format("numkit:{}:MustBeInteger: Calendar duration quantities must be finite integers.", fnName).c_str());
         keel::i64 iv = keel::as<keel::i64>(v);
@@ -838,7 +836,7 @@ void weekday_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         static const char *kShort[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         static const char *kLong[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
         keel::f64 dval = args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(0);
-        keel::i64 f = keel::as<keel::i64>(std::floor(dval)) - 2;
+        keel::i64 f = keel::as<keel::i64>(keel::floor(dval)) - 2;
         keel::i64 r = f % 7;
         if (r < 0) r += 7;
         keel::i32 dayIdx = keel::as<keel::i32>(r) + 1;
@@ -996,14 +994,14 @@ void isnat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     const keel::usize n = args[0].objectCount();
     if (n == 1) {
         const auto *p = dtElem(args[0], 0);
-        outs[0] = Value::logicalScalar(!p || !std::isfinite(p->serialDay), mr);
+        outs[0] = Value::logicalScalar(!p || !keel::is_finite(p->serialDay), mr);
         return;
     }
     Value out = makeArrayFromDims(args[0].dims(), ValueType::LOGICAL, mr);
     keel::u8 *dst = out.logicalDataMut();
     for (keel::usize i = 0; i < n; ++i) {
         const auto *p = dtElem(args[0], i);
-        dst[i] = (!p || !std::isfinite(p->serialDay)) ? 1 : 0;
+        dst[i] = (!p || !keel::is_finite(p->serialDay)) ? 1 : 0;
     }
     outs[0] = std::move(out);
 }
@@ -1025,7 +1023,7 @@ void nat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
         c = keel::as<keel::usize>(std::max(0.0, args[1].elemAsDouble(0)));
     }
     keel::Array<keel::f64> nats(mr);
-    nats.assign(r * c, std::numeric_limits<keel::f64>::quiet_NaN());
+    nats.assign(r * c, keel::Limits<keel::f64>::quiet_nan());
     outs[0] = makeDatetimeArray(Dims(r, c), nats.as_ref(), "", "", mr);
 }
 
@@ -1201,8 +1199,8 @@ void register_timefun(Engine &engine) {
                 keel::f64 sec = durElem(self, i) ? durElem(self, i)->seconds : 0.0;
                 keel::f64 sign = sec < 0.0 ? -1.0 : 1.0;
                 keel::f64 a = keel::abs(sec);
-                keel::f64 hh = std::floor(a / 3600.0);
-                keel::f64 mm = std::floor((a - hh * 3600.0) / 60.0);
+                keel::f64 hh = keel::floor(a / 3600.0);
+                keel::f64 mm = keel::floor((a - hh * 3600.0) / 60.0);
                 keel::f64 ss = a - hh * 3600.0 - mm * 60.0;
                 h.doubleDataMut()[i] = sign * hh;
                 m.doubleDataMut()[i] = sign * mm;
@@ -1253,8 +1251,8 @@ void register_timefun(Engine &engine) {
                 keel::f64 bestVal = durElem(self, 0) ? durElem(self, 0)->seconds : 0.0;
                 for (keel::usize i = 1; i < n; ++i) {
                     keel::f64 v = durElem(self, i) ? durElem(self, i)->seconds : 0.0;
-                    if (std::isnan(v)) continue;
-                    if (std::isnan(bestVal) || (isMax ? (v > bestVal) : (v < bestVal))) {
+                    if (keel::is_nan(v)) continue;
+                    if (keel::is_nan(bestVal) || (isMax ? (v > bestVal) : (v < bestVal))) {
                         bestVal = v;
                         bestIdx = i;
                     }
@@ -1447,9 +1445,9 @@ void register_timefun(Engine &engine) {
                 keel::Array<CalDurElemPayload> items(mr);
                 items.resize(R);
                 for (keel::usize r = 0; r < R; ++r) {
-                    keel::i64 y = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r)));
-                    keel::i64 m = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r + R)));
-                    keel::i64 d = keel::as<keel::i64>(std::round(args[0].elemAsDouble(r + 2 * R)));
+                    keel::i64 y = keel::as<keel::i64>(keel::round(args[0].elemAsDouble(r)));
+                    keel::i64 m = keel::as<keel::i64>(keel::round(args[0].elemAsDouble(r + R)));
+                    keel::i64 d = keel::as<keel::i64>(keel::round(args[0].elemAsDouble(r + 2 * R)));
                     items[r] = CalDurElemPayload(y * 12 + m, d, 0.0);
                 }
                 return makeCalDurArray(Dims(R, 1), items.as_ref(), mr);
@@ -1461,9 +1459,9 @@ void register_timefun(Engine &engine) {
                 keel::Array<CalDurElemPayload> items(mr);
                 items.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
-                    keel::i64 y = keel::as<keel::i64>(std::round(args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i)));
-                    keel::i64 m = keel::as<keel::i64>(std::round(args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i)));
-                    keel::i64 dy = keel::as<keel::i64>(std::round(args[2].numel() == 1 ? args[2].toScalar() : args[2].elemAsDouble(i)));
+                    keel::i64 y = keel::as<keel::i64>(keel::round(args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(i)));
+                    keel::i64 m = keel::as<keel::i64>(keel::round(args[1].numel() == 1 ? args[1].toScalar() : args[1].elemAsDouble(i)));
+                    keel::i64 dy = keel::as<keel::i64>(keel::round(args[2].numel() == 1 ? args[2].toScalar() : args[2].elemAsDouble(i)));
                     keel::f64 sec = 0.0;
                     if (args.size() == 6) {
                         keel::f64 hh = args[3].numel() == 1 ? args[3].toScalar() : args[3].elemAsDouble(i);
@@ -1693,7 +1691,7 @@ void register_timefun(Engine &engine) {
                 keel::String tz0 = tz.clone();
                 for (keel::usize i = 0; i < n; ++i) {
                     const auto *p = dtElem(args[0], i);
-                    sds[i] = p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN();
+                    sds[i] = p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan();
                     if (i == 0 && p) {
                         if (f0.empty()) f0.assign(p->format.as_ref());
                         if (tz0.empty()) tz0.assign(p->timeZone.as_ref());
@@ -1712,8 +1710,8 @@ void register_timefun(Engine &engine) {
                 sds.resize(n);
                 for (keel::usize i = 0; i < n; ++i) {
                     keel::f64 v = x.elemAsDouble(i);
-                    if (!std::isfinite(v)) {
-                        sds[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+                    if (!keel::is_finite(v)) {
+                        sds[i] = keel::Limits<keel::f64>::quiet_nan();
                     } else if (convFrom == "datenum") {
                         sds[i] = v;
                     } else if (convFrom == "posixtime" || convFrom == "epochtime") {
@@ -1725,7 +1723,7 @@ void register_timefun(Engine &engine) {
                     } else if (convFrom == "excel") {
                         sds[i] = v + 693960.0;
                     } else if (convFrom == "yyyymmdd") {
-                        keel::i64 iv = keel::as<keel::i64>(std::llround(v));
+                        keel::i64 iv = keel::as<keel::i64>(keel::round_i64(v));
                         keel::i64 y = iv / 10000;
                         keel::i64 m = (iv / 100) % 100;
                         keel::i64 d = iv % 100;
@@ -1792,14 +1790,14 @@ void register_timefun(Engine &engine) {
                     // lie in [1, 200000].
                     if ((C == 1 || R == 1) && args[0].numel() >= 1) {
                         keel::f64 v0 = args[0].elemAsDouble(0);
-                        if (std::isfinite(v0) && v0 >= 1.0 && v0 <= 200000.0) {
+                        if (keel::is_finite(v0) && v0 >= 1.0 && v0 <= 200000.0) {
                             const keel::usize n = args[0].numel();
                             keel::Array<keel::f64> sds(mr);
                             sds.resize(n);
                             for (keel::usize i = 0; i < n; ++i) {
                                 keel::f64 v = args[0].elemAsDouble(i);
-                                sds[i] = std::isfinite(v) ? (v + 693960.0)
-                                                          : std::numeric_limits<keel::f64>::quiet_NaN();
+                                sds[i] = keel::is_finite(v) ? (v + 693960.0)
+                                                          : keel::Limits<keel::f64>::quiet_nan();
                             }
                             return makeDatetimeArray(args[0].dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                         }
@@ -1941,14 +1939,14 @@ void register_timefun(Engine &engine) {
             const keel::usize n = self.objectCount();
             if (n == 1) {
                 const auto *p = dtElem(self, 0);
-                keel::f64 sd = p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN();
-                return Value::scalar(std::isfinite(sd) ? xform(sd) : sd, mr);
+                keel::f64 sd = p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan();
+                return Value::scalar(keel::is_finite(sd) ? xform(sd) : sd, mr);
             }
             Value out = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                keel::f64 sd = p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN();
-                out.doubleDataMut()[i] = std::isfinite(sd) ? xform(sd) : sd;
+                keel::f64 sd = p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan();
+                out.doubleDataMut()[i] = keel::is_finite(sd) ? xform(sd) : sd;
             }
             return out;
         };
@@ -2003,10 +2001,10 @@ void register_timefun(Engine &engine) {
             keel::f64 *dst = dv.doubleDataMut();
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                CivilDateTime c = decomposeSerialDay(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN());
+                CivilDateTime c = decomposeSerialDay(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan());
                 if (c.isNaT) {
                     for (keel::usize k = 0; k < 6; ++k)
-                        dst[i + k * n] = std::numeric_limits<keel::f64>::quiet_NaN();
+                        dst[i + k * n] = keel::Limits<keel::f64>::quiet_nan();
                 } else {
                     dst[i + 0 * n] = keel::as<keel::f64>(c.year);
                     dst[i + 1 * n] = keel::as<keel::f64>(c.month);
@@ -2057,7 +2055,7 @@ void register_timefun(Engine &engine) {
                 keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
                                                          : (p ? p->format.as_ref() : keel::StringRef(""));
                 outs[0] = Value::fromString(
-                    formatDateTimeElem(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN(),
+                    formatDateTimeElem(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(),
                                        f, anyTime),
                     mr);
                 return;
@@ -2070,7 +2068,7 @@ void register_timefun(Engine &engine) {
                 keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
                                                          : (p ? p->format.as_ref() : keel::StringRef(""));
                 keel::String row = formatDateTimeElem(
-                    p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN(), f, anyTime);
+                    p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(), f, anyTime);
                 maxW = std::max(maxW, row.size());
                 rows.push_back(std::move(row));
             }
@@ -2127,7 +2125,7 @@ void register_timefun(Engine &engine) {
                 keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
                                                          : (p ? p->format.as_ref() : keel::StringRef(""));
                 s.stringElemSet(
-                    i, formatDateTimeElem(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN(),
+                    i, formatDateTimeElem(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(),
                                           f, anyTime));
             }
             outs[0] = std::move(s);
@@ -2147,7 +2145,7 @@ void register_timefun(Engine &engine) {
                 keel::StringRef f = !overrideFmt.empty() ? overrideFmt.as_ref()
                                                          : (p ? p->format.as_ref() : keel::StringRef(""));
                 c.cellAt(i) = Value::fromString(
-                    formatDateTimeElem(p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN(),
+                    formatDateTimeElem(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(),
                                        f, anyTime),
                     mr);
             }
@@ -2160,13 +2158,13 @@ void register_timefun(Engine &engine) {
             const keel::usize n = self.objectCount();
             if (n == 1) {
                 const auto *p = dtElem(self, 0);
-                outs[0] = Value::logicalScalar(!p || !std::isfinite(p->serialDay), mr);
+                outs[0] = Value::logicalScalar(!p || !keel::is_finite(p->serialDay), mr);
                 return;
             }
             Value out = makeArrayFromDims(self.dims(), ValueType::LOGICAL, mr);
             for (keel::usize i = 0; i < n; ++i) {
                 const auto *p = dtElem(self, i);
-                out.logicalDataMut()[i] = (!p || !std::isfinite(p->serialDay)) ? 1 : 0;
+                out.logicalDataMut()[i] = (!p || !keel::is_finite(p->serialDay)) ? 1 : 0;
             }
             outs[0] = std::move(out);
         };
@@ -2215,7 +2213,7 @@ void register_timefun(Engine &engine) {
                 keel::i64 months = (c2.year - c1.year) * 12 + (c2.month - c1.month);
                 keel::f64 anchor = addCalendarMonths(sd1, months, 0, 0.0);
                 keel::f64 remDays = sd2 - anchor;
-                keel::i64 wholeDays = keel::as<keel::i64>(std::trunc(remDays));
+                keel::i64 wholeDays = keel::as<keel::i64>(keel::trunc(remDays));
                 keel::f64 remSec = (remDays - keel::as<keel::f64>(wholeDays)) * kSecondsPerDay;
                 items[i] = CalDurElemPayload(months, wholeDays, remSec);
             }
@@ -2239,7 +2237,7 @@ void register_timefun(Engine &engine) {
             for (keel::usize i = 0; i < n; ++i) {
                 CivilDateTime c = decomposeSerialDay(dtElem(self, i)->serialDay);
                 if (c.isNaT) {
-                    sds[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+                    sds[i] = keel::Limits<keel::f64>::quiet_nan();
                     continue;
                 }
                 if (unit == "year" || unit == "years") {
@@ -2286,8 +2284,8 @@ void register_timefun(Engine &engine) {
             std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                 keel::f64 sa = dtElem(self, a)->serialDay;
                 keel::f64 sb = dtElem(self, b)->serialDay;
-                if (std::isnan(sa)) return false;
-                if (std::isnan(sb)) return true;
+                if (keel::is_nan(sa)) return false;
+                if (keel::is_nan(sb)) return true;
                 return desc ? (sa > sb) : (sa < sb);
             });
             keel::Array<keel::f64> sds(mr);
@@ -2320,8 +2318,8 @@ void register_timefun(Engine &engine) {
                 keel::f64 bestVal = dtElem(self, 0)->serialDay;
                 for (keel::usize i = 1; i < n; ++i) {
                     keel::f64 v = dtElem(self, i)->serialDay;
-                    if (std::isnan(v)) continue;
-                    if (std::isnan(bestVal) || (isMax ? (v > bestVal) : (v < bestVal))) {
+                    if (keel::is_nan(v)) continue;
+                    if (keel::is_nan(bestVal) || (isMax ? (v > bestVal) : (v < bestVal))) {
                         bestVal = v;
                         bestIdx = i;
                     }
@@ -2427,14 +2425,14 @@ void register_timefun(Engine &engine) {
                 std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                     keel::f64 sa = dtElem(self, a)->serialDay;
                     keel::f64 sb = dtElem(self, b)->serialDay;
-                    if (std::isnan(sa)) return false;
-                    if (std::isnan(sb)) return true;
+                    if (keel::is_nan(sa)) return false;
+                    if (keel::is_nan(sb)) return true;
                     return sa < sb - kTol;
                 });
                 for (keel::usize k = 0; k < n; ++k) {
                     keel::usize idx = order[k];
                     keel::f64 sd = dtElem(self, idx)->serialDay;
-                    if (uniqSds.empty() || std::isnan(sd) || std::isnan(uniqSds.back())
+                    if (uniqSds.empty() || keel::is_nan(sd) || keel::is_nan(uniqSds.back())
                         || keel::abs(sd - uniqSds.back()) > kTol) {
                         uniqSds.push_back(sd);
                         ia.push_back(idx + 1);
@@ -2485,7 +2483,7 @@ void register_timefun(Engine &engine) {
             keel::Array<Item> items(mr);
             for (keel::usize i = 0; i < nA; ++i) {
                 keel::f64 sa = dtElem(self, i)->serialDay;
-                if (std::isnan(sa)) continue;
+                if (keel::is_nan(sa)) continue;
                 bool dup = false;
                 for (const auto &it : items) {
                     if (keel::abs(it.sd - sa) <= kTol) { dup = true; break; }
@@ -2493,7 +2491,7 @@ void register_timefun(Engine &engine) {
                 if (dup) continue;
                 for (keel::usize j = 0; j < nB; ++j) {
                     keel::f64 sb = dtElem(other, j)->serialDay;
-                    if (!std::isnan(sb) && keel::abs(sa - sb) <= kTol) {
+                    if (!keel::is_nan(sb) && keel::abs(sa - sb) <= kTol) {
                         items.push_back({sa, i + 1, j + 1});
                         break;
                     }
@@ -2544,10 +2542,10 @@ void register_timefun(Engine &engine) {
             for (keel::usize i = 0; i < nA; ++i) {
                 keel::f64 sa = dtElem(self, i)->serialDay;
                 keel::usize found = 0;
-                if (!std::isnan(sa)) {
+                if (!keel::is_nan(sa)) {
                     for (keel::usize j = 0; j < nB; ++j) {
                         keel::f64 sb = dtElem(other, j)->serialDay;
-                        if (!std::isnan(sb) && keel::abs(sa - sb) <= kTol) {
+                        if (!keel::is_nan(sb) && keel::abs(sa - sb) <= kTol) {
                             found = j + 1;
                             break;
                         }
@@ -2681,7 +2679,7 @@ void register_timefun(Engine &engine) {
                 const keel::usize n = d.numel();
                 constexpr keel::f64 kTol = 1e-9 / kSecondsPerDay;
                 auto cmp1 = [mode](keel::f64 a, keel::f64 b) -> bool {
-                    if (std::isnan(a) || std::isnan(b))
+                    if (keel::is_nan(a) || keel::is_nan(b))
                         return mode == 1;
                     switch (mode) {
                     case 0: return keel::abs(a - b) <= kTol;
@@ -2787,7 +2785,7 @@ void register_timefun(Engine &engine) {
                     const auto *p = dtElem(self, c * R + r);
                     os.push_back(' ');
                     os.append(formatDateTimeElem(
-                        p ? p->serialDay : std::numeric_limits<keel::f64>::quiet_NaN(),
+                        p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(),
                         p ? p->format.as_ref() : keel::StringRef(""), anyTime).as_ref());
                     if (c + 1 < C) os.append("   ");
                 }

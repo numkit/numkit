@@ -31,8 +31,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <tuple>
 
 namespace numkit::linalg {
@@ -148,17 +146,17 @@ static Value leftEigenvectors(const Value &M, const Value &D,
     for (keel::usize k = 0; k < n; ++k) {
         // Match D's k-th eigenvalue to the nearest unused eigenvalue of Mᵀ.
         keel::usize best = n;
-        keel::f64 bestErr = std::numeric_limits<keel::f64>::infinity();
+        keel::f64 bestErr = keel::Limits<keel::f64>::infinity();
         for (keel::usize j = 0; j < n; ++j) {
             if (used[j]) continue;
-            const keel::f64 e = std::fabs(dl[j] - d[k]);
+            const keel::f64 e = keel::abs(dl[j] - d[k]);
             if (e < bestErr) { bestErr = e; best = j; }
         }
         used[best] = 1;
         keel::f64 nrm = 0.0;
         for (keel::usize i = 0; i < n; ++i)
             nrm += vld[i + best * n] * vld[i + best * n];
-        nrm = std::sqrt(nrm);
+        nrm = keel::sqrt(nrm);
         for (keel::usize i = 0; i < n; ++i)
             wd[i + k * n] = (nrm > 0.0) ? vld[i + best * n] / nrm : vld[i + best * n];
     }

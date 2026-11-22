@@ -29,9 +29,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <climits>
-#include <cmath>
 #include <cstdlib>
-#include <limits>
 
 #include "engine_internal.hpp"
 

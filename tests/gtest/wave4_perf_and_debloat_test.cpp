@@ -1,4 +1,5 @@
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/smart_ptr.h>
 #include "dual_engine_fixture.hpp"
 #include <numkit/sys/vfs.hpp>
@@ -369,7 +370,7 @@ TEST_P(Wave4PerfTest, ComplexAndSingleMtimesPlusFastMatrixPower)
     EXPECT_LT(getVar("err_cplx"), 1e-11);
     EXPECT_LT(getVar("err_sng"), 1e-4);
     EXPECT_DOUBLE_EQ(getVar("m12"), 2000000000.0);
-    EXPECT_NEAR(getVar("minv22"), std::pow(4.0, -5.0), 1e-15);
+    EXPECT_NEAR(getVar("minv22"), keel::pow(4.0, -5.0), 1e-15);
 }
 
 TEST_P(Wave4PerfTest, QzDecompositionGeneralAndSingularBForNGe4)

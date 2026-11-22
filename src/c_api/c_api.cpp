@@ -2,6 +2,7 @@
 //
 // Self-contained C-ABI implementation for `numkit/numkit` (`numkit_c`).
 #include <keel/array.h>
+#include <keel/memory.h>
 #include <keel/core.h>
 #include <keel/env.h>
 #include <keel/format.h>
@@ -16,7 +17,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <keel/dynlib.h>
-#include <cstring>
 #include <exception>
 #include <stdexcept>
 
@@ -402,7 +402,7 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
         if (s.empty()) s = val.toString();
         if (!buf || buf_cap == 0) return s.size();
         keel::usize n = std::min(s.size(), buf_cap - 1);
-        if (n > 0) std::memcpy(buf, s.data(), n);
+        if (n > 0) keel::mem_copy(buf, s.data(), n);
         buf[n] = '\0';
         return s.size();
     } catch (...) {

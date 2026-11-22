@@ -4,6 +4,7 @@
 // top-level if/elseif block is a WILDCARD there.
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
@@ -348,7 +349,7 @@ std::string snapshotVars(Engine &e,
             continue;   // cells/structs compared only by presence
         for (keel::usize k = 0; k < v->numel() && k < 64; ++k) {
             double d = v->elemAsDouble(k);
-            out += std::isfinite(d) ? std::to_string(d) : "nan";
+            out += keel::is_finite(d) ? std::to_string(d) : "nan";
             out += ",";
         }
         out += ";";

@@ -15,10 +15,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -94,7 +91,7 @@ void surfImpl(const char *typeName,
             for (keel::usize c = 0; c < C; ++c) {
                 if (c) zs << ',';
                 const keel::f64 v = Zat(r, c);
-                if (std::isfinite(v)) zs << v;
+                if (keel::is_finite(v)) zs << v;
                 else                  zs << "null";
             }
             zs << ']';
@@ -246,17 +243,17 @@ void sliceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
 
     // Compute the volume value range for the single representative
     // colour per slice. (Per-cell colormap is BACKLOG.)
-    keel::f64 vmn = std::numeric_limits<keel::f64>::infinity();
-    keel::f64 vmx = -std::numeric_limits<keel::f64>::infinity();
+    keel::f64 vmn = keel::Limits<keel::f64>::infinity();
+    keel::f64 vmx = -keel::Limits<keel::f64>::infinity();
     const keel::usize Vn = M * N * P;
     for (keel::usize i = 0; i < Vn; ++i) {
         const keel::f64 v = V->elemAsDouble(i);
-        if (std::isfinite(v)) {
+        if (keel::is_finite(v)) {
             if (v < vmn) vmn = v;
             if (v > vmx) vmx = v;
         }
     }
-    if (!std::isfinite(vmn)) { vmn = 0; vmx = 1; }
+    if (!keel::is_finite(vmn)) { vmn = 0; vmx = 1; }
     const keel::f64 vmid = (vmn + vmx) * 0.5;
 
     const auto rgbForValue = [&](keel::f64 L) -> keel::StaticArray<keel::i32, 3> {
@@ -264,7 +261,7 @@ void sliceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
         const keel::f64 Cr = 0.6;
         const keel::f64 H = Hd / 60.0;
-        const keel::f64 Xc = Cr * (1.0 - keel::abs(std::fmod(H, 2.0) - 1.0));
+        const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));
         keel::f64 r1 = 0, g1 = 0, b1 = 0;
         if      (H < 1) { r1 = Cr; g1 = Xc; b1 = 0; }
         else if (H < 2) { r1 = Xc; g1 = Cr; b1 = 0; }
@@ -388,19 +385,19 @@ void sliceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
             for (keel::usize i = 0; i < M; ++i)
                 for (keel::usize k = 0; k < P; ++k) {
                     const keel::f64 v = Vat(i, idx, k);
-                    if (std::isfinite(v)) { sum += v; ++n; }
+                    if (keel::is_finite(v)) { sum += v; ++n; }
                 }
         } else if (axis == 'y') {
             for (keel::usize j = 0; j < N; ++j)
                 for (keel::usize k = 0; k < P; ++k) {
                     const keel::f64 v = Vat(idx, j, k);
-                    if (std::isfinite(v)) { sum += v; ++n; }
+                    if (keel::is_finite(v)) { sum += v; ++n; }
                 }
         } else {
             for (keel::usize i = 0; i < M; ++i)
                 for (keel::usize j = 0; j < N; ++j) {
                     const keel::f64 v = Vat(i, j, idx);
-                    if (std::isfinite(v)) { sum += v; ++n; }
+                    if (keel::is_finite(v)) { sum += v; ++n; }
                 }
         }
         return n > 0 ? sum / n : 0.0;
@@ -785,7 +782,7 @@ void isosurfaceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
             for (keel::usize j = 0; j < N; ++j)
                 for (keel::usize i = 0; i < M; ++i) {
                     const keel::f64 v = Vat(i, j, k);
-                    if (std::isfinite(v)) { sum += v; ++n; }
+                    if (keel::is_finite(v)) { sum += v; ++n; }
                 }
         iso = n ? sum / n : 0.0;
     }
@@ -821,7 +818,7 @@ void isosurfaceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 cv[7] = Vat(i + 1, j,     k + 1);
                 bool anyNan = false;
                 for (keel::i32 c = 0; c < 8; ++c)
-                    if (!std::isfinite(cv[c])) { anyNan = true; break; }
+                    if (!keel::is_finite(cv[c])) { anyNan = true; break; }
                 if (anyNan) continue;
                 keel::i32 code = 0;
                 for (keel::i32 c = 0; c < 8; ++c) if (cv[c] < iso) code |= (1 << c);
@@ -876,17 +873,17 @@ void isosurfaceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     ds.zJson = zs.take();
     // Single representative colour from the iso level (relative
     // to the volume's own range).
-    keel::f64 vmn = std::numeric_limits<keel::f64>::infinity();
-    keel::f64 vmx = -std::numeric_limits<keel::f64>::infinity();
+    keel::f64 vmn = keel::Limits<keel::f64>::infinity();
+    keel::f64 vmx = -keel::Limits<keel::f64>::infinity();
     const keel::usize Vn = M * N * P;
     for (keel::usize ii = 0; ii < Vn; ++ii) {
         const keel::f64 v = V->elemAsDouble(ii);
-        if (std::isfinite(v)) {
+        if (keel::is_finite(v)) {
             if (v < vmn) vmn = v;
             if (v > vmx) vmx = v;
         }
     }
-    if (!std::isfinite(vmn)) { vmn = 0; vmx = 1; }
+    if (!keel::is_finite(vmn)) { vmn = 0; vmx = 1; }
     const keel::f64 t = (vmx == vmn) ? 0.5 : (iso - vmn) / (vmx - vmn);
     const keel::i32 rcomp = (keel::i32)std::clamp(t * 255.0,        0.0, 255.0);
     const keel::i32 gcomp = (keel::i32)std::clamp(120.0,            0.0, 255.0);
@@ -1032,7 +1029,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     // by 0.4 × the smallest grid spacing → cones don't overlap.
     keel::f64 maxMag = 0;
     for (const auto &c : cones) {
-        const keel::f64 m = std::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
+        const keel::f64 m = keel::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
         if (m > maxMag) maxMag = m;
     }
     if (maxMag <= 0) { outs[0] = Value(); return; }
@@ -1050,7 +1047,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     constexpr keel::i32 kRingN = 6;
 
     for (const auto &c : cones) {
-        const keel::f64 mag = std::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
+        const keel::f64 mag = keel::sqrt(c.u * c.u + c.v * c.v + c.w * c.w);
         if (mag <= 0) continue;
         // Axis = normalized (u, v, w). Apex at base + axis * len.
         const keel::f64 ax = c.u / mag, ay = c.v / mag, az = c.w / mag;
@@ -1060,7 +1057,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         if (keel::abs(ax) < 0.9) { e1x = 0; e1y = -az; e1z = ay; }
         else                    { e1x = -az; e1y = 0; e1z = ax; }
         // Normalize e1.
-        const keel::f64 e1n = std::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
+        const keel::f64 e1n = keel::sqrt(e1x*e1x + e1y*e1y + e1z*e1z);
         if (e1n > 0) { e1x /= e1n; e1y /= e1n; e1z /= e1n; }
         // e2 = axis × e1
         const keel::f64 e2x = ay * e1z - az * e1y;
@@ -1076,7 +1073,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::StaticArray<keel::f64, kRingN> rx, ry, rz;
         for (keel::i32 n = 0; n < kRingN; ++n) {
             const keel::f64 theta = (2 * keel::kPi) * n / kRingN;
-            const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
+            const keel::f64 cs = keel::cos(theta), sn = keel::sin(theta);
             rx[n] = bx + coneRad * (e1x * cs + e2x * sn);
             ry[n] = by + coneRad * (e1y * cs + e2y * sn);
             rz[n] = bz + coneRad * (e1z * cs + e2z * sn);
@@ -1233,7 +1230,7 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
             path.push_back({xq, yq, zq});
             keel::f64 u, v, w;
             sampleAt(xq, yq, zq, u, v, w);
-            const keel::f64 mag = std::sqrt(u * u + v * v + w * w);
+            const keel::f64 mag = keel::sqrt(u * u + v * v + w * w);
             if (mag < 1e-12) break;
             const keel::f64 h = smallStep / mag * 0.5;   // half-cell stride
             xq += u * h;
@@ -1262,7 +1259,7 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                         path[i][1] - path[i - 1][1],
                         path[i][2] - path[i - 1][2] };
             }
-            const keel::f64 tn = std::sqrt(tan[0] * tan[0] + tan[1] * tan[1] + tan[2] * tan[2]);
+            const keel::f64 tn = keel::sqrt(tan[0] * tan[0] + tan[1] * tan[1] + tan[2] * tan[2]);
             if (tn > 0) { tan[0] /= tn; tan[1] /= tn; tan[2] /= tn; }
             // Project prevE1 onto plane ⊥ tan and renormalise.
             const keel::f64 dot = tan[0] * prevE1[0] + tan[1] * prevE1[1] + tan[2] * prevE1[2];
@@ -1271,12 +1268,12 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 prevE1[1] - dot * tan[1],
                 prevE1[2] - dot * tan[2],
             };
-            keel::f64 e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+            keel::f64 e1n = keel::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
             if (e1n < 1e-9) {
                 // prev was nearly parallel — pick a new e1.
                 if (keel::abs(tan[0]) < 0.9) e1 = {0, -tan[2], tan[1]};
                 else                        e1 = {-tan[2], 0, tan[0]};
-                e1n = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+                e1n = keel::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
             }
             if (e1n > 0) { e1[0] /= e1n; e1[1] /= e1n; e1[2] /= e1n; }
             prevE1 = e1;
@@ -1287,7 +1284,7 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
             };
             for (keel::i32 n = 0; n < kRingN; ++n) {
                 const keel::f64 theta = (2 * keel::kPi) * n / kRingN;
-                const keel::f64 cs = std::cos(theta), sn = std::sin(theta);
+                const keel::f64 cs = keel::cos(theta), sn = keel::sin(theta);
                 rings[i][n] = {
                     path[i][0] + tubeR * (e1[0] * cs + e2[0] * sn),
                     path[i][1] + tubeR * (e1[1] * cs + e2[1] * sn),
@@ -1366,7 +1363,7 @@ void contour3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
         for (keel::usize c = 0; c < C; ++c) {
             if (c) zs << ',';
             const keel::f64 v = Z_arg->elemAsDouble(c * R + r);
-            if (std::isfinite(v)) zs << v;
+            if (keel::is_finite(v)) zs << v;
             else                  zs << "null";
         }
         zs << ']';
@@ -1450,7 +1447,7 @@ void waterfall_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
         for (keel::usize c = 0; c < C; ++c) {
             if (c) zs << ',';
             const keel::f64 v = Z.elemAsDouble(c * R + r);
-            if (std::isfinite(v)) zs << v;
+            if (keel::is_finite(v)) zs << v;
             else                  zs << "null";
         }
         zs << ']';

@@ -4,6 +4,7 @@
 // custom namespace dispatch, multi-output return).
 
 #include "dual_engine_fixture.hpp"
+#include <keel/math.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <keel/fs.h>
 
@@ -128,7 +129,7 @@ TEST_P(PluginLoaderTest, IsolatedModeCoreWorksAndBarePluginRejectedWithHint)
     EXPECT_NEAR(evalScalar("sum(filter([1 1], 1, [1 2 3]))"), 9.0, 1e-12);
     EXPECT_NEAR(evalScalar("fzero(@(x) x^2 - 4, 2)"), 2.0, 1e-10);
     eval("[t_ode, y_ode] = ode45(@(t, y) -y, [0 1], 1);");
-    EXPECT_NEAR(evalScalar("y_ode(end)"), std::exp(-1.0), 1e-3);
+    EXPECT_NEAR(evalScalar("y_ode(end)"), keel::exp(-1.0), 1e-3);
 
     // Bare plugin function is rejected with an actionable hint
     try {

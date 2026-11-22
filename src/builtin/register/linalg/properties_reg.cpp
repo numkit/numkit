@@ -10,6 +10,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/linalg/properties.hpp>
@@ -21,7 +22,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <utility>
 
@@ -73,7 +73,7 @@ void cond_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
         const keel::f64 pv = p.toScalar();
         if      (pv == 1.0) p_kind = 1;
         else if (pv == 2.0) p_kind = 2;
-        else if (std::isinf(pv)) p_kind = 3;
+        else if (keel::is_inf(pv)) p_kind = 3;
         else throw Error("cond: numeric p must be 1, 2, or Inf",
                          0, 0, "cond", "", "numkit:cond:badP");
     }

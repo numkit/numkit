@@ -1,6 +1,7 @@
 // src/bundle/src/register/builtin/iofun_reg.cpp
 
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/core.h>
 #include <keel/memory.h>
 #include <keel/number.h>
@@ -23,7 +24,6 @@ void sprintf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, C
 void sscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
-#include <cmath>
 #include <cstdio>
 #include <utility>
 
@@ -79,7 +79,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
         }
         if (v.numel() == 1) {
             keel::f64 d = v.elemAsDouble(0);
-            if (!std::isfinite(d)) {
+            if (!keel::is_finite(d)) {
                 out.append("null");
                 return;
             }
@@ -95,7 +95,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
             for (keel::usize i = 0; i < v.numel(); ++i) {
                 if (i > 0) out.push_back(',');
                 keel::f64 d = v.elemAsDouble(i);
-                if (!std::isfinite(d)) out.append("null");
+                if (!keel::is_finite(d)) out.append("null");
                 else {
                     char buf[64];
                     std::snprintf(buf, sizeof(buf), "%.15g", d);
@@ -112,7 +112,7 @@ static void jsonEncodeValAppend(const Value &v, keel::String &out) {
             for (keel::usize c = 0; c < C; ++c) {
                 if (c > 0) out.push_back(',');
                 keel::f64 d = v.elemAsDouble(r + c * R);
-                if (!std::isfinite(d)) out.append("null");
+                if (!keel::is_finite(d)) out.append("null");
                 else {
                     char buf[64];
                     std::snprintf(buf, sizeof(buf), "%.15g", d);

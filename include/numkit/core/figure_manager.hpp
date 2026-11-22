@@ -11,7 +11,6 @@
 #include <keel/string.h>
 #include <cstdio>
 #include <utility>
-#include <cmath>
 #include <cstdlib>
 #include <algorithm>
 #include <cstdint>

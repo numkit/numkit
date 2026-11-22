@@ -3,6 +3,9 @@
 // subsref/subsasgn frame pushers, named & indirect call dispatch, indirect
 // indexing, and display/who/whos formatting.
 #include <keel/array.h>
+#include <keel/algo.h>
+#include <keel/memory.h>
+#include <keel/math.h>
 #include <keel/complex.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -18,10 +21,7 @@
 #include "vm_internal.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -295,11 +295,11 @@ bool VM::execIndexSet1DSlow(const Instruction &I, Value *R,
         if (sameCount
             && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()
             && rhs.type() == ValueType::DOUBLE && !rhs.isComplex()) {
-            std::memcpy(dst.doubleDataMut(), rhs.doubleData(), n * sizeof(keel::f64));
+            keel::copy_n(dst.doubleDataMut(), rhs.doubleData(), n);
             return false;
         }
         if (sameCount && dst.isComplex() && rhs.isComplex()) {
-            std::memcpy(dst.complexDataMut(), rhs.complexData(), n * sizeof(keel::c64));
+            keel::copy_n(dst.complexDataMut(), rhs.complexData(), n);
             return false;
         }
         auto indices = Value::resolveIndices(ix, n);
@@ -789,30 +789,30 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         keel::f64 result;
         bool handled = true;
         switch (bid) {
-        case FastBuiltinId::Abs:   result = std::fabs(v); break;
-        case FastBuiltinId::Floor: result = std::floor(v); break;
-        case FastBuiltinId::Ceil:  result = std::ceil(v); break;
-        case FastBuiltinId::Round: result = std::round(v); break;
-        case FastBuiltinId::Fix:   result = std::trunc(v); break;
+        case FastBuiltinId::Abs:   result = keel::abs(v); break;
+        case FastBuiltinId::Floor: result = keel::floor(v); break;
+        case FastBuiltinId::Ceil:  result = keel::ceil(v); break;
+        case FastBuiltinId::Round: result = keel::round(v); break;
+        case FastBuiltinId::Fix:   result = keel::trunc(v); break;
         // sqrt / log / log2 / log10 of a negative scalar promote to a
         // complex result. The scalar fast path can only hold a real double,
         // so for v < 0 we bail and let the full builtin produce complex.
-        case FastBuiltinId::Sqrt:  if (v < 0.0) { handled = false; break; } result = std::sqrt(v);  break;
-        case FastBuiltinId::Exp:   result = std::exp(v); break;
-        case FastBuiltinId::Log:   if (v < 0.0) { handled = false; break; } result = std::log(v);   break;
-        case FastBuiltinId::Log2:  if (v < 0.0) { handled = false; break; } result = std::log2(v);  break;
-        case FastBuiltinId::Log10: if (v < 0.0) { handled = false; break; } result = std::log10(v); break;
-        case FastBuiltinId::Sin:   result = std::sin(v); break;
-        case FastBuiltinId::Cos:   result = std::cos(v); break;
-        case FastBuiltinId::Tan:   result = std::tan(v); break;
+        case FastBuiltinId::Sqrt:  if (v < 0.0) { handled = false; break; } result = keel::sqrt(v);  break;
+        case FastBuiltinId::Exp:   result = keel::exp(v); break;
+        case FastBuiltinId::Log:   if (v < 0.0) { handled = false; break; } result = keel::log(v);   break;
+        case FastBuiltinId::Log2:  if (v < 0.0) { handled = false; break; } result = keel::log2(v);  break;
+        case FastBuiltinId::Log10: if (v < 0.0) { handled = false; break; } result = keel::log10(v); break;
+        case FastBuiltinId::Sin:   result = keel::sin(v); break;
+        case FastBuiltinId::Cos:   result = keel::cos(v); break;
+        case FastBuiltinId::Tan:   result = keel::tan(v); break;
         case FastBuiltinId::Sign:
-            result = std::isnan(v) ? std::numeric_limits<keel::f64>::quiet_NaN()
+            result = keel::is_nan(v) ? keel::Limits<keel::f64>::quiet_nan()
                      : (v > 0)     ? 1.0
                      : (v < 0)     ? -1.0
                                    : 0.0;
             break;
-        case FastBuiltinId::IsNan: R[I.a].setLogicalFast(std::isnan(v)); return;
-        case FastBuiltinId::IsInf: R[I.a].setLogicalFast(std::isinf(v)); return;
+        case FastBuiltinId::IsNan: R[I.a].setLogicalFast(keel::is_nan(v)); return;
+        case FastBuiltinId::IsInf: R[I.a].setLogicalFast(keel::is_inf(v)); return;
         default: handled = false; break;
         }
         if (handled) {
@@ -829,15 +829,15 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         switch (bid) {
         case FastBuiltinId::Mod:
             if (b == 0.0) { result = a; break; }
-            result = std::fmod(a, b);
+            result = keel::fmod(a, b);
             if (result != 0.0 && ((result > 0) != (b > 0)))
                 result += b;
             break;
-        case FastBuiltinId::Rem:   result = std::fmod(a, b); break;
-        case FastBuiltinId::Max:   result = std::fmax(a, b); break;
-        case FastBuiltinId::Min:   result = std::fmin(a, b); break;
-        case FastBuiltinId::Pow:   result = std::pow(a, b); break;
-        case FastBuiltinId::Atan2: result = std::atan2(a, b); break;
+        case FastBuiltinId::Rem:   result = keel::fmod(a, b); break;
+        case FastBuiltinId::Max:   result = keel::fmax(a, b); break;
+        case FastBuiltinId::Min:   result = keel::fmin(a, b); break;
+        case FastBuiltinId::Pow:   result = keel::pow(a, b); break;
+        case FastBuiltinId::Atan2: result = keel::atan2(a, b); break;
         default: handled = false; break;
         }
         if (handled) {
@@ -1619,7 +1619,7 @@ void VM::execIndirectIndexSpan(const Value &mv, keel::u16 dstReg, const Value *A
                 auto res = Value::matrix(n, 1, t, engine_.mr_);
                 if (n > 0) {
                     keel::usize es = elementSize(t);
-                    std::memcpy(res.rawDataMut(), mv.rawData(), n * es);
+                    keel::mem_copy(res.rawDataMut(), mv.rawData(), n * es);
                 }
                 R[dstReg] = numkit::narrowComplex(keel::move(res), engine_.mr_);  // z(:) all-real -> real
             }

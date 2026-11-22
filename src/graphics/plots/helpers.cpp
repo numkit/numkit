@@ -10,7 +10,6 @@
 #include <keel/math.h>
 #include <keel/utf8.h>
 #include "plot_internal.hpp"
-#include <cmath>
 
 namespace numkit::detail {
 
@@ -36,9 +35,9 @@ keel::String vecToJson(const Value &v)
             if (i)
                 os << ",";
             keel::f64 val = fast ? fast[i] : v.elemAsDouble(i);
-            if (std::isnan(val))
+            if (keel::is_nan(val))
                 os << "null";
-            else if (std::isinf(val))
+            else if (keel::is_inf(val))
                 os << (val > 0 ? "1e308" : "-1e308");
             else
                 os << val;
@@ -56,9 +55,9 @@ keel::String vecToJson(keel::ArrayRef<keel::f64> v)
         if (i)
             os << ",";
         keel::f64 val = v[i];
-        if (std::isnan(val))
+        if (keel::is_nan(val))
             os << "null";
-        else if (std::isinf(val))
+        else if (keel::is_inf(val))
             os << (val > 0 ? "1e308" : "-1e308");
         else
             os << val;
@@ -142,9 +141,9 @@ keel::usize parsePlotXYStyle(keel::ArrayRef<Value> args, DatasetInfo &ds)
 
 void doubleToJson(StrBuf &os, keel::f64 val)
 {
-    if (std::isnan(val))
+    if (keel::is_nan(val))
         os << "null";
-    else if (std::isinf(val))
+    else if (keel::is_inf(val))
         os << (val > 0 ? "1e308" : "-1e308");
     else
         os << val;

@@ -17,10 +17,8 @@
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
 #include <cerrno>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 
 namespace numkit::io {
 
@@ -214,7 +212,7 @@ keel::String writematrixToString(const Value &m)
         for (keel::usize c = 0; c < C; ++c) {
             if (c) out.push_back(',');
             const keel::f64 v = m.elemAsDouble(c * R + r);
-            if (std::isfinite(v) && std::floor(v) == v && keel::abs(v) < 1e16) {
+            if (keel::is_finite(v) && keel::floor(v) == v && keel::abs(v) < 1e16) {
                 keel::format_into(out, "{}", keel::as<keel::i64>(v));
             } else {
                 char buf[64];

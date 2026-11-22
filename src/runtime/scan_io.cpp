@@ -10,6 +10,8 @@
 // only, so they ride along here whole.
 
 #include <keel/arena.h>
+#include <keel/algo.h>
+#include <keel/math.h>
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -25,10 +27,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/ops/io_helpers.hpp>       // SizeSpec / parseReadSize (numkit::builtin::detail)
-#include <cmath>
 #include <cstdlib>
-#include <cstring>
-#include <limits>
 
 namespace numkit::runtime {
 
@@ -96,7 +95,7 @@ struct TextscanOptions
     // collapses regardless.
     bool multipleDelimsAsOne = false;
     // Value substituted for empty numeric fields. MATLAB default NaN.
-    keel::f64 emptyValue = std::numeric_limits<keel::f64>::quiet_NaN();
+    keel::f64 emptyValue = keel::Limits<keel::f64>::quiet_nan();
 };
 
 struct TextscanConv { char spec; bool suppress; keel::i32 width; };
@@ -176,8 +175,8 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     keel::usize cycleCap = SIZE_MAX;
     if (argIdx < args.size() && args[argIdx].isScalar() && !args[argIdx].isChar()) {
         keel::f64 d = args[argIdx].toScalar();
-        if (!std::isinf(d)) {
-            if (d < 0 || !std::isfinite(d))
+        if (!keel::is_inf(d)) {
+            if (d < 0 || !keel::is_finite(d))
                 throw Error("textscan: N must be Inf or a non-negative integer");
             cycleCap = keel::as<keel::usize>(d);
         }
@@ -215,7 +214,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
             opts.endOfLine.assign(val.toString());
         } else if (name == "headerlines") {
             keel::f64 d = val.toScalar();
-            if (d < 0 || !std::isfinite(d))
+            if (d < 0 || !keel::is_finite(d))
                 throw Error("textscan: 'HeaderLines' must be a non-negative integer");
             opts.headerLines = keel::as<keel::usize>(d);
         } else if (name == "commentstyle") {
@@ -522,8 +521,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
                              ? Value::matrix(0, 0, ValueType::DOUBLE, mr)
                              : Value::matrix(k, 1, ValueType::DOUBLE, mr);
             if (k > 0)
-                std::memcpy(col.doubleDataMut(), numCols[i].data(),
-                            k * sizeof(keel::f64));
+                keel::copy_n(col.doubleDataMut(), numCols[i].data(), k);
             result.cellAt(slot++) = keel::move(col);
         }
     }

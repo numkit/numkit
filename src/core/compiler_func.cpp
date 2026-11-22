@@ -9,7 +9,6 @@
 #include "compiler_internal.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 

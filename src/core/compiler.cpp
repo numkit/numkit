@@ -1,5 +1,6 @@
 // src/core/compiler.cpp
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
@@ -9,7 +10,6 @@
 #include "compiler_internal.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -189,7 +189,7 @@ void scanAstForLoopsAndClear(const ASTNode *node, bool inLoop, bool &mayClear,
     } else if (inLoop && node->type == NodeType::NUMBER_LITERAL && loopNums.size() < 16) {
         bool exists = false;
         for (keel::f64 v : loopNums) {
-            if (v == node->numValue && std::signbit(v) == std::signbit(node->numValue)) {
+            if (v == node->numValue && keel::signbit(v) == keel::signbit(node->numValue)) {
                 exists = true;
                 break;
             }
@@ -653,7 +653,7 @@ keel::i32 Compiler::addConstant(keel::f64 value)
     for (keel::usize i = 0; i < chunk_.constants.size(); ++i) {
         if (chunk_.constants[i].isScalar() && chunk_.constants[i].type() == ValueType::DOUBLE) {
             keel::f64 cv = chunk_.constants[i].toScalar();
-            if (cv == value && std::signbit(cv) == std::signbit(value))
+            if (cv == value && keel::signbit(cv) == keel::signbit(value))
                 return keel::as<keel::i32>(i);
         }
     }
@@ -1539,10 +1539,10 @@ keel::u16 Compiler::compileBinaryOp(const ASTNode *node)
         else if (op == "/")  result = lv / rv;
         // negative base ^ non-integer exp is complex in MATLAB — don't
         // constant-fold to a real NaN; let it run through power() at runtime.
-        else if (op == "^")  { if (lv < 0.0 && rv != std::floor(rv)) folded = false; else result = std::pow(lv, rv); }
+        else if (op == "^")  { if (lv < 0.0 && rv != keel::floor(rv)) folded = false; else result = keel::pow(lv, rv); }
         else if (op == ".*") result = lv * rv;
         else if (op == "./") result = lv / rv;
-        else if (op == ".^") { if (lv < 0.0 && rv != std::floor(rv)) folded = false; else result = std::pow(lv, rv); }
+        else if (op == ".^") { if (lv < 0.0 && rv != keel::floor(rv)) folded = false; else result = keel::pow(lv, rv); }
         else folded = false;
         if (folded) {
             keel::i32 idx = addConstant(result);

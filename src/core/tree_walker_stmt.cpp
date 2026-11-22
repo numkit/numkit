@@ -15,11 +15,8 @@
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <limits>
 
 namespace numkit {
 

@@ -17,10 +17,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -199,7 +196,7 @@ void cdfImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     xs.reserve(X.numel());
     for (keel::usize i = 0; i < X.numel(); ++i) {
         const keel::f64 v = X.elemAsDouble(i);
-        if (std::isfinite(v)) xs.push_back(v);
+        if (keel::is_finite(v)) xs.push_back(v);
     }
     if (xs.empty()) { outs[0] = Value(); return; }
     std::sort(xs.begin(), xs.end());
@@ -243,7 +240,7 @@ void qqplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::f64> xs;
     for (keel::usize i = 0; i < args[0].numel(); ++i) {
         const keel::f64 v = args[0].elemAsDouble(i);
-        if (std::isfinite(v)) xs.push_back(v);
+        if (keel::is_finite(v)) xs.push_back(v);
     }
     if (xs.size() < 2) { outs[0] = Value(); return; }
     std::sort(xs.begin(), xs.end());
@@ -256,7 +253,7 @@ void qqplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         p = std::max(1e-15, std::min(1.0 - 1e-15, p));
         const bool lower = (p < 0.5);
         const keel::f64 q = lower ? p : (1.0 - p);
-        const keel::f64 t = std::sqrt(-2.0 * std::log(q));
+        const keel::f64 t = keel::sqrt(-2.0 * keel::log(q));
         const keel::f64 c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
         const keel::f64 d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
         const keel::f64 r = t - (c0 + c1*t + c2*t*t)
@@ -319,7 +316,7 @@ void pareto_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::Array<keel::f64> ys;
     for (keel::usize i = 0; i < args[0].numel(); ++i) {
         const keel::f64 v = args[0].elemAsDouble(i);
-        if (std::isfinite(v)) ys.push_back(v);
+        if (keel::is_finite(v)) ys.push_back(v);
     }
     if (ys.empty()) { outs[0] = Value(); return; }
     std::sort(ys.begin(), ys.end(), [](keel::f64 a, keel::f64 b) { return a > b; });
@@ -366,7 +363,7 @@ void histfit_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     keel::Array<keel::f64> xs;
     for (keel::usize i = 0; i < args[0].numel(); ++i) {
         const keel::f64 v = args[0].elemAsDouble(i);
-        if (std::isfinite(v)) xs.push_back(v);
+        if (keel::is_finite(v)) xs.push_back(v);
     }
     if (xs.size() < 2) { outs[0] = Value(); return; }
     keel::i32 nbins = 10;
@@ -395,7 +392,7 @@ void histfit_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     keel::f64 var = 0;
     for (keel::f64 v : xs) var += (v - mean) * (v - mean);
     var /= (xs.size() > 1 ? xs.size() - 1 : 1);
-    const keel::f64 sd = std::sqrt(var);
+    const keel::f64 sd = keel::sqrt(var);
     const keel::f64 sdSafe = (sd > 0) ? sd : 1.0;
 
     // Sample the Gaussian on a fine grid for the fit curve.
@@ -412,7 +409,7 @@ void histfit_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     for (keel::i32 g = 0; g < gridN; ++g) {
         if (g) { fx << ','; fy << ','; }
         const keel::f64 xg = mn + (mx - mn) * g / (gridN - 1);
-        const keel::f64 pdf = std::exp(-0.5 * std::pow((xg - mean) / sdSafe, 2))
+        const keel::f64 pdf = keel::exp(-0.5 * keel::pow((xg - mean) / sdSafe, 2))
                          / (sdSafe * keel::kSqrt2Pi);
         fx << xg; fy << (pdf * scale);
     }
@@ -521,7 +518,7 @@ void spy_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     for (keel::usize c = 0; c < C; ++c) {
         for (keel::usize r = 0; r < R; ++r) {
             const keel::f64 v = M.elemAsDouble(c * R + r);
-            if (v == 0.0 || !std::isfinite(v)) continue;
+            if (v == 0.0 || !keel::is_finite(v)) continue;
             if (!first) { xs << ','; ys << ','; }
             first = false;
             xs << (c + 1);
@@ -616,7 +613,7 @@ void hist_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         const keel::f64 *cd = centers.doubleData();
         for (keel::usize i = 0; i < data.numel(); ++i) {
             const keel::f64 v = data.elemAsDouble(i);
-            if (std::isnan(v))
+            if (keel::is_nan(v))
                 continue;
             keel::usize b = 0;
             while (b + 1 < bins && v > 0.5 * (cd[b] + cd[b + 1]))
@@ -631,13 +628,13 @@ void hist_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         keel::f64 mx = mn;
         for (keel::usize i = 1; i < data.numel(); ++i) {
             const keel::f64 v = data.elemAsDouble(i);
-            if (!std::isnan(v)) {
+            if (!keel::is_nan(v)) {
                 mn = std::min(mn, v);
                 mx = std::max(mx, v);
             }
         }
         keel::f64 bw = (mx - mn) / bins;
-        if (bw == 0 || !std::isfinite(bw))
+        if (bw == 0 || !keel::is_finite(bw))
             bw = 1.0;
         centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
         counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
@@ -645,7 +642,7 @@ void hist_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
             centers.doubleDataMut()[b] = mn + bw * (b + 0.5);
         for (keel::usize i = 0; i < data.numel(); ++i) {
             const keel::f64 v = data.elemAsDouble(i);
-            if (std::isnan(v))
+            if (keel::is_nan(v))
                 continue;
             keel::i32 b = keel::as<keel::i32>((v - mn) / bw);
             if (b >= bins)
@@ -719,7 +716,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             haveEdges = true;
         } else if (args[1].isNumeric() && args[1].numel() == 1) {
             spec.hasNumBins = true;
-            spec.numBins = std::max(1.0, std::floor(args[1].toScalar()));
+            spec.numBins = std::max(1.0, keel::floor(args[1].toScalar()));
         }
         optStart = 2;
     }
@@ -735,7 +732,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             haveEdges = false;
         } else if (key == "numbins" && val.isNumeric() && val.elemAsDouble(0) >= 1.0) {
             spec.hasNumBins = true;
-            spec.numBins = std::floor(val.elemAsDouble(0));
+            spec.numBins = keel::floor(val.elemAsDouble(0));
             spec.hasBinWidth = false;
             haveEdges = false;
         } else if (key == "binedges" && val.isNumeric() && val.numel() >= 2) {
@@ -863,11 +860,11 @@ void histogram2_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     for (keel::usize k = 1; k < N; ++k) {
         const keel::f64 xv = X.elemAsDouble(k);
         const keel::f64 yv = Y.elemAsDouble(k);
-        if (std::isfinite(xv)) {
+        if (keel::is_finite(xv)) {
             if (xv < xmn) xmn = xv;
             if (xv > xmx) xmx = xv;
         }
-        if (std::isfinite(yv)) {
+        if (keel::is_finite(yv)) {
             if (yv < ymn) ymn = yv;
             if (yv > ymx) ymx = yv;
         }
@@ -890,7 +887,7 @@ void histogram2_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     for (keel::usize k = 0; k < N; ++k) {
         const keel::f64 xv = X.elemAsDouble(k);
         const keel::f64 yv = Y.elemAsDouble(k);
-        if (!std::isfinite(xv) || !std::isfinite(yv))
+        if (!keel::is_finite(xv) || !keel::is_finite(yv))
             continue;
         keel::i32 i = (keel::i32)((xv - xmn) / bwx);
         keel::i32 j = (keel::i32)((yv - ymn) / bwy);
@@ -987,9 +984,9 @@ void patchImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 }
             }
         } else if (Carg.numel() >= 3) {
-            const keel::i32 r = (keel::i32)std::round(255 * std::clamp(Carg.elemAsDouble(0), 0.0, 1.0));
-            const keel::i32 g = (keel::i32)std::round(255 * std::clamp(Carg.elemAsDouble(1), 0.0, 1.0));
-            const keel::i32 b = (keel::i32)std::round(255 * std::clamp(Carg.elemAsDouble(2), 0.0, 1.0));
+            const keel::i32 r = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(0), 0.0, 1.0));
+            const keel::i32 g = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(1), 0.0, 1.0));
+            const keel::i32 b = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(2), 0.0, 1.0));
             char buf[16];
             std::snprintf(buf, sizeof buf, "#%02x%02x%02x", r, g, b);
             color.assign(buf);
@@ -1038,7 +1035,7 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     keel::f64 total = 0;
     for (keel::usize i = 0; i < N; ++i) {
         const keel::f64 v = X.elemAsDouble(i);
-        if (std::isfinite(v) && v > 0) total += v;
+        if (keel::is_finite(v) && v > 0) total += v;
     }
     if (total <= 0) { outs[0] = Value(); return; }
 
@@ -1061,7 +1058,7 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     keel::f64 angle = 0;
     for (keel::usize i = 0; i < N; ++i) {
         const keel::f64 v = X.elemAsDouble(i);
-        if (!std::isfinite(v) || v <= 0) continue;
+        if (!keel::is_finite(v) || v <= 0) continue;
         const keel::f64 dθ = v / total * TAU;
         const keel::f64 θ0 = angle;
         const keel::f64 θ1 = angle + dθ;
@@ -1072,8 +1069,8 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (expl && expl->numel() > i && expl->elemAsDouble(i) != 0) {
             const keel::f64 mid = (θ0 + θ1) / 2;
             const keel::f64 off = 0.1;
-            cx = off * std::cos(mid);
-            cy = off * std::sin(mid) * tiltY;
+            cx = off * keel::cos(mid);
+            cy = off * keel::sin(mid) * tiltY;
         }
 
         StrBuf xs, ys;
@@ -1081,8 +1078,8 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         xs << cx; ys << cy;
         for (keel::i32 s = 0; s <= arcSamples; ++s) {
             const keel::f64 t = θ0 + (θ1 - θ0) * s / arcSamples;
-            xs << ',' << (cx + std::cos(t));
-            ys << ',' << (cy + std::sin(t) * tiltY);
+            xs << ',' << (cx + keel::cos(t));
+            ys << ',' << (cy + keel::sin(t) * tiltY);
         }
         xs << ']'; ys << ']';
 
@@ -1146,7 +1143,7 @@ void boxImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             const keel::f64 v = single
                 ? M.elemAsDouble(r)
                 : M.elemAsDouble(bi * R + r);
-            if (std::isfinite(v)) col.push_back(v);
+            if (keel::is_finite(v)) col.push_back(v);
         }
         if (col.size() < 2) continue;
         std::sort(col.begin(), col.end());
@@ -1280,7 +1277,7 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
             const keel::f64 v = single
                 ? M.elemAsDouble(r)
                 : M.elemAsDouble(bi * R + r);
-            if (std::isfinite(v)) col.push_back(v);
+            if (keel::is_finite(v)) col.push_back(v);
         }
         if (col.size() < 2) continue;
         keel::f64 mean = 0;
@@ -1289,9 +1286,9 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
         keel::f64 var = 0;
         for (keel::f64 v : col) var += (v - mean) * (v - mean);
         var /= col.size() - 1;
-        const keel::f64 sd = std::sqrt(var);
+        const keel::f64 sd = keel::sqrt(var);
         if (sd <= 0) continue;
-        const keel::f64 bw = 1.06 * sd * std::pow((keel::f64)col.size(), -0.2);
+        const keel::f64 bw = 1.06 * sd * keel::pow((keel::f64)col.size(), -0.2);
         if (bw <= 0) continue;
 
         std::sort(col.begin(), col.end());
@@ -1308,7 +1305,7 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
             keel::f64 s = 0;
             for (keel::f64 v : col) {
                 const keel::f64 t = (y - v) / bw;
-                s += std::exp(-0.5 * t * t);
+                s += keel::exp(-0.5 * t * t);
             }
             s /= (col.size() * bw * keel::kSqrt2Pi);
             ys[keel::as<keel::usize>(g)] = y;
@@ -1399,7 +1396,7 @@ void bar3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         for (keel::usize c = 0; c < C; ++c) {
             if (c) zs << ',';
             const keel::f64 v = Z.elemAsDouble(c * R + r);
-            if (std::isfinite(v)) zs << v;
+            if (keel::is_finite(v)) zs << v;
             else                  zs << "null";
         }
         zs << ']';
@@ -1445,9 +1442,9 @@ void fill3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             const keel::f64 xv = X.elemAsDouble(c * R + r);
             const keel::f64 yv = Y.elemAsDouble(c * R + r);
             const keel::f64 zv = Z.elemAsDouble(c * R + r);
-            if (std::isfinite(xv)) xs << xv; else xs << "null";
-            if (std::isfinite(yv)) ys << yv; else ys << "null";
-            if (std::isfinite(zv)) zs << zv; else zs << "null";
+            if (keel::is_finite(xv)) xs << xv; else xs << "null";
+            if (keel::is_finite(yv)) ys << yv; else ys << "null";
+            if (keel::is_finite(zv)) zs << zv; else zs << "null";
         }
     }
     xs << ']'; ys << ']'; zs << ']';
@@ -1516,7 +1513,7 @@ void swarmchart_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     struct Bucket { keel::i64 key; keel::Array<keel::usize> idxs; };
     keel::Array<Bucket> buckets;
     for (keel::usize i = 0; i < n; ++i) {
-        keel::i64 key = (keel::i64)std::llround(xv.elemAsDouble(i));
+        keel::i64 key = (keel::i64)keel::round_i64(xv.elemAsDouble(i));
         keel::usize bi = buckets.size();
         for (keel::usize b = 0; b < buckets.size(); ++b) {
             if (buckets[b].key == key) { bi = b; break; }
@@ -1644,11 +1641,11 @@ void heatmap_plot(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value>
         const keel::usize R = C.dims().rows();
         const keel::usize W = C.dims().cols();
         if (R * W <= 400) {   // ≤ 20×20 grid — show labels
-            keel::f64 cmn = std::numeric_limits<keel::f64>::infinity();
-            keel::f64 cmx = -std::numeric_limits<keel::f64>::infinity();
+            keel::f64 cmn = keel::Limits<keel::f64>::infinity();
+            keel::f64 cmx = -keel::Limits<keel::f64>::infinity();
             for (keel::usize i = 0; i < R * W; ++i) {
                 const keel::f64 v = C.elemAsDouble(i);
-                if (std::isfinite(v)) {
+                if (keel::is_finite(v)) {
                     if (v < cmn) cmn = v;
                     if (v > cmx) cmx = v;
                 }

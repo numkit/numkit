@@ -21,7 +21,6 @@
 #include <numkit/signal/digital_filtering/filter.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -114,10 +113,10 @@ bool tryParseReducer(const Value &h, AccumReducer &op)
 
 keel::usize toSubIndex(keel::f64 v, keel::usize maxAllowed, const char *fn)
 {
-    if (!std::isfinite(v) || v < 1.0)
+    if (!keel::is_finite(v) || v < 1.0)
         throw Error(keel::format("{}: subscripts must be positive integers", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subRange", fn));
-    const keel::f64 rounded = std::round(v);
+    const keel::f64 rounded = keel::round(v);
     if (keel::abs(v - rounded) > 1e-9)
         throw Error(keel::format("{}: subscripts must be integer-valued", fn),
                      0, 0, fn, "", keel::format("numkit:{}:subInt", fn));
@@ -255,10 +254,10 @@ keel::Array<keel::usize> parseSizeArg(const Value &sz, keel::Allocator *mr)
     const keel::f64 *p = sz.doubleData();
     for (keel::usize i = 0; i < k; ++i) {
         const keel::f64 v = p[i];
-        if (!std::isfinite(v) || v < 0)
+        if (!keel::is_finite(v) || v < 0)
             throw Error("accumarray: sz entries must be non-negative integers",
                          0, 0, "accumarray", "", "numkit:accumarray:sizeRange");
-        shape[i] = keel::as<keel::usize>(std::round(v));
+        shape[i] = keel::as<keel::usize>(keel::round(v));
     }
     return shape;
 }
@@ -336,7 +335,7 @@ void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         auto out = Value::matrix(1, v.numel(), ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < v.numel(); ++i)
             out.doubleDataMut()[i] =
-                (v.doubleData()[i] > 0.5) ? 1.0 : std::nan("");
+                (v.doubleData()[i] > 0.5) ? 1.0 : keel::kNaN;
         outs[0] = std::move(out);
         return;
     }
@@ -346,7 +345,7 @@ void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
     auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
     const keel::f64 *p = v.doubleData();
     for (keel::usize j = 0; j < cols; ++j) {
-        keel::f64 best = std::nan("");
+        keel::f64 best = keel::kNaN;
         for (keel::usize i = 0; i < rows; ++i) {
             keel::f64 val = p[i + j * rows];
             if (val > 0.5) {
@@ -399,7 +398,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                         const keel::f64 diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
                         acc += diff * diff;
                     }
-                    zd[q1 + q2 * Q] = std::sqrt(acc);
+                    zd[q1 + q2 * Q] = keel::sqrt(acc);
                 }
             }
             outs[0] = std::move(Z);
@@ -443,7 +442,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                     const keel::f64 diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
                     acc += diff * diff;
                 }
-                zd[s + q * S] = std::sqrt(acc);
+                zd[s + q * S] = keel::sqrt(acc);
             }
         }
         outs[0] = std::move(Z);
@@ -553,7 +552,7 @@ void fftn_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
         sz.resize(n);
         for (keel::usize i = 0; i < n; ++i) {
             const keel::f64 d = args[1].elemAsDouble(i);
-            if (d <= 0 || d != std::floor(d))
+            if (d <= 0 || d != keel::floor(d))
                 throw Error("fftn: size entries must be positive integers",
                             0, 0, "fftn", "", "numkit:fftn:badSize");
             sz[i] = keel::as<keel::usize>(d);
@@ -572,7 +571,7 @@ void ifftn_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
         sz.resize(n);
         for (keel::usize i = 0; i < n; ++i) {
             const keel::f64 d = args[1].elemAsDouble(i);
-            if (d <= 0 || d != std::floor(d))
+            if (d <= 0 || d != keel::floor(d))
                 throw Error("ifftn: size entries must be positive integers",
                             0, 0, "ifftn", "", "numkit:ifftn:badSize");
             sz[i] = keel::as<keel::usize>(d);

@@ -13,7 +13,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 
 namespace numkit::builtin {

@@ -31,7 +31,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <tuple>
 #include <utility>
@@ -326,7 +325,7 @@ void ichol_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         if (lkk <= 0.0)
             throw Error("ichol: encountered nonpositive pivot",
                         0, 0, "ichol", "", "numkit:ichol:nonposPivot");
-        lkk = std::sqrt(lkk);
+        lkk = keel::sqrt(lkk);
         ld[k + k * n] = lkk;
         for (keel::usize i = k + 1; i < n; ++i) {
             if (ld[i + k * n] != 0.0) {
@@ -366,7 +365,7 @@ void nan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
 {
     auto *mr = ctx.engine->allocator();
     if (args.empty()) {
-        outs[0] = Value::scalar(std::numeric_limits<keel::f64>::quiet_NaN(), mr);
+        outs[0] = Value::scalar(keel::Limits<keel::f64>::quiet_nan(), mr);
         return;
     }
     ValueType t;
@@ -378,8 +377,8 @@ void nan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     auto d = parseDimsArgsND(dimArgs, "nan", scratch.allocator());
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
-    nanInfFill(m, std::numeric_limits<keel::f64>::quiet_NaN(),
-                  std::numeric_limits<keel::f32>::quiet_NaN(), t);
+    nanInfFill(m, keel::Limits<keel::f64>::quiet_nan(),
+                  keel::Limits<keel::f32>::quiet_nan(), t);
     outs[0] = std::move(m);
 }
 
@@ -387,7 +386,7 @@ void inf_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
 {
     auto *mr = ctx.engine->allocator();
     if (args.empty()) {
-        outs[0] = Value::scalar(std::numeric_limits<keel::f64>::infinity(), mr);
+        outs[0] = Value::scalar(keel::Limits<keel::f64>::infinity(), mr);
         return;
     }
     ValueType t;
@@ -399,8 +398,8 @@ void inf_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     auto d = parseDimsArgsND(dimArgs, "inf", scratch.allocator());
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
-    nanInfFill(m, std::numeric_limits<keel::f64>::infinity(),
-                  std::numeric_limits<keel::f32>::infinity(), t);
+    nanInfFill(m, keel::Limits<keel::f64>::infinity(),
+                  keel::Limits<keel::f32>::infinity(), t);
     outs[0] = std::move(m);
 }
 
@@ -476,7 +475,7 @@ void magic_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
         throw Error("magic: requires exactly 1 argument",
                      0, 0, "magic", "", "numkit:magic:nargin");
     const keel::f64 nd = args[0].toScalar();
-    if (nd < 0.0 || nd != std::floor(nd))
+    if (nd < 0.0 || nd != keel::floor(nd))
         throw Error("magic: N must be a non-negative integer",
                      0, 0, "magic", "", "numkit:magic:badN");
     outs[0] = magic(keel::as<keel::usize>(nd), ctx.engine->allocator());
@@ -530,7 +529,7 @@ keel::usize requireSizeArg(keel::ArrayRef<Value> args, const char *fn)
         throw Error(keel::format("{}: requires exactly 1 argument", fn),
                     0, 0, fn, "", keel::format("numkit:{}:nargin", fn));
     const keel::f64 nd = args[0].toScalar();
-    if (nd < 0.0 || nd != std::floor(nd))
+    if (nd < 0.0 || nd != keel::floor(nd))
         throw Error(keel::format("{}: N must be a non-negative integer", fn),
                     0, 0, fn, "", keel::format("numkit:{}:badN", fn));
     return keel::as<keel::usize>(nd);
@@ -594,7 +593,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
 {
     argcheck::checkNargin(args.size(), 2, "topkrows");
     const keel::f64 kd = args[1].toScalar();
-    if (kd < 0.0 || kd != std::floor(kd))
+    if (kd < 0.0 || kd != keel::floor(kd))
         throw Error("topkrows: k must be a non-negative integer",
                     0, 0, "topkrows", "", "numkit:topkrows:badK");
     auto *mr = ctx.engine->allocator();
@@ -623,7 +622,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         cols.reserve(c.numel());
         for (keel::usize kk = 0; kk < c.numel(); ++kk) {
             const keel::f64 v = c.elemAsDouble(kk);
-            if (v < 1.0 || v != std::floor(v))
+            if (v < 1.0 || v != keel::floor(v))
                 throw Error("topkrows: col must be a positive integer "
                             "or vector of positive integers",
                             0, 0, "topkrows", "", "numkit:topkrows:badCol");
@@ -713,8 +712,8 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                     ka1 = za.real(); ka2 = za.imag();
                     kb1 = zb.real(); kb2 = zb.imag();
                 } else {
-                    ka1 = keel::abs(za); ka2 = std::atan2(za.imag(), za.real());
-                    kb1 = keel::abs(zb); kb2 = std::atan2(zb.imag(), zb.real());
+                    ka1 = keel::abs(za); ka2 = keel::atan2(za.imag(), za.real());
+                    kb1 = keel::abs(zb); kb2 = keel::atan2(zb.imag(), zb.real());
                 }
                 if (ka1 != kb1) return desc[k2] ? (ka1 > kb1) : (ka1 < kb1);
                 if (ka2 != kb2) return desc[k2] ? (ka2 > kb2) : (ka2 < kb2);
@@ -924,7 +923,7 @@ void peaks_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     keel::usize n = 49;  // MATLAB default
     if (!args.empty()) {
         const keel::f64 dn = args[0].toScalar();
-        if (dn < 0 || dn > 1.0e9 || std::isnan(dn))
+        if (dn < 0 || dn > 1.0e9 || keel::is_nan(dn))
             throw Error("peaks: n must be a non-negative integer",
                          0, 0, "peaks", "", "numkit:peaks:badN");
         n = keel::as<keel::usize>(dn);
@@ -1173,7 +1172,7 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             cols.reserve(c.numel());
             for (keel::usize i = 0; i < c.numel(); ++i) {
                 const keel::f64 v = c.elemAsDouble(i);
-                if (v != std::floor(v))
+                if (v != keel::floor(v))
                     throw Error("sortrows: column index must be an integer",
                                  0, 0, "sortrows", "", "numkit:sortrows:badCol");
                 cols.push_back(keel::as<keel::i32>(v));
@@ -1231,7 +1230,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
             throw Error("find: Second argument must be a positive scalar integer.",
                          0, 0, "find", "", "numkit:find:badK");
         const keel::f64 kd = args[1].toScalar();
-        if (!std::isfinite(kd) || kd < 1.0 || kd != std::floor(kd))
+        if (!keel::is_finite(kd) || kd < 1.0 || kd != keel::floor(kd))
             throw Error("find: Second argument must be a positive scalar integer.",
                          0, 0, "find", "", "numkit:find:badK");
         kReq = keel::as<keel::usize>(kd);
@@ -1521,7 +1520,7 @@ void propagateNanFromSrc(Value &out, const Value &src, keel::i32 dim1Based)
     keel::usize outer = 1;
     for (keel::i32 i = d; i < nd; ++i) outer *= dd.dim(i);
     const keel::usize L = dd.dim(d - 1);
-    const keel::f64 qnan = std::numeric_limits<keel::f64>::quiet_NaN();
+    const keel::f64 qnan = keel::Limits<keel::f64>::quiet_nan();
     // Complex cummax/cummin (out + src both COMPLEX): an element is "missing"
     // when EITHER component is NaN, and the propagated fill is NaN+NaNi.
     if (out.isComplex() && src.isComplex()) {
@@ -1534,7 +1533,7 @@ void propagateNanFromSrc(Value &out, const Value &src, keel::i32 dim1Based)
                 keel::c64 fill{qnan, qnan};
                 for (keel::usize k = 0; k < L; ++k) {
                     const keel::c64 z = s[base + k * inner];
-                    if (!seenNaN && (std::isnan(z.real()) || std::isnan(z.imag()))) {
+                    if (!seenNaN && (keel::is_nan(z.real()) || keel::is_nan(z.imag()))) {
                         // includenan: the first NaN operand wins the running
                         // max/min and propagates UNCHANGED (MATLAB keeps its
                         // imaginary part: cummax([2 NaN+1i 3],'includenan') is
@@ -1555,7 +1554,7 @@ void propagateNanFromSrc(Value &out, const Value &src, keel::i32 dim1Based)
             const keel::usize base = oc * inner * L + b;
             bool seenNaN = false;
             for (keel::usize k = 0; k < L; ++k) {
-                if (!seenNaN && std::isnan(s[base + k * inner]))
+                if (!seenNaN && keel::is_nan(s[base + k * inner]))
                     seenNaN = true;
                 if (seenNaN)
                     o[base + k * inner] = qnan;
@@ -1658,7 +1657,7 @@ Value cumScanFlags(const Value &x, keel::ArrayRef<Value> args, bool isProd,
         keel::f64 *d = src.doubleDataMut();
         const keel::usize n = src.numel();
         for (keel::usize k = 0; k < n; ++k)
-            if (std::isnan(d[k])) d[k] = id;
+            if (keel::is_nan(d[k])) d[k] = id;
     }
     if (reverse) src = flip(src, effDim, mr);
     Value out = isProd ? cumprod(src, effDim, mr) : cumsum(src, effDim, mr);
@@ -1696,7 +1695,7 @@ void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
             throw Error("diff: Difference order N must be a positive integer scalar",
                          0, 0, "diff", "", "numkit:diff:badOrder");
         const keel::f64 nv = args[1].toScalar();
-        if (!std::isfinite(nv) || nv != std::floor(nv) || nv < 1.0)
+        if (!keel::is_finite(nv) || nv != keel::floor(nv) || nv < 1.0)
             throw Error("diff: Difference order N must be a positive integer scalar",
                          0, 0, "diff", "", "numkit:diff:badOrder");
         n = keel::as<keel::i32>(nv);

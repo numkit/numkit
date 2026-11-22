@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/arena.h>
+#include <keel/math.h>
 #include <keel/array.h>
 #include <keel/complex.h>
 #include <keel/core.h>
@@ -28,9 +29,7 @@
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -146,12 +145,12 @@ inline T toOutT(keel::f64 v)
     if constexpr (std::is_floating_point_v<T>) {
         return static_cast<T>(v);
     } else {
-        if (std::isnan(v)) return T{};
-        v = std::round(v);
-        constexpr keel::f64 lo = keel::as<keel::f64>(std::numeric_limits<T>::min());
-        constexpr keel::f64 hi = keel::as<keel::f64>(std::numeric_limits<T>::max());
-        if (v < lo) return std::numeric_limits<T>::min();
-        if (v > hi) return std::numeric_limits<T>::max();
+        if (keel::is_nan(v)) return T{};
+        v = keel::round(v);
+        constexpr keel::f64 lo = keel::as<keel::f64>(keel::Limits<T>::kMin);
+        constexpr keel::f64 hi = keel::as<keel::f64>(keel::Limits<T>::kMax);
+        if (v < lo) return keel::Limits<T>::kMin;
+        if (v > hi) return keel::Limits<T>::kMax;
         return static_cast<T>(v);
     }
 }
@@ -291,12 +290,12 @@ struct MeanOp {
     static keel::f64 accum(keel::f64 a, keel::f64 b) { return a + b; }
     template<typename T>
     static T finalize(keel::f64 acc, keel::usize n) {
-        return toOutT<T>(n == 0 ? std::nan("") : acc / keel::as<keel::f64>(n));
+        return toOutT<T>(n == 0 ? keel::kNaN : acc / keel::as<keel::f64>(n));
     }
     static keel::c64 cInit() { return keel::c64(0.0, 0.0); }
     static keel::c64 cAccum(keel::c64 a, keel::c64 b) { return a + b; }
     static keel::c64 cFinalize(keel::c64 acc, keel::usize n) {
-        return n == 0 ? keel::c64(std::nan(""), 0.0) : acc / keel::as<keel::f64>(n);
+        return n == 0 ? keel::c64(keel::kNaN, 0.0) : acc / keel::as<keel::f64>(n);
     }
 };
 
@@ -511,7 +510,7 @@ inline StringFlag classifyStringFlag(const Value &v)
 template <typename Op>
 inline void nanAccumDouble(keel::f64 &acc, keel::usize &count, keel::f64 v)
 {
-    if (std::isnan(v)) return;
+    if (keel::is_nan(v)) return;
     acc = Op::accum(acc, v);
     ++count;
 }
@@ -520,7 +519,7 @@ template <typename T, typename Op>
 inline T nanFinalize(keel::f64 acc, keel::usize nonNanCount)
 {
     if constexpr (std::is_same_v<Op, MeanOp>)
-        return toOutT<T>(nonNanCount == 0 ? std::nan("")
+        return toOutT<T>(nonNanCount == 0 ? keel::kNaN
                                           : acc / keel::as<keel::f64>(nonNanCount));
     else
         // sum: empty → 0 (matches MATLAB nansum). prod: empty → 1.
@@ -638,7 +637,7 @@ Value runNanReduction(const Value &x, keel::i32 dim, ValueType outType, keel::Al
 // or imag part is NaN.
 inline bool isComplexNaN(keel::c64 c)
 {
-    return std::isnan(c.real()) || std::isnan(c.imag());
+    return keel::is_nan(c.real()) || keel::is_nan(c.imag());
 }
 
 template <typename Op>
@@ -650,7 +649,7 @@ Value runComplexNanReduction(const Value &x, keel::i32 dim, keel::Allocator *mr,
 
     auto finalizeOne = [](keel::c64 acc, keel::usize count) -> keel::c64 {
         if constexpr (std::is_same_v<Op, MeanOp>)
-            return count == 0 ? keel::c64(std::nan(""), 0.0)
+            return count == 0 ? keel::c64(keel::kNaN, 0.0)
                               : acc / keel::as<keel::f64>(count);
         else
             return acc;
@@ -933,7 +932,7 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
     const keel::usize total = out.numel();
     for (keel::usize q = 0; q < total; ++q) {
         keel::f64 v = dst[q];
-        if (!std::isfinite(v) || v < 1.0) continue;
+        if (!keel::is_finite(v) || v < 1.0) continue;
         keel::usize k = keel::as<keel::usize>(v) - 1;
 
         keel::usize remQ = q;

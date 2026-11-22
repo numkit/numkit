@@ -22,7 +22,6 @@
 #include <numkit/value/value.hpp>
 
 #include <cstddef>
-#include <cstring>
 
 namespace numkit::runtime {
 
@@ -68,7 +67,7 @@ keel::usize fprintf(Engine &engine, keel::ArrayRef<Value> args)
         if (writePos + result.size() > f->buffer.size())
             f->buffer.resize(writePos + result.size());
         if (!result.empty())
-            std::memcpy(f->buffer.data() + writePos, result.data(), result.size());
+            keel::mem_copy(f->buffer.data() + writePos, result.data(), result.size());
         f->cursor = writePos + result.size();
     } else {
         throw Error("fprintf: invalid file identifier");

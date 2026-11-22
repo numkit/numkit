@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -23,7 +24,6 @@
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <tuple>
 #include <utility>
@@ -296,7 +296,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         return s;
     };
     auto requireNumBins = [](keel::f64 v) {
-        if (!(std::isfinite(v) && v >= 1.0 && v == std::floor(v)))
+        if (!(keel::is_finite(v) && v >= 1.0 && v == keel::floor(v)))
             throw Error("histcounts: number of bins must be a positive integer",
                          0, 0, "histcounts", "", "numkit:histcounts:badNumBins");
     };
@@ -346,7 +346,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             ++i;
         } else if (key == "binwidth") {
             const keel::f64 w = args[i + 1].toScalar();
-            if (!(std::isfinite(w) && w > 0.0))
+            if (!(keel::is_finite(w) && w > 0.0))
                 throw Error("histcounts: 'BinWidth' must be a positive scalar",
                              0, 0, "histcounts", "", "numkit:histcounts:badBinWidth");
             spec.hasBinWidth = true;
@@ -409,7 +409,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::f64 *bd = binOut.doubleDataMut();
         for (keel::usize idx = 0; idx < nx; ++idx) {
             const keel::f64 v = x.elemAsDouble(idx);
-            if (nbins == 0 || std::isnan(v) || v < ed[0] || v > ed[nbins]) {
+            if (nbins == 0 || keel::is_nan(v) || v < ed[0] || v > ed[nbins]) {
                 bd[idx] = 0.0;
             } else {
                 const keel::usize b = keel::as<keel::usize>(std::upper_bound(ed, ed + nbins, v) - ed);
@@ -535,14 +535,14 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         idxB.reserve(b.numel());
         const keel::f64 *pb = b.doubleData();
         for (keel::usize i = 0; i < b.numel(); ++i)
-            if (!std::isnan(pb[i]))
+            if (!keel::is_nan(pb[i]))
                 idxB.try_insert(pb[i], keel::as<keel::f64>(i + 1));  // try_insert keeps the lowest index
         Value loc = createLike(a, ValueType::DOUBLE, mr);
         keel::f64 *lo = loc.doubleDataMut();
         const keel::f64 *pa = a.doubleData();
         for (keel::usize i = 0; i < a.numel(); ++i) {
             const keel::f64 v = pa[i];
-            const keel::f64 *found = std::isnan(v) ? nullptr : idxB.get(v);
+            const keel::f64 *found = keel::is_nan(v) ? nullptr : idxB.get(v);
             lo[i] = found ? *found : 0.0;
         }
         outs[1] = std::move(loc);
@@ -573,7 +573,7 @@ void buildFirstIndexMap(const Value &x,
     const keel::usize n = x.numel();
     for (keel::usize i = 0; i < n; ++i) {
         const keel::f64 v = x.elemAsDouble(i);
-        if (!std::isnan(v)) m.try_insert(v, i + 1); // 1-based first occurrence
+        if (!keel::is_nan(v)) m.try_insert(v, i + 1); // 1-based first occurrence
     }
 }
 
@@ -582,10 +582,10 @@ keel::usize setopFirstIndex(const Value &x,
                        const keel::HashMap<keel::f64, keel::usize, DoubleHashEq0> &m,
                        keel::f64 v)
 {
-    if (std::isnan(v)) {
+    if (keel::is_nan(v)) {
         const keel::usize n = x.numel();
         for (keel::usize i = 0; i < n; ++i)
-            if (std::isnan(x.elemAsDouble(i))) return i + 1;
+            if (keel::is_nan(x.elemAsDouble(i))) return i + 1;
         return 0;
     }
     const keel::usize *p = m.get(v);

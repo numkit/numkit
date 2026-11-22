@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -18,7 +19,6 @@
 #include <numkit/ops/helpers.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <tuple>
 #include <type_traits>
@@ -136,7 +136,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                 const keel::usize idx = keel::as<keel::usize>(dimArgs[1].elemAsDouble(32));
                 const keel::f64 borrow = dimArgs[1].elemAsDouble(33);
                 const keel::u32 j = keel::as<keel::u32>(
-                    std::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
+                    keel::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
                 rngRef.setLegacyV5RandState(z, idx, borrow, j);
                 outs[0] = Value();
                 return;
@@ -339,7 +339,7 @@ void randi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
                                       ValueType::DOUBLE, mr);
             const keel::f64 span = keel::as<keel::f64>(imax - imin + 1);
             for (keel::usize i = 0; i < m.numel(); ++i)
-                m.doubleDataMut()[i] = keel::as<keel::f64>(imin) + std::floor(rngRef.nextUniform() * span);
+                m.doubleDataMut()[i] = keel::as<keel::f64>(imin) + keel::floor(rngRef.nextUniform() * span);
             dbl_out = std::move(m);
         }
     }

@@ -1,10 +1,10 @@
 // src/core/figure_manager.cpp
 // Out-of-line implementations for FigureManager, figure state clones,
 // JSON serialization, and LOD tile resampling.
+#include <keel/math.h>
 #include <numkit/core/figure_manager.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
@@ -38,7 +38,7 @@ keel::Array<keel::f64> parseFlatDoubles(const keel::String &j) {
         if (p >= end || *p == ']') break;
         if ((p[0] == 'n' || p[0] == 'N') && (p + 4 <= end) &&
             (p[1] == 'u') && (p[2] == 'l') && (p[3] == 'l')) {
-            out.push_back(std::nan(""));
+            out.push_back(keel::kNaN);
             p += 4;
             continue;
         }
@@ -59,8 +59,8 @@ keel::String serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
     for (keel::usize i = 0; i < v.size(); ++i) {
         if (i) out.push_back(',');
         keel::f64 x = v[i];
-        if (std::isnan(x)) out.append("null");
-        else if (std::isinf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
+        if (keel::is_nan(x)) out.append("null");
+        else if (keel::is_inf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
         else {
             keel::i32 n = std::snprintf(buf, sizeof(buf), "%.17g", x);
             if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
@@ -452,9 +452,9 @@ void FigureManager::maybeDownsampleSeries(DatasetInfo &ds)
     }
     keel::f64 xlo = xSrc.front(), xhi = xSrc.back();
     if (xhi < xlo) std::swap(xlo, xhi);
-    keel::f64 ylo = INFINITY, yhi = -INFINITY;
-    for (keel::f64 v : ySrc) if (std::isfinite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
-    if (!std::isfinite(ylo)) { ylo = 0; yhi = 0; }
+    keel::f64 ylo = keel::kInf, yhi = -keel::kInf;
+    for (keel::f64 v : ySrc) if (keel::is_finite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
+    if (!keel::is_finite(ylo)) { ylo = 0; yhi = 0; }
     auto prev = decimateM4(xSrc.data(), ySrc.data(), n, xlo, xhi, kSeriesPreviewCols);
     ds.xJson = figdetail::serializeFlatDoubles(prev.x);
     ds.yJson = figdetail::serializeFlatDoubles(prev.y);
@@ -1164,7 +1164,7 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
     const keel::f64 minStep = std::min(rStep0, cStep0);
     keel::i32 level = 0;
     if (minStep > 1.5) {
-        level = keel::as<keel::i32>(std::floor(std::log2(minStep)));
+        level = keel::as<keel::i32>(keel::floor(keel::log2(minStep)));
         if (level < 0) level = 0;
         if (level > 10) level = 10;
     }
@@ -1197,24 +1197,24 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
     const keel::f64 lvlC1 = srcC1 / scaleFactor;
     const keel::f64 rStep = (lvlR1 - lvlR0) / displayH;
     const keel::f64 cStep = (lvlC1 - lvlC0) / displayW;
-    const keel::i32 rBlock = std::max(1, keel::as<keel::i32>(std::ceil(rStep)));
-    const keel::i32 cBlock = std::max(1, keel::as<keel::i32>(std::ceil(cStep)));
+    const keel::i32 rBlock = std::max(1, keel::as<keel::i32>(keel::ceil(rStep)));
+    const keel::i32 cBlock = std::max(1, keel::as<keel::i32>(keel::ceil(cStep)));
 
     // Log-ratios computed in level coords (log preserves ratios).
-    const keel::f64 yLogRatio = yLog ? std::log(lvlR1 / lvlR0) : 0.0;
-    const keel::f64 xLogRatio = xLog ? std::log(lvlC1 / lvlC0) : 0.0;
+    const keel::f64 yLogRatio = yLog ? keel::log(lvlR1 / lvlR0) : 0.0;
+    const keel::f64 xLogRatio = xLog ? keel::log(lvlC1 / lvlC0) : 0.0;
 
     for (keel::i32 orow = 0; orow < displayH; ++orow) {
         const keel::f64 v = (orow + 0.5) / displayH;
         const keel::f64 rCenter = yLog
-            ? lvlR0 * std::exp(v * yLogRatio)
+            ? lvlR0 * keel::exp(v * yLogRatio)
             : lvlR0 + v * (lvlR1 - lvlR0);
         const keel::i32 rA = std::max(0, keel::as<keel::i32>(rCenter) - rBlock / 2);
         const keel::i32 rB = std::min(keel::as<keel::i32>(lvlRows), rA + rBlock);
         for (keel::i32 ocol = 0; ocol < displayW; ++ocol) {
             const keel::f64 u = (ocol + 0.5) / displayW;
             const keel::f64 cCenter = xLog
-                ? lvlC0 * std::exp(u * xLogRatio)
+                ? lvlC0 * keel::exp(u * xLogRatio)
                 : lvlC0 + u * (lvlC1 - lvlC0);
             const keel::i32 cA = std::max(0, keel::as<keel::i32>(cCenter) - cBlock / 2);
             const keel::i32 cB = std::min(keel::as<keel::i32>(lvlCols), cA + cBlock);

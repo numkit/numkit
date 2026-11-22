@@ -15,10 +15,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit {
@@ -553,11 +550,11 @@ void fplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         } catch (...) {
             continue;       // f(x) blew up at this sample; skip
         }
-        const keel::f64 yval = res.numel() >= 1 ? res.elemAsDouble(0) : std::nan("");
-        const keel::f64 y = std::isfinite(yval) ? yval : std::nan("");
+        const keel::f64 yval = res.numel() >= 1 ? res.elemAsDouble(0) : keel::kNaN;
+        const keel::f64 y = keel::is_finite(yval) ? yval : keel::kNaN;
         if (i) { xs << ','; ys << ','; }
         xs << x;
-        if (std::isfinite(y)) ys << y;
+        if (keel::is_finite(y)) ys << y;
         else                   ys << "null";
     }
     xs << ']'; ys << ']';
@@ -609,7 +606,7 @@ Value sampleGrid(const Value &fh, keel::f64 xa, keel::f64 xb,
             Value xv = Value::scalar(x, mr);
             Value yv = Value::scalar(y, mr);
             keel::StaticArray<Value, 2> argv{ xv, yv };
-            keel::f64 r = std::nan("");
+            keel::f64 r = keel::kNaN;
             try {
                 Value res = gc.callHandle(fh,
                     keel::ArrayRef<Value>(argv.data(), 2));
@@ -722,7 +719,7 @@ void fplot3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         const keel::f64 t = a + (b - a) * i / (keel::f64)(N - 1);
         Value tv = Value::scalar(t, mr);
         keel::StaticArray<Value, 1> argv{ tv };
-        keel::f64 x = std::nan(""), y = std::nan(""), z = std::nan("");
+        keel::f64 x = keel::kNaN, y = keel::kNaN, z = keel::kNaN;
         try {
             x = gc.callHandle(fx,
                 keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
@@ -732,9 +729,9 @@ void fplot3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 keel::ArrayRef<Value>(argv.data(), 1)).toScalar();
         } catch (...) { /* point becomes NaN — JSON null */ }
         if (i) { xs << ','; ys << ','; zs << ','; }
-        if (std::isfinite(x)) xs << x; else xs << "null";
-        if (std::isfinite(y)) ys << y; else ys << "null";
-        if (std::isfinite(z)) zs << z; else zs << "null";
+        if (keel::is_finite(x)) xs << x; else xs << "null";
+        if (keel::is_finite(y)) ys << y; else ys << "null";
+        if (keel::is_finite(z)) zs << z; else zs << "null";
     }
     xs << ']'; ys << ']'; zs << ']';
 
@@ -817,10 +814,10 @@ void streamImpl(bool autoSlice,
         const keel::f64 v01 = Vat(r0,     c0 + 1);
         const keel::f64 v10 = Vat(r0 + 1, c0);
         const keel::f64 v11 = Vat(r0 + 1, c0 + 1);
-        if (!std::isfinite(u00) || !std::isfinite(u01)
-         || !std::isfinite(u10) || !std::isfinite(u11)
-         || !std::isfinite(v00) || !std::isfinite(v01)
-         || !std::isfinite(v10) || !std::isfinite(v11)) return false;
+        if (!keel::is_finite(u00) || !keel::is_finite(u01)
+         || !keel::is_finite(u10) || !keel::is_finite(u11)
+         || !keel::is_finite(v00) || !keel::is_finite(v01)
+         || !keel::is_finite(v10) || !keel::is_finite(v11)) return false;
         const keel::f64 u0 = u00 * (1 - tx) + u01 * tx;
         const keel::f64 u1 = u10 * (1 - tx) + u11 * tx;
         u = u0 * (1 - ty) + u1 * ty;
@@ -866,8 +863,8 @@ void streamImpl(bool autoSlice,
         for (keel::i32 step = 0; step < maxSteps; ++step) {
             keel::f64 u, v;
             if (!sampleField(x, y, u, v)) break;
-            const keel::f64 mag = std::hypot(u, v);
-            if (!std::isfinite(mag) || mag < eps) break;
+            const keel::f64 mag = keel::hypot(u, v);
+            if (!keel::is_finite(mag) || mag < eps) break;
             if (count > 0) { xs << ','; ys << ','; }
             xs << x; ys << y; ++count;
 
@@ -1379,7 +1376,7 @@ void voronoi_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             if (nx * tx + ny * ty > 0) { nx = -nx; ny = -ny; }
             // Extend the ray FAR — clipSeg will trim to the bbox.
             const keel::f64 far = (clipXHi - clipXLo) + (clipYHi - clipYLo);
-            const keel::f64 nlen = std::sqrt(nx * nx + ny * ny);
+            const keel::f64 nlen = keel::sqrt(nx * nx + ny * ny);
             if (nlen < 1e-15) { i = j; continue; }
             const keel::f64 endX = ccs[t].x + (nx / nlen) * far;
             const keel::f64 endY = ccs[t].y + (ny / nlen) * far;

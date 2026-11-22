@@ -2,6 +2,7 @@
 // the optim toolbox in Phase D. Toolbox keeps the Engine-free FnHandle
 // kernels (fzero/fminbnd/fminsearch); this core-coupled glue lives in bundle.
 #include <keel/arena.h>
+#include <keel/math.h>
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -14,7 +15,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <cmath>
 #include <utility>
 
 namespace numkit::optim {
@@ -41,7 +41,7 @@ keel::f64 evalHandleScalar(CallContext &ctx, const Value &handle, const Value &p
 {
     Value a[1] = { pt };
     auto r = ctx.engine->callFunctionHandleMulti(handle, keel::ArrayRef<Value>(a, 1), 1);
-    return r.empty() ? std::nan("") : r[0].toScalar();
+    return r.empty() ? keel::kNaN : r[0].toScalar();
 }
 
 // Emit the optional fval / exitflag outputs (and reject the not-yet-

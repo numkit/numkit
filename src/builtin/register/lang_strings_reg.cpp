@@ -2,6 +2,7 @@
 //
 // CallContext register half (Phase 2b multi-block split).
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -20,11 +21,9 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -638,12 +637,12 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     keel::f64 *Dd = D.doubleDataMut();
     for (keel::usize i = 0; i < n; ++i) {
         const keel::f64 v = x.elemAsDouble(i);
-        if (!std::isfinite(v)) {
+        if (!keel::is_finite(v)) {
             // MATLAB returns NaN/NaN for NaN input, ±Inf/0 for ±Inf? Empirically
             // [n, d] = rat(NaN) → n=NaN, d=NaN; [n, d] = rat(Inf) → n=Inf, d=1.
-            if (std::isnan(v)) {
-                Nd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
-                Dd[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+            if (keel::is_nan(v)) {
+                Nd[i] = keel::Limits<keel::f64>::quiet_nan();
+                Dd[i] = keel::Limits<keel::f64>::quiet_nan();
             } else {
                 Nd[i] = v;  // ±Inf
                 Dd[i] = 1.0;

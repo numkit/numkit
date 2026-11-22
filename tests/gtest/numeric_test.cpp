@@ -31,7 +31,7 @@ TEST_P(NumericTest, HypotOverflowSafe)
 {
     // hypot avoids intermediate overflow; sqrt(x^2+y^2) would overflow.
     EXPECT_NEAR(evalScalar("hypot(1e200, 1e200);"),
-                std::sqrt(2.0) * 1e200, 1e185);
+                keel::sqrt(2.0) * 1e200, 1e185);
 }
 
 // ── nthroot ─────────────────────────────────────────────────
@@ -51,7 +51,7 @@ TEST_P(NumericTest, NthrootNegativeOddRoot)
 
 TEST_P(NumericTest, NthrootNegativeEvenRootIsNaN)
 {
-    EXPECT_TRUE(std::isnan(evalScalar("nthroot(-4, 2);")));
+    EXPECT_TRUE(keel::is_nan(evalScalar("nthroot(-4, 2);")));
 }
 
 // ── expm1 / log1p ──────────────────────────────────────────
@@ -61,14 +61,14 @@ TEST_P(NumericTest, Expm1NearZero)
     // exp(x) - 1 for small x — accurate via expm1
     EXPECT_NEAR(evalScalar("expm1(1e-15);"), 1e-15, 1e-25);
     EXPECT_NEAR(evalScalar("expm1(0);"), 0.0, 1e-12);
-    EXPECT_NEAR(evalScalar("expm1(1);"), std::exp(1.0) - 1.0, 1e-12);
+    EXPECT_NEAR(evalScalar("expm1(1);"), keel::exp(1.0) - 1.0, 1e-12);
 }
 
 TEST_P(NumericTest, Log1pNearZero)
 {
     EXPECT_NEAR(evalScalar("log1p(1e-15);"), 1e-15, 1e-25);
     EXPECT_NEAR(evalScalar("log1p(0);"), 0.0, 1e-12);
-    EXPECT_NEAR(evalScalar("log1p(1);"), std::log(2.0), 1e-12);
+    EXPECT_NEAR(evalScalar("log1p(1);"), keel::log(2.0), 1e-12);
 }
 
 TEST_P(NumericTest, Expm1Vector)
@@ -76,8 +76,8 @@ TEST_P(NumericTest, Expm1Vector)
     eval("v = expm1([0 1 -1]);");
     auto *v = getVarPtr("v");
     EXPECT_NEAR(v->doubleData()[0], 0.0, 1e-12);
-    EXPECT_NEAR(v->doubleData()[1], std::exp(1.0) - 1.0, 1e-12);
-    EXPECT_NEAR(v->doubleData()[2], std::exp(-1.0) - 1.0, 1e-12);
+    EXPECT_NEAR(v->doubleData()[1], keel::exp(1.0) - 1.0, 1e-12);
+    EXPECT_NEAR(v->doubleData()[2], keel::exp(-1.0) - 1.0, 1e-12);
 }
 
 // ── gcd / lcm ──────────────────────────────────────────────
@@ -229,15 +229,15 @@ TEST_P(NumericTest, DecicOde15iAndBvpinitBvp4c)
     EXPECT_NEAR(getVar("yp0_m"), -2.0, 1e-8);
     EXPECT_LT(getVar("resn"), 1e-9);
     eval("[ti, yi] = ode15i(f_imp, [0 1], y0_m, yp0_m);");
-    EXPECT_NEAR(evalScalar("yi(end);"), std::exp(-2.0), 1e-3);
+    EXPECT_NEAR(evalScalar("yi(end);"), keel::exp(-2.0), 1e-3);
 
     // bvpinit + bvp4c + deval on y'' + y = 0, y(0) = 0, y(pi/2) = 1 => y(x) = sin(x)
     eval("ode_bvp = @(x, y) [y(2); -y(1)];");
     eval("bc_bvp  = @(ya, yb) [ya(1); yb(1) - 1];");
     eval("solinit = bvpinit(linspace(0, pi/2, 10), [0; 1]);");
     eval("sol = bvp4c(ode_bvp, bc_bvp, solinit);");
-    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 1);"), std::sin(keel::kPi / 4.0), 1e-4);
-    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 2);"), std::cos(keel::kPi / 4.0), 1e-4);
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 1);"), keel::sin(keel::kPi / 4.0), 1e-4);
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 2);"), keel::cos(keel::kPi / 4.0), 1e-4);
 }
 
 INSTANTIATE_DUAL(NumericTest);

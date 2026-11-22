@@ -21,9 +21,7 @@
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -47,7 +45,7 @@ void interp1_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
     // (extrapolate using the method) or a numeric extrapval (fill
     // out-of-range with it).
     Interp1Extrap mode = Interp1Extrap::Default;
-    keel::f64 fill = std::numeric_limits<keel::f64>::quiet_NaN();
+    keel::f64 fill = keel::Limits<keel::f64>::quiet_nan();
     if (args.size() >= 5) {
         const Value &e = args[4];
         if (e.isChar() || e.isString()) {
@@ -363,7 +361,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             const Value &Xqd = args[qStart + keel::as<keel::usize>(d)];
             const keel::f64 xq = Xqd.elemAsDouble(Xqd.numel() == 1 ? 0 : q);
             const auto &g = grids[keel::as<keel::usize>(d)];
-            if (std::isnan(xq) || xq < g[0] || xq > g[g.size() - 1]) {
+            if (keel::is_nan(xq) || xq < g[0] || xq > g[g.size() - 1]) {
                 outOfBounds = true;
                 break;
             }
@@ -375,7 +373,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             frac[keel::as<keel::usize>(d)] = (denom != 0.0) ? (xq - g[i0]) / denom : 0.0;
         }
         if (outOfBounds) {
-            od[q] = std::numeric_limits<keel::f64>::quiet_NaN();
+            od[q] = keel::Limits<keel::f64>::quiet_nan();
             continue;
         }
         if (isNearest) {

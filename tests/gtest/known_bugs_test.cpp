@@ -6,6 +6,7 @@
 // their own files, e.g. sort-missingplacement -> matrix_test.cpp.)
 
 #include <numkit/core/engine.hpp>
+#include <keel/math.h>
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/standard_engine.hpp>
@@ -580,7 +581,7 @@ TEST_P(CommandGlueTest, ExistFileInsideFunction)
 TEST_P(CommandGlueTest, MldivideSingularWarns)
 {
     eval("x = true(2) \\ eye(2);");
-    EXPECT_DOUBLE_EQ(evalScalar("x(1,1)"), std::numeric_limits<double>::infinity());
+    EXPECT_DOUBLE_EQ(evalScalar("x(1,1)"), keel::Limits<double>::infinity());
 }
 
 // bugs/closed/runtime/dir-nargout-in-argument.md — a call in ARGUMENT
@@ -662,7 +663,7 @@ TEST_P(CommandGlueTest, AnonTableResolutionCorruption)
          "  r = grayfns{i, 2}(1);\n"
          "  if i == 1, s1 = r; end\n"
          "end\n");
-    EXPECT_NEAR(evalScalar("s1"), std::sin(2.0), 1e-12);
+    EXPECT_NEAR(evalScalar("s1"), keel::sin(2.0), 1e-12);
 }
 
 // bugs/closed/runtime/hilbert-non-pow2-length.md — hilbert() accepts

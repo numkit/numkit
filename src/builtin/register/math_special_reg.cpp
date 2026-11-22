@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/engine.hpp>
@@ -15,9 +16,7 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -51,10 +50,10 @@ namespace {
 
 keel::f64 polygammaScalar(keel::i32 k, keel::f64 x)
 {
-    if (std::isnan(x)) return x;
-    if (x <= 0.0 && x == std::floor(x)) {
-        return (k % 2 == 1) ? std::numeric_limits<keel::f64>::infinity()
-                            : -std::numeric_limits<keel::f64>::infinity();
+    if (keel::is_nan(x)) return x;
+    if (x <= 0.0 && x == keel::floor(x)) {
+        return (k % 2 == 1) ? keel::Limits<keel::f64>::infinity()
+                            : -keel::Limits<keel::f64>::infinity();
     }
     keel::f64 factK = 1.0;
     for (keel::i32 i = 2; i <= k; ++i) factK *= keel::as<keel::f64>(i);
@@ -63,12 +62,12 @@ keel::f64 polygammaScalar(keel::i32 k, keel::f64 x)
     keel::f64 r = 0.0;
     keel::f64 y = x;
     while (y < 12.0) {
-        r += sign * factK / std::pow(y, k + 1);
+        r += sign * factK / keel::pow(y, k + 1);
         y += 1.0;
     }
     const keel::f64 invY = 1.0 / y;
     const keel::f64 invY2 = invY * invY;
-    const keel::f64 yk = std::pow(invY, k);
+    const keel::f64 yk = keel::pow(invY, k);
     const keel::f64 factKm1 = factK / keel::as<keel::f64>(k);
 
     // Bernoulli numbers B_2..B_10

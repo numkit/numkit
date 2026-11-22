@@ -14,8 +14,6 @@
 
 #include <keel/random.h>
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -232,7 +230,7 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
              CallContext &ctx) {
     auto *mr = ctx.engine->allocator();
     if (args.empty()) {
-        outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
+        outs[0] = Value::scalar(keel::Limits<keel::f64>::kEpsilon, mr);
         return;
     }
     const Value &x = args[0];
@@ -240,10 +238,10 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
         keel::String s = x.toString();
         if (s == "single") {
             Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
-            out.singleDataMut()[0] = std::numeric_limits<keel::f32>::epsilon();
+            out.singleDataMut()[0] = keel::Limits<keel::f32>::kEpsilon;
             outs[0] = std::move(out);
         } else if (s == "double") {
-            outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
+            outs[0] = Value::scalar(keel::Limits<keel::f64>::kEpsilon, mr);
         } else {
             throw Error("eps: class name must be 'double' or 'single'",
                         0, 0, "eps", "", "numkit:eps:invalidClassName");
@@ -269,12 +267,12 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
             keel::f32 v = x.isComplex()
                 ? keel::as<keel::f32>(keel::abs(x.complexData()[i]))
                 : keel::abs(keel::as<keel::f32>(x.elemAsDouble(i)));
-            if (std::isnan(v) || std::isinf(v)) {
-                dst[i] = std::numeric_limits<keel::f32>::quiet_NaN();
-            } else if (v <= std::numeric_limits<keel::f32>::min()) {
-                dst[i] = std::numeric_limits<keel::f32>::denorm_min();
+            if (keel::is_nan(v) || keel::is_inf(v)) {
+                dst[i] = keel::Limits<keel::f32>::quiet_nan();
+            } else if (v <= keel::Limits<keel::f32>::kMin) {
+                dst[i] = keel::Limits<keel::f32>::kDenormMin;
             } else {
-                dst[i] = std::nextafter(v, std::numeric_limits<keel::f32>::infinity()) - v;
+                dst[i] = keel::nextafter(v, keel::Limits<keel::f32>::infinity()) - v;
             }
         }
     } else {
@@ -283,12 +281,12 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
             keel::f64 v = x.isComplex()
                 ? keel::abs(x.complexData()[i])
                 : keel::abs(x.elemAsDouble(i));
-            if (std::isnan(v) || std::isinf(v)) {
-                dst[i] = std::numeric_limits<keel::f64>::quiet_NaN();
-            } else if (v <= std::numeric_limits<keel::f64>::min()) {
-                dst[i] = std::numeric_limits<keel::f64>::denorm_min();
+            if (keel::is_nan(v) || keel::is_inf(v)) {
+                dst[i] = keel::Limits<keel::f64>::quiet_nan();
+            } else if (v <= keel::Limits<keel::f64>::kMin) {
+                dst[i] = keel::Limits<keel::f64>::kDenormMin;
             } else {
-                dst[i] = std::nextafter(v, std::numeric_limits<keel::f64>::infinity()) - v;
+                dst[i] = keel::nextafter(v, keel::Limits<keel::f64>::infinity()) - v;
             }
         }
     }

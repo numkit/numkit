@@ -10,6 +10,7 @@
 #pragma once
 
 #include <keel/core.h>
+#include <keel/math.h>
 #include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
@@ -20,7 +21,6 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
-#include <cmath>
 
 namespace numkit::runtime::detail::handlefn {
 
@@ -156,19 +156,19 @@ inline Value applyBuiltin(keel::Allocator *mr, BuiltinFn f, const Value &v,
         if (!v.isScalar())
             throw Error(keel::format("{}: @isnan requires each cell to be scalar in uniform mode", fn),
                          0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
-        return Value::logicalScalar(std::isnan(v.toScalar()), mr);
+        return Value::logicalScalar(keel::is_nan(v.toScalar()), mr);
     }
     case BuiltinFn::IsInf: {
         if (!v.isScalar())
             throw Error(keel::format("{}: @isinf requires each cell to be scalar in uniform mode", fn),
                          0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
-        return Value::logicalScalar(std::isinf(v.toScalar()), mr);
+        return Value::logicalScalar(keel::is_inf(v.toScalar()), mr);
     }
     case BuiltinFn::IsFinite: {
         if (!v.isScalar())
             throw Error(keel::format("{}: @isfinite requires each cell to be scalar in uniform mode", fn),
                          0, 0, fn, "", keel::format("numkit:{}:notScalar", fn));
-        return Value::logicalScalar(std::isfinite(v.toScalar()), mr);
+        return Value::logicalScalar(keel::is_finite(v.toScalar()), mr);
     }
     case BuiltinFn::Sum:  return ::numkit::builtin::sum (v, mr);
     case BuiltinFn::Prod: return ::numkit::builtin::prod(v, mr);

@@ -19,10 +19,7 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <climits>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <utility>
 
 namespace numkit::detail {
@@ -99,19 +96,19 @@ void heatmapImpl(
         };
         const auto getVal = [&](keel::usize idx) -> keel::f64 {
             const keel::f64 r = getRaw(idx);
-            if (!std::isfinite(r)) return std::numeric_limits<keel::f64>::quiet_NaN();
+            if (!keel::is_finite(r)) return keel::Limits<keel::f64>::quiet_nan();
             if (!logColor) return r;
-            if (r <= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
-            return std::log10(r);
+            if (r <= 0.0) return keel::Limits<keel::f64>::quiet_nan();
+            return keel::log10(r);
         };
 
         // Pass 1: scan for cmin/cmax (skipping NaN/Inf). When logColor
         // is on these are already in log10 space.
-        keel::f64 cmin = std::numeric_limits<keel::f64>::infinity();
-        keel::f64 cmax = -std::numeric_limits<keel::f64>::infinity();
+        keel::f64 cmin = keel::Limits<keel::f64>::infinity();
+        keel::f64 cmax = -keel::Limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < rows * cols; ++i) {
             const keel::f64 v = getVal(i);
-            if (std::isfinite(v)) {
+            if (keel::is_finite(v)) {
                 if (v < cmin) cmin = v;
                 if (v > cmax) cmax = v;
             }
@@ -133,8 +130,8 @@ void heatmapImpl(
                     keel::f64 b = rbv.value();
                     if (logColor) {
                         if (a > 0 && b > 0) {
-                            cmin = std::log10(a);
-                            cmax = std::log10(b);
+                            cmin = keel::log10(a);
+                            cmax = keel::log10(b);
                         }
                         // else: keep scanned (log) values — user set bad clim for log
                     } else {
@@ -144,7 +141,7 @@ void heatmapImpl(
                 }
             }
         }
-        if (!std::isfinite(cmin) || !std::isfinite(cmax) || cmin == cmax) {
+        if (!keel::is_finite(cmin) || !keel::is_finite(cmax) || cmin == cmax) {
             cmin = 0.0;
             cmax = 1.0;
         }
@@ -159,7 +156,7 @@ void heatmapImpl(
         ds.zQuantized.resize(rows * cols);
         for (keel::usize i = 0; i < rows * cols; ++i) {
             const keel::f64 v = getVal(i);
-            if (!std::isfinite(v)) {
+            if (!keel::is_finite(v)) {
                 ds.zQuantized[i] = 255;
             } else {
                 keel::f64 t = (v - cmin) * qScale;

@@ -1,4 +1,5 @@
 #include <keel/ref.h>
+#include <keel/math.h>
 #include <gtest/gtest.h>
 #include <numkit/builtin/lang.hpp>
 #include <numkit/core/standard_library.hpp>
@@ -150,9 +151,9 @@ TEST_F(LangTest, TextbookBatch2Builtins) {
     // 5. dist and latc2tf
     Value dVal = engine->eval("W = [1 2 3; 4 5 6]; P = [1 0; 2 1; 3 2]; dist(W, P)");
     EXPECT_NEAR(dVal.elemAsDouble(0), 0.0, 1e-12);
-    EXPECT_NEAR(dVal.elemAsDouble(1), std::sqrt(27.0), 1e-12);
-    EXPECT_NEAR(dVal.elemAsDouble(2), std::sqrt(3.0), 1e-12);
-    EXPECT_NEAR(dVal.elemAsDouble(3), std::sqrt(48.0), 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(1), keel::sqrt(27.0), 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(2), keel::sqrt(3.0), 1e-12);
+    EXPECT_NEAR(dVal.elemAsDouble(3), keel::sqrt(48.0), 1e-12);
 
     Value lVal = engine->eval("[n, d] = latc2tf([0.1; 0.2; 0.3], [1; 2; 3; 4]); [n, d]");
     EXPECT_NEAR(lVal.elemAsDouble(0), 3.0, 1e-12);

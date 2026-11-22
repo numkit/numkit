@@ -20,7 +20,6 @@
 #include <numkit/ops/io_helpers.hpp>
 
 #include <cstdint>
-#include <cstring>
 
 namespace numkit::io {
 using namespace ::numkit::ops;
@@ -317,27 +316,27 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     for (keel::usize i = 0; i < n; ++i) {
         // Local copy lets us byte-swap safely without mutating f->buffer.
         char tmp[8];
-        std::memcpy(tmp, f->buffer.data() + f->cursor + i * stride, bsize);
+        keel::mem_copy(tmp, f->buffer.data() + f->cursor + i * stride, bsize);
         if (be && bsize > 1) numkit::ops::byteSwap(tmp, bsize);
 
         keel::f64 v = 0.0;
         if (kind == 0) {
             switch (bsize) {
-            case 1: { keel::u8  x; std::memcpy(&x, tmp, 1); v = x; break; }
-            case 2: { keel::u16 x; std::memcpy(&x, tmp, 2); v = x; break; }
-            case 4: { keel::u32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::u64 x; std::memcpy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
+            case 1: { keel::u8  x; keel::mem_copy(&x, tmp, 1); v = x; break; }
+            case 2: { keel::u16 x; keel::mem_copy(&x, tmp, 2); v = x; break; }
+            case 4: { keel::u32 x; keel::mem_copy(&x, tmp, 4); v = x; break; }
+            case 8: { keel::u64 x; keel::mem_copy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
-            case 1: { keel::i8  x; std::memcpy(&x, tmp, 1); v = x; break; }
-            case 2: { keel::i16 x; std::memcpy(&x, tmp, 2); v = x; break; }
-            case 4: { keel::i32 x; std::memcpy(&x, tmp, 4); v = x; break; }
-            case 8: { keel::i64 x; std::memcpy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
+            case 1: { keel::i8  x; keel::mem_copy(&x, tmp, 1); v = x; break; }
+            case 2: { keel::i16 x; keel::mem_copy(&x, tmp, 2); v = x; break; }
+            case 4: { keel::i32 x; keel::mem_copy(&x, tmp, 4); v = x; break; }
+            case 8: { keel::i64 x; keel::mem_copy(&x, tmp, 8); v = keel::as<keel::f64>(x); break; }
             }
         } else {
-            if (bsize == 4) { keel::f32 x; std::memcpy(&x, tmp, 4); v = x; }
-            else            {                     std::memcpy(&v, tmp, 8); }
+            if (bsize == 4) { keel::f32 x; keel::mem_copy(&x, tmp, 4); v = x; }
+            else            {                     keel::mem_copy(&v, tmp, 8); }
         }
         values[i] = v;
     }
@@ -395,21 +394,21 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
         keel::f64 v = A.elemAsDouble(i);
         if (kind == 0) {
             switch (bsize) {
-            case 1: { keel::u8  x = keel::as<keel::u8>(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { keel::u16 x = keel::as<keel::u16>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { keel::u32 x = keel::as<keel::u32>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { keel::u64 x = keel::as<keel::u64>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::u8  x = keel::as<keel::u8>(v); keel::mem_copy(dst, &x, 1); break; }
+            case 2: { keel::u16 x = keel::as<keel::u16>(v); keel::mem_copy(dst, &x, 2); break; }
+            case 4: { keel::u32 x = keel::as<keel::u32>(v); keel::mem_copy(dst, &x, 4); break; }
+            case 8: { keel::u64 x = keel::as<keel::u64>(v); keel::mem_copy(dst, &x, 8); break; }
             }
         } else if (kind == 1) {
             switch (bsize) {
-            case 1: { keel::i8  x = keel::as<keel::i8>(v); std::memcpy(dst, &x, 1); break; }
-            case 2: { keel::i16 x = keel::as<keel::i16>(v); std::memcpy(dst, &x, 2); break; }
-            case 4: { keel::i32 x = keel::as<keel::i32>(v); std::memcpy(dst, &x, 4); break; }
-            case 8: { keel::i64 x = keel::as<keel::i64>(v); std::memcpy(dst, &x, 8); break; }
+            case 1: { keel::i8  x = keel::as<keel::i8>(v); keel::mem_copy(dst, &x, 1); break; }
+            case 2: { keel::i16 x = keel::as<keel::i16>(v); keel::mem_copy(dst, &x, 2); break; }
+            case 4: { keel::i32 x = keel::as<keel::i32>(v); keel::mem_copy(dst, &x, 4); break; }
+            case 8: { keel::i64 x = keel::as<keel::i64>(v); keel::mem_copy(dst, &x, 8); break; }
             }
         } else {
-            if (bsize == 4) { keel::f32 x = keel::as<keel::f32>(v); std::memcpy(dst, &x, 4); }
-            else            {                                  std::memcpy(dst, &v, 8); }
+            if (bsize == 4) { keel::f32 x = keel::as<keel::f32>(v); keel::mem_copy(dst, &x, 4); }
+            else            {                                  keel::mem_copy(dst, &v, 8); }
         }
         if (be && bsize > 1)
             numkit::ops::byteSwap(dst, bsize);
@@ -422,7 +421,7 @@ void fwrite(FsContext &fs, keel::ArrayRef<Value> args, keel::usize, keel::MutArr
     if (writePos + bytes.size() > f->buffer.size())
         f->buffer.resize(writePos + bytes.size());
     if (!bytes.empty())
-        std::memcpy(f->buffer.data() + writePos, bytes.data(), bytes.size());
+        keel::mem_copy(f->buffer.data() + writePos, bytes.data(), bytes.size());
     f->cursor = writePos + bytes.size();
     outs[0] = Value::scalar(keel::as<keel::f64>(numel), mr);
 }

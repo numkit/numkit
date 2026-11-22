@@ -2,6 +2,7 @@
 //
 // CallContext register half (Phase 2b multi-block split).
 #include <keel/array.h>
+#include <keel/math.h>
 #include <keel/core.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -14,11 +15,8 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -86,7 +84,7 @@ void boundary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                      0, 0, "boundary", "", "numkit:boundary:shape");
     keel::f64 shrink = 0.0;
     if (args.size() >= 3) shrink = args[2].toScalar();
-    if (!std::isfinite(shrink)) shrink = 0.0;
+    if (!keel::is_finite(shrink)) shrink = 0.0;
     if (shrink < 0) shrink = 0;
     if (shrink > 1) shrink = 1;
     // shrink == 0 → convex hull (use existing impl).
@@ -222,11 +220,11 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         for (keel::usize i = 1; i < n; ++i) {
             const keel::f64 X = xv.elemAsDouble(i);
             const keel::f64 Y = yv.elemAsDouble(i);
-            if (std::isfinite(X)) {
+            if (keel::is_finite(X)) {
                 if (X < xmn) xmn = X;
                 if (X > xmx) xmx = X;
             }
-            if (std::isfinite(Y)) {
+            if (keel::is_finite(Y)) {
                 if (Y < ymn) ymn = Y;
                 if (Y > ymx) ymx = Y;
             }
@@ -389,7 +387,7 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     Value K = Value::matrix(nQ, 1, ValueType::DOUBLE, mr);
     Value D = (nargout >= 2) ? Value::matrix(nQ, 1, ValueType::DOUBLE, mr) : Value();
     for (keel::usize q = 0; q < nQ; ++q) {
-        keel::f64 bestDistSq = std::numeric_limits<keel::f64>::infinity();
+        keel::f64 bestDistSq = keel::Limits<keel::f64>::infinity();
         keel::usize bestIdx = 1;
         for (keel::usize p = 0; p < nPts; ++p) {
             keel::f64 dsq = 0.0;
@@ -404,7 +402,7 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         }
         K.doubleDataMut()[q] = keel::as<keel::f64>(bestIdx);
         if (nargout >= 2)
-            D.doubleDataMut()[q] = std::sqrt(bestDistSq);
+            D.doubleDataMut()[q] = keel::sqrt(bestDistSq);
     }
     outs[0] = std::move(K);
     if (nargout >= 2 && outs.size() >= 2)
