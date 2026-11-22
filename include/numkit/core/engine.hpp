@@ -276,6 +276,11 @@ public:
     // count. Callers first verify dst is a valid target (empty/unset, or a
     // same-class object array). Centralises the store boilerplate shared by
     // TreeWalker and every VM INDEX_SET* opcode.
+    // Check whether `dst(subscripts) = rhs` should use the builtin object-array
+    // slice store (`objectStoreSlice`), promoting numeric placeholder arrays
+    // (e.g. zeros(1,N)) to unset when `rhs` belongs to a heterogeneous class
+    // group. Centralises the target-compatibility check shared by VM and TW.
+    bool prepareObjectArrayStore(Value &dst, const Value &rhs) const;
     void objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                           const Value &val, Environment *env);
     // Read counterpart: if `self`'s class defines a custom subsref, dispatch

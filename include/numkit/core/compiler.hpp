@@ -316,7 +316,7 @@ private:
     keel::u16 compileReturn(const ASTNode *node);
     void emitVarargoutReturn();
     keel::u16 compileDeleteAssign(const ASTNode *node);
-    static keel::i8 resolveBuiltinId(keel::StringRef name, keel::usize nargs);
+    static FastBuiltinId resolveBuiltinId(keel::StringRef name, keel::usize nargs);
 
     // Constant register cache: maps constant pool index → register that holds it
     keel::HashMap<keel::i32, keel::u16> constRegCache_;

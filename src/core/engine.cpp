@@ -560,6 +560,37 @@ bool Engine::tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value
     return false;
 }
 
+bool Engine::prepareObjectArrayStore(Value &dst, const Value &rhs) const
+{
+    const bool canPromote =
+        dst.isObject() && !rhs.isObject()
+        && (rhs.isNumeric() || rhs.isLogical())
+        && dst.objectStateConst() && dst.objectStateConst()->native
+        && dst.objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
+    if (!rhs.isObject() && !canPromote)
+        return false;
+    const BuiltinClass *rhsCls =
+        rhs.isObject() ? findClass(rhs.objectClassNameRef()) : nullptr;
+    if (!dst.isObject() && dst.isNumeric() && rhsCls
+        && !rhsCls->heterogeneousGroup.empty()) {
+        dst = Value();
+    }
+    if (!dst.isObject() && (dst.isUnset() || dst.isEmpty()))
+        return true;
+    if (canPromote)
+        return true;
+    if (dst.isObject() && rhs.isObject()) {
+        if (dst.objectClassNameRef() == rhs.objectClassNameRef())
+            return true;
+        const BuiltinClass *dstCls = findClass(dst.objectClassNameRef());
+        if (dstCls && rhsCls && !dstCls->heterogeneousGroup.empty()
+            && dstCls->heterogeneousGroup == rhsCls->heterogeneousGroup) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                               const Value &val, Environment *env)
 {

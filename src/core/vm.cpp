@@ -262,14 +262,7 @@ void VM::ensureRegStackCapacity(keel::usize needed)
 // (generic external fallback) so the two can never drift out of sync.
 static const char *builtinIdName(keel::i32 bid)
 {
-    static const char *kNames[] = {
-        "abs",   "floor", "ceil",  "round", "fix",   "sqrt",  "exp",   "log",
-        "log2",  "log10", "sin",   "cos",   "tan",   "sign",  "isnan", "isinf",
-        nullptr, nullptr, nullptr, nullptr, "mod",   "rem",   "max",   "min",
-        "pow",   "atan2",
-    };
-    constexpr keel::i32 n = keel::as<keel::i32>(sizeof(kNames) / sizeof(kNames[0]));
-    return (bid >= 0 && bid < n) ? kNames[bid] : nullptr;
+    return fastBuiltinName(static_cast<FastBuiltinId>(bid));
 }
 
 // Fast scalar check for VM arithmetic — accepts double scalars AND logical scalar tags
@@ -1842,34 +1835,16 @@ enter_frame:
                 }
                 // Builtin object-array indexed store: arr(i) = obj. Fires
                 // when RHS is an object and the target is empty/unset (→ a
-                // fresh object array) or an object array of the same class.
-                const bool canPromote1D = R[I.a].isObject() && !R[I.c].isObject()
-                                          && (R[I.c].isNumeric() || R[I.c].isLogical())
-                                          && R[I.a].objectStateConst() && R[I.a].objectStateConst()->native
-                                          && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
-                if (R[I.c].isObject() || canPromote1D) {
+                // OBJECT: arr(i) = obj — builtin element store + grow, when the
+                // target is unset/empty, a compatible object array, or promotable.
+                if (engine_.prepareObjectArrayStore(R[I.a], R[I.c])) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](keel::StringRef c) {
-                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
-                    };
-                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(R[I.c].objectClassNameRef())) {
-                        dst = Value();
-                    }
-                    const bool newable =
-                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    const bool sameArr = canPromote1D ||
-                        (dst.isObject()
-                         && (dst.objectClassNameRef() == R[I.c].objectClassNameRef()
-                             || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(R[I.c].objectClassNameRef()))));
-                    if (newable || sameArr) {
-                        // Linear slice: scalar / range / vector / logical / `:`.
-                        keel::Array<keel::usize> pos =
-                            resolveStoreSubscript(ix, dst.objectCount());
-                        engine_.objectStoreSlice(
-                            dst, keel::ArrayRef<keel::Array<keel::usize>>(&pos, 1),
-                            R[I.c], currentCallEnv());
-                        break;
-                    }
+                    keel::Array<keel::usize> pos =
+                        resolveStoreSubscript(ix, dst.objectCount());
+                    engine_.objectStoreSlice(
+                        dst, keel::ArrayRef<keel::Array<keel::usize>>(&pos, 1),
+                        R[I.c], currentCallEnv());
+                    break;
                 }
                 if (R[I.a].isObject())
                     throw std::runtime_error(
@@ -2003,39 +1978,20 @@ enter_frame:
                         break;
                     }
                 }
-                // OBJECT: arr(i,j) = obj — builtin 2-D element store + grow,
-                // when the target is empty/unset or a same-class object array.
-                const bool canPromote2D = R[I.a].isObject() && !val.isObject()
-                                          && (val.isNumeric() || val.isLogical())
-                                          && R[I.a].objectStateConst() && R[I.a].objectStateConst()->native
-                                          && R[I.a].objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
-                if (val.isObject() || canPromote2D) {
+                // OBJECT: arr(i,j) = obj — builtin 2-D element store + grow.
+                if (engine_.prepareObjectArrayStore(R[I.a], val)) {
                     Value &dst = R[I.a];
-                    auto isGfxCls = [](keel::StringRef c) {
-                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
-                    };
-                    if (!dst.isObject() && dst.isNumeric() && isGfxCls(val.objectClassNameRef())) {
-                        dst = Value();
-                    }
-                    const bool newable =
-                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    const bool sameArr = canPromote2D ||
-                        (dst.isObject()
-                         && (dst.objectClassNameRef() == val.objectClassNameRef()
-                             || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(val.objectClassNameRef()))));
-                    if (newable || sameArr) {
-                        const keel::usize rDim = (dst.isObject() && dst.objectCount() > 0)
-                                                ? dst.dims().rows() : val.dims().rows();
-                        const keel::usize cDim = (dst.isObject() && dst.objectCount() > 0)
-                                                ? dst.dims().cols() : val.numel();
-                        keel::Array<keel::usize> perDim[2] = {
-                            resolveStoreSubscript(ri, rDim),
-                            resolveStoreSubscript(ci, cDim)};
-                        engine_.objectStoreSlice(
-                            dst, keel::ArrayRef<keel::Array<keel::usize>>(perDim, 2),
-                            val, currentCallEnv());
-                        break;
-                    }
+                    const keel::usize rDim = (dst.isObject() && dst.objectCount() > 0)
+                                            ? dst.dims().rows() : val.dims().rows();
+                    const keel::usize cDim = (dst.isObject() && dst.objectCount() > 0)
+                                            ? dst.dims().cols() : val.numel();
+                    keel::Array<keel::usize> perDim[2] = {
+                        resolveStoreSubscript(ri, rDim),
+                        resolveStoreSubscript(ci, cDim)};
+                    engine_.objectStoreSlice(
+                        dst, keel::ArrayRef<keel::Array<keel::usize>>(perDim, 2),
+                        val, currentCallEnv());
+                    break;
                 }
 
                 // ── Scalar fast path: Z(i,j) = scalar ──
@@ -2172,31 +2128,20 @@ enter_frame:
                     }
                 }
                 // OBJECT: arr(i,j,k,…) = obj — builtin N-D element store + grow.
-                if (R[I.e].isObject()) {
+                if (engine_.prepareObjectArrayStore(R[I.a], R[I.e])) {
                     Value &dst = R[I.a];
                     const Value &val = R[I.e];
-                    const bool newable =
-                        !dst.isObject() && (dst.isUnset() || dst.isEmpty());
-                    auto isGfxCls = [](keel::StringRef c) {
-                        return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
-                    };
-                    const bool sameArr =
-                        dst.isObject()
-                        && (dst.objectClassNameRef() == val.objectClassNameRef()
-                            || (isGfxCls(dst.objectClassNameRef()) && isGfxCls(val.objectClassNameRef())));
-                    if (newable || sameArr) {
-                        keel::Array<keel::Array<keel::usize>> perDim;
-                        perDim.resize(ndims);
-                        for (keel::u16 i = 0; i < ndims; ++i) {
-                            keel::usize curDim =
-                                dst.isObject()
-                                    ? (i < dst.dims().ndim() ? dst.dims().dim(i) : 1)
-                                    : 0;
-                            perDim[i] = resolveStoreSubscript(R[base + i], curDim);
-                        }
-                        engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
-                        break;
+                    keel::Array<keel::Array<keel::usize>> perDim;
+                    perDim.resize(ndims);
+                    for (keel::u16 i = 0; i < ndims; ++i) {
+                        keel::usize curDim =
+                            dst.isObject()
+                                ? (i < dst.dims().ndim() ? dst.dims().dim(i) : 1)
+                                : 0;
+                        perDim[i] = resolveStoreSubscript(R[base + i], curDim);
                     }
+                    engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
+                    break;
                 }
                 if (ndims == 3) {
                     auto rowIds = ResolvedSubscript::resolveUnchecked(R[base]);
@@ -3108,895 +3053,30 @@ enter_frame:
 
             // ── General function calls ───────────────────────────
             case OpCode::CALL: {
-                keel::u16 argBase = I.b, na = I.c;
-                keel::u16 nargout_val = I.e; // 0=statement, 1=expression
-                keel::i32 funcIdx = I.d;
-
-                // Dynamically injected local variable (via eval/load/assignin)
-                // shadows functions and builtins.
-                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
-                    const keel::String &candName = chunk.strings[funcIdx];
-                    bool clearedInChunk = false;
-                    if (chunk.assignedVars.contains(candName)) {
-                        for (const auto &[vn, reg] : chunk.varMap) {
-                            if (vn == candName && reg < chunk.numRegisters) {
-                                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
-                                if (rv.isDeleted())
-                                    clearedInChunk = true;
-                                break;
-                            }
-                        }
-                    }
-                    const Value *dynLocal = nullptr;
-                    if (!clearedInChunk) {
-                        if (frame.dynVars) {
-                            if (const Value *dvp = frame.dynVars->get(candName);
-                                dvp && !dvp->isUnset() && !dvp->isDeleted())
-                                dynLocal = dvp;
-                        }
-                        if (!dynLocal) {
-                            if (frame.isScriptFrame) {
-                                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                                dynLocal = scopeEnv.getLocal(candName);
-                            } else if (frame.env) {
-                                dynLocal = frame.env->getLocal(candName);
-                            }
-                            if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
-                                dynLocal = nullptr;
-                        }
-                    }
-                    if (dynLocal) {
-                        Value target = *dynLocal;
-                        if (na == 0 && !target.isFuncHandle()) {
-                            R[I.a] = keel::move(target);
-                        } else {
-                            if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
-                                goto enter_frame;
-                        }
-                        break;
-                    }
-                }
-
-                const keel::u64 curEpoch = engine_.callCacheEpoch();
-                const Environment *scopeForImports = frame.isScriptFrame
-                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                    : frame.env.get();
-                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
-                const bool originStable = chunk.originKnown
-                    || !engine_.currentScriptDir()
-                    || engine_.currentScriptDir()->empty();
-
-                // Try resolved inline cache first (skip when first arg is an
-                // object so a class method beats a same-named global function).
-                const bool firstArgIsObj = (na >= 1 && R[argBase].isObject());
-                const BytecodeChunk *targetChunk = nullptr;
-                if (!firstArgIsObj
-                    && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
-                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
-                    const auto &ce = resolvedFuncs[funcIdx];
-                    if (ce.userChunk) {
-                        targetChunk = ce.userChunk;
-                    } else if (ce.extFunc && !hasImports && originStable) {
-                        keel::ArrayRef<Value> as(&R[argBase], na);
-                        Value ob[1];
-                        bool canHint = nargout_val > 0 && R[I.a].hasHeap();
-                        for (keel::u16 i = 0; i < na && canHint; ++i)
-                            if (&R[argBase + i] == &R[I.a])
-                                canHint = false;
-                        if (canHint)
-                            ob[0] = keel::move(R[I.a]);
-                        keel::MutArrayRef<Value> os(ob, 1);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        (*ce.extFunc)(as, nargout_val, os, ctx);
-                        R[I.a] = keel::move(ob[0]);
-                        break;
-                    }
-                }
-
-                // OBJECT function-form: m(obj, ...) where obj's class has
-                // method m beats a same-named global/path function (matches TW).
-                if (firstArgIsObj) {
-                    const keel::String &mnm = chunk.strings[funcIdx];
-                    const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassNameRef());
-                    if (cls) {
-                        if (const auto *mfp = cls->methodFns.get(mnm)) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                            if (mc) {
-                                engine_.enforceMethodAccess(R[argBase].objectClassNameRef(), mnm);
-                                frame.ip = ip + 1;
-                                pushCallFrame(*mc, &R[argBase], na, I.a, nargout_val, false, 0, 0,
-                                              (*mfp)->ownerClass, false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (const auto *mfn = cls->methods.get(mnm)) {
-                            Value self = R[argBase];
-                            keel::ArrayRef<Value> rest((na > 1) ? &R[argBase + 1] : nullptr, na - 1);
-                            Value out[1];
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
-                                   ctx);
-                            R[I.a] = keel::move(out[0]);
-                            break;
-                        }
-                    }
-                }
-
-                if (!targetChunk) {
-                    const keel::String &funcName = chunk.strings[funcIdx];
-                    const BytecodeChunk *found = findCompiledFunc(funcName);
-                    if (found) {
-                        if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                            resolvedFuncs.resize(funcIdx + 1);
-                        resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        targetChunk = found;
-                    }
-                }
-
-                if (targetChunk) {
-                    // User function — push frame and enter
-                    frame.ip = ip + 1;
-                    pushCallFrame(*targetChunk, &R[argBase], na, I.a, nargout_val);
+                if (execCallNamedSingleSpan(I.a, I.d, I.e,
+                                            I.c ? &R[I.b] : nullptr, I.c,
+                                            R, frame, ip, resolvedFuncs))
                     goto enter_frame;
-                }
-
-                // OBJECT: ClassName(args) constructs an instance when the
-                // name is a registered class (object model, object_model.md).
-                {
-                    const keel::String &ctorName = chunk.strings[funcIdx];
-                    if (const BuiltinClass *cls = engine_.findClass(ctorName);
-                        cls && cls->construct) {
-                        engine_.enforceCtorAccess(ctorName); // private/protected ctor
-                        // classdef with a user constructor → run the ctor body as
-                        // a VM frame (debuggable), seeding the output variable with
-                        // a default instance. The super-ctor / property assigns in
-                        // the body then run on the VM too. P2, vm_callbacks_plan.md.
-                        if (const UserFunction *cuf = engine_.classCtor(ctorName)) {
-                            if (const BytecodeChunk *cc =
-                                    engine_.ensureClassMethodChunk(*cuf)) {
-                                Value seed = engine_.makeDefaultInstance(ctorName);
-                                frame.ip = ip + 1;
-                                pushCallFrame(*cc, &R[argBase], na, I.a, nargout_val,
-                                              false, 0, 0, ctorName, /*isCtor=*/true,
-                                              &seed);
-                                goto enter_frame;
-                            }
-                        }
-                        // No user ctor, or ctor body not VM-compilable → C++ path
-                        // (default-fill, or the ctor body on the TreeWalker hook).
-                        // Access already enforced above, so call construct directly.
-                        keel::ArrayRef<Value> as(&R[argBase], na);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        R[I.a] = cls->construct(as, ctx);
-                        break;
-                    }
-                }
-
-                // Resolution order matches MATLAB: user-on-path beats
-                // builtins. The compiled-cache check above already
-                // handled functions adopted earlier in the session.
-                // BUG #1 fix: m-file lookup MUST run before findExternal
-                // so a user split.m on the path shadows the builtin
-                // `split`. Previously the order was builtin → m-file
-                // (CALL_MULTI/VM picked the builtin and broke
-                // [a,b] = split(5) destructure).
-                {
-                    const keel::String &funcName = chunk.strings[funcIdx];
-
-                    // M-file lookup (Phase 9a; Phase 10 adds packages).
-                    // Compiler::registerFunctionAs binds the chunk under
-                    // the canonical name returned by lookupUserFunction —
-                    // qualified for +pkg/foo.m, bare for plain foo.m.
-                    if (auto *uf =
-                            engine_.lookupUserFunction(funcName,
-                                                        currentCallEnv())) {
-                        const BytecodeChunk *found = findCompiledFunc(uf->name);
-                        if (!found)
-                            found = engine_.ensureClassMethodChunk(*uf);
-                        if (!hasImports && originStable) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        }
-                        frame.ip = ip + 1;
-                        pushCallFrame(*found, &R[argBase], na, I.a, nargout_val);
-                        goto enter_frame;
-                    }
-
-                    CallbackBuiltin *cb = engine_.callbackBuiltin(funcName);
-                    if (cb) {
-                        keel::ArrayRef<Value> as(&R[argBase], na);
-                        auto outBox = keel::make_arc<Value>();
-                        if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
-                            auto cont = keel::make_arc<RegDestContinuation>(
-                                keel::move(inner), keel::move(outBox), frame.regBase + I.a);
-                            frame.ip = ip + 1;
-                            if (startContinuation(keel::move(cont)))
-                                goto enter_frame;
-                            R = frame.R;
-                            break;
-                        }
-                    }
-
-                    // External (builtin) function — call directly (no frame push).
-                    const ExternalFunc *fnPtr = engine_.findExternal(
-                        funcName, currentCallEnv());
-                    if (fnPtr) {
-                        if (!cb && !hasImports && originStable
-                            && !(na >= 1 && R[argBase].isObject())
-                            && !engine_.findClass(funcName)) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
-                        }
-                        keel::ArrayRef<Value> as(&R[argBase], na);
-                        Value ob[1];
-                        // Output-reuse hint: when no argument register
-                        // aliases the destination (so reading the args
-                        // can't observe a moved-out R[I.a]), hand the
-                        // destination's current value to the adapter
-                        // via outs[0]. Adapters that opt in (the
-                        // NUMKIT_UNARY_ADAPTER_HINT macro for abs/sin/cos/
-                        // exp/log) check for a uniquely-owned heap
-                        // double of matching shape and write straight
-                        // into its buffer instead of allocating fresh.
-                        // Adapters that don't opt in just overwrite
-                        // outs[0] — same observable behaviour, the
-                        // moved-out heap is freed when ob[0] is
-                        // overwritten.
-                        bool canHint = nargout_val > 0 && R[I.a].hasHeap();
-                        for (keel::u16 i = 0; i < na && canHint; ++i)
-                            if (&R[argBase + i] == &R[I.a])
-                                canHint = false;
-                        if (canHint)
-                            ob[0] = keel::move(R[I.a]);
-                        keel::MutArrayRef<Value> os(ob, 1);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        (*fnPtr)(as, nargout_val, os, ctx);
-                        R[I.a] = keel::move(ob[0]);
-                        break;
-                    }
-                    auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
-                        if (chunk.parentFuncName.empty())
-                            return keel::kNullOpt;
-                        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
-                            const CallFrame &pf = frames_[fi];
-                            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                                continue;
-                            for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                if (vname == varName && reg < pf.nregs) {
-                                    Value v = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
-                                    if (!v.isUnset() && !v.isDeleted())
-                                        return v;
-                                    break;
-                                }
-                            }
-                        }
-                        for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
-                            const VM::PausedState *ps = activePausedStates_[psi];
-                            if (!ps) continue;
-                            for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
-                                const CallFrame &pf = ps->frames[fi];
-                                if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                                    continue;
-                                if (pf.regBase + pf.nregs > ps->regSnapshot.size())
-                                    continue;
-                                const Value *psR = &ps->regSnapshot[pf.regBase];
-                                for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                    if (vname == varName && reg < pf.nregs) {
-                                        Value v = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
-                                        if (!v.isUnset() && !v.isDeleted())
-                                            return v;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        return keel::kNullOpt;
-                    };
-                    keel::usize dot = funcName.find('.');
-                    if (dot != keel::kInvalidIndex) {
-                        keel::StringRef root = funcName.substr(0, dot);
-                        keel::Optional<Value> rootOpt;
-                        if (frame.dynVars) {
-                            if (const Value *dvp = frame.dynVars->get(root);
-                                dvp && !dvp->isUnset() && !dvp->isDeleted())
-                                rootOpt = *dvp;
-                        }
-                        if (!rootOpt)
-                            rootOpt = findParentVar(root);
-                        if (!rootOpt && currentCallEnv()) {
-                            if (const Value *ev = currentCallEnv()->get(root);
-                                ev && !ev->isUnset() && !ev->isDeleted())
-                                rootOpt = *ev;
-                        }
-                        if (!rootOpt) {
-                            if (const Value *wv = engine_.workspaceEnv().get(root);
-                                wv && !wv->isUnset() && !wv->isDeleted())
-                                rootOpt = *wv;
-                        }
-                        if (rootOpt) {
-                            Value cur = keel::move(*rootOpt);
-                            keel::usize pos = dot + 1;
-                            while (pos < funcName.size()) {
-                                keel::usize nextDot = funcName.find('.', pos);
-                                keel::StringRef seg = (nextDot == keel::kInvalidIndex)
-                                                          ? funcName.substr(pos)
-                                                          : funcName.substr(pos, nextDot - pos);
-                                if (!cur.isStruct())
-                                    throw std::runtime_error("Dot indexing requires a struct");
-                                if (!cur.hasField(seg))
-                                    throw std::runtime_error(
-                                        keel::format("Reference to non-existent field '{}'", seg)
-                                            .c_str());
-                                Value nextVal = cur.field(seg);
-                                cur = keel::move(nextVal);
-                                if (nextDot == keel::kInvalidIndex)
-                                    break;
-                                pos = nextDot + 1;
-                            }
-                            if (na == 0) {
-                                R[I.a] = keel::move(cur);
-                            } else {
-                                if (execCallIndirectSpan(cur, I.a, &R[argBase], na, R, frame, ip))
-                                    goto enter_frame;
-                            }
-                            break;
-                        }
-                    }
-                    if (dot == keel::kInvalidIndex && na > 0) {
-                        keel::Optional<Value> varOpt;
-                        if (frame.dynVars) {
-                            if (const Value *dvp = frame.dynVars->get(funcName);
-                                dvp && !dvp->isUnset() && !dvp->isDeleted())
-                                varOpt = *dvp;
-                        }
-                        if (!varOpt)
-                            varOpt = findParentVar(funcName);
-                        if (!varOpt && currentCallEnv()) {
-                            if (const Value *ev = currentCallEnv()->get(funcName);
-                                ev && !ev->isUnset() && !ev->isDeleted())
-                                varOpt = *ev;
-                        }
-                        if (!varOpt) {
-                            if (const Value *wv = engine_.workspaceEnv().get(funcName);
-                                wv && !wv->isUnset() && !wv->isDeleted())
-                                varOpt = *wv;
-                        }
-                        if (varOpt) {
-                            Value target = keel::move(*varOpt);
-                            if (execCallIndirectSpan(target, I.a, na ? &R[argBase] : nullptr, na, R, frame, ip))
-                                goto enter_frame;
-                            break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        engine_
-                            .formatUndefinedFunctionError(
-                                funcName, keel::format("VM: undefined function '{}'", funcName))
-                            .c_str());
-                }
+                break;
             }
 
             case OpCode::CALL_FLATTEN: {
-                // First-class call with possible CSL args: flatten any comma-separated
-                // list arg into a runtime arg vector, then run the SAME full target
-                // dispatch as CALL (user fn / ctor / object method / m-file / callback /
-                // external) over AB/NF. Emitted only when an arg could be a CSL, so the
-                // hot no-CSL CALL is untouched. pushCallFrame copies args, so flatArgs may
-                // die after the goto. See dev-docs/memory/csl_first_class.md.
-                keel::u16 argBase = I.b, na = I.c;
-                keel::u16 nargout_val = I.e;
-                keel::i32 funcIdx = I.d;
-                SplatArgs splat = splatCallArgs(R, argBase, na);
-                const Value *AB = splat.data();
-                keel::usize NF = splat.size();
-
-                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
-                    const keel::String &candName = chunk.strings[funcIdx];
-                    const Value *dynLocal = nullptr;
-                    if (frame.dynVars) {
-                        if (const Value *dvp = frame.dynVars->get(candName);
-                            dvp && !dvp->isUnset() && !dvp->isDeleted())
-                            dynLocal = dvp;
-                    }
-                    if (!dynLocal) {
-                        if (frame.isScriptFrame) {
-                            Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                            dynLocal = scopeEnv.getLocal(candName);
-                        } else if (frame.env) {
-                            dynLocal = frame.env->getLocal(candName);
-                        }
-                        if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
-                            dynLocal = nullptr;
-                    }
-                    if (dynLocal) {
-                        Value target = *dynLocal;
-                        if (NF == 0 && !target.isFuncHandle()) {
-                            R[I.a] = keel::move(target);
-                        } else {
-                            if (execCallIndirectSpan(target, I.a, AB, NF, R, frame, ip))
-                                goto enter_frame;
-                        }
-                        break;
-                    }
-                }
-
-                const keel::u64 curEpoch = engine_.callCacheEpoch();
-                const Environment *scopeForImports = frame.isScriptFrame
-                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                    : frame.env.get();
-                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
-                const bool originStable = chunk.originKnown
-                    || !engine_.currentScriptDir()
-                    || engine_.currentScriptDir()->empty();
-
-                const bool firstArgIsObj = (NF >= 1 && AB[0].isObject());
-                if (firstArgIsObj) {
-                    const keel::String &mnm = chunk.strings[funcIdx];
-                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
-                    if (cls) {
-                        if (const auto *mfp = cls->methodFns.get(mnm)) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                            if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), mnm);
-                                frame.ip = ip + 1;
-                                pushCallFrame(*mc, AB, NF, I.a, nargout_val, false, 0, 0,
-                                              (*mfp)->ownerClass, false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (const auto *mfn = cls->methods.get(mnm)) {
-                            Value self = AB[0];
-                            keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                            Value out[1];
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1),
-                                   ctx);
-                            R[I.a] = keel::move(out[0]);
-                            break;
-                        }
-                    }
-                }
-
-                const BytecodeChunk *targetChunk = nullptr;
-                if (!firstArgIsObj
-                    && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
-                    && resolvedFuncs[funcIdx].epoch == curEpoch
-                    && resolvedFuncs[funcIdx].userChunk)
-                    targetChunk = resolvedFuncs[funcIdx].userChunk;
-                if (!targetChunk) {
-                    const keel::String &funcName = chunk.strings[funcIdx];
-                    if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                        if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                            resolvedFuncs.resize(funcIdx + 1);
-                        resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        targetChunk = found;
-                    }
-                }
-                if (targetChunk) {
-                    frame.ip = ip + 1;
-                    pushCallFrame(*targetChunk, AB, NF, I.a, nargout_val);
+                SplatArgs splat = splatCallArgs(R, I.b, I.c);
+                if (execCallNamedSingleSpan(I.a, I.d, I.e,
+                                            splat.data(), splat.size(),
+                                            R, frame, ip, resolvedFuncs))
                     goto enter_frame;
-                }
-
-                {
-                    const keel::String &ctorName = chunk.strings[funcIdx];
-                    if (const BuiltinClass *cls = engine_.findClass(ctorName);
-                        cls && cls->construct) {
-                        engine_.enforceCtorAccess(ctorName);
-                        if (const UserFunction *cuf = engine_.classCtor(ctorName)) {
-                            if (const BytecodeChunk *cc =
-                                    engine_.ensureClassMethodChunk(*cuf)) {
-                                Value seed = engine_.makeDefaultInstance(ctorName);
-                                frame.ip = ip + 1;
-                                pushCallFrame(*cc, AB, NF, I.a, nargout_val,
-                                              false, 0, 0, ctorName, /*isCtor=*/true,
-                                              &seed);
-                                goto enter_frame;
-                            }
-                        }
-                        keel::ArrayRef<Value> as(AB, NF);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        R[I.a] = cls->construct(as, ctx);
-                        break;
-                    }
-                }
-
-                {
-                    const keel::String &funcName = chunk.strings[funcIdx];
-                    if (auto *uf =
-                            engine_.lookupUserFunction(funcName, currentCallEnv())) {
-                        const BytecodeChunk *found = findCompiledFunc(uf->name);
-                        if (!found)
-                            found = engine_.ensureClassMethodChunk(*uf);
-                        if (!hasImports && originStable) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        }
-                        frame.ip = ip + 1;
-                        pushCallFrame(*found, AB, NF, I.a, nargout_val);
-                        goto enter_frame;
-                    }
-                    if (CallbackBuiltin *cb = engine_.callbackBuiltin(funcName)) {
-                        keel::ArrayRef<Value> as(AB, NF);
-                        auto outBox = keel::make_arc<Value>();
-                        if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
-                            auto cont = keel::make_arc<RegDestContinuation>(
-                                keel::move(inner), keel::move(outBox), frame.regBase + I.a);
-                            frame.ip = ip + 1;
-                            if (startContinuation(keel::move(cont)))
-                                goto enter_frame;
-                            R = frame.R;
-                            break;
-                        }
-                    }
-                    const ExternalFunc *fnPtr = engine_.findExternal(
-                        funcName, currentCallEnv());
-                    if (fnPtr) {
-                        keel::ArrayRef<Value> as(AB, NF);
-                        Value             ob[1];
-                        keel::MutArrayRef<Value>       os(ob, 1);
-                        CallContext       ctx{&engine_, currentCallEnv()};
-                        (*fnPtr)(as, nargout_val, os, ctx);
-                        R[I.a] = keel::move(ob[0]);
-                        break;
-                    }
-                    throw std::runtime_error(
-                        engine_
-                            .formatUndefinedFunctionError(
-                                funcName, keel::format("VM: undefined function '{}'", funcName))
-                            .c_str());
-                }
+                break;
             }
 
-            // ── Multi-return function call ──────────────────────
-            case OpCode::CALL_MULTI: {
-                // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout
-                keel::u16 outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
-                keel::i32 funcIdx = I.d;
-                const keel::String &funcName = chunk.strings[funcIdx];
-                // Splat any runtime CSL arg (pkg.fn(c{:})); zero-copy on a
-                // pure splice (bugs/closed/core/qualified-call-no-csl-splat).
-                SplatArgs splat = splatCallArgs(R, argBase, na);
-                const Value *AB = splat.data();
-                keel::usize NF = splat.size();
-
-                if (frame.dynVars || (frame.env && frame.env->hasLocals()) || frame.isScriptFrame) {
-                    const Value *dynLocal = nullptr;
-                    if (frame.dynVars) {
-                        if (const Value *dvp = frame.dynVars->get(funcName);
-                            dvp && !dvp->isUnset() && !dvp->isDeleted())
-                            dynLocal = dvp;
-                    }
-                    if (!dynLocal) {
-                        if (frame.isScriptFrame) {
-                            Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                            dynLocal = scopeEnv.getLocal(funcName);
-                        } else if (frame.env) {
-                            dynLocal = frame.env->getLocal(funcName);
-                        }
-                        if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
-                            dynLocal = nullptr;
-                    }
-                    if (dynLocal && dynLocal->isFuncHandle()) {
-                        const Value fh = *dynLocal;
-                        const keel::usize ncaps = fh.funcHandleCaptureCount();
-                        const keel::StringRef hName = fh.funcHandleNameRef();
-                        keel::Array<Value> cargs(NF + ncaps);
-                        for (keel::usize i = 0; i < NF; ++i) cargs[i] = AB[i];
-                        for (keel::usize i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
-                        if (const BytecodeChunk *fc = findCompiledFunc(hName)) {
-                            frame.ip = ip + 1;
-                            returnBuf_.clear();
-                            pushCallFrame(*fc, cargs.data(), cargs.size(), 0, nout, true, outBase, nout);
-                            goto enter_frame;
-                        }
-                        if (const ExternalFunc *fp = engine_.findExternal(hName, currentCallEnv())) {
-                            Value smallOb[8];
-                            keel::Array<Value> bigOb;
-                            Value *obPtr = (nout <= 8) ? smallOb : (bigOb.resize(nout), bigOb.data());
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*fp)(keel::ArrayRef<Value>(cargs.data(), NF), nout, keel::MutArrayRef<Value>(obPtr, nout), ctx);
-                            for (keel::u16 i = 0; i < nout; ++i)
-                                if (obPtr[i].isUnset())
-                                    throw std::runtime_error("Too many output arguments.");
-                            for (keel::u16 i = 0; i < nout; ++i)
-                                R[outBase + i] = keel::move(obPtr[i]);
-                            break;
-                        }
-                    }
-                }
-
-                const keel::u64 curEpoch = engine_.callCacheEpoch();
-                const Environment *scopeForImports = frame.isScriptFrame
-                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                    : frame.env.get();
-                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
-                const bool originStable = chunk.originKnown
-                    || !engine_.currentScriptDir()
-                    || engine_.currentScriptDir()->empty();
-
-                // Inline cache check (user chunk or external builtin).
-                // Skip when first arg is an object so a class method wins.
-                const bool firstArgIsObj = (NF >= 1 && AB[0].isObject());
-                if (!firstArgIsObj
-                    && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
-                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
-                    const auto &ce = resolvedFuncs[funcIdx];
-                    if (ce.userChunk) {
-                        frame.ip = ip + 1;
-                        returnBuf_.clear();
-                        pushCallFrame(*ce.userChunk, AB, NF, 0, nout, true, outBase, nout);
-                        goto enter_frame;
-                    }
-                    if (ce.extFunc && !hasImports && originStable) {
-                        Value smallOut[8];
-                        keel::Array<Value> bigOut;
-                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        keel::ArrayRef<Value> as(AB, NF);
-                        keel::MutArrayRef<Value> os(outPtr, nout);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        (*ce.extFunc)(as, nout, os, ctx);
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = keel::move(outPtr[i]);
-                        break;
-                    }
-                }
-
-                // OBJECT function-form multi-output: [a,b] = m(obj, ...).
-                // A class method on the dominant (first) object argument
-                // beats a same-named global/path function (matches TW).
-                if (firstArgIsObj) {
-                    const BuiltinClass *cls =
-                        engine_.findClass(AB[0].objectClassNameRef());
-                    if (cls) {
-                        if (const auto *mfp = cls->methodFns.get(funcName)) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                            if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
-                                frame.ip = ip + 1;
-                                returnBuf_.clear();
-                                pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
-                                              (*mfp)->ownerClass, false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (const auto *mfn = cls->methods.get(funcName)) {
-                            Value self = AB[0];
-                            keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                            Value smallOut[8];
-                            keel::Array<Value> bigOut;
-                            Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*mfn)(self, rest, nout,
-                                   keel::MutArrayRef<Value>(outPtr, nout), ctx);
-                            for (keel::u16 i = 0; i < nout; ++i)
-                                if (outPtr[i].isUnset())
-                                    throw std::runtime_error("Too many output arguments.");
-                            for (keel::usize i = 0; i < nout; ++i)
-                                R[outBase + i] = keel::move(outPtr[i]);
-                            break;
-                        }
-                    }
-                }
-
-                // Try compiled user function next.
-                if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                    if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                        resolvedFuncs.resize(funcIdx + 1);
-                    resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                    frame.ip = ip + 1;
-                    returnBuf_.clear();
-                    pushCallFrame(*found, AB, NF,
-                                  0, nout, true, outBase, nout);
-                    goto enter_frame;
-                }
-                // BUG #1 fix: m-file resolution must beat builtin
-                // resolution to match MATLAB. Was builtin → m-file —
-                // a user `split.m` couldn't shadow the builtin `split`,
-                // so [a,b] = split(5) ended up calling the 1-output
-                // builtin and failing the destructure.
-                {
-                    // M-file lookup (Phase 9a / 10). Same canonical-name
-                    // dispatch as CALL above.
-                    if (auto *uf =
-                            engine_.lookupUserFunction(funcName,
-                                                        currentCallEnv())) {
-                        const BytecodeChunk *found = findCompiledFunc(uf->name);
-                        if (!found)
-                            found = engine_.ensureClassMethodChunk(*uf);
-                        if (!hasImports && originStable) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        }
-                        frame.ip = ip + 1;
-                        returnBuf_.clear();
-                        pushCallFrame(*found, AB, NF,
-                                      0, nout, true, outBase, nout);
-                        goto enter_frame;
-                    }
-                    // External function with nout — call directly.
-                    const ExternalFunc *fnPtr = engine_.findExternal(
-                        funcName, currentCallEnv());
-                    if (fnPtr) {
-                        if (!hasImports && originStable
-                            && !(NF >= 1 && AB[0].isObject())
-                            && !engine_.callbackBuiltin(funcName)
-                            && !engine_.findClass(funcName)) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
-                        }
-                        Value smallOut[8];
-                        keel::Array<Value> bigOut;
-                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        keel::ArrayRef<Value> as(AB, NF);
-                        keel::MutArrayRef<Value> os(outPtr, nout);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        (*fnPtr)(as, nout, os, ctx);
-                        // MATLAB: asking for more outputs than the builtin
-                        // produces is "Too many output arguments" here, not
-                        // a silently-unset target that later reads as a
-                        // phantom undefined function (bug #44).
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = keel::move(outPtr[i]);
-                        break;
-                    }
-                    throw std::runtime_error(
-                        engine_
-                            .formatUndefinedFunctionError(
-                                funcName, keel::format("VM: undefined function '{}'", funcName))
-                            .c_str());
-                }
-            }
-
+            case OpCode::CALL_MULTI:
             case OpCode::CALL_FLATTEN_MULTI: {
-                // First-class multi-output call with possible CSL args: flatten any CSL
-                // arg into a runtime arg vector, then run the CALL_MULTI target dispatch
-                // (compiled user fn / object method / m-file / external) over AB/NF.
-                // a=outBase, b=argBase, c=nargs, d=funcIdx, e=nout.
-                keel::u16 outBase = I.a, argBase = I.b, na = I.c, nout = I.e;
-                keel::i32 funcIdx = I.d;
-                const keel::String &funcName = chunk.strings[funcIdx];
-                SplatArgs splat = splatCallArgs(R, argBase, na);
-                const Value *AB = splat.data();
-                keel::usize NF = splat.size();
-
-                const keel::u64 curEpoch = engine_.callCacheEpoch();
-                const Environment *scopeForImports = frame.isScriptFrame
-                    ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
-                    : frame.env.get();
-                const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
-                const bool originStable = chunk.originKnown
-                    || !engine_.currentScriptDir()
-                    || engine_.currentScriptDir()->empty();
-
-                const bool firstArgIsObj = (NF >= 1 && AB[0].isObject());
-                if (!firstArgIsObj
-                    && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
-                    && resolvedFuncs[funcIdx].epoch == curEpoch) {
-                    const auto &ce = resolvedFuncs[funcIdx];
-                    if (ce.userChunk) {
-                        frame.ip = ip + 1;
-                        returnBuf_.clear();
-                        pushCallFrame(*ce.userChunk, AB, NF, 0, nout, true, outBase, nout);
-                        goto enter_frame;
-                    }
-                    if (ce.extFunc && !hasImports && originStable) {
-                        Value smallOut[8];
-                        keel::Array<Value> bigOut;
-                        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        keel::ArrayRef<Value> as(AB, NF);
-                        keel::MutArrayRef<Value> os(outPtr, nout);
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        (*ce.extFunc)(as, nout, os, ctx);
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = keel::move(outPtr[i]);
-                        break;
-                    }
-                }
-
-                if (firstArgIsObj) {
-                    const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
-                    if (cls) {
-                        if (const auto *mfp = cls->methodFns.get(funcName)) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                            if (mc) {
-                                engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
-                                frame.ip = ip + 1;
-                                returnBuf_.clear();
-                                pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
-                                              (*mfp)->ownerClass, false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (const auto *mfn = cls->methods.get(funcName)) {
-                            Value              self = AB[0];
-                            keel::ArrayRef<Value>  rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
-                            Value              smallOut[8];
-                            keel::Array<Value> bigOut;
-                            Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                            CallContext        ctx{&engine_, currentCallEnv()};
-                            (*mfn)(self, rest, nout,
-                                   keel::MutArrayRef<Value>(outPtr, nout), ctx);
-                            for (keel::u16 i = 0; i < nout; ++i)
-                                if (outPtr[i].isUnset())
-                                    throw std::runtime_error("Too many output arguments.");
-                            for (keel::usize i = 0; i < nout; ++i)
-                                R[outBase + i] = keel::move(outPtr[i]);
-                            break;
-                        }
-                    }
-                }
-
-                if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-                    if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                        resolvedFuncs.resize(funcIdx + 1);
-                    resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                    frame.ip = ip + 1;
-                    returnBuf_.clear();
-                    pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
+                SplatArgs splat = splatCallArgs(R, I.b, I.c);
+                if (execCallNamedMultiSpan(I.a, I.d, I.e,
+                                           splat.data(), splat.size(),
+                                           R, frame, ip, resolvedFuncs))
                     goto enter_frame;
-                }
-                {
-                    if (auto *uf =
-                            engine_.lookupUserFunction(funcName, currentCallEnv())) {
-                        const BytecodeChunk *found = findCompiledFunc(uf->name);
-                        if (!found)
-                            found = engine_.ensureClassMethodChunk(*uf);
-                        if (!hasImports && originStable) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
-                        }
-                        frame.ip = ip + 1;
-                        returnBuf_.clear();
-                        pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
-                        goto enter_frame;
-                    }
-                    const ExternalFunc *fnPtr = engine_.findExternal(
-                        funcName, currentCallEnv());
-                    if (fnPtr) {
-                        if (!hasImports && originStable
-                            && !(NF >= 1 && AB[0].isObject())
-                            && !engine_.callbackBuiltin(funcName)
-                            && !engine_.findClass(funcName)) {
-                            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
-                                resolvedFuncs.resize(funcIdx + 1);
-                            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
-                        }
-                        Value              smallOut[8];
-                        keel::Array<Value> bigOut;
-                        Value             *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
-                        keel::ArrayRef<Value>  as(AB, NF);
-                        keel::MutArrayRef<Value>        os(outPtr, nout);
-                        CallContext        ctx{&engine_, currentCallEnv()};
-                        (*fnPtr)(as, nout, os, ctx);
-                        for (keel::u16 i = 0; i < nout; ++i)
-                            if (outPtr[i].isUnset())
-                                throw std::runtime_error("Too many output arguments.");
-                        for (keel::usize i = 0; i < nout; ++i)
-                            R[outBase + i] = keel::move(outPtr[i]);
-                        break;
-                    }
-                    throw std::runtime_error(
-                        engine_
-                            .formatUndefinedFunctionError(
-                                funcName, keel::format("VM: undefined function '{}'", funcName))
-                            .c_str());
-                }
+                break;
             }
 
             // ── Indirect function call (func handle) or array indexing ─
@@ -5792,7 +4872,7 @@ bool VM::tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVa
 void VM::execCallBuiltin(const Instruction &I, Value *R)
 {
     keel::u16 argBase = I.b, na = I.c;
-    keel::i32 bid = I.d;
+    const FastBuiltinId bid = static_cast<FastBuiltinId>(I.d);
 
     // 1-arg scalar fast path
     if (na == 1 && R[argBase].isDoubleScalar()) {
@@ -5800,31 +4880,30 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         keel::f64 result;
         bool handled = true;
         switch (bid) {
-        case 0:  result = std::fabs(v); break;
-        case 1:  result = std::floor(v); break;
-        case 2:  result = std::ceil(v); break;
-        case 3:  result = std::round(v); break;
-        case 4:  result = std::trunc(v); break;
+        case FastBuiltinId::Abs:   result = std::fabs(v); break;
+        case FastBuiltinId::Floor: result = std::floor(v); break;
+        case FastBuiltinId::Ceil:  result = std::ceil(v); break;
+        case FastBuiltinId::Round: result = std::round(v); break;
+        case FastBuiltinId::Fix:   result = std::trunc(v); break;
         // sqrt / log / log2 / log10 of a negative scalar promote to a
-        // complex result in MATLAB. The scalar fast path can only hold a
-        // real double, so for v < 0 we bail (handled = false) and let the
-        // full builtin (Value wrapper) produce the complex value.
-        case 5:  if (v < 0.0) { handled = false; break; } result = std::sqrt(v);  break;
-        case 6:  result = std::exp(v); break;
-        case 7:  if (v < 0.0) { handled = false; break; } result = std::log(v);   break;
-        case 8:  if (v < 0.0) { handled = false; break; } result = std::log2(v);  break;
-        case 9:  if (v < 0.0) { handled = false; break; } result = std::log10(v); break;
-        case 10: result = std::sin(v); break;
-        case 11: result = std::cos(v); break;
-        case 12: result = std::tan(v); break;
-        case 13:
+        // complex result. The scalar fast path can only hold a real double,
+        // so for v < 0 we bail and let the full builtin produce complex.
+        case FastBuiltinId::Sqrt:  if (v < 0.0) { handled = false; break; } result = std::sqrt(v);  break;
+        case FastBuiltinId::Exp:   result = std::exp(v); break;
+        case FastBuiltinId::Log:   if (v < 0.0) { handled = false; break; } result = std::log(v);   break;
+        case FastBuiltinId::Log2:  if (v < 0.0) { handled = false; break; } result = std::log2(v);  break;
+        case FastBuiltinId::Log10: if (v < 0.0) { handled = false; break; } result = std::log10(v); break;
+        case FastBuiltinId::Sin:   result = std::sin(v); break;
+        case FastBuiltinId::Cos:   result = std::cos(v); break;
+        case FastBuiltinId::Tan:   result = std::tan(v); break;
+        case FastBuiltinId::Sign:
             result = std::isnan(v) ? std::numeric_limits<keel::f64>::quiet_NaN()
                      : (v > 0)     ? 1.0
                      : (v < 0)     ? -1.0
                                    : 0.0;
             break;
-        case 14: R[I.a].setLogicalFast(std::isnan(v)); return;
-        case 15: R[I.a].setLogicalFast(std::isinf(v)); return;
+        case FastBuiltinId::IsNan: R[I.a].setLogicalFast(std::isnan(v)); return;
+        case FastBuiltinId::IsInf: R[I.a].setLogicalFast(std::isinf(v)); return;
         default: handled = false; break;
         }
         if (handled) {
@@ -5839,21 +4918,17 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         keel::f64 result;
         bool handled = true;
         switch (bid) {
-        case 20:
-            // MATLAB: mod(a, 0) == a (std::fmod(a, 0) would be NaN).
+        case FastBuiltinId::Mod:
             if (b == 0.0) { result = a; break; }
             result = std::fmod(a, b);
             if (result != 0.0 && ((result > 0) != (b > 0)))
                 result += b;
             break;
-        case 21: result = std::fmod(a, b); break;
-        // max/min ignore NaN (MATLAB): fmax/fmin return the non-NaN
-        // operand, NaN only if both are NaN. The old (a>=b)?a:b returned
-        // NaN for max(5,NaN) and disagreed with the TreeWalker (fmax).
-        case 22: result = std::fmax(a, b); break;
-        case 23: result = std::fmin(a, b); break;
-        case 24: result = std::pow(a, b); break;
-        case 25: result = std::atan2(a, b); break;
+        case FastBuiltinId::Rem:   result = std::fmod(a, b); break;
+        case FastBuiltinId::Max:   result = std::fmax(a, b); break;
+        case FastBuiltinId::Min:   result = std::fmin(a, b); break;
+        case FastBuiltinId::Pow:   result = std::pow(a, b); break;
+        case FastBuiltinId::Atan2: result = std::atan2(a, b); break;
         default: handled = false; break;
         }
         if (handled) {
@@ -5863,7 +4938,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
     }
 
     // Generic fallback via externalFuncs_
-    const char *fname = builtinIdName(bid);
+    const char *fname = fastBuiltinName(bid);
     if (fname) {
         if (na >= 1 && R[argBase].isObject()) {
             const BuiltinClass *cls = engine_.findClass(R[argBase].objectClassNameRef());
@@ -5903,6 +4978,473 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
         }
     }
     throw std::runtime_error("VM: unsupported builtin");
+}
+
+const Value *VM::findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
+                                 const Value *R, const keel::String &name) const
+{
+    if (!frame.dynVars && !(frame.env && frame.env->hasLocals()) && !frame.isScriptFrame)
+        return nullptr;
+    if (chunk.assignedVars.contains(name)) {
+        for (const auto &[vn, reg] : chunk.varMap) {
+            if (vn == name && reg < chunk.numRegisters) {
+                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                if (rv.isDeleted())
+                    return nullptr;
+                break;
+            }
+        }
+    }
+    if (frame.dynVars) {
+        if (const Value *dvp = frame.dynVars->get(name);
+            dvp && !dvp->isUnset() && !dvp->isDeleted())
+            return dvp;
+    }
+    const Value *dynLocal = nullptr;
+    if (frame.isScriptFrame) {
+        Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+        dynLocal = scopeEnv.getLocal(name);
+    } else if (frame.env) {
+        dynLocal = frame.env->getLocal(name);
+    }
+    if (dynLocal && (dynLocal->isUnset() || dynLocal->isDeleted()))
+        return nullptr;
+    return dynLocal;
+}
+
+bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 nargout_val,
+                                 const Value *AB, keel::usize NF, Value *&R,
+                                 CallFrame &frame, const Instruction *ip,
+                                 keel::Array<CallCacheEntry> &resolvedFuncs)
+{
+    const BytecodeChunk &chunk = *frame.chunk;
+    const keel::String &funcName = chunk.strings[funcIdx];
+
+    // Dynamically injected local variable (via eval/load/assignin)
+    // shadows functions and builtins.
+    if (const Value *dynLocal = findDynLocalVar(chunk, frame, R, funcName)) {
+        Value target = *dynLocal;
+        if (NF == 0 && !target.isFuncHandle()) {
+            R[dstReg] = keel::move(target);
+            return false;
+        }
+        return execCallIndirectSpan(target, dstReg, AB, NF, R, frame, ip);
+    }
+
+    const keel::u64 curEpoch = engine_.callCacheEpoch();
+    const Environment *scopeForImports = frame.isScriptFrame
+        ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+        : frame.env.get();
+    const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+    const bool originStable = chunk.originKnown
+        || !engine_.currentScriptDir()
+        || engine_.currentScriptDir()->empty();
+
+    // Try resolved inline cache first (skip when first arg is an object
+    // so a class method beats a same-named global function).
+    const bool firstArgIsObj = (NF >= 1 && AB[0].isObject());
+    const BytecodeChunk *targetChunk = nullptr;
+    if (!firstArgIsObj
+        && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
+        && resolvedFuncs[funcIdx].epoch == curEpoch) {
+        const auto &ce = resolvedFuncs[funcIdx];
+        if (ce.userChunk) {
+            targetChunk = ce.userChunk;
+        } else if (ce.extFunc && !hasImports && originStable) {
+            keel::ArrayRef<Value> as(AB, NF);
+            Value ob[1];
+            bool canHint = nargout_val > 0 && R[dstReg].hasHeap();
+            for (keel::usize i = 0; i < NF && canHint; ++i)
+                if (&AB[i] == &R[dstReg])
+                    canHint = false;
+            if (canHint)
+                ob[0] = keel::move(R[dstReg]);
+            keel::MutArrayRef<Value> os(ob, 1);
+            CallContext ctx{&engine_, currentCallEnv()};
+            (*ce.extFunc)(as, nargout_val, os, ctx);
+            R[dstReg] = keel::move(ob[0]);
+            return false;
+        }
+    }
+
+    // OBJECT function-form: m(obj, ...) where obj's class has method m
+    // beats a same-named global/path function (matches TreeWalker).
+    if (firstArgIsObj) {
+        const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
+        if (cls) {
+            if (const auto *mfp = cls->methodFns.get(funcName)) {
+                const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
+                if (mc) {
+                    engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
+                    frame.ip = ip + 1;
+                    pushCallFrame(*mc, AB, NF, dstReg, nargout_val, false, 0, 0,
+                                  (*mfp)->ownerClass, false);
+                    return true;
+                }
+            }
+            if (const auto *mfn = cls->methods.get(funcName)) {
+                Value self = AB[0];
+                keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
+                Value out[1];
+                CallContext ctx{&engine_, currentCallEnv()};
+                (*mfn)(self, rest, nargout_val, keel::MutArrayRef<Value>(out, 1), ctx);
+                R[dstReg] = keel::move(out[0]);
+                return false;
+            }
+        }
+    }
+
+    if (!targetChunk) {
+        if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
+            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+                resolvedFuncs.resize(funcIdx + 1);
+            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+            targetChunk = found;
+        }
+    }
+
+    if (targetChunk) {
+        frame.ip = ip + 1;
+        pushCallFrame(*targetChunk, AB, NF, dstReg, nargout_val);
+        return true;
+    }
+
+    // OBJECT: ClassName(args) constructs an instance when the name is a registered class.
+    if (const BuiltinClass *cls = engine_.findClass(funcName); cls && cls->construct) {
+        engine_.enforceCtorAccess(funcName);
+        if (const UserFunction *cuf = engine_.classCtor(funcName)) {
+            if (const BytecodeChunk *cc = engine_.ensureClassMethodChunk(*cuf)) {
+                Value seed = engine_.makeDefaultInstance(funcName);
+                frame.ip = ip + 1;
+                pushCallFrame(*cc, AB, NF, dstReg, nargout_val,
+                              false, 0, 0, funcName, /*isCtor=*/true, &seed);
+                return true;
+            }
+        }
+        keel::ArrayRef<Value> as(AB, NF);
+        CallContext ctx{&engine_, currentCallEnv()};
+        R[dstReg] = cls->construct(as, ctx);
+        return false;
+    }
+
+    // M-file lookup beats builtins.
+    if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
+        const BytecodeChunk *found = findCompiledFunc(uf->name);
+        if (!found)
+            found = engine_.ensureClassMethodChunk(*uf);
+        if (!hasImports && originStable) {
+            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+                resolvedFuncs.resize(funcIdx + 1);
+            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+        }
+        frame.ip = ip + 1;
+        pushCallFrame(*found, AB, NF, dstReg, nargout_val);
+        return true;
+    }
+
+    CallbackBuiltin *cb = engine_.callbackBuiltin(funcName);
+    if (cb) {
+        keel::ArrayRef<Value> as(AB, NF);
+        auto outBox = keel::make_arc<Value>();
+        if (auto inner = cb->tryStart(as, nargout_val, outBox.get(), engine_)) {
+            auto cont = keel::make_arc<RegDestContinuation>(
+                keel::move(inner), keel::move(outBox), frame.regBase + dstReg);
+            frame.ip = ip + 1;
+            if (startContinuation(keel::move(cont)))
+                return true;
+            R = frames_.back().R;
+            return false;
+        }
+    }
+
+    if (const ExternalFunc *fnPtr = engine_.findExternal(funcName, currentCallEnv())) {
+        if (!cb && !hasImports && originStable && !firstArgIsObj && !engine_.findClass(funcName)) {
+            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+                resolvedFuncs.resize(funcIdx + 1);
+            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
+        }
+        keel::ArrayRef<Value> as(AB, NF);
+        Value ob[1];
+        bool canHint = nargout_val > 0 && R[dstReg].hasHeap();
+        for (keel::usize i = 0; i < NF && canHint; ++i)
+            if (&AB[i] == &R[dstReg])
+                canHint = false;
+        if (canHint)
+            ob[0] = keel::move(R[dstReg]);
+        keel::MutArrayRef<Value> os(ob, 1);
+        CallContext ctx{&engine_, currentCallEnv()};
+        (*fnPtr)(as, nargout_val, os, ctx);
+        R[dstReg] = keel::move(ob[0]);
+        return false;
+    }
+
+    // Fallback: nested-function parent-frame variable or workspace struct/var.
+    auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
+        if (chunk.parentFuncName.empty())
+            return keel::kNullOpt;
+        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
+            const CallFrame &pf = frames_[fi];
+            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                continue;
+            for (const auto &[vname, reg] : pf.chunk->varMap) {
+                if (vname == varName && reg < pf.nregs) {
+                    Value v = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
+                    if (!v.isUnset() && !v.isDeleted())
+                        return v;
+                    break;
+                }
+            }
+        }
+        for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
+            const VM::PausedState *ps = activePausedStates_[psi];
+            if (!ps) continue;
+            for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                const CallFrame &pf = ps->frames[fi];
+                if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                    continue;
+                if (pf.regBase + pf.nregs > ps->regSnapshot.size())
+                    continue;
+                const Value *psR = &ps->regSnapshot[pf.regBase];
+                for (const auto &[vname, reg] : pf.chunk->varMap) {
+                    if (vname == varName && reg < pf.nregs) {
+                        Value v = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
+                        if (!v.isUnset() && !v.isDeleted())
+                            return v;
+                        break;
+                    }
+                }
+            }
+        }
+        return keel::kNullOpt;
+    };
+
+    const keel::usize dot = funcName.find('.');
+    if (dot != keel::kInvalidIndex) {
+        keel::StringRef root = funcName.substr(0, dot);
+        keel::Optional<Value> rootOpt;
+        if (frame.dynVars) {
+            if (const Value *dvp = frame.dynVars->get(root);
+                dvp && !dvp->isUnset() && !dvp->isDeleted())
+                rootOpt = *dvp;
+        }
+        if (!rootOpt)
+            rootOpt = findParentVar(root);
+        if (!rootOpt && currentCallEnv()) {
+            if (const Value *ev = currentCallEnv()->get(root);
+                ev && !ev->isUnset() && !ev->isDeleted())
+                rootOpt = *ev;
+        }
+        if (!rootOpt) {
+            if (const Value *wv = engine_.workspaceEnv().get(root);
+                wv && !wv->isUnset() && !wv->isDeleted())
+                rootOpt = *wv;
+        }
+        if (rootOpt) {
+            Value cur = keel::move(*rootOpt);
+            keel::usize pos = dot + 1;
+            while (pos < funcName.size()) {
+                keel::usize nextDot = funcName.find('.', pos);
+                keel::StringRef seg = (nextDot == keel::kInvalidIndex)
+                                          ? funcName.substr(pos)
+                                          : funcName.substr(pos, nextDot - pos);
+                if (!cur.isStruct())
+                    throw std::runtime_error("Dot indexing requires a struct");
+                if (!cur.hasField(seg))
+                    throw std::runtime_error(
+                        keel::format("Reference to non-existent field '{}'", seg).c_str());
+                Value nextVal = cur.field(seg);
+                cur = keel::move(nextVal);
+                if (nextDot == keel::kInvalidIndex)
+                    break;
+                pos = nextDot + 1;
+            }
+            if (NF == 0) {
+                R[dstReg] = keel::move(cur);
+                return false;
+            }
+            return execCallIndirectSpan(cur, dstReg, AB, NF, R, frame, ip);
+        }
+    }
+    if (dot == keel::kInvalidIndex && NF > 0) {
+        keel::Optional<Value> varOpt;
+        if (frame.dynVars) {
+            if (const Value *dvp = frame.dynVars->get(funcName);
+                dvp && !dvp->isUnset() && !dvp->isDeleted())
+                varOpt = *dvp;
+        }
+        if (!varOpt)
+            varOpt = findParentVar(funcName);
+        if (!varOpt && currentCallEnv()) {
+            if (const Value *ev = currentCallEnv()->get(funcName);
+                ev && !ev->isUnset() && !ev->isDeleted())
+                varOpt = *ev;
+        }
+        if (!varOpt) {
+            if (const Value *wv = engine_.workspaceEnv().get(funcName);
+                wv && !wv->isUnset() && !wv->isDeleted())
+                varOpt = *wv;
+        }
+        if (varOpt) {
+            Value target = keel::move(*varOpt);
+            return execCallIndirectSpan(target, dstReg, AB, NF, R, frame, ip);
+        }
+    }
+
+    throw std::runtime_error(
+        engine_.formatUndefinedFunctionError(
+            funcName, keel::format("VM: undefined function '{}'", funcName)).c_str());
+}
+
+bool VM::execCallNamedMultiSpan(keel::u16 outBase, keel::i32 funcIdx, keel::u16 nout,
+                                const Value *AB, keel::usize NF, Value *R,
+                                CallFrame &frame, const Instruction *ip,
+                                keel::Array<CallCacheEntry> &resolvedFuncs)
+{
+    const BytecodeChunk &chunk = *frame.chunk;
+    const keel::String &funcName = chunk.strings[funcIdx];
+
+    auto writeMultiOutputs = [&](Value *outPtr) {
+        for (keel::u16 i = 0; i < nout; ++i)
+            if (outPtr[i].isUnset())
+                throw std::runtime_error("Too many output arguments.");
+        for (keel::usize i = 0; i < nout; ++i)
+            R[outBase + i] = keel::move(outPtr[i]);
+    };
+
+    if (const Value *dynLocal = findDynLocalVar(chunk, frame, R, funcName);
+        dynLocal && dynLocal->isFuncHandle()) {
+        const Value fh = *dynLocal;
+        const keel::usize ncaps = fh.funcHandleCaptureCount();
+        const keel::StringRef hName = fh.funcHandleNameRef();
+        keel::Array<Value> cargs(NF + ncaps);
+        for (keel::usize i = 0; i < NF; ++i) cargs[i] = AB[i];
+        for (keel::usize i = 0; i < ncaps; ++i) cargs[NF + i] = fh.funcHandleCapture(i);
+        if (const BytecodeChunk *fc = findCompiledFunc(hName)) {
+            frame.ip = ip + 1;
+            returnBuf_.clear();
+            pushCallFrame(*fc, cargs.data(), cargs.size(), 0, nout, true, outBase, nout);
+            return true;
+        }
+        if (const ExternalFunc *fp = engine_.findExternal(hName, currentCallEnv())) {
+            Value smallOb[8];
+            keel::Array<Value> bigOb;
+            Value *obPtr = (nout <= 8) ? smallOb : (bigOb.resize(nout), bigOb.data());
+            CallContext ctx{&engine_, currentCallEnv()};
+            (*fp)(keel::ArrayRef<Value>(cargs.data(), NF), nout,
+                  keel::MutArrayRef<Value>(obPtr, nout), ctx);
+            writeMultiOutputs(obPtr);
+            return false;
+        }
+    }
+
+    const keel::u64 curEpoch = engine_.callCacheEpoch();
+    const Environment *scopeForImports = frame.isScriptFrame
+        ? (inheritedScope_ ? inheritedScope_ : &engine_.workspaceEnv())
+        : frame.env.get();
+    const bool hasImports = scopeForImports && scopeForImports->hasAnyActiveImports();
+    const bool originStable = chunk.originKnown
+        || !engine_.currentScriptDir()
+        || engine_.currentScriptDir()->empty();
+
+    const bool firstArgIsObj = (NF >= 1 && AB[0].isObject());
+    if (!firstArgIsObj
+        && funcIdx < keel::as<keel::i32>(resolvedFuncs.size())
+        && resolvedFuncs[funcIdx].epoch == curEpoch) {
+        const auto &ce = resolvedFuncs[funcIdx];
+        if (ce.userChunk) {
+            frame.ip = ip + 1;
+            returnBuf_.clear();
+            pushCallFrame(*ce.userChunk, AB, NF, 0, nout, true, outBase, nout);
+            return true;
+        }
+        if (ce.extFunc && !hasImports && originStable) {
+            Value smallOut[8];
+            keel::Array<Value> bigOut;
+            Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+            CallContext ctx{&engine_, currentCallEnv()};
+            (*ce.extFunc)(keel::ArrayRef<Value>(AB, NF), nout,
+                          keel::MutArrayRef<Value>(outPtr, nout), ctx);
+            writeMultiOutputs(outPtr);
+            return false;
+        }
+    }
+
+    // OBJECT function-form multi-output: [a,b] = m(obj, ...).
+    // A class method on the dominant (first) object beats global/path functions.
+    if (firstArgIsObj) {
+        const BuiltinClass *cls = engine_.findClass(AB[0].objectClassNameRef());
+        if (cls) {
+            if (const auto *mfp = cls->methodFns.get(funcName)) {
+                const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
+                if (mc) {
+                    engine_.enforceMethodAccess(AB[0].objectClassNameRef(), funcName);
+                    frame.ip = ip + 1;
+                    returnBuf_.clear();
+                    pushCallFrame(*mc, AB, NF, 0, nout, true, outBase, nout,
+                                  (*mfp)->ownerClass, false);
+                    return true;
+                }
+            }
+            if (const auto *mfn = cls->methods.get(funcName)) {
+                Value self = AB[0];
+                keel::ArrayRef<Value> rest((NF > 1) ? &AB[1] : nullptr, NF - 1);
+                Value smallOut[8];
+                keel::Array<Value> bigOut;
+                Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+                CallContext ctx{&engine_, currentCallEnv()};
+                (*mfn)(self, rest, nout, keel::MutArrayRef<Value>(outPtr, nout), ctx);
+                writeMultiOutputs(outPtr);
+                return false;
+            }
+        }
+    }
+
+    if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
+        if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+            resolvedFuncs.resize(funcIdx + 1);
+        resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+        frame.ip = ip + 1;
+        returnBuf_.clear();
+        pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
+        return true;
+    }
+
+    if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
+        const BytecodeChunk *found = findCompiledFunc(uf->name);
+        if (!found)
+            found = engine_.ensureClassMethodChunk(*uf);
+        if (!hasImports && originStable) {
+            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+                resolvedFuncs.resize(funcIdx + 1);
+            resolvedFuncs[funcIdx] = {found, nullptr, curEpoch};
+        }
+        frame.ip = ip + 1;
+        returnBuf_.clear();
+        pushCallFrame(*found, AB, NF, 0, nout, true, outBase, nout);
+        return true;
+    }
+
+    if (const ExternalFunc *fnPtr = engine_.findExternal(funcName, currentCallEnv())) {
+        if (!hasImports && originStable && !firstArgIsObj
+            && !engine_.callbackBuiltin(funcName)
+            && !engine_.findClass(funcName)) {
+            if (funcIdx >= keel::as<keel::i32>(resolvedFuncs.size()))
+                resolvedFuncs.resize(funcIdx + 1);
+            resolvedFuncs[funcIdx] = {nullptr, fnPtr, curEpoch};
+        }
+        Value smallOut[8];
+        keel::Array<Value> bigOut;
+        Value *outPtr = (nout <= 8) ? smallOut : (bigOut.resize(nout), bigOut.data());
+        CallContext ctx{&engine_, currentCallEnv()};
+        (*fnPtr)(keel::ArrayRef<Value>(AB, NF), nout,
+                 keel::MutArrayRef<Value>(outPtr, nout), ctx);
+        writeMultiOutputs(outPtr);
+        return false;
+    }
+
+    throw std::runtime_error(
+        engine_.formatUndefinedFunctionError(
+            funcName, keel::format("VM: undefined function '{}'", funcName)).c_str());
 }
 
 bool VM::execCallIndirect(const Instruction &I, Value *R,

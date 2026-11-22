@@ -509,4 +509,74 @@ struct BytecodeChunk
     }
 };
 
+// ============================================================
+// Inline scalar fast-path builtin IDs (OpCode::CALL_BUILTIN)
+// Shared single source of truth between Compiler and VM.
+// ============================================================
+enum class FastBuiltinId : keel::i8
+{
+    None  = -1,
+    // 1-arg scalar fast path
+    Abs   = 0,
+    Floor = 1,
+    Ceil  = 2,
+    Round = 3,
+    Fix   = 4,
+    Sqrt  = 5,
+    Exp   = 6,
+    Log   = 7,
+    Log2  = 8,
+    Log10 = 9,
+    Sin   = 10,
+    Cos   = 11,
+    Tan   = 12,
+    Sign  = 13,
+    IsNan = 14,
+    IsInf = 15,
+    // 2-arg scalar fast path
+    Mod   = 20,
+    Rem   = 21,
+    Max   = 22,
+    Min   = 23,
+    Pow   = 24,
+    Atan2 = 25,
+};
+
+[[nodiscard]] constexpr bool isUnaryFastBuiltin(FastBuiltinId id) noexcept
+{
+    const keel::i8 v = static_cast<keel::i8>(id);
+    return v >= static_cast<keel::i8>(FastBuiltinId::Abs)
+        && v <= static_cast<keel::i8>(FastBuiltinId::IsInf);
+}
+
+[[nodiscard]] constexpr const char *fastBuiltinName(FastBuiltinId id) noexcept
+{
+    switch (id) {
+    case FastBuiltinId::Abs:   return "abs";
+    case FastBuiltinId::Floor: return "floor";
+    case FastBuiltinId::Ceil:  return "ceil";
+    case FastBuiltinId::Round: return "round";
+    case FastBuiltinId::Fix:   return "fix";
+    case FastBuiltinId::Sqrt:  return "sqrt";
+    case FastBuiltinId::Exp:   return "exp";
+    case FastBuiltinId::Log:   return "log";
+    case FastBuiltinId::Log2:  return "log2";
+    case FastBuiltinId::Log10: return "log10";
+    case FastBuiltinId::Sin:   return "sin";
+    case FastBuiltinId::Cos:   return "cos";
+    case FastBuiltinId::Tan:   return "tan";
+    case FastBuiltinId::Sign:  return "sign";
+    case FastBuiltinId::IsNan: return "isnan";
+    case FastBuiltinId::IsInf: return "isinf";
+    case FastBuiltinId::Mod:   return "mod";
+    case FastBuiltinId::Rem:   return "rem";
+    case FastBuiltinId::Max:   return "max";
+    case FastBuiltinId::Min:   return "min";
+    case FastBuiltinId::Pow:   return "pow";
+    case FastBuiltinId::Atan2: return "atan2";
+    case FastBuiltinId::None:  return nullptr;
+    }
+    return nullptr;
+}
+
 } // namespace numkit

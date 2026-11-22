@@ -3941,10 +3941,6 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     keel::usize nargs = node->children.size() - 1;
 
     if (name == "syms") {
-        auto isSymsFlag = [](keel::StringRef s) noexcept {
-            return s == "real" || s == "positive" || s == "negative"
-                   || s == "nonnegative" || s == "integer" || s == "clear";
-        };
         for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
             if (argNode->type == NodeType::STRING_LITERAL) {
@@ -4170,15 +4166,14 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     // Fast path: 1-arg inline builtins — skip MOVE, pass arg register directly
     if (!mayInjectVars_) {
-        keel::i8 builtinId = resolveBuiltinId(name, nargs);
-        if (builtinId >= 0 && nargs == 1) {
+        FastBuiltinId builtinId = resolveBuiltinId(name, nargs);
+        if (builtinId != FastBuiltinId::None && nargs == 1) {
             keel::u16 arg = compileNode(node->children[1].get());
             keel::u16 dst = tempReg();
             emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                          dst, arg, 1,
-                                         keel::as<keel::i32>(builtinId), 0));
-            constexpr keel::i8 kMaxUnaryInlineBuiltinId = 15;
-            if (scalarRegs_.test(arg) && builtinId <= kMaxUnaryInlineBuiltinId)
+                                         static_cast<keel::i32>(builtinId), 0));
+            if (scalarRegs_.test(arg) && isUnaryFastBuiltin(builtinId))
                 scalarRegs_.set(dst);
             return dst;
         }
@@ -4236,14 +4231,14 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
 
     keel::u16 dst = tempReg();
 
-    // Try to resolve as inline scalar builtin (numeric ID)
-    keel::i8 builtinId = mayInjectVars_ ? -1 : resolveBuiltinId(name, nargs);
-    if (builtinId >= 0) {
+    // Try to resolve as inline scalar builtin
+    FastBuiltinId builtinId = mayInjectVars_ ? FastBuiltinId::None : resolveBuiltinId(name, nargs);
+    if (builtinId != FastBuiltinId::None) {
         emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                      dst,
                                      argBase,
                                      keel::as<keel::u16>(nargs),
-                                     keel::as<keel::i32>(builtinId),
+                                     static_cast<keel::i32>(builtinId),
                                      0));
         return dst;
     }
@@ -4424,10 +4419,6 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
 
     // ── Generic command call ──
     if (name == "syms") {
-        auto isSymsFlag = [](keel::StringRef s) noexcept {
-            return s == "real" || s == "positive" || s == "negative"
-                   || s == "nonnegative" || s == "integer" || s == "clear";
-        };
         for (keel::usize i = 0; i < nargs; ++i) {
             const keel::String &tok = node->children[i]->strValue;
             if (!isSymsFlag(tok) && !engine_.isReservedName(tok)) {
@@ -5689,58 +5680,35 @@ keel::u16 Compiler::compileDeleteAssign(const ASTNode *node)
 // Builtin ID resolution (compile-time)
 // ============================================================
 
-// Must match the switch in VM::execute CALL_BUILTIN handler
-keel::i8 Compiler::resolveBuiltinId(keel::StringRef name, keel::usize nargs)
+FastBuiltinId Compiler::resolveBuiltinId(keel::StringRef name, keel::usize nargs)
 {
     if (nargs == 1) {
-        if (name == "abs")
-            return 0;
-        if (name == "floor")
-            return 1;
-        if (name == "ceil")
-            return 2;
-        if (name == "round")
-            return 3;
-        if (name == "fix")
-            return 4;
-        if (name == "sqrt")
-            return 5;
-        if (name == "exp")
-            return 6;
-        if (name == "log")
-            return 7;
-        if (name == "log2")
-            return 8;
-        if (name == "log10")
-            return 9;
-        if (name == "sin")
-            return 10;
-        if (name == "cos")
-            return 11;
-        if (name == "tan")
-            return 12;
-        if (name == "sign")
-            return 13;
-        if (name == "isnan")
-            return 14;
-        if (name == "isinf")
-            return 15;
+        if (name == "abs")   return FastBuiltinId::Abs;
+        if (name == "floor") return FastBuiltinId::Floor;
+        if (name == "ceil")  return FastBuiltinId::Ceil;
+        if (name == "round") return FastBuiltinId::Round;
+        if (name == "fix")   return FastBuiltinId::Fix;
+        if (name == "sqrt")  return FastBuiltinId::Sqrt;
+        if (name == "exp")   return FastBuiltinId::Exp;
+        if (name == "log")   return FastBuiltinId::Log;
+        if (name == "log2")  return FastBuiltinId::Log2;
+        if (name == "log10") return FastBuiltinId::Log10;
+        if (name == "sin")   return FastBuiltinId::Sin;
+        if (name == "cos")   return FastBuiltinId::Cos;
+        if (name == "tan")   return FastBuiltinId::Tan;
+        if (name == "sign")  return FastBuiltinId::Sign;
+        if (name == "isnan") return FastBuiltinId::IsNan;
+        if (name == "isinf") return FastBuiltinId::IsInf;
     }
     if (nargs == 2) {
-        if (name == "mod")
-            return 20;
-        if (name == "rem")
-            return 21;
-        if (name == "max")
-            return 22;
-        if (name == "min")
-            return 23;
-        if (name == "pow")
-            return 24;
-        if (name == "atan2")
-            return 25;
+        if (name == "mod")   return FastBuiltinId::Mod;
+        if (name == "rem")   return FastBuiltinId::Rem;
+        if (name == "max")   return FastBuiltinId::Max;
+        if (name == "min")   return FastBuiltinId::Min;
+        if (name == "pow")   return FastBuiltinId::Pow;
+        if (name == "atan2") return FastBuiltinId::Atan2;
     }
-    return -1; // not a known inline builtin
+    return FastBuiltinId::None;
 }
 
 keel::String Compiler::disassemble(const BytecodeChunk &chunk)

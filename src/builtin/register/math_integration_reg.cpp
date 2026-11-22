@@ -534,14 +534,6 @@ function [h, tout, x] = impulse(b, a, t)
     % feedthrough k terms are not representable on a grid — MATLAB
     % samples the strictly-proper part only (probed: impulse([1 0],
     % [1 1]) at t=0 gives -e^0, not delta).
-    if isstruct(b)
-        if nargin >= 2
-            [h, tout, x] = impulse_lti(b, a);
-        else
-            [h, tout, x] = impulse_lti(b);
-        end
-        return;
-    end
     [rk, pk, ~] = residue(b, a);
     n = numel(pk);
     % MATLAB R2025b shape contract (probed): h is a Nx1 COLUMN whatever

@@ -339,6 +339,16 @@ private:
     bool tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVal,
                                 CallFrame &frame, const Instruction *ip);
     void execCallBuiltin(const Instruction &I, Value *R);
+    const Value *findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
+                                 const Value *R, const keel::String &name) const;
+    bool execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 nargout_val,
+                                 const Value *AB, keel::usize NF, Value *&R,
+                                 CallFrame &frame, const Instruction *ip,
+                                 keel::Array<CallCacheEntry> &resolvedFuncs);
+    bool execCallNamedMultiSpan(keel::u16 outBase, keel::i32 funcIdx, keel::u16 nout,
+                                const Value *AB, keel::usize NF, Value *R,
+                                CallFrame &frame, const Instruction *ip,
+                                keel::Array<CallCacheEntry> &resolvedFuncs);
     bool execCallIndirect(const Instruction &I, Value *R,
                           CallFrame &frame, const Instruction *ip);
     bool execCallIndirectTarget(const Value &target, keel::u16 dstReg, keel::u16 argBase, keel::u16 na,

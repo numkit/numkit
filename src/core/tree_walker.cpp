@@ -627,42 +627,24 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
 
     // Builtin object-array indexed assignment: arr(i)=obj / arr(i,j)=obj.
     // Fires when the RHS is an object and the target is empty/unset (→ a
-    // fresh object array) or an existing object array of the same class.
-    // Grows (any rank) with default-constructed gap fill. v1: each
-    // subscript selects a single element.
-    const bool canPromoteRhs = var->isObject() && !rhs.isObject()
-                               && (rhs.isNumeric() || rhs.isLogical())
-                               && var->objectStateConst() && var->objectStateConst()->native
-                               && var->objectStateConst()->native->fromScalarDouble(0.0) != nullptr;
-    if (rhs.isObject() || canPromoteRhs) {
-        auto isGfxCls = [](keel::StringRef c) {
-            return c.starts_with("matlab.graphics.") || c.starts_with("matlab.ui.");
-        };
-        if (!var->isObject() && var->isNumeric() && isGfxCls(rhs.objectClassNameRef())) {
-            *var = Value();
-        }
-        const bool newable = !var->isObject() && (var->isUnset() || var->isEmpty());
-        const bool sameArr = canPromoteRhs ||
-            (var->isObject() && (var->objectClassNameRef() == rhs.objectClassNameRef()
-                                 || (isGfxCls(var->objectClassNameRef()) && isGfxCls(rhs.objectClassNameRef()))));
-        if (newable || sameArr) {
-            keel::Array<keel::Array<keel::usize>> perDim;
-            perDim.resize(nargs);
-            for (keel::usize d = 0; d < nargs; ++d) {
-                const ASTNode *sub = lhs->children[d + 1].get();
-                if ((var->isUnset() || var->isEmpty())
-                    && sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
-                    const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(keel::as<keel::i32>(d));
-                    perDim[d].resize(n);
-                    for (keel::usize k = 0; k < n; ++k) perDim[d][k] = k;
-                } else {
-                    perDim[d] = resolveIndex(sub, *var,
-                                             keel::as<keel::i32>(d), keel::as<keel::i32>(nargs), env);
-                }
+    // Builtin object-array element store + grow (any rank).
+    if (engine_.prepareObjectArrayStore(*var, rhs)) {
+        keel::Array<keel::Array<keel::usize>> perDim;
+        perDim.resize(nargs);
+        for (keel::usize d = 0; d < nargs; ++d) {
+            const ASTNode *sub = lhs->children[d + 1].get();
+            if ((var->isUnset() || var->isEmpty())
+                && sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
+                const keel::usize n = (nargs == 2 && d == 1) ? rhs.numel() : rhs.dims().dim(keel::as<keel::i32>(d));
+                perDim[d].resize(n);
+                for (keel::usize k = 0; k < n; ++k) perDim[d][k] = k;
+            } else {
+                perDim[d] = resolveIndex(sub, *var,
+                                         keel::as<keel::i32>(d), keel::as<keel::i32>(nargs), env);
             }
-            engine_.objectStoreSlice(*var, perDim, rhs, env);
-            return;
         }
+        engine_.objectStoreSlice(*var, perDim, rhs, env);
+        return;
     }
 
     if (var->isChar() && rhs.isChar()) {

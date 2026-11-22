@@ -2110,6 +2110,7 @@ void registerGraphicsClasses(Engine &engine)
         BuiltinClass cls;
         cls.name = keel::String::from(clsName);
         cls.isHandle = true;
+        cls.heterogeneousGroup = keel::String::from("graphics");
         cls.superclasses.push_back(keel::String::from("matlab.mixin.Handle"));
         cls.superclasses.push_back(keel::String::from("handle"));
         cls.construct = [&engine, clsName, recType](
