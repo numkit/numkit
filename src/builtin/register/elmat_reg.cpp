@@ -138,6 +138,165 @@ struct BsxfunCallbackBuiltin : CallbackBuiltin
 
 namespace numkit::builtin::detail {
 
+namespace {
+
+void rands_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+               CallContext &ctx) {
+    auto *mr = ctx.engine->allocator();
+    keel::usize m = 1, n = 1;
+    if (args.size() >= 2) {
+        m = argcheck::arrayDim(args[0], "rands");
+        n = argcheck::arrayDim(args[1], "rands");
+    } else if (args.size() == 1) {
+        // NN toolbox: rands(S) -> Sx1 column vector
+        m = argcheck::arrayDim(args[0], "rands");
+        n = 1;
+    }
+    auto out = Value::matrix(m, n, ValueType::DOUBLE, mr);
+    keel::f64 *p = out.doubleDataMut();
+    auto &rng = ctx.engine->rng();
+    for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::random::uniform_f64(rng, -1.0, 1.0);
+    outs[0] = std::move(out);
+}
+
+void head_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    if (args.empty()) throw std::runtime_error("head requires at least 1 argument");
+    keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "head") : 8;
+    outs[0] = numkit::builtin::head(args[0], k, ctx.engine->allocator());
+}
+
+void tail_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    if (args.empty()) throw std::runtime_error("tail requires at least 1 argument");
+    keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "tail") : 8;
+    outs[0] = numkit::builtin::tail(args[0], k, ctx.engine->allocator());
+}
+
+void bsxfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                CallContext &ctx) {
+    if (args.size() < 3)
+        throw std::runtime_error("bsxfun requires at least 3 arguments (fun, A, B)");
+    const auto &fn = args[0];
+    const auto &a = args[1];
+    const auto &b = args[2];
+    auto *mr = ctx.engine->allocator();
+
+    if (fn.isFuncHandle()) {
+        const keel::StringRef name = fn.funcHandleNameRef();
+        if (!name.empty() && name[0] != '@') {
+            try {
+                outs[0] = numkit::builtin::bsxfun(name, a, b, mr);
+                return;
+            } catch (...) {
+            }
+        }
+    } else if (fn.isChar() || fn.isString()) {
+        try {
+            outs[0] = numkit::builtin::bsxfun(fn.asStringRef(), a, b, mr);
+            return;
+        } catch (...) {
+        }
+    }
+
+    if (a.isEmpty() || b.isEmpty()) {
+        outs[0] = Value::Empty;
+        return;
+    }
+    keel::usize ar = a.dims().rows(), ac = a.dims().cols();
+    keel::usize br = b.dims().rows(), bc = b.dims().cols();
+    if ((ar != br && ar != 1 && br != 1) || (ac != bc && ac != 1 && bc != 1)) {
+        throw std::runtime_error("bsxfun: non-singleton dimensions must match");
+    }
+    keel::usize outR = std::max(ar, br);
+    keel::usize outC = std::max(ac, bc);
+    auto res = Value::matrix(outR, outC, ValueType::DOUBLE, mr);
+    keel::f64 *outData = res.doubleDataMut();
+    for (keel::usize c = 0; c < outC; ++c) {
+        keel::usize acIdx = (ac == 1) ? 0 : c;
+        keel::usize bcIdx = (bc == 1) ? 0 : c;
+        for (keel::usize r = 0; r < outR; ++r) {
+            keel::usize arIdx = (ar == 1) ? 0 : r;
+            keel::usize brIdx = (br == 1) ? 0 : r;
+            Value elemA = Value::scalar(a.elemAsDouble(acIdx * ar + arIdx));
+            Value elemB = Value::scalar(b.elemAsDouble(bcIdx * br + brIdx));
+            Value argsArr[2] = {elemA, elemB};
+            Value callOut = ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>(argsArr, 2));
+            outData[c * outR + r] = callOut.toScalar();
+        }
+    }
+    outs[0] = std::move(res);
+}
+
+void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+             CallContext &ctx) {
+    auto *mr = ctx.engine->allocator();
+    if (args.empty()) {
+        outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
+        return;
+    }
+    const Value &x = args[0];
+    if (x.isChar() || x.isString()) {
+        keel::String s = x.toString();
+        if (s == "single") {
+            Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
+            out.singleDataMut()[0] = std::numeric_limits<keel::f32>::epsilon();
+            outs[0] = std::move(out);
+        } else if (s == "double") {
+            outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
+        } else {
+            throw Error("eps: class name must be 'double' or 'single'",
+                        0, 0, "eps", "", "numkit:eps:invalidClassName");
+        }
+        return;
+    }
+    const ValueType outType = (x.type() == ValueType::SINGLE) ? ValueType::SINGLE : ValueType::DOUBLE;
+    if (x.isEmpty()) {
+        keel::usize dArr[Dims::kMaxRank];
+        keel::i32 nd = x.dims().ndims();
+        for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+        outs[0] = Value::matrixND(dArr, nd, outType, mr);
+        return;
+    }
+    keel::usize dArr[Dims::kMaxRank];
+    keel::i32 nd = x.dims().ndims();
+    for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
+    Value out = Value::matrixND(dArr, nd, outType, mr);
+    const keel::usize n = x.numel();
+    if (outType == ValueType::SINGLE) {
+        keel::f32 *dst = out.singleDataMut();
+        for (keel::usize i = 0; i < n; ++i) {
+            keel::f32 v = x.isComplex()
+                ? keel::as<keel::f32>(keel::abs(x.complexData()[i]))
+                : keel::abs(keel::as<keel::f32>(x.elemAsDouble(i)));
+            if (std::isnan(v) || std::isinf(v)) {
+                dst[i] = std::numeric_limits<keel::f32>::quiet_NaN();
+            } else if (v <= std::numeric_limits<keel::f32>::min()) {
+                dst[i] = std::numeric_limits<keel::f32>::denorm_min();
+            } else {
+                dst[i] = std::nextafter(v, std::numeric_limits<keel::f32>::infinity()) - v;
+            }
+        }
+    } else {
+        keel::f64 *dst = out.doubleDataMut();
+        for (keel::usize i = 0; i < n; ++i) {
+            keel::f64 v = x.isComplex()
+                ? keel::abs(x.complexData()[i])
+                : keel::abs(x.elemAsDouble(i));
+            if (std::isnan(v) || std::isinf(v)) {
+                dst[i] = std::numeric_limits<keel::f64>::quiet_NaN();
+            } else if (v <= std::numeric_limits<keel::f64>::min()) {
+                dst[i] = std::numeric_limits<keel::f64>::denorm_min();
+            } else {
+                dst[i] = std::nextafter(v, std::numeric_limits<keel::f64>::infinity()) - v;
+            }
+        }
+    }
+    outs[0] = std::move(out);
+}
+
+} // namespace
+
 void register_elmat(Engine &engine) {
     engine.registerFunction("blkdiag",    &::numkit::builtin::detail::blkdiag_reg);
     engine.registerFunction("cat",        &::numkit::builtin::detail::cat_reg);
@@ -194,166 +353,15 @@ void register_elmat(Engine &engine) {
     engine.registerFunction("true",       &::numkit::builtin::detail::true_reg);
     engine.registerFunction("vander",     &::numkit::builtin::detail::vander_reg);
     engine.registerFunction("wilkinson",  &::numkit::builtin::detail::wilkinson_reg);
-    engine.registerFunction("rands",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            auto *mr = ctx.engine->allocator();
-            keel::usize m = 1, n = 1;
-            if (args.size() >= 2) {
-                m = argcheck::arrayDim(args[0], "rands");
-                n = argcheck::arrayDim(args[1], "rands");
-            } else if (args.size() == 1) {
-                // MATLAB NN toolbox: rands(S) -> S×1 column vector
-                m = argcheck::arrayDim(args[0], "rands");
-                n = 1;
-            }
-            auto out = Value::matrix(m, n, ValueType::DOUBLE, mr);
-            keel::f64 *p = out.doubleDataMut();
-            auto &rng = ctx.engine->rng();
-            for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::random::uniform_f64(rng, -1.0, 1.0);
-            outs[0] = std::move(out);
-        });
-
+    engine.registerFunction("rands",      &rands_reg);
     engine.registerFunction("zeros",      &::numkit::builtin::detail::zeros_reg);
     engine.registerFunction("paddata",    &::numkit::builtin::detail::paddata_reg);
     engine.registerFunction("trimdata",   &::numkit::builtin::detail::trimdata_reg);
-
-    engine.registerFunction("head",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty()) throw std::runtime_error("head requires at least 1 argument");
-            keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "head") : 8;
-            outs[0] = numkit::builtin::head(args[0], k, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("tail",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty()) throw std::runtime_error("tail requires at least 1 argument");
-            keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "tail") : 8;
-            outs[0] = numkit::builtin::tail(args[0], k, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("bsxfun",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.size() < 3)
-                throw std::runtime_error("bsxfun requires at least 3 arguments (fun, A, B)");
-            const auto &fn = args[0];
-            const auto &a = args[1];
-            const auto &b = args[2];
-            auto *mr = ctx.engine->allocator();
-
-            if (fn.isFuncHandle()) {
-                const keel::StringRef name = fn.funcHandleNameRef();
-                if (!name.empty() && name[0] != '@') {
-                    try {
-                        outs[0] = numkit::builtin::bsxfun(name, a, b, mr);
-                        return;
-                    } catch (...) {
-                    }
-                }
-            } else if (fn.isChar() || fn.isString()) {
-                try {
-                    outs[0] = numkit::builtin::bsxfun(fn.asStringRef(), a, b, mr);
-                    return;
-                } catch (...) {
-                }
-            }
-
-            if (a.isEmpty() || b.isEmpty()) {
-                outs[0] = Value::Empty;
-                return;
-            }
-            keel::usize ar = a.dims().rows(), ac = a.dims().cols();
-            keel::usize br = b.dims().rows(), bc = b.dims().cols();
-            if ((ar != br && ar != 1 && br != 1) || (ac != bc && ac != 1 && bc != 1)) {
-                throw std::runtime_error("bsxfun: non-singleton dimensions must match");
-            }
-            keel::usize outR = std::max(ar, br);
-            keel::usize outC = std::max(ac, bc);
-            auto res = Value::matrix(outR, outC, ValueType::DOUBLE, mr);
-            keel::f64 *outData = res.doubleDataMut();
-            for (keel::usize c = 0; c < outC; ++c) {
-                keel::usize acIdx = (ac == 1) ? 0 : c;
-                keel::usize bcIdx = (bc == 1) ? 0 : c;
-                for (keel::usize r = 0; r < outR; ++r) {
-                    keel::usize arIdx = (ar == 1) ? 0 : r;
-                    keel::usize brIdx = (br == 1) ? 0 : r;
-                    Value elemA = Value::scalar(a.elemAsDouble(acIdx * ar + arIdx));
-                    Value elemB = Value::scalar(b.elemAsDouble(bcIdx * br + brIdx));
-                    Value argsArr[2] = {elemA, elemB};
-                    Value callOut = ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>(argsArr, 2));
-                    outData[c * outR + r] = callOut.toScalar();
-                }
-            }
-            outs[0] = std::move(res);
-        });
-
+    engine.registerFunction("head",       &head_reg);
+    engine.registerFunction("tail",       &tail_reg);
+    engine.registerFunction("bsxfun",     &bsxfun_reg);
     engine.registerCallbackBuiltin("bsxfun", keel::make_arc<::numkit::builtin::detail::BsxfunCallbackBuiltin>());
-
-    engine.registerFunction("eps",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            auto *mr = ctx.engine->allocator();
-            if (args.empty()) {
-                outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
-                return;
-            }
-            const Value &x = args[0];
-            if (x.isChar() || x.isString()) {
-                keel::String s = x.toString();
-                if (s == "single") {
-                    Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
-                    out.singleDataMut()[0] = std::numeric_limits<keel::f32>::epsilon();
-                    outs[0] = std::move(out);
-                } else if (s == "double") {
-                    outs[0] = Value::scalar(std::numeric_limits<keel::f64>::epsilon(), mr);
-                } else {
-                    throw Error("eps: class name must be 'double' or 'single'",
-                                0, 0, "eps", "", "numkit:eps:invalidClassName");
-                }
-                return;
-            }
-            const ValueType outType = (x.type() == ValueType::SINGLE) ? ValueType::SINGLE : ValueType::DOUBLE;
-            if (x.isEmpty()) {
-                keel::usize dArr[Dims::kMaxRank];
-                keel::i32 nd = x.dims().ndims();
-                for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
-                outs[0] = Value::matrixND(dArr, nd, outType, mr);
-                return;
-            }
-            keel::usize dArr[Dims::kMaxRank];
-            keel::i32 nd = x.dims().ndims();
-            for (keel::i32 d = 0; d < nd; ++d) dArr[d] = x.dims().dim(d);
-            Value out = Value::matrixND(dArr, nd, outType, mr);
-            const keel::usize n = x.numel();
-            if (outType == ValueType::SINGLE) {
-                keel::f32 *dst = out.singleDataMut();
-                for (keel::usize i = 0; i < n; ++i) {
-                    keel::f32 v = x.isComplex()
-                        ? keel::as<keel::f32>(keel::abs(x.complexData()[i]))
-                        : keel::abs(keel::as<keel::f32>(x.elemAsDouble(i)));
-                    if (std::isnan(v) || std::isinf(v)) {
-                        dst[i] = std::numeric_limits<keel::f32>::quiet_NaN();
-                    } else if (v <= std::numeric_limits<keel::f32>::min()) {
-                        dst[i] = std::numeric_limits<keel::f32>::denorm_min();
-                    } else {
-                        dst[i] = std::nextafter(v, std::numeric_limits<keel::f32>::infinity()) - v;
-                    }
-                }
-            } else {
-                keel::f64 *dst = out.doubleDataMut();
-                for (keel::usize i = 0; i < n; ++i) {
-                    keel::f64 v = x.isComplex()
-                        ? keel::abs(x.complexData()[i])
-                        : keel::abs(x.elemAsDouble(i));
-                    if (std::isnan(v) || std::isinf(v)) {
-                        dst[i] = std::numeric_limits<keel::f64>::quiet_NaN();
-                    } else if (v <= std::numeric_limits<keel::f64>::min()) {
-                        dst[i] = std::numeric_limits<keel::f64>::denorm_min();
-                    } else {
-                        dst[i] = std::nextafter(v, std::numeric_limits<keel::f64>::infinity()) - v;
-                    }
-                }
-            }
-            outs[0] = std::move(out);
-        });
+    engine.registerFunction("eps",        &eps_reg);
 }
 
 } // namespace numkit::builtin::detail

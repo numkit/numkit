@@ -88,13 +88,78 @@ void validatestring_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Va
 
 namespace numkit::builtin::detail {
 
-void register_strfun(Engine &engine) {
-    engine.registerFunction("convertContainedStringsToChars",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "convertContainedStringsToChars");
-            outs[0] = numkit::builtin::convertContainedStringsToChars(args[0], ctx.engine->allocator());
-        });
+namespace {
 
+void convertContainedStringsToChars_reg(keel::ArrayRef<Value> args, keel::usize,
+                                        keel::MutArrayRef<Value> outs, CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 1, "convertContainedStringsToChars");
+    outs[0] = numkit::builtin::convertContainedStringsToChars(args[0], ctx.engine->allocator());
+}
+
+void strmatch_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                  CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "strmatch");
+    auto *mr = ctx.engine->allocator();
+    keel::String pat = args[0].toString();
+    bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
+    keel::Array<keel::f64> hits(mr);
+    const Value &arr = args[1];
+    if (arr.isCell() || arr.isString()) {
+        for (keel::usize i = 0; i < arr.numel(); ++i) {
+            keel::String s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
+            bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
+            if (m) hits.push_back(keel::as<keel::f64>(i + 1));
+        }
+    } else if (arr.isChar()) {
+        keel::usize R = arr.dims().rows(), C = arr.dims().cols();
+        for (keel::usize r = 0; r < R; ++r) {
+            keel::String s(mr);
+            s.reserve(C);
+            for (keel::usize c = 0; c < C; ++c)
+                s.push_back(keel::as<char>(arr.charData()[c * R + r]));
+            while (exact && !s.empty() && s.back() == ' ') s.pop_back();
+            bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
+            if (m) hits.push_back(keel::as<keel::f64>(r + 1));
+        }
+    }
+    if (hits.empty()) {
+        outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    } else {
+        auto out = Value::matrix(hits.size(), 1, ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i < hits.size(); ++i) out.doubleDataMut()[i] = hits[i];
+        outs[0] = std::move(out);
+    }
+}
+
+void strvcat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx) {
+    keel::Array<Value> nonEmpty(ctx.engine->allocator());
+    for (const auto &a : args) {
+        if (!a.isEmpty())
+            nonEmpty.push_back(a);
+    }
+    if (nonEmpty.empty()) {
+        outs[0] = Value::matrix(0, 0, ValueType::CHAR, ctx.engine->allocator());
+        return;
+    }
+    char_reg(keel::ArrayRef<Value>(nonEmpty.data(), nonEmpty.size()), nargout, outs, ctx);
+}
+
+void findstr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 2, "findstr");
+    if (args[0].numel() < args[1].numel()) {
+        Value swapped[2] = {args[1], args[0]};
+        strfind_reg(keel::ArrayRef<Value>(swapped, 2), nargout, outs, ctx);
+    } else {
+        strfind_reg(args, nargout, outs, ctx);
+    }
+}
+
+} // namespace
+
+void register_strfun(Engine &engine) {
+    engine.registerFunction("convertContainedStringsToChars", &convertContainedStringsToChars_reg);
     engine.registerFunction("num2str",    &::numkit::builtin::detail::num2str_reg);
     engine.registerFunction("int2str",    &::numkit::builtin::detail::int2str_reg);
     engine.registerFunction("validatestring", &::numkit::builtin::detail::validatestring_reg);
@@ -104,40 +169,7 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("char",       &::numkit::builtin::detail::char_reg);
     engine.registerFunction("strcmp",     &::numkit::builtin::detail::strcmp_reg);
     engine.registerFunction("strcmpi",    &::numkit::builtin::detail::strcmpi_reg);
-    engine.registerFunction("strmatch",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "strmatch");
-            auto *mr = ctx.engine->allocator();
-            keel::String pat = args[0].toString();
-            bool exact = (args.size() >= 3 && (args[2].isChar() || args[2].isString()) && args[2].toString() == "exact");
-            keel::Array<keel::f64> hits(mr);
-            const Value &arr = args[1];
-            if (arr.isCell() || arr.isString()) {
-                for (keel::usize i = 0; i < arr.numel(); ++i) {
-                    keel::String s = arr.isCell() ? arr.cellAt(i).toString() : arr.stringElem(i);
-                    bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(keel::as<keel::f64>(i + 1));
-                }
-            } else if (arr.isChar()) {
-                keel::usize R = arr.dims().rows(), C = arr.dims().cols();
-                for (keel::usize r = 0; r < R; ++r) {
-                    keel::String s(mr);
-                    s.reserve(C);
-                    for (keel::usize c = 0; c < C; ++c)
-                        s.push_back(keel::as<char>(arr.charData()[c * R + r]));
-                    while (exact && !s.empty() && s.back() == ' ') s.pop_back();
-                    bool m = exact ? (s == pat) : s.as_ref().starts_with(pat);
-                    if (m) hits.push_back(keel::as<keel::f64>(r + 1));
-                }
-            }
-            if (hits.empty()) {
-                outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
-            } else {
-                auto out = Value::matrix(hits.size(), 1, ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i < hits.size(); ++i) out.doubleDataMut()[i] = hits[i];
-                outs[0] = std::move(out);
-            }
-        });
+    engine.registerFunction("strmatch",   &strmatch_reg);
     engine.registerFunction("upper",      &::numkit::builtin::detail::upper_reg);
     engine.registerFunction("lower",      &::numkit::builtin::detail::lower_reg);
     engine.registerFunction("strtrim",    &::numkit::builtin::detail::strtrim_reg);
@@ -212,29 +244,8 @@ void register_strfun(Engine &engine) {
     engine.registerFunction("regexprep",  &::numkit::builtin::detail::regexprep_reg);
     engine.registerFunction("regexptranslate", &::numkit::builtin::detail::regexptranslate_reg);
     engine.registerFunction("setstr",     &::numkit::builtin::detail::char_reg);
-    engine.registerFunction("strvcat",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            keel::Array<Value> nonEmpty(ctx.engine->allocator());
-            for (const auto &a : args) {
-                if (!a.isEmpty())
-                    nonEmpty.push_back(a);
-            }
-            if (nonEmpty.empty()) {
-                outs[0] = Value::matrix(0, 0, ValueType::CHAR, ctx.engine->allocator());
-                return;
-            }
-            char_reg(keel::ArrayRef<Value>(nonEmpty.data(), nonEmpty.size()), nargout, outs, ctx);
-        });
-    engine.registerFunction("findstr",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 2, "findstr");
-            if (args[0].numel() < args[1].numel()) {
-                Value swapped[2] = {args[1], args[0]};
-                strfind_reg(keel::ArrayRef<Value>(swapped, 2), nargout, outs, ctx);
-            } else {
-                strfind_reg(args, nargout, outs, ctx);
-            }
-        });
+    engine.registerFunction("strvcat",    &strvcat_reg);
+    engine.registerFunction("findstr",    &findstr_reg);
 }
 
 } // namespace numkit::builtin::detail

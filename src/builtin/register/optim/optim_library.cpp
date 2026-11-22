@@ -38,6 +38,27 @@ void registerFminconM(Engine &engine);      // fmincon_reg.cpp
 
 namespace numkit {
 
+namespace {
+
+void optimoptions_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                      CallContext &ctx)
+{
+    if (args.empty())
+        throw Error("optimoptions requires at least 1 input argument",
+                    0, 0, "optimoptions", "", "numkit:optimoptions:minrhs");
+    auto *mr = ctx.engine->allocator();
+    Value st = Value::structure(mr);
+    if (args[0].isChar() || args[0].isString())
+        st.field("SolverName") = Value::fromString(args[0].toString(), mr);
+    for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
+        if (args[i].isChar() || args[i].isString())
+            st.field(args[i].toString()) = args[i + 1];
+    }
+    outs[0] = std::move(st);
+}
+
+} // namespace
+
 void OptimLibrary::install(Engine &engine)
 {
     // MATLAB-base: available top-level (no namespace, no import needed).
@@ -66,21 +87,7 @@ void OptimLibrary::install(Engine &engine)
     // fmincon — embedded `.m` SQP (quadprog QP subproblem; pausable
     // objective + nonlcon). Solution-parity with MATLAB.
     optim::registerFminconM(engine);
-    engine.registerFunction("optimoptions",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty())
-                throw Error("optimoptions requires at least 1 input argument",
-                            0, 0, "optimoptions", "", "numkit:optimoptions:minrhs");
-            auto *mr = ctx.engine->allocator();
-            Value st = Value::structure(mr);
-            if (args[0].isChar() || args[0].isString())
-                st.field("SolverName") = Value::fromString(args[0].toString(), mr);
-            for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                if (args[i].isChar() || args[i].isString())
-                    st.field(args[i].toString()) = args[i + 1];
-            }
-            outs[0] = std::move(st);
-        });
+    engine.registerFunction("optimoptions", &optimoptions_reg);
 }
 
 } // namespace numkit

@@ -52,6 +52,211 @@ void psi_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallC
 
 namespace numkit::builtin::detail {
 
+namespace {
+
+keel::f64 evalPosCi(keel::f64 ax) {
+    constexpr keel::f64 kGamma = 0.57721566490153286060651209;
+    if (ax <= 4.0) {
+        keel::f64 ci = kGamma + std::log(ax);
+        keel::f64 p = 1.0;
+        for (keel::i32 k = 1; k < 60; ++k) {
+            p *= -ax * ax / (keel::as<keel::f64>(2 * k - 1) * keel::as<keel::f64>(2 * k));
+            keel::f64 term = p / keel::as<keel::f64>(2 * k);
+            ci += term;
+            if (keel::abs(term) < 1e-16 * keel::abs(ci)) break;
+        }
+        return ci;
+    }
+    keel::c64 z(0.0, ax);
+    keel::c64 cf(0.0, 0.0);
+    for (keel::i32 k = 120; k >= 1; --k) {
+        keel::f64 kk = keel::as<keel::f64>(k);
+        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
+    }
+    keel::c64 h = 1.0 / (z + 1.0 + cf);
+    keel::f64 f = -h.imag();
+    keel::f64 g = h.real();
+    return f * std::sin(ax) - g * std::cos(ax);
+}
+
+keel::f64 evalLambertW(keel::i32 k, keel::f64 z) {
+    if (std::isnan(z)) return z;
+    const keel::f64 negInvE = -1.0 / std::exp(1.0);
+    if (k == 0) {
+        if (z == 0.0) return 0.0;
+        if (std::isinf(z) && z > 0.0) return z;
+        if (z < negInvE) return std::numeric_limits<keel::f64>::quiet_NaN();
+        if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
+        keel::f64 w;
+        if (z < -0.3) {
+            keel::f64 p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
+            w = -1.0 + p - p * p / 3.0;
+        } else if (z < 1.0) {
+            w = z * (1.0 - z + 1.5 * z * z) / (1.0 + 0.5 * z * z);
+        } else {
+            keel::f64 lz = std::log(z);
+            w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
+        }
+        for (keel::i32 it = 0; it < 50; ++it) {
+            keel::f64 ew = std::exp(w);
+            keel::f64 wew = w * ew;
+            keel::f64 f = wew - z;
+            if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
+            keel::f64 wp1 = w + 1.0;
+            keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+            if (denom == 0.0) break;
+            keel::f64 dw = f / denom;
+            w -= dw;
+            if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
+        }
+        return w;
+    }
+    if (k == -1) {
+        if (z < negInvE || z >= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
+        if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
+        keel::f64 w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
+                                 : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
+        for (keel::i32 it = 0; it < 50; ++it) {
+            keel::f64 ew = std::exp(w);
+            keel::f64 f = w * ew - z;
+            if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
+            keel::f64 wp1 = w + 1.0;
+            keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
+            if (denom == 0.0) break;
+            keel::f64 dw = f / denom;
+            w -= dw;
+            if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
+        }
+        return w;
+    }
+    return std::numeric_limits<keel::f64>::quiet_NaN();
+}
+
+void heaviside_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                   CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 1, "heaviside");
+    keel::Allocator *mr = ctx.engine->allocator();
+    const Value &x = args[0];
+    Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+    keel::f64 *dst = out.doubleDataMut();
+    const keel::usize n = x.numel();
+    for (keel::usize i = 0; i < n; ++i) {
+        keel::f64 v = x.elemAsDouble(i);
+        if (std::isnan(v)) dst[i] = v;
+        else if (v < 0.0)  dst[i] = 0.0;
+        else if (v == 0.0) dst[i] = 0.5;
+        else               dst[i] = 1.0;
+    }
+    outs[0] = std::move(out);
+}
+
+void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 1, "sinint");
+    keel::Allocator *mr = ctx.engine->allocator();
+    const Value &x = args[0];
+    Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+    keel::f64 *dst = out.doubleDataMut();
+    const keel::usize n = x.numel();
+    constexpr keel::f64 kPi2 = 1.57079632679489661923;
+    for (keel::usize i = 0; i < n; ++i) {
+        keel::f64 v = x.elemAsDouble(i);
+        if (std::isnan(v)) { dst[i] = v; continue; }
+        if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
+        if (v == 0.0) { dst[i] = 0.0; continue; }
+        keel::f64 sgn = (v < 0.0) ? -1.0 : 1.0;
+        keel::f64 ax = keel::abs(v);
+        keel::f64 si = 0.0;
+        if (ax <= 4.0) {
+            si = ax;
+            keel::f64 p = ax;
+            for (keel::i32 k = 1; k < 60; ++k) {
+                p *= -ax * ax / (keel::as<keel::f64>(2 * k) * keel::as<keel::f64>(2 * k + 1));
+                keel::f64 term = p / keel::as<keel::f64>(2 * k + 1);
+                si += term;
+                if (keel::abs(term) < 1e-16 * keel::abs(si)) break;
+            }
+        } else {
+            keel::c64 z(0.0, ax);
+            keel::c64 cf(0.0, 0.0);
+            for (keel::i32 k = 120; k >= 1; --k) {
+                keel::f64 kk = keel::as<keel::f64>(k);
+                cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
+            }
+            keel::c64 h = 1.0 / (z + 1.0 + cf);
+            keel::f64 f = -h.imag();
+            keel::f64 g = h.real();
+            si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
+        }
+        dst[i] = sgn * si;
+    }
+    outs[0] = std::move(out);
+}
+
+void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 1, "cosint");
+    keel::Allocator *mr = ctx.engine->allocator();
+    const Value &x = args[0];
+    const keel::usize n = x.numel();
+    bool hasNeg = false;
+    for (keel::usize i = 0; i < n; ++i) {
+        if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
+    }
+    constexpr keel::f64 kPi = 3.14159265358979323846;
+    if (!hasNeg) {
+        Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+        keel::f64 *dst = out.doubleDataMut();
+        for (keel::usize i = 0; i < n; ++i) {
+            keel::f64 v = x.elemAsDouble(i);
+            if (std::isnan(v)) dst[i] = v;
+            else if (v == 0.0) dst[i] = -std::numeric_limits<keel::f64>::infinity();
+            else if (std::isinf(v)) dst[i] = 0.0;
+            else dst[i] = evalPosCi(v);
+        }
+        outs[0] = std::move(out);
+    } else {
+        Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
+        auto *dst = out.complexDataMut();
+        for (keel::usize i = 0; i < n; ++i) {
+            keel::f64 v = x.elemAsDouble(i);
+            if (std::isnan(v)) dst[i] = {v, v};
+            else if (v == 0.0) dst[i] = {-std::numeric_limits<keel::f64>::infinity(), 0.0};
+            else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
+            else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
+        }
+        outs[0] = std::move(out);
+    }
+}
+
+void lambertw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                  CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 2, "lambertw");
+    auto *mr = ctx.engine->allocator();
+    keel::i32 branch = 0;
+    const Value &x = (args.size() == 2) ? args[1] : args[0];
+    if (args.size() == 2)
+        branch = argcheck::expectedInteger(
+            argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
+    const keel::usize n = x.numel();
+    if (n == 1) {
+        outs[0] = Value::scalar(evalLambertW(branch, x.elemAsDouble(0)), mr);
+        return;
+    }
+    Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
+    keel::f64 *dst = out.doubleDataMut();
+    for (keel::usize i = 0; i < n; ++i)
+        dst[i] = evalLambertW(branch, x.elemAsDouble(i));
+    outs[0] = std::move(out);
+}
+
+void debug_noop_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
+                    CallContext &) {
+    outs[0] = Value();
+}
+
+} // namespace
+
 void register_specfun(Engine &engine) {
     engine.registerFunction("airy",        &::numkit::builtin::detail::airy_reg);
     engine.registerFunction("besselh",     &::numkit::builtin::detail::besselh_reg);
@@ -85,205 +290,16 @@ void register_specfun(Engine &engine) {
     engine.registerFunction("perms",       &::numkit::builtin::detail::perms_reg);
     engine.registerFunction("primes",      &::numkit::builtin::detail::primes_reg);
     engine.registerFunction("psi",         &::numkit::builtin::detail::psi_reg);
-    engine.registerFunction("heaviside",
-        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "heaviside");
-            keel::Allocator *mr = ctx.engine->allocator();
-            const Value &x = args[0];
-            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            keel::f64 *dst = out.doubleDataMut();
-            const keel::usize n = x.numel();
-            for (keel::usize i = 0; i < n; ++i) {
-                keel::f64 v = x.elemAsDouble(i);
-                if (std::isnan(v)) dst[i] = v;
-                else if (v < 0.0)  dst[i] = 0.0;
-                else if (v == 0.0) dst[i] = 0.5;
-                else               dst[i] = 1.0;
-            }
-            outs[0] = std::move(out);
-        });
-    engine.registerFunction("sinint",
-        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "sinint");
-            keel::Allocator *mr = ctx.engine->allocator();
-            const Value &x = args[0];
-            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            keel::f64 *dst = out.doubleDataMut();
-            const keel::usize n = x.numel();
-            constexpr keel::f64 kPi2 = 1.57079632679489661923;
-            for (keel::usize i = 0; i < n; ++i) {
-                keel::f64 v = x.elemAsDouble(i);
-                if (std::isnan(v)) { dst[i] = v; continue; }
-                if (std::isinf(v)) { dst[i] = (v > 0.0) ? kPi2 : -kPi2; continue; }
-                if (v == 0.0) { dst[i] = 0.0; continue; }
-                keel::f64 sgn = (v < 0.0) ? -1.0 : 1.0;
-                keel::f64 ax = keel::abs(v);
-                keel::f64 si = 0.0;
-                if (ax <= 4.0) {
-                    si = ax;
-                    keel::f64 p = ax;
-                    for (keel::i32 k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (keel::as<keel::f64>(2 * k) * keel::as<keel::f64>(2 * k + 1));
-                        keel::f64 term = p / keel::as<keel::f64>(2 * k + 1);
-                        si += term;
-                        if (keel::abs(term) < 1e-16 * keel::abs(si)) break;
-                    }
-                } else {
-                    keel::c64 z(0.0, ax);
-                    keel::c64 cf(0.0, 0.0);
-                    for (keel::i32 k = 120; k >= 1; --k) {
-                        keel::f64 kk = keel::as<keel::f64>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
-                    }
-                    keel::c64 h = 1.0 / (z + 1.0 + cf);
-                    keel::f64 f = -h.imag();
-                    keel::f64 g = h.real();
-                    si = kPi2 - f * std::cos(ax) - g * std::sin(ax);
-                }
-                dst[i] = sgn * si;
-            }
-            outs[0] = std::move(out);
-        });
-    engine.registerFunction("cosint",
-        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "cosint");
-            keel::Allocator *mr = ctx.engine->allocator();
-            const Value &x = args[0];
-            const keel::usize n = x.numel();
-            bool hasNeg = false;
-            for (keel::usize i = 0; i < n; ++i) {
-                if (x.elemAsDouble(i) < 0.0) { hasNeg = true; break; }
-            }
-            constexpr keel::f64 kGamma = 0.57721566490153286060651209;
-            constexpr keel::f64 kPi = 3.14159265358979323846;
-            auto evalPosCi = [&](keel::f64 ax) -> keel::f64 {
-                if (ax <= 4.0) {
-                    keel::f64 ci = kGamma + std::log(ax);
-                    keel::f64 p = 1.0;
-                    for (keel::i32 k = 1; k < 60; ++k) {
-                        p *= -ax * ax / (keel::as<keel::f64>(2 * k - 1) * keel::as<keel::f64>(2 * k));
-                        keel::f64 term = p / keel::as<keel::f64>(2 * k);
-                        ci += term;
-                        if (keel::abs(term) < 1e-16 * keel::abs(ci)) break;
-                    }
-                    return ci;
-                } else {
-                    keel::c64 z(0.0, ax);
-                    keel::c64 cf(0.0, 0.0);
-                    for (keel::i32 k = 120; k >= 1; --k) {
-                        keel::f64 kk = keel::as<keel::f64>(k);
-                        cf = keel::c64(-kk * kk, 0.0) / (z + keel::as<keel::f64>(2 * k + 1) + cf);
-                    }
-                    keel::c64 h = 1.0 / (z + 1.0 + cf);
-                    keel::f64 f = -h.imag();
-                    keel::f64 g = h.real();
-                    return f * std::sin(ax) - g * std::cos(ax);
-                }
-            };
-            if (!hasNeg) {
-                Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-                keel::f64 *dst = out.doubleDataMut();
-                for (keel::usize i = 0; i < n; ++i) {
-                    keel::f64 v = x.elemAsDouble(i);
-                    if (std::isnan(v)) dst[i] = v;
-                    else if (v == 0.0) dst[i] = -std::numeric_limits<keel::f64>::infinity();
-                    else if (std::isinf(v)) dst[i] = 0.0;
-                    else dst[i] = evalPosCi(v);
-                }
-                outs[0] = std::move(out);
-            } else {
-                Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
-                auto *dst = out.complexDataMut();
-                for (keel::usize i = 0; i < n; ++i) {
-                    keel::f64 v = x.elemAsDouble(i);
-                    if (std::isnan(v)) dst[i] = {v, v};
-                    else if (v == 0.0) dst[i] = {-std::numeric_limits<keel::f64>::infinity(), 0.0};
-                    else if (std::isinf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
-                    else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
-                }
-                outs[0] = std::move(out);
-            }
-        });
-    engine.registerFunction("lambertw",
-        [](keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "lambertw");
-            auto *mr = ctx.engine->allocator();
-            keel::i32 branch = 0;
-            const Value &x = (args.size() == 2) ? args[1] : args[0];
-            if (args.size() == 2)
-                branch = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
-            auto evalLambertW = [](keel::i32 k, keel::f64 z) -> keel::f64 {
-                if (std::isnan(z)) return z;
-                const keel::f64 negInvE = -1.0 / std::exp(1.0);
-                if (k == 0) {
-                    if (z == 0.0) return 0.0;
-                    if (std::isinf(z) && z > 0.0) return z;
-                    if (z < negInvE) return std::numeric_limits<keel::f64>::quiet_NaN();
-                    if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
-                    keel::f64 w;
-                    if (z < -0.3) {
-                        keel::f64 p = std::sqrt(2.0 * (std::exp(1.0) * z + 1.0));
-                        w = -1.0 + p - p * p / 3.0;
-                    } else if (z < 1.0) {
-                        w = z * (1.0 - z + 1.5 * z * z) / (1.0 + 0.5 * z * z);
-                    } else {
-                        keel::f64 lz = std::log(z);
-                        w = lz - (lz > 0.0 ? std::log(lz) : 0.0);
-                    }
-                    for (keel::i32 it = 0; it < 50; ++it) {
-                        keel::f64 ew = std::exp(w);
-                        keel::f64 wew = w * ew;
-                        keel::f64 f = wew - z;
-                        if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
-                        keel::f64 wp1 = w + 1.0;
-                        keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
-                        if (denom == 0.0) break;
-                        keel::f64 dw = f / denom;
-                        w -= dw;
-                        if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
-                    }
-                    return w;
-                } else if (k == -1) {
-                    if (z < negInvE || z >= 0.0) return std::numeric_limits<keel::f64>::quiet_NaN();
-                    if (keel::abs(z - negInvE) <= 1e-15) return -1.0;
-                    keel::f64 w = (z > -0.2) ? (std::log(-z) - std::log(-std::log(-z)))
-                                          : (-1.0 - std::sqrt(2.0 * (std::exp(1.0) * z + 1.0)));
-                    for (keel::i32 it = 0; it < 50; ++it) {
-                        keel::f64 ew = std::exp(w);
-                        keel::f64 f = w * ew - z;
-                        if (keel::abs(f) <= 1e-15 * (keel::abs(z) + 1.0)) break;
-                        keel::f64 wp1 = w + 1.0;
-                        keel::f64 denom = ew * wp1 - (w + 2.0) * f / (2.0 * wp1);
-                        if (denom == 0.0) break;
-                        keel::f64 dw = f / denom;
-                        w -= dw;
-                        if (keel::abs(dw) <= 1e-15 * keel::abs(w)) break;
-                    }
-                    return w;
-                }
-                return std::numeric_limits<keel::f64>::quiet_NaN();
-            };
-            const keel::usize n = x.numel();
-            if (n == 1) {
-                outs[0] = Value::scalar(evalLambertW(branch, x.elemAsDouble(0)), mr);
-                return;
-            }
-            Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::DOUBLE, mr);
-            keel::f64 *dst = out.doubleDataMut();
-            for (keel::usize i = 0; i < n; ++i)
-                dst[i] = evalLambertW(branch, x.elemAsDouble(i));
-            outs[0] = std::move(out);
-        });
-    auto noopFn = [](keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &/*ctx*/) {
-        outs[0] = Value();
-    };
-    engine.registerFunction("dbstop",   noopFn);
-    engine.registerFunction("dbclear",  noopFn);
-    engine.registerFunction("dbstatus", noopFn);
-    engine.registerFunction("dbcont",   noopFn);
-    engine.registerFunction("dbquit",   noopFn);
-    engine.registerFunction("keyboard", noopFn);
+    engine.registerFunction("heaviside",   &heaviside_reg);
+    engine.registerFunction("sinint",      &sinint_reg);
+    engine.registerFunction("cosint",      &cosint_reg);
+    engine.registerFunction("lambertw",    &lambertw_reg);
+    engine.registerFunction("dbstop",      &debug_noop_reg);
+    engine.registerFunction("dbclear",     &debug_noop_reg);
+    engine.registerFunction("dbstatus",    &debug_noop_reg);
+    engine.registerFunction("dbcont",      &debug_noop_reg);
+    engine.registerFunction("dbquit",      &debug_noop_reg);
+    engine.registerFunction("keyboard",    &debug_noop_reg);
 }
 
 } // namespace numkit::builtin::detail

@@ -10,16 +10,22 @@
 
 namespace numkit::builtin::detail {
 
+namespace {
+
+void idivide_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "idivide");
+    keel::String opt = keel::String::from("fix");
+    if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
+        opt = args[2].toString();
+    }
+    outs[0] = numkit::builtin::idivide(args[0], args[1], opt, ctx.engine->allocator());
+}
+
+} // namespace
+
 void register_matfun(Engine &engine) {
-    engine.registerFunction("idivide",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "idivide");
-            keel::String opt = keel::String::from("fix");
-            if (args.size() >= 3 && (args[2].isChar() || args[2].isString())) {
-                opt = args[2].toString();
-            }
-            outs[0] = numkit::builtin::idivide(args[0], args[1], opt, ctx.engine->allocator());
-        });
+    engine.registerFunction("idivide", &idivide_reg);
 }
 
 } // namespace numkit::builtin::detail

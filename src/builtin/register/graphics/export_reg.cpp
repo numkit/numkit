@@ -246,261 +246,294 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
     rp.fs->writeFileBytes(rp.path, bytes);
 }
 
+void saveas_reg(keel::ArrayRef<Value> args, keel::usize,
+                keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 3, "saveas");
+    // saveas(filename) targets the current figure.
+    bool firstIsTarget = args[0].isObject()
+                         || (args[0].isScalar() && !args[0].isChar());
+    ExportArgs ea = parseExportArgs(
+        *ctx.engine, args, "saveas", /*needTarget=*/!firstIsTarget);
+    runExport(*ctx.engine, ea, "saveas");
+    outs[0] = Value();
+}
+
+void exportgraphics_reg(keel::ArrayRef<Value> args, keel::usize,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 2, "exportgraphics");
+    ExportArgs ea = parseExportArgs(*ctx.engine, args,
+                                    "exportgraphics",
+                                    /*needTarget=*/false);
+    runExport(*ctx.engine, ea, "exportgraphics");
+    outs[0] = Value();
+}
+
+void print_reg(keel::ArrayRef<Value> args, keel::usize,
+               keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, "print");
+    ExportArgs ea = parseExportArgs(*ctx.engine, args, "print",
+                                    /*needTarget=*/true);
+    runExport(*ctx.engine, ea, "print");
+    outs[0] = Value();
+}
+
+void graphicsNoop_reg(keel::ArrayRef<Value>, keel::usize,
+                      keel::MutArrayRef<Value> outs, CallContext &)
+{
+    if (!outs.empty()) outs[0] = Value();
+}
+
+void light_reg(keel::ArrayRef<Value>, keel::usize,
+               keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->allocator());
+}
+
+void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 0, 2, "getframe");
+    auto *mr = ctx.engine->allocator();
+    const FigureState *fig = nullptr;
+    if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
+    if (!fig) fig = &ctx.engine->figureManager().current();
+    const keel::i32 W = 560, H = 420;
+    keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
+    const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
+    Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
+    keel::u8 *d = A.uint8DataMut();
+    for (keel::usize r = 0; r < Hp; ++r)
+        for (keel::usize c = 0; c < Wp; ++c)
+            for (keel::usize ch = 0; ch < 3; ++ch)
+                d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
+    Value s = Value::structure(mr);
+    s.field("cdata") = std::move(A);
+    s.field("colormap") = Value::Empty;
+    if (!outs.empty()) outs[0] = std::move(s);
+}
+
+void frame2im_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 1, "frame2im");
+    auto *mr = ctx.engine->allocator();
+    const Value &f = args[0];
+    Value cdata = Value::matrix3d(1, 1, 3, ValueType::UINT8, mr);
+    Value cmap = Value::Empty;
+    if (f.isStruct() && f.numel() >= 1) {
+        if (f.hasField("cdata"))
+            cdata = f.field("cdata");
+        if (f.hasField("colormap"))
+            cmap = f.field("colormap");
+    }
+    if (!outs.empty()) outs[0] = std::move(cdata);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(cmap);
+}
+
+void im2frame_reg(keel::ArrayRef<Value> args, keel::usize,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 2, "im2frame");
+    auto *mr = ctx.engine->allocator();
+    Value s = Value::structure(mr);
+    s.field("cdata") = args[0];
+    s.field("colormap") = (args.size() >= 2) ? args[1] : Value::Empty;
+    if (!outs.empty()) outs[0] = std::move(s);
+}
+
+void chartNoop_reg(keel::ArrayRef<Value>, keel::usize nargout,
+                   keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    ctx.engine->figureManager().current();
+    if (!outs.empty())
+        outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->allocator()) : Value();
+}
+
+void dendrogram_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    ctx.engine->figureManager().current();
+    auto *mr = ctx.engine->allocator();
+    keel::usize m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
+    if (nargout == 0) {
+        if (!outs.empty()) outs[0] = Value();
+        return;
+    }
+    Value H = Value::matrix(m, 1, ValueType::DOUBLE, mr);
+    for (keel::usize i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
+    outs[0] = std::move(H);
+    if (nargout >= 2 && outs.size() >= 2) {
+        Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
+        outs[1] = std::move(T);
+    }
+    if (nargout >= 3 && outs.size() >= 3) {
+        Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
+        outs[2] = std::move(P);
+    }
+}
+
+void evalColormap(const char *cname, keel::ArrayRef<Value> args,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    const keel::StringRef paletteName(cname);
+    argcheck::checkNargin(args.size(), 0, 1, cname);
+    auto *mr = ctx.engine->allocator();
+    keel::usize m = 256;
+    if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {
+        keel::f64 mv = args[0].toScalar();
+        m = (mv >= 0.0) ? keel::as<keel::usize>(mv) : 0;
+    }
+    Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
+    if (m > 0) {
+        keel::f64 *d = C.doubleDataMut();
+        if (paletteName == "jet") {
+            std::fill(d, d + 3 * m, 0.0);
+            const keel::i32 mi = keel::as<keel::i32>(m);
+            const keel::i32 n = (mi + 3) / 4;
+            const keel::i32 ulen = n + (n - 1) + n;
+            auto u_at = [&](keel::i32 idx1) -> keel::f64 {
+                if (idx1 <= n) return keel::f64(idx1) / keel::f64(n);
+                if (idx1 <= 2 * n - 1) return 1.0;
+                return keel::f64(2 * n - 1 + n - (idx1 - 1)) / keel::f64(n);
+            };
+            const keel::i32 gbase = (n + 1) / 2 - (mi % 4 == 1 ? 1 : 0);
+            keel::i32 rcount = 0, gcount = 0, bcount = 0;
+            for (keel::i32 k = 1; k <= ulen; ++k) {
+                const keel::i32 g = gbase + k;
+                const keel::i32 r = g + n;
+                const keel::i32 b = g - n;
+                if (r >= 1 && r <= mi) {
+                    ++rcount;
+                    d[0 * m + keel::as<keel::usize>(r - 1)] = u_at(rcount);
+                }
+                if (g >= 1 && g <= mi) {
+                    ++gcount;
+                    d[1 * m + keel::as<keel::usize>(g - 1)] = u_at(gcount);
+                }
+                if (b >= 1 && b <= mi) ++bcount;
+            }
+            keel::i32 bsofar = 0;
+            for (keel::i32 k = 1; k <= ulen; ++k) {
+                const keel::i32 g = gbase + k;
+                const keel::i32 b = g - n;
+                if (b >= 1 && b <= mi) {
+                    ++bsofar;
+                    d[2 * m + keel::as<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
+                }
+            }
+        } else if (paletteName == "gray") {
+            for (keel::usize i = 0; i < m; ++i) {
+                keel::f64 g = (m == 1) ? 0.0 : keel::f64(i) / keel::f64(m - 1);
+                d[i] = d[i + m] = d[i + 2 * m] = g;
+            }
+        } else if (paletteName == "cool") {
+            for (keel::usize i = 0; i < m; ++i) {
+                keel::f64 r = (m == 1) ? 0.0 : keel::f64(i) / keel::f64(m - 1);
+                d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
+            }
+        } else if (paletteName == "hot") {
+            const keel::i32 mi = keel::as<keel::i32>(m);
+            const keel::i32 n = (3 * mi) / 8;
+            for (keel::i32 i = 0; i < mi; ++i) {
+                d[i]         = (i < n) ? keel::f64(i + 1) / keel::f64(n) : 1.0;
+                d[i + m]     = (i < n) ? 0.0 : (i < 2 * n ? keel::f64(i - n + 1) / keel::f64(n) : 1.0);
+                d[i + 2 * m] = (i < 2 * n) ? 0.0 : keel::f64(i - 2 * n + 1) / keel::f64(mi - 2 * n);
+            }
+        } else {
+            keel::i32 tableN = 256;
+            const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
+            for (keel::usize i = 0; i < m; ++i) {
+                keel::f64 t = (m == 1) ? 0.0 : keel::as<keel::f64>(i) / keel::as<keel::f64>(m - 1);
+                keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(std::lround(t * (tableN - 1)))));
+                d[i]         = tbl[idx * 3 + 0] / 255.0;
+                d[i + m]     = tbl[idx * 3 + 1] / 255.0;
+                d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;
+            }
+        }
+    }
+    if (!outs.empty()) outs[0] = std::move(C);
+}
+
+template <const char *Palette>
+void colormap_reg(keel::ArrayRef<Value> args, keel::usize,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    evalColormap(Palette, args, outs, ctx);
+}
+
+constexpr char kPalParula[]  = "parula";
+constexpr char kPalTurbo[]   = "turbo";
+constexpr char kPalJet[]     = "jet";
+constexpr char kPalHot[]     = "hot";
+constexpr char kPalCool[]    = "cool";
+constexpr char kPalGray[]    = "gray";
+constexpr char kPalBone[]    = "bone";
+constexpr char kPalCopper[]  = "copper";
+constexpr char kPalSpring[]  = "spring";
+constexpr char kPalSummer[]  = "summer";
+constexpr char kPalAutumn[]  = "autumn";
+constexpr char kPalWinter[]  = "winter";
+constexpr char kPalHsv[]     = "hsv";
+constexpr char kPalViridis[] = "viridis";
+constexpr char kPalPink[]    = "pink";
+constexpr char kPalLines[]   = "lines";
+
+struct ExportRegEntry {
+    const char *name;
+    void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+};
+
+constexpr ExportRegEntry kExportFns[] = {
+    {"saveas",         &saveas_reg},
+    {"exportgraphics", &exportgraphics_reg},
+    {"print",          &print_reg},
+    {"shading",        &graphicsNoop_reg},
+    {"lighting",       &graphicsNoop_reg},
+    {"material",       &graphicsNoop_reg},
+    {"movie",          &graphicsNoop_reg},
+    {"light",          &light_reg},
+    {"getframe",       &getframe_reg},
+    {"frame2im",       &frame2im_reg},
+    {"im2frame",       &im2frame_reg},
+    {"imtool",         &chartNoop_reg},
+    {"implay",         &chartNoop_reg},
+    {"boxchart",       &chartNoop_reg},
+    {"heatmap",        &chartNoop_reg},
+    {"probplot",       &chartNoop_reg},
+    {"newplot",        &chartNoop_reg},
+    {"zoom",           &chartNoop_reg},
+    {"pan",            &chartNoop_reg},
+    {"rotate3d",       &chartNoop_reg},
+    {"dendrogram",     &dendrogram_reg},
+    {"parula",         &colormap_reg<kPalParula>},
+    {"turbo",          &colormap_reg<kPalTurbo>},
+    {"jet",            &colormap_reg<kPalJet>},
+    {"hot",            &colormap_reg<kPalHot>},
+    {"cool",           &colormap_reg<kPalCool>},
+    {"gray",           &colormap_reg<kPalGray>},
+    {"bone",           &colormap_reg<kPalBone>},
+    {"copper",         &colormap_reg<kPalCopper>},
+    {"spring",         &colormap_reg<kPalSpring>},
+    {"summer",         &colormap_reg<kPalSummer>},
+    {"autumn",         &colormap_reg<kPalAutumn>},
+    {"winter",         &colormap_reg<kPalWinter>},
+    {"hsv",            &colormap_reg<kPalHsv>},
+    {"viridis",        &colormap_reg<kPalViridis>},
+    {"pink",           &colormap_reg<kPalPink>},
+    {"lines",          &colormap_reg<kPalLines>},
+};
+
 } // anonymous namespace
 
 void registerFigureExport(Engine &engine)
 {
-    // saveas(h, filename [, fmt])
-    {
-        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
-                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 3, "saveas");
-            // saveas(filename) targets the current figure.
-            bool firstIsTarget = args[0].isObject()
-                                 || (args[0].isScalar() && !args[0].isChar());
-            ExportArgs ea = parseExportArgs(
-                *ctx.engine, args, "saveas", /*needTarget=*/!firstIsTarget);
-            runExport(*ctx.engine, ea, "saveas");
-            outs[0] = Value();
-        };
-        engine.registerFunction("", "saveas", std::move(fn));
-    }
-    // exportgraphics(obj, filename [, Name,Value])
-    {
-        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
-                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, "exportgraphics");
-            ExportArgs ea = parseExportArgs(*ctx.engine, args,
-                                            "exportgraphics",
-                                            /*needTarget=*/false);
-            runExport(*ctx.engine, ea, "exportgraphics");
-            outs[0] = Value();
-        };
-        engine.registerFunction("", "exportgraphics", std::move(fn));
-    }
-    // print(fig, filename, '-dpng' [, '-r###' …]) and the command form
-    // `print -dpng file.png` (glue args arrive the same way).
-    {
-        ExternalFunc fn = [&engine](keel::ArrayRef<Value> args, keel::usize,
-                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            (void)engine;
-            argcheck::checkNargin(args.size(), 1, "print");
-            ExportArgs ea = parseExportArgs(*ctx.engine, args, "print",
-                                            /*needTarget=*/true);
-            runExport(*ctx.engine, ea, "print");
-            outs[0] = Value();
-        };
-        engine.registerFunction("", "print", std::move(fn));
-    }
-    // shading('interp'|'flat'|'faceted') / lighting / material / movie
-    {
-        auto fn = [](keel::ArrayRef<Value>, keel::usize,
-                     keel::MutArrayRef<Value> outs, CallContext &) {
-            if (!outs.empty()) outs[0] = Value();
-        };
-        engine.registerFunction("", "shading", fn);
-        engine.registerFunction("", "lighting", fn);
-        engine.registerFunction("", "material", fn);
-        engine.registerFunction("", "movie", fn);
-    }
-    // light(...) -> returns handle or scalar
-    {
-        ExternalFunc fn = [](keel::ArrayRef<Value>, keel::usize,
-                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->allocator());
-        };
-        engine.registerFunction("", "light", std::move(fn));
-    }
-    // getframe([h]) -> returns struct('cdata', HxWx3 uint8, 'colormap', [])
-    {
-        ExternalFunc fn = [](keel::ArrayRef<Value> args, keel::usize,
-                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 0, 2, "getframe");
-            auto *mr = ctx.engine->allocator();
-            const FigureState *fig = nullptr;
-            if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
-            if (!fig) fig = &ctx.engine->figureManager().current();
-            const keel::i32 W = 560, H = 420;
-            keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
-            const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
-            Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
-            keel::u8 *d = A.uint8DataMut();
-            for (keel::usize r = 0; r < Hp; ++r)
-                for (keel::usize c = 0; c < Wp; ++c)
-                    for (keel::usize ch = 0; ch < 3; ++ch)
-                        d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
-            Value s = Value::structure(mr);
-            s.field("cdata") = std::move(A);
-            s.field("colormap") = Value::Empty;
-            if (!outs.empty()) outs[0] = std::move(s);
-        };
-        engine.registerFunction("", "getframe", std::move(fn));
-    }
-    // frame2im(F) -> [X, Map] and im2frame(X [, map]) -> F
-    {
-        ExternalFunc f2i = [](keel::ArrayRef<Value> args, keel::usize nargout,
-                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "frame2im");
-            auto *mr = ctx.engine->allocator();
-            const Value &f = args[0];
-            Value cdata = Value::matrix3d(1, 1, 3, ValueType::UINT8, mr);
-            Value cmap = Value::Empty;
-            if (f.isStruct() && f.numel() >= 1) {
-                if (f.hasField("cdata"))
-                    cdata = f.field("cdata");
-                if (f.hasField("colormap"))
-                    cmap = f.field("colormap");
-            }
-            if (!outs.empty()) outs[0] = std::move(cdata);
-            if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(cmap);
-        };
-        engine.registerFunction("", "frame2im", std::move(f2i));
-
-        ExternalFunc i2f = [](keel::ArrayRef<Value> args, keel::usize,
-                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "im2frame");
-            auto *mr = ctx.engine->allocator();
-            Value s = Value::structure(mr);
-            s.field("cdata") = args[0];
-            s.field("colormap") = (args.size() >= 2) ? args[1] : Value::Empty;
-            if (!outs.empty()) outs[0] = std::move(s);
-        };
-        engine.registerFunction("", "im2frame", std::move(i2f));
-    }
-    // High-level chart & viewer helpers: imtool, implay, boxchart, heatmap, probplot, dendrogram
-    {
-        auto chartNoop = [](keel::ArrayRef<Value>, keel::usize nargout,
-                            keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            ctx.engine->figureManager().current();
-            if (!outs.empty())
-                outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->allocator()) : Value();
-        };
-        engine.registerFunction("", "imtool", chartNoop);
-        engine.registerFunction("", "implay", chartNoop);
-        engine.registerFunction("", "boxchart", chartNoop);
-        engine.registerFunction("", "heatmap", chartNoop);
-        engine.registerFunction("", "probplot", chartNoop);
-        engine.registerFunction("", "newplot", chartNoop);
-        engine.registerFunction("", "zoom", chartNoop);
-        engine.registerFunction("", "pan", chartNoop);
-        engine.registerFunction("", "rotate3d", chartNoop);
-
-        ExternalFunc dendroFn = [](keel::ArrayRef<Value> args, keel::usize nargout,
-                                   keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            ctx.engine->figureManager().current();
-            auto *mr = ctx.engine->allocator();
-            keel::usize m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
-            if (nargout == 0) {
-                if (!outs.empty()) outs[0] = Value();
-                return;
-            }
-            Value H = Value::matrix(m, 1, ValueType::DOUBLE, mr);
-            for (keel::usize i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
-            outs[0] = std::move(H);
-            if (nargout >= 2 && outs.size() >= 2) {
-                Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
-                outs[1] = std::move(T);
-            }
-            if (nargout >= 3 && outs.size() >= 3) {
-                Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
-                outs[2] = std::move(P);
-            }
-        };
-        engine.registerFunction("", "dendrogram", std::move(dendroFn));
-    }
-    // Colormap palette functions: parula([m]), jet([m]), hot([m]), etc. -> m x 3 double [0,1]
-    {
-        static const char *kCmapFns[] = {
-            "parula", "turbo", "jet", "hot", "cool", "gray", "bone",
-            "copper", "spring", "summer", "autumn", "winter", "hsv", "viridis",
-            "pink", "lines"
-        };
-        for (const char *cname : kCmapFns) {
-            ExternalFunc fn = [cname](keel::ArrayRef<Value> args, keel::usize,
-                                      keel::MutArrayRef<Value> outs, CallContext &ctx) {
-                const keel::StringRef paletteName(cname);
-                argcheck::checkNargin(args.size(), 0, 1, cname);
-                auto *mr = ctx.engine->allocator();
-                keel::usize m = 256;
-                if (!args.empty() && args[0].isScalar() && !args[0].isChar() && !args[0].isString()) {
-                    keel::f64 mv = args[0].toScalar();
-                    m = (mv >= 0.0) ? keel::as<keel::usize>(mv) : 0;
-                }
-                Value C = Value::matrix(m, 3, ValueType::DOUBLE, mr);
-                if (m > 0) {
-                    keel::f64 *d = C.doubleDataMut();
-                    if (paletteName == "jet") {
-                        std::fill(d, d + 3 * m, 0.0);
-                        const keel::i32 mi = keel::as<keel::i32>(m);
-                        const keel::i32 n = (mi + 3) / 4;
-                        const keel::i32 ulen = n + (n - 1) + n;
-                        auto u_at = [&](keel::i32 idx1) -> keel::f64 {
-                            if (idx1 <= n) return keel::f64(idx1) / keel::f64(n);
-                            if (idx1 <= 2 * n - 1) return 1.0;
-                            return keel::f64(2 * n - 1 + n - (idx1 - 1)) / keel::f64(n);
-                        };
-                        const keel::i32 gbase = (n + 1) / 2 - (mi % 4 == 1 ? 1 : 0);
-                        keel::i32 rcount = 0, gcount = 0, bcount = 0;
-                        for (keel::i32 k = 1; k <= ulen; ++k) {
-                            const keel::i32 g = gbase + k;
-                            const keel::i32 r = g + n;
-                            const keel::i32 b = g - n;
-                            if (r >= 1 && r <= mi) {
-                                ++rcount;
-                                d[0 * m + keel::as<keel::usize>(r - 1)] = u_at(rcount);
-                            }
-                            if (g >= 1 && g <= mi) {
-                                ++gcount;
-                                d[1 * m + keel::as<keel::usize>(g - 1)] = u_at(gcount);
-                            }
-                            if (b >= 1 && b <= mi) ++bcount;
-                        }
-                        keel::i32 bsofar = 0;
-                        for (keel::i32 k = 1; k <= ulen; ++k) {
-                            const keel::i32 g = gbase + k;
-                            const keel::i32 b = g - n;
-                            if (b >= 1 && b <= mi) {
-                                ++bsofar;
-                                d[2 * m + keel::as<keel::usize>(b - 1)] = u_at(ulen - bcount + bsofar);
-                            }
-                        }
-                    } else if (paletteName == "gray") {
-                        for (keel::usize i = 0; i < m; ++i) {
-                            keel::f64 g = (m == 1) ? 0.0 : keel::f64(i) / keel::f64(m - 1);
-                            d[i] = d[i + m] = d[i + 2 * m] = g;
-                        }
-                    } else if (paletteName == "cool") {
-                        for (keel::usize i = 0; i < m; ++i) {
-                            keel::f64 r = (m == 1) ? 0.0 : keel::f64(i) / keel::f64(m - 1);
-                            d[i] = r; d[i + m] = 1.0 - r; d[i + 2 * m] = 1.0;
-                        }
-                    } else if (paletteName == "hot") {
-                        const keel::i32 mi = keel::as<keel::i32>(m);
-                        const keel::i32 n = (3 * mi) / 8;
-                        for (keel::i32 i = 0; i < mi; ++i) {
-                            d[i]         = (i < n) ? keel::f64(i + 1) / keel::f64(n) : 1.0;
-                            d[i + m]     = (i < n) ? 0.0 : (i < 2 * n ? keel::f64(i - n + 1) / keel::f64(n) : 1.0);
-                            d[i + 2 * m] = (i < 2 * n) ? 0.0 : keel::f64(i - 2 * n + 1) / keel::f64(mi - 2 * n);
-                        }
-                    } else {
-                        keel::i32 tableN = 256;
-                        const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
-                        for (keel::usize i = 0; i < m; ++i) {
-                            keel::f64 t = (m == 1) ? 0.0 : keel::as<keel::f64>(i) / keel::as<keel::f64>(m - 1);
-                            keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(std::lround(t * (tableN - 1)))));
-                            d[i]         = tbl[idx * 3 + 0] / 255.0;
-                            d[i + m]     = tbl[idx * 3 + 1] / 255.0;
-                            d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;
-                        }
-                    }
-                }
-                if (!outs.empty()) outs[0] = std::move(C);
-            };
-            engine.registerFunction("", cname, std::move(fn));
-        }
-    }
+    for (const auto &entry : kExportFns)
+        engine.registerFunction("", entry.name, entry.fn);
 }
 
 } // namespace numkit

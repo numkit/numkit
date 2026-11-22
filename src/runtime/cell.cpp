@@ -842,6 +842,107 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
     }
 };
 
+void deal_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+              keel::MutArrayRef<Value> outs, CallContext &)
+{
+    if (args.empty())
+        throw std::runtime_error("deal requires at least 1 argument");
+    if (args.size() == 1) {
+        for (keel::usize i = 0; i < nargout && i < outs.size(); ++i)
+            outs[i] = args[0];
+        return;
+    }
+    const keel::usize n = keel::min(nargout, args.size());
+    for (keel::usize i = 0; i < n && i < outs.size(); ++i)
+        outs[i] = args[i];
+}
+
+void celldisp_reg(keel::ArrayRef<Value> args, keel::usize,
+                  keel::MutArrayRef<Value>, CallContext &ctx)
+{
+    if (args.empty())
+        throw std::runtime_error("celldisp requires 1 argument");
+    const Value &c = args[0];
+    if (!c.isCell())
+        throw std::runtime_error("celldisp: input must be a cell");
+    const keel::String name = (args.size() >= 2)
+                                  ? args[1].toString()
+                                  : keel::String::from("ans");
+    for (keel::usize i = 0; i < c.numel(); ++i) {
+        ctx.engine->outputText(keel::format("{}{{{}}} =\n", name, i + 1));
+        keel::String disp = c.cellAt(i).formatDisplay("");
+        disp.push_back('\n');
+        ctx.engine->outputText(disp);
+    }
+}
+
+void arrayfun_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    if (args.size() < 2)
+        throw std::runtime_error("arrayfun requires at least 2 arguments");
+    if (!args[0].isFuncHandle())
+        throw std::runtime_error("arrayfun: first argument must be a function handle");
+    const Value &handle = args[0];
+
+    bool uniformOutput = true;
+    keel::Array<const Value *> inputs;
+    inputs.reserve(args.size() - 1);
+    for (keel::usize i = 1; i < args.size(); ++i) {
+        if (args[i].isChar() && i + 1 < args.size()) {
+            keel::String key = hf::lowerName(args[i].toString());
+            if (key == "uniformoutput") {
+                uniformOutput = args[i + 1].toScalar() != 0.0;
+                ++i;
+                continue;
+            }
+            if (key == "errorhandler") {
+                ++i;
+                continue;
+            }
+        }
+        inputs.push_back(&args[i]);
+    }
+    if (inputs.empty())
+        throw std::runtime_error("arrayfun: at least one input array required");
+
+    const keel::usize n = inputs[0]->numel();
+    for (const auto *p : inputs) {
+        if (p->numel() != n)
+            throw std::runtime_error("arrayfun: all input arrays must be the same size");
+    }
+    auto *mr = ctx.engine->allocator();
+
+    keel::Array<Value> callArgs(inputs.size());
+    if (uniformOutput) {
+        auto out = allocMatrixShape(inputs[0]->dims(), ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i < n; ++i) {
+            for (keel::usize k = 0; k < inputs.size(); ++k)
+                callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
+            Value r = ctx.engine->callFunctionHandle(
+                handle,
+                keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
+                ctx.env);
+            out.doubleDataMut()[i] = r.toScalar();
+        }
+        if (!outs.empty())
+            outs[0] = keel::move(out);
+    } else {
+        auto cell = allocCellShape(inputs[0]->dims(), mr);
+        for (keel::usize i = 0; i < n; ++i) {
+            for (keel::usize k = 0; k < inputs.size(); ++k)
+                callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
+            Value r = ctx.engine->callFunctionHandle(
+                handle,
+                keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
+                ctx.env);
+            cell.cellAt(i) = keel::move(r);
+        }
+        if (!outs.empty())
+            outs[0] = keel::move(cell);
+    }
+}
+
 } // namespace detail
 
 void registerCellfunCallbackBuiltin(Engine &engine)
@@ -852,116 +953,16 @@ void registerCellfunCallbackBuiltin(Engine &engine)
 
 void registerCellsRuntime(Engine &engine)
 {
-    engine.registerFunction("cell",     &detail::cell_reg);
-    engine.registerFunction("num2cell", &detail::num2cell_reg);
-    engine.registerFunction("cell2mat", &detail::cell2mat_reg);
-    engine.registerFunction("iscellstr",&detail::iscellstr_reg);
-    engine.registerFunction("cellstr",  &detail::cellstr_reg);
-    engine.registerFunction("mat2cell", &detail::mat2cell_reg);
-    engine.registerFunction("cellfun",  &detail::cellfun_reg);
-
-    engine.registerFunction("deal",
-        [](keel::ArrayRef<Value> args, keel::usize nargout,
-           keel::MutArrayRef<Value> outs, CallContext &) {
-            if (args.empty())
-                throw std::runtime_error("deal requires at least 1 argument");
-            if (args.size() == 1) {
-                for (keel::usize i = 0; i < nargout && i < outs.size(); ++i)
-                    outs[i] = args[0];
-                return;
-            }
-            const keel::usize n = keel::min(nargout, args.size());
-            for (keel::usize i = 0; i < n && i < outs.size(); ++i)
-                outs[i] = args[i];
-        });
-
-    engine.registerFunction("celldisp",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx) {
-            if (args.empty())
-                throw std::runtime_error("celldisp requires 1 argument");
-            const Value &c = args[0];
-            if (!c.isCell())
-                throw std::runtime_error("celldisp: input must be a cell");
-            const keel::String name = (args.size() >= 2)
-                                          ? args[1].toString()
-                                          : keel::String::from("ans");
-            for (keel::usize i = 0; i < c.numel(); ++i) {
-                ctx.engine->outputText(keel::format("{}{{{}}} =\n", name, i + 1));
-                keel::String disp = c.cellAt(i).formatDisplay("");
-                disp.push_back('\n');
-                ctx.engine->outputText(disp);
-            }
-        });
-
-    engine.registerFunction("arrayfun",
-        [](keel::ArrayRef<Value> args,
-           keel::usize nargout,
-           keel::MutArrayRef<Value> outs,
-           CallContext &ctx) {
-            (void)nargout;
-            if (args.size() < 2)
-                throw std::runtime_error("arrayfun requires at least 2 arguments");
-            if (!args[0].isFuncHandle())
-                throw std::runtime_error("arrayfun: first argument must be a function handle");
-            const Value &handle = args[0];
-
-            bool uniformOutput = true;
-            keel::Array<const Value *> inputs;
-            inputs.reserve(args.size() - 1);
-            for (keel::usize i = 1; i < args.size(); ++i) {
-                if (args[i].isChar() && i + 1 < args.size()) {
-                    keel::String key = hf::lowerName(args[i].toString());
-                    if (key == "uniformoutput") {
-                        uniformOutput = args[i + 1].toScalar() != 0.0;
-                        ++i;
-                        continue;
-                    }
-                    if (key == "errorhandler") {
-                        ++i;
-                        continue;
-                    }
-                }
-                inputs.push_back(&args[i]);
-            }
-            if (inputs.empty())
-                throw std::runtime_error("arrayfun: at least one input array required");
-
-            const keel::usize n = inputs[0]->numel();
-            for (const auto *p : inputs) {
-                if (p->numel() != n)
-                    throw std::runtime_error("arrayfun: all input arrays must be the same size");
-            }
-            auto *mr = ctx.engine->allocator();
-
-            keel::Array<Value> callArgs(inputs.size());
-            if (uniformOutput) {
-                auto out = allocMatrixShape(inputs[0]->dims(), ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i < n; ++i) {
-                    for (keel::usize k = 0; k < inputs.size(); ++k)
-                        callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
-                    Value r = ctx.engine->callFunctionHandle(
-                        handle,
-                        keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
-                        ctx.env);
-                    out.doubleDataMut()[i] = r.toScalar();
-                }
-                if (!outs.empty())
-                    outs[0] = keel::move(out);
-            } else {
-                auto cell = allocCellShape(inputs[0]->dims(), mr);
-                for (keel::usize i = 0; i < n; ++i) {
-                    for (keel::usize k = 0; k < inputs.size(); ++k)
-                        callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
-                    Value r = ctx.engine->callFunctionHandle(
-                        handle,
-                        keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
-                        ctx.env);
-                    cell.cellAt(i) = keel::move(r);
-                }
-                if (!outs.empty())
-                    outs[0] = keel::move(cell);
-            }
-        });
+    engine.registerFunction("cell",      &detail::cell_reg);
+    engine.registerFunction("num2cell",  &detail::num2cell_reg);
+    engine.registerFunction("cell2mat",  &detail::cell2mat_reg);
+    engine.registerFunction("iscellstr", &detail::iscellstr_reg);
+    engine.registerFunction("cellstr",   &detail::cellstr_reg);
+    engine.registerFunction("mat2cell",  &detail::mat2cell_reg);
+    engine.registerFunction("cellfun",   &detail::cellfun_reg);
+    engine.registerFunction("deal",      &detail::deal_reg);
+    engine.registerFunction("celldisp",  &detail::celldisp_reg);
+    engine.registerFunction("arrayfun",  &detail::arrayfun_reg);
 
     registerCellfunCallbackBuiltin(engine);
 }

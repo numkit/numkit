@@ -321,6 +321,404 @@ void accumarray_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
 namespace numkit::builtin::detail {
 
+namespace {
+
+void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx) {
+    if (args.empty())
+        throw Error("vec2ind: requires at least 1 argument",
+                    0, 0, "vec2ind", "", "numkit:vec2ind:nargin");
+    auto *mr = ctx.engine->allocator();
+    const Value &v = args[0];
+    if (v.dims().rows() == 1 && v.numel() > 0) {
+        // Row vector: each element is its own column. If the value
+        // is closer to 1 than to 0, index = 1; else NaN.
+        auto out = Value::matrix(1, v.numel(), ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i < v.numel(); ++i)
+            out.doubleDataMut()[i] =
+                (v.doubleData()[i] > 0.5) ? 1.0 : std::nan("");
+        outs[0] = std::move(out);
+        return;
+    }
+    // Matrix: each column -> row index of the value closest to 1;
+    // NaN if no positive element.
+    const keel::usize rows = v.dims().rows(), cols = v.dims().cols();
+    auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
+    const keel::f64 *p = v.doubleData();
+    for (keel::usize j = 0; j < cols; ++j) {
+        keel::f64 best = std::nan("");
+        for (keel::usize i = 0; i < rows; ++i) {
+            keel::f64 val = p[i + j * rows];
+            if (val > 0.5) {
+                best = keel::as<keel::f64>(i + 1);
+                break;
+            }
+        }
+        out.doubleDataMut()[j] = best;
+    }
+    outs[0] = std::move(out);
+}
+
+void full_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &) {
+    if (args.empty())
+        throw std::runtime_error("full requires 1 argument");
+    outs[0] = args[0];
+}
+
+void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 2, "dist");
+    auto *mr = ctx.engine->allocator();
+    if (args.size() == 1) {
+        const Value &P = args[0];
+        const keel::usize R = P.dims().rows();
+        const keel::usize Q = P.dims().cols();
+        if (P.isComplex()) {
+            Value Z = Value::matrix(Q, Q, ValueType::COMPLEX, mr);
+            auto *zd = Z.complexDataMut();
+            const auto *pd = P.complexData();
+            for (keel::usize q2 = 0; q2 < Q; ++q2) {
+                for (keel::usize q1 = 0; q1 < Q; ++q1) {
+                    keel::c64 acc(0.0, 0.0);
+                    for (keel::usize r = 0; r < R; ++r) {
+                        const auto diff = pd[r + q1 * R] - pd[r + q2 * R];
+                        acc += diff * diff;
+                    }
+                    zd[q1 + q2 * Q] = keel::sqrt(acc);
+                }
+            }
+            outs[0] = std::move(Z);
+        } else {
+            Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
+            keel::f64 *zd = Z.doubleDataMut();
+            for (keel::usize q2 = 0; q2 < Q; ++q2) {
+                for (keel::usize q1 = 0; q1 < Q; ++q1) {
+                    keel::f64 acc = 0.0;
+                    for (keel::usize r = 0; r < R; ++r) {
+                        const keel::f64 diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
+                        acc += diff * diff;
+                    }
+                    zd[q1 + q2 * Q] = std::sqrt(acc);
+                }
+            }
+            outs[0] = std::move(Z);
+        }
+        return;
+    }
+    const Value &W = args[0];
+    const Value &P = args[1];
+    const keel::usize S = W.dims().rows();
+    const keel::usize R = W.dims().cols();
+    if (P.dims().rows() != R) {
+        throw Error("dist: inner matrix dimensions must agree (size(W,2) must equal size(P,1))",
+                    0, 0, "dist", "", "numkit:dist:dimMismatch");
+    }
+    const keel::usize Q = P.dims().cols();
+    if (W.isComplex() || P.isComplex()) {
+        Value Z = Value::matrix(S, Q, ValueType::COMPLEX, mr);
+        auto *zd = Z.complexDataMut();
+        auto readCx = [](const Value &v, keel::usize idx) -> keel::c64 {
+            return v.isComplex() ? v.complexData()[idx]
+                                 : keel::c64(v.elemAsDouble(idx), 0.0);
+        };
+        for (keel::usize q = 0; q < Q; ++q) {
+            for (keel::usize s = 0; s < S; ++s) {
+                keel::c64 acc(0.0, 0.0);
+                for (keel::usize r = 0; r < R; ++r) {
+                    const auto diff = keel::conj(readCx(W, s + r * S)) - readCx(P, r + q * R);
+                    acc += diff * diff;
+                }
+                zd[s + q * S] = keel::sqrt(acc);
+            }
+        }
+        outs[0] = std::move(Z);
+    } else {
+        Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
+        keel::f64 *zd = Z.doubleDataMut();
+        for (keel::usize q = 0; q < Q; ++q) {
+            for (keel::usize s = 0; s < S; ++s) {
+                keel::f64 acc = 0.0;
+                for (keel::usize r = 0; r < R; ++r) {
+                    const keel::f64 diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
+                    acc += diff * diff;
+                }
+                zd[s + q * S] = std::sqrt(acc);
+            }
+        }
+        outs[0] = std::move(Z);
+    }
+}
+
+void fft_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+             CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 3, "fft");
+    keel::i32 n = -1, dim = 0;
+    if (args.size() >= 2 && !args[1].isEmpty())
+        n = argcheck::expectedInteger(
+            argcheck::expectedReal(args[1], 2, "n", "fft"), 2, "n", "fft");
+    if (args.size() >= 3)
+        dim = argcheck::dimArg(args[2], "fft");
+    outs[0] = signal::fft(args[0], n, dim, ctx.engine->allocator());
+}
+
+void ifft_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 4, "ifft");
+    keel::usize nargs = args.size();
+    bool symmetric = false;
+    if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
+        keel::String flag = args[nargs - 1].toString();
+        for (char &c : flag) c = keel::to_ascii_lower(c);
+        if (flag == "symmetric") symmetric = true;
+        else if (flag == "nonsymmetric") symmetric = false;
+        else
+            throw Error(keel::format("ifft: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
+                                     args[nargs - 1].toString()),
+                        0, 0, "ifft", "", "numkit:ifft:badOption");
+        --nargs;
+    }
+    keel::i32 n = -1, dim = 0;
+    if (nargs >= 2 && !args[1].isEmpty())
+        n = argcheck::expectedInteger(
+            argcheck::expectedReal(args[1], 2, "n", "ifft"), 2, "n", "ifft");
+    if (nargs >= 3)
+        dim = argcheck::dimArg(args[2], "ifft");
+    auto *mr = ctx.engine->allocator();
+    outs[0] = symmetric ? signal::ifftSymmetric(args[0], n, dim, mr)
+                        : signal::ifft(args[0], n, dim, mr);
+}
+
+void fft2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 3, "fft2");
+    if (args.size() == 2)
+        throw Error("fft2: requires 1 or 3 arguments (got 2 — specify both m and n)",
+                    0, 0, "fft2", "", "numkit:fft2:nargin");
+    keel::i32 m = -1, n = -1;
+    if (args.size() >= 2 && !args[1].isEmpty())
+        m = argcheck::expectedInteger(
+            argcheck::expectedReal(args[1], 2, "m", "fft2"), 2, "m", "fft2");
+    if (args.size() >= 3 && !args[2].isEmpty())
+        n = argcheck::expectedInteger(
+            argcheck::expectedReal(args[2], 3, "n", "fft2"), 3, "n", "fft2");
+    outs[0] = signal::fft2(args[0], m, n, ctx.engine->allocator());
+}
+
+void ifft2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+               CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 4, "ifft2");
+    keel::usize nargs = args.size();
+    bool symmetric = false;
+    if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
+        keel::String flag = args[nargs - 1].toString();
+        for (char &c : flag) c = keel::to_ascii_lower(c);
+        if (flag == "symmetric") symmetric = true;
+        else if (flag == "nonsymmetric") symmetric = false;
+        else
+            throw Error(keel::format("ifft2: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
+                                     args[nargs - 1].toString()),
+                        0, 0, "ifft2", "", "numkit:ifft2:badOption");
+        --nargs;
+    }
+    if (nargs == 2)
+        throw Error("ifft2: requires 1 or 3 numeric arguments (got 2 — specify both m and n)",
+                    0, 0, "ifft2", "", "numkit:ifft2:nargin");
+    keel::i32 m = -1, n = -1;
+    if (nargs >= 2 && !args[1].isEmpty())
+        m = argcheck::expectedInteger(
+            argcheck::expectedReal(args[1], 2, "m", "ifft2"), 2, "m", "ifft2");
+    if (nargs >= 3 && !args[2].isEmpty())
+        n = argcheck::expectedInteger(
+            argcheck::expectedReal(args[2], 3, "n", "ifft2"), 3, "n", "ifft2");
+    auto *mr = ctx.engine->allocator();
+    if (symmetric) {
+        if (m > 0 || n > 0)
+            throw Error("ifft2: the 'symmetric' option with explicit size args "
+                        "(m, n) is not supported in this revision",
+                        0, 0, "ifft2", "", "numkit:ifft2:symmetricResize");
+        outs[0] = signal::ifft2Symmetric(args[0], mr);
+        return;
+    }
+    outs[0] = signal::ifft2(args[0], m, n, mr);
+}
+
+void fftn_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 2, "fftn");
+    auto *mr = ctx.engine->allocator();
+    keel::Array<keel::usize> sz(mr);
+    if (args.size() >= 2 && !args[1].isEmpty()) {
+        const keel::usize n = args[1].numel();
+        sz.resize(n);
+        for (keel::usize i = 0; i < n; ++i) {
+            const keel::f64 d = args[1].elemAsDouble(i);
+            if (d <= 0 || d != std::floor(d))
+                throw Error("fftn: size entries must be positive integers",
+                            0, 0, "fftn", "", "numkit:fftn:badSize");
+            sz[i] = keel::as<keel::usize>(d);
+        }
+    }
+    outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
+}
+
+void ifftn_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+               CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 3, "ifftn");
+    auto *mr = ctx.engine->allocator();
+    keel::Array<keel::usize> sz(mr);
+    if (args.size() >= 2 && !args[1].isEmpty()) {
+        const keel::usize n = args[1].numel();
+        sz.resize(n);
+        for (keel::usize i = 0; i < n; ++i) {
+            const keel::f64 d = args[1].elemAsDouble(i);
+            if (d <= 0 || d != std::floor(d))
+                throw Error("ifftn: size entries must be positive integers",
+                            0, 0, "ifftn", "", "numkit:ifftn:badSize");
+            sz[i] = keel::as<keel::usize>(d);
+        }
+    }
+    outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
+}
+
+void nextpow2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                  CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 1, "nextpow2");
+    outs[0] = signal::nextpow2(args[0], ctx.engine->allocator());
+}
+
+void fftshift_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                  CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 2, "fftshift");
+    if (args.size() >= 2) {
+        const keel::i32 dim = argcheck::dimArg(args[1], "fftshift");
+        if (dim < 1 || dim > 3)
+            throw Error("fftshift: dim must be 1, 2, or 3",
+                        0, 0, "fftshift", "", "numkit:fftshift:dim");
+        outs[0] = signal::fftshift(args[0], dim, ctx.engine->allocator());
+    } else {
+        outs[0] = signal::fftshift(args[0], ctx.engine->allocator());
+    }
+}
+
+void ifftshift_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                   CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 1, 2, "ifftshift");
+    if (args.size() >= 2) {
+        const keel::i32 dim = argcheck::dimArg(args[1], "ifftshift");
+        if (dim < 1 || dim > 3)
+            throw Error("ifftshift: dim must be 1, 2, or 3",
+                        0, 0, "ifftshift", "", "numkit:ifftshift:dim");
+        outs[0] = signal::ifftshift(args[0], dim, ctx.engine->allocator());
+    } else {
+        outs[0] = signal::ifftshift(args[0], ctx.engine->allocator());
+    }
+}
+
+void conv_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+              CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "conv");
+    keel::String shape("full");
+    if (args.size() >= 3 && !args[2].isEmpty()) {
+        if (!args[2].isChar() && !args[2].isString())
+            throw Error("conv: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                        0, 0, "conv", "", "numkit:conv:badShape");
+        shape = args[2].toString();
+    }
+    outs[0] = signal::conv(args[0], args[1], shape, ctx.engine->allocator());
+}
+
+void conv2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+               CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 4, "conv2");
+    auto *mr = ctx.engine->allocator();
+    keel::String shape("full");
+    if (args.size() >= 3 && !args[2].isEmpty() &&
+        !(args[2].isChar() || args[2].isString())) {
+        // Separable form: conv2(u, v, A[, shape])
+        if ((!args[0].isEmpty() && !args[0].dims().isVector()) ||
+            (!args[1].isEmpty() && !args[1].dims().isVector())) {
+            throw Error("conv2: first two arguments u and v must be vectors in separable form conv2(u, v, A)",
+                        0, 0, "conv2", "", "numkit:conv2:firstTwoInputsNotVectors");
+        }
+        if (args.size() >= 4 && !args[3].isEmpty()) {
+            if (!args[3].isChar() && !args[3].isString())
+                throw Error("conv2: shape option must be 'full', 'same', or 'valid'",
+                            0, 0, "conv2", "", "numkit:conv2:badShape");
+            shape = args[3].toString();
+        }
+        const keel::usize m = args[0].numel();
+        const keel::usize n = args[1].numel();
+        Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
+        keel::f64 *kd = k.doubleDataMut();
+        for (keel::usize c = 0; c < n; ++c) {
+            const keel::f64 vc = args[1].elemAsDouble(c);
+            for (keel::usize r = 0; r < m; ++r)
+                kd[r + c * m] = args[0].elemAsDouble(r) * vc;
+        }
+        outs[0] = signal::conv2(args[2], k, shape, mr);
+        return;
+    }
+    if (args.size() >= 3 && !args[2].isEmpty()) {
+        shape = args[2].toString();
+    }
+    outs[0] = signal::conv2(args[0], args[1], shape, mr);
+}
+
+void convn_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+               CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "convn");
+    keel::String shape("full");
+    if (args.size() >= 3 && !args[2].isEmpty()) {
+        if (!args[2].isChar() && !args[2].isString())
+            throw Error("convn: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                        0, 0, "convn", "", "numkit:convn:badShape");
+        shape = args[2].toString();
+    }
+    outs[0] = signal::convn(args[0], args[1], shape, ctx.engine->allocator());
+}
+
+void deconv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "deconv");
+    auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->allocator());
+    outs[0] = std::move(q);
+    if (nargout > 1)
+        outs[1] = std::move(r);
+}
+
+void filter_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 3, 5, "filter");
+    const bool hasZi = (args.size() >= 4 && !args[3].isEmpty()
+                        && !args[3].isChar() && !args[3].isString());
+    auto *mr = ctx.engine->allocator();
+    if (!hasZi && nargout <= 1) {
+        outs[0] = signal::filter(args[0], args[1], args[2], mr);
+        return;
+    }
+    const Value zi = hasZi ? args[3] : Value();
+    signal::FilterState st = signal::filter(args[0], args[1], args[2], zi, mr);
+    outs[0] = std::move(st.y);
+    if (nargout > 1)
+        outs[1] = std::move(st.zf);
+}
+
+void filter2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx) {
+    argcheck::checkNargin(args.size(), 2, 3, "filter2");
+    keel::String shape("same");
+    if (args.size() >= 3 && !args[2].isEmpty()) {
+        if (!args[2].isChar() && !args[2].isString())
+            throw Error("filter2: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
+                        0, 0, "filter2", "", "numkit:filter2:badShape");
+        shape = args[2].toString();
+    }
+    outs[0] = signal::filter2(args[0], args[1], shape, ctx.engine->allocator());
+}
+
+} // namespace
+
 void register_datafun(Engine &engine) {
     engine.registerFunction("linspace", &::numkit::builtin::detail::linspace_reg);
     engine.registerFunction("logspace", &::numkit::builtin::detail::logspace_reg);
@@ -396,401 +794,28 @@ void register_datafun(Engine &engine) {
     engine.registerFunction("groupfilter",&::numkit::builtin::detail::groupfilter_reg);
     engine.registerFunction("colperm",    &::numkit::builtin::detail::colperm_reg);
     engine.registerFunction("symrcm",     &::numkit::builtin::detail::symrcm_reg);
-        engine.registerFunction("vec2ind",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty())
-                throw Error("vec2ind: requires at least 1 argument",
-                             0, 0, "vec2ind", "", "numkit:vec2ind:nargin");
-            auto *mr = ctx.engine->allocator();
-            const Value &v = args[0];
-            if (v.dims().rows() == 1 && v.numel() > 0) {
-                // Row vector: each element is its own column. If the value
-                // is closer to 1 than to 0, index = 1; else NaN (MATLAB).
-                auto out = Value::matrix(1, v.numel(), ValueType::DOUBLE, mr);
-                for (keel::usize i = 0; i < v.numel(); ++i)
-                    out.doubleDataMut()[i] =
-                        (v.doubleData()[i] > 0.5) ? 1.0 : std::nan("");
-                outs[0] = std::move(out);
-                return;
-            }
-            // Matrix: each column → row index of the value closest to 1;
-            // NaN if no positive element (MATLAB).
-            const keel::usize rows = v.dims().rows(), cols = v.dims().cols();
-            auto out = Value::matrix(1, cols, ValueType::DOUBLE, mr);
-            const keel::f64 *p = v.doubleData();
-            for (keel::usize j = 0; j < cols; ++j) {
-                keel::f64 best = std::nan("");
-                for (keel::usize i = 0; i < rows; ++i) {
-                    keel::f64 val = p[i + j * rows];
-                    if (val > 0.5) {
-                        best = keel::as<keel::f64>(i + 1);
-                        break;
-                    }
-                }
-                out.doubleDataMut()[j] = best;
-            }
-            outs[0] = std::move(out);
-        });
+    engine.registerFunction("vec2ind",    &vec2ind_reg);
+    engine.registerFunction("full",       &full_reg);
+    engine.registerFunction("dist",       &dist_reg);
 
-    engine.registerFunction("full",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
-            if (args.empty())
-                throw std::runtime_error("full requires 1 argument");
-            outs[0] = args[0];
-        });
+    // Base Fourier transforms & helpers
+    engine.registerFunction("fft",        &fft_reg);
+    engine.registerFunction("ifft",       &ifft_reg);
+    engine.registerFunction("fft2",       &fft2_reg);
+    engine.registerFunction("ifft2",      &ifft2_reg);
+    engine.registerFunction("fftn",       &fftn_reg);
+    engine.registerFunction("ifftn",      &ifftn_reg);
+    engine.registerFunction("nextpow2",   &nextpow2_reg);
+    engine.registerFunction("fftshift",   &fftshift_reg);
+    engine.registerFunction("ifftshift",  &ifftshift_reg);
 
-    engine.registerFunction("dist",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "dist");
-            auto *mr = ctx.engine->allocator();
-            if (args.size() == 1) {
-                const Value &P = args[0];
-                const keel::usize R = P.dims().rows();
-                const keel::usize Q = P.dims().cols();
-                if (P.isComplex()) {
-                    Value Z = Value::matrix(Q, Q, ValueType::COMPLEX, mr);
-                    auto *zd = Z.complexDataMut();
-                    const auto *pd = P.complexData();
-                    for (keel::usize q2 = 0; q2 < Q; ++q2) {
-                        for (keel::usize q1 = 0; q1 < Q; ++q1) {
-                            keel::c64 acc(0.0, 0.0);
-                            for (keel::usize r = 0; r < R; ++r) {
-                                const auto diff = pd[r + q1 * R] - pd[r + q2 * R];
-                                acc += diff * diff;
-                            }
-                            zd[q1 + q2 * Q] = keel::sqrt(acc);
-                        }
-                    }
-                    outs[0] = std::move(Z);
-                } else {
-                    Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
-                    keel::f64 *zd = Z.doubleDataMut();
-                    for (keel::usize q2 = 0; q2 < Q; ++q2) {
-                        for (keel::usize q1 = 0; q1 < Q; ++q1) {
-                            keel::f64 acc = 0.0;
-                            for (keel::usize r = 0; r < R; ++r) {
-                                const keel::f64 diff = P.elemAsDouble(r + q1 * R) - P.elemAsDouble(r + q2 * R);
-                                acc += diff * diff;
-                            }
-                            zd[q1 + q2 * Q] = std::sqrt(acc);
-                        }
-                    }
-                    outs[0] = std::move(Z);
-                }
-                return;
-            }
-            const Value &W = args[0];
-            const Value &P = args[1];
-            const keel::usize S = W.dims().rows();
-            const keel::usize R = W.dims().cols();
-            if (P.dims().rows() != R) {
-                throw Error("dist: inner matrix dimensions must agree (size(W,2) must equal size(P,1))",
-                            0, 0, "dist", "", "numkit:dist:dimMismatch");
-            }
-            const keel::usize Q = P.dims().cols();
-            if (W.isComplex() || P.isComplex()) {
-                Value Z = Value::matrix(S, Q, ValueType::COMPLEX, mr);
-                auto *zd = Z.complexDataMut();
-                auto readCx = [](const Value &v, keel::usize idx) -> keel::c64 {
-                    return v.isComplex() ? v.complexData()[idx]
-                                         : keel::c64(v.elemAsDouble(idx), 0.0);
-                };
-                for (keel::usize q = 0; q < Q; ++q) {
-                    for (keel::usize s = 0; s < S; ++s) {
-                        keel::c64 acc(0.0, 0.0);
-                        for (keel::usize r = 0; r < R; ++r) {
-                            const auto diff = keel::conj(readCx(W, s + r * S)) - readCx(P, r + q * R);
-                            acc += diff * diff;
-                        }
-                        zd[s + q * S] = keel::sqrt(acc);
-                    }
-                }
-                outs[0] = std::move(Z);
-            } else {
-                Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
-                keel::f64 *zd = Z.doubleDataMut();
-                for (keel::usize q = 0; q < Q; ++q) {
-                    for (keel::usize s = 0; s < S; ++s) {
-                        keel::f64 acc = 0.0;
-                        for (keel::usize r = 0; r < R; ++r) {
-                            const keel::f64 diff = W.elemAsDouble(s + r * S) - P.elemAsDouble(r + q * R);
-                            acc += diff * diff;
-                        }
-                        zd[s + q * S] = std::sqrt(acc);
-                    }
-                }
-                outs[0] = std::move(Z);
-            }
-        });
-
-    // Base Fourier transforms & helpers (MATLAB datafun / elfun)
-    engine.registerFunction("fft",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 3, "fft");
-            keel::i32 n = -1, dim = 0;
-            if (args.size() >= 2 && !args[1].isEmpty())
-                n = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[1], 2, "n", "fft"), 2, "n", "fft");
-            if (args.size() >= 3)
-                dim = argcheck::dimArg(args[2], "fft");
-            outs[0] = signal::fft(args[0], n, dim, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("ifft",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 4, "ifft");
-            keel::usize nargs = args.size();
-            bool symmetric = false;
-            if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
-                keel::String flag = args[nargs - 1].toString();
-                for (char &c : flag) c = keel::to_ascii_lower(c);
-                if (flag == "symmetric") symmetric = true;
-                else if (flag == "nonsymmetric") symmetric = false;
-                else
-                    throw Error(keel::format("ifft: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
-                                             args[nargs - 1].toString()),
-                                0, 0, "ifft", "", "numkit:ifft:badOption");
-                --nargs;
-            }
-            keel::i32 n = -1, dim = 0;
-            if (nargs >= 2 && !args[1].isEmpty())
-                n = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[1], 2, "n", "ifft"), 2, "n", "ifft");
-            if (nargs >= 3)
-                dim = argcheck::dimArg(args[2], "ifft");
-            auto *mr = ctx.engine->allocator();
-            outs[0] = symmetric ? signal::ifftSymmetric(args[0], n, dim, mr)
-                                : signal::ifft(args[0], n, dim, mr);
-        });
-
-    engine.registerFunction("fft2",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 3, "fft2");
-            if (args.size() == 2)
-                throw Error("fft2: requires 1 or 3 arguments (got 2 — specify both m and n)",
-                            0, 0, "fft2", "", "numkit:fft2:nargin");
-            keel::i32 m = -1, n = -1;
-            if (args.size() >= 2 && !args[1].isEmpty())
-                m = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[1], 2, "m", "fft2"), 2, "m", "fft2");
-            if (args.size() >= 3 && !args[2].isEmpty())
-                n = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[2], 3, "n", "fft2"), 3, "n", "fft2");
-            outs[0] = signal::fft2(args[0], m, n, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("ifft2",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 4, "ifft2");
-            keel::usize nargs = args.size();
-            bool symmetric = false;
-            if (nargs >= 2 && (args[nargs - 1].isChar() || args[nargs - 1].isString())) {
-                keel::String flag = args[nargs - 1].toString();
-                for (char &c : flag) c = keel::to_ascii_lower(c);
-                if (flag == "symmetric") symmetric = true;
-                else if (flag == "nonsymmetric") symmetric = false;
-                else
-                    throw Error(keel::format("ifft2: unknown option '{}' (expected 'symmetric' or 'nonsymmetric')",
-                                             args[nargs - 1].toString()),
-                                0, 0, "ifft2", "", "numkit:ifft2:badOption");
-                --nargs;
-            }
-            if (nargs == 2)
-                throw Error("ifft2: requires 1 or 3 numeric arguments (got 2 — specify both m and n)",
-                            0, 0, "ifft2", "", "numkit:ifft2:nargin");
-            keel::i32 m = -1, n = -1;
-            if (nargs >= 2 && !args[1].isEmpty())
-                m = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[1], 2, "m", "ifft2"), 2, "m", "ifft2");
-            if (nargs >= 3 && !args[2].isEmpty())
-                n = argcheck::expectedInteger(
-                    argcheck::expectedReal(args[2], 3, "n", "ifft2"), 3, "n", "ifft2");
-            auto *mr = ctx.engine->allocator();
-            if (symmetric) {
-                if (m > 0 || n > 0)
-                    throw Error("ifft2: the 'symmetric' option with explicit size args "
-                                "(m, n) is not supported in this revision",
-                                0, 0, "ifft2", "", "numkit:ifft2:symmetricResize");
-                outs[0] = signal::ifft2Symmetric(args[0], mr);
-                return;
-            }
-            outs[0] = signal::ifft2(args[0], m, n, mr);
-        });
-
-    engine.registerFunction("fftn",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "fftn");
-            auto *mr = ctx.engine->allocator();
-            keel::Array<keel::usize> sz(mr);
-            if (args.size() >= 2 && !args[1].isEmpty()) {
-                const keel::usize n = args[1].numel();
-                sz.resize(n);
-                for (keel::usize i = 0; i < n; ++i) {
-                    const keel::f64 d = args[1].elemAsDouble(i);
-                    if (d <= 0 || d != std::floor(d))
-                        throw Error("fftn: size entries must be positive integers",
-                                    0, 0, "fftn", "", "numkit:fftn:badSize");
-                    sz[i] = keel::as<keel::usize>(d);
-                }
-            }
-            outs[0] = signal::fftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
-        });
-
-    engine.registerFunction("ifftn",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 3, "ifftn");
-            auto *mr = ctx.engine->allocator();
-            keel::Array<keel::usize> sz(mr);
-            if (args.size() >= 2 && !args[1].isEmpty()) {
-                const keel::usize n = args[1].numel();
-                sz.resize(n);
-                for (keel::usize i = 0; i < n; ++i) {
-                    const keel::f64 d = args[1].elemAsDouble(i);
-                    if (d <= 0 || d != std::floor(d))
-                        throw Error("ifftn: size entries must be positive integers",
-                                    0, 0, "ifftn", "", "numkit:ifftn:badSize");
-                    sz[i] = keel::as<keel::usize>(d);
-                }
-            }
-            outs[0] = signal::ifftn(args[0], keel::ArrayRef<keel::usize>(sz.data(), sz.size()), mr);
-        });
-
-    engine.registerFunction("nextpow2",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 1, "nextpow2");
-            outs[0] = signal::nextpow2(args[0], ctx.engine->allocator());
-        });
-
-    engine.registerFunction("fftshift",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "fftshift");
-            if (args.size() >= 2) {
-                const keel::i32 dim = argcheck::dimArg(args[1], "fftshift");
-                if (dim < 1 || dim > 3)
-                    throw Error("fftshift: dim must be 1, 2, or 3",
-                                0, 0, "fftshift", "", "numkit:fftshift:dim");
-                outs[0] = signal::fftshift(args[0], dim, ctx.engine->allocator());
-            } else {
-                outs[0] = signal::fftshift(args[0], ctx.engine->allocator());
-            }
-        });
-
-    engine.registerFunction("ifftshift",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 1, 2, "ifftshift");
-            if (args.size() >= 2) {
-                const keel::i32 dim = argcheck::dimArg(args[1], "ifftshift");
-                if (dim < 1 || dim > 3)
-                    throw Error("ifftshift: dim must be 1, 2, or 3",
-                                0, 0, "ifftshift", "", "numkit:ifftshift:dim");
-                outs[0] = signal::ifftshift(args[0], dim, ctx.engine->allocator());
-            } else {
-                outs[0] = signal::ifftshift(args[0], ctx.engine->allocator());
-            }
-        });
-
-    // Base convolution & digital filtering (MATLAB datafun)
-    engine.registerFunction("conv",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "conv");
-            keel::String shape("full");
-            if (args.size() >= 3 && !args[2].isEmpty()) {
-                if (!args[2].isChar() && !args[2].isString())
-                    throw Error("conv: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
-                                0, 0, "conv", "", "numkit:conv:badShape");
-                shape = args[2].toString();
-            }
-            outs[0] = signal::conv(args[0], args[1], shape, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("conv2",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 4, "conv2");
-            auto *mr = ctx.engine->allocator();
-            keel::String shape("full");
-            if (args.size() >= 3 && !args[2].isEmpty() &&
-                !(args[2].isChar() || args[2].isString())) {
-                // Separable form: conv2(u, v, A[, shape])
-                if ((!args[0].isEmpty() && !args[0].dims().isVector()) ||
-                    (!args[1].isEmpty() && !args[1].dims().isVector())) {
-                    throw Error("conv2: first two arguments u and v must be vectors in separable form conv2(u, v, A)",
-                                0, 0, "conv2", "", "numkit:conv2:firstTwoInputsNotVectors");
-                }
-                if (args.size() >= 4 && !args[3].isEmpty()) {
-                    if (!args[3].isChar() && !args[3].isString())
-                        throw Error("conv2: shape option must be 'full', 'same', or 'valid'",
-                                    0, 0, "conv2", "", "numkit:conv2:badShape");
-                    shape = args[3].toString();
-                }
-                const keel::usize m = args[0].numel();
-                const keel::usize n = args[1].numel();
-                Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
-                keel::f64 *kd = k.doubleDataMut();
-                for (keel::usize c = 0; c < n; ++c) {
-                    const keel::f64 vc = args[1].elemAsDouble(c);
-                    for (keel::usize r = 0; r < m; ++r)
-                        kd[r + c * m] = args[0].elemAsDouble(r) * vc;
-                }
-                outs[0] = signal::conv2(args[2], k, shape, mr);
-                return;
-            }
-            if (args.size() >= 3 && !args[2].isEmpty()) {
-                shape = args[2].toString();
-            }
-            outs[0] = signal::conv2(args[0], args[1], shape, mr);
-        });
-
-    engine.registerFunction("convn",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "convn");
-            keel::String shape("full");
-            if (args.size() >= 3 && !args[2].isEmpty()) {
-                if (!args[2].isChar() && !args[2].isString())
-                    throw Error("convn: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
-                                0, 0, "convn", "", "numkit:convn:badShape");
-                shape = args[2].toString();
-            }
-            outs[0] = signal::convn(args[0], args[1], shape, ctx.engine->allocator());
-        });
-
-    engine.registerFunction("deconv",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "deconv");
-            auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->allocator());
-            outs[0] = std::move(q);
-            if (nargout > 1)
-                outs[1] = std::move(r);
-        });
-
-    engine.registerFunction("filter",
-        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 3, 5, "filter");
-            const bool hasZi = (args.size() >= 4 && !args[3].isEmpty()
-                                && !args[3].isChar() && !args[3].isString());
-            auto *mr = ctx.engine->allocator();
-            if (!hasZi && nargout <= 1) {
-                outs[0] = signal::filter(args[0], args[1], args[2], mr);
-                return;
-            }
-            const Value zi = hasZi ? args[3] : Value();
-            signal::FilterState st = signal::filter(args[0], args[1], args[2], zi, mr);
-            outs[0] = std::move(st.y);
-            if (nargout > 1)
-                outs[1] = std::move(st.zf);
-        });
-
-    engine.registerFunction("filter2",
-        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            argcheck::checkNargin(args.size(), 2, 3, "filter2");
-            keel::String shape("same");
-            if (args.size() >= 3 && !args[2].isEmpty()) {
-                if (!args[2].isChar() && !args[2].isString())
-                    throw Error("filter2: shape option must be 'full', 'same', or 'valid' (got a non-string argument)",
-                                0, 0, "filter2", "", "numkit:filter2:badShape");
-                shape = args[2].toString();
-            }
-            outs[0] = signal::filter2(args[0], args[1], shape, ctx.engine->allocator());
-        });
+    // Base convolution & digital filtering
+    engine.registerFunction("conv",       &conv_reg);
+    engine.registerFunction("conv2",      &conv2_reg);
+    engine.registerFunction("convn",      &convn_reg);
+    engine.registerFunction("deconv",     &deconv_reg);
+    engine.registerFunction("filter",     &filter_reg);
+    engine.registerFunction("filter2",    &filter2_reg);
 }
 
 } // namespace numkit::builtin::detail

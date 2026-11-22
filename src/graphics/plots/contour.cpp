@@ -26,23 +26,13 @@
 
 namespace numkit {
 
-void buildContourPlots(keel::Array<PlotEntry> &table)
-{
-    using namespace detail;
-    auto reg = [&](const char *sub, const char *name, GraphicsFn fn) {
-        table.push_back(PlotEntry{sub, name, /*core=*/false, keel::move(fn)});
-    };
+namespace {
 
-    // ── Contour — marching squares over Z(R, C) ────────────────────────
-    // contour(Z) / contour(Z, n) / contour(Z, levels)
-    // contour(X, Y, Z[, n|levels])
-    // We don't reuse the imagesc heatmap path — contour produces 1-D
-    // line layers instead of a 2-D raster. Each level becomes its own
-    // DatasetInfo with type='line' and an inline color (HSL→RGB ramp
-    // through the z-extent), with NaN separators between segments so
-    // the existing line renderer can draw them as one path.
-    auto contourImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
-                          keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+using namespace numkit::detail;
+
+void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, GraphicsContext &gc)
+{
         auto &fm = gc.fm;
         fm.prepareForPlot();
 
@@ -202,29 +192,16 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
         }
         fm.emitModified();
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
-        if (nargout >= 2 && outs.size() >= 2) {
-            Value h = Value::structure();
-            h.setField(0, "LineWidth", Value::scalar(0.5));
-            outs[1] = keel::move(h);
-        }
-    };
-    reg("contour", "contour", contourImpl);
-    // ────────────────────────────────────────────────────────────────
-    // contourf — filled bands between consecutive levels.
-    // Strategy: for each level L from highest to lowest, draw the
-    // closed polygon "Z >= L" with a colour from the colormap at that
-    // level. Because levels are drawn in descending order each layer
-    // overdraws a smaller region of the previous one, producing the
-    // classic MATLAB filled-contour banded effect.
-    // Per cell with values (v_TL, v_TR, v_BR, v_BL) and the four
-    // corner-points (TL, TR, BR, BL), we compute a 4-bit bitmask of
-    // "corner is inside (z >= L)" and look up the polygon vertices
-    // from a 16-entry table. Saddle codes (5, 10) are split into two
-    // disjoint triangles — visually equivalent to MATLAB's
-    // disambiguation in our usage (the renderer fills the union).
-    // ────────────────────────────────────────────────────────────────
-    auto contourfImpl = [](keel::ArrayRef<Value> args, keel::usize nargout,
-                           keel::MutArrayRef<Value> outs, GraphicsContext &gc) {
+    if (nargout >= 2 && outs.size() >= 2) {
+        Value h = Value::structure();
+        h.setField(0, "LineWidth", Value::scalar(0.5));
+        outs[1] = keel::move(h);
+    }
+}
+
+void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
+                   keel::MutArrayRef<Value> outs, GraphicsContext &gc)
+{
         auto setOutputs = [&]() {
             outs[0] = Value::matrix(0, 0, ValueType::DOUBLE);
             if (nargout >= 2 && outs.size() >= 2) {
@@ -429,8 +406,14 @@ void buildContourPlots(keel::Array<PlotEntry> &table)
         }
         fm.emitModified();
         setOutputs();
-    };
-    reg("contour", "contourf", contourfImpl);
+}
+
+} // namespace
+
+void buildContourPlots(keel::Array<PlotEntry> &table)
+{
+    table.push_back(PlotEntry{"contour", "contour",  /*core=*/false, &contour_plot});
+    table.push_back(PlotEntry{"contour", "contourf", /*core=*/false, &contourf_plot});
 }
 
 }  // namespace numkit
