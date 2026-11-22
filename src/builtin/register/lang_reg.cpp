@@ -134,6 +134,49 @@ void register_lang(Engine &engine) {
             else outs[0] = Value::logicalScalar(false, mr);
         });
 
+    engine.registerFunction("narginchk",
+        [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 2, "narginchk");
+            const keel::f64 lo = args[0].toScalar();
+            const keel::f64 hi = args[1].toScalar();
+            const keel::i64 n = ctx.engine->currentFunctionNargin();
+            if (n >= 0) {
+                if (keel::as<keel::f64>(n) < lo)
+                    throw Error("Not enough input arguments.",
+                                0, 0, "narginchk", "", "numkit:narginchk:notEnoughInputs");
+                if (keel::as<keel::f64>(n) > hi)
+                    throw Error("Too many input arguments.",
+                                0, 0, "narginchk", "", "numkit:narginchk:tooManyInputs");
+            }
+            outs[0] = Value();
+        });
+
+    engine.registerFunction("nargoutchk",
+        [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            argcheck::checkNargin(args.size(), 2, 4, "nargoutchk");
+            auto *mr = ctx.engine->allocator();
+            const keel::f64 lo = args[0].toScalar();
+            const keel::f64 hi = args[1].toScalar();
+            if (args.size() >= 3) {
+                const keel::f64 n = args[2].toScalar();
+                if (n < lo) outs[0] = Value::fromString("Not enough output arguments.", mr);
+                else if (n > hi) outs[0] = Value::fromString("Too many output arguments.", mr);
+                else outs[0] = Value::fromString("", mr);
+                return;
+            }
+            const keel::i64 n = ctx.engine->currentFunctionNargout();
+            if (n >= 0) {
+                if (keel::as<keel::f64>(n) < lo)
+                    throw Error("Not enough output arguments.",
+                                0, 0, "nargoutchk", "", "numkit:nargoutchk:notEnoughOutputs");
+                if (keel::as<keel::f64>(n) > hi)
+                    throw Error("Too many output arguments.",
+                                0, 0, "nargoutchk", "", "numkit:nargoutchk:tooManyOutputs");
+            }
+            (void)nargout;
+            outs[0] = Value();
+        });
+
     engine.registerFunction("memoize",
         [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &) {
             argcheck::checkNargin(args.size(), 1, 1, "memoize");

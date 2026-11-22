@@ -131,6 +131,23 @@ public:
         return !frames_.empty() && frames_.back().isCtor;
     }
 
+    keel::i64 currentFunctionNargin() const
+    {
+        for (keel::usize i = frames_.size(); i > 0; --i) {
+            const auto &f = frames_[i - 1];
+            if (!f.isScriptFrame) return keel::as<keel::i64>(f.nargin);
+        }
+        return -1;
+    }
+    keel::i64 currentFunctionNargout() const
+    {
+        for (keel::usize i = frames_.size(); i > 0; --i) {
+            const auto &f = frames_[i - 1];
+            if (!f.isScriptFrame) return keel::as<keel::i64>(f.nargout);
+        }
+        return -1;
+    }
+
     void setMaxRecursionDepth(keel::i32 d) { maxRecursion_ = d; }
 
     Environment *callerEnvAtDepth(keel::i32 n);
@@ -200,6 +217,7 @@ private:
         bool isMultiReturn = false;      // CALL_MULTI?
         keel::u16 outBase = 0;            // multi-return: output base register
         keel::u16 nout = 0;               // multi-return: output count
+        keel::usize nargin = 0;
         keel::usize nargout = 1;
         keel::String ownerClass;
         bool isCtor = false;

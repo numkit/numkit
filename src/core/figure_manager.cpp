@@ -414,25 +414,54 @@ void FigureManager::pushDataset(DatasetInfo ds)
 void FigureManager::maybeDownsampleSeries(DatasetInfo &ds)
 {
     if (ds.type != "line" && ds.type != "stairs") return;
-    if (ds.xJson.empty() || ds.yJson.empty()) return;
-    if (figdetail::countFlatElements(ds.xJson) <= kSeriesPreviewThreshold) return;
-    auto xr = figdetail::parseFlatDoubles(ds.xJson);
-    auto yr = figdetail::parseFlatDoubles(ds.yJson);
-    const keel::usize n = xr.size();
-    if (n != yr.size() || n <= kSeriesPreviewThreshold) return;
+    keel::Array<keel::f64> xr, yr;
+    bool fromRaw = false;
+    if (!ds.xRaw.empty() && ds.xRaw.size() == ds.yRaw.size()) {
+        if (ds.xRaw.size() <= kSeriesPreviewThreshold) {
+            if (ds.xJson.empty()) ds.xJson = figdetail::serializeFlatDoubles(ds.xRaw);
+            if (ds.yJson.empty()) ds.yJson = figdetail::serializeFlatDoubles(ds.yRaw);
+            return;
+        }
+        fromRaw = true;
+    } else {
+        if (ds.xJson.empty() || ds.yJson.empty()) return;
+        if (figdetail::countFlatElements(ds.xJson) <= kSeriesPreviewThreshold) return;
+        xr = figdetail::parseFlatDoubles(ds.xJson);
+        yr = figdetail::parseFlatDoubles(ds.yJson);
+    }
+    const keel::Array<keel::f64> &xSrc = fromRaw ? ds.xRaw : xr;
+    const keel::Array<keel::f64> &ySrc = fromRaw ? ds.yRaw : yr;
+    const keel::usize n = xSrc.size();
+    if (n != ySrc.size() || n <= kSeriesPreviewThreshold) {
+        if (fromRaw) {
+            if (ds.xJson.empty()) ds.xJson = figdetail::serializeFlatDoubles(ds.xRaw);
+            if (ds.yJson.empty()) ds.yJson = figdetail::serializeFlatDoubles(ds.yRaw);
+        }
+        return;
+    }
     // Decimation buckets by x — valid only for ascending x. Bail on a
     // non-monotonic series (rare for huge data; keeps the full JSON).
-    for (keel::usize i = 1; i < n; ++i) if (xr[i] < xr[i - 1]) return;
-    keel::f64 xlo = xr.front(), xhi = xr.back();
+    for (keel::usize i = 1; i < n; ++i) {
+        if (xSrc[i] < xSrc[i - 1]) {
+            if (fromRaw) {
+                if (ds.xJson.empty()) ds.xJson = figdetail::serializeFlatDoubles(ds.xRaw);
+                if (ds.yJson.empty()) ds.yJson = figdetail::serializeFlatDoubles(ds.yRaw);
+            }
+            return;
+        }
+    }
+    keel::f64 xlo = xSrc.front(), xhi = xSrc.back();
     if (xhi < xlo) std::swap(xlo, xhi);
     keel::f64 ylo = INFINITY, yhi = -INFINITY;
-    for (keel::f64 v : yr) if (std::isfinite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
+    for (keel::f64 v : ySrc) if (std::isfinite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
     if (!std::isfinite(ylo)) { ylo = 0; yhi = 0; }
-    auto prev = decimateM4(xr.data(), yr.data(), n, xlo, xhi, kSeriesPreviewCols);
+    auto prev = decimateM4(xSrc.data(), ySrc.data(), n, xlo, xhi, kSeriesPreviewCols);
     ds.xJson = figdetail::serializeFlatDoubles(prev.x);
     ds.yJson = figdetail::serializeFlatDoubles(prev.y);
-    ds.xRaw = keel::move(xr);
-    ds.yRaw = keel::move(yr);
+    if (!fromRaw) {
+        ds.xRaw = keel::move(xr);
+        ds.yRaw = keel::move(yr);
+    }
     ds.seriesDownsampled = true;
     ds.seriesN = n;
     ds.sxLo = xlo; ds.sxHi = xhi; ds.syLo = ylo; ds.syHi = yhi;

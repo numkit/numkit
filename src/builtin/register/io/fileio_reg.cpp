@@ -37,16 +37,23 @@ void fopen_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         const bool isReadOnly = !mode.empty() && mode[0] == 'r'
                                 && mode.find('+') == keel::kInvalidIndex;
         if (isReadOnly && rawPath != "all") {
-            auto rp = ctx.engine->resolvePath(rawPath.as_ref());
-            if (rp.fs && rp.fs->exists(rp.path) && rp.path != rawPath) {
-                keel::Array<Value> resolvedArgs(args.size());
-                resolvedArgs[0] = Value::fromString(rp.path, mr);
-                for (keel::usize i = 1; i < args.size(); ++i)
-                    resolvedArgs[i] = args[i];
-                fopen(ctx.engine->fsContext(),
-                      keel::ArrayRef<Value>(resolvedArgs.data(), resolvedArgs.size()),
-                      nargout, outs, mr);
-                return;
+            auto &fsc = ctx.engine->fsContext();
+            auto cwdRp = fsc.resolvePath(rawPath.as_ref());
+            const bool foundInCwd = cwdRp.fs
+                && (cwdRp.fs->exists(cwdRp.path)
+                    || (fsc.cwd().empty() && cwdRp.fs->exists(rawPath)));
+            if (!foundInCwd) {
+                auto rp = ctx.engine->resolvePath(rawPath.as_ref());
+                if (rp.fs && rp.fs->exists(rp.path) && rp.path != rawPath) {
+                    keel::Array<Value> resolvedArgs(args.size());
+                    resolvedArgs[0] = Value::fromString(rp.path, mr);
+                    for (keel::usize i = 1; i < args.size(); ++i)
+                        resolvedArgs[i] = args[i];
+                    fopen(fsc,
+                          keel::ArrayRef<Value>(resolvedArgs.data(), resolvedArgs.size()),
+                          nargout, outs, mr);
+                    return;
+                }
             }
         }
     }

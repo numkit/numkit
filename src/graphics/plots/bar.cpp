@@ -11,6 +11,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include "plot_internal.hpp"
+#include <numkit/builtin/datafun.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
@@ -701,50 +702,78 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             const keel::usize n = X.numel();
             if (!n) { outs[0] = Value(); return; }
             keel::Array<keel::f64> v(n);
-            keel::f64 mn = X.elemAsDouble(0), mx = mn, sum = 0, sum2 = 0;
-            bool allInt = true;
-            for (keel::usize i = 0; i < n; ++i) {
-                keel::f64 x = X.elemAsDouble(i);
-                v[i] = x;
-                mn = std::min(mn, x);
-                mx = std::max(mx, x);
-                sum += x;
-                sum2 += x * x;
-                if (keel::abs(x - std::round(x)) > 1e-9)
-                    allInt = false;
-            }
-            keel::f64 mean = sum / n;
-            keel::f64 var = n > 1 ? (sum2 - n * mean * mean) / (n - 1) : 0;
-            keel::f64 sd = std::sqrt(std::max(0.0, var));
+            for (keel::usize i = 0; i < n; ++i)
+                v[i] = X.elemAsDouble(i);
 
-            // Edges: explicit vector > nbins scalar > BinWidth NV > auto.
-            keel::Array<keel::f64> edges;
-            keel::f64 binWidthNV = 0;
-            keel::f64 limLo = 0, limHi = 0;
-            bool hasLimits = false;
+            auto lowerStr = [](keel::StringRef sv) {
+                keel::String s(sv);
+                for (auto &c : s) c = keel::to_ascii_lower(c);
+                return s;
+            };
+
+            numkit::builtin::HistNorm norm = numkit::builtin::HistNorm::Count;
+            numkit::builtin::HistBinSpec spec;
+            Value edgesVal;
+            bool haveEdges = false;
             keel::String faceKV, edgeKV;
-            keel::f64 faceAlpha = 0.6;   // MATLAB default (probe R2025b)
-            for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
-                if (!args[i].isChar()) continue;
-                keel::String key = args[i].toString();
-                for (auto &c : key) c = keel::to_ascii_lower(c);
-                if (key == "binwidth" && args[i + 1].isNumeric())
-                    binWidthNV = args[i + 1].elemAsDouble(0);
-                else if (key == "binlimits" && args[i + 1].numel() >= 2) {
-                    limLo = args[i + 1].elemAsDouble(0);
-                    limHi = args[i + 1].elemAsDouble(1);
-                    hasLimits = true;
+            keel::f64 faceAlpha = 0.6;
+
+            keel::usize optStart = 1;
+            if (args.size() >= 2 && !args[1].isChar() && !args[1].isString()) {
+                if (args[1].numel() >= 2) {
+                    edgesVal = args[1];
+                    haveEdges = true;
+                } else if (args[1].isNumeric() && args[1].numel() == 1) {
+                    spec.hasNumBins = true;
+                    spec.numBins = std::max(1.0, std::floor(args[1].toScalar()));
                 }
-                else if (key == "facealpha" && args[i + 1].isNumeric()) {
-                    faceAlpha = std::min(1.0, std::max(0.0, args[i + 1].elemAsDouble(0)));
-                }
-                else if (key == "facecolor" || key == "edgecolor") {
-                    const Value &cv = args[i + 1];
+                optStart = 2;
+            }
+
+            for (keel::usize i = optStart; i + 1 < args.size(); i += 2) {
+                if (!args[i].isChar() && !args[i].isString()) continue;
+                keel::String key = lowerStr(args[i].toString());
+                const Value &val = args[i + 1];
+                if (key == "binwidth" && val.isNumeric() && val.elemAsDouble(0) > 0.0) {
+                    spec.hasBinWidth = true;
+                    spec.binWidth = val.elemAsDouble(0);
+                    spec.hasNumBins = false;
+                    haveEdges = false;
+                } else if (key == "numbins" && val.isNumeric() && val.elemAsDouble(0) >= 1.0) {
+                    spec.hasNumBins = true;
+                    spec.numBins = std::floor(val.elemAsDouble(0));
+                    spec.hasBinWidth = false;
+                    haveEdges = false;
+                } else if (key == "binedges" && val.isNumeric() && val.numel() >= 2) {
+                    edgesVal = val;
+                    haveEdges = true;
+                } else if (key == "binlimits" && val.isNumeric() && val.numel() >= 2) {
+                    spec.hasBinLimits = true;
+                    spec.limLo = val.elemAsDouble(0);
+                    spec.limHi = val.elemAsDouble(1);
+                } else if (key == "binmethod" && (val.isChar() || val.isString())) {
+                    keel::String m = lowerStr(val.toString());
+                    if      (m == "auto")     spec.method = numkit::builtin::HistBinMethod::Auto;
+                    else if (m == "scott")    spec.method = numkit::builtin::HistBinMethod::Scott;
+                    else if (m == "fd")       spec.method = numkit::builtin::HistBinMethod::Fd;
+                    else if (m == "integers") spec.method = numkit::builtin::HistBinMethod::Integers;
+                    else if (m == "sturges")  spec.method = numkit::builtin::HistBinMethod::Sturges;
+                    else if (m == "sqrt")     spec.method = numkit::builtin::HistBinMethod::Sqrt;
+                } else if (key == "normalization" && (val.isChar() || val.isString())) {
+                    keel::String m = lowerStr(val.toString());
+                    if      (m == "count")        norm = numkit::builtin::HistNorm::Count;
+                    else if (m == "probability")  norm = numkit::builtin::HistNorm::Probability;
+                    else if (m == "countdensity") norm = numkit::builtin::HistNorm::CountDensity;
+                    else if (m == "pdf")          norm = numkit::builtin::HistNorm::Pdf;
+                    else if (m == "cumcount")     norm = numkit::builtin::HistNorm::CumCount;
+                    else if (m == "cdf")          norm = numkit::builtin::HistNorm::Cdf;
+                } else if (key == "facealpha" && val.isNumeric()) {
+                    faceAlpha = std::min(1.0, std::max(0.0, val.elemAsDouble(0)));
+                } else if (key == "facecolor" || key == "edgecolor") {
                     char hex[8];
-                    keel::String *kv = key == "facecolor" ? &faceKV : &edgeKV;
-                    if (cv.isChar()) {
-                        keel::String c = cv.toString();
-                        for (auto &ch : c) ch = keel::to_ascii_lower(ch);
+                    keel::String *kv = (key == "facecolor") ? &faceKV : &edgeKV;
+                    if (val.isChar() || val.isString()) {
+                        keel::String c = lowerStr(val.toString());
                         static const std::pair<const char *, const char *> shorts[] = {
                             {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                             {"k", "#000000"}, {"y", "#ffff00"}, {"m", "#ff00ff"},
@@ -753,85 +782,32 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                         for (const auto &sc : shorts)
                             if (c == sc.first)
                                 kv->assign(sc.second);
-                    } else if (cv.isNumeric() && cv.numel() >= 3) {
-                        // Explicit triplet — the deterministic path the
-                        // parity spec pins (MATLAB's 'auto' colour is
-                        // THEME-dependent: dark theme renders
-                        // (0.49,0.73,0.92) on a forced-white figure).
+                    } else if (val.isNumeric() && val.numel() >= 3) {
                         std::snprintf(hex, sizeof hex, "#%02x%02x%02x",
-                                      (keel::u32)(cv.elemAsDouble(0) * 255 + 0.5),
-                                      (keel::u32)(cv.elemAsDouble(1) * 255 + 0.5),
-                                      (keel::u32)(cv.elemAsDouble(2) * 255 + 0.5));
+                                      (keel::u32)(val.elemAsDouble(0) * 255 + 0.5),
+                                      (keel::u32)(val.elemAsDouble(1) * 255 + 0.5),
+                                      (keel::u32)(val.elemAsDouble(2) * 255 + 0.5));
                         kv->assign(hex);
                     }
                 }
             }
-            if (args.size() >= 2 && args[1].isNumeric() && binWidthNV == 0
-                && !hasLimits) {
-                if (args[1].numel() >= 2) {
-                    // explicit edges vector
-                    edges.clear();
-                    for (keel::usize k = 0; k < args[1].numel(); ++k)
-                        edges.push_back(args[1].elemAsDouble(k));
-                } else {
-                    keel::i32 nb = (keel::i32)args[1].toScalar();
-                    if (nb < 1) nb = 1;
-                    keel::f64 w = (mx - mn) / nb;
-                    if (!(w > 0)) w = 1;
-                    for (keel::i32 k = 0; k <= nb; ++k)
-                        edges.push_back(mn + k * w);
-                }
-            } else {
-                keel::f64 w;
-                if (binWidthNV > 0) {
-                    w = binWidthNV;
-                } else if (allInt) {
-                    w = 1;
-                } else {
-                    keel::f64 scott = 3.5 * sd * std::pow((keel::f64)n, -1.0 / 3.0);
-                    // floor to one significant digit (probe: 0.35→0.3)
-                    keel::f64 p = std::pow(10.0, std::floor(std::log10(scott > 0 ? scott : 1)));
-                    w = std::floor((scott > 0 ? scott : 1) / p) * p;
-                    if (!(w > 0)) w = 1;
-                }
-                keel::f64 lo, hi;
-                if (hasLimits) {
-                    lo = limLo;
-                    hi = limHi;
-                } else if (allInt) {
-                    // integer rule: bins centred on the integers
-                    lo = mn - 0.5;
-                    hi = mx + 0.5;
-                } else {
-                    lo = std::floor(mn / w) * w;
-                    hi = std::ceil(mx / w) * w;
-                }
-                if (!(hi > lo)) hi = lo + w;
-                for (keel::f64 e = lo; e <= hi + w * 1e-9; e += w)
-                    edges.push_back(e);
-            }
-            const keel::usize nb = edges.size() > 1 ? edges.size() - 1 : 1;
 
-            keel::Array<keel::f64> centers(nb), counts(nb, 0.0);
+            if (!haveEdges)
+                edgesVal = numkit::builtin::histcountsAutoEdges(X, spec, gc.mr);
+            Value countsVal = numkit::builtin::histcounts(X, edgesVal, norm, gc.mr);
+
+            const keel::usize ne = edgesVal.numel();
+            const keel::usize nb = countsVal.numel();
+            keel::Array<keel::f64> edges(ne);
+            for (keel::usize k = 0; k < ne; ++k) edges[k] = edgesVal.elemAsDouble(k);
+            keel::Array<keel::f64> counts(nb);
+            for (keel::usize k = 0; k < nb; ++k) counts[k] = countsVal.elemAsDouble(k);
+            keel::Array<keel::f64> centers(nb);
             for (keel::usize b = 0; b < nb; ++b)
-                centers[b] = 0.5 * (edges[b] + edges[b + 1]);
-            for (keel::usize i = 0; i < n; ++i) {
-                keel::f64 x = v[i];
-                if (x < edges.front() || x > edges.back())
-                    continue;
-                keel::usize b = nb - 1;
-                for (keel::usize k = 0; k + 1 < edges.size(); ++k)
-                    if (x < edges[k + 1] || k + 1 == edges.size() - 1) {
-                        b = k;
-                        break;
-                    }
-                counts[b] += 1;
-            }
+                centers[b] = (b + 1 < ne) ? 0.5 * (edges[b] + edges[b + 1]) : 0.0;
 
             StrBuf style;
-            style << "binWidth=" << (edges.size() > 1 ? edges[1] - edges[0] : 1);
-            // MATLAB default FaceAlpha 0.6: bars composite with the
-            // background — the export pre-blends toward white.
+            style << "binWidth=" << (ne > 1 ? edges[1] - edges[0] : 1.0);
             {
                 char ab[24];
                 std::snprintf(ab, sizeof ab, ";faceAlpha=%.4g", faceAlpha);
@@ -848,6 +824,8 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
             ds.zJson = vecToJson(edges.as_ref());
             ds.uJson = vecToJson(v.as_ref());
             ds.vJson.assign((X.dims().rows() > 1 && X.dims().cols() == 1) ? "col" : "row");
+            ds.xRaw = keel::move(edges);
+            ds.yRaw = keel::move(counts);
             ds.style = style.take();
             fm.pushDataset(keel::move(ds));
             fm.emitModified();

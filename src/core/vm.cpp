@@ -3595,6 +3595,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     cf.forStackBase = forStack_.size();
     cf.tryStackBase = tryStack_.size();
     cf.destReg = destReg;
+    cf.nargin = userNargs;
     cf.nargout = nargout;
     cf.isMultiReturn = isMulti;
     cf.outBase = outBase;

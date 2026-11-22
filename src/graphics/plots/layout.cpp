@@ -181,6 +181,17 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                     if (0.0 < dmin) dmin = 0.0;
                     if (0.0 > dmax) dmax = 0.0;
                 }
+                const keel::Array<keel::f64> *raw =
+                    (axisChar == 'x') ? &ds.xRaw : (axisChar == 'y' ? &ds.yRaw : nullptr);
+                if (raw && !raw->empty()) {
+                    for (keel::f64 v : *raw) {
+                        if (std::isfinite(v)) {
+                            if (v < dmin) dmin = v;
+                            if (v > dmax) dmax = v;
+                        }
+                    }
+                    continue;
+                }
                 const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
                 const char *base = j.c_str();
                 keel::usize pos = 0;
@@ -200,15 +211,20 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
             }
             if (dmin <= dmax) {
                 if (dmax > dmin) {
-                    const keel::f64 span = dmax - dmin;
-                    const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
-                    const keel::f64 s = span / p10;
-                    const keel::f64 step = (s <= 1.5) ? 0.2 * p10
-                                      : (s <= 3.0) ? 0.5 * p10
-                                      : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
-                                                   : 2.0 * p10;
-                    lo = std::floor(dmin / step + 1e-12) * step;
-                    hi = std::ceil(dmax / step - 1e-12) * step;
+                    if (fm.currentAxes().axisMode == "tight") {
+                        lo = dmin;
+                        hi = dmax;
+                    } else {
+                        const keel::f64 span = dmax - dmin;
+                        const keel::f64 p10 = std::pow(10.0, std::floor(std::log10(span)));
+                        const keel::f64 s = span / p10;
+                        const keel::f64 step = (s <= 1.5) ? 0.2 * p10
+                                          : (s <= 3.0) ? 0.5 * p10
+                                          : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
+                                                       : 2.0 * p10;
+                        lo = std::floor(dmin / step + 1e-12) * step;
+                        hi = std::ceil(dmax / step - 1e-12) * step;
+                    }
                 } else {
                     lo = dmin - 1.0;
                     hi = dmin + 1.0;
@@ -792,6 +808,11 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
                 } else {
                     if (mode == "ij") ax.yDir.assign("reverse");
                     else if (mode == "xy") ax.yDir.assign("normal");
+                    else if (mode == "tight" || mode == "auto") {
+                        ax.xlimJson.clear();
+                        ax.ylimJson.clear();
+                        ax.zlimJson.clear();
+                    }
                     ax.axisMode = keel::move(mode);
                 }
                 fm.current().modified = true;

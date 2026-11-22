@@ -855,28 +855,36 @@ Value chartDataProp(FigureManager &fm, FigureManager::HandleRecord *rec,
 {
     DatasetInfo *ds = fm.datasetOf(*rec);
     if (rec->type == "histogram" && ds) {
+        auto getEdges = [&]() -> keel::Array<keel::f64> {
+            if (!ds->xRaw.empty()) return ds->xRaw.clone();
+            return figdetail::parseFlatDoubles(ds->zJson);
+        };
+        auto getCounts = [&]() -> keel::Array<keel::f64> {
+            if (!ds->yRaw.empty()) return ds->yRaw.clone();
+            return figdetail::parseFlatDoubles(ds->yJson);
+        };
         if (name == "BinEdges") {
-            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            auto ev = getEdges();
             auto v = Value::matrix(1, ev.size(), ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < ev.size(); ++i) v.doubleDataMut()[i] = ev[i];
             return v;
         }
         if (name == "Values" || name == "BinCounts") {
-            auto cv = figdetail::parseFlatDoubles(ds->yJson);
+            auto cv = getCounts();
             auto v = Value::matrix(1, cv.size(), ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < cv.size(); ++i) v.doubleDataMut()[i] = cv[i];
             return v;
         }
         if (name == "NumBins") {
-            auto cv = figdetail::parseFlatDoubles(ds->yJson);
+            auto cv = getCounts();
             return Value::scalar(keel::as<keel::f64>(cv.size()), mr);
         }
         if (name == "BinWidth") {
-            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            auto ev = getEdges();
             return Value::scalar(ev.size() >= 2 ? ev[1] - ev[0] : 1.0, mr);
         }
         if (name == "BinLimits") {
-            auto ev = figdetail::parseFlatDoubles(ds->zJson);
+            auto ev = getEdges();
             auto v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
             v.doubleDataMut()[0] = ev.empty() ? 0.0 : ev.front();
             v.doubleDataMut()[1] = ev.empty() ? 1.0 : ev.back();

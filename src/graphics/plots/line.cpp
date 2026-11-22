@@ -68,16 +68,36 @@ void buildLinePlots(keel::Array<PlotEntry> &table)
                 ds.type.assign("line");
                 const Value *xArg = nullptr;
                 const Value *yArg = nullptr;
+                auto fillRaw = [](const Value &v, keel::Array<keel::f64> &dst) {
+                    const keel::usize n = v.numel();
+                    dst.resize(n);
+                    for (keel::usize k = 0; k < n; ++k) dst[k] = v.elemAsDouble(k);
+                };
                 if (i + 1 < args.size() && isData(args[i]) && isData(args[i + 1])) {
                     xArg = &args[i];
                     yArg = &args[i + 1];
-                    ds.xJson = vecToJson(*xArg);
-                    ds.yJson = vecToJson(*yArg);
+                    const bool is1D = (xArg->numel() == yArg->numel()
+                                       && (xArg->dims().rows() == 1 || xArg->dims().cols() == 1)
+                                       && (yArg->dims().rows() == 1 || yArg->dims().cols() == 1));
+                    if (is1D) {
+                        fillRaw(*xArg, ds.xRaw);
+                        fillRaw(*yArg, ds.yRaw);
+                    }
+                    if (!is1D || xArg->numel() <= 4000) {
+                        ds.xJson = vecToJson(*xArg);
+                        ds.yJson = vecToJson(*yArg);
+                    }
                     i += 2;
                 } else if (isData(args[i])) {
                     yArg = &args[i];
-                    ds.xJson = makeIndexJson(yArg->numel());
-                    ds.yJson = vecToJson(*yArg);
+                    const keel::usize n = yArg->numel();
+                    ds.xRaw.resize(n);
+                    for (keel::usize k = 0; k < n; ++k) ds.xRaw[k] = keel::as<keel::f64>(k + 1);
+                    fillRaw(*yArg, ds.yRaw);
+                    if (n <= 4000) {
+                        ds.xJson = makeIndexJson(n);
+                        ds.yJson = vecToJson(*yArg);
+                    }
                     i += 1;
                 } else {
                     break;

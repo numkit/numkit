@@ -400,6 +400,38 @@ keel::String Engine::inputName(keel::i32 k)
     return {};
 }
 
+keel::i64 Engine::currentFunctionNargin() const
+{
+    if (vm_ && backend_ == Backend::VM)
+        return vm_->currentFunctionNargin();
+    if (treeWalker_) {
+        const auto &frames = treeWalker_->activeFrames();
+        for (keel::usize i = frames.size(); i > 0; --i) {
+            if (auto *env = frames[i - 1].env) {
+                if (const Value *v = env->getLocal("nargin"))
+                    return keel::as<keel::i64>(v->toScalar());
+            }
+        }
+    }
+    return -1;
+}
+
+keel::i64 Engine::currentFunctionNargout() const
+{
+    if (vm_ && backend_ == Backend::VM)
+        return vm_->currentFunctionNargout();
+    if (treeWalker_) {
+        const auto &frames = treeWalker_->activeFrames();
+        for (keel::usize i = frames.size(); i > 0; --i) {
+            if (auto *env = frames[i - 1].env) {
+                if (const Value *v = env->getLocal("nargout"))
+                    return keel::as<keel::i64>(v->toScalar());
+            }
+        }
+    }
+    return -1;
+}
+
 void Engine::clearUserFunctions()
 {
     userFuncs_.clear();

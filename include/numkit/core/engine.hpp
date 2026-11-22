@@ -708,6 +708,8 @@ public:
     // Backed by per-CALL-site metadata recorded by the compiler / TW
     // call sites.
     keel::String inputName(keel::i32 k);
+    keel::i64 currentFunctionNargin() const;
+    keel::i64 currentFunctionNargout() const;
 
     // ── Virtual filesystem ────────────────────────────────────
     //

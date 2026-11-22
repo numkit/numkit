@@ -3167,4 +3167,57 @@ TEST_P(DisplayTest, CoreAndLinalgStubClosures)
     EXPECT_NEAR(evalScalar("norm(H20 * H20' - 20 * eye(20), 'fro')"), 0.0, 1e-12);
 }
 
+TEST_P(DisplayTest, IsequalMixedTypesFopenModesNarginchkHistogramAndAxisTight)
+{
+    // 1. isequal / isequaln compare numeric/logical/char/complex values across classes.
+    EXPECT_TRUE(evalBool("isequal([87 65 86 69], uint8('WAVE'))"));
+    EXPECT_TRUE(evalBool("isequal(1, true)"));
+    EXPECT_TRUE(evalBool("isequal(uint8(5), int32(5))"));
+    EXPECT_TRUE(evalBool("isequal(65, 'A')"));
+    EXPECT_TRUE(evalBool("isequal('A', uint8(65))"));
+    EXPECT_TRUE(evalBool("isequal(5 + 0i, 5)"));
+    EXPECT_FALSE(evalBool("isequal(5 + 1i, 5)"));
+    EXPECT_TRUE(evalBool("isequaln(NaN, single(NaN))"));
+    EXPECT_FALSE(evalBool("isequal(int64(9007199254740992) + int64(1), 9007199254740992)"));
+    EXPECT_TRUE(evalBool("isequal(int64(42), uint64(42))"));
+
+    // 2. fopen accepts 'wb+' / 'rb+' binary-plus permission strings.
+    eval("tmpf = [tempname '.bin']; "
+         "fid = fopen(tmpf, 'wb+', 'l'); "
+         "fwrite(fid, uint8('WAVE'), 'uchar'); "
+         "fseek(fid, 0, -1); "
+         "hdr = fread(fid, 4, 'uchar'); "
+         "fclose(fid); "
+         "delete(tmpf);");
+    EXPECT_TRUE(evalBool("isequal(hdr', uint8('WAVE'))"));
+
+    // 3. narginchk / nargoutchk enforce caller argument bounds in VM and TW.
+    eval("function y = chk_demo(a, b)\n"
+         "  narginchk(1, 2);\n"
+         "  nargoutchk(0, 1);\n"
+         "  if nargin < 2, b = 10; end\n"
+         "  y = a + b;\n"
+         "end");
+    EXPECT_DOUBLE_EQ(evalScalar("chk_demo(5)"), 15.0);
+    EXPECT_DOUBLE_EQ(evalScalar("chk_demo(5, 7)"), 12.0);
+    EXPECT_THROW(eval("chk_demo()"), std::exception);
+    EXPECT_THROW(eval("chk_demo(1, 2, 3)"), std::exception);
+    EXPECT_THROW(eval("[u, v] = chk_demo(1)"), std::exception);
+
+    // 4. histogram delegates to binpicker nice edges and supports Normalization NV after nbins.
+    eval("y = linspace(0.001, 8.48, 500); "
+         "h = histogram(y, 10, 'Normalization', 'pdf'); "
+         "be = h.BinEdges; bv = h.Values;");
+    EXPECT_DOUBLE_EQ(evalScalar("be(1)"), 0.0);
+    EXPECT_NEAR(evalScalar("be(end)"), 8.5, 1e-12);
+    EXPECT_NEAR(evalScalar("sum(bv .* diff(be))"), 1.0, 1e-12);
+
+    // 5. axis tight returns exact full-precision data extrema from xRaw/yRaw.
+    eval("figure; xx = linspace(-512, 511.99951171875, 100); yy = -154.1234567 + 0.5*xx; "
+         "plot(xx, yy); axis tight; axv = axis;");
+    EXPECT_NEAR(evalScalar("axv(1)"), -512.0, 1e-12);
+    EXPECT_NEAR(evalScalar("axv(2)"), 511.99951171875, 1e-12);
+    EXPECT_NEAR(evalScalar("axv(3)"), -154.1234567 - 256.0, 1e-9);
+}
+
 INSTANTIATE_DUAL(DisplayTest);
