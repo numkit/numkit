@@ -86,6 +86,7 @@ struct ASTNode
     keel::f64 numValue = 0;
     bool boolValue = false;
     bool suppressOutput = false;
+    bool captureResult = false;
 
     keel::Array<ASTNodePtr> children;
     keel::Array<keel::String> paramNames;

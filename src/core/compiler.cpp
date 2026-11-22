@@ -317,20 +317,73 @@ void Compiler::collectAssignedNames(const ASTNode *node, keel::Array<keel::Strin
     }
     if (node->type == NodeType::FOR_STMT && !node->strValue.empty())
         out.push_back(node->strValue.clone());
-    if (node->type == NodeType::COMMAND_CALL && node->strValue == "syms") {
-        for (const auto &ch : node->children) {
-            if (!ch->strValue.empty() && !isSymsFlag(ch->strValue))
-                out.push_back(ch->strValue.clone());
+    auto pushSymsTokNames = [&](keel::StringRef raw) {
+        if (raw.empty() || isSymsFlag(raw))
+            return;
+        const keel::usize lp = raw.find('(');
+        if (lp == keel::kInvalidIndex) {
+            out.push_back(keel::String::from(raw));
+            return;
         }
+        keel::StringRef fn = raw.substr(0, lp);
+        while (!fn.empty() && fn.back() == ' ') fn.remove_suffix(1);
+        if (!fn.empty())
+            out.push_back(keel::String::from(fn));
+        keel::usize rp = raw.rfind(')');
+        if (rp == keel::kInvalidIndex || rp <= lp) rp = raw.size();
+        keel::StringRef inside = raw.substr(lp + 1, rp - lp - 1);
+        keel::usize p = 0;
+        while (p < inside.size()) {
+            keel::usize comma = inside.find(',', p);
+            if (comma == keel::kInvalidIndex) comma = inside.size();
+            keel::StringRef arg = inside.substr(p, comma - p);
+            while (!arg.empty() && (arg.front() == ' ' || arg.front() == '\t')) arg.remove_prefix(1);
+            while (!arg.empty() && (arg.back() == ' ' || arg.back() == '\t' || arg.back() == ')')) arg.remove_suffix(1);
+            if (!arg.empty() && !isSymsFlag(arg))
+                out.push_back(keel::String::from(arg));
+            p = (comma < inside.size()) ? comma + 1 : inside.size();
+        }
+    };
+    if (node->type == NodeType::COMMAND_CALL && node->strValue == "syms") {
+        keel::String joined;
+        keel::i32 depth = 0;
+        for (const auto &ch : node->children) {
+            const keel::StringRef tok = ch->strValue.as_ref();
+            if (depth > 0) {
+                joined.append(tok);
+                for (char c : tok) {
+                    if (c == '(') ++depth;
+                    else if (c == ')') --depth;
+                }
+                if (depth <= 0) {
+                    pushSymsTokNames(joined.as_ref());
+                    joined.clear();
+                    depth = 0;
+                }
+                continue;
+            }
+            keel::i32 d = 0;
+            for (char c : tok) {
+                if (c == '(') ++d;
+                else if (c == ')') --d;
+            }
+            if (d > 0) {
+                joined = keel::String::from(tok);
+                depth = d;
+            } else {
+                pushSymsTokNames(tok);
+            }
+        }
+        if (!joined.empty())
+            pushSymsTokNames(joined.as_ref());
     }
     if (node->type == NodeType::CALL && !node->children.empty()
         && node->children[0]->type == NodeType::IDENTIFIER
         && node->children[0]->strValue == "syms") {
         for (keel::usize i = 1; i < node->children.size(); ++i) {
             const auto *ch = node->children[i].get();
-            if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty()
-                && !isSymsFlag(ch->strValue))
-                out.push_back(ch->strValue.clone());
+            if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty())
+                pushSymsTokNames(ch->strValue.as_ref());
         }
     }
 
@@ -1781,7 +1834,9 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
     // Non-call expressions (e.g. `1 + numel(dir(p))`) evaluate operands in
     // value context (nargout=1).
     const keel::u16 stmtNargout =
-        (child->type == NodeType::CALL || child->type == NodeType::COMMAND_CALL) ? 0 : 1;
+        node->captureResult
+            ? 1
+            : ((child->type == NodeType::CALL || child->type == NodeType::COMMAND_CALL) ? 0 : 1);
     struct NargoutGuard
     {
         keel::u16 &ref;
@@ -1857,7 +1912,9 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                 keel::i32 funcIdx = addStringConstant(nit->compiledName);
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
                                              keel::as<keel::u16>(nit->upvalueNames.size()),
-                                             funcIdx, 0));
+                                             funcIdx, node->captureResult ? 1 : 0));
+                if (node->captureResult)
+                    return dst;
                 keel::u16 ansReg = varRegWrite("ans");
                 if (ansReg != dst)
                     emitAB(OpCode::MOVE, ansReg, dst);
@@ -1873,8 +1930,8 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
         if (!isKnownVar && !mayInjectVars_
             && (engine_.isKnownLeafName(name) || engine_.hasFunction(name)
                 || engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr)) {
-            // Workspace builtins inside functions -> opcodes
-            if (!isTopLevel_) {
+            // Workspace builtins inside functions -> opcodes (statement nargout=0 only)
+            if (!isTopLevel_ && !node->captureResult) {
                 if (name == "who") {
                     emitAB(OpCode::WHO, 0, 0);
                     return tempReg();
@@ -1905,11 +1962,14 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                 }
             }
 
-            // Compile as zero-arg CALL (nargout=0 for statement context).
+            // Compile as zero-arg CALL (nargout=1 when result is captured by eval/evalin).
             keel::u16 argBase = nextReg_;
             keel::u16 dst = tempReg();
             keel::i32 funcIdx = addStringConstant(name);
-            emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, 0));
+            emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx,
+                                         node->captureResult ? 1 : 0));
+            if (node->captureResult)
+                return dst;
 
             // Anonymous call result -> bind to `ans`.
             keel::u16 ansReg = varRegWrite("ans");
@@ -1932,6 +1992,12 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
             emitAD(OpCode::DISPLAY, reg, nameIdx);
         }
         return reg;
+    }
+
+    if (node->captureResult) {
+        keel::u16 dst = tempReg();
+        emitABC(OpCode::COLLAPSE, dst, reg, 1);
+        return dst;
     }
 
     if (!node->suppressOutput) {
@@ -4401,7 +4467,8 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
         ninfo ? ninfo->compiledName.as_ref() : name.as_ref());
     emit(
         Instruction::make_abcde(OpCode::CALL, dst, argBase,
-                                keel::as<keel::u16>(totalCallArgs), funcIdx, 0));
+                                keel::as<keel::u16>(totalCallArgs), funcIdx,
+                                node->captureResult ? 1 : 0));
 
     // Display result if no semicolon (rare for commands, but correct)
     if (!node->suppressOutput) {

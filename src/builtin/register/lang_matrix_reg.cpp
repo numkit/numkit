@@ -761,10 +761,53 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     }
 }
 
+static bool getLtiIoDims(const Value &v, keel::usize &ny, keel::usize &nu)
+{
+    if (!v.isStruct() || v.isStructArray() || v.numel() != 1 || !v.hasField("kind"))
+        return false;
+    const Value &kf = v.field("kind");
+    if (!kf.isChar() && !kf.isString())
+        return false;
+    const keel::String kind = kf.toString();
+    if (kind == "tf" && v.hasField("num") && v.field("num").isCell()) {
+        ny = v.field("num").dims().rows();
+        nu = v.field("num").dims().cols();
+        return true;
+    }
+    if (kind == "ss" && v.hasField("B") && v.hasField("C")) {
+        ny = v.field("C").dims().rows();
+        nu = v.field("B").dims().cols();
+        return true;
+    }
+    return false;
+}
+
 void size_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "size");
     auto *mr = ctx.engine->allocator();
+
+    keel::usize ltiNy = 0, ltiNu = 0;
+    if (getLtiIoDims(args[0], ltiNy, ltiNu)) {
+        if (args.size() >= 2) {
+            const keel::i32 dim = argcheck::dimArg(args[1], "size");
+            keel::usize d = (dim == 1) ? ltiNy : (dim == 2 ? ltiNu : 1);
+            outs[0] = Value::scalar(keel::as<keel::f64>(d), mr);
+            return;
+        }
+        if (nargout > 1) {
+            for (keel::usize i = 0; i < nargout && i < outs.size(); ++i) {
+                keel::usize d = (i == 0) ? ltiNy : (i == 1 ? ltiNu : 1);
+                outs[i] = Value::scalar(keel::as<keel::f64>(d), mr);
+            }
+            return;
+        }
+        Value out = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        out.doubleDataMut()[0] = keel::as<keel::f64>(ltiNy);
+        out.doubleDataMut()[1] = keel::as<keel::f64>(ltiNu);
+        outs[0] = std::move(out);
+        return;
+    }
 
     if (args.size() >= 2) {
         outs[0] = size(args[0], argcheck::dimArg(args[1], "size"), mr);

@@ -3379,10 +3379,18 @@ static void markTopLevelSuppressed(ASTNode *ast)
 {
     if (!ast) return;
     if (ast->type == NodeType::BLOCK) {
-        for (auto &c : ast->children)
-            if (c) c->suppressOutput = true;
+        ASTNode *lastExec = nullptr;
+        for (auto &c : ast->children) {
+            if (!c) continue;
+            c->suppressOutput = true;
+            if (c->type != NodeType::FUNCTION_DEF)
+                lastExec = c.get();
+        }
+        if (lastExec)
+            lastExec->captureResult = true;
     } else {
         ast->suppressOutput = true;
+        ast->captureResult = true;
     }
 }
 
@@ -3437,6 +3445,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         if (!isNum && !isIdent) continue;
         const keel::i32 ln = node->line, cl = node->col;
         const bool suppress = node->suppressOutput;
+        const bool capture = node->captureResult;
         auto ident = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
         ident->strValue = name.clone();
         ident->line = ln; ident->col = cl;
@@ -3464,6 +3473,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
         node->children.clear();
         node->children.push_back(keel::move(bin));
         node->suppressOutput = suppress;
+        node->captureResult = capture;
     }
 }
 Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)

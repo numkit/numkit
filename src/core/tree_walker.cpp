@@ -292,8 +292,15 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
                     return out[0];
                 }
             }
-            keel::usize sz = (ctx.ndims == 1) ? ctx.array->numel()
-                                         : ctx.array->dims().dimSize(ctx.dimension);
+            const Value &dimArr = (ctx.array->isStruct() && !ctx.array->isStructArray()
+                                   && ctx.array->numel() == 1 && ctx.array->hasField("kind")
+                                   && (ctx.array->field("kind").isChar() || ctx.array->field("kind").isString())
+                                   && ctx.array->field("kind").toString() == "tf"
+                                   && ctx.array->hasField("num") && ctx.array->field("num").isCell())
+                                      ? ctx.array->field("num")
+                                      : *ctx.array;
+            keel::usize sz = (ctx.ndims == 1) ? dimArr.numel()
+                                         : dimArr.dims().dimSize(ctx.dimension);
             return Value::scalar(keel::as<keel::f64>(sz), engine_.mr_);
         }
         throw std::runtime_error("'end' used outside of indexing context");
@@ -550,6 +557,53 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
     auto *var = &resolveObjectSlot(lhs->children[0].get(), env);
 
     keel::usize nargs = lhs->children.size() - 1;
+
+    // Symbolic function definition: f(x) = expr or g(x, y) = expr when any subscript is `sym`.
+    if (nargs >= 1) {
+        bool allPlainNonColon = true;
+        for (keel::usize i = 0; i < nargs; ++i) {
+            const ASTNode *sub = lhs->children[i + 1].get();
+            if (sub->type == NodeType::COLON_EXPR && sub->children.empty()) {
+                allPlainNonColon = false;
+                break;
+            }
+        }
+        if (allPlainNonColon) {
+            // Peek first subscript; only allocate/check all if a sym subscript is present.
+            const ASTNode *firstSub = lhs->children[1].get();
+            bool maybeSym = false;
+            if (firstSub->type == NodeType::IDENTIFIER) {
+                const Value *sv = env->get(firstSub->strValue);
+                if (sv && sv->isObject() && sv->objectClassNameRef() == "sym")
+                    maybeSym = true;
+            } else if (firstSub->type == NodeType::CALL && !firstSub->children.empty()
+                       && firstSub->children[0]->type == NodeType::IDENTIFIER
+                       && firstSub->children[0]->strValue == "sym") {
+                maybeSym = true;
+            }
+            if (maybeSym) {
+                keel::Array<Value> sfArgs;
+                sfArgs.reserve(nargs + 1);
+                sfArgs.push_back(rhs);
+                bool hasSymIdx = false;
+                for (keel::usize i = 0; i < nargs; ++i) {
+                    Value sv = execNode(lhs->children[i + 1].get(), env);
+                    if (sv.isObject() && sv.objectClassNameRef() == "sym")
+                        hasSymIdx = true;
+                    sfArgs.push_back(keel::move(sv));
+                }
+                if (hasSymIdx) {
+                    if (const ExternalFunc *sfFn = engine_.findExternal("symfun", env)) {
+                        Value sfOut[1];
+                        CallContext ctx{&engine_, env};
+                        (*sfFn)(sfArgs.as_ref(), 1, keel::MutArrayRef<Value>(sfOut, 1), ctx);
+                        *var = keel::move(sfOut[0]);
+                        return;
+                    }
+                }
+            }
+        }
+    }
 
     // OBJECT: obj(i…) = v dispatches to the class subsasgn overload,
     // which mutates `var` in place (value/handle rule via objectStateMut).
@@ -1929,9 +1983,137 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
     throw std::runtime_error(msg.c_str());
 }
 
+static bool isMimoTfStructTw(const Value &v)
+{
+    return v.isStruct() && !v.isStructArray() && v.numel() == 1
+        && v.hasField("kind")
+        && (v.field("kind").isChar() || v.field("kind").isString())
+        && v.field("kind").toString() == "tf"
+        && v.hasField("num") && v.hasField("den")
+        && v.field("num").isCell() && v.field("den").isCell();
+}
+
+static bool isSsStructTw(const Value &v)
+{
+    return v.isStruct() && !v.isStructArray() && v.numel() == 1
+        && v.hasField("kind")
+        && (v.field("kind").isChar() || v.field("kind").isString())
+        && v.field("kind").toString() == "ss"
+        && v.hasField("A") && v.hasField("B") && v.hasField("C") && v.hasField("D");
+}
+
+static Value indexSsStruct2DTw(const Value &src,
+                               const keel::usize *rowIds, keel::usize rowCount,
+                               const keel::usize *colIds, keel::usize colCount,
+                               keel::Allocator *mr)
+{
+    const Value &A = src.field("A");
+    const Value &B = src.field("B");
+    const Value &C = src.field("C");
+    const Value &D = src.field("D");
+    const keel::usize nx = A.dims().rows();
+    keel::Array<keel::usize> states(nx);
+    for (keel::usize i = 0; i < nx; ++i) states[i] = i;
+    Value subB = (nx > 0) ? B.indexGet2D(states.data(), nx, colIds, colCount, mr)
+                          : Value::matrix(0, colCount, ValueType::DOUBLE, mr);
+    Value subC = (nx > 0) ? C.indexGet2D(rowIds, rowCount, states.data(), nx, mr)
+                          : Value::matrix(rowCount, 0, ValueType::DOUBLE, mr);
+    Value subD = D.indexGet2D(rowIds, rowCount, colIds, colCount, mr);
+    Value out = Value::structure(mr);
+    out.field("kind") = Value::fromString("ss", mr);
+    out.field("A") = A;
+    out.field("B") = std::move(subB);
+    out.field("C") = std::move(subC);
+    out.field("D") = std::move(subD);
+    if (src.hasField("Ts"))
+        out.field("Ts") = src.field("Ts");
+    return out;
+}
+
+static Value wrapIndexedTfTw(const Value &src, Value subNum, Value subDen, keel::Allocator *mr)
+{
+    Value out = Value::structure(mr);
+    out.field("kind") = Value::fromString("tf", mr);
+    if (src.hasField("Ts"))
+        out.field("Ts") = src.field("Ts");
+    if (src.hasField("variable"))
+        out.field("variable") = src.field("variable");
+    if (subNum.isCell() && subNum.numel() == 1) {
+        out.field("num") = subNum.cellAt(0);
+        out.field("den") = subDen.cellAt(0);
+    } else {
+        out.field("num") = std::move(subNum);
+        out.field("den") = std::move(subDen);
+    }
+    return out;
+}
+
 Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env)
 {
     keel::usize nargs = callNode->children.size() - 1;
+
+    if (isMimoTfStructTw(var)) {
+        const Value &numCell = var.field("num");
+        const Value &denCell = var.field("den");
+        Value subNum = execIndexAccess(numCell, callNode, env);
+        Value subDen = execIndexAccess(denCell, callNode, env);
+        return wrapIndexedTfTw(var, std::move(subNum), std::move(subDen), engine_.mr_);
+    }
+
+    if (isSsStructTw(var) && (nargs == 1 || nargs == 2)) {
+        const Value &D = var.field("D");
+        const keel::usize ny = D.dims().rows();
+        const keel::usize nu = D.dims().cols();
+        if (nargs == 1) {
+            indexContextStack_.push_back({&D, 0, 1});
+            Value ix;
+            try {
+                ix = execNode(callNode->children[1].get(), env);
+            } catch (...) {
+                indexContextStack_.pop_back();
+                throw;
+            }
+            indexContextStack_.pop_back();
+            if (ny == 1) {
+                auto cols = Value::resolveIndices(ix, nu);
+                keel::usize r0 = 0;
+                return indexSsStruct2DTw(var, &r0, 1, cols.data(), cols.size(), engine_.mr_);
+            }
+            if (nu == 1) {
+                auto rows = Value::resolveIndices(ix, ny);
+                keel::usize c0 = 0;
+                return indexSsStruct2DTw(var, rows.data(), rows.size(), &c0, 1, engine_.mr_);
+            }
+            auto lin = Value::resolveIndices(ix, ny * nu);
+            if (lin.size() == 1) {
+                keel::usize r = lin[0] % ny;
+                keel::usize c = lin[0] / ny;
+                return indexSsStruct2DTw(var, &r, 1, &c, 1, engine_.mr_);
+            }
+            throw std::runtime_error("ss: multi-element linear indexing on MIMO ss requires 2D subscripts");
+        }
+        auto evalSub = [&](keel::usize childIdx, keel::i32 dim, keel::usize lim) {
+            const ASTNode *argNode = callNode->children[childIdx].get();
+            if (argNode->type == NodeType::COLON_EXPR && argNode->children.empty()) {
+                keel::Array<keel::usize> all(lim);
+                for (keel::usize k = 0; k < lim; ++k) all[k] = k;
+                return all;
+            }
+            indexContextStack_.push_back({&D, dim, 2});
+            Value v;
+            try {
+                v = execNode(argNode, env);
+            } catch (...) {
+                indexContextStack_.pop_back();
+                throw;
+            }
+            indexContextStack_.pop_back();
+            return Value::resolveIndices(v, lim);
+        };
+        auto rows = evalSub(1, 0, ny);
+        auto cols = evalSub(2, 1, nu);
+        return indexSsStruct2DTw(var, rows.data(), rows.size(), cols.data(), cols.size(), engine_.mr_);
+    }
 
     auto checkBounds = [](keel::ArrayRef<keel::usize> indices, keel::usize limit, const char *ctx) {
         for (auto idx : indices) {
@@ -2790,14 +2972,19 @@ Value TreeWalker::execExprStmt(const ASTNode *node, Environment *env)
         }
     }
 
-    // Statement context: dispatch CALL and IDENTIFIER with nargout=0
+    // Statement context: dispatch CALL and IDENTIFIER with nargout=0,
+    // or nargout=1 when result is captured by eval/evalin.
+    const keel::usize stmtNargout = node->captureResult ? 1 : 0;
     Value val;
     if (child->type == NodeType::CALL)
-        val = execCall(child, env, 0);
+        val = execCall(child, env, stmtNargout);
     else if (child->type == NodeType::IDENTIFIER)
-        val = execIdentifier(child, env, 0);
+        val = execIdentifier(child, env, stmtNargout);
     else
         val = execNodeExpand(child, env);
+
+    if (node->captureResult)
+        return val;
 
     if (bareUserVar) {
         if (!node->suppressOutput)
@@ -2916,7 +3103,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
     if (const ExternalFunc *fn = engine_.findExternal(name, env)) {
         Value outBuf[1];
         CallContext ctx{&engine_, env};
-        (*fn)(args, 0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+        (*fn)(args, node->captureResult ? 1 : 0, keel::MutArrayRef<Value>(outBuf, 1), ctx);
         result = outBuf[0];
         if (!node->suppressOutput && !result.isEmpty()) {
             env->set("ans", result);

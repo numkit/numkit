@@ -498,10 +498,365 @@ function [center, U, obj_fcn] = fcm(data, cluster_n, options)
 end
 )NKM";
 
+static const char *kImplicitAndBvpMSource = R"NKM(
+function [y0_mod, yp0_mod, resnrm] = decic(odefun, t0, y0, fixed_y0, yp0, fixed_yp0, opts, varargin)
+  if ischar(odefun) || isstring(odefun), odefun = str2func(odefun); end
+  y0 = y0(:); yp0 = yp0(:);
+  n = numel(y0);
+  if nargin < 4 || isempty(fixed_y0),  fixed_y0  = zeros(n, 1); else, fixed_y0  = fixed_y0(:);  end
+  if nargin < 6 || isempty(fixed_yp0), fixed_yp0 = zeros(n, 1); else, fixed_yp0 = fixed_yp0(:); end
+  if nargin < 7, opts = []; end
+  rel_tol = 1e-3; abs_tol = 1e-6;
+  if isstruct(opts)
+    if isfield(opts, 'RelTol') && ~isempty(opts.RelTol), rel_tol = opts.RelTol; end
+    if isfield(opts, 'AbsTol') && ~isempty(opts.AbsTol), abs_tol = min(opts.AbsTol(:)); end
+  end
+  free_y  = find(fixed_y0 == 0);
+  free_yp = find(fixed_yp0 == 0);
+  ny = numel(free_y); nyp = numel(free_yp);
+  nf = ny + nyp;
+  y = y0; yp = yp0;
+  r = odefun(t0, y, yp, varargin{:}); r = r(:);
+  resnrm = norm(r);
+  tol = max(1e-13, min(abs_tol, rel_tol) * 1e-6);
+  if nf == 0 || resnrm <= tol
+    y0_mod = y; yp0_mod = yp;
+    return;
+  end
+  for iter = 1:50
+    J = zeros(n, nf);
+    for k = 1:ny
+      idx = free_y(k);
+      h = max(1e-8, 1e-8 * abs(y(idx)));
+      yt = y; yt(idx) = y(idx) + h;
+      rt = odefun(t0, yt, yp, varargin{:});
+      J(:, k) = (rt(:) - r) / h;
+    end
+    for k = 1:nyp
+      idx = free_yp(k);
+      h = max(1e-8, 1e-8 * abs(yp(idx)));
+      ypt = yp; ypt(idx) = yp(idx) + h;
+      rt = odefun(t0, y, ypt, varargin{:});
+      J(:, ny + k) = (rt(:) - r) / h;
+    end
+    if nf == n
+      dz = -(J \ r);
+    else
+      dz = -(pinv(J) * r);
+    end
+    if any(isnan(dz)) || any(isinf(dz)), break; end
+    alpha = 1.0;
+    improved = false;
+    for bt = 1:15
+      yn = y; ypn = yp;
+      if ny > 0,  yn(free_y)   = y(free_y)   + alpha * dz(1:ny); end
+      if nyp > 0, ypn(free_yp) = yp(free_yp) + alpha * dz(ny+1:nf); end
+      rn = odefun(t0, yn, ypn, varargin{:}); rn = rn(:);
+      nn = norm(rn);
+      if isfinite(nn) && nn < resnrm
+        y = yn; yp = ypn; r = rn; resnrm = nn;
+        improved = true;
+        break;
+      end
+      alpha = 0.5 * alpha;
+    end
+    if ~improved || resnrm <= tol || norm(alpha * dz) <= 1e-12 * (1 + norm(y) + norm(yp))
+      break;
+    end
+  end
+  y0_mod = y; yp0_mod = yp;
+end
+
+function [t, y] = ode15i(odefun, tspan, y0, yp0, opts, varargin)
+  if ischar(odefun) || isstring(odefun), odefun = str2func(odefun); end
+  if nargin < 5, opts = []; end
+  ts = tspan(:); nspan = numel(ts);
+  t0 = ts(1); tf = ts(end);
+  dir = 1; if tf < t0, dir = -1; end
+  rel_tol = 1e-3; abs_tol = 1e-6; max_step = inf; initial_step = 0;
+  if isstruct(opts)
+    if isfield(opts,'RelTol')      && ~isempty(opts.RelTol),      rel_tol = opts.RelTol; end
+    if isfield(opts,'AbsTol')      && ~isempty(opts.AbsTol),      abs_tol = opts.AbsTol(:); end
+    if isfield(opts,'MaxStep')     && ~isempty(opts.MaxStep),     max_step = opts.MaxStep; end
+    if isfield(opts,'InitialStep') && ~isempty(opts.InitialStep), initial_step = opts.InitialStep; end
+  end
+  yc = y0(:); ypc = yp0(:);
+  n = numel(yc);
+  if numel(abs_tol) == 1, abs_tol = abs_tol * ones(n, 1); end
+  span = abs(tf - t0);
+  if isinf(max_step), max_step = 0.1 * span; end
+  h = initial_step;
+  if ~(h > 0), h = min(max_step, max(1e-6, 1e-3 * span)); end
+  out_t = t0; out_y = yc.';
+  tc = t0; yprev = yc; hprev = 0; step_count = 0; max_steps = 50000;
+  have_prev = false;
+  while dir * (tf - tc) > 1e-14 * max(1, abs(tf)) && step_count < max_steps
+    h = min([h, max_step, abs(tf - tc)]);
+    if h < max(1e-15, abs(tc) * 1e-14), break; end
+    tn = tc + dir * h;
+    s = dir * h;
+    % Predictor
+    yguess = yc + s * ypc;
+    if have_prev && hprev > 0
+      % Variable-step BDF2: a0*y_{n+1} + a1*y_n + a2*y_{n-1} = s*yp_{n+1}
+      rho = h / hprev;
+      a0 = (1 + 2*rho) / (1 + rho);
+      a1 = -(1 + rho);
+      a2 = (rho * rho) / (1 + rho);
+    else
+      a0 = 1.0; a1 = -1.0; a2 = 0.0;
+    end
+    yn = yguess;
+    converged = false;
+    for nit = 1:12
+      if have_prev && hprev > 0
+        ypn = (a0 * yn + a1 * yc + a2 * yprev) / s;
+      else
+        ypn = (yn - yc) / s;
+      end
+      r = odefun(tn, yn, ypn, varargin{:}); r = r(:);
+      if norm(r) <= max(1e-10, 0.1 * min(abs_tol))
+        converged = true; break;
+      end
+      J = zeros(n, n);
+      for j = 1:n
+        dy = max(1e-8, 1e-8 * abs(yn(j)));
+        yt = yn; yt(j) = yn(j) + dy;
+        if have_prev && hprev > 0
+          ypt = (a0 * yt + a1 * yc + a2 * yprev) / s;
+        else
+          ypt = (yt - yc) / s;
+        end
+        rt = odefun(tn, yt, ypt, varargin{:});
+        J(:, j) = (rt(:) - r) / dy;
+      end
+      dy_step = -(J \ r);
+      if any(isnan(dy_step)) || any(isinf(dy_step)), break; end
+      yn = yn + dy_step;
+      sc = abs_tol + rel_tol * max(abs(yc), abs(yn));
+      if norm(dy_step ./ sc) / sqrt(n) < 1e-3
+        converged = true; break;
+      end
+    end
+    if ~converged
+      h = 0.5 * h;
+      have_prev = false;
+      continue;
+    end
+    if have_prev && hprev > 0
+      ypn = (a0 * yn + a1 * yc + a2 * yprev) / s;
+    else
+      ypn = (yn - yc) / s;
+    end
+    % Local truncation error estimate against explicit predictor
+    sc = abs_tol + rel_tol * max(abs(yc), abs(yn));
+    err_est = norm((yn - yguess) ./ sc) / sqrt(n);
+    if have_prev
+      err_est = err_est / 3.0;
+    else
+      err_est = err_est / 2.0;
+    end
+    if err_est > 1.0 && h > 1e-12 * max(1, span)
+      fac = max(0.2, 0.8 * (1.0 / err_est)^(1/3));
+      h = h * fac;
+      continue;
+    end
+    yprev = yc; hprev = h; have_prev = true;
+    tc = tn; yc = yn; ypc = ypn;
+    step_count = step_count + 1;
+    out_t = [out_t; tc];
+    out_y = [out_y; yc.'];
+    if err_est > 0
+      fac = min(2.0, max(0.5, 0.85 * (1.0 / err_est)^(1/3)));
+    else
+      fac = 2.0;
+    end
+    h = min(max_step, h * fac);
+  end
+  if nspan > 2
+    t = ts;
+    y = zeros(nspan, n);
+    for j = 1:n
+      y(:, j) = interp1(out_t, out_y(:, j), ts, 'linear', 'extrap');
+    end
+  else
+    t = out_t;
+    y = out_y;
+  end
+end
+
+function solinit = bvpinit(x, yinit, params)
+  xv = x(:)';
+  m = numel(xv);
+  if ischar(yinit) || isstring(yinit), yinit = str2func(yinit); end
+  if isa(yinit, 'function_handle')
+    if nargin >= 3 && ~isempty(params)
+      y0 = yinit(xv(1), params);
+    else
+      y0 = yinit(xv(1));
+    end
+    y0 = y0(:);
+    d = numel(y0);
+    Y = zeros(d, m);
+    Y(:, 1) = y0;
+    for k = 2:m
+      if nargin >= 3 && ~isempty(params)
+        yk = yinit(xv(k), params);
+      else
+        yk = yinit(xv(k));
+      end
+      Y(:, k) = yk(:);
+    end
+  elseif ismatrix(yinit) && size(yinit, 2) == m && size(yinit, 1) >= 1 && numel(yinit) > m
+    Y = yinit;
+  else
+    y0 = yinit(:);
+    Y = y0 * ones(1, m);
+  end
+  solinit = struct();
+  solinit.x = xv;
+  solinit.y = Y;
+  solinit.solver = 'bvpinit';
+  if nargin >= 3 && ~isempty(params)
+    solinit.parameters = params(:);
+  end
+end
+
+function opts = bvpset(varargin)
+  opts = odeset(varargin{:});
+end
+
+function val = bvpget(varargin)
+  val = odeget(varargin{:});
+end
+
+function sol = bvp4c(odefun, bcfun, solinit, opts, varargin)
+  if ischar(odefun) || isstring(odefun), odefun = str2func(odefun); end
+  if ischar(bcfun)  || isstring(bcfun),  bcfun  = str2func(bcfun);  end
+  if nargin < 4, opts = []; end
+  rel_tol = 1e-3; abs_tol = 1e-6;
+  if isstruct(opts)
+    if isfield(opts, 'RelTol') && ~isempty(opts.RelTol), rel_tol = opts.RelTol; end
+    if isfield(opts, 'AbsTol') && ~isempty(opts.AbsTol), abs_tol = min(opts.AbsTol(:)); end
+  end
+  X = solinit.x(:)';
+  Y = solinit.y;
+  has_params = isfield(solinit, 'parameters') && ~isempty(solinit.parameters);
+  if has_params
+    P = solinit.parameters(:);
+    np = numel(P);
+  else
+    P = [];
+    np = 0;
+  end
+  [d, N] = size(Y);
+  % Ensure a reasonable mesh density for Lobatto IIIA 4th-order collocation.
+  if N < 10
+    Xnew = linspace(X(1), X(end), 25);
+    Ynew = zeros(d, numel(Xnew));
+    for r = 1:d
+      Ynew(r, :) = interp1(X, Y(r, :), Xnew, 'linear');
+    end
+    X = Xnew; Y = Ynew; N = numel(X);
+  end
+  ntot = d * N + np;
+  z = [Y(:); P];
+  tol = max(1e-13, min(abs_tol, rel_tol) * 1e-6);
+  r = NUMKIT_bvp4c_res(odefun, bcfun, X, z, d, N, np, has_params, varargin{:});
+  rnrm = norm(r);
+  for iter = 1:40
+    if rnrm <= tol, break; end
+    J = zeros(ntot, ntot);
+    for j = 1:ntot
+      h = max(1e-8, 1e-8 * abs(z(j)));
+      zt = z; zt(j) = z(j) + h;
+      rt = NUMKIT_bvp4c_res(odefun, bcfun, X, zt, d, N, np, has_params, varargin{:});
+      J(:, j) = (rt - r) / h;
+    end
+    dz = -(J \ r);
+    if any(isnan(dz)) || any(isinf(dz)), break; end
+    alpha = 1.0;
+    improved = false;
+    for bt = 1:15
+      zn = z + alpha * dz;
+      rn = NUMKIT_bvp4c_res(odefun, bcfun, X, zn, d, N, np, has_params, varargin{:});
+      nn = norm(rn);
+      if isfinite(nn) && nn < rnrm
+        z = zn; r = rn; rnrm = nn;
+        improved = true;
+        break;
+      end
+      alpha = 0.5 * alpha;
+    end
+    if ~improved || norm(alpha * dz) <= 1e-12 * (1 + norm(z))
+      break;
+    end
+  end
+  Y = reshape(z(1:d*N), d, N);
+  if has_params, P = z(d*N+1:ntot); end
+  YP = zeros(d, N);
+  for k = 1:N
+    if has_params
+      fk = odefun(X(k), Y(:, k), P, varargin{:});
+    else
+      fk = odefun(X(k), Y(:, k), varargin{:});
+    end
+    YP(:, k) = fk(:);
+  end
+  sol = struct();
+  sol.solver = 'bvp4c';
+  sol.x = X;
+  sol.y = Y;
+  sol.yp = YP;
+  if has_params, sol.parameters = P; end
+end
+
+function r = NUMKIT_bvp4c_res(odefun, bcfun, X, z, d, N, np, has_params, varargin)
+  Y = reshape(z(1:d*N), d, N);
+  if has_params, P = z(d*N+1:d*N+np); end
+  F = zeros(d, N);
+  for k = 1:N
+    if has_params
+      fk = odefun(X(k), Y(:, k), P, varargin{:});
+    else
+      fk = odefun(X(k), Y(:, k), varargin{:});
+    end
+    F(:, k) = fk(:);
+  end
+  if has_params
+    rbc = bcfun(Y(:, 1), Y(:, N), P, varargin{:});
+  else
+    rbc = bcfun(Y(:, 1), Y(:, N), varargin{:});
+  end
+  r = zeros(d * N + np, 1);
+  r(1:d+np) = rbc(:);
+  off = d + np;
+  for k = 1:N-1
+    h = X(k+1) - X(k);
+    xm = 0.5 * (X(k) + X(k+1));
+    ym = 0.5 * (Y(:, k) + Y(:, k+1)) - (h / 8.0) * (F(:, k+1) - F(:, k));
+    if has_params
+      fm = odefun(xm, ym, P, varargin{:});
+    else
+      fm = odefun(xm, ym, varargin{:});
+    end
+    fm = fm(:);
+    r(off + (k-1)*d + 1 : off + k*d) = Y(:, k+1) - Y(:, k) - (h / 6.0) * (F(:, k) + 4.0 * fm + F(:, k+1));
+  end
+end
+
+function sol = bvp5c(odefun, bcfun, solinit, opts, varargin)
+  if nargin < 4, opts = []; end
+  sol = bvp4c(odefun, bcfun, solinit, opts, varargin{:});
+  sol.solver = 'bvp5c';
+end
+)NKM";
+
 void registerOde23M(Engine &engine)
 {
     engine.registerBuiltinMSource(kOde23MSource);
     engine.registerBuiltinMSource(kDde23MSource);
+    engine.registerBuiltinMSource(kImplicitAndBvpMSource);
 }
 
 

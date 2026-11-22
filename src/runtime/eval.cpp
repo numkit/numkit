@@ -169,12 +169,107 @@ void registerEvalFamily(Engine &engine)
     engine.registerFunction(
         "eval", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
-            if (args.empty() || !args[0].isChar())
+            if (!args.empty() && args[0].isObject()) {
+                if (const BuiltinClass *cls = ctx.engine->findClass(args[0].objectClassName())) {
+                    if (const ObjectMethod *m = cls->methods.get(keel::StringRef("eval"))) {
+                        Value selfCopy = args[0];
+                        keel::ArrayRef<Value> tail =
+                            args.size() > 1 ? keel::ArrayRef<Value>(args.data() + 1, args.size() - 1)
+                                            : keel::ArrayRef<Value>{};
+                        (*m)(selfCopy, tail, nargout, outs, ctx);
+                        return;
+                    }
+                }
+            }
+            if (args.empty() || (!args[0].isChar() && !args[0].isString()))
                 throw std::runtime_error("eval requires a string");
             const bool suppress = (nargout >= 1);
             outs[0] = ctx.engine->eval(args[0].toString().as_ref(),
                                        resolveEvalScope(ctx),
                                        suppress);
+        });
+
+    // ── evalc ────────────────────────────────────────────────
+    // T = evalc(expr) / [T, r] = evalc(expr): execute `expr` in the caller's
+    // workspace while capturing everything emitted via engine outputText().
+    engine.registerFunction(
+        "evalc", [resolveEvalScope](keel::ArrayRef<Value> args, keel::usize nargout,
+                                    keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+                throw std::runtime_error("evalc requires a string");
+            keel::String captured;
+            auto prevOut = ctx.engine->swapOutputFunc(
+                [&captured](keel::StringRef s) { captured.append(s); });
+            Value res;
+            const bool suppress = (nargout >= 2);
+            try {
+                res = ctx.engine->eval(args[0].toString().as_ref(),
+                                       resolveEvalScope(ctx),
+                                       suppress);
+            } catch (...) {
+                ctx.engine->setOutputFunc(keel::move(prevOut));
+                throw;
+            }
+            ctx.engine->setOutputFunc(keel::move(prevOut));
+            outs[0] = Value::fromString(captured.as_ref(), ctx.engine->allocator());
+            if (nargout >= 2 && outs.size() >= 2)
+                outs[1] = res;
+        });
+
+    // ── vectorize ────────────────────────────────────────────
+    // Replace scalar '*', '/', '^' operators with elementwise '.*', './', '.^'
+    // in a char vector, string scalar, or object supporting char().
+    engine.registerFunction(
+        "vectorize", [](keel::ArrayRef<Value> args, keel::usize,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx) {
+            if (args.empty())
+                throw std::runtime_error("vectorize: not enough input arguments");
+            keel::String src;
+            if (args[0].isChar() || args[0].isString()) {
+                src = args[0].toString();
+            } else if (args[0].isObject()) {
+                bool converted = false;
+                if (const BuiltinClass *cls = ctx.engine->findClass(args[0].objectClassName())) {
+                    if (const ObjectMethod *m = cls->methods.get(keel::StringRef("char"))) {
+                        Value selfCopy = args[0];
+                        Value outChar;
+                        keel::MutArrayRef<Value> outRef(&outChar, 1);
+                        (*m)(selfCopy, keel::ArrayRef<Value>{}, 1, outRef, ctx);
+                        if (outChar.isChar() || outChar.isString()) {
+                            src = outChar.toString();
+                            converted = true;
+                        }
+                    } else if (cls->dispText) {
+                        src = cls->dispText(args[0]);
+                        converted = true;
+                    }
+                }
+                if (!converted)
+                    throw std::runtime_error("vectorize: unsupported object input");
+            } else {
+                throw std::runtime_error("vectorize: input must be a character vector, string, or symbolic expression");
+            }
+            keel::String out;
+            out.reserve(src.size() + 16);
+            bool inSingle = false;
+            bool inDouble = false;
+            for (keel::usize i = 0; i < src.size(); ++i) {
+                const char ch = src[i];
+                if (ch == '\'' && !inDouble) {
+                    inSingle = !inSingle;
+                    out.push_back(ch);
+                } else if (ch == '"' && !inSingle) {
+                    inDouble = !inDouble;
+                    out.push_back(ch);
+                } else if (!inSingle && !inDouble && (ch == '*' || ch == '/' || ch == '^')) {
+                    if (out.empty() || out.back() != '.')
+                        out.push_back('.');
+                    out.push_back(ch);
+                } else {
+                    out.push_back(ch);
+                }
+            }
+            outs[0] = Value::fromString(out.as_ref(), ctx.engine->allocator());
         });
 
     // ── input ────────────────────────────────────────────────
@@ -246,7 +341,7 @@ void registerEvalFamily(Engine &engine)
     // containing this evalin call ('caller'). The latter matches
     // MATLAB's two-frames-up rule.
     engine.registerFunction(
-        "evalin", [](keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx) {
+        "evalin", [](keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
                 throw std::runtime_error("evalin: requires (workspace, code)");
             if (!args[0].isChar() || !args[1].isChar())
@@ -267,7 +362,8 @@ void registerEvalFamily(Engine &engine)
                     keel::format("evalin: workspace must be 'base' or 'caller', got '{}'", where)
                         .c_str());
             }
-            outs[0] = ctx.engine->eval(code.as_ref(), target);
+            const bool suppress = (nargout >= 1);
+            outs[0] = ctx.engine->eval(code.as_ref(), target, suppress);
         });
 }
 

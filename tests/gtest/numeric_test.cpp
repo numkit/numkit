@@ -219,4 +219,24 @@ TEST_P(NumericTest, BitcmpUint32)
     EXPECT_DOUBLE_EQ(evalScalar("bitcmp(0, 'uint32');"), 4294967295.0);
 }
 
+TEST_P(NumericTest, DecicOde15iAndBvpinitBvp4c)
+{
+    // decic + ode15i on implicit ODE: yp + 2*y = 0, y(0) = 1 => y(t) = exp(-2*t)
+    eval("f_imp = @(t, y, yp) yp + 2*y;");
+    eval("[y0_m, yp0_m, resn] = decic(f_imp, 0, 1, 1, 0, 0);");
+    EXPECT_NEAR(getVar("y0_m"), 1.0, 1e-10);
+    EXPECT_NEAR(getVar("yp0_m"), -2.0, 1e-8);
+    EXPECT_LT(getVar("resn"), 1e-9);
+    eval("[ti, yi] = ode15i(f_imp, [0 1], y0_m, yp0_m);");
+    EXPECT_NEAR(evalScalar("yi(end);"), std::exp(-2.0), 1e-3);
+
+    // bvpinit + bvp4c + deval on y'' + y = 0, y(0) = 0, y(pi/2) = 1 => y(x) = sin(x)
+    eval("ode_bvp = @(x, y) [y(2); -y(1)];");
+    eval("bc_bvp  = @(ya, yb) [ya(1); yb(1) - 1];");
+    eval("solinit = bvpinit(linspace(0, pi/2, 10), [0; 1]);");
+    eval("sol = bvp4c(ode_bvp, bc_bvp, solinit);");
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 1);"), std::sin(M_PI / 4.0), 1e-4);
+    EXPECT_NEAR(evalScalar("deval(sol, pi/4, 2);"), std::cos(M_PI / 4.0), 1e-4);
+}
+
 INSTANTIATE_DUAL(NumericTest);

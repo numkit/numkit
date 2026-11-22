@@ -36,6 +36,7 @@ ASTNodePtr cloneNode(const ASTNode *src)
     dst->numValue = src->numValue;
     dst->boolValue = src->boolValue;
     dst->suppressOutput = src->suppressOutput;
+    dst->captureResult = src->captureResult;
     dst->paramNames = src->paramNames.clone();
     dst->returnNames = src->returnNames.clone();
     dst->classAttrs = src->classAttrs.clone();

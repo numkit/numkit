@@ -350,8 +350,12 @@ void registerWorkspaceRuntime(Engine &engine)
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
-                                    for (auto &n : env->localNames())
-                                        if (!isPseudo(n)) uniqNames.insert(n.clone(scratch.allocator()));
+                                    for (auto &n : env->localNames()) {
+                                        if (isPseudo(n)) continue;
+                                        const Value *lv = env->getLocal(n);
+                                        if (!lv || lv->isUnset() || lv->isDeleted()) continue;
+                                        uniqNames.insert(n.clone(scratch.allocator()));
+                                    }
                                     for (const auto &g : env->globalNames())
                                         if (!isPseudo(g) && env->get(g)) uniqNames.insert(g.clone(scratch.allocator()));
                                     for (const auto &p : env->persistentNames())
@@ -431,8 +435,12 @@ void registerWorkspaceRuntime(Engine &engine)
                                     return n == "nargin" || n == "nargout";
                                 };
                                 if (args.empty()) {
-                                    for (auto &n : env->localNames())
-                                        if (!isPseudo(n)) uniqNames.insert(n.clone(scratch.allocator()));
+                                    for (auto &n : env->localNames()) {
+                                        if (isPseudo(n)) continue;
+                                        const Value *lv = env->getLocal(n);
+                                        if (!lv || lv->isUnset() || lv->isDeleted()) continue;
+                                        uniqNames.insert(n.clone(scratch.allocator()));
+                                    }
                                     for (const auto &g : env->globalNames())
                                         if (!isPseudo(g) && env->get(g)) uniqNames.insert(g.clone(scratch.allocator()));
                                     for (const auto &p : env->persistentNames())

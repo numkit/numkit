@@ -72,6 +72,27 @@ bool isTfStruct(const Value &v) {
         && v.hasField("num") && v.hasField("den");
 }
 
+bool isSisoSsStruct(const Value &v) {
+    if (!v.isStruct() || v.isStructArray() || v.numel() != 1
+        || !v.hasField("kind")
+        || !(v.field("kind").isChar() || v.field("kind").isString())
+        || v.field("kind").toString() != "ss"
+        || !v.hasField("A") || !v.hasField("B") || !v.hasField("C") || !v.hasField("D")) {
+        return false;
+    }
+    const Value &B = v.field("B");
+    const Value &C = v.field("C");
+    const Value &D = v.field("D");
+    return B.isNumeric() && C.isNumeric() && D.isNumeric()
+        && !B.isComplex() && !C.isComplex() && !D.isComplex()
+        && C.dims().rows() == 1 && B.dims().cols() == 1
+        && D.dims().rows() == 1 && D.dims().cols() == 1;
+}
+
+bool isLtiSisoStruct(const Value &v) {
+    return isTfStruct(v) || isSisoSsStruct(v);
+}
+
 struct TfPoly {
     keel::Array<keel::f64> num;
     keel::Array<keel::f64> den;
@@ -89,6 +110,59 @@ bool toTfPoly(const Value &v, TfPoly &out) {
         out.den.resize(dv.numel());
         for (keel::usize i = 0; i < dv.numel(); ++i) out.den[i] = dv.elemAsDouble(i);
         out.Ts = v.hasField("Ts") ? v.field("Ts").toScalar() : 0.0;
+        return true;
+    }
+    if (isSisoSsStruct(v)) {
+        const Value &Av = v.field("A");
+        const Value &Bv = v.field("B");
+        const Value &Cv = v.field("C");
+        const Value &Dv = v.field("D");
+        if (!Av.isNumeric() || Av.isComplex() || Av.dims().rows() != Av.dims().cols())
+            return false;
+        const keel::usize n = Av.dims().rows();
+        const keel::f64 dVal = Dv.elemAsDouble(0);
+        out.Ts = v.hasField("Ts") ? v.field("Ts").toScalar() : 0.0;
+        if (n == 0) {
+            out.num = {dVal};
+            out.den = {1.0};
+            return true;
+        }
+        // Fadeev-LeVerrier: den(s) = det(sI - A), num(s) = C * adj(sI - A) * B + D * den(s).
+        auto Aat = [&](keel::usize r, keel::usize c) { return Av.elemAsDouble(c * n + r); };
+        keel::Array<keel::f64> M(n * n, 0.0);
+        for (keel::usize i = 0; i < n; ++i) M[i * n + i] = 1.0;
+        out.den.assign(n + 1, 0.0);
+        out.num.assign(n + 1, 0.0);
+        out.den[0] = 1.0;
+        out.num[0] = dVal;
+        keel::Array<keel::f64> P(n * n, 0.0);
+        for (keel::usize k = 1; k <= n; ++k) {
+            // cMB = C * M_{k-1} * B
+            keel::f64 cMB = 0.0;
+            for (keel::usize r = 0; r < n; ++r) {
+                const keel::f64 cr = Cv.elemAsDouble(r);
+                for (keel::usize c = 0; c < n; ++c)
+                    cMB += cr * M[r * n + c] * Bv.elemAsDouble(c);
+            }
+            // P = A * M_{k-1}
+            for (keel::usize r = 0; r < n; ++r) {
+                for (keel::usize c = 0; c < n; ++c) {
+                    keel::f64 acc = 0.0;
+                    for (keel::usize j = 0; j < n; ++j)
+                        acc += Aat(r, j) * M[j * n + c];
+                    P[r * n + c] = acc;
+                }
+            }
+            keel::f64 tr = 0.0;
+            for (keel::usize i = 0; i < n; ++i) tr += P[i * n + i];
+            const keel::f64 ck = -tr / keel::as<keel::f64>(k);
+            out.den[k] = ck;
+            out.num[k] = cMB + dVal * ck;
+            for (keel::usize r = 0; r < n; ++r) {
+                for (keel::usize c = 0; c < n; ++c)
+                    M[r * n + c] = P[r * n + c] + (r == c ? ck : 0.0);
+            }
+        }
         return true;
     }
     if (v.isScalar() && v.isNumeric() && !v.isComplex()) {
@@ -149,12 +223,12 @@ Value buildTfValue(keel::ArrayRef<keel::f64> num, keel::ArrayRef<keel::f64> den,
 
 bool tryTfBinaryOp(char op, const Value &a, const Value &b,
                    keel::Allocator *mr, Value &out) {
-    if (!isTfStruct(a) && !isTfStruct(b)) return false;
+    if (!isLtiSisoStruct(a) && !isLtiSisoStruct(b)) return false;
     TfPoly pa, pb;
     if (!toTfPoly(a, pa)) return false;
-    const keel::f64 Ts = isTfStruct(a) ? pa.Ts : (isTfStruct(b) ? (b.hasField("Ts") ? b.field("Ts").toScalar() : 0.0) : 0.0);
+    const keel::f64 Ts = isLtiSisoStruct(a) ? pa.Ts : (isLtiSisoStruct(b) ? (b.hasField("Ts") ? b.field("Ts").toScalar() : 0.0) : 0.0);
     if (op == '^') {
-        if (!isTfStruct(a) || !b.isScalar() || !b.isNumeric() || b.isComplex()) return false;
+        if (!isLtiSisoStruct(a) || !b.isScalar() || !b.isNumeric() || b.isComplex()) return false;
         const keel::f64 expVal = b.toScalar();
         const keel::i32 k = keel::as<keel::i32>(expVal);
         if (keel::as<keel::f64>(k) != expVal) return false;

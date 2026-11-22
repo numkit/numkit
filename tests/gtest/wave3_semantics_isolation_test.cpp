@@ -248,6 +248,34 @@ TEST_P(Wave3SemanticsIsolationTest, DynamicWorkspaceSyncEvalAssigninLoadClearvar
     EXPECT_DOUBLE_EQ(getVar("cvA"), 0.0);
     EXPECT_TRUE(evalBool("cvB"));
     EXPECT_DOUBLE_EQ(getVar("cvG"), 77.0);
+
+    // 3f. evalin('caller', 'who') honours nargout and evalin('caller', 'a') suppresses echo
+    eval(
+        "function [cls, cnt, val] = probe_evalin_fn()\n"
+        "  ws = evalin('caller', 'who');\n"
+        "  cls = class(ws);\n"
+        "  cnt = numel(ws);\n"
+        "  val = evalin('caller', 'a_probe');\n"
+        "end\n"
+        "function [cls, cnt, val] = probe_evalin_host()\n"
+        "  a_probe = 42;\n"
+        "  [cls, cnt, val] = probe_evalin_fn();\n"
+        "end\n");
+    capturedOutput.clear();
+    eval("[pe_cls, pe_cnt, pe_val] = probe_evalin_host();");
+    EXPECT_TRUE(capturedOutput.empty()) << "Unexpected echo output: " << capturedOutput;
+    EXPECT_EQ(eval("pe_cls;").toString(), "cell");
+    EXPECT_DOUBLE_EQ(getVar("pe_cnt"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("pe_val"), 42.0);
+
+    // Also from base workspace
+    eval("clear global g_keep; clearvars; a_probe = 99;");
+    capturedOutput.clear();
+    eval("[be_cls, be_cnt, be_val] = probe_evalin_fn();");
+    EXPECT_TRUE(capturedOutput.empty()) << "Unexpected base echo output: " << capturedOutput;
+    EXPECT_EQ(eval("be_cls;").toString(), "cell");
+    EXPECT_DOUBLE_EQ(getVar("be_cnt"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("be_val"), 99.0);
 }
 
 // 4. Lexer and parser bug fixes
