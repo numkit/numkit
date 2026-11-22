@@ -275,74 +275,23 @@ void Compiler::collectAssignedNames(const ASTNode *node, keel::Array<keel::Strin
     }
     if (node->type == NodeType::FOR_STMT && !node->strValue.empty())
         out.push_back(node->strValue.clone());
-    auto pushSymsTokNames = [&](keel::StringRef raw) {
-        if (raw.empty() || isSymsFlag(raw))
-            return;
-        const keel::usize lp = raw.find('(');
-        if (lp == keel::kInvalidIndex) {
-            out.push_back(keel::String::from(raw));
-            return;
-        }
-        keel::StringRef fn = raw.substr(0, lp);
-        while (!fn.empty() && fn.back() == ' ') fn.remove_suffix(1);
-        if (!fn.empty())
-            out.push_back(keel::String::from(fn));
-        keel::usize rp = raw.rfind(')');
-        if (rp == keel::kInvalidIndex || rp <= lp) rp = raw.size();
-        keel::StringRef inside = raw.substr(lp + 1, rp - lp - 1);
-        keel::usize p = 0;
-        while (p < inside.size()) {
-            keel::usize comma = inside.find(',', p);
-            if (comma == keel::kInvalidIndex) comma = inside.size();
-            keel::StringRef arg = inside.substr(p, comma - p);
-            while (!arg.empty() && (arg.front() == ' ' || arg.front() == '\t')) arg.remove_prefix(1);
-            while (!arg.empty() && (arg.back() == ' ' || arg.back() == '\t' || arg.back() == ')')) arg.remove_suffix(1);
-            if (!arg.empty() && !isSymsFlag(arg))
-                out.push_back(keel::String::from(arg));
-            p = (comma < inside.size()) ? comma + 1 : inside.size();
-        }
-    };
-    if (node->type == NodeType::COMMAND_CALL && node->strValue == "syms") {
-        keel::String joined;
-        keel::i32 depth = 0;
-        for (const auto &ch : node->children) {
-            const keel::StringRef tok = ch->strValue.as_ref();
-            if (depth > 0) {
-                joined.append(tok);
-                for (char c : tok) {
-                    if (c == '(') ++depth;
-                    else if (c == ')') --depth;
-                }
-                if (depth <= 0) {
-                    pushSymsTokNames(joined.as_ref());
-                    joined.clear();
-                    depth = 0;
-                }
-                continue;
-            }
-            keel::i32 d = 0;
-            for (char c : tok) {
-                if (c == '(') ++d;
-                else if (c == ')') --d;
-            }
-            if (d > 0) {
-                joined = keel::String::from(tok);
-                depth = d;
-            } else {
-                pushSymsTokNames(tok);
-            }
-        }
-        if (!joined.empty())
-            pushSymsTokNames(joined.as_ref());
+    if (node->type == NodeType::COMMAND_CALL && engine_.isVarDeclCommand(node->strValue)) {
+        keel::Array<keel::StringRef> rawArgs;
+        rawArgs.reserve(node->children.size());
+        for (const auto &ch : node->children)
+            rawArgs.push_back(ch->strValue.as_ref());
+        engine_.extractVarDeclCommandNames(node->strValue, rawArgs.as_ref(), out);
     }
     if (node->type == NodeType::CALL && !node->children.empty()
         && node->children[0]->type == NodeType::IDENTIFIER
-        && node->children[0]->strValue == "syms") {
+        && engine_.isVarDeclCommand(node->children[0]->strValue)) {
+        keel::Array<keel::StringRef> rawArgs;
         for (keel::usize i = 1; i < node->children.size(); ++i) {
             const auto *ch = node->children[i].get();
             if (ch->type == NodeType::STRING_LITERAL && !ch->strValue.empty())
-                pushSymsTokNames(ch->strValue.as_ref());
+                rawArgs.push_back(ch->strValue.as_ref());
         }
+        engine_.extractVarDeclCommandNames(node->children[0]->strValue, rawArgs.as_ref(), out);
     }
 
     for (const auto &child : node->children)

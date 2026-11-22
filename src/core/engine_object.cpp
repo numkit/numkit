@@ -339,6 +339,55 @@ bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usi
     return true;
 }
 
+bool Engine::tryObjectSubsasgn(Value &self, keel::ArrayRef<Value> idxAndVal, Environment *env)
+{
+    const BuiltinClass *cls = findClass(self.objectClassNameRef());
+    if (!cls || !cls->subsasgn)
+        return false;
+    Value res[1];
+    CallContext ctx{this, env};
+    cls->subsasgn(self, idxAndVal, 0, keel::MutArrayRef<Value>(res, 1), ctx);
+    return true;
+}
+
+Value Engine::objectPropGet(const Value &obj, keel::StringRef name, Environment *env)
+{
+    const keel::StringRef clsName = obj.objectClassNameRef();
+    const BuiltinClass *cls = findClass(clsName);
+    if (cls) {
+        CallContext ctx{this, env};
+        if (cls->propGet) {
+            Value out;
+            if (cls->propGet(obj, name, out, ctx))
+                return out;
+        }
+        // Bare `obj.method` (no parens) invokes a zero-arg method.
+        if (const auto *m = cls->methods.get(name)) {
+            Value self = obj;
+            Value outBuf[1];
+            (*m)(self, keel::ArrayRef<Value>(nullptr, 0), 1,
+                 keel::MutArrayRef<Value>(outBuf, 1), ctx);
+            return outBuf[0];
+        }
+    }
+    auto msg = keel::format("No appropriate property '{}' for class '{}'", name, clsName);
+    throw std::runtime_error(msg.c_str());
+}
+
+void Engine::objectPropSet(Value &objSlot, keel::StringRef name,
+                           const Value &rhs, Environment *env)
+{
+    const BuiltinClass *cls = findClass(objSlot.objectClassNameRef());
+    if (cls && cls->propSet) {
+        CallContext ctx{this, env};
+        if (cls->propSet(objSlot, name, rhs, ctx))
+            return;
+    }
+    auto msg = keel::format("Cannot set property '{}' on class '{}'",
+                            name, objSlot.objectClassNameRef());
+    throw std::runtime_error(msg.c_str());
+}
+
 bool Engine::tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value &rhs,
                                       Environment *env, Value &out)
 {

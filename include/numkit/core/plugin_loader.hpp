@@ -39,6 +39,10 @@ public:
     // Locate the shared library path for a known package name (e.g. "signal")
     keel::String findPackageLibrary(keel::StringRef pkgName);
 
+    // Check whether any discovered plugin manifest declares `name` as a
+    // variable-declaring command (without loading the plugin).
+    bool isVarDeclCommand(keel::StringRef name);
+
     // Check if a library at `path` is already loaded
     bool isLoaded(keel::StringRef path) const;
 
@@ -51,6 +55,7 @@ private:
     keel::HashSet<keel::String> loadedPaths_;
 
     keel::HashMap<keel::String, keel::String> manifestIndex_;
+    keel::HashSet<keel::String> varDeclCommands_;
     bool manifestsScanned_{false};
 
     void scanManifests_();

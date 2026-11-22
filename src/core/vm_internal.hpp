@@ -110,4 +110,77 @@ inline Value readChunkVar(const BytecodeChunk &chunk, const Value *R, keel::u32 
     return (reg < nregs) ? R[reg] : Value();
 }
 
+// Resolve one assignment subscript to 0-based indices for an object-array
+// slice store: ':' expands to the whole current dimension; everything else
+// (scalar / range / vector / logical) is grow-friendly (unchecked).
+inline keel::Array<keel::usize> resolveStoreSubscript(const Value &s, keel::usize curDim)
+{
+    if (s.isChar() && s.numel() == 1 && s.charData()[0] == ':') {
+        keel::Array<keel::usize> out;
+        out.resize(curDim);
+        for (keel::usize i = 0; i < curDim; ++i)
+            out[i] = i;
+        return out;
+    }
+    return Value::resolveIndicesUnchecked(s);
+}
+
+class SplatArgs;
+inline SplatArgs splatCallArgs(const Value *, keel::u16, keel::u16);
+
+class SplatArgs
+{
+public:
+    SplatArgs(const SplatArgs &) = delete;
+    SplatArgs &operator=(const SplatArgs &) = delete;
+    SplatArgs(SplatArgs &&) = default;
+    SplatArgs &operator=(SplatArgs &&) = delete;
+
+    const Value *data() const { return ptr_; }
+    keel::usize size() const { return n_; }
+    bool empty() const { return n_ == 0; }
+    const Value &operator[](keel::usize i) const { return ptr_[i]; }
+
+private:
+    friend SplatArgs splatCallArgs(const Value *, keel::u16, keel::u16);
+
+    SplatArgs() = default;
+    keel::Array<Value> buf_;
+    const Value *ptr_ = nullptr;
+    keel::usize n_ = 0;
+};
+
+inline SplatArgs splatCallArgs(const Value *R, keel::u16 base, keel::u16 n)
+{
+    SplatArgs r;
+    bool anyCsl = false;
+    for (keel::u16 i = 0; i < n; ++i)
+        if (R[base + i].isCsl()) {
+            anyCsl = true;
+            break;
+        }
+    if (!anyCsl) {
+        r.ptr_ = n ? &R[base] : nullptr;
+        r.n_ = n;
+        return r;
+    }
+    if (n == 1 && R[base].isCsl()) {
+        r.ptr_ = R[base].cellDataVec().data();
+        r.n_ = R[base].cslCount();
+        return r;
+    }
+    r.buf_.reserve(n);
+    for (keel::u16 i = 0; i < n; ++i) {
+        const Value &a = R[base + i];
+        if (a.isCsl())
+            for (keel::usize k = 0; k < a.cslCount(); ++k)
+                r.buf_.push_back(a.cslAt(k));
+        else
+            r.buf_.push_back(a);
+    }
+    r.ptr_ = r.buf_.empty() ? nullptr : r.buf_.data();
+    r.n_ = r.buf_.size();
+    return r;
+}
+
 } // namespace numkit

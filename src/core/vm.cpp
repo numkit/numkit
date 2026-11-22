@@ -38,79 +38,6 @@ void rdivideLoop(const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::u
 
 namespace numkit {
 
-// Resolve a call's argument list: the compile-time registers
-// [base, base + n) with any runtime CSL splice (`c{:}`) expanded in
-// place. A pure splice passes the CSL's storage through untouched
-// (zero copies, any count — the uint8 count wrap used to live in
-// exactly this shape; bugs/closed/core/call-arg-count-uint8-wrap.md,
-// bugs/closed/core/call-method-splice-arg-count-uint8-wrap.md).
-//
-// The backing buffer is ENCAPSULATED on purpose: on the zero-copy and
-// no-CSL paths it is empty and the view points into the caller's
-// registers / CSL storage, so reading "the buffer" directly (instead
-// of data()/size()) is always wrong — an earlier revision of the
-// indirect-multi tail did exactly that and read out of bounds. The
-// view is valid until the SplatArgs (and the R registers it may point
-// into) go out of scope; pushCallFrame copies its args, so a
-// subsequent `goto enter_frame` out of the case block is safe.
-class SplatArgs;
-static SplatArgs splatCallArgs(const Value *, keel::u16, keel::u16);
-
-class SplatArgs
-{
-public:
-    SplatArgs(const SplatArgs &) = delete;
-    SplatArgs &operator=(const SplatArgs &) = delete;
-    SplatArgs(SplatArgs &&) = default; // vector move keeps the heap block
-    SplatArgs &operator=(SplatArgs &&) = delete;
-
-    const Value *data() const { return ptr_; }
-    keel::usize size() const { return n_; }
-    bool empty() const { return n_ == 0; }
-    const Value &operator[](keel::usize i) const { return ptr_[i]; }
-
-private:
-    friend SplatArgs splatCallArgs(const Value *, keel::u16, keel::u16);
-
-    SplatArgs() = default;
-    keel::Array<Value> buf_; // filled only on the mixed-position path
-    const Value *ptr_ = nullptr;
-    keel::usize n_ = 0;
-};
-
-static SplatArgs splatCallArgs(const Value *R, keel::u16 base, keel::u16 n)
-{
-    SplatArgs r;
-    bool anyCsl = false;
-    for (keel::u16 i = 0; i < n; ++i)
-        if (R[base + i].isCsl()) {
-            anyCsl = true;
-            break;
-        }
-    if (!anyCsl) {
-        r.ptr_ = n ? &R[base] : nullptr;
-        r.n_ = n;
-        return r;
-    }
-    if (n == 1 && R[base].isCsl()) {
-        r.ptr_ = R[base].cellDataVec().data();
-        r.n_ = R[base].cslCount();
-        return r;
-    }
-    r.buf_.reserve(n);
-    for (keel::u16 i = 0; i < n; ++i) {
-        const Value &a = R[base + i];
-        if (a.isCsl())
-            for (keel::usize k = 0; k < a.cslCount(); ++k)
-                r.buf_.push_back(a.cslAt(k));
-        else
-            r.buf_.push_back(a);
-    }
-    r.ptr_ = r.buf_.empty() ? nullptr : r.buf_.data();
-    r.n_ = r.buf_.size();
-    return r;
-}
-
 // Output-reuse fast path for `dst = lhs op rhs` where both inputs and
 // the destination are real heap doubles of the same shape and dst has
 // unique ownership. Skips the N-element alloc + free that the public
@@ -188,21 +115,6 @@ static inline bool isArithScalar(const Value &v)
 static inline keel::f64 asScalar(const Value &v)
 {
     return v.fastScalarVal();
-}
-
-// Resolve one assignment subscript to 0-based indices for an object-array
-// slice store: ':' expands to the whole current dimension; everything else
-// (scalar / range / vector / logical) is grow-friendly (unchecked).
-static keel::Array<keel::usize> resolveStoreSubscript(const Value &s, keel::usize curDim)
-{
-    if (s.isChar() && s.numel() == 1 && s.charData()[0] == ':') {
-        keel::Array<keel::usize> out;
-        out.resize(curDim);
-        for (keel::usize i = 0; i < curDim; ++i)
-            out[i] = i;
-        return out;
-    }
-    return Value::resolveIndicesUnchecked(s);
 }
 
 static void writeChunkVar(const BytecodeChunk &chunk, Value *R, keel::u32 nregs,
@@ -1674,11 +1586,6 @@ enter_frame:
             }
             case OpCode::INDEX_SET: {
                 const Value &ix = R[I.b];
-                // Hot path: A(i) = scalar into a uniquely-owned heap double,
-                // scalar index in bounds -- the dominant `y(n) = …` write in
-                // scalar loops. Skips the object / append / ensureSize / elemSet
-                // chain and writeScalar's type-switch, writing the element
-                // directly. Out-of-bounds / shared / non-scalar fall through.
                 if (R[I.a].isHeapDouble() && R[I.a].heapRefCount() == 1
                     && ix.isDoubleScalar() && R[I.c].isDoubleScalar()) {
                     keel::usize i = checkedIndex(ix.scalarVal(), SIZE_MAX);
@@ -1687,195 +1594,14 @@ enter_frame:
                         break;
                     }
                 }
-                // Subscript-driven object assignment hook (e.g. f(x) = expr).
-                if (ix.isObject()) {
-                    Value out;
-                    if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(&ix, 1),
-                                                         R[I.c], currentCallEnv(), out)) {
-                        R[I.a] = keel::move(out);
-                        break;
-                    }
-                }
-                // OBJECT: obj(i) = v dispatches to the class subsasgn
-                // overload (args = [index, value]); mutates R[I.a] in place.
-                if (R[I.a].isObject()) {
-                    Value sargs[2] = {ix, R[I.c]}; // [index, value]
-                    // classdef subsasgn → same-stack VM frame (pausable, P4)
-                    if (tryObjectSubsasgnFrame(I.a, keel::ArrayRef<Value>(sargs, 2), frame, ip))
-                        goto enter_frame;
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
-                    if (cls && cls->subsasgn) {
-                        Value args[2] = {ix, R[I.c]};
-                        Value out[1];
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        cls->subsasgn(R[I.a], keel::ArrayRef<Value>(args, 2), 0,
-                                      keel::MutArrayRef<Value>(out, 1), ctx);
-                        break;
-                    }
-                    // else: builtin object-array element store below.
-                }
-                // Builtin object-array indexed store: arr(i) = obj. Fires
-                // when RHS is an object and the target is empty/unset (→ a
-                // OBJECT: arr(i) = obj — builtin element store + grow, when the
-                // target is unset/empty, a compatible object array, or promotable.
-                if (engine_.prepareObjectArrayStore(R[I.a], R[I.c])) {
-                    Value &dst = R[I.a];
-                    keel::Array<keel::usize> pos =
-                        resolveStoreSubscript(ix, dst.objectCount());
-                    engine_.objectStoreSlice(
-                        dst, keel::ArrayRef<keel::Array<keel::usize>>(&pos, 1),
-                        R[I.c], currentCallEnv());
-                    break;
-                }
-                if (R[I.a].isObject())
-                    throw std::runtime_error(
-                        keel::format("'()' assignment is not defined for class '{}'",
-                                     R[I.a].objectClassNameRef())
-                            .c_str());
-                if (ix.isDoubleScalar()) {
-                    // Fast path: scalar index
-                    keel::usize i = Value::checkedScalarIndex(ix.scalarVal());
-                    Value &dst = R[I.a];
-                    const Value &rhs = R[I.c];
-
-                    if (rhs.isStruct() && (dst.isUnset() || dst.isEmpty() || dst.isStruct())) {
-                        if (dst.isUnset() || dst.isEmpty())
-                            dst = Value::structArray(0, 0, engine_.mr_);
-                        dst.growStructArrayTo(i, engine_.mr_);
-                        for (const auto &name : rhs.fieldNamesInOrder())
-                            dst.setField(i, name, rhs.field(name));
-                        break;
-                    }
-
-                    // Amortised O(1) grow-by-one: `A(end+1) = scalar` or
-                    // `A(i) = scalar` where i == numel(A). Uses Value's
-                    // appendScalar, which keeps a geometric capacity so
-                    // the classic incremental-build loop runs in amortised
-                    // O(1) instead of O(N) per iteration. Applies to
-                    // empty / row-vector heap double targets with unique
-                    // ownership only — everything else falls through to
-                    // the generic ensureSize + elemSet path.
-                    if (rhs.isScalar() && !rhs.isComplex()
-                        && i == dst.numel()
-                        && dst.heapRefCount() == 1
-                        && (dst.isEmpty()
-                            || (dst.isHeapDouble() && dst.dims().rows() == 1))) {
-                        dst.appendScalar(rhs.toScalar(), engine_.mr_);
-                        break;
-                    }
-
-                    if (rhs.isScalar() && (dst.isEmpty() || dst.isScalar() || i >= dst.numel()))
-                        dst.ensureSize(i, engine_.mr_);
-                    dst.elemSet(i, rhs);
-                } else if (ix.isChar() && ix.numel() == 1 && ix.charData()[0] == ':') {
-                    // Colon linear-assign: z(:) = rhs writes across every
-                    // element of z without changing its shape. Four fast
-                    // paths cover the common MATLAB patterns; everything
-                    // else falls through to the generic indexSet.
-                    Value &dst = R[I.a];
-                    Value &rhs = R[I.c];   // mutable so the buffer-steal
-                                            // fast path can absorb rhs's
-                                            // heap when it's a unique temp
-                    const keel::usize n = dst.numel();
-                    const bool sameCount = (rhs.numel() == n);
-
-                    // Scalar broadcast into heap double: tight std::fill.
-                    if (rhs.isScalar() && !rhs.isComplex()
-                        && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()) {
-                        const keel::f64 v = rhs.toScalar();
-                        keel::f64 *d = dst.doubleDataMut();
-                        std::fill_n(d, n, v);
-                        break;
-                    }
-
-                    // Buffer-steal fast path. When rhs is a uniquely-owned
-                    // heap value matching dst's shape (typically a freshly
-                    // computed temp from `sin(x)`, `x + y`, etc.), swap
-                    // their data buffers in place — dst keeps its dims,
-                    // rhs gets the old buffer which is freed on its next
-                    // overwrite. Skips the O(N) memcpy that would otherwise
-                    // copy rhs into dst. Saves ~2 ms per call at N=1M.
-                    if (sameCount
-                        && dst.hasHeap() && rhs.hasHeap()
-                        && dst.heapRefCount() == 1 && rhs.heapRefCount() == 1
-                        && dst.type() == rhs.type()
-                        && (dst.type() == ValueType::DOUBLE
-                            || dst.type() == ValueType::COMPLEX)
-                        && dst.isComplex() == rhs.isComplex()) {
-                        dst.swapHeapBufferUnchecked(rhs);
-                        break;
-                    }
-
-                    // double → double, matching count: bulk memcpy.
-                    if (sameCount
-                        && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()
-                        && rhs.type() == ValueType::DOUBLE && !rhs.isComplex()) {
-                        std::memcpy(dst.doubleDataMut(),
-                                    rhs.doubleData(),
-                                    n * sizeof(keel::f64));
-                        break;
-                    }
-
-                    // complex → complex, matching count: bulk memcpy.
-                    if (sameCount && dst.isComplex() && rhs.isComplex()) {
-                        std::memcpy(dst.complexDataMut(),
-                                    rhs.complexData(),
-                                    n * sizeof(keel::c64));
-                        break;
-                    }
-
-                    // Generic fallback — handles type promotion
-                    // (double→complex), complex→double, logical/char,
-                    // and raises the size-mismatch error for bad rhs.
-                    auto indices = Value::resolveIndices(ix, n);
-                    dst.indexSet(indices.data(), indices.size(), rhs);
-                } else {
-                    // Vector or logical index
-                    auto indices = Value::resolveIndicesUnchecked(ix);
-                    if (!indices.empty()
-                        && (R[I.c].isScalar() || R[I.c].numel() == indices.size())) {
-                        // Auto-grow if needed
-                        keel::usize maxIdx = 0;
-                        for (keel::usize idx : indices) maxIdx = std::max(maxIdx, idx);
-                        if (R[I.a].isEmpty() || maxIdx >= R[I.a].numel())
-                            R[I.a].ensureSize(maxIdx, engine_.mr_);
-                    }
-                    R[I.a].indexSet(indices.data(), indices.size(), R[I.c]);
-                }
+                if (execIndexSet1DSlow(I, R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             case OpCode::INDEX_SET_2D: {
                 const Value &ri = R[I.b];
                 const Value &ci = R[I.c];
                 const Value &val = R[I.e];
-
-                // Subscript-driven object assignment hook (e.g. g(x, y) = expr).
-                if (ri.isObject() || ci.isObject()) {
-                    Value idxArgs[2] = {ri, ci};
-                    Value out;
-                    if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(idxArgs, 2),
-                                                         val, currentCallEnv(), out)) {
-                        R[I.a] = keel::move(out);
-                        break;
-                    }
-                }
-                // OBJECT: arr(i,j) = obj — builtin 2-D element store + grow.
-                if (engine_.prepareObjectArrayStore(R[I.a], val)) {
-                    Value &dst = R[I.a];
-                    const keel::usize rDim = (dst.isObject() && dst.objectCount() > 0)
-                                            ? dst.dims().rows() : val.dims().rows();
-                    const keel::usize cDim = (dst.isObject() && dst.objectCount() > 0)
-                                            ? dst.dims().cols() : val.numel();
-                    keel::Array<keel::usize> perDim[2] = {
-                        resolveStoreSubscript(ri, rDim),
-                        resolveStoreSubscript(ci, cDim)};
-                    engine_.objectStoreSlice(
-                        dst, keel::ArrayRef<keel::Array<keel::usize>>(perDim, 2),
-                        val, currentCallEnv());
-                    break;
-                }
-
-                // ── Scalar fast path: Z(i,j) = scalar ──
                 if (ri.isDoubleScalar() && ci.isDoubleScalar()
                     && val.isDoubleScalar() && R[I.a].isHeapDouble()
                     && R[I.a].heapDims().ndim() <= 2) {
@@ -1883,59 +1609,17 @@ enter_frame:
                     keel::usize c = Value::checkedScalarIndex(ci.scalarVal());
                     const auto &d = R[I.a].heapDims();
                     if (r < d.rows() && c < d.cols()) {
-                        // In-bounds: direct write, skip detach overhead
                         R[I.a].doubleDataMutFast()[d.sub2ind(r, c)] = val.scalarVal();
                         break;
                     }
-                    // Out-of-bounds: grow then write
                     keel::usize newR = std::max(d.rows(), r + 1);
                     keel::usize newC = std::max(d.cols(), c + 1);
                     R[I.a].resize(newR, newC, engine_.mr_);
                     R[I.a].doubleDataMutFast()[R[I.a].heapDims().sub2ind(r, c)] = val.scalarVal();
                     break;
                 }
-
-                auto rowIds = ResolvedSubscript::resolveUnchecked(ri);
-                auto colIds = ResolvedSubscript::resolveUnchecked(ci);
-                bool riIsColon = rowIds.isColon;
-                bool ciIsColon = colIds.isColon;
-
-                const keel::usize curRows = R[I.a].dims().rows();
-                const keel::usize curColDim = R[I.a].dims().ndim() > 2
-                    ? (curRows > 0 ? R[I.a].dims().numel() / curRows : R[I.a].dims().cols())
-                    : R[I.a].dims().cols();
-
-                // Grow if needed
-                keel::usize maxR = rowIds.maxPlusOne(curRows);
-                keel::usize maxC = colIds.maxPlusOne(curColDim);
-                if (R[I.a].isEmpty()) {
-                    if (riIsColon && ciIsColon) {
-                        maxR = val.dims().rows();
-                        maxC = val.dims().cols();
-                    } else if (riIsColon) {
-                        maxR = (colIds.count == 1) ? val.numel() : val.dims().rows();
-                    } else if (ciIsColon) {
-                        maxC = (rowIds.count == 1) ? val.numel() : val.dims().cols();
-                    }
-                }
-                if (maxR > curRows || maxC > curColDim) {
-                    const keel::usize propR = std::max(curRows, maxR);
-                    const keel::usize propC = std::max(curColDim, maxC);
-                    const keel::usize targetCnt =
-                        (riIsColon ? propR : rowIds.count) * (ciIsColon ? propC : colIds.count);
-                    if (val.isScalar() || val.numel() == targetCnt)
-                        R[I.a].resize(maxR, maxC, engine_.mr_);
-                }
-
-                const keel::usize finalRows = R[I.a].dims().rows();
-                const keel::usize finalColDim = R[I.a].dims().ndim() > 2
-                    ? (finalRows > 0 ? R[I.a].dims().numel() / finalRows : R[I.a].dims().cols())
-                    : R[I.a].dims().cols();
-
-                R[I.a].indexSet2D(rowIds.data(),
-                                  riIsColon ? finalRows : rowIds.count,
-                                  colIds.data(),
-                                  ciIsColon ? finalColDim : colIds.count, val);
+                if (execIndexSet2DSlow(I, R, frame, ip))
+                    goto enter_frame;
                 break;
             }
 
@@ -1988,142 +1672,8 @@ enter_frame:
                 break;
             }
             case OpCode::INDEX_SET_ND: {
-                // a=arr/cell, b=base, c=ndims, e=val
-                keel::u16 base = I.b, ndims = I.c;
-                // Subscript-driven object assignment hook (e.g. g(x, y, z, ...) = expr).
-                {
-                    bool anyObj = false;
-                    for (keel::u16 i = 0; i < ndims; ++i) {
-                        if (R[base + i].isObject()) {
-                            anyObj = true;
-                            break;
-                        }
-                    }
-                    if (anyObj) {
-                        Value out;
-                        if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(&R[base], ndims),
-                                                             R[I.e], currentCallEnv(), out)) {
-                            R[I.a] = keel::move(out);
-                            break;
-                        }
-                    }
-                }
-                // OBJECT: arr(i,j,k,…) = obj — builtin N-D element store + grow.
-                if (engine_.prepareObjectArrayStore(R[I.a], R[I.e])) {
-                    Value &dst = R[I.a];
-                    const Value &val = R[I.e];
-                    keel::Array<keel::Array<keel::usize>> perDim;
-                    perDim.resize(ndims);
-                    for (keel::u16 i = 0; i < ndims; ++i) {
-                        keel::usize curDim =
-                            dst.isObject()
-                                ? (i < dst.dims().ndim() ? dst.dims().dim(i) : 1)
-                                : 0;
-                        perDim[i] = resolveStoreSubscript(R[base + i], curDim);
-                    }
-                    engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
-                    break;
-                }
-                if (ndims == 3) {
-                    auto rowIds = ResolvedSubscript::resolveUnchecked(R[base]);
-                    auto colIds = ResolvedSubscript::resolveUnchecked(R[base + 1]);
-                    auto pageIds = ResolvedSubscript::resolveUnchecked(R[base + 2]);
-                    bool riColon = rowIds.isColon;
-                    bool ciColon = colIds.isColon;
-                    bool piColon = pageIds.isColon;
-
-                    // Grow if needed
-                    const Value &val = R[I.e];
-                    keel::usize maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
-                    keel::usize maxC = colIds.maxPlusOne(R[I.a].dims().cols());
-                    keel::usize maxP = pageIds.maxPlusOne(R[I.a].dims().pages());
-                    if (R[I.a].isEmpty() && (!val.isScalar() || (R[I.a].dims().rows() == 0 && R[I.a].dims().cols() == 0 && !val.isEmpty()))) {
-                        const keel::i32 nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
-                        const keel::usize nonColonProd = (riColon ? 1 : rowIds.count)
-                                                  * (ciColon ? 1 : colIds.count)
-                                                  * (piColon ? 1 : pageIds.count);
-                        if (nColons == 1 && nonColonProd == 1 && val.dims().isVector()) {
-                            if (riColon) maxR = val.numel();
-                            else if (ciColon) maxC = val.numel();
-                            else if (piColon) maxP = val.numel();
-                        } else if (riColon && ciColon && piColon) {
-                            maxR = val.dims().rows();
-                            maxC = val.dims().cols();
-                            maxP = val.dims().pages();
-                        } else if (nColons > 0) {
-                            keel::usize rCursor = 0;
-                            keel::i32 colonsLeft = nColons;
-                            auto nextRhsDim = [&]() -> keel::usize {
-                                while (rCursor < keel::as<keel::usize>(val.dims().ndim())
-                                       && val.dims().dim(keel::as<keel::i32>(rCursor)) == 1
-                                       && (keel::as<keel::usize>(val.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
-                                    ++rCursor;
-                                }
-                                --colonsLeft;
-                                return (rCursor < keel::as<keel::usize>(val.dims().ndim()))
-                                           ? val.dims().dim(keel::as<keel::i32>(rCursor++))
-                                           : 1;
-                            };
-                            if (riColon) maxR = nextRhsDim();
-                            if (ciColon) maxC = nextRhsDim();
-                            if (piColon) maxP = nextRhsDim();
-                        }
-                    }
-                    if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols()
-                        || maxP > R[I.a].dims().pages())
-                        R[I.a].resize3d(maxR, maxC, maxP, engine_.mr_);
-
-                    R[I.a].indexSet3D(rowIds.data(),
-                                      riColon ? R[I.a].dims().rows() : rowIds.count,
-                                      colIds.data(),
-                                      ciColon ? R[I.a].dims().cols() : colIds.count,
-                                      pageIds.data(),
-                                      piColon ? R[I.a].dims().pages() : pageIds.count,
-                                      val);
-                } else {
-                    // ND write (≥4): grow the target *first* so the
-                    // subsequent resolveIndices bounds checks succeed.
-                    const keel::i32 nd = keel::as<keel::i32>(ndims);
-                    const keel::i32 curNd = R[I.a].dims().ndim();
-                    const keel::i32 newNd = std::max(nd, curNd);
-                    keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
-                    for (keel::i32 i = 0; i < newNd; ++i)
-                        need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
-                    auto isColon = [](const Value &v) {
-                        return v.isChar() && v.numel() == 1 && v.charData()[0] == ':';
-                    };
-                    for (keel::i32 i = 0; i < nd; ++i) {
-                        const Value &iv = R[base + i];
-                        if (isColon(iv) || iv.isLogical()) continue;
-                        if (iv.isDoubleScalar()) {
-                            keel::usize v = keel::as<keel::usize>(iv.toScalar());
-                            if (v > need[i]) need[i] = v;
-                        } else if (iv.type() == ValueType::DOUBLE) {
-                            const keel::f64 *d = iv.doubleData();
-                            for (keel::usize k = 0; k < iv.numel(); ++k) {
-                                keel::usize v = keel::as<keel::usize>(d[k]);
-                                if (v > need[i]) need[i] = v;
-                            }
-                        }
-                    }
-                    bool grow = (newNd > curNd);
-                    for (keel::i32 i = 0; i < curNd && !grow; ++i)
-                        if (need[i] > R[I.a].dims().dim(i)) grow = true;
-                    if (grow)
-                        R[I.a].resizeND(need.data(), newNd, engine_.mr_);
-
-                    const keel::usize ndu = keel::as<keel::usize>(nd);
-                    keel::Array<keel::Array<keel::usize>> idxLists(ndu);
-                    keel::Array<const keel::usize *> idxPtrs(ndu);
-                    keel::Array<keel::usize> idxCounts(ndu);
-                    for (keel::i32 i = 0; i < nd; ++i) {
-                        const keel::usize lim = (i < R[I.a].dims().ndim()) ? R[I.a].dims().dim(i) : 1;
-                        idxLists[i] = Value::resolveIndices(R[base + i], lim);
-                        idxPtrs[i] = idxLists[i].data();
-                        idxCounts[i] = idxLists[i].size();
-                    }
-                    R[I.a].indexSetND(idxPtrs.data(), idxCounts.data(), nd, R[I.e]);
-                }
+                if (execIndexSetND(I, R, frame, ip))
+                    goto enter_frame;
                 break;
             }
 
@@ -2166,166 +1716,17 @@ enter_frame:
 
             // ── Struct field access ──────────────────────────────
             case OpCode::FIELD_GET: {
-                // a=dst, b=obj, d=nameIdx — strict: throws if field missing
-                const keel::String &fname = chunk.strings[I.d];
-                // OBJECT: obj.Prop via class property hook (object model).
-                if (R[I.b].isObject()) {
-                    const keel::StringRef cn = R[I.b].objectClassNameRef();
-                    const BuiltinClass *cls = engine_.findClass(cn);
-                    if (cls) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        // classdef `get.Prop` accessor → run its body as a
-                        // same-stack VM frame (debuggable, no save/restore),
-                        // enforcing the property's GetAccess first. P4,
-                        // vm_callbacks_plan.md. Getters return exactly one value
-                        // so destReg = I.a is always the right write-back.
-                        if (const UserFunction *g = engine_.classGetter(cn, fname)) {
-                            if (const BytecodeChunk *gc = engine_.ensureClassMethodChunk(*g)) {
-                                engine_.enforcePropGetAccess(cn, fname);
-                                Value selfBuf = R[I.b];
-                                frame.ip = ip + 1;
-                                pushCallFrame(*gc, &selfBuf, 1, I.a, 1, false, 0, 0, cn,
-                                              /*isCtor=*/false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (cls->propGet) {
-                            Value out;
-                            if (cls->propGet(R[I.b], fname, out, ctx)) {
-                                R[I.a] = keel::move(out);
-                                break;
-                            }
-                        }
-                        // Bare obj.method (no parens) → no-arg method call.
-                        if (const auto *mfn = cls->methods.get(fname)) {
-                            Value self = R[I.b];
-                            Value out[1];
-                            (*mfn)(self, keel::ArrayRef<Value>(nullptr, 0), 1,
-                                   keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = keel::move(out[0]);
-                            break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassNameRef())
-                            .c_str());
-                }
-                if (!R[I.b].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
-                    keel::usize n = R[I.b].numel();
-                    if (n == 0 && !R[I.b].hasField(fname))
-                        throw std::runtime_error(
-                            keel::format("Reference to non-existent field '{}'", fname).c_str());
-                    Value csl = Value::csl(n, engine_.mr_);
-                    for (keel::usize i = 0; i < n; ++i) {
-                        const auto &m = R[I.b].structArrayElem(i);
-                        const Value *vp = m.get(fname);
-                        if (!vp)
-                            throw std::runtime_error(
-                                keel::format("Reference to non-existent field '{}'", fname).c_str());
-                        csl.cslAt(i) = *vp;
-                    }
-                    R[I.a] = keel::move(csl);
-                    break;
-                }
-                if (!R[I.b].hasField(fname)) {
-                    throw std::runtime_error(
-                        keel::format("Reference to non-existent field '{}'", fname).c_str());
-                }
-                R[I.a] = R[I.b].field(fname);
+                if (execFieldGet(I.a, I.b, chunk.strings[I.d], R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             case OpCode::FIELD_GET_OR_CREATE: {
-                // a=dst, b=obj, d=nameIdx — lvalue: auto-creates struct and field
-                const keel::String &fname = chunk.strings[I.d];
-                // OBJECT: read the property (propGet) so a compound lvalue
-                // `obj.prop(i) = v` can modify the value and FIELD_SET it back
-                // (read-modify-write — objects have no addressable slot).
-                if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
-                    if (cls && cls->propGet) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        Value out;
-                        if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = keel::move(out);
-                            break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassNameRef())
-                            .c_str());
-                }
-                if (R[I.b].isEmpty())
-                    R[I.b] = Value::structure();
-                if (!R[I.b].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                R[I.a] = R[I.b].field(fname); // field() auto-creates if missing
+                execFieldGetOrCreate(I.a, I.b, chunk.strings[I.d], R);
                 break;
             }
             case OpCode::FIELD_SET: {
-                // a=obj, b=val, d=nameIdx
-                const keel::String &fname = chunk.strings[I.d];
-                // OBJECT: obj.Prop = val via class property hook (object model).
-                if (R[I.a].isObject()) {
-                    const keel::StringRef cn = R[I.a].objectClassNameRef();
-                    const BuiltinClass *cls = engine_.findClass(cn);
-                    if (cls) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        // classdef `set.Prop` accessor → run its body on the VM
-                        // (P4). A value/handle setter that returns the object
-                        // (`function obj = set.Prop(obj,val)`) runs as a
-                        // same-stack frame (pausable, fast) with the modified
-                        // object written back into the object register. A
-                        // no-output handle setter (`function set.Prop(obj,val)`)
-                        // mutates shared state in place; run it re-entrantly so
-                        // the object register is not clobbered by an empty RET.
-                        if (const UserFunction *s = engine_.classSetter(cn, fname)) {
-                            if (const BytecodeChunk *sc = engine_.ensureClassMethodChunk(*s)) {
-                                engine_.enforcePropSetAccess(cn, fname);
-                                Value argbuf[2] = {R[I.a], R[I.b]};
-                                if (!s->returns.empty()) {
-                                    frame.ip = ip + 1;
-                                    pushCallFrame(*sc, argbuf, 2, I.a, 1, false, 0, 0, cn,
-                                                  /*isCtor=*/false);
-                                    goto enter_frame;
-                                }
-                                callReentrant(*sc, keel::ArrayRef<Value>(argbuf, 2), 1, cn,
-                                              /*isCtor=*/false);
-                                break; // handle mutated via shared state
-                            }
-                        }
-                        if (cls->propSet) {
-                            if (cls->propSet(R[I.a], fname, R[I.b], ctx))
-                                break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        keel::format("Cannot set property '{}' on class '{}'",
-                                     fname, R[I.a].objectClassNameRef())
-                            .c_str());
-                }
-                if (R[I.a].isEmpty()) {
-                    R[I.a] = Value::structure();
-                }
-                if (!R[I.a].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                // Broadcast: `s.f = val` for a multi-element struct
-                // array sets f on every element (MATLAB semantics).
-                if (R[I.a].isStructArray()) {
-                    R[I.a].setFieldAll(fname, R[I.b]);  // BUG #15
-                } else if (!lvalDetaches_.empty()
-                           && lvalDetaches_.back().kind == LvalDetach::Kind::Field
-                           && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
-                           && lvalDetaches_.back().valRegAbs == frame.regBase + I.b
-                           && lvalDetaches_.back().fieldName == fname) {
-                    lvalDetaches_.pop_back();
-                    R[I.a].field(fname) = keel::move(R[I.b]);
-                } else {
-                    R[I.a].field(fname) = R[I.b];        // tracks via field()
-                }
+                if (execFieldSet(I.a, I.b, chunk.strings[I.d], R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             case OpCode::STRUCT_ELEM_FIELD_SET: {
@@ -2389,102 +1790,17 @@ enter_frame:
                 break;
             }
             case OpCode::FIELD_GET_DYN: {
-                // a=dst, b=obj, c=nameReg — s.(R[nameReg])
-                const keel::StringRef fname = R[I.c].asStringRef();
-                if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
-                    if (cls && cls->propGet) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        Value out;
-                        if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = keel::move(out);
-                            break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassNameRef())
-                            .c_str());
-                }
-                if (!R[I.b].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                if (R[I.b].isStructArray() || R[I.b].numel() == 0) {
-                    keel::usize n = R[I.b].numel();
-                    if (n == 0 && !R[I.b].hasField(fname))
-                        throw std::runtime_error(
-                            keel::format("Reference to non-existent field '{}'", fname).c_str());
-                    Value csl = Value::csl(n, engine_.mr_);
-                    for (keel::usize i = 0; i < n; ++i) {
-                        const auto &m = R[I.b].structArrayElem(i);
-                        const Value *vp = m.get(fname);
-                        if (!vp)
-                            throw std::runtime_error(
-                                keel::format("Reference to non-existent field '{}'", fname).c_str());
-                        csl.cslAt(i) = *vp;
-                    }
-                    R[I.a] = keel::move(csl);
-                    break;
-                }
-                if (!R[I.b].hasField(fname))
-                    throw std::runtime_error(
-                        keel::format("Reference to non-existent field '{}'", fname).c_str());
-                R[I.a] = R[I.b].field(fname);
+                if (execFieldGet(I.a, I.b, R[I.c].asStringRef(), R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             case OpCode::FIELD_GET_OR_CREATE_DYN: {
-                // a=dst, b=obj (in/out), c=nameReg — lvalue dynamic field
-                const keel::StringRef fname = R[I.c].asStringRef();
-                if (R[I.b].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.b].objectClassNameRef());
-                    if (cls && cls->propGet) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        Value out;
-                        if (cls->propGet(R[I.b], fname, out, ctx)) {
-                            R[I.a] = keel::move(out);
-                            break;
-                        }
-                    }
-                    throw std::runtime_error(
-                        keel::format("No appropriate property '{}' for class '{}'",
-                                     fname, R[I.b].objectClassNameRef())
-                            .c_str());
-                }
-                if (R[I.b].isEmpty())
-                    R[I.b] = Value::structure();
-                if (!R[I.b].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                R[I.a] = R[I.b].field(fname);  // field() auto-creates if missing
+                execFieldGetOrCreate(I.a, I.b, R[I.c].asStringRef(), R);
                 break;
             }
             case OpCode::FIELD_SET_DYN: {
-                // a=obj, b=nameReg, c=val — s.(R[nameReg]) = R[val]
-                const keel::StringRef fname = R[I.b].asStringRef();
-                if (R[I.a].isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(R[I.a].objectClassNameRef());
-                    if (cls && cls->propSet) {
-                        CallContext ctx{&engine_, currentCallEnv()};
-                        if (cls->propSet(R[I.a], fname, R[I.c], ctx))
-                            break;
-                    }
-                    throw std::runtime_error(
-                        keel::format("Cannot set property '{}' on class '{}'",
-                                     fname, R[I.a].objectClassNameRef())
-                            .c_str());
-                }
-                if (R[I.a].isEmpty())
-                    R[I.a] = Value::structure();
-                if (!R[I.a].isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
-                if (!lvalDetaches_.empty()
-                    && lvalDetaches_.back().kind == LvalDetach::Kind::Field
-                    && lvalDetaches_.back().containerRegAbs == frame.regBase + I.a
-                    && lvalDetaches_.back().valRegAbs == frame.regBase + I.c
-                    && lvalDetaches_.back().fieldName == fname) {
-                    lvalDetaches_.pop_back();
-                    R[I.a].field(fname) = keel::move(R[I.c]);
-                } else {
-                    R[I.a].field(fname) = R[I.c];
-                }
+                if (execFieldSet(I.a, I.c, R[I.b].asStringRef(), R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             case OpCode::LVAL_UNSHARE_FIELD: {
@@ -2962,129 +2278,13 @@ enter_frame:
 
             // ── Indirect function call (func handle) or array indexing ─
             case OpCode::CALL_METHOD: {
-                // a=dst, b=objReg, c=argBase, d=nameIdx, e=nargs.
-                // obj.name(args): dispatch a class method, else fall back
-                // to field-value + CALL_INDIRECT (func handle / index).
-                const keel::String &mname = chunk.strings[I.d];
-                const Value &obj = R[I.b];
-                // obj.fh(c{:}) / obj.method(c{:}): flatten any CSL arg ONCE
-                // at the top so every dispatch below sees the splatted
-                // runtime list (bugs/closed/lang/handle-call-csl-splat).
-                SplatArgs splat = splatCallArgs(R, I.c, I.e);
-                const Value *argPtr = splat.data();
-                keel::usize argN = splat.size();
-                if (obj.isObject()) {
-                    const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
-                    // classdef method → native VM frame (debuggable). Receiver
-                    // and args aren't contiguous, so build [self, args…].
-                    if (cls) {
-                        if (const auto *mfp = cls->methodFns.get(mname)) {
-                            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                            if (mc) {
-                                engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
-                                keel::Array<Value> frameArgs;
-                                frameArgs.reserve(argN + 1);
-                                frameArgs.push_back(obj);
-                                for (keel::usize k = 0; k < argN; ++k)
-                                    frameArgs.push_back(argPtr[k]);
-                                frame.ip = ip + 1;
-                                pushCallFrame(*mc, frameArgs.data(),
-                                              frameArgs.size(), I.a, 1, false,
-                                              0, 0, (*mfp)->ownerClass, false);
-                                goto enter_frame;
-                            }
-                        }
-                        if (const auto *mfn = cls->methods.get(mname)) {
-                            Value self = obj; // handle: shares state; value: own copy
-                            keel::ArrayRef<Value> args(argPtr, argN);
-                            Value out[1];
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*mfn)(self, args, 1, keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = keel::move(out[0]);
-                            break;
-                        }
-                    }
-                    // Not a method → property read, then index the result.
-                    Value out;
-                    CallContext ctx{&engine_, currentCallEnv()};
-                    if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
-                        throw std::runtime_error(
-                            keel::format("No appropriate property '{}' for class '{}'",
-                                         mname, obj.objectClassNameRef())
-                                .c_str());
-                    if (execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip))
-                        goto enter_frame;
-                } else {
-                    // Struct field holding a func handle, or a value to index
-                    // (`s.fh(args)`, `s.arr(idx)`).
-                    if (!obj.isStruct())
-                        throw std::runtime_error("Dot indexing requires a struct");
-                    if (!obj.hasField(mname))
-                        throw std::runtime_error(
-                            keel::format("Reference to non-existent field '{}'", mname).c_str());
-                    Value fv = obj.field(mname);
-                    if (execCallIndirectSpan(fv, I.a, argPtr, argN, R, frame, ip))
-                        goto enter_frame;
-                }
+                if (execCallMethod(I, R, frame, ip))
+                    goto enter_frame;
                 break;
             }
-            // ── Dotted multi-output method: [a,b] = obj.m(args) ──
             case OpCode::CALL_METHOD_MULTI: {
-                // a=outBase, b=objReg, c=argBase, d=nameIdx,
-                // e=(nargs<<8)|nout (each byte <= 255).
-                keel::u16 outBase = I.a, objReg = I.b, argBase = I.c;
-                keel::u16 na = keel::as<keel::u16>((I.e >> 8) & 0xFF);
-                keel::u16 nout = keel::as<keel::u16>(I.e & 0xFF);
-                const keel::String &mname = chunk.strings[I.d];
-                Value &obj = R[objReg];
-                if (!obj.isObject())
-                    throw std::runtime_error(
-                        keel::format("Dot-indexing multi-output requires an object; '{}' is not a method of a {}",
-                                     mname, mtypeName(obj.type()))
-                            .c_str());
-                // Splat any runtime CSL arg so [a,b] = o.mm(c{:}) sees the
-                // expanded list, exactly like the single-output CALL_METHOD
-                // (bugs/closed/core/call-method-multi-no-csl-splat).
-                SplatArgs splat = splatCallArgs(R, argBase, na);
-                const Value *argPtr = splat.data();
-                keel::usize argN = splat.size();
-                const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
-                // classdef method → native multi-output VM frame.
-                if (cls) {
-                    if (const auto *mfp = cls->methodFns.get(mname)) {
-                        const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
-                        if (mc) {
-                            engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
-                            keel::Array<Value> frameArgs;
-                            frameArgs.reserve(argN + 1);
-                            frameArgs.push_back(obj);
-                            for (keel::usize k = 0; k < argN; ++k)
-                                frameArgs.push_back(argPtr[k]);
-                            frame.ip = ip + 1;
-                            returnBuf_.clear();
-                            pushCallFrame(*mc, frameArgs.data(),
-                                          frameArgs.size(), 0, nout, true,
-                                          outBase, nout, (*mfp)->ownerClass, false);
-                            goto enter_frame;
-                        }
-                    }
-                }
-                const ObjectMethod *mfn = cls ? cls->methods.get(mname) : nullptr;
-                if (!mfn)
-                    throw std::runtime_error(
-                        keel::format("No appropriate method '{}' for class '{}'",
-                                     mname, obj.objectClassNameRef())
-                            .c_str());
-                Value self = obj; // handle: shares state; value: own copy
-                keel::ArrayRef<Value> args(argPtr, argN);
-                keel::Array<Value> outBuf(nout);
-                CallContext ctx{&engine_, currentCallEnv()};
-                (*mfn)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
-                for (keel::u16 i = 0; i < nout; ++i)
-                    if (outBuf[i].isUnset())
-                        throw std::runtime_error("Too many output arguments.");
-                for (keel::usize i = 0; i < nout; ++i)
-                    R[outBase + i] = keel::move(outBuf[i]);
+                if (execCallMethodMulti(I, R, frame, ip))
+                    goto enter_frame;
                 break;
             }
             // ── Superclass calls inside a classdef body ──

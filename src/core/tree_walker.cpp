@@ -616,11 +616,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 args.push_back(execNode(lhs->children[i + 1].get(), env));
             }
             args.push_back(rhs);
-            Value outBuf[1];
-            CallContext ctx{&engine_, env};
-            cls->subsasgn(*var, keel::ArrayRef<Value>(args.data(), args.size()), 0,
-                          keel::MutArrayRef<Value>(outBuf, 1), ctx);
-            return;
+            if (engine_.tryObjectSubsasgn(*var, args.as_ref(), env))
+                return;
         }
         // No custom subsasgn → fall through to the builtin object-array
         // element store below (arr(i) = obj).

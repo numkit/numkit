@@ -338,6 +338,22 @@ private:
                                   CallFrame &frame, const Instruction *ip);
     bool tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVal,
                                 CallFrame &frame, const Instruction *ip);
+    bool execIndexSet1DSlow(const Instruction &I, Value *R,
+                            CallFrame &frame, const Instruction *ip);
+    bool execIndexSet2DSlow(const Instruction &I, Value *R,
+                            CallFrame &frame, const Instruction *ip);
+    bool execIndexSetND(const Instruction &I, Value *R,
+                        CallFrame &frame, const Instruction *ip);
+    bool execFieldGet(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
+                      Value *R, CallFrame &frame, const Instruction *ip);
+    void execFieldGetOrCreate(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
+                              Value *R);
+    bool execFieldSet(keel::u16 objReg, keel::u16 valReg, keel::StringRef fname,
+                      Value *R, CallFrame &frame, const Instruction *ip);
+    bool execCallMethod(const Instruction &I, Value *R,
+                        CallFrame &frame, const Instruction *ip);
+    bool execCallMethodMulti(const Instruction &I, Value *R,
+                             CallFrame &frame, const Instruction *ip);
     void execCallBuiltin(const Instruction &I, Value *R);
     const Value *findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
                                  const Value *R, const keel::String &name) const;

@@ -441,6 +441,33 @@ const PluginLoader &Engine::pluginLoader() const
     return *pluginLoader_;
 }
 
+void Engine::registerVarDeclCommand(keel::StringRef cmdName, PluginContext::VarDeclExtractor fn)
+{
+    varDeclCommands_.put(keel::String::from(cmdName), keel::move(fn));
+}
+
+bool Engine::isVarDeclCommand(keel::StringRef cmdName) const
+{
+    if (varDeclCommands_.contains(cmdName))
+        return true;
+    return const_cast<Engine *>(this)->pluginLoader().isVarDeclCommand(cmdName);
+}
+
+void Engine::extractVarDeclCommandNames(keel::StringRef cmdName,
+                                        keel::ArrayRef<keel::StringRef> args,
+                                        keel::Array<keel::String> &outNames) const
+{
+    const auto *fn = varDeclCommands_.get(cmdName);
+    if (!fn) {
+        auto &loader = const_cast<Engine *>(this)->pluginLoader();
+        if (loader.isVarDeclCommand(cmdName))
+            (void)loader.tryAutoLoadForFunction(cmdName);
+        fn = varDeclCommands_.get(cmdName);
+    }
+    if (fn && *fn)
+        (*fn)(args, outNames);
+}
+
 void Engine::setVariable(keel::StringRef name, Value val)
 {
     workspaceEnv_->set(name, keel::move(val));

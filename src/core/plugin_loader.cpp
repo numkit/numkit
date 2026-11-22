@@ -162,13 +162,19 @@ public:
         engine_.assignToCaller(n, name, keel::move(val));
     }
 
+    void registerVarDeclCommand(keel::StringRef cmdName, VarDeclExtractor fn) override {
+        engine_.registerVarDeclCommand(cmdName, keel::move(fn));
+    }
+
 private:
     Engine &engine_;
     keel::String prefixNs_;
     keel::String defaultNs_;
 };
 
-static bool parseManifest(keel::StringRef content, keel::String &libName, keel::Array<keel::String> &funcs) {
+static bool parseManifest(keel::StringRef content, keel::String &libName,
+                          keel::Array<keel::String> &funcs,
+                          keel::Array<keel::String> &varDeclCmds) {
     auto extractStringField = [&](keel::StringRef key) -> keel::String {
         keel::usize pos = content.find(key);
         if (pos == keel::kInvalidIndex) return {};
@@ -180,6 +186,23 @@ static bool parseManifest(keel::StringRef content, keel::String &libName, keel::
         if (q2 == keel::kInvalidIndex) return {};
         return keel::String::from(content.substr(q1 + 1, q2 - q1 - 1));
     };
+    auto extractStringArray = [&](keel::StringRef key, keel::Array<keel::String> &out) {
+        keel::usize pos = content.find(key);
+        if (pos == keel::kInvalidIndex) return false;
+        keel::usize bOpen = content.find('[', pos);
+        keel::usize bClose = (bOpen != keel::kInvalidIndex) ? content.find(']', bOpen) : keel::kInvalidIndex;
+        if (bOpen == keel::kInvalidIndex || bClose == keel::kInvalidIndex) return false;
+        keel::usize cur = bOpen + 1;
+        while (cur < bClose) {
+            keel::usize q1 = content.find('"', cur);
+            if (q1 == keel::kInvalidIndex || q1 >= bClose) break;
+            keel::usize q2 = content.find('"', q1 + 1);
+            if (q2 == keel::kInvalidIndex || q2 >= bClose) break;
+            out.push_back(keel::String::from(content.substr(q1 + 1, q2 - q1 - 1)));
+            cur = q2 + 1;
+        }
+        return true;
+    };
 
     libName = extractStringField("\"library\"");
     if (libName.empty()) {
@@ -189,25 +212,10 @@ static bool parseManifest(keel::StringRef content, keel::String &libName, keel::
         }
     }
 
-    keel::usize fnPos = content.find("\"functions\"");
-    if (fnPos == keel::kInvalidIndex) {
-        fnPos = content.find("\"exports\"");
+    if (!extractStringArray("\"functions\"", funcs)) {
+        extractStringArray("\"exports\"", funcs);
     }
-    if (fnPos != keel::kInvalidIndex) {
-        keel::usize bOpen = content.find('[', fnPos);
-        keel::usize bClose = (bOpen != keel::kInvalidIndex) ? content.find(']', bOpen) : keel::kInvalidIndex;
-        if (bOpen != keel::kInvalidIndex && bClose != keel::kInvalidIndex) {
-            keel::usize cur = bOpen + 1;
-            while (cur < bClose) {
-                keel::usize q1 = content.find('"', cur);
-                if (q1 == keel::kInvalidIndex || q1 >= bClose) break;
-                keel::usize q2 = content.find('"', q1 + 1);
-                if (q2 == keel::kInvalidIndex || q2 >= bClose) break;
-                funcs.push_back(keel::String::from(content.substr(q1 + 1, q2 - q1 - 1)));
-                cur = q2 + 1;
-            }
-        }
-    }
+    extractStringArray("\"varDeclCommands\"", varDeclCmds);
     return !libName.empty();
 }
 
@@ -413,11 +421,15 @@ void PluginLoader::scanManifests_()
             if (!textRes.is_ok()) return;
             keel::String libName;
             keel::Array<keel::String> funcs;
-            if (parseManifest(textRes->as_ref(), libName, funcs)) {
+            keel::Array<keel::String> varDeclCmds;
+            if (parseManifest(textRes->as_ref(), libName, funcs, varDeclCmds)) {
                 if (!sharedLibExistsInDir(dir, libName)) return;
                 keel::String libPath = keel::path_join(dir, libName);
                 for (const auto &fn : funcs) {
                     manifestIndex_.put(fn.clone(), libPath.clone());
+                }
+                for (const auto &cmd : varDeclCmds) {
+                    varDeclCommands_.insert(cmd.clone());
                 }
                 keel::StringRef pkgName = libName.as_ref();
                 if (pkgName.starts_with("numkit_")) {
@@ -516,6 +528,12 @@ keel::String PluginLoader::findPackageLibrary(keel::StringRef pkgNameInput)
         return libPath->clone();
     }
     return {};
+}
+
+bool PluginLoader::isVarDeclCommand(keel::StringRef name)
+{
+    scanManifests_();
+    return varDeclCommands_.contains(name);
 }
 
 bool PluginLoader::isLoaded(keel::StringRef path) const

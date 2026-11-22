@@ -289,11 +289,26 @@ public:
     // Centralises the subsref check + call shared by the VM index opcodes.
     bool tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           Value &out, Environment *env);
+    // Write counterpart: if `self`'s class defines a custom subsasgn, dispatch
+    // it with `idxAndVal` ([subscripts..., value]) in place and return true.
+    // Centralises custom subsasgn shared by TreeWalker and all VM INDEX_SET* ranks.
+    bool tryObjectSubsasgn(Value &self, keel::ArrayRef<Value> idxAndVal, Environment *env);
+    // Shared object property read/write semantics (incl. bare `obj.method`
+    // zero-arg call fallback on read) used by both VM and TreeWalker.
+    Value objectPropGet(const Value &obj, keel::StringRef name, Environment *env);
+    void objectPropSet(Value &objSlot, keel::StringRef name, const Value &rhs, Environment *env);
     // Subscript-driven assignment hook: if any subscript in `idxArgs` is an
     // object whose class defines `__indexAssign`, invoke it with `[rhs, idxArgs...]`
     // and return true (result in `out`).
     bool tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value &rhs,
                                   Environment *env, Value &out);
+    // Compiler-facing registry for plugin commands that inject local variables
+    // into the caller's scope (e.g. `syms x y`).
+    void registerVarDeclCommand(keel::StringRef cmdName, PluginContext::VarDeclExtractor fn) override;
+    bool isVarDeclCommand(keel::StringRef cmdName) const;
+    void extractVarDeclCommandNames(keel::StringRef cmdName,
+                                    keel::ArrayRef<keel::StringRef> args,
+                                    keel::Array<keel::String> &outNames) const;
 
     // ── Namespace introspection (used by resolver — Phase 6) ──────
 
@@ -896,6 +911,7 @@ private:
     InputProvider inputProvider_;   // empty → input() reads stdin
     keel::UniquePtr<FigureManager> figureManager_;
     mutable keel::UniquePtr<PluginLoader> pluginLoader_;
+    keel::HashMap<keel::String, PluginContext::VarDeclExtractor> varDeclCommands_;
 
     // Tic/toc timer
     TimePoint ticBase_{};

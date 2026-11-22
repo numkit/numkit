@@ -878,39 +878,13 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
 
 Value TreeWalker::objectPropGet(const Value &obj, keel::StringRef name, Environment *env)
 {
-    const keel::StringRef clsName = obj.objectClassNameRef();
-    const BuiltinClass *cls = engine_.findClass(clsName);
-    if (cls) {
-        CallContext ctx{&engine_, env};
-        if (cls->propGet) {
-            Value out;
-            if (cls->propGet(obj, name, out, ctx))
-                return out;
-        }
-        // Bare `obj.method` (no parens) invokes a no-arg method (MATLAB).
-        if (const auto *m = cls->methods.get(name)) {
-            Value self = obj;
-            Value outBuf[1];
-            (*m)(self, keel::ArrayRef<Value>(nullptr, 0), 1, keel::MutArrayRef<Value>(outBuf, 1), ctx);
-            return outBuf[0];
-        }
-    }
-    auto msg = keel::format("No appropriate property '{}' for class '{}'", name, clsName);
-    throw std::runtime_error(msg.c_str());
+    return engine_.objectPropGet(obj, name, env);
 }
 
 void TreeWalker::objectPropSet(Value &objSlot, keel::StringRef name,
                                const Value &rhs, Environment *env)
 {
-    const BuiltinClass *cls = engine_.findClass(objSlot.objectClassNameRef());
-    if (cls && cls->propSet) {
-        CallContext ctx{&engine_, env};
-        if (cls->propSet(objSlot, name, rhs, ctx))
-            return;
-    }
-    auto msg = keel::format("Cannot set property '{}' on class '{}'",
-                            name, objSlot.objectClassNameRef());
-    throw std::runtime_error(msg.c_str());
+    engine_.objectPropSet(objSlot, name, rhs, env);
 }
 
 // ============================================================

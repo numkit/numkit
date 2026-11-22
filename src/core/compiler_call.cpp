@@ -374,16 +374,20 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     const keel::String &name = funcNode->strValue;
     keel::usize nargs = node->children.size() - 1;
 
-    if (name == "syms") {
+    if (engine_.isVarDeclCommand(name)) {
+        keel::Array<keel::StringRef> rawArgs;
         for (keel::usize i = 1; i <= nargs; ++i) {
             auto *argNode = node->children[i].get();
-            if (argNode->type == NodeType::STRING_LITERAL) {
-                const keel::String &tok = argNode->strValue;
-                if (!isSymsFlag(tok) && !engine_.isReservedName(tok)) {
-                    keel::u16 reg = varRegWrite(tok);
-                    if (!mayClear_)
-                        definedRegs_.set(reg);
-                }
+            if (argNode->type == NodeType::STRING_LITERAL)
+                rawArgs.push_back(argNode->strValue.as_ref());
+        }
+        keel::Array<keel::String> declared;
+        engine_.extractVarDeclCommandNames(name, rawArgs.as_ref(), declared);
+        for (const auto &tok : declared) {
+            if (!engine_.isReservedName(tok)) {
+                keel::u16 reg = varRegWrite(tok);
+                if (!mayClear_)
+                    definedRegs_.set(reg);
             }
         }
     }
@@ -709,7 +713,7 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
     // Variable-headed command-syntax misparse inside functions: `x -1`, `x /2`, `x -y`
     if (!isTopLevel_ && nargs == 1
         && name != "clear" && name != "who" && name != "whos"
-        && name != "exist" && name != "syms"
+        && name != "exist" && !engine_.isVarDeclCommand(name)
         && (varRegisters_.contains(name) || upvalueRegs_.contains(name)
             || engine_.isReservedName(name) != 0)) {
         const keel::String &arg = node->children[0]->strValue;
@@ -852,10 +856,15 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
     }
 
     // ── Generic command call ──
-    if (name == "syms") {
-        for (keel::usize i = 0; i < nargs; ++i) {
-            const keel::String &tok = node->children[i]->strValue;
-            if (!isSymsFlag(tok) && !engine_.isReservedName(tok)) {
+    if (engine_.isVarDeclCommand(name)) {
+        keel::Array<keel::StringRef> rawArgs;
+        rawArgs.reserve(nargs);
+        for (keel::usize i = 0; i < nargs; ++i)
+            rawArgs.push_back(node->children[i]->strValue.as_ref());
+        keel::Array<keel::String> declared;
+        engine_.extractVarDeclCommandNames(name, rawArgs.as_ref(), declared);
+        for (const auto &tok : declared) {
+            if (!engine_.isReservedName(tok)) {
                 keel::u16 reg = varRegWrite(tok);
                 if (!mayClear_)
                     definedRegs_.set(reg);

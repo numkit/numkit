@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -211,6 +212,570 @@ bool VM::tryObjectSubsasgnFrame(keel::u16 objReg, keel::ArrayRef<Value> idxAndVa
     pushCallFrame(*cc, args.data(), args.size(), objReg, 1, false, 0, 0,
                   ownerClass, /*isCtor=*/false);
     return true;
+}
+
+bool VM::execIndexSet1DSlow(const Instruction &I, Value *R,
+                            CallFrame &frame, const Instruction *ip)
+{
+    const Value &ix = R[I.b];
+    if (ix.isObject()) {
+        Value out;
+        if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(&ix, 1),
+                                             R[I.c], currentCallEnv(), out)) {
+            R[I.a] = keel::move(out);
+            return false;
+        }
+    }
+    if (R[I.a].isObject()) {
+        Value sargs[2] = {ix, R[I.c]};
+        if (tryObjectSubsasgnFrame(I.a, keel::ArrayRef<Value>(sargs, 2), frame, ip))
+            return true;
+        if (engine_.tryObjectSubsasgn(R[I.a], keel::ArrayRef<Value>(sargs, 2), currentCallEnv()))
+            return false;
+    }
+    if (engine_.prepareObjectArrayStore(R[I.a], R[I.c])) {
+        Value &dst = R[I.a];
+        keel::Array<keel::usize> pos = resolveStoreSubscript(ix, dst.objectCount());
+        engine_.objectStoreSlice(
+            dst, keel::ArrayRef<keel::Array<keel::usize>>(&pos, 1),
+            R[I.c], currentCallEnv());
+        return false;
+    }
+    if (R[I.a].isObject())
+        throw std::runtime_error(
+            keel::format("'()' assignment is not defined for class '{}'",
+                         R[I.a].objectClassNameRef())
+                .c_str());
+
+    if (ix.isDoubleScalar()) {
+        keel::usize i = Value::checkedScalarIndex(ix.scalarVal());
+        Value &dst = R[I.a];
+        const Value &rhs = R[I.c];
+        if (rhs.isStruct() && (dst.isUnset() || dst.isEmpty() || dst.isStruct())) {
+            if (dst.isUnset() || dst.isEmpty())
+                dst = Value::structArray(0, 0, engine_.mr_);
+            dst.growStructArrayTo(i, engine_.mr_);
+            for (const auto &name : rhs.fieldNamesInOrder())
+                dst.setField(i, name, rhs.field(name));
+            return false;
+        }
+        if (rhs.isScalar() && !rhs.isComplex()
+            && i == dst.numel()
+            && dst.heapRefCount() == 1
+            && (dst.isEmpty() || (dst.isHeapDouble() && dst.dims().rows() == 1))) {
+            dst.appendScalar(rhs.toScalar(), engine_.mr_);
+            return false;
+        }
+        if (rhs.isScalar() && (dst.isEmpty() || dst.isScalar() || i >= dst.numel()))
+            dst.ensureSize(i, engine_.mr_);
+        dst.elemSet(i, rhs);
+        return false;
+    }
+
+    if (ix.isChar() && ix.numel() == 1 && ix.charData()[0] == ':') {
+        Value &dst = R[I.a];
+        Value &rhs = R[I.c];
+        const keel::usize n = dst.numel();
+        const bool sameCount = (rhs.numel() == n);
+
+        if (rhs.isScalar() && !rhs.isComplex()
+            && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()) {
+            std::fill_n(dst.doubleDataMut(), n, rhs.toScalar());
+            return false;
+        }
+        if (sameCount
+            && dst.hasHeap() && rhs.hasHeap()
+            && dst.heapRefCount() == 1 && rhs.heapRefCount() == 1
+            && dst.type() == rhs.type()
+            && (dst.type() == ValueType::DOUBLE || dst.type() == ValueType::COMPLEX)
+            && dst.isComplex() == rhs.isComplex()) {
+            dst.swapHeapBufferUnchecked(rhs);
+            return false;
+        }
+        if (sameCount
+            && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()
+            && rhs.type() == ValueType::DOUBLE && !rhs.isComplex()) {
+            std::memcpy(dst.doubleDataMut(), rhs.doubleData(), n * sizeof(keel::f64));
+            return false;
+        }
+        if (sameCount && dst.isComplex() && rhs.isComplex()) {
+            std::memcpy(dst.complexDataMut(), rhs.complexData(), n * sizeof(keel::c64));
+            return false;
+        }
+        auto indices = Value::resolveIndices(ix, n);
+        dst.indexSet(indices.data(), indices.size(), rhs);
+        return false;
+    }
+
+    auto indices = Value::resolveIndicesUnchecked(ix);
+    if (!indices.empty() && (R[I.c].isScalar() || R[I.c].numel() == indices.size())) {
+        keel::usize maxIdx = 0;
+        for (keel::usize idx : indices) maxIdx = std::max(maxIdx, idx);
+        if (R[I.a].isEmpty() || maxIdx >= R[I.a].numel())
+            R[I.a].ensureSize(maxIdx, engine_.mr_);
+    }
+    R[I.a].indexSet(indices.data(), indices.size(), R[I.c]);
+    return false;
+}
+
+bool VM::execIndexSet2DSlow(const Instruction &I, Value *R,
+                            CallFrame &frame, const Instruction *ip)
+{
+    const Value &ri = R[I.b];
+    const Value &ci = R[I.c];
+    const Value &val = R[I.e];
+
+    if (ri.isObject() || ci.isObject()) {
+        Value idxArgs[2] = {ri, ci};
+        Value out;
+        if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(idxArgs, 2),
+                                             val, currentCallEnv(), out)) {
+            R[I.a] = keel::move(out);
+            return false;
+        }
+    }
+    if (R[I.a].isObject()) {
+        Value sargs[3] = {ri, ci, val};
+        if (tryObjectSubsasgnFrame(I.a, keel::ArrayRef<Value>(sargs, 3), frame, ip))
+            return true;
+        if (engine_.tryObjectSubsasgn(R[I.a], keel::ArrayRef<Value>(sargs, 3), currentCallEnv()))
+            return false;
+    }
+    if (engine_.prepareObjectArrayStore(R[I.a], val)) {
+        Value &dst = R[I.a];
+        const keel::usize rDim = (dst.isObject() && dst.objectCount() > 0)
+                                ? dst.dims().rows() : val.dims().rows();
+        const keel::usize cDim = (dst.isObject() && dst.objectCount() > 0)
+                                ? dst.dims().cols() : val.numel();
+        keel::Array<keel::usize> perDim[2] = {
+            resolveStoreSubscript(ri, rDim),
+            resolveStoreSubscript(ci, cDim)};
+        engine_.objectStoreSlice(
+            dst, keel::ArrayRef<keel::Array<keel::usize>>(perDim, 2),
+            val, currentCallEnv());
+        return false;
+    }
+    if (R[I.a].isObject())
+        throw std::runtime_error(
+            keel::format("'()' assignment is not defined for class '{}'",
+                         R[I.a].objectClassNameRef())
+                .c_str());
+
+    auto rowIds = ResolvedSubscript::resolveUnchecked(ri);
+    auto colIds = ResolvedSubscript::resolveUnchecked(ci);
+    bool riIsColon = rowIds.isColon;
+    bool ciIsColon = colIds.isColon;
+
+    const keel::usize curRows = R[I.a].dims().rows();
+    const keel::usize curColDim = R[I.a].dims().ndim() > 2
+        ? (curRows > 0 ? R[I.a].dims().numel() / curRows : R[I.a].dims().cols())
+        : R[I.a].dims().cols();
+
+    keel::usize maxR = rowIds.maxPlusOne(curRows);
+    keel::usize maxC = colIds.maxPlusOne(curColDim);
+    if (R[I.a].isEmpty()) {
+        if (riIsColon && ciIsColon) {
+            maxR = val.dims().rows();
+            maxC = val.dims().cols();
+        } else if (riIsColon) {
+            maxR = (colIds.count == 1) ? val.numel() : val.dims().rows();
+        } else if (ciIsColon) {
+            maxC = (rowIds.count == 1) ? val.numel() : val.dims().cols();
+        }
+    }
+    if (maxR > curRows || maxC > curColDim) {
+        const keel::usize propR = std::max(curRows, maxR);
+        const keel::usize propC = std::max(curColDim, maxC);
+        const keel::usize targetCnt =
+            (riIsColon ? propR : rowIds.count) * (ciIsColon ? propC : colIds.count);
+        if (val.isScalar() || val.numel() == targetCnt)
+            R[I.a].resize(maxR, maxC, engine_.mr_);
+    }
+
+    const keel::usize finalRows = R[I.a].dims().rows();
+    const keel::usize finalColDim = R[I.a].dims().ndim() > 2
+        ? (finalRows > 0 ? R[I.a].dims().numel() / finalRows : R[I.a].dims().cols())
+        : R[I.a].dims().cols();
+
+    R[I.a].indexSet2D(rowIds.data(),
+                      riIsColon ? finalRows : rowIds.count,
+                      colIds.data(),
+                      ciIsColon ? finalColDim : colIds.count, val);
+    return false;
+}
+
+bool VM::execIndexSetND(const Instruction &I, Value *R,
+                        CallFrame &frame, const Instruction *ip)
+{
+    keel::u16 base = I.b, ndims = I.c;
+    {
+        bool anyObj = false;
+        for (keel::u16 i = 0; i < ndims; ++i) {
+            if (R[base + i].isObject()) {
+                anyObj = true;
+                break;
+            }
+        }
+        if (anyObj) {
+            Value out;
+            if (engine_.tryObjectSubscriptAssign(keel::ArrayRef<Value>(&R[base], ndims),
+                                                 R[I.e], currentCallEnv(), out)) {
+                R[I.a] = keel::move(out);
+                return false;
+            }
+        }
+    }
+    if (R[I.a].isObject()) {
+        keel::Array<Value> sargs;
+        sargs.reserve(ndims + 1);
+        for (keel::u16 i = 0; i < ndims; ++i)
+            sargs.push_back(R[base + i]);
+        sargs.push_back(R[I.e]);
+        if (tryObjectSubsasgnFrame(I.a, sargs.as_ref(), frame, ip))
+            return true;
+        if (engine_.tryObjectSubsasgn(R[I.a], sargs.as_ref(), currentCallEnv()))
+            return false;
+    }
+    if (engine_.prepareObjectArrayStore(R[I.a], R[I.e])) {
+        Value &dst = R[I.a];
+        const Value &val = R[I.e];
+        keel::Array<keel::Array<keel::usize>> perDim;
+        perDim.resize(ndims);
+        for (keel::u16 i = 0; i < ndims; ++i) {
+            keel::usize curDim =
+                dst.isObject()
+                    ? (i < dst.dims().ndim() ? dst.dims().dim(i) : 1)
+                    : 0;
+            perDim[i] = resolveStoreSubscript(R[base + i], curDim);
+        }
+        engine_.objectStoreSlice(dst, perDim, val, currentCallEnv());
+        return false;
+    }
+    if (R[I.a].isObject())
+        throw std::runtime_error(
+            keel::format("'()' assignment is not defined for class '{}'",
+                         R[I.a].objectClassNameRef())
+                .c_str());
+
+    if (ndims == 3) {
+        auto rowIds = ResolvedSubscript::resolveUnchecked(R[base]);
+        auto colIds = ResolvedSubscript::resolveUnchecked(R[base + 1]);
+        auto pageIds = ResolvedSubscript::resolveUnchecked(R[base + 2]);
+        bool riColon = rowIds.isColon;
+        bool ciColon = colIds.isColon;
+        bool piColon = pageIds.isColon;
+
+        const Value &val = R[I.e];
+        keel::usize maxR = rowIds.maxPlusOne(R[I.a].dims().rows());
+        keel::usize maxC = colIds.maxPlusOne(R[I.a].dims().cols());
+        keel::usize maxP = pageIds.maxPlusOne(R[I.a].dims().pages());
+        if (R[I.a].isEmpty()
+            && (!val.isScalar()
+                || (R[I.a].dims().rows() == 0 && R[I.a].dims().cols() == 0 && !val.isEmpty()))) {
+            const keel::i32 nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
+            const keel::usize nonColonProd = (riColon ? 1 : rowIds.count)
+                                      * (ciColon ? 1 : colIds.count)
+                                      * (piColon ? 1 : pageIds.count);
+            if (nColons == 1 && nonColonProd == 1 && val.dims().isVector()) {
+                if (riColon) maxR = val.numel();
+                else if (ciColon) maxC = val.numel();
+                else if (piColon) maxP = val.numel();
+            } else if (riColon && ciColon && piColon) {
+                maxR = val.dims().rows();
+                maxC = val.dims().cols();
+                maxP = val.dims().pages();
+            } else if (nColons > 0) {
+                keel::usize rCursor = 0;
+                keel::i32 colonsLeft = nColons;
+                auto nextRhsDim = [&]() -> keel::usize {
+                    while (rCursor < keel::as<keel::usize>(val.dims().ndim())
+                           && val.dims().dim(keel::as<keel::i32>(rCursor)) == 1
+                           && (keel::as<keel::usize>(val.dims().ndim()) - rCursor) > keel::as<keel::usize>(colonsLeft)) {
+                        ++rCursor;
+                    }
+                    --colonsLeft;
+                    return (rCursor < keel::as<keel::usize>(val.dims().ndim()))
+                               ? val.dims().dim(keel::as<keel::i32>(rCursor++))
+                               : 1;
+                };
+                if (riColon) maxR = nextRhsDim();
+                if (ciColon) maxC = nextRhsDim();
+                if (piColon) maxP = nextRhsDim();
+            }
+        }
+        if (maxR > R[I.a].dims().rows() || maxC > R[I.a].dims().cols()
+            || maxP > R[I.a].dims().pages())
+            R[I.a].resize3d(maxR, maxC, maxP, engine_.mr_);
+
+        R[I.a].indexSet3D(rowIds.data(),
+                          riColon ? R[I.a].dims().rows() : rowIds.count,
+                          colIds.data(),
+                          ciColon ? R[I.a].dims().cols() : colIds.count,
+                          pageIds.data(),
+                          piColon ? R[I.a].dims().pages() : pageIds.count,
+                          val);
+        return false;
+    }
+
+    const keel::i32 nd = keel::as<keel::i32>(ndims);
+    const keel::i32 curNd = R[I.a].dims().ndim();
+    const keel::i32 newNd = std::max(nd, curNd);
+    keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
+    for (keel::i32 i = 0; i < newNd; ++i)
+        need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
+    auto isColon = [](const Value &v) {
+        return v.isChar() && v.numel() == 1 && v.charData()[0] == ':';
+    };
+    for (keel::i32 i = 0; i < nd; ++i) {
+        const Value &iv = R[base + i];
+        if (isColon(iv) || iv.isLogical()) continue;
+        if (iv.isDoubleScalar()) {
+            keel::usize v = keel::as<keel::usize>(iv.toScalar());
+            if (v > need[i]) need[i] = v;
+        } else if (iv.type() == ValueType::DOUBLE) {
+            const keel::f64 *d = iv.doubleData();
+            for (keel::usize k = 0; k < iv.numel(); ++k) {
+                keel::usize v = keel::as<keel::usize>(d[k]);
+                if (v > need[i]) need[i] = v;
+            }
+        }
+    }
+    bool grow = (newNd > curNd);
+    for (keel::i32 i = 0; i < curNd && !grow; ++i)
+        if (need[i] > R[I.a].dims().dim(i)) grow = true;
+    if (grow)
+        R[I.a].resizeND(need.data(), newNd, engine_.mr_);
+
+    const keel::usize ndu = keel::as<keel::usize>(nd);
+    keel::Array<keel::Array<keel::usize>> idxLists(ndu);
+    keel::Array<const keel::usize *> idxPtrs(ndu);
+    keel::Array<keel::usize> idxCounts(ndu);
+    for (keel::i32 i = 0; i < nd; ++i) {
+        const keel::usize lim = (i < R[I.a].dims().ndim()) ? R[I.a].dims().dim(i) : 1;
+        idxLists[i] = Value::resolveIndices(R[base + i], lim);
+        idxPtrs[i] = idxLists[i].data();
+        idxCounts[i] = idxLists[i].size();
+    }
+    R[I.a].indexSetND(idxPtrs.data(), idxCounts.data(), nd, R[I.e]);
+    return false;
+}
+
+bool VM::execFieldGet(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
+                      Value *R, CallFrame &frame, const Instruction *ip)
+{
+    if (R[objReg].isObject()) {
+        const keel::StringRef cn = R[objReg].objectClassNameRef();
+        if (const UserFunction *g = engine_.classGetter(cn, fname)) {
+            if (const BytecodeChunk *gc = engine_.ensureClassMethodChunk(*g)) {
+                engine_.enforcePropGetAccess(cn, fname);
+                Value selfBuf = R[objReg];
+                frame.ip = ip + 1;
+                pushCallFrame(*gc, &selfBuf, 1, dstReg, 1, false, 0, 0, cn, /*isCtor=*/false);
+                return true;
+            }
+        }
+        R[dstReg] = engine_.objectPropGet(R[objReg], fname, currentCallEnv());
+        return false;
+    }
+    if (!R[objReg].isStruct())
+        throw std::runtime_error("Dot indexing requires a struct");
+    if (R[objReg].isStructArray() || R[objReg].numel() == 0) {
+        keel::usize n = R[objReg].numel();
+        if (n == 0 && !R[objReg].hasField(fname))
+            throw std::runtime_error(
+                keel::format("Reference to non-existent field '{}'", fname).c_str());
+        Value csl = Value::csl(n, engine_.mr_);
+        for (keel::usize i = 0; i < n; ++i) {
+            const auto &m = R[objReg].structArrayElem(i);
+            const Value *vp = m.get(fname);
+            if (!vp)
+                throw std::runtime_error(
+                    keel::format("Reference to non-existent field '{}'", fname).c_str());
+            csl.cslAt(i) = *vp;
+        }
+        R[dstReg] = keel::move(csl);
+        return false;
+    }
+    if (!R[objReg].hasField(fname))
+        throw std::runtime_error(
+            keel::format("Reference to non-existent field '{}'", fname).c_str());
+    R[dstReg] = R[objReg].field(fname);
+    return false;
+}
+
+void VM::execFieldGetOrCreate(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
+                              Value *R)
+{
+    if (R[objReg].isObject()) {
+        const BuiltinClass *cls = engine_.findClass(R[objReg].objectClassNameRef());
+        if (cls && cls->propGet) {
+            CallContext ctx{&engine_, currentCallEnv()};
+            Value out;
+            if (cls->propGet(R[objReg], fname, out, ctx)) {
+                R[dstReg] = keel::move(out);
+                return;
+            }
+        }
+        throw std::runtime_error(
+            keel::format("No appropriate property '{}' for class '{}'",
+                         fname, R[objReg].objectClassNameRef())
+                .c_str());
+    }
+    if (R[objReg].isEmpty())
+        R[objReg] = Value::structure();
+    if (!R[objReg].isStruct())
+        throw std::runtime_error("Dot indexing requires a struct");
+    R[dstReg] = R[objReg].field(fname);
+}
+
+bool VM::execFieldSet(keel::u16 objReg, keel::u16 valReg, keel::StringRef fname,
+                      Value *R, CallFrame &frame, const Instruction *ip)
+{
+    if (R[objReg].isObject()) {
+        const keel::StringRef cn = R[objReg].objectClassNameRef();
+        if (const UserFunction *s = engine_.classSetter(cn, fname)) {
+            if (const BytecodeChunk *sc = engine_.ensureClassMethodChunk(*s)) {
+                engine_.enforcePropSetAccess(cn, fname);
+                Value argbuf[2] = {R[objReg], R[valReg]};
+                if (!s->returns.empty()) {
+                    frame.ip = ip + 1;
+                    pushCallFrame(*sc, argbuf, 2, objReg, 1, false, 0, 0, cn, /*isCtor=*/false);
+                    return true;
+                }
+                callReentrant(*sc, keel::ArrayRef<Value>(argbuf, 2), 1, cn, /*isCtor=*/false);
+                return false;
+            }
+        }
+        engine_.objectPropSet(R[objReg], fname, R[valReg], currentCallEnv());
+        return false;
+    }
+    if (R[objReg].isEmpty())
+        R[objReg] = Value::structure();
+    if (!R[objReg].isStruct())
+        throw std::runtime_error("Dot indexing requires a struct");
+    if (R[objReg].isStructArray()) {
+        R[objReg].setFieldAll(fname, R[valReg]);
+    } else if (!lvalDetaches_.empty()
+               && lvalDetaches_.back().kind == LvalDetach::Kind::Field
+               && lvalDetaches_.back().containerRegAbs == frame.regBase + objReg
+               && lvalDetaches_.back().valRegAbs == frame.regBase + valReg
+               && lvalDetaches_.back().fieldName == fname) {
+        lvalDetaches_.pop_back();
+        R[objReg].field(fname) = keel::move(R[valReg]);
+    } else {
+        R[objReg].field(fname) = R[valReg];
+    }
+    return false;
+}
+
+bool VM::execCallMethod(const Instruction &I, Value *R,
+                        CallFrame &frame, const Instruction *ip)
+{
+    const BytecodeChunk &chunk = *frame.chunk;
+    const keel::String &mname = chunk.strings[I.d];
+    const Value &obj = R[I.b];
+    SplatArgs splat = splatCallArgs(R, I.c, I.e);
+    const Value *argPtr = splat.data();
+    keel::usize argN = splat.size();
+    if (obj.isObject()) {
+        const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
+        if (cls) {
+            if (const auto *mfp = cls->methodFns.get(mname)) {
+                const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
+                if (mc) {
+                    engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
+                    keel::Array<Value> frameArgs;
+                    frameArgs.reserve(argN + 1);
+                    frameArgs.push_back(obj);
+                    for (keel::usize k = 0; k < argN; ++k)
+                        frameArgs.push_back(argPtr[k]);
+                    frame.ip = ip + 1;
+                    pushCallFrame(*mc, frameArgs.data(), frameArgs.size(), I.a, 1, false,
+                                  0, 0, (*mfp)->ownerClass, false);
+                    return true;
+                }
+            }
+            if (const auto *mfn = cls->methods.get(mname)) {
+                Value self = obj;
+                keel::ArrayRef<Value> args(argPtr, argN);
+                Value out[1];
+                CallContext ctx{&engine_, currentCallEnv()};
+                (*mfn)(self, args, 1, keel::MutArrayRef<Value>(out, 1), ctx);
+                R[I.a] = keel::move(out[0]);
+                return false;
+            }
+        }
+        Value out;
+        CallContext ctx{&engine_, currentCallEnv()};
+        if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
+            throw std::runtime_error(
+                keel::format("No appropriate property '{}' for class '{}'",
+                             mname, obj.objectClassNameRef())
+                    .c_str());
+        return execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip);
+    }
+    if (!obj.isStruct())
+        throw std::runtime_error("Dot indexing requires a struct");
+    if (!obj.hasField(mname))
+        throw std::runtime_error(
+            keel::format("Reference to non-existent field '{}'", mname).c_str());
+    Value fv = obj.field(mname);
+    return execCallIndirectSpan(fv, I.a, argPtr, argN, R, frame, ip);
+}
+
+bool VM::execCallMethodMulti(const Instruction &I, Value *R,
+                             CallFrame &frame, const Instruction *ip)
+{
+    const BytecodeChunk &chunk = *frame.chunk;
+    keel::u16 outBase = I.a, objReg = I.b, argBase = I.c;
+    keel::u16 na = keel::as<keel::u16>((I.e >> 8) & 0xFF);
+    keel::u16 nout = keel::as<keel::u16>(I.e & 0xFF);
+    const keel::String &mname = chunk.strings[I.d];
+    Value &obj = R[objReg];
+    if (!obj.isObject())
+        throw std::runtime_error(
+            keel::format("Dot-indexing multi-output requires an object; '{}' is not a method of a {}",
+                         mname, mtypeName(obj.type()))
+                .c_str());
+    SplatArgs splat = splatCallArgs(R, argBase, na);
+    const Value *argPtr = splat.data();
+    keel::usize argN = splat.size();
+    const BuiltinClass *cls = engine_.findClass(obj.objectClassNameRef());
+    if (cls) {
+        if (const auto *mfp = cls->methodFns.get(mname)) {
+            const BytecodeChunk *mc = engine_.ensureClassMethodChunk(**mfp);
+            if (mc) {
+                engine_.enforceMethodAccess(obj.objectClassNameRef(), mname);
+                keel::Array<Value> frameArgs;
+                frameArgs.reserve(argN + 1);
+                frameArgs.push_back(obj);
+                for (keel::usize k = 0; k < argN; ++k)
+                    frameArgs.push_back(argPtr[k]);
+                frame.ip = ip + 1;
+                returnBuf_.clear();
+                pushCallFrame(*mc, frameArgs.data(), frameArgs.size(), 0, nout, true,
+                              outBase, nout, (*mfp)->ownerClass, false);
+                return true;
+            }
+        }
+    }
+    const ObjectMethod *mfn = cls ? cls->methods.get(mname) : nullptr;
+    if (!mfn)
+        throw std::runtime_error(
+            keel::format("No appropriate method '{}' for class '{}'",
+                         mname, obj.objectClassNameRef())
+                .c_str());
+    Value self = obj;
+    keel::ArrayRef<Value> args(argPtr, argN);
+    keel::Array<Value> outBuf(nout);
+    CallContext ctx{&engine_, currentCallEnv()};
+    (*mfn)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
+    for (keel::u16 i = 0; i < nout; ++i)
+        if (outBuf[i].isUnset())
+            throw std::runtime_error("Too many output arguments.");
+    for (keel::usize i = 0; i < nout; ++i)
+        R[outBase + i] = keel::move(outBuf[i]);
+    return false;
 }
 
 void VM::execCallBuiltin(const Instruction &I, Value *R)

@@ -39,12 +39,6 @@ private:
     keel::u16 savedArr_, savedDim_, savedNdims_;
 };
 
-[[nodiscard]] constexpr bool isSymsFlag(keel::StringRef s) noexcept
-{
-    return s == "real" || s == "positive" || s == "negative"
-        || s == "nonnegative" || s == "integer" || s == "clear";
-}
-
 [[maybe_unused]] [[nodiscard]] constexpr bool isClearFlag(keel::StringRef s) noexcept
 {
     return s == "all" || s == "classes" || s == "functions"
