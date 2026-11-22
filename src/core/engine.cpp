@@ -535,6 +535,31 @@ bool Engine::tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usi
     return true;
 }
 
+bool Engine::tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value &rhs,
+                                      Environment *env, Value &out)
+{
+    for (keel::usize i = 0; i < idxArgs.size(); ++i) {
+        if (!idxArgs[i].isObject())
+            continue;
+        const BuiltinClass *cls = findClass(idxArgs[i].objectClassNameRef());
+        const ObjectMethod *m = cls ? cls->methods.get("__indexAssign") : nullptr;
+        if (!m)
+            continue;
+        keel::Array<Value> callArgs;
+        callArgs.reserve(idxArgs.size() + 1);
+        callArgs.push_back(rhs);
+        for (keel::usize j = 0; j < idxArgs.size(); ++j)
+            callArgs.push_back(idxArgs[j]);
+        Value self = idxArgs[i];
+        Value res[1];
+        CallContext ctx{this, env};
+        (*m)(self, callArgs.as_ref(), 1, keel::MutArrayRef<Value>(res, 1), ctx);
+        out = keel::move(res[0]);
+        return true;
+    }
+    return false;
+}
+
 void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize>> perDim,
                               const Value &val, Environment *env)
 {

@@ -284,6 +284,11 @@ public:
     // Centralises the subsref check + call shared by the VM index opcodes.
     bool tryObjectSubsref(Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           Value &out, Environment *env);
+    // Subscript-driven assignment hook: if any subscript in `idxArgs` is an
+    // object whose class defines `__indexAssign`, invoke it with `[rhs, idxArgs...]`
+    // and return true (result in `out`).
+    bool tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value &rhs,
+                                  Environment *env, Value &out);
 
     // ── Namespace introspection (used by resolver — Phase 6) ──────
 
