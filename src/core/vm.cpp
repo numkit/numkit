@@ -660,16 +660,16 @@ enter_frame:
             case OpCode::COLLAPSE:
                 // Collapse a CSL reaching a single-value sink (no-op on a non-CSL).
                 // When I.c == 1 (statement-level sink to ans), bind the last CSL element
-                // (or leave R[I.a] untouched if 0-element CSL).
+                // or defined value, leaving R[I.a] (`ans`) untouched when the statement
+                // produced no output value (isUnset()/isDeleted()/0-element CSL).
                 if (I.c == 1) {
                     if (R[I.b].isCsl()) {
                         keel::usize n = R[I.b].cslCount();
                         if (n > 0)
                             R[I.a] = R[I.b].cslAt(n - 1);
-                        else if (I.a == I.b)
-                            R[I.a] = Value();
-                    } else if (I.a != I.b) {
-                        R[I.a] = R[I.b];
+                    } else if (!R[I.b].isUnset() && !R[I.b].isDeleted()) {
+                        if (I.a != I.b)
+                            R[I.a] = R[I.b];
                     }
                     break;
                 }

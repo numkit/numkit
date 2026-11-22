@@ -67,11 +67,12 @@ void registerFigureExport(Engine &engine);
 
 namespace {
 
-constexpr const char *kFigureClass = "matlab.ui.Figure";
-constexpr const char *kAxesClass   = "matlab.graphics.axis.Axes";
-constexpr const char *kTextClass   = "matlab.graphics.primitive.Text";
-constexpr const char *kLegendClass = "matlab.graphics.illustration.Legend";
-constexpr const char *kRootClass   = "matlab.ui.Root";
+constexpr const char *kFigureClass      = "matlab.ui.Figure";
+constexpr const char *kAxesClass        = "matlab.graphics.axis.Axes";
+constexpr const char *kTextClass        = "matlab.graphics.primitive.Text";
+constexpr const char *kLegendClass      = "matlab.graphics.illustration.Legend";
+constexpr const char *kTiledLayoutClass = "matlab.graphics.layout.TiledChartLayout";
+constexpr const char *kRootClass        = "matlab.ui.Root";
 
 // Builtin name → Text slot for the title/label family (adapter wrap).
 keel::StringRef textSlotOf(keel::StringRef fnName)
@@ -1010,6 +1011,17 @@ Value makeLegendHandleFor(FigureManager &fm, keel::i32 figureId, keel::usize axe
     return makeGraphicsHandleValue(kLegendClass, id, mr);
 }
 
+Value makeTiledLayoutHandle(FigureManager &fm, keel::i32 figureId, keel::Allocator *mr)
+{
+    for (auto [id, rec] : fm.handles())
+        if (!rec.deleted && rec.type == "tiledlayout" && rec.figureId == figureId)
+            return makeGraphicsHandleValue(kTiledLayoutClass, id, mr);
+    const keel::i32 id = fm.createHandleAt(
+        figureId, FigureManager::HandleRecord::kNoAxes,
+        "tiledlayout", kTiledLayoutClass);
+    return makeGraphicsHandleValue(kTiledLayoutClass, id, mr);
+}
+
 // Root (groot) — ONE global record (figureId 0 never matches a real
 // figure, so figure sweeps leave it alone).
 Value makeRootHandle(FigureManager &fm, keel::Allocator *mr)
@@ -1082,6 +1094,7 @@ keel::String canonicalPropName(keel::StringRef raw)
         {"number", "Number"}, {"currentaxes", "CurrentAxes"},
         {"position", "Position"}, {"outerposition", "OuterPosition"},
         {"string", "String"}, {"location", "Location"}, {"box", "Box"},
+        {"layout", "Layout"},
         {"units", "Units"}, {"paperunits", "PaperUnits"}, {"papersize", "PaperSize"},
         {"paperposition", "PaperPosition"}, {"papertype", "PaperType"},
         {"numbertitle", "NumberTitle"}, {"name", "Name"},
@@ -1123,7 +1136,45 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             return makeHandleArray(kFigureClass, ids, mr);
         }
         const keel::String *hit = rec->props.get(name);
-        return hit ? decodeProp(*hit, mr) : Value();
+        if (hit)
+            return decodeProp(*hit, mr);
+        keel::String low = name.clone();
+        for (char &ch : low) ch = keel::to_ascii_lower(ch);
+        if (low == "screensize") {
+            Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = 1.0; v.doubleDataMut()[1] = 1.0;
+            v.doubleDataMut()[2] = 1920.0; v.doubleDataMut()[3] = 1080.0;
+            return v;
+        }
+        if (low == "pointerlocation") {
+            Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
+            return v;
+        }
+        if (low.find("fontangle") != keel::kInvalidIndex
+            || low.find("fontweight") != keel::kInvalidIndex)
+            return str("normal");
+        if (low.find("fontname") != keel::kInvalidIndex)
+            return str("Helvetica");
+        if (low.find("fontsize") != keel::kInvalidIndex)
+            return num(10.0);
+        return Value();
+    }
+    if (rec->type == "tiledlayout") {
+        if (name == "Type") return str("tiledlayout");
+        if (name == "Parent") return makeFigureHandleFor(fm, rec->figureId, mr);
+        if (const keel::String *hit = rec->props.get(name))
+            return decodeProp(*hit, mr);
+        if (name == "GridSize") {
+            FigureState *fig = fm.figureOf(rec->figureId);
+            Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            v.doubleDataMut()[0] = fig && fig->subplotRows > 0 ? fig->subplotRows : 1.0;
+            v.doubleDataMut()[1] = fig && fig->subplotCols > 0 ? fig->subplotCols : 1.0;
+            return v;
+        }
+        if (name == "TileSpacing" || name == "Padding")
+            return str("loose");
+        return Value();
     }
     if (rec->type == "text") {
         // Live String from the label slot (the render source of truth).
@@ -1177,6 +1228,21 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
         if (name == "Box")  return str(!ax || ax->legendBoxOn ? "on" : "off");
         if (name == "Visible")
             return str(!ax || !ax->legendHidden ? "on" : "off");
+        if (name == "Layout") {
+            Value st = Value::structure(mr);
+            if (const keel::String *t = rec->props.get("Layout.Tile"))
+                st.field("Tile") = decodeProp(*t, mr);
+            else
+                st.field("Tile") = num(1.0);
+            if (const keel::String *ts = rec->props.get("Layout.TileSpan"))
+                st.field("TileSpan") = decodeProp(*ts, mr);
+            else {
+                Value sp = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+                sp.doubleDataMut()[0] = 1.0; sp.doubleDataMut()[1] = 1.0;
+                st.field("TileSpan") = std::move(sp);
+            }
+            return st;
+        }
         if (const keel::String *hit = rec->props.get(name))
             return decodeProp(*hit, mr);
         return Value();
@@ -1405,9 +1471,17 @@ bool recordSetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             for (keel::usize i = 0; i < val.numel(); ++i)
                 ax->legendLabels.push_back(val.cellAt(i).toString());
             fm.markFigureModified(rec->figureId);
+        } else if (name == "Layout" && val.isStruct()) {
+            if (val.hasField("Tile"))
+                rec->props.put(keel::String::from("Layout.Tile"), encodeProp(val.field("Tile")));
+            if (val.hasField("TileSpan"))
+                rec->props.put(keel::String::from("Layout.TileSpan"), encodeProp(val.field("TileSpan")));
+            fm.markFigureModified(rec->figureId);
         }
         return true;
     }
+    if (rec->type == "tiledlayout")
+        return true;
     if (rec->type == "root")
         return true;   // root properties are read-only at this layer
     if (rec->type == "axes")
@@ -2098,6 +2172,7 @@ void registerGraphicsClasses(Engine &engine)
     addClass(kAxesClass,   "axes");
     addClass(kTextClass,   "text");
     addClass(kLegendClass, "legend");
+    addClass(kTiledLayoutClass, "tiledlayout");
     addClass(kRootClass,   "root");
     addClass("matlab.graphics.Graphics", "line");
     addClass("matlab.graphics.GraphicsPlaceholder", "line");
@@ -2132,6 +2207,8 @@ void registerGraphicsClasses(Engine &engine)
                 const keel::i32 fid = fm.currentFigureId();
                 const keel::usize aidx = keel::as<keel::usize>(fm.current().currentAxes);
                 h = makeLegendHandleFor(fm, fid, aidx, mr);
+            } else if (recTypeRef == "tiledlayout") {
+                h = makeTiledLayoutHandle(fm, fm.currentFigureId(), mr);
             } else if (recTypeRef == "root") {
                 h = makeRootHandle(fm, mr);
             } else {
@@ -2275,7 +2352,7 @@ void GraphicsLibrary::install(Engine &engine)
     // object (the core-free body only prepares the state / label field).
     auto isHandleReturning = [](keel::StringRef nm) -> bool {
         static constexpr const char *kNames[] = {
-            "figure", "gcf", "gca", "axes", "polaraxes",
+            "figure", "gcf", "gca", "axes", "polaraxes", "tiledlayout",
             "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
             "legend", "text",
         };
@@ -2332,9 +2409,10 @@ void GraphicsLibrary::install(Engine &engine)
                 };
                 (*fn)(args, nargout, outs, gc);
 
-                // Post-hook: bind the handle object(s) so h = plot(...)
-                // works (bugs/closed/graphics/plot-family-no-return-value.md).
-                // Statement calls get the handle in `ans`, like the reference.
+                // Post-hook: register handle record(s) in FigureManager so
+                // gca().Children / findobj see every created object, and return
+                // the handle object(s) only when requested (nargout >= 1) —
+                // statement calls with nargout == 0 leave `ans` untouched.
                 if (hasHandle) {
                     const keel::usize base = fm.chartCallBase();
                     const keel::usize after = fm.currentAxes().datasets.size();
@@ -2373,9 +2451,12 @@ void GraphicsLibrary::install(Engine &engine)
                                     }
                                 }
                             }
-                            outs[0] = makeGraphicsHandleValue(
-                                hClass, id, ctx.engine->allocator());
-                        } else {
+                            if (nargout >= 1)
+                                outs[0] = makeGraphicsHandleValue(
+                                    hClass, id, ctx.engine->allocator());
+                            else
+                                outs[0] = Value();
+                        } else if (nargout >= 1) {
                             auto *res = ctx.engine->allocator()
                                             ? ctx.engine->allocator()
                                             : keel::default_allocator();
@@ -2395,16 +2476,28 @@ void GraphicsLibrary::install(Engine &engine)
                             outs[0] = Value::objectArray(
                                 hClass, d, keel::move(states),
                                 /*isHandle=*/true, res);
+                        } else {
+                            for (keel::i32 i = 0; i < nnew; ++i) {
+                                fm.createHandle(
+                                    hType, hClass,
+                                    base + keel::as<keel::usize>(i));
+                            }
+                            outs[0] = Value();
                         }
+                    } else if (nargout == 0) {
+                        outs[0] = Value();
                     }
                 } else if (wrapHandle) {
                     // figure/gcf → Figure, gca/axes → Axes, the title/
                     // label family → slot-bound Text, legend → Legend.
+                    // Only query accessors (gcf, gca) return a handle when
+                    // nargout == 0; creation/annotation commands leave `ans` untouched.
                     auto *mr = ctx.engine->allocator();
+                    Value handleVal;
                     if (name == "figure" || name == "gcf") {
-                        outs[0] = makeFigureHandle(fm, mr);
+                        handleVal = makeFigureHandle(fm, mr);
                         if (name == "figure" && args.size() >= 2 && (args[0].isChar() || args[0].isString())) {
-                            keel::i32 hid = graphicsHandleIdOf(outs[0]);
+                            keel::i32 hid = graphicsHandleIdOf(handleVal);
                             if (auto *rec = fm.findHandle(hid)) {
                                 for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
                                     if (args[i].isChar() || args[i].isString())
@@ -2416,7 +2509,7 @@ void GraphicsLibrary::install(Engine &engine)
                                !slot.empty()) {
                         // sgtitle is figure-scoped (kNoAxes) so scoped
                         // axes sweeps keep it; the rest bind the axes.
-                        outs[0] =
+                        handleVal =
                             (name == "sgtitle")
                                 ? makeTextHandleFor(
                                       fm, fm.currentFigureId(),
@@ -2428,18 +2521,25 @@ void GraphicsLibrary::install(Engine &engine)
                                           fm.current().currentAxes),
                                       slot, mr);
                     } else if (name == "text") {
-                        outs[0] = makeTextHandleFor(
+                        handleVal = makeTextHandleFor(
                             fm, fm.currentFigureId(),
                             keel::as<keel::usize>(fm.current().currentAxes),
                             "text", mr);
                     } else if (name == "legend") {
-                        outs[0] = makeLegendHandleFor(
+                        handleVal = makeLegendHandleFor(
                             fm, fm.currentFigureId(),
                             keel::as<keel::usize>(fm.current().currentAxes),
                             mr);
+                    } else if (name == "tiledlayout") {
+                        handleVal = makeTiledLayoutHandle(
+                            fm, fm.currentFigureId(), mr);
                     } else {
-                        outs[0] = makeAxesHandle(fm, mr);
+                        handleVal = makeAxesHandle(fm, mr);
                     }
+                    if (nargout >= 1 || name == "gcf" || name == "gca")
+                        outs[0] = std::move(handleVal);
+                    else
+                        outs[0] = Value();
                 } else if (name == "subplot" && nargout >= 1) {
                     outs[0] = makeAxesHandle(fm, ctx.engine->allocator());
                 }

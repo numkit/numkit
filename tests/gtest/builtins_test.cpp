@@ -2747,6 +2747,83 @@ TEST_P(DisplayTest, FprintfBareCallSetsNoAns)
     EXPECT_EQ(engine.getVariable("ans"), nullptr);
 }
 
+TEST_P(DisplayTest, VoidAndGraphicsCallsPreserveAns)
+{
+    // Void calls in the same chunk must not overwrite or erase an existing `ans`.
+    eval("42; disp('hello'); fprintf('ok');");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_DOUBLE_EQ(getVar("ans"), 42.0);
+
+    // Separate eval() calls with void statements also preserve workspace `ans`.
+    eval("fprintf('again');");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_DOUBLE_EQ(getVar("ans"), 42.0);
+
+    // Graphics creation/styling calls with nargout == 0 leave `ans` untouched,
+    // do not print `ans = ...`, and still register handles on the axes.
+    capturedOutput.clear();
+    eval("figure; plot([0 1], [0 1]); patch([0 1 1 0], [0 0 1 1], 'r'); "
+         "title('t'); set(gca, 'fontsize', 14); view(45, 45);");
+    EXPECT_EQ(capturedOutput.find("ans ="), std::string::npos);
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_DOUBLE_EQ(getVar("ans"), 42.0);
+
+    // Bare zero-arg void call preserves `ans`.
+    eval("tic;");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_DOUBLE_EQ(getVar("ans"), 42.0);
+
+    // With nargout >= 1, graphics constructors still return valid handles.
+    eval("hLine = plot([0 1], [1 2]); hPatch = patch([0 1 1 0], [0 0 1 1], 'b');");
+    EXPECT_TRUE(evalBool("isgraphics(hLine) && isgraphics(hPatch);"));
+    // `ans` was updated by evalBool above; reset and check query accessors.
+    eval("99; gca;");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_EQ(getVarPtr("ans")->objectClassNameRef(), "matlab.graphics.axis.Axes");
+    eval("99; gcf;");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_EQ(getVarPtr("ans")->objectClassNameRef(), "matlab.ui.Figure");
+
+    // Empty matrix expression `[]` IS a value and must update `ans` to 0x0 double.
+    eval("42; [];");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_FALSE(getVarPtr("ans")->isUnset());
+    EXPECT_TRUE(getVarPtr("ans")->isEmpty());
+    EXPECT_EQ(rows(*getVarPtr("ans")), 0u);
+    EXPECT_EQ(cols(*getVarPtr("ans")), 0u);
+
+    // Inside a function, void calls preserve local `ans`.
+    eval("function r = f_keep_ans()\n"
+         "  77;\n"
+         "  disp('inside');\n"
+         "  r = ans;\n"
+         "end\n"
+         "res = f_keep_ans();");
+    EXPECT_DOUBLE_EQ(getVar("res"), 77.0);
+}
+
+TEST_P(DisplayTest, TiledLayoutGrootDefaultsAndLegendLayout)
+{
+    eval("close all; figure;");
+    eval("55; tiledlayout(2, 2);");
+    ASSERT_NE(getVarPtr("ans"), nullptr);
+    EXPECT_DOUBLE_EQ(getVar("ans"), 55.0);
+
+    eval("tl = tiledlayout(2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');");
+    EXPECT_TRUE(evalBool("isgraphics(tl);"));
+    eval("nexttile; plot([0 1], [0 1]);");
+    eval("xl = xlabel(tl, 'X'); yl = ylabel(tl, 'Y'); tt = title(tl, 'T');");
+    eval("fs = get(groot, 'defaultAxesFontSize');");
+    EXPECT_DOUBLE_EQ(getVar("fs"), 10.0);
+    eval("xl.FontSize = fs; yl.FontSize = fs; tt.FontSize = fs; tt.FontWeight = 'normal';");
+    EXPECT_DOUBLE_EQ(evalScalar("xl.FontSize"), 10.0);
+
+    eval("lgd = legend('series1', 'Orientation', 'horizontal');");
+    eval("lgd.Layout.Tile = 'south';");
+    eval("tileVal = lgd.Layout.Tile;");
+    EXPECT_EQ(getVarPtr("tileVal")->toString(), "south");
+}
+
 TEST_P(DisplayTest, GraphicsHandleSurfaceGaps)
 {
     // 1. Direct chart class construction via dotted package path.

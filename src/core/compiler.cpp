@@ -88,6 +88,10 @@ void Compiler::preImportGlobals(const ASTNode *ast)
     // Collect all identifiers referenced in the AST
     keel::HashSet<keel::String> identifiers;
     collectAllIdentifiers(ast, identifiers);
+    // Pre-import `ans` when already defined in the enclosing workspace/scope so
+    // a void statement (e.g. `disp(...)`, `set(...)`) that writes no value
+    // preserves the existing `ans` instead of exporting an unset slot.
+    identifiers.insert(keel::String::from("ans"));
 
     // Pre-allocate a register and emit LOAD_CONST for every identifier that
     // resolves to a value — including built-in constants (pi, eps, …) and
@@ -1822,14 +1826,13 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                                              funcIdx, node->captureResult ? 1 : 0));
                 if (node->captureResult)
                     return dst;
-                keel::u16 ansReg = varRegWrite("ans");
-                if (ansReg != dst)
-                    emitAB(OpCode::MOVE, ansReg, dst);
-                emitUpvalStoreIfShared("ans", ansReg);
                 if (!node->suppressOutput) {
                     keel::i32 nameIdx = addStringConstant("ans");
-                    emitAD(OpCode::DISPLAY, ansReg, nameIdx);
+                    emitAD(OpCode::DISPLAY, dst, nameIdx);
                 }
+                keel::u16 ansReg = varRegWrite("ans");
+                emitABC(OpCode::COLLAPSE, ansReg, dst, 1);
+                emitUpvalStoreIfShared("ans", ansReg);
                 return ansReg;
             }
         }
@@ -1886,15 +1889,14 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
             if (node->captureResult)
                 return dst;
 
-            // Anonymous call result -> bind to `ans`.
-            keel::u16 ansReg = varRegWrite("ans");
-            if (ansReg != dst)
-                emitAB(OpCode::MOVE, ansReg, dst);
-            emitUpvalStoreIfShared("ans", ansReg);
+            // Anonymous call result -> bind to `ans` (preserving prior `ans` if void).
             if (!node->suppressOutput) {
                 keel::i32 nameIdx = addStringConstant("ans");
-                emitAD(OpCode::DISPLAY, ansReg, nameIdx);
+                emitAD(OpCode::DISPLAY, dst, nameIdx);
             }
+            keel::u16 ansReg = varRegWrite("ans");
+            emitABC(OpCode::COLLAPSE, ansReg, dst, 1);
+            emitUpvalStoreIfShared("ans", ansReg);
             return ansReg;
         }
     }

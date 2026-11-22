@@ -637,6 +637,45 @@ TEST_P(Reductions3DTest, Max3DReturnsIndices)
         EXPECT_DOUBLE_EQ(I->doubleData()[i], 2.0);
 }
 
+TEST_P(Reductions3DTest, ExplicitDimOnVectorsAndTrailingSingleton)
+{
+    // Row vector reduced along dim=1 (singleton) keeps 1xN shape.
+    eval("r = [0 1 0 1]; mr1 = mean(r, 1); sr1 = sum(r, 1); pr1 = prod([2 3 4], 1);");
+    ASSERT_EQ(rows(*getVarPtr("mr1")), 1u);
+    ASSERT_EQ(cols(*getVarPtr("mr1")), 4u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("mr1"))(0, 0), 0.0);
+    EXPECT_DOUBLE_EQ((*getVarPtr("mr1"))(0, 1), 1.0);
+    ASSERT_EQ(rows(*getVarPtr("sr1")), 1u);
+    ASSERT_EQ(cols(*getVarPtr("sr1")), 4u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("sr1"))(0, 3), 1.0);
+    ASSERT_EQ(rows(*getVarPtr("pr1")), 1u);
+    ASSERT_EQ(cols(*getVarPtr("pr1")), 3u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("pr1"))(0, 2), 4.0);
+
+    // Row vector reduced along dim=2 collapses to scalar.
+    eval("mr2 = mean(r, 2); sr2 = sum(r, 2);");
+    EXPECT_DOUBLE_EQ(getVar("mr2"), 0.5);
+    EXPECT_DOUBLE_EQ(getVar("sr2"), 2.0);
+
+    // Column vector reduced along dim=2 (singleton) keeps Nx1 shape.
+    eval("c = [1; 2; 3]; mc2 = mean(c, 2); sc2 = sum(c, 2);");
+    ASSERT_EQ(rows(*getVarPtr("mc2")), 3u);
+    ASSERT_EQ(cols(*getVarPtr("mc2")), 1u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("mc2"))(2, 0), 3.0);
+    ASSERT_EQ(rows(*getVarPtr("sc2")), 3u);
+    ASSERT_EQ(cols(*getVarPtr("sc2")), 1u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("sc2"))(1, 0), 2.0);
+
+    // Trailing-singleton dim (> ndim) preserves shape.
+    eval("M = [1 2; 3 4]; s3 = sum(M, 3); A3 = reshape(1:8, 2, 2, 2); m4 = mean(A3, 4);");
+    ASSERT_EQ(rows(*getVarPtr("s3")), 2u);
+    ASSERT_EQ(cols(*getVarPtr("s3")), 2u);
+    EXPECT_DOUBLE_EQ((*getVarPtr("s3"))(1, 1), 4.0);
+    ASSERT_TRUE(getVarPtr("m4")->dims().is3D());
+    EXPECT_EQ(getVarPtr("m4")->numel(), 8u);
+    EXPECT_DOUBLE_EQ(getVarPtr("m4")->doubleData()[7], 8.0);
+}
+
 INSTANTIATE_DUAL(Reductions3DTest);
 
 // ============================================================

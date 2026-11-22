@@ -265,9 +265,9 @@ Value TreeWalker::execExprStmt(const ASTNode *node, Environment *env)
         return last;
     }
 
-    // Anonymous value — bind to `ans` regardless of semicolon (matches
-    // MATLAB; `ans` persists even when display is suppressed).
-    if (!val.isEmpty()) {
+    // Anonymous value — bind to `ans` regardless of semicolon; leave `ans`
+    // untouched when a void call produced no output value.
+    if (!val.isUnset() && !val.isDeleted()) {
         env->set("ans", val);
         if (!node->suppressOutput)
             displayValue("ans", val);
