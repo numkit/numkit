@@ -324,6 +324,24 @@ TEST_P(Wave4PerfTest, MFileCacheUsesMtimeWithoutReReadingFileOnEveryEval)
     EXPECT_EQ(fsPtr->readCount, 2);
 }
 
+TEST_P(Wave4PerfTest, BareScriptInvocationByName)
+{
+    auto fs = keel::make_unique<CountingMemoryFS>("memscr");
+    fs->put("/scripts/seed_vars.m",
+            "a = 17;\nb = 25;\n",
+            /*mtime=*/1700000000,
+            /*mtimeNs=*/1700000000000000000LL);
+    engine.registerVirtualFS(std::move(fs));
+    engine.addPath("memscr:/scripts");
+
+    // Calling a .m script by bare statement must execute with nargout=0 and
+    // populate the caller's workspace (regression for compiler.cpp compileExprStmt).
+    eval("seed_vars;\nc = a + b;");
+    EXPECT_DOUBLE_EQ(getVar("c"), 42.0);
+    // Calling a script as a function with a return target must still throw.
+    EXPECT_THROW(eval("x = seed_vars;"), std::exception);
+}
+
 TEST_P(Wave4PerfTest, ComplexAndSingleMtimesPlusFastMatrixPower)
 {
     // Complex GEMM (80x70 * 70x65 triggers SIMD tiled GemmComplexKernel)

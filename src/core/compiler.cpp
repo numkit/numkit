@@ -1834,9 +1834,17 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
             }
         }
 
-        if (!isKnownVar && !mayInjectVars_
-            && (engine_.isKnownLeafName(name) || engine_.hasFunction(name)
-                || engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr)) {
+        bool knownCallable = !isKnownVar && !mayInjectVars_
+            && (engine_.isKnownLeafName(name) || engine_.hasFunction(name));
+        if (!isKnownVar && !mayInjectVars_ && !knownCallable) {
+            // lookupUserFunction may register a script or classdef .m file as an
+            // external callable while returning nullptr; re-check hasFunction after.
+            if (engine_.lookupUserFunction(name, &engine_.workspaceEnv()) != nullptr
+                || engine_.hasFunction(name)) {
+                knownCallable = true;
+            }
+        }
+        if (knownCallable) {
             // Workspace builtins inside functions -> opcodes (statement nargout=0 only)
             if (!isTopLevel_ && !node->captureResult) {
                 if (name == "who") {
