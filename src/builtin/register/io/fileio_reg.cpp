@@ -24,7 +24,35 @@ namespace numkit::io::detail {
         FN(ctx.engine->fsContext(), args, nargout, outs, ctx.engine->allocator());                  \
     }
 
-NUMKIT_FILEIO_REG(fopen,   1, 4)
+void fopen_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+               keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, 4, "fopen");
+    auto *mr = ctx.engine->allocator();
+    if (!args.empty() && (args[0].isChar() || args[0].isString())) {
+        const keel::String rawPath = args[0].toString();
+        const keel::String mode = (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
+                                      ? args[1].toString()
+                                      : keel::String::from("r");
+        const bool isReadOnly = !mode.empty() && mode[0] == 'r'
+                                && mode.find('+') == keel::kInvalidIndex;
+        if (isReadOnly && rawPath != "all") {
+            auto rp = ctx.engine->resolvePath(rawPath.as_ref());
+            if (rp.fs && rp.fs->exists(rp.path) && rp.path != rawPath) {
+                keel::Array<Value> resolvedArgs(args.size());
+                resolvedArgs[0] = Value::fromString(rp.path, mr);
+                for (keel::usize i = 1; i < args.size(); ++i)
+                    resolvedArgs[i] = args[i];
+                fopen(ctx.engine->fsContext(),
+                      keel::ArrayRef<Value>(resolvedArgs.data(), resolvedArgs.size()),
+                      nargout, outs, mr);
+                return;
+            }
+        }
+    }
+    fopen(ctx.engine->fsContext(), args, nargout, outs, mr);
+}
+
 NUMKIT_FILEIO_REG(fclose,  1, 1)
 NUMKIT_FILEIO_REG(fgetl,   1, 1)
 NUMKIT_FILEIO_REG(fgets,   1, 2)

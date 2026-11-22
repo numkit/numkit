@@ -297,6 +297,8 @@ public:
     // zero-arg call fallback on read) used by both VM and TreeWalker.
     Value objectPropGet(const Value &obj, keel::StringRef name, Environment *env);
     void objectPropSet(Value &objSlot, keel::StringRef name, const Value &rhs, Environment *env);
+    void objectElemPropSet(Value &objSlot, keel::usize linearIdx, keel::StringRef name,
+                           const Value &rhs, Environment *env);
     // Subscript-driven assignment hook: if any subscript in `idxArgs` is an
     // object whose class defines `__indexAssign`, invoke it with `[rhs, idxArgs...]`
     // and return true (result in `out`).

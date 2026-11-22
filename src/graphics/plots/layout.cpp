@@ -176,6 +176,11 @@ void buildLayoutPlots(keel::Array<PlotEntry> &table)
         if (!parsed) {
             keel::f64 dmin = 1e300, dmax = -1e300;
             for (const auto &ds : fm.currentAxes().datasets) {
+                if (axisChar == 'y'
+                    && (ds.type == "bar" || ds.type == "histogram" || ds.type == "area")) {
+                    if (0.0 < dmin) dmin = 0.0;
+                    if (0.0 > dmax) dmax = 0.0;
+                }
                 const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
                 const char *base = j.c_str();
                 keel::usize pos = 0;

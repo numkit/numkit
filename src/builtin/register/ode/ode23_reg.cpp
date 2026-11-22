@@ -75,17 +75,17 @@ function [t, y] = ode23(fn, tspan, y0, opts, varargin)
   h = initial_step;
   if ~(h > 0)
     sc0 = abs_tol + rel_tol*abs(yc);
-    d0 = sqrt(sum((yc ./ sc0).^2) / d);
-    d1 = sqrt(sum((k1 ./ sc0).^2) / d);
+    d0 = sqrt(sum(abs(yc ./ sc0).^2) / d);
+    d1 = sqrt(sum(abs(k1 ./ sc0).^2) / d);
     if d0 < 1e-5 || d1 < 1e-5, h0 = 1e-6; else, h0 = 0.01*d0/d1; end
     h0 = min(h0, abs(tf - t0));
     k2t = fn(t0 + dir*h0, yc + dir*h0*k1, varargin{:}); k2t = k2t(:);
-    d2 = sqrt(sum(((k2t - k1) ./ sc0).^2) / d) / h0;
+    d2 = sqrt(sum(abs((k2t - k1) ./ sc0).^2) / d) / h0;
     if max(d1, d2) < 1e-15, h1 = max(1e-6, h0*1e-3); else, h1 = (0.01/max(d1,d2))^(1/3); end
     h = min([100*h0, h1, max_step, abs(tf - t0)]);
     if ~(h > 0), h = max(1e-6, abs(tf - t0)*1e-3); end
   end
-  T = t0; Y = yc';
+  T = t0; Y = yc.';
   emit_at_tspan = (nspan > 2);
   if emit_at_tspan, refine = 1; else, refine = max(1, refine); end
   next_span = 2;
@@ -103,10 +103,10 @@ function [t, y] = ode23(fn, tspan, y0, opts, varargin)
           if theta > 1 + 1e-12, break; end
           cl = max(0, min(1, theta));
           if abs(cl - 1) < 1e-15
-            T = [T; tt]; Y = [Y; ynew'];
+            T = [T; tt]; Y = [Y; ynew.'];
           else
             yint = NUMKIT_bs23_hermite(cl, dir, th, yc, ynew, k1, k4);
-            T = [T; tt]; Y = [Y; yint'];
+            T = [T; tt]; Y = [Y; yint.'];
           end
           next_span = next_span + 1;
         end
@@ -114,11 +114,11 @@ function [t, y] = ode23(fn, tspan, y0, opts, varargin)
         for r = 1:(refine-1)
           theta = r/refine;
           yint = NUMKIT_bs23_hermite(theta, dir, th, yc, ynew, k1, k4);
-          T = [T; t_old + dir*th*theta]; Y = [Y; yint'];
+          T = [T; t_old + dir*th*theta]; Y = [Y; yint.'];
         end
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       else
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       end
       tc = t_new; yc = ynew; k1 = k4; failed = 0;
       if err_norm < 1e-300, fac = 5; else, fac = 0.9*(1/err_norm)^(1/3); end
@@ -148,7 +148,7 @@ function [ynew, err_norm, k4] = NUMKIT_bs23_step(fn, tc, yc, h, dir, k1, rel_tol
   k4 = fn(tc + dir*h, ynew, varargin{:}); k4 = k4(:);
   sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
   er = dir*h*(e1*k1 + e2*k2 + e3*k3 + e4*k4);
-  err_norm = sqrt(sum((er ./ sc).^2) / numel(yc));
+  err_norm = sqrt(sum(abs(er ./ sc).^2) / numel(yc));
 end
 
 function out = NUMKIT_bs23_hermite(theta, dir, h, yn, ynew, k1, k4)
@@ -202,7 +202,7 @@ function [t, y] = ode23s(fn, tspan, y0, opts, varargin)
     h = min([h, max_step, abs(tf - t0)]);
     if ~(h > 0), h = max(1e-10, abs(tf - t0)*1e-6); end
   end
-  T = t0; Y = yc';
+  T = t0; Y = yc.';
   emit_at_tspan = (nspan > 2);
   if emit_at_tspan, refine = 1; else, refine = max(1, refine); end
   next_span = 2;
@@ -220,10 +220,10 @@ function [t, y] = ode23s(fn, tspan, y0, opts, varargin)
           if theta > 1 + 1e-12, break; end
           cl = max(0, min(1, theta));
           if abs(cl - 1) < 1e-15
-            T = [T; tt]; Y = [Y; ynew'];
+            T = [T; tt]; Y = [Y; ynew.'];
           else
             yint = NUMKIT_bs23_hermite(cl, dir, th, yc, ynew, f0, f2);
-            T = [T; tt]; Y = [Y; yint'];
+            T = [T; tt]; Y = [Y; yint.'];
           end
           next_span = next_span + 1;
         end
@@ -231,11 +231,11 @@ function [t, y] = ode23s(fn, tspan, y0, opts, varargin)
         for r = 1:(refine-1)
           theta = r/refine;
           yint = NUMKIT_bs23_hermite(theta, dir, th, yc, ynew, f0, f2);
-          T = [T; t_old + dir*th*theta]; Y = [Y; yint'];
+          T = [T; t_old + dir*th*theta]; Y = [Y; yint.'];
         end
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       else
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       end
       tc = t_new; yc = ynew; f0 = f2; failed = 0;
       if err_norm < 1e-300, fac = 5; else, fac = 0.8*(1/err_norm)^(1/3); end
@@ -277,7 +277,7 @@ function [ynew, err_norm, f2] = NUMKIT_ros23_step(fn, tc, yc, h, dir, f0, rel_to
   k3 = W \ (f2 - e32*(k2 - f1) - 2*(k1 - f0) + (s * d) * dFdt);
   sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
   er = (s / 6) * (k1 - 2*k2 + k3);
-  err_norm = sqrt(sum((er ./ sc).^2) / n);
+  err_norm = sqrt(sum(abs(er ./ sc).^2) / n);
   if isnan(err_norm) || isinf(err_norm) || any(isnan(ynew)) || any(isinf(ynew))
     err_norm = 100;
   end
@@ -388,7 +388,7 @@ function [ynew, err_norm, k4] = NUMKIT_dde23_step(ddefun, tc, yc, h, k1, rel_tol
   k4 = ddefun(t4, ynew, Z4, varargin{:}); k4 = k4(:);
   sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
   er = h*((2/9 - 7/24)*k1 + (1/3 - 1/4)*k2 + (4/9 - 1/3)*k3 - (1/8)*k4);
-  err_norm = sqrt(sum((er ./ sc).^2) / numel(yc));
+  err_norm = sqrt(sum(abs(er ./ sc).^2) / numel(yc));
 end
 
 function Z = NUMKIT_dde_lags(t, lags, t0, history, X, Y, YP, varargin)

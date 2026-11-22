@@ -2824,6 +2824,42 @@ TEST_P(DisplayTest, TiledLayoutGrootDefaultsAndLegendLayout)
     EXPECT_EQ(getVarPtr("tileVal")->toString(), "south");
 }
 
+TEST_P(DisplayTest, ObjectArrayIndexedPropAssignAndBarMetrics)
+{
+    // Indexed property write on a handle object array must NOT clobber it into a struct.
+    eval("close all; t = 0:0.2:1; GH = [sin(t); cos(t); t]; HG = plot(t, GH);");
+    eval("HG(1).Color = 'r'; HG(2).LineStyle = '--';");
+    eval("HG(1).LineWidth = HG(1).LineWidth + 0.5;");
+    EXPECT_EQ(getVarPtr("HG")->objectClassNameRef(), "matlab.graphics.chart.primitive.Line");
+    EXPECT_DOUBLE_EQ(evalScalar("HG(1).LineWidth"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("HG(2).LineWidth"), 0.5);
+
+    // Grouped bar XEndPoints and bar ylim baseline 0.
+    eval("V = [12 13 16 17 15; 25 21 23 26 24; 31 33 30 35 37];");
+    eval("b = bar(1:5, V); x1 = b(1).XEndPoints; x2 = b(2).XEndPoints; x3 = b(3).XEndPoints;");
+    EXPECT_NEAR(evalScalar("x1(1)"), 7.0 / 9.0, 1e-12);
+    EXPECT_NEAR(evalScalar("x2(1)"), 1.0, 1e-12);
+    EXPECT_NEAR(evalScalar("x3(1)"), 11.0 / 9.0, 1e-12);
+
+    eval("figure; H = bar([3.7 4.3 nan 3 2 nan 5.5 2.9 NaN 4]); yl = ylim;");
+    EXPECT_DOUBLE_EQ(evalScalar("yl(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("yl(2)"), 6.0);
+
+    // Complex-valued ODE integration via ode45 / ode23 preserves imaginary sign and converges.
+    eval("[tc, yc] = ode45(@(t, y) (-0.5 + 2i) * y, [0 0.5 1.0], 1 + 1i);");
+    const double expRe = std::exp(-0.5) * (std::cos(2.0) - std::sin(2.0));
+    const double expIm = std::exp(-0.5) * (std::cos(2.0) + std::sin(2.0));
+    EXPECT_NEAR(evalScalar("real(yc(end))"), expRe, 1e-3);
+    EXPECT_NEAR(evalScalar("imag(yc(end))"), expIm, 1e-3);
+
+    eval("[tc2, yc2] = ode23(@(t, y) 1i * y, [0 1.0], 1 + 0i);");
+    EXPECT_NEAR(evalScalar("real(yc2(end))"), std::cos(1.0), 1e-2);
+    EXPECT_NEAR(evalScalar("imag(yc2(end))"), std::sin(1.0), 1e-2);
+
+    // sound and refreshdata are registered headless no-ops.
+    eval("sound([0 0.1 0]); refreshdata(HG, 'caller');");
+}
+
 TEST_P(DisplayTest, GraphicsHandleSurfaceGaps)
 {
     // 1. Direct chart class construction via dotted package path.

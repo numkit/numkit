@@ -1730,28 +1730,48 @@ enter_frame:
                 break;
             }
             case OpCode::STRUCT_ELEM_FIELD_SET: {
-                // a=obj (struct array, in/out), b=idxReg, c=valReg, d=nameIdx
+                // a=obj (struct or object array, in/out), b=idxReg, c=valReg, d=nameIdx
                 const keel::String &fname = chunk.strings[I.d];
                 keel::usize idx = Value::checkedScalarIndex(R[I.b].toScalar());
                 Value &obj = R[I.a];
+                if (obj.isObject()) {
+                    engine_.objectElemPropSet(obj, idx, fname, R[I.c], currentCallEnv());
+                    break;
+                }
                 obj.growStructArrayTo(idx, engine_.allocator());
                 obj.setField(idx, fname, R[I.c]);  // BUG #15
                 break;
             }
             case OpCode::STRUCT_ELEM_GET_OR_CREATE: {
                 // a=dst, b=obj (in/out), c=base, e=nargs — d(i…) as a 1×1
-                // struct, auto-growing the array (compound-lvalue container).
+                // struct or object element (compound-lvalue container).
                 Value &obj = R[I.b];
-                if (obj.isUnset() || obj.isEmpty())
-                    obj = Value::structArray(0, 0, engine_.allocator());
-                if (!obj.isStruct())
-                    throw std::runtime_error("Indexed assignment on a non-struct value");
                 const keel::i32 nargs = I.e;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
                     throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
                 for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.c + k].toScalar());
+                if (obj.isObject()) {
+                    keel::usize linear = 0;
+                    if (nargs == 1) {
+                        linear = coords[0];
+                    } else {
+                        keel::usize stride = 1;
+                        for (keel::i32 k = 0; k < nargs; ++k) {
+                            linear += coords[k] * stride;
+                            stride *= obj.dims().dim(k);
+                        }
+                    }
+                    if (linear >= obj.objectCount())
+                        throw std::runtime_error("Index exceeds object array bounds");
+                    R[I.a] = obj.objectSubArray(keel::ArrayRef<keel::usize>(&linear, 1), engine_.mr_);
+                    break;
+                }
+                if (obj.isUnset() || obj.isEmpty())
+                    obj = Value::structArray(0, 0, engine_.allocator());
+                if (!obj.isStruct())
+                    throw std::runtime_error("Indexed assignment on a non-struct value");
                 keel::usize linear;
                 if (nargs == 1) {
                     linear = coords[0];
@@ -1763,18 +1783,36 @@ enter_frame:
                 break;
             }
             case OpCode::STRUCT_ELEM_SET: {
-                // a=obj (in/out), b=base, c=nargs, e=valReg — d(i…) = struct.
+                // a=obj (in/out), b=base, c=nargs, e=valReg — d(i…) = struct/object.
                 Value &obj = R[I.a];
-                if (obj.isUnset() || obj.isEmpty())
-                    obj = Value::structArray(0, 0, engine_.allocator());
-                if (!obj.isStruct())
-                    throw std::runtime_error("Indexed assignment on a non-struct value");
                 const keel::i32 nargs = I.c;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
                     throw std::runtime_error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
                 for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.b + k].toScalar());
+                if (obj.isObject()) {
+                    keel::usize linear = 0;
+                    if (nargs == 1) {
+                        linear = coords[0];
+                    } else {
+                        keel::usize stride = 1;
+                        for (keel::i32 k = 0; k < nargs; ++k) {
+                            linear += coords[k] * stride;
+                            stride *= obj.dims().dim(k);
+                        }
+                    }
+                    if (linear >= obj.objectCount())
+                        throw std::runtime_error("Index exceeds object array bounds");
+                    if (!obj.objectIsHandle())
+                        obj.objectAssignLinear(keel::ArrayRef<keel::usize>(&linear, 1),
+                                               R[I.e], R[I.e], engine_.mr_);
+                    break;
+                }
+                if (obj.isUnset() || obj.isEmpty())
+                    obj = Value::structArray(0, 0, engine_.allocator());
+                if (!obj.isStruct())
+                    throw std::runtime_error("Indexed assignment on a non-struct value");
                 keel::usize linear;
                 if (nargs == 1) {
                     linear = coords[0];

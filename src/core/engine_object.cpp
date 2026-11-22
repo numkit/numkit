@@ -388,6 +388,17 @@ void Engine::objectPropSet(Value &objSlot, keel::StringRef name,
     throw std::runtime_error(msg.c_str());
 }
 
+void Engine::objectElemPropSet(Value &objSlot, keel::usize linearIdx, keel::StringRef name,
+                               const Value &rhs, Environment *env)
+{
+    if (linearIdx >= objSlot.objectCount())
+        throw std::runtime_error("Index exceeds object array bounds");
+    Value elem = objSlot.objectSubArray(keel::ArrayRef<keel::usize>(&linearIdx, 1), mr_);
+    objectPropSet(elem, name, rhs, env);
+    if (!objSlot.objectIsHandle())
+        objSlot.objectAssignLinear(keel::ArrayRef<keel::usize>(&linearIdx, 1), elem, elem, mr_);
+}
+
 bool Engine::tryObjectSubscriptAssign(keel::ArrayRef<Value> idxArgs, const Value &rhs,
                                       Environment *env, Value &out)
 {

@@ -1001,6 +1001,25 @@ void TreeWalker::execFieldAssign(const ASTNode *lhs, const Value &rhs, Environme
                 objectPropSet(parent, lhs->strValue, rhs, env);
                 return;
             }
+        } else if ((objNode->type == NodeType::CALL || objNode->type == NodeType::INDEX)
+                   && objNode->children.size() >= 2) {
+            Value &parent = resolveObjectSlot(objNode->children[0].get(), env);
+            if (parent.isObject()) {
+                const keel::usize nargs = objNode->children.size() - 1;
+                keel::usize linear = 0;
+                keel::usize stride = 1;
+                for (keel::usize a = 0; a < nargs; ++a) {
+                    IndexContextGuard guard(indexContextStack_,
+                                            {&parent, keel::as<keel::i32>(a), keel::as<keel::i32>(nargs)});
+                    Value v = execNode(objNode->children[a + 1].get(), env);
+                    keel::usize c = Value::checkedScalarIndex(v.toScalar());
+                    linear += c * stride;
+                    if (nargs > 1)
+                        stride *= parent.dims().dim(keel::as<keel::i32>(a));
+                }
+                engine_.objectElemPropSet(parent, linear, lhs->strValue, rhs, env);
+                return;
+            }
         }
     }
     if (lhs->children.size() == 1

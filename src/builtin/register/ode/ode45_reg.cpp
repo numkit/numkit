@@ -103,12 +103,12 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
   h = initial_step;
   if ~(h > 0)
     sc0 = abs_tol + rel_tol*abs(yc);
-    d0 = sqrt(sum((yc ./ sc0).^2) / d);
-    d1 = sqrt(sum((k1 ./ sc0).^2) / d);
+    d0 = sqrt(sum(abs(yc ./ sc0).^2) / d);
+    d1 = sqrt(sum(abs(k1 ./ sc0).^2) / d);
     if d0 < 1e-5 || d1 < 1e-5, h0 = 1e-6; else, h0 = 0.01*d0/d1; end
     h0 = min(h0, abs(tf - t0));
     k2t = fn(t0 + dir*h0, yc + dir*h0*k1); k2t = k2t(:);
-    d2 = sqrt(sum(((k2t - k1) ./ sc0).^2) / d) / h0;
+    d2 = sqrt(sum(abs((k2t - k1) ./ sc0).^2) / d) / h0;
     if max(d1, d2) < 1e-15, h1 = max(1e-6, h0*1e-3); else, h1 = (0.01/max(d1,d2))^(1/5); end
     h = min([100*h0, h1, max_step, abs(tf - t0)]);
     if ~(h > 0), h = max(1e-6, abs(tf - t0)*1e-3); end
@@ -117,11 +117,11 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
   if emit_at_tspan
     refine = 1;
     T = zeros(nspan, 1); Y = zeros(nspan, d);
-    T(1) = t0; Y(1, :) = yc';
+    T(1) = t0; Y(1, :) = yc.';
     out_idx = 1;
   else
     refine = max(1, refine);
-    T = t0; Y = yc';
+    T = t0; Y = yc.';
   end
   next_span = 2;
   c2 = 1/5; c3 = 3/10; c4 = 4/5; c5 = 8/9;
@@ -146,7 +146,7 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
     k7 = fn(tc + dh, ynew); k7 = k7(:);
     sc = abs_tol + rel_tol*max(abs(yc), abs(ynew));
     er = dh*(e1*k1 + e3*k3 + e4*k4 + e5*k5 + e6*k6 + e7*k7);
-    err_norm = sqrt(sum((er ./ sc).^2) / d);
+    err_norm = sqrt(sum(abs(er ./ sc).^2) / d);
     if err_norm <= 1
       t_old = tc; t_new = tc + dh;
       if emit_at_tspan
@@ -158,10 +158,10 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
           out_idx = out_idx + 1;
           T(out_idx) = tt;
           if abs(cl - 1) < 1e-15
-            Y(out_idx, :) = ynew';
+            Y(out_idx, :) = ynew.';
           else
             yint = NUMKIT_ode_dense(cl, dir, th, yc, k1, k3, k4, k5, k6, k7);
-            Y(out_idx, :) = yint';
+            Y(out_idx, :) = yint.';
           end
           next_span = next_span + 1;
         end
@@ -169,11 +169,11 @@ function [t, y] = ode45(fn, tspan, y0, opts, varargin)
         for r = 1:(refine-1)
           theta = r/refine;
           yint = NUMKIT_ode_dense(theta, dir, th, yc, k1, k3, k4, k5, k6, k7);
-          T = [T; t_old + dh*theta]; Y = [Y; yint'];
+          T = [T; t_old + dh*theta]; Y = [Y; yint.'];
         end
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       else
-        T = [T; t_new]; Y = [Y; ynew'];
+        T = [T; t_new]; Y = [Y; ynew.'];
       end
       tc = t_new; yc = ynew; k1 = k7; failed = 0;
       if err_norm < 1e-300, fac = 5; else, fac = 0.9*(1/err_norm)^(1/5); end

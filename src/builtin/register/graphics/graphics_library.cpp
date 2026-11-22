@@ -2558,6 +2558,7 @@ void GraphicsLibrary::install(Engine &engine)
         if (nargout >= 1) outs[0] = Value::scalar(1.0, ctx.engine->allocator());
     };
     engine.registerFunction("", "shg", noopGfx);
+    engine.registerFunction("", "refreshdata", noopGfx);
     engine.registerFunction("", "datetick", noopGfx);
     engine.registerFunction("", "rectangle", noopGfx);
     engine.registerFunction("", "uicontrol",
@@ -2598,6 +2599,7 @@ void GraphicsLibrary::install(Engine &engine)
     engine.registerFunction("", "graph", graphStub);
     engine.registerFunction("", "plotmatrix", noopGfx);
     engine.registerFunction("", "makedatatip", noopGfx);
+    engine.registerFunction("", "sound", noopGfx);
     engine.registerFunction("", "soundsc", noopGfx);
     engine.registerFunction("", "zplane", noopGfx);
     engine.registerFunction("", "listfonts",

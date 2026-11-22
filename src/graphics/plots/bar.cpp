@@ -155,23 +155,28 @@ void buildBarPlots(keel::Array<PlotEntry> &table)
                     fm.pushDataset(keel::move(ds));
                 }
             } else {
-                // Grouped: each column gets a small X offset so bars
-                // don't overlap. The IDE renderer renders each dataset
-                // with the same default width, so sub-pixel
-                // positioning is the visible separator. With Yc bars
-                // per group, offsets span ±0.4 around the base.
-                const keel::f64 groupHalf = 0.4;
-                const keel::f64 slot = (Yc > 1) ? (2 * groupHalf) / (Yc - 1) : 0.0;
+                // Grouped: exact groupWidth = min(0.8, m / (m + 1.5)) bar center offsets
+                // so Bar.XEndPoints matches standard grouped bar layout.
+                const keel::f64 m = keel::as<keel::f64>(Yc);
+                const keel::f64 groupWidth = std::min(0.8, m / (m + 1.5));
                 for (keel::usize cc = 0; cc < Yc; ++cc) {
                     DatasetInfo ds;
                     ds.type.assign("bar");
                     StrBuf xs, ys;
                     xs << '['; ys << '[';
-                    const keel::f64 off = -groupHalf + slot * cc;
+                    const keel::f64 off = (Yc > 1)
+                        ? (-groupWidth * 0.5 + (2.0 * keel::as<keel::f64>(cc) + 1.0) * groupWidth / (2.0 * m))
+                        : 0.0;
+                    ds.xRaw.reserve(Yr);
+                    ds.yRaw.reserve(Yr);
                     for (keel::usize r = 0; r < Yr; ++r) {
                         if (r) { xs << ','; ys << ','; }
-                        xs << (xb[r] + off);
-                        ys << Yp[cc * Yr + r];
+                        const keel::f64 xv = xb[r] + off;
+                        const keel::f64 yv = Yp[cc * Yr + r];
+                        ds.xRaw.push_back(xv);
+                        ds.yRaw.push_back(yv);
+                        xs << xv;
+                        ys << yv;
                     }
                     xs << ']'; ys << ']';
                     ds.xJson = xs.take();
