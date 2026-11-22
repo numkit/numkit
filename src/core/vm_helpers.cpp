@@ -971,6 +971,7 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
             keel::MutArrayRef<Value> os(ob, 1);
             CallContext ctx{&engine_, currentCallEnv()};
             (*ce.extFunc)(as, nargout_val, os, ctx);
+            R = frames_.back().R;
             R[dstReg] = keel::move(ob[0]);
             return false;
         }
@@ -1083,6 +1084,7 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         keel::MutArrayRef<Value> os(ob, 1);
         CallContext ctx{&engine_, currentCallEnv()};
         (*fnPtr)(as, nargout_val, os, ctx);
+        R = frames_.back().R;
         R[dstReg] = keel::move(ob[0]);
         return false;
     }
@@ -1138,15 +1140,17 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         }
         if (!rootOpt)
             rootOpt = findParentVar(root);
-        if (!rootOpt && currentCallEnv()) {
-            if (const Value *ev = currentCallEnv()->get(root);
-                ev && !ev->isUnset() && !ev->isDeleted())
-                rootOpt = *ev;
-        }
         if (!rootOpt) {
-            if (const Value *wv = engine_.workspaceEnv().get(root);
-                wv && !wv->isUnset() && !wv->isDeleted())
-                rootOpt = *wv;
+            if (frame.isScriptFrame) {
+                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                if (const Value *wv = scopeEnv.get(root);
+                    wv && !wv->isUnset() && !wv->isDeleted())
+                    rootOpt = *wv;
+            } else if (frame.env) {
+                if (const Value *ev = frame.env->getLocal(root);
+                    ev && !ev->isUnset() && !ev->isDeleted())
+                    rootOpt = *ev;
+            }
         }
         if (rootOpt) {
             Value cur = keel::move(*rootOpt);
@@ -1183,15 +1187,17 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         }
         if (!varOpt)
             varOpt = findParentVar(funcName);
-        if (!varOpt && currentCallEnv()) {
-            if (const Value *ev = currentCallEnv()->get(funcName);
-                ev && !ev->isUnset() && !ev->isDeleted())
-                varOpt = *ev;
-        }
         if (!varOpt) {
-            if (const Value *wv = engine_.workspaceEnv().get(funcName);
-                wv && !wv->isUnset() && !wv->isDeleted())
-                varOpt = *wv;
+            if (frame.isScriptFrame) {
+                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+                if (const Value *wv = scopeEnv.get(funcName);
+                    wv && !wv->isUnset() && !wv->isDeleted())
+                    varOpt = *wv;
+            } else if (frame.env) {
+                if (const Value *ev = frame.env->getLocal(funcName);
+                    ev && !ev->isUnset() && !ev->isDeleted())
+                    varOpt = *ev;
+            }
         }
         if (varOpt) {
             Value target = keel::move(*varOpt);

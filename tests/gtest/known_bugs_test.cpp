@@ -1099,6 +1099,91 @@ TEST_F(BuiltinKnownBug, RegMacroOptionsHonored)
     EXPECT_DOUBLE_EQ(evalScalar("r1(5)"), 99.0);
 }
 
+// Script with many local functions triggers HashMap rehash in compiledFuncs_ /
+// scriptLocalCompiledFuncs_ while frames are active; Arc-backed chunks keep
+// CallFrame::chunk pointers valid across rehashes.
+TEST_F(BuiltinKnownBug, CompiledFuncMapRehashStability)
+{
+    eval("res = f1(1) + f6(2) + f12(3);\n"
+         "function y = f1(x); y = f2(x) + 1; end\n"
+         "function y = f2(x); y = f3(x) + 1; end\n"
+         "function y = f3(x); y = f4(x) + 1; end\n"
+         "function y = f4(x); y = f5(x) + 1; end\n"
+         "function y = f5(x); y = x + 1; end\n"
+         "function y = f6(x); y = f7(x) + 1; end\n"
+         "function y = f7(x); y = f8(x) + 1; end\n"
+         "function y = f8(x); y = f9(x) + 1; end\n"
+         "function y = f9(x); y = f10(x) + 1; end\n"
+         "function y = f10(x); y = x + 1; end\n"
+         "function y = f11(x); y = x + 1; end\n"
+         "function y = f12(x); y = f11(x) + 1; end\n");
+    EXPECT_DOUBLE_EQ(evalScalar("res"), 6.0 + 7.0 + 5.0);
+}
+
+// Under mayInjectVars_ (e.g. eval in script), zero-arg builtin calls like
+// `h = figure; figure(h);` must pass nargout=1 and must not register `figure`
+// as a local variable (which would break subsequent `figure(h)` calls).
+TEST_F(BuiltinKnownBug, MayInjectVarsZeroArgFuncNargout)
+{
+    eval("eval('dummy_eval_var = 1;');\n"
+         "h1 = figure;\n"
+         "h2 = figure;\n"
+         "figure(h1);\n"
+         "figure(h2);\n"
+         "is_fig1 = isobject(h1);\n"
+         "is_fig2 = isobject(h2);\n"
+         "same_num = (h1.Number == h2.Number);\n");
+    EXPECT_DOUBLE_EQ(evalScalar("is_fig1"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("is_fig2"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("same_num"), 0.0);
+}
+
+// Complex Gram products A*A' and A'*A must be exactly Hermitian (zero imaginary
+// diagonal, conjugate-symmetric off-diagonals) for both small and SIMD sizes.
+TEST_F(LinalgKnownBug, ComplexHermitianGramProduct)
+{
+    eval("rng(42);\n"
+         "A3 = complex(randn(3, 3), randn(3, 3));\n"
+         "ok3_1 = ishermitian(A3 * A3');\n"
+         "ok3_2 = ishermitian(A3' * A3);\n"
+         "A16 = complex(randn(16, 16), randn(16, 16));\n"
+         "ok16_1 = ishermitian(A16 * A16');\n"
+         "ok16_2 = ishermitian(A16' * A16);\n");
+    EXPECT_DOUBLE_EQ(evalScalar("ok3_1"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ok3_2"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ok16_1"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ok16_2"), 1.0);
+}
+
+// validateattributes builtin checks classes, shape/size, and value predicates.
+TEST_F(BuiltinKnownBug, ValidateAttributesBuiltin)
+{
+    EXPECT_NO_THROW(eval(
+        "validateattributes(3.5, {'numeric'}, {'scalar','real','finite','positive'});\n"
+        "validateattributes(4, {'numeric'}, {'scalar','integer','even','>',2,'<=',4}, 'myfn', 'x', 1);\n"
+        "validateattributes([1 2 3], {'double'}, {'row','vector','numel',3,'increasing'});\n"
+        "validateattributes(eye(3), {'numeric'}, {'2d','square','diag','binary','size',[3 NaN]});\n"
+        "validateattributes(true, {'logical','numeric'}, {'scalar','nonempty'});\n"));
+    EXPECT_THROW(eval("validateattributes(-1, {'numeric'}, {'positive'});"), keel::Exception);
+    EXPECT_THROW(eval("validateattributes(1+1i, {'numeric'}, {'real'});"), keel::Exception);
+    EXPECT_THROW(eval("validateattributes([1 2], {'numeric'}, {'scalar'});"), keel::Exception);
+    EXPECT_THROW(eval("validateattributes('abc', {'numeric'}, {});"), keel::Exception);
+    EXPECT_THROW(eval("validateattributes(5, {'numeric'}, {'>', 10});"), keel::Exception);
+    EXPECT_THROW(eval("validateattributes([1 2 3], {'numeric'}, {'numel', 4});"), keel::Exception);
+}
+
+// Local functions must not leak base/script workspace structs or handles via
+// dotted-name or indexed-call fallbacks.
+TEST_F(BuiltinKnownBug, FunctionScopeIsolationDottedFallback)
+{
+    EXPECT_THROW(eval(
+        "s_iso = struct('g', 9.81);\n"
+        "r_iso = iso_reader();\n"
+        "function y = iso_reader()\n"
+        "    y = s_iso.g;\n"
+        "end\n"), keel::Exception);
+}
+
 
 
 

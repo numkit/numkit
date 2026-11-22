@@ -60,6 +60,7 @@ void uint16_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, Ca
 void uint32_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void uint64_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void uint8_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void validateattributes_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 
 namespace numkit::builtin::detail {
@@ -120,6 +121,7 @@ void register_datatypes(Engine &engine) {
     engine.registerFunction("anynan",     &::numkit::builtin::detail::anynan_reg);
     engine.registerFunction("isequal",   &::numkit::builtin::detail::isequal_reg);
     engine.registerFunction("isequaln",  &::numkit::builtin::detail::isequaln_reg);
+    engine.registerFunction("validateattributes", &::numkit::builtin::detail::validateattributes_reg);
 }
 
 } // namespace numkit::builtin::detail

@@ -2489,9 +2489,11 @@ enter_frame:
                     forStack_.pop_back(); // break from for-loop
                 break;
 
-            case OpCode::ASSERT_DEF:
-                if (R[I.a].isUnset() || R[I.a].isDeleted()) {
-                    // nargin/nargout at top level are illegal in MATLAB —
+            case OpCode::ASSERT_DEF: {
+                if (I.c == 0 && !R[I.a].isUnset() && !R[I.a].isDeleted())
+                    break;
+                {
+                    // nargin/nargout at top level are illegal —
                     // this check must precede the env fallbacks below
                     // (workspaceEnv HOLDS a top-level nargin value, which
                     // would otherwise silently resolve the name).
@@ -2509,15 +2511,6 @@ enter_frame:
                             break;
                         }
                     }
-                    // The BASE frame also consults the workspace env:
-                    // names created MID-CHUNK by eval()/assignin land
-                    // there after the inner chunk syncs, but this
-                    // chunk's registers predate them (write side of the
-                    // eval-family bug). Only frames_.front() — function
-                    // frames allocate their private env LAZILY (env can
-                    // still be null mid-body), so `!frame.env` was the
-                    // wrong predicate and leaked base variables into
-                    // functions (ScopeIsolationTest regression).
                     if (frame.isScriptFrame) {
                         Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
                         const Value *wv = scopeEnv.get(chunk.strings[I.d]);
@@ -2584,19 +2577,21 @@ enter_frame:
                     }
                     {
                         const keel::String &nn = chunk.strings[I.d];
+                        const keel::usize nout = I.e;
                         if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
                             const BytecodeChunk *found = findCompiledFunc(uf->name);
                             if (!found)
                                 found = engine_.ensureClassMethodChunk(*uf);
                             frame.ip = ip + 1;
-                            pushCallFrame(*found, nullptr, 0, I.a, 1);
+                            pushCallFrame(*found, nullptr, 0, I.a, nout);
                             goto enter_frame;
                         }
                         if (const ExternalFunc *fnPtr = engine_.findExternal(nn, currentCallEnv())) {
                             Value ob[1];
                             keel::MutArrayRef<Value> os(ob, 1);
                             CallContext ctx{&engine_, currentCallEnv()};
-                            (*fnPtr)(keel::ArrayRef<Value>(nullptr, 0), 0, os, ctx);
+                            (*fnPtr)(keel::ArrayRef<Value>(nullptr, 0), nout, os, ctx);
+                            R = frames_.back().R;
                             R[I.a] = keel::move(ob[0]);
                             break;
                         }
@@ -2605,6 +2600,7 @@ enter_frame:
                         keel::format("Undefined function or variable '{}'", chunk.strings[I.d]).c_str());
                 }
                 break;
+            }
 
             case OpCode::CLEAR_VAR:
                 R[I.a] = Value::deleted();

@@ -35,11 +35,12 @@ keel::u16 Compiler::compileFunctionDef(const ASTNode *node)
     uf.body = keel::Arc<const ASTNode>(cloneNode(node->children[0].get()));
     uf.closureEnv = nullptr;
 
+    auto funcChunkArc = keel::make_arc<BytecodeChunk>(keel::move(funcChunk));
     if (scriptDepth_ > 0) {
-        scriptLocalCompiledFuncs_.put(node->strValue.clone(), keel::move(funcChunk));
+        scriptLocalCompiledFuncs_.put(node->strValue.clone(), keel::move(funcChunkArc));
         engine_.adoptUserFunction(node->strValue, keel::move(uf), /*scriptScope=*/true);
     } else {
-        compiledFuncs_.put(node->strValue.clone(), keel::move(funcChunk));
+        compiledFuncs_.put(node->strValue.clone(), keel::move(funcChunkArc));
         engine_.adoptUserFunction(node->strValue, keel::move(uf), /*scriptScope=*/false);
     }
     return 0;
@@ -118,11 +119,12 @@ void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
     uf.body = keel::Arc<const ASTNode>(cloneNode(funcDef->children[0].get()));
     uf.closureEnv = nullptr;
 
+    auto funcChunkArc = keel::make_arc<BytecodeChunk>(keel::move(funcChunk));
     if (scriptDepth_ > 0) {
-        scriptLocalCompiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunk));
+        scriptLocalCompiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunkArc));
         engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/true);
     } else {
-        compiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunk));
+        compiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunkArc));
         engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/false);
     }
 }
@@ -131,15 +133,15 @@ void Compiler::setChunkOrigin(keel::StringRef qualifiedName,
                               keel::StringRef fsName, keel::StringRef scriptDir,
                               keel::StringRef scriptFile)
 {
-    auto stampMap = [&](keel::HashMap<keel::String, BytecodeChunk> &tbl) {
+    auto stampMap = [&](CompiledFuncMap &tbl) {
         const keel::String prefix = keel::format("{}>", qualifiedName);
         for (auto [k, ch] : tbl) {
-            if (k == qualifiedName
-                || (k.size() > prefix.size() && k.starts_with(prefix))) {
-                ch.originKnown = true;
-                ch.originFs.assign(fsName);
-                ch.originDir.assign(scriptDir);
-                ch.originFile.assign(scriptFile);
+            if (ch && (k == qualifiedName
+                || (k.size() > prefix.size() && k.starts_with(prefix)))) {
+                ch->originKnown = true;
+                ch->originFs.assign(fsName);
+                ch->originDir.assign(scriptDir);
+                ch->originFile.assign(scriptFile);
             }
         }
     };
@@ -202,15 +204,17 @@ const BytecodeChunk *Compiler::ensureClassMethodCompiled(const UserFunction &uf)
     chunk.originFs = uf.sourceFs.clone();
     chunk.originDir = uf.sourceDir.clone();
     chunk.originFile = uf.sourceFile.clone();
-    auto ins = compiledFuncs_.try_insert(uf.name.clone(), keel::move(chunk));
-    return ins.value;
+    auto ins = compiledFuncs_.try_insert(uf.name.clone(), keel::make_arc<BytecodeChunk>(keel::move(chunk)));
+    return ins.value ? ins.value->get() : nullptr;
 }
 
 const BytecodeChunk *Compiler::findCompiled(keel::StringRef name) const
 {
-    if (const BytecodeChunk *c = scriptLocalCompiledFuncs_.get(name))
-        return c;
-    return compiledFuncs_.get(name);
+    if (const auto *c = scriptLocalCompiledFuncs_.get(name))
+        return c->get();
+    if (const auto *c = compiledFuncs_.get(name))
+        return c->get();
+    return nullptr;
 }
 
 void Compiler::beginScriptScope()
@@ -642,11 +646,12 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
             nuf.closureEnv = nullptr;
             nuf.numUpvalueCaptures = info.upvalueNames.size();
 
+            auto nestedChunkArc = keel::make_arc<BytecodeChunk>(keel::move(nestedChunk));
             if (scriptDepth_ > 0) {
-                scriptLocalCompiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunk));
+                scriptLocalCompiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunkArc));
                 engine_.adoptUserFunction(info.compiledName, keel::move(nuf), /*scriptScope=*/true);
             } else {
-                compiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunk));
+                compiledFuncs_.put(info.compiledName.clone(), keel::move(nestedChunkArc));
                 engine_.adoptUserFunction(info.compiledName, keel::move(nuf), /*scriptScope=*/false);
             }
         }

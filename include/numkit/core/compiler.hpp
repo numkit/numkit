@@ -71,9 +71,11 @@ public:
     const BytecodeChunk *ensureClassMethodCompiled(const UserFunction &uf);
 
     // Workspace-scope compiled functions. Populated by `function` at
+    using CompiledFuncMap = keel::HashMap<keel::String, keel::Arc<BytecodeChunk>>;
+
     // the REPL or by anonymous-function allocation. Cleared by
     // `clear all` / `clear functions` (see Engine::clearUserFunctions).
-    const keel::HashMap<keel::String, BytecodeChunk> &compiledFuncs() const
+    const CompiledFuncMap &compiledFuncs() const
     {
         return compiledFuncs_;
     }
@@ -91,7 +93,7 @@ public:
     // clearCompiledFuncs — that's the whole point of keeping this
     // bucket separate. Its lifetime is bounded by beginScriptScope /
     // endScriptScope pairs.
-    const keel::HashMap<keel::String, BytecodeChunk> &scriptLocalCompiledFuncs() const
+    const CompiledFuncMap &scriptLocalCompiledFuncs() const
     {
         return scriptLocalCompiledFuncs_;
     }
@@ -211,11 +213,13 @@ private:
 
     // Compiled function table (persists across compile() calls) —
     // workspace-scope (cleared by `clear all`/`clear functions`).
-    keel::HashMap<keel::String, BytecodeChunk> compiledFuncs_;
+    // Values are heap-allocated Arcs so HashMap rehashes never invalidate
+    // live CallFrame::chunk pointers or chunkCallCache_ keys on the VM stack.
+    CompiledFuncMap compiledFuncs_;
 
     // Script-lexical compiled functions.
-    keel::HashMap<keel::String, BytecodeChunk> scriptLocalCompiledFuncs_;
-    keel::Array<keel::HashMap<keel::String, BytecodeChunk>> savedScriptLocalCompiledFuncs_;
+    CompiledFuncMap scriptLocalCompiledFuncs_;
+    keel::Array<CompiledFuncMap> savedScriptLocalCompiledFuncs_;
     keel::i32 scriptDepth_ = 0;
 
     keel::u16 varRegWrite(keel::StringRef name);

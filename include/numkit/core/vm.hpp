@@ -65,13 +65,15 @@ public:
     keel::UniquePtr<PausedState> savePausedState();
     void restorePausedState(keel::UniquePtr<PausedState> state);
 
-    void setCompiledFuncs(const keel::HashMap<keel::String, BytecodeChunk> *funcs)
+    using CompiledFuncMap = keel::HashMap<keel::String, keel::Arc<BytecodeChunk>>;
+
+    void setCompiledFuncs(const CompiledFuncMap *funcs)
     {
         compiledFuncs_ = funcs;
         scriptLocalFuncs_ = nullptr;
     }
-    void setCompiledFuncs(const keel::HashMap<keel::String, BytecodeChunk> *funcs,
-                          const keel::HashMap<keel::String, BytecodeChunk> *scriptLocal)
+    void setCompiledFuncs(const CompiledFuncMap *funcs,
+                          const CompiledFuncMap *scriptLocal)
     {
         compiledFuncs_ = funcs;
         scriptLocalFuncs_ = scriptLocal;
@@ -80,12 +82,12 @@ public:
     const BytecodeChunk *findCompiledFunc(keel::StringRef name) const
     {
         if (scriptLocalFuncs_) {
-            if (const BytecodeChunk *c = scriptLocalFuncs_->get(name))
-                return c;
+            if (const auto *c = scriptLocalFuncs_->get(name))
+                return c->get();
         }
         if (compiledFuncs_) {
-            if (const BytecodeChunk *c = compiledFuncs_->get(name))
-                return c;
+            if (const auto *c = compiledFuncs_->get(name))
+                return c->get();
         }
         return nullptr;
     }
@@ -193,8 +195,8 @@ public:
 private:
     Engine &engine_;
     keel::HashMap<keel::String, Value> *nextFrameDynVars_ = nullptr;
-    const keel::HashMap<keel::String, BytecodeChunk> *compiledFuncs_ = nullptr;
-    const keel::HashMap<keel::String, BytecodeChunk> *scriptLocalFuncs_ = nullptr;
+    const CompiledFuncMap *compiledFuncs_ = nullptr;
+    const CompiledFuncMap *scriptLocalFuncs_ = nullptr;
 
     // Register stack — grows dynamically via ensureRegStackCapacity
     static constexpr keel::usize kInitialRegStackSize = 256 * 50;

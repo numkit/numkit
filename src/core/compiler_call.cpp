@@ -1159,7 +1159,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         funcChunk.originDir = keel::move(stamp.sourceDir);
         funcChunk.originFile = keel::move(stamp.sourceFile);
     }
-    compiledFuncs_.put(anonName.clone(), keel::move(funcChunk));
+    compiledFuncs_.put(anonName.clone(), keel::make_arc<BytecodeChunk>(keel::move(funcChunk)));
 
     // Mirror-register the anon-fn into engine.userFuncs_ so that callbacks
     // routed through Engine::callFunctionHandle (TW-side) can find it

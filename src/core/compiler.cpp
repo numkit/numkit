@@ -472,7 +472,7 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
         if (!engine_.isReservedName(name)) {
             if (mayClear_ || !definedRegs_.test(*vr)) {
                 keel::i32 nameIdx = addStringConstant(name);
-                emitAD(OpCode::ASSERT_DEF, *vr, nameIdx);
+                emit(Instruction::make_abcde(OpCode::ASSERT_DEF, *vr, *vr, 0, nameIdx, nargoutContext_));
                 if (!mayClear_ && *vr < chunk_.numParams)
                     definedRegs_.set(*vr);
             }
@@ -517,9 +517,9 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
     // variable injection (`load`/`eval`/`evalin`/`run`) may shadow it in frame.env,
     // in which case ASSERT_DEF checks dynVars/frame.env first and falls back to 0-arg CALL.
     const BuiltinClass *kls = engine_.findClass(name);
-    if (!mayInjectVars_
-        && (engine_.hasFunction(name) || engine_.isKnownLeafName(name)
-            || (kls && kls->construct))) {
+    const bool isKnownFunc = engine_.hasFunction(name) || engine_.isKnownLeafName(name)
+                             || (kls && kls->construct);
+    if (!mayInjectVars_ && isKnownFunc) {
         keel::u16 argBase = nextReg_;
         keel::u16 dst = tempReg();
         keel::i32 funcIdx = addStringConstant(name);
@@ -527,10 +527,20 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
         return dst;
     }
 
-    // Unknown variable — allocate register and emit runtime check.
+    // Unknown variable (or known function shadowed when mayInjectVars_ is true):
+    // emit runtime check. For known functions under mayInjectVars_, write into a
+    // fresh temp register WITHOUT registering `name` in varRegisters_ — otherwise
+    // subsequent `name(arg)` calls (e.g. `h = figure; figure(h);`) would miscompile
+    // as CALL_INDIRECT/array-indexing, and repeated zero-arg calls would cache.
+    if (isKnownFunc) {
+        keel::u16 dst = tempReg();
+        keel::i32 nameIdx = addStringConstant(name);
+        emit(Instruction::make_abcde(OpCode::ASSERT_DEF, dst, 0, 1, nameIdx, nargoutContext_));
+        return dst;
+    }
     keel::u16 reg = varRegLookup(name);
     keel::i32 nameIdx = addStringConstant(name);
-    emitAD(OpCode::ASSERT_DEF, reg, nameIdx);
+    emit(Instruction::make_abcde(OpCode::ASSERT_DEF, reg, reg, 0, nameIdx, nargoutContext_));
     return reg;
 }
 
@@ -1395,7 +1405,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             if (const keel::u16 *uv = upvalueRegs_.get(fname))
                 emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, *uv, 0, nameIdx, 0));
             else
-                emitAD(OpCode::ASSERT_DEF, fhReg, nameIdx);
+                emit(Instruction::make_abcde(OpCode::ASSERT_DEF, fhReg, fhReg, 0, nameIdx, 1));
             const keel::u16 noutF = keel::as<keel::u16>(std::max<keel::usize>(nout, 1));
             keel::u16 outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
