@@ -11,6 +11,7 @@
 #include <keel/time.h>
 #include <keel/utf8.h>
 #include <numkit/builtin/timefun.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -21,7 +22,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
 #include <tuple>
 
 namespace numkit::builtin::detail {
@@ -574,7 +574,7 @@ inline Dims broadcastDims(const Value &a, const Value &b, const char *fnName)
         return a.dims();
     if (na == nb)
         return a.dims();
-    throw std::runtime_error(
+    throw numkit::Error(
         keel::format("numkit:{}:DimMismatch: Arrays have incompatible sizes for this operation.", fnName).c_str());
 }
 
@@ -614,7 +614,7 @@ inline void mutateDatetimeComponent(Value &self, keel::i32 comp, const Value &va
     const keel::usize n = self.objectCount();
     const keel::usize nv = val.numel();
     if (nv != 1 && nv != n)
-        throw std::runtime_error("numkit:datetime:SizeMismatch: Assigned value must be a scalar or match the datetime array size.");
+        throw numkit::Error("numkit:datetime:SizeMismatch: Assigned value must be a scalar or match the datetime array size.");
     for (keel::usize i = 0; i < n; ++i) {
         auto *p = dtElemMut(self, i);
         if (!p)
@@ -662,7 +662,7 @@ inline Value constructDurationFromUnit(keel::ArrayRef<Value> args, keel::f64 sca
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("numkit:{}:InvalidInput: Expected a numeric or duration input.", fnName).c_str());
     const keel::usize n = x.numel();
     keel::Array<keel::f64> secs(mr);
@@ -694,7 +694,7 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
         return out;
     }
     if (!x.isNumeric() && !x.isLogical())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("numkit:{}:InvalidInput: Expected a numeric integer array.", fnName).c_str());
     const keel::usize n = x.numel();
     keel::Array<CalDurElemPayload> items(mr);
@@ -702,7 +702,7 @@ inline Value constructCalDurFromUnit(keel::ArrayRef<Value> args, keel::i64 month
     for (keel::usize i = 0; i < n; ++i) {
         keel::f64 v = x.elemAsDouble(i);
         if (!keel::is_finite(v) || keel::floor(v) != v)
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("numkit:{}:MustBeInteger: Calendar duration quantities must be finite integers.", fnName).c_str());
         keel::i64 iv = keel::as<keel::i64>(v);
         items[i] = CalDurElemPayload(iv * monthMult, iv * dayMult, 0.0);
@@ -770,7 +770,7 @@ void toc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     } else if (ctx.engine->ticWasCalled()) {
         startNs = ctx.engine->ticTimer();
     } else {
-        throw std::runtime_error("toc: You must call 'tic' before calling 'toc'.");
+        throw numkit::Error("toc: You must call 'tic' before calling 'toc'.");
     }
     const keel::f64 elapsed = (nowNs >= startNs) ? keel::as<keel::f64>(nowNs - startNs) * 1e-9 : 0.0;
     if (nargout > 0) {
@@ -831,7 +831,7 @@ void weekday_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             if (fmt == "long")
                 wantLong = true;
             else if (fmt != "short")
-                throw std::runtime_error("weekday: format must be 'short' or 'long'");
+                throw numkit::Error("weekday: format must be 'short' or 'long'");
         }
         static const char *kShort[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         static const char *kLong[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
@@ -1130,7 +1130,7 @@ void register_timefun(Engine &engine) {
                 }
                 return makeDurationArray(d, secs.as_ref(), fmt.as_ref(), mr);
             }
-            throw std::runtime_error("numkit:duration:InvalidArgs: Expected duration(H, MI, S) or duration([H MI S]).");
+            throw numkit::Error("numkit:duration:InvalidArgs: Expected duration(H, MI, S) or duration([H MI S]).");
         };
 
         dur.propGet = [](const Value &self, keel::StringRef name, Value &out,
@@ -1292,7 +1292,7 @@ void register_timefun(Engine &engine) {
                 }
                 if (!lhs.isObject() || lhs.objectClassNameRef() != "duration"
                     || !rhs.isObject() || rhs.objectClassNameRef() != "duration")
-                    throw std::runtime_error("numkit:duration:TypeMismatch: Both operands must be durations.");
+                    throw numkit::Error("numkit:duration:TypeMismatch: Both operands must be durations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
                 keel::Array<keel::f64> secs(mr);
@@ -1473,7 +1473,7 @@ void register_timefun(Engine &engine) {
                 }
                 return makeCalDurArray(d, items.as_ref(), mr);
             }
-            throw std::runtime_error("numkit:calendarDuration:InvalidArgs: Expected calendarDuration(Y, M, D) or calendarDuration(Y, M, D, H, MI, S).");
+            throw numkit::Error("numkit:calendarDuration:InvalidArgs: Expected calendarDuration(Y, M, D) or calendarDuration(Y, M, D, H, MI, S).");
         };
 
         cal.methods.put(keel::String("calyears", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
@@ -1559,7 +1559,7 @@ void register_timefun(Engine &engine) {
                 }
                 if (!lhs.isObject() || lhs.objectClassNameRef() != "calendarDuration"
                     || !rhs.isObject() || rhs.objectClassNameRef() != "calendarDuration")
-                    throw std::runtime_error("numkit:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
+                    throw numkit::Error("numkit:calendarDuration:TypeMismatch: Both operands must be calendarDurations.");
                 Dims d = broadcastDims(lhs, rhs, sign > 0 ? "plus" : "minus");
                 const keel::usize n = d.numel();
                 keel::Array<CalDurElemPayload> items(mr);
@@ -1703,7 +1703,7 @@ void register_timefun(Engine &engine) {
             // datetime(x, 'ConvertFrom', type)
             if (!convFrom.empty()) {
                 if (nPos != 1 || (!args[0].isNumeric() && !args[0].isLogical()))
-                    throw std::runtime_error("numkit:datetime:InvalidConvertFrom: Expected a single numeric input with 'ConvertFrom'.");
+                    throw numkit::Error("numkit:datetime:InvalidConvertFrom: Expected a single numeric input with 'ConvertFrom'.");
                 const Value &x = args[0];
                 const keel::usize n = x.numel();
                 keel::Array<keel::f64> sds(mr);
@@ -1729,7 +1729,7 @@ void register_timefun(Engine &engine) {
                         keel::i64 d = iv % 100;
                         sds[i] = composeSerialDay(keel::as<keel::f64>(y), keel::as<keel::f64>(m), keel::as<keel::f64>(d));
                     } else {
-                        throw std::runtime_error(
+                        throw numkit::Error(
                             keel::format("numkit:datetime:UnknownConvertFrom: Unsupported ConvertFrom type '{}'.", convFrom).c_str());
                     }
                 }
@@ -1802,7 +1802,7 @@ void register_timefun(Engine &engine) {
                             return makeDatetimeArray(args[0].dims(), sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
                         }
                     }
-                    throw std::runtime_error("numkit:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
+                    throw numkit::Error("numkit:datetime:InvalidDatevecSize: Numeric matrix input to datetime must have 3 or 6 columns.");
                 }
                 keel::Array<keel::f64> sds(mr);
                 sds.resize(R);
@@ -1823,12 +1823,12 @@ void register_timefun(Engine &engine) {
                 Dims outDims(1, 1);
                 for (keel::usize k = 0; k < nPos; ++k) {
                     if (!args[k].isNumeric() && !args[k].isLogical())
-                        throw std::runtime_error("numkit:datetime:NonNumericComponent: Date/time components must be numeric.");
+                        throw numkit::Error("numkit:datetime:NonNumericComponent: Date/time components must be numeric.");
                     if (args[k].numel() != 1) {
                         if (outDims.numel() == 1)
                             outDims = args[k].dims();
                         else if (args[k].dims() != outDims && args[k].numel() != outDims.numel())
-                            throw std::runtime_error("numkit:datetime:ComponentSizeMismatch: Date/time component arrays must be the same size or scalar.");
+                            throw numkit::Error("numkit:datetime:ComponentSizeMismatch: Date/time component arrays must be the same size or scalar.");
                     }
                 }
                 const keel::usize n = outDims.numel();
@@ -1850,7 +1850,7 @@ void register_timefun(Engine &engine) {
                 return makeDatetimeArray(outDims, sds.as_ref(), fmt.as_ref(), tz.as_ref(), mr);
             }
 
-            throw std::runtime_error("numkit:datetime:InvalidSyntax: Unsupported arguments to datetime constructor.");
+            throw numkit::Error("numkit:datetime:InvalidSyntax: Unsupported arguments to datetime constructor.");
         };
 
         dt.propGet = [](const Value &self, keel::StringRef name, Value &out,
@@ -2198,7 +2198,7 @@ void register_timefun(Engine &engine) {
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
-                throw std::runtime_error("numkit:between:InvalidInput: Expected two datetime inputs.");
+                throw numkit::Error("numkit:between:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &rhs = args[0];
             Dims d = broadcastDims(self, rhs, "between");
@@ -2224,7 +2224,7 @@ void register_timefun(Engine &engine) {
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.size() < 2)
-                throw std::runtime_error("numkit:dateshift:NotEnoughInputs: Expected dateshift(t, 'start'|'end', unit).");
+                throw numkit::Error("numkit:dateshift:NotEnoughInputs: Expected dateshift(t, 'start'|'end', unit).");
             auto *mr = ctx.engine->allocator();
             keel::String rule = args[0].toString();
             keel::String unit = args[1].toString();
@@ -2465,7 +2465,7 @@ void register_timefun(Engine &engine) {
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
-                throw std::runtime_error("numkit:intersect:InvalidInput: Expected two datetime inputs.");
+                throw numkit::Error("numkit:intersect:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &other = args[0];
             bool stable = false;
@@ -2531,7 +2531,7 @@ void register_timefun(Engine &engine) {
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                           keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (args.empty() || !args[0].isObject() || args[0].objectClassNameRef() != "datetime")
-                throw std::runtime_error("numkit:ismember:InvalidInput: Expected two datetime inputs.");
+                throw numkit::Error("numkit:ismember:InvalidInput: Expected two datetime inputs.");
             auto *mr = ctx.engine->allocator();
             const Value &other = args[0];
             constexpr keel::f64 kTol = 1e-9 / kSecondsPerDay;
@@ -2593,7 +2593,7 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd + dy;
                 }
             } else {
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("numkit:datetime:InvalidPlusOperand: Cannot add value of type '{}' to a datetime.",
                                  mtypeName(other.type())).c_str());
             }
@@ -2609,7 +2609,7 @@ void register_timefun(Engine &engine) {
             const Value &lhs = args[0];
             const Value &rhs = args[1];
             if (!lhs.isObject() || lhs.objectClassNameRef() != "datetime")
-                throw std::runtime_error("numkit:datetime:InvalidMinus: Cannot subtract a datetime from a non-datetime.");
+                throw numkit::Error("numkit:datetime:InvalidMinus: Cannot subtract a datetime from a non-datetime.");
 
             // datetime - datetime -> duration
             if (rhs.isObject() && rhs.objectClassNameRef() == "datetime") {
@@ -2651,7 +2651,7 @@ void register_timefun(Engine &engine) {
                     sds[i] = sd - dy;
                 }
             } else {
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("numkit:datetime:InvalidMinusOperand: Cannot subtract value of type '{}' from a datetime.",
                                  mtypeName(rhs.type())).c_str());
             }
@@ -2720,7 +2720,7 @@ void register_timefun(Engine &engine) {
             const Value &stopVal = (args.size() == 3) ? args[2] : args[1];
             if (!startVal.isObject() || startVal.objectClassNameRef() != "datetime"
                 || !stopVal.isObject() || stopVal.objectClassNameRef() != "datetime")
-                throw std::runtime_error("numkit:datetime:InvalidColonEndpoints: Colon endpoints must be datetimes.");
+                throw numkit::Error("numkit:datetime:InvalidColonEndpoints: Colon endpoints must be datetimes.");
             keel::f64 startSd = dtElem(startVal, 0)->serialDay;
             keel::f64 stopSd = dtElem(stopVal, 0)->serialDay;
             const auto *p0 = dtElem(startVal, 0);
@@ -2734,7 +2734,7 @@ void register_timefun(Engine &engine) {
                                     + keel::as<keel::f64>(cp->days)
                                     + cp->seconds / kSecondsPerDay;
                 if (approxStep == 0.0)
-                    throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
+                    throw numkit::Error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (keel::i64 k = 0; k < 100000; ++k) {
                     keel::f64 cur = addCalendarMonths(startSd, cp->months * k, cp->days * k, cp->seconds * keel::as<keel::f64>(k));
                     if ((approxStep > 0.0 && cur > stopSd + kTol)
@@ -2750,10 +2750,10 @@ void register_timefun(Engine &engine) {
                     else if (args[1].isNumeric())
                         stepDays = args[1].toScalar();
                     else
-                        throw std::runtime_error("numkit:datetime:InvalidColonStep: Unsupported colon step type.");
+                        throw numkit::Error("numkit:datetime:InvalidColonStep: Unsupported colon step type.");
                 }
                 if (stepDays == 0.0)
-                    throw std::runtime_error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
+                    throw numkit::Error("numkit:datetime:ZeroColonStep: Colon step cannot be zero.");
                 for (keel::i64 k = 0; k < 100000; ++k) {
                     keel::f64 cur = startSd + keel::as<keel::f64>(k) * stepDays;
                     if ((stepDays > 0.0 && cur > stopSd + kTol)

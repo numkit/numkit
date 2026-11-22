@@ -6,6 +6,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
@@ -15,7 +16,6 @@
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
-#include <stdexcept>
 #include <utility>
 #include <numkit/core/build_info.hpp>
 
@@ -155,7 +155,7 @@ void which_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
                     CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("which requires a name argument");
+        throw numkit::Error("which requires a name argument");
     auto *mr = ctx.engine->allocator();
     keel::String qname = (args[0].isChar() || args[0].isString())
                              ? args[0].toString()
@@ -308,14 +308,14 @@ void cd_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         return;
     }
     if (!args[0].isChar())
-        throw std::runtime_error("cd: directory must be a string");
+        throw numkit::Error("cd: directory must be a string");
     keel::String target = args[0].toString();
     auto rp = ctx.engine->resolvePath(target);
     if (!rp.fs)
-        throw std::runtime_error(keel::format("cd: cannot resolve '{}'", target).c_str());
+        throw numkit::Error(keel::format("cd: cannot resolve '{}'", target).c_str());
     auto st = rp.fs->stat(rp.path);
     if (!st || st->kind != FileStat::Kind::Directory)
-        throw std::runtime_error(keel::format("cd: not a directory: {}", target).c_str());
+        throw numkit::Error(keel::format("cd: not a directory: {}", target).c_str());
     keel::String prev = getActualCwd(*ctx.engine, mr);
     ctx.engine->setCwd(rp.path);
     // With output, return the previous cwd.
@@ -335,7 +335,7 @@ void mkdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
                     CallContext &ctx)
 {
     if (args.empty() || !args[0].isChar())
-        throw std::runtime_error("mkdir requires a directory name");
+        throw numkit::Error("mkdir requires a directory name");
     auto *mr = ctx.engine->allocator();
     keel::String p = args[0].toString();
     if (args.size() >= 2 && args[1].isChar()) {
@@ -347,7 +347,7 @@ void mkdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
     }
     auto rp = ctx.engine->resolvePath(p);
     if (!rp.fs)
-        throw std::runtime_error(keel::format("mkdir: cannot resolve '{}'", p).c_str());
+        throw numkit::Error(keel::format("mkdir: cannot resolve '{}'", p).c_str());
     bool ok = true;
     keel::String msg(mr);
     try {
@@ -359,7 +359,7 @@ void mkdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
     if (nargout > 0)
         outs[0] = Value::logicalScalar(ok, mr);
     else if (!ok)
-        throw std::runtime_error(keel::format("mkdir: {}", msg).c_str());
+        throw numkit::Error(keel::format("mkdir: {}", msg).c_str());
     else
         outs[0] = Value();
     if (nargout > 1)
@@ -370,12 +370,12 @@ void rmdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
                     CallContext &ctx)
 {
     if (args.empty() || !args[0].isChar())
-        throw std::runtime_error("rmdir requires a directory name");
+        throw numkit::Error("rmdir requires a directory name");
     auto *mr = ctx.engine->allocator();
     keel::String p = args[0].toString();
     auto rp = ctx.engine->resolvePath(p);
     if (!rp.fs)
-        throw std::runtime_error(keel::format("rmdir: cannot resolve '{}'", p).c_str());
+        throw numkit::Error(keel::format("rmdir: cannot resolve '{}'", p).c_str());
     bool ok = true;
     keel::String msg(mr);
     try {
@@ -387,7 +387,7 @@ void rmdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
     if (nargout > 0)
         outs[0] = Value::logicalScalar(ok, mr);
     else if (!ok)
-        throw std::runtime_error(keel::format("rmdir: {}", msg).c_str());
+        throw numkit::Error(keel::format("rmdir: {}", msg).c_str());
     else
         outs[0] = Value();
     if (nargout > 1)
@@ -419,11 +419,11 @@ void delete_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
         if (a.isNumeric() || a.isEmpty())
             continue;
         if (!a.isChar() && !a.isString())
-            throw std::runtime_error("delete: filename must be a string");
+            throw numkit::Error("delete: filename must be a string");
         keel::String p = a.toString();
         auto rp = ctx.engine->resolvePath(p);
         if (!rp.fs)
-            throw std::runtime_error(keel::format("delete: cannot resolve '{}'", p).c_str());
+            throw numkit::Error(keel::format("delete: cannot resolve '{}'", p).c_str());
         rp.fs->unlink(rp.path);
     }
     if (!anyFigureClosed)
@@ -448,7 +448,7 @@ void dir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         keel::StringRef patPart = (sep == keel::kInvalidIndex) ? target.as_ref() : target.as_ref().substr(sep + 1);
         rp = ctx.engine->resolvePath(dirPart);
         if (!rp.fs)
-            throw std::runtime_error(keel::format("dir: cannot resolve '{}'", target).c_str());
+            throw numkit::Error(keel::format("dir: cannot resolve '{}'", target).c_str());
         auto all = rp.fs->listDir(rp.path);
         for (auto &e : all) {
             if ((e.name == "." || e.name == "..") && (patPart.empty() || patPart[0] != '.'))
@@ -461,7 +461,7 @@ void dir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     } else {
         rp = ctx.engine->resolvePath(target);
         if (!rp.fs)
-            throw std::runtime_error(keel::format("dir: cannot resolve '{}'", target).c_str());
+            throw numkit::Error(keel::format("dir: cannot resolve '{}'", target).c_str());
         auto st = rp.fs->stat(rp.path);
         if (st && st->kind == FileStat::Kind::File) {
             DirEntry e;
@@ -519,7 +519,7 @@ void ls_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                                        : args[0].toString();
     auto rp = ctx.engine->resolvePath(target);
     if (!rp.fs)
-        throw std::runtime_error(keel::format("ls: cannot resolve '{}'", target).c_str());
+        throw numkit::Error(keel::format("ls: cannot resolve '{}'", target).c_str());
     auto entries = rp.fs->listDir(rp.path);
     if (nargout == 0) {
         keel::String out(mr);
@@ -550,7 +550,7 @@ void formatteddisplaytext_impl_reg(keel::ArrayRef<Value> args, keel::usize,
                                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("formatteddisplaytext requires 1 argument");
+        throw numkit::Error("formatteddisplaytext requires 1 argument");
     outs[0] = Value::fromString(args[0].formatDisplay(""), ctx.engine->allocator());
 }
 
@@ -559,7 +559,7 @@ void format_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
 {
     if (!args.empty()) {
         if (!args[0].isChar() && !args[0].isString())
-            throw std::runtime_error("format: argument must be a string");
+            throw numkit::Error("format: argument must be a string");
         static constexpr keel::StringRef kKnown[] = {
             "short", "long", "compact", "loose",
             "shortg", "longg", "shorte", "longe",
@@ -567,7 +567,7 @@ void format_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
         };
         const keel::String s = args[0].toString();
         if (!s.is_one_of_ignore_ascii_case(keel::ArrayRef<keel::StringRef>(kKnown)))
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("format: unrecognised format spec '{}'", s).c_str());
     }
     // No-op: nk's display already runs at full precision.
@@ -586,7 +586,7 @@ void optimset_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
     s.field("TolX")        = Value::scalar(1e-6, mr);
     for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
-            throw std::runtime_error("optimset: option name must be a string");
+            throw numkit::Error("optimset: option name must be a string");
         s.field(args[i].toString()) = args[i + 1];
     }
     outs[0] = std::move(s);
@@ -596,7 +596,7 @@ void optimget_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
                        CallContext &)
 {
     if (args.size() < 2)
-        throw std::runtime_error("optimget requires (options, name[, default])");
+        throw numkit::Error("optimget requires (options, name[, default])");
     const Value &opts = args[0];
     const keel::String name = args[1].toString();
     if (opts.isStruct() && opts.hasField(name)) {
@@ -611,7 +611,7 @@ void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                         keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("freqspace requires (n[, 'whole'])");
+        throw numkit::Error("freqspace requires (n[, 'whole'])");
     keel::usize n_rows = 0, n_cols = 0;
     const Value &a0 = args[0];
     if (a0.numel() == 1) {
@@ -621,7 +621,7 @@ void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         n_rows = argcheck::arrayDim(a0.elemAsDouble(0), "freqspace");
         n_cols = argcheck::arrayDim(a0.elemAsDouble(1), "freqspace");
     } else {
-        throw std::runtime_error("freqspace: N must be a scalar or 2-element vector");
+        throw numkit::Error("freqspace: N must be a scalar or 2-element vector");
     }
     bool whole = false;
     if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
@@ -672,13 +672,13 @@ void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     if (nargout > 1) {
         if (whole)
-            throw std::runtime_error("freqspace: 2-output 'whole' form is not supported");
+            throw numkit::Error("freqspace: 2-output 'whole' form is not supported");
         outs[0] = centered_vec(n_cols);
         outs[1] = centered_vec(n_rows);
         return;
     }
     if (a0.numel() == 2)
-        throw std::runtime_error("freqspace: 2-vec input requires 2 output args");
+        throw numkit::Error("freqspace: 2-vec input requires 2 output args");
     outs[0] = whole ? whole_vec(n_rows) : half_vec(n_rows);
 }
 

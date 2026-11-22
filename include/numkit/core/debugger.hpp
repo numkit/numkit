@@ -14,12 +14,12 @@
 
 #include <keel/array.h>
 #include <keel/core.h>
+#include <keel/exception.h>
 #include <keel/hash_map.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/value/value.hpp>
 #include <cstdint>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -241,11 +241,11 @@ private:
 // ============================================================
 // DebugStopException
 // ============================================================
-class DebugStopException : public std::runtime_error
+class DebugStopException : public keel::Exception
 {
 public:
     DebugStopException()
-        : std::runtime_error("Execution stopped by debugger")
+        : keel::Exception("Execution stopped by debugger", keel::Error{keel::ErrorCode::Unknown, 0})
     {}
 };
 

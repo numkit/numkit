@@ -3,6 +3,7 @@
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
@@ -10,7 +11,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -413,7 +413,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
     chunk_.returnNames = funcDef->returnNames.clone();
     if (funcDef->paramNames.size() >= keel::as<keel::usize>(kInvalidReg)
         || funcDef->returnNames.size() >= keel::as<keel::usize>(kInvalidReg))
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Compiler: function '{}' declares more than 65534 parameters or returns",
                          funcDef->strValue)
                 .c_str());
@@ -803,11 +803,11 @@ keel::u16 Compiler::compileDeleteAssign(const ASTNode *node)
 {
     auto *lhs = node->children[0].get();
     if (lhs->type != NodeType::CALL || lhs->children.empty())
-        throw std::runtime_error("Compiler: invalid delete assignment syntax");
+        throw numkit::Error("Compiler: invalid delete assignment syntax");
 
     auto *target = lhs->children[0].get();
     if (target->type != NodeType::IDENTIFIER)
-        throw std::runtime_error("Compiler: invalid delete target");
+        throw numkit::Error("Compiler: invalid delete target");
 
     keel::u16 arr = varRegWrite(target->strValue);
     emitUpvalLoadRawIfShared(target->strValue, arr);

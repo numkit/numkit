@@ -9,8 +9,8 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/builtin/lang.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
-#include <stdexcept>
 
 namespace numkit::builtin {
 
@@ -76,7 +76,7 @@ Value isvarname(const Value &a, keel::Allocator *mr)
 Value isvarname(keel::ArrayRef<Value> args, keel::Allocator *mr)
 {
     if (args.empty())
-        throw std::runtime_error("isvarname requires 1 argument");
+        throw numkit::Error("isvarname requires 1 argument");
     return isvarname(args[0], mr);
 }
 

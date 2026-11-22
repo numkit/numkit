@@ -2,6 +2,7 @@
 // Parameterized: runs on both TreeWalker and VM backends
 
 #include <keel/core.h>
+#include <numkit/value/error.hpp>
 #include <keel/math.h>
 #include "dual_engine_fixture.hpp"
 
@@ -928,7 +929,7 @@ TEST_P(BuiltinTest, IdivideRejectsDoubleDouble)
 {
     // MATLAB R2025b: idivide(double, double) → "At least one argument
     // must belong to an integer class."
-    EXPECT_THROW(eval("y = idivide(10, 3);"), std::runtime_error);
+    EXPECT_THROW(eval("y = idivide(10, 3);"), numkit::Error);
 }
 
 TEST_P(BuiltinTest, Bsxfun)
@@ -2221,7 +2222,7 @@ TEST_P(BuiltinTest, Reshape)
 
 TEST_P(BuiltinTest, ErrorFunction)
 {
-    EXPECT_THROW(eval("error('test error');"), std::runtime_error);
+    EXPECT_THROW(eval("error('test error');"), numkit::Error);
 }
 
 // ── String functions ────────────────────────────────────────

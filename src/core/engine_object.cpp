@@ -2,6 +2,7 @@
 // Engine object model: BuiltinClass registry, display, operator & subsref
 // dispatch, object-array slice store, and classdef registration/access control.
 #include <keel/array.h>
+#include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -12,12 +13,12 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/tree_walker.hpp>
 #include <numkit/core/vm.hpp>
 #include "engine_internal.hpp"
 #include <algorithm>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -25,7 +26,7 @@ void Engine::registerClass(BuiltinClass cls)
 {
     if (classes_.contains(cls.name)) {
         auto msg = keel::format("Engine::registerClass: duplicate class '{}'", cls.name);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     keel::String key = cls.name.clone();
     classes_.put(keel::move(key), keel::move(cls));
@@ -166,7 +167,7 @@ bool Engine::tryObjectBinaryOp(keel::StringRef op, const Value &lhs, const Value
         }
     }
     auto msg = keel::format("Undefined operator '{}' for input arguments of type '{}'.", op, clsName);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 bool Engine::tryObjectUnaryOp(keel::StringRef op, const Value &operand,
@@ -193,7 +194,7 @@ bool Engine::tryObjectUnaryOp(keel::StringRef op, const Value &operand,
     if (op == "'" || op == ".'")
         return false;
     auto msg = keel::format("Undefined operator '{}' for input arguments of type '{}'.", op, clsName);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 Value Engine::applyBinaryOp(keel::StringRef op, const Value &lhs, const Value &rhs)
@@ -209,7 +210,7 @@ Value Engine::applyBinaryOp(keel::StringRef op, const Value &lhs, const Value &r
     if (const auto *fn = binaryOps_.get(op))
         return (*fn)(lhs, rhs);
     auto msg = keel::format("Undefined binary operator: {}", op);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 Value Engine::applyUnaryOp(keel::StringRef op, const Value &operand)
@@ -222,7 +223,7 @@ Value Engine::applyUnaryOp(keel::StringRef op, const Value &operand)
     if (const auto *fn = unaryOps_.get(op))
         return (*fn)(operand);
     auto msg = keel::format("Undefined unary operator: {}", op);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 const BytecodeChunk *Engine::resolveBinaryOpChunk(keel::StringRef op, const Value &lhs,
@@ -371,7 +372,7 @@ Value Engine::objectPropGet(const Value &obj, keel::StringRef name, Environment 
         }
     }
     auto msg = keel::format("No appropriate property '{}' for class '{}'", name, clsName);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 void Engine::objectPropSet(Value &objSlot, keel::StringRef name,
@@ -385,14 +386,14 @@ void Engine::objectPropSet(Value &objSlot, keel::StringRef name,
     }
     auto msg = keel::format("Cannot set property '{}' on class '{}'",
                             name, objSlot.objectClassNameRef());
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 void Engine::objectElemPropSet(Value &objSlot, keel::usize linearIdx, keel::StringRef name,
                                const Value &rhs, Environment *env)
 {
     if (linearIdx >= objSlot.objectCount())
-        throw std::runtime_error("Index exceeds object array bounds");
+        throw numkit::Error("Index exceeds object array bounds");
     Value elem = objSlot.objectSubArray(keel::ArrayRef<keel::usize>(&linearIdx, 1), mr_);
     objectPropSet(elem, name, rhs, env);
     if (!objSlot.objectIsHandle())
@@ -575,13 +576,13 @@ static void enforceAccess(Engine *engine, Access level, keel::StringRef declClas
         auto msg = keel::format(
             "Cannot set property '{}': it has immutable SetAccess (settable only in the {} constructor)",
             name, declClass);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     if (engine->classCtxAllows(declClass, /*privateOnly=*/level == Access::Private))
         return;
     auto msg = keel::format("Cannot access {} '{}' of class '{}': it has {} access",
                             kind, name, declClass, accessWord(level));
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // Find a property by name in a class descriptor (linear; property counts are
@@ -860,7 +861,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         const auto &base = *bp;
         if (base->isSealed) {
             auto msg = keel::format("Cannot subclass sealed class '{}'", superName);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         desc->isHandle = desc->isHandle || base->isHandle;
         // Properties: base first; a derived property of the same name fully
@@ -1079,7 +1080,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             if (pi->isConstant) {
                 auto msg = keel::format("Cannot set Constant property '{}' of class '{}'",
                                         nameRef, desc->name);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             if (pi->setAccess != Access::Public)
                 enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", nameRef);
@@ -1088,7 +1089,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                                 "dynamicprops")
                           == desc->superclasses.end()) {
             auto msg = keel::format("No public property '{}' for class '{}'", nameRef, desc->name);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         if (const auto *sp = desc->setters.get(nameRef);
             sp && !ctx.engine->isPropAccessorActive((*sp)->name)) {
@@ -1381,11 +1382,11 @@ keel::Array<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::Array
     // is needed. Falls back to the TreeWalker if the body can't VM-compile.
     if (backend_ == Backend::VM) {
         if (!vm_)
-            throw std::runtime_error("classdef methods require an active VM");
+            throw numkit::Error("classdef methods require an active VM");
         const BytecodeChunk *cc = ensureClassMethodChunk(uf);
         if (!cc) {
             auto msg = keel::format("Failed to compile classdef method '{}'", uf.name);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         return vm_->callReentrant(*cc, args, std::max<keel::usize>(nout, 1), uf.ownerClass,
                                   /*isCtor=*/false);
@@ -1394,7 +1395,7 @@ keel::Array<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::Array
         ClassCtxGuard ctx(this, uf.ownerClass, /*isCtor=*/false);
         return treeWalker_->runClassMethod(uf, args, nout);
     }
-    throw std::runtime_error("classdef methods require the interpreter backend");
+    throw numkit::Error("classdef methods require the interpreter backend");
 }
 
 Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
@@ -1402,11 +1403,11 @@ Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
 {
     if (backend_ == Backend::VM) {
         if (!vm_)
-            throw std::runtime_error("classdef constructor requires an active VM");
+            throw numkit::Error("classdef constructor requires an active VM");
         const BytecodeChunk *cc = ensureClassMethodChunk(ctor);
         if (!cc) {
             auto msg = keel::format("Failed to compile classdef constructor '{}'", ctor.name);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         auto r = vm_->callReentrant(*cc, args, 1, ctor.ownerClass, /*isCtor=*/true, &seed);
         return r.empty() ? seed : keel::move(r[0]);
@@ -1415,7 +1416,7 @@ Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
         ClassCtxGuard ctx(this, ctor.ownerClass, /*isCtor=*/true);
         return treeWalker_->runClassCtor(ctor, seed, args);
     }
-    throw std::runtime_error("classdef constructor requires the interpreter backend");
+    throw numkit::Error("classdef constructor requires the interpreter backend");
 }
 
 Value Engine::evalConstExpr(const ASTNode *expr)
@@ -1424,7 +1425,7 @@ Value Engine::evalConstExpr(const ASTNode *expr)
         return Value::Empty;
     if (backend_ == Backend::VM) {
         if (!compiler_ || !vm_)
-            throw std::runtime_error("evalConstExpr: VM backend is unavailable");
+            throw numkit::Error("evalConstExpr: VM backend is unavailable");
         ASTNode fn(NodeType::FUNCTION_DEF);
         fn.strValue.assign("__const_expr__");
         fn.returnNames.push_back(keel::String::from("__result__"));
@@ -1445,7 +1446,7 @@ Value Engine::evalConstExpr(const ASTNode *expr)
     }
     if (treeWalker_)
         return treeWalker_->evalExpressionPublic(expr, &constantsEnv());
-    throw std::runtime_error("evalConstExpr: interpreter backend is unavailable");
+    throw numkit::Error("evalConstExpr: interpreter backend is unavailable");
 }
 
 const BytecodeChunk *Engine::ensureClassMethodChunk(const UserFunction &uf)
@@ -1520,7 +1521,7 @@ void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef pro
         if (pi->isConstant) {
             auto msg = keel::format("Cannot set Constant property '{}' of class '{}'",
                                     prop, className);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         if (pi->setAccess != Access::Public)
             enforceAccess(this, pi->setAccess, pi->declClass, "property", prop);
@@ -1528,7 +1529,7 @@ void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef pro
                && std::find(desc.superclasses.begin(), desc.superclasses.end(), "dynamicprops")
                       == desc.superclasses.end()) {
         auto msg = keel::format("No public property '{}' for class '{}'", prop, className);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 }
 
@@ -1538,7 +1539,7 @@ Value Engine::superConstruct(keel::StringRef base, const Value &seed,
     const auto *dp = classDefs_.get(base);
     if (!dp) {
         auto msg = keel::format("superclass '{}' is not a classdef", base);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     const auto &desc = *dp;
     // A base with no explicit constructor contributes only its default
@@ -1554,13 +1555,13 @@ keel::Array<Value> Engine::superMethod(keel::StringRef base, keel::StringRef met
     const auto *dp = classDefs_.get(base);
     if (!dp) {
         auto msg = keel::format("superclass '{}' is not a classdef", base);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     const auto &desc = *dp;
     const auto *mp = desc->methods.get(method);
     if (!mp) {
         auto msg = keel::format("superclass '{}' has no method '{}'", base, method);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     // Enforce the base method's access from the calling context (the current
     // top frame is the subclass method making the super-call): a `protected`
@@ -1628,7 +1629,7 @@ void Engine::enforceCtorAccess(keel::StringRef className)
         if (!classCtxAllows((*dp)->ctorDeclClass, /*privateOnly=*/lvl == Access::Private)) {
             auto msg = keel::format("Cannot call the {} constructor of '{}' from outside the class",
                                     accessWord(lvl), className);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
     }
 }
@@ -1644,13 +1645,13 @@ Value Engine::makeDefaultInstance(keel::StringRef className)
     const auto *dp = classDefs_.get(className);
     if (!dp) {
         auto msg = keel::format("'{}' is not a classdef", className);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     const auto &desc = *dp;
     if (desc->isAbstract) {
         auto msg = keel::format("Cannot instantiate abstract class '{}' (unimplemented abstract method)",
                                 className);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     auto st = keel::make_arc_in<ObjectState>(mr_, mr_);
     for (const auto &p : desc->props)

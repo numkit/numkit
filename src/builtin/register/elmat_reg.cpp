@@ -7,6 +7,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/builtin/elmat.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/value/value.hpp>
@@ -14,7 +15,6 @@
 
 #include <keel/random.h>
 #include <algorithm>
-#include <stdexcept>
 #include <utility>
 
 namespace numkit::builtin::detail {
@@ -159,14 +159,14 @@ void rands_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
 
 void head_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
               CallContext &ctx) {
-    if (args.empty()) throw std::runtime_error("head requires at least 1 argument");
+    if (args.empty()) throw numkit::Error("head requires at least 1 argument");
     keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "head") : 8;
     outs[0] = numkit::builtin::head(args[0], k, ctx.engine->allocator());
 }
 
 void tail_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
               CallContext &ctx) {
-    if (args.empty()) throw std::runtime_error("tail requires at least 1 argument");
+    if (args.empty()) throw numkit::Error("tail requires at least 1 argument");
     keel::usize k = (args.size() > 1) ? argcheck::arrayDim(args[1], "tail") : 8;
     outs[0] = numkit::builtin::tail(args[0], k, ctx.engine->allocator());
 }
@@ -174,7 +174,7 @@ void tail_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
 void bsxfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                 CallContext &ctx) {
     if (args.size() < 3)
-        throw std::runtime_error("bsxfun requires at least 3 arguments (fun, A, B)");
+        throw numkit::Error("bsxfun requires at least 3 arguments (fun, A, B)");
     const auto &fn = args[0];
     const auto &a = args[1];
     const auto &b = args[2];
@@ -204,7 +204,7 @@ void bsxfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     keel::usize ar = a.dims().rows(), ac = a.dims().cols();
     keel::usize br = b.dims().rows(), bc = b.dims().cols();
     if ((ar != br && ar != 1 && br != 1) || (ac != bc && ac != 1 && bc != 1)) {
-        throw std::runtime_error("bsxfun: non-singleton dimensions must match");
+        throw numkit::Error("bsxfun: non-singleton dimensions must match");
     }
     keel::usize outR = std::max(ar, br);
     keel::usize outC = std::max(ac, bc);

@@ -4,6 +4,7 @@
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
@@ -11,7 +12,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -120,7 +120,7 @@ void Compiler::preImportGlobals(const ASTNode *ast)
         // are legal MATLAB values). Only unset / deleted slots get skipped.
         if (existing && !existing->isUnset() && !existing->isDeleted()) {
             if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
-                throw std::runtime_error(
+                throw numkit::Error(
                     "Compiler: register limit exceeded (>65534 registers in chunk)");
             keel::u16 r = keel::as<keel::u16>(nextReg_++);
             if (nextReg_ > peakReg_) peakReg_ = nextReg_;
@@ -156,7 +156,7 @@ void Compiler::preallocateAssignedVars(const ASTNode *body)
         if (engine_.isReservedName(name))
             continue; // reserved/pseudo-vars are looked up on demand
         if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
-            throw std::runtime_error(
+            throw numkit::Error(
                 "Compiler: register limit exceeded (>65534 registers in chunk)");
         keel::u16 r = keel::as<keel::u16>(nextReg_++);
         if (nextReg_ > peakReg_) peakReg_ = nextReg_;
@@ -358,7 +358,7 @@ keel::u16 Compiler::varRegLookup(keel::StringRef name, bool preloadReserved)
         return *found;
     keel::i32 allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
     if (allocReg >= keel::as<keel::i32>(kInvalidReg))
-        throw std::runtime_error(
+        throw numkit::Error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(allocReg);
     peakReg_ = allocReg + 1;
@@ -392,7 +392,7 @@ keel::u16 Compiler::allocPinnedReg()
 {
     keel::i32 allocReg = (nextReg_ > peakReg_) ? nextReg_ : peakReg_;
     if (allocReg >= keel::as<keel::i32>(kInvalidReg))
-        throw std::runtime_error(
+        throw numkit::Error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(allocReg);
     peakReg_ = allocReg + 1;
@@ -446,7 +446,7 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
         keel::u16 slot = tempReg();
         const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
         if (!boxPtr)
-            throw std::runtime_error("Compiler: missing upvalue box register");
+            throw numkit::Error("Compiler: missing upvalue box register");
         keel::u16 boxReg = *boxPtr;
         if (boxReg != slot)
             emitAB(OpCode::MOVE, slot, boxReg);
@@ -487,7 +487,7 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
             keel::u16 slot = tempReg();
             const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
             if (!boxPtr)
-                throw std::runtime_error("Compiler: missing upvalue box register");
+                throw numkit::Error("Compiler: missing upvalue box register");
             keel::u16 boxReg = *boxPtr;
             if (boxReg != slot)
                 emitAB(OpCode::MOVE, slot, boxReg);
@@ -540,7 +540,7 @@ keel::u16 Compiler::tempReg()
     // numRegisters is uint16_t, so its count must fit too: cap at 255.
     // Throw early rather than wrap nextReg_ and silently corrupt slot 0+.
     if (nextReg_ >= keel::as<keel::i32>(kInvalidReg))
-        throw std::runtime_error(
+        throw numkit::Error(
             "Compiler: register limit exceeded (>65534 registers in chunk)");
     keel::u16 r = keel::as<keel::u16>(nextReg_++);
     if (nextReg_ > peakReg_)
@@ -630,7 +630,7 @@ void Compiler::patchJump(keel::usize instrPos, keel::i32 offset)
 keel::i32 Compiler::appendConstant(Value v)
 {
     if (chunk_.constants.size() >= keel::as<keel::usize>(INT32_MAX))
-        throw std::runtime_error(
+        throw numkit::Error(
             "Compiler: constant pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = keel::as<keel::i32>(chunk_.constants.size());
     chunk_.constants.push_back(keel::move(v));
@@ -640,7 +640,7 @@ keel::i32 Compiler::appendConstant(Value v)
 keel::i32 Compiler::appendString(keel::StringRef s)
 {
     if (chunk_.strings.size() >= keel::as<keel::usize>(INT32_MAX))
-        throw std::runtime_error(
+        throw numkit::Error(
             "Compiler: string pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = keel::as<keel::i32>(chunk_.strings.size());
     chunk_.strings.push_back(keel::String::from(s));
@@ -824,7 +824,7 @@ keel::u16 Compiler::compileNodeExpand(const ASTNode *node)
     case NodeType::DELETE_ASSIGN:
         return compileDeleteAssign(node);
     default:
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Compiler: unsupported node type {}",
                          keel::as<keel::i32>(node->type)).c_str());
     }
@@ -1028,7 +1028,7 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
         // s.(expr) = val — child[0]=obj, child[1]=field name expr
         auto *objNode = lhs->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
-            throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
+            throw numkit::Error("Compiler: dynamic field assign requires identifier target");
         keel::u16 obj = varRegWrite(objNode->strValue);
         emitUpvalLoadRawIfShared(objNode->strValue, obj);
         keel::u16 val = compileNode(node->children[1].get());
@@ -1048,7 +1048,7 @@ keel::u16 Compiler::compileAssign(const ASTNode *node)
         return compileCellAssign(node);
     }
 
-    throw std::runtime_error("Compiler: unsupported assignment target");
+    throw numkit::Error("Compiler: unsupported assignment target");
 }
 
 keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
@@ -1089,7 +1089,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
     if (rhsNode->type != NodeType::CELL_INDEX
         && rhsNode->type != NodeType::CALL) {
         if (nout > 1)
-            throw std::runtime_error(
+            throw numkit::Error(
                 "Compiler: too many output arguments for single-valued "
                 "right-hand side");
         keel::u16 src = compileNode(rhsNode);
@@ -1170,7 +1170,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
             return outRegs.empty() ? 0 : outRegs[0];
         }
         if (nidx != 1)  // 3-D+ cell CSL multi-assign — mirror the TreeWalker refusal.
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("Cell CSL with {} indices not supported", nidx).c_str());
 
         // 1-D subscript [a,b]=c{:} / c{vec}. Guard so `end` binds to the cell numel.
@@ -1359,7 +1359,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                 for (const auto &uvName : nit->upvalueNames) {
                     const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
                     if (!boxPtr)
-                        throw std::runtime_error("Compiler: missing upvalue box register");
+                        throw numkit::Error("Compiler: missing upvalue box register");
                     argRegs.push_back(*boxPtr);
                 }
             }
@@ -1433,7 +1433,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
         for (const auto &uvName : nestedIt->upvalueNames) {
             const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
             if (!boxPtr)
-                throw std::runtime_error("Compiler: missing upvalue box register");
+                throw numkit::Error("Compiler: missing upvalue box register");
             argRegs.push_back(*boxPtr);
         }
     }
@@ -1681,7 +1681,7 @@ keel::u16 Compiler::emitPlainBinary(keel::StringRef op, keel::u16 left, keel::u1
     else if (op == "|")
         opcode = OpCode::OR;
     else
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Compiler: unsupported binary operator '{}'", op).c_str());
 
     emitABC(opcode, dst, left, right);
@@ -1730,7 +1730,7 @@ keel::u16 Compiler::compileUnaryOp(const ASTNode *node)
     else if (op == ".'")
         emitAB(OpCode::TRANSPOSE, dst, src);
     else
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Compiler: unsupported unary operator '{}'", op).c_str());
 
     return dst;
@@ -1814,7 +1814,7 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                     keel::u16 slot = tempReg();
                     const keel::u16 *boxPtr = allScopeUpvalueBoxRegs_.get(uvName);
                     if (!boxPtr)
-                        throw std::runtime_error("Compiler: missing upvalue box register");
+                        throw numkit::Error("Compiler: missing upvalue box register");
                     keel::u16 boxReg = *boxPtr;
                     if (boxReg != slot)
                         emitAB(OpCode::MOVE, slot, boxReg);

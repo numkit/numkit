@@ -10,6 +10,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/tree_walker.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
@@ -72,7 +73,7 @@ Value TreeWalker::execBinaryOp(const ASTNode *node, Environment *env)
         if (const auto *fn = engine_.binaryOps_.get(stepOp))
             return (*fn)(left, right);
         auto msg = keel::format("Undefined binary operator: {}", stepOp);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     };
 
     if (node->children[0]->type == NodeType::BINARY_OP
@@ -115,7 +116,7 @@ Value TreeWalker::execUnaryOp(const ASTNode *node, Environment *env)
         return (*fn)(operand);
 
     auto msg = keel::format("Undefined unary operator: {}", node->strValue);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // ============================================================
@@ -169,7 +170,7 @@ keel::Array<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
         return outBuf;
     }
     auto msg = keel::format("Undefined function in handle: @{}", name);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 keel::Array<Value> TreeWalker::execSuperCall(const ASTNode *superRef, const ASTNode *callNode,
@@ -314,7 +315,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
                 return execIndexAccess(callee, node, env);
             }
             auto msg = keel::format("Undefined function or variable: {}", qualified);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
 
         // OBJECT: obj.method(args) (dotted method) or obj.prop(idx)
@@ -398,11 +399,11 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
             if (!recv.isStruct()) {
                 auto msg = keel::format("Dot indexing requires a struct, got {}",
                                         mtypeName(recv.type()));
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             if (!recv.hasField(mname)) {
                 auto msg = keel::format("Reference to non-existent field '{}'", mname);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             target = recv.field(mname);
             haveTarget = true;
@@ -434,7 +435,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
 
         auto msg = keel::format("Cannot call or index into value of type {}",
                                 mtypeName(target.type()));
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     const keel::String &name = funcNode->strValue;
@@ -549,11 +550,11 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
         auto msg = keel::format(
             "Cannot index into variable '{}' of type {}, and no function '{}' was found",
             name, mtypeName(var->type()), name);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     auto msg = engine_.formatUndefinedFunctionError(
         name, keel::format("Undefined function or variable: {}", name));
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Environment *env)
@@ -565,7 +566,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
             if (idx >= limit) {
                 auto msg = keel::format("Index exceeds array dimensions ({}: {} > {})",
                                         ctx, idx + 1, limit);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
         }
     };
@@ -596,7 +597,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
             if (scalarIdx >= var.numel()) {
                 auto msg = keel::format("Index exceeds array dimensions (linear index: {} > {})",
                                         scalarIdx + 1, var.numel());
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             // Cell () returns 1×1 sub-cell, not content
             if (var.isCell()) {
@@ -637,7 +638,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
                 if (sri >= var.dims().rows()) {
                     auto msg = keel::format("Index exceeds array dimensions (row index: {} > {})",
                                             sri + 1, var.dims().rows());
-                    throw std::runtime_error(msg.c_str());
+                    throw numkit::Error(msg.c_str());
                 }
                 const keel::usize colDim = var.dims().ndim() > 2
                     ? (var.dims().rows() > 0 ? var.dims().numel() / var.dims().rows() : var.dims().cols())
@@ -645,7 +646,7 @@ Value TreeWalker::execIndexAccess(const Value &var, const ASTNode *callNode, Env
                 if (sci >= colDim) {
                     auto msg = keel::format("Index exceeds array dimensions (column index: {} > {})",
                                             sci + 1, colDim);
-                    throw std::runtime_error(msg.c_str());
+                    throw numkit::Error(msg.c_str());
                 }
                 // Cell () returns 1×1 sub-cell
                 if (var.isCell()) {
@@ -711,7 +712,7 @@ Value TreeWalker::execCellIndex(const ASTNode *node, Environment *env)
     // 3-D+ : scalar N-D brace read only (no CSL form yet).
     auto obj = execNode(node->children[0].get(), env);
     if (!obj.isCell())
-        throw std::runtime_error("Cell indexing {}-operator requires a cell array");
+        throw numkit::Error("Cell indexing {}-operator requires a cell array");
     if (nidx == 3) {
         Value ridx, cidx, pidx;
         {
@@ -746,7 +747,7 @@ Value TreeWalker::execCellIndex(const ASTNode *node, Environment *env)
         if (coords[i] >= lim) {
             auto msg = keel::format("Cell index out of bounds (dim {}: {} > {})",
                                     i + 1, coords[i] + 1, lim);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         idx += coords[i] * stride;
         stride *= lim;
@@ -782,7 +783,7 @@ keel::Array<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
         }
     }
     if (!obj.isCell())
-        throw std::runtime_error("Cell contents indexing requires a cell array");
+        throw numkit::Error("Cell contents indexing requires a cell array");
     keel::Array<Value> out;
     keel::usize nidx = node->children.size() - 1;
     if (nidx == 1) {
@@ -805,7 +806,7 @@ keel::Array<Value> TreeWalker::cellBraceContents(const ASTNode *node, Environmen
                 out.push_back(obj.cellAt(obj.dims().sub2ind(r, c)));
     } else {
         auto msg = keel::format("Cell CSL with {} indices not supported", nidx);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     return out;
 }
@@ -847,13 +848,13 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
         return objectPropGet(obj, node->strValue, env);
     if (!obj.isStruct()) {
         auto msg = keel::format("Dot indexing requires a struct, got {}", mtypeName(obj.type()));
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     if (obj.isStructArray() || obj.numel() == 0) {
         keel::usize n = obj.numel();
         if (n == 0 && !obj.hasField(node->strValue)) {
             auto msg = keel::format("Reference to non-existent field '{}'", node->strValue);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         Value csl = Value::csl(n, engine_.mr_);
         for (keel::usize i = 0; i < n; ++i) {
@@ -861,7 +862,7 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
             const Value *vp = m.get(node->strValue);
             if (!vp) {
                 auto msg = keel::format("Reference to non-existent field '{}'", node->strValue);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             csl.cslAt(i) = *vp;
         }
@@ -869,7 +870,7 @@ Value TreeWalker::execFieldAccess(const ASTNode *node, Environment *env)
     }
     if (!obj.hasField(node->strValue)) {
         auto msg = keel::format("Reference to non-existent field '{}'", node->strValue);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     return obj.field(node->strValue);
 }
@@ -931,14 +932,14 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                         : execNode(elemNode->children[1].get(), env).toString();
                     if (base.numel() == 0 && !base.hasField(fname)) {
                         auto msg = keel::format("Reference to non-existent field '{}'", fname);
-                        throw std::runtime_error(msg.c_str());
+                        throw numkit::Error(msg.c_str());
                     }
                     for (keel::usize i = 0; i < base.numel(); ++i) {
                         const auto &m = base.structArrayElem(i);
                         const Value *vp = m.get(fname);
                         if (!vp) {
                             auto msg = keel::format("Reference to non-existent field '{}'", fname);
-                            throw std::runtime_error(msg.c_str());
+                            throw numkit::Error(msg.c_str());
                         }
                         pushElem(Value(*vp), rowElems);
                     }
@@ -961,7 +962,7 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx)) {
                             auto msg = keel::format("No appropriate property '{}' for class '{}'",
                                                     fname, clsName);
-                            throw std::runtime_error(msg.c_str());
+                            throw numkit::Error(msg.c_str());
                         }
                         pushElem(keel::move(out), rowElems);
                     }
@@ -1088,7 +1089,7 @@ Value TreeWalker::execCellLiteral(const ASTNode *node, Environment *env)
     const keel::usize numCols = rows.empty() ? 0 : rows[0].size();
     for (const auto &r : rows)
         if (r.size() != numCols)
-            throw std::runtime_error(
+            throw numkit::Error(
                 "Dimensions of cell arrays being concatenated are not consistent");
 
     auto cell = Value::cell(numRows, numCols);
@@ -1107,7 +1108,7 @@ static ValueType colonOutputType(const Value *ops, keel::usize n)
         if (t == ValueType::DOUBLE) continue;
         if (!found) { nonDouble = t; found = true; }
         else if (t != nonDouble) {
-            throw std::runtime_error(
+            throw numkit::Error(
                 "Colon operands must be all the same type, "
                 "or mixed with real scalar doubles");
         }

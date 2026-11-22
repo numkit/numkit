@@ -7,19 +7,19 @@
 #include <keel/memory.h>
 #include <keel/string.h>
 #include <numkit/builtin/lang.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/sys/env.hpp>
 #include <numkit/value/value.hpp>
 
-#include <stdexcept>
 
 namespace numkit::builtin {
 
 void setenv(keel::StringRef name, keel::StringRef value)
 {
     if (name.empty())
-        throw std::runtime_error("setenv: variable name cannot be empty");
+        throw numkit::Error("setenv: variable name cannot be empty");
     if (name.find('=') != keel::kInvalidIndex)
-        throw std::runtime_error("setenv: variable name cannot contain '='");
+        throw numkit::Error("setenv: variable name cannot contain '='");
     (void)keel::env_set(name, value);
 }
 
@@ -31,7 +31,7 @@ keel::String getenv(keel::StringRef name)
 Value getenv(const Value &name, keel::Allocator *mr)
 {
     if (!name.isChar() && !name.isString())
-        throw std::runtime_error("getenv: argument must be a variable name");
+        throw numkit::Error("getenv: argument must be a variable name");
     return Value::fromString(sys::envGet(name.toString(), mr), mr);
 }
 

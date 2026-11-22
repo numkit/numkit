@@ -17,6 +17,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/runtime/runtime.hpp>
+#include <numkit/value/error.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/engine.hpp>
@@ -29,7 +30,6 @@
 
 #include <cstdint>
 #include <regex>
-#include <stdexcept>
 
 namespace numkit::runtime {
 
@@ -90,7 +90,7 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
             try {
                 pats.push_back(keel::make_unique<std::regex>(patStr.c_str(), patStr.size()));
             } catch (const std::regex_error &) {
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("clear -regexp: invalid pattern '{}'", patStr).c_str());
             }
         }
@@ -188,7 +188,7 @@ void import_reg(keel::ArrayRef<Value> args, keel::usize,
                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto fail = [](keel::StringRef msg) {
-        throw std::runtime_error(keel::format("import: {}", msg).c_str());
+        throw numkit::Error(keel::format("import: {}", msg).c_str());
     };
     auto asString = [&](const Value &v, keel::usize i) -> keel::String {
         if (!v.isChar() && !v.isString())
@@ -254,24 +254,24 @@ void assignin_reg(keel::ArrayRef<Value> args, keel::usize,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() != 3)
-        throw std::runtime_error("assignin: requires 3 arguments (workspace, name, value)");
+        throw numkit::Error("assignin: requires 3 arguments (workspace, name, value)");
     if (!args[0].isChar())
-        throw std::runtime_error("assignin: workspace must be 'base' or 'caller'");
+        throw numkit::Error("assignin: workspace must be 'base' or 'caller'");
     if (!args[1].isChar())
-        throw std::runtime_error("assignin: name must be a string");
+        throw numkit::Error("assignin: name must be a string");
     keel::String where = args[0].toString();
     keel::String name = args[1].toString();
     if (name.empty())
-        throw std::runtime_error("assignin: name must be non-empty");
+        throw numkit::Error("assignin: name must be non-empty");
     if (where == "base") {
         ctx.engine->assignInBase(name, args[2]);
     } else if (where == "caller") {
         if (ctx.engine->callerDepth() < 1)
-            throw std::runtime_error(
+            throw numkit::Error(
                 "assignin: 'caller' is not valid in the base workspace");
         ctx.engine->assignToCaller(1, name, args[2]);
     } else {
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("assignin: workspace must be 'base' or 'caller', got '{}'", where).c_str());
     }
     outs[0] = Value();
@@ -281,11 +281,11 @@ void inputname_reg(keel::ArrayRef<Value> args, keel::usize,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() != 1)
-        throw std::runtime_error("inputname: requires one argument (k)");
+        throw numkit::Error("inputname: requires one argument (k)");
     keel::f64 kd = args[0].toScalar();
     keel::i32 k = keel::as<keel::i32>(kd);
     if (keel::as<keel::f64>(k) != kd || k < 1)
-        throw std::runtime_error("inputname: k must be a positive integer");
+        throw numkit::Error("inputname: k must be a positive integer");
     keel::String name = ctx.engine->inputName(k);
     outs[0] = Value::fromString(name, ctx.engine->allocator());
 }
@@ -335,11 +335,11 @@ void who_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
         if (args.size() < 2 || !args[1].isChar())
-            throw std::runtime_error("who -file requires a filename");
+            throw numkit::Error("who -file requires a filename");
         keel::String fname = args[1].toString();
         auto rp = ctx.engine->resolvePath(fname);
         if (!rp.fs || !rp.fs->exists(rp.path))
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("who -file: file not found: {}", fname).c_str());
         keel::StringRef stem = extractStem(fname);
         ctx.engine->outputText(keel::format("\nYour variables are:\n\n{}  \n\n", stem));
@@ -381,11 +381,11 @@ void whos_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
         if (args.size() < 2 || !args[1].isChar())
-            throw std::runtime_error("whos -file requires a filename");
+            throw numkit::Error("whos -file requires a filename");
         keel::String fname = args[1].toString();
         auto rp = ctx.engine->resolvePath(fname);
         if (!rp.fs || !rp.fs->exists(rp.path))
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("whos -file: file not found: {}", fname).c_str());
         auto st = rp.fs->stat(rp.path);
         keel::i64 bytes = st ? st->size : 0;
@@ -488,7 +488,7 @@ void exist_reg(keel::ArrayRef<Value> args, keel::usize,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("exist requires a name argument");
+        throw numkit::Error("exist requires a name argument");
     keel::String varName = args[0].toString();
     auto *env = ctx.env;
     ctx.engine->syncFrameToEnv(env);

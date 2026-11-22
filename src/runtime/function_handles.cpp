@@ -15,11 +15,11 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/runtime/runtime.hpp>
+#include <numkit/value/error.hpp>
 
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 
-#include <stdexcept>
 
 namespace numkit::runtime {
 
@@ -30,9 +30,9 @@ void str2func_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("str2func requires 1 argument");
+        throw numkit::Error("str2func requires 1 argument");
     if (!args[0].isChar() && !args[0].isString())
-        throw std::runtime_error("str2func: argument must be a string");
+        throw numkit::Error("str2func: argument must be a string");
     keel::String s = args[0].toString();
     // str2func accepts three forms:
     //   'sin'        -> named handle
@@ -57,10 +57,10 @@ void func2str_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("func2str requires 1 argument");
+        throw numkit::Error("func2str requires 1 argument");
     const Value *h = &args[0];
     if (!h->isFuncHandle())
-        throw std::runtime_error("func2str: argument must be a function handle");
+        throw numkit::Error("func2str: argument must be a function handle");
     const keel::StringRef name = h->funcHandleNameRef();
     const keel::StringRef src = h->funcHandleSourceRef();
     const bool isAnon = name.starts_with("__anon_");

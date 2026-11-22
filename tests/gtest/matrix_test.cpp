@@ -2,6 +2,7 @@
 // Parameterized: runs on both TreeWalker and VM backends
 
 #include <keel/core.h>
+#include <numkit/value/error.hpp>
 #include <keel/math.h>
 #include "dual_engine_fixture.hpp"
 
@@ -228,19 +229,19 @@ class BoundsTest : public DualEngineTest
 TEST_P(BoundsTest, OutOfBoundsLinear)
 {
     eval("v = [1 2 3];");
-    EXPECT_THROW(eval("v(5);"), std::runtime_error);
+    EXPECT_THROW(eval("v(5);"), numkit::Error);
 }
 
 TEST_P(BoundsTest, OutOfBoundsRow)
 {
     eval("A = [1 2; 3 4];");
-    EXPECT_THROW(eval("A(3, 1);"), std::runtime_error);
+    EXPECT_THROW(eval("A(3, 1);"), numkit::Error);
 }
 
 TEST_P(BoundsTest, OutOfBoundsCol)
 {
     eval("A = [1 2; 3 4];");
-    EXPECT_THROW(eval("A(1, 5);"), std::runtime_error);
+    EXPECT_THROW(eval("A(1, 5);"), numkit::Error);
 }
 
 TEST_P(BoundsTest, ValidBoundsOK)
@@ -252,7 +253,7 @@ TEST_P(BoundsTest, ValidBoundsOK)
 TEST_P(BoundsTest, IndexZeroError)
 {
     eval("v = [1 2 3];");
-    EXPECT_THROW(eval("v(0);"), std::runtime_error);
+    EXPECT_THROW(eval("v(0);"), numkit::Error);
 }
 
 INSTANTIATE_DUAL(BoundsTest);

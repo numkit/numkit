@@ -7,6 +7,7 @@
 // read/write via the Engine.
 
 #include <keel/arena.h>
+#include <keel/exception.h>
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -245,7 +246,7 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(filename.as_ref());
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
     keel::String content;
@@ -278,7 +279,7 @@ void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(filename.as_ref());
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
     try {

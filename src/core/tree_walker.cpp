@@ -1,5 +1,6 @@
 // src/core/tree_walker.cpp
 #include <keel/array.h>
+#include <keel/exception.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_set.h>
@@ -9,6 +10,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/tree_walker.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
@@ -158,7 +160,7 @@ keel::Array<keel::usize> TreeWalker::resolveIndex(
     }
 
     auto msg = keel::format("Invalid index type: {}", mtypeName(val.type()));
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // ============================================================
@@ -195,7 +197,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
         auto msg = keel::format(
             "superclass reference '{}' must be called: use lhs@{}(...)",
             node->strValue, node->strValue);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     case NodeType::CELL_INDEX:
         return execCellIndex(node, env);
@@ -207,12 +209,12 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
         if (obj.isObject())
             return objectPropGet(obj, fname, env);
         if (!obj.isStruct())
-            throw std::runtime_error("Dot indexing requires a struct");
+            throw numkit::Error("Dot indexing requires a struct");
         if (obj.isStructArray() || obj.numel() == 0) {
             keel::usize n = obj.numel();
             if (n == 0 && !obj.hasField(fname)) {
                 auto msg = keel::format("Reference to non-existent field '{}'", fname);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
             Value csl = Value::csl(n, engine_.mr_);
             for (keel::usize i = 0; i < n; ++i) {
@@ -220,7 +222,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
                 const Value *vp = m.get(fname);
                 if (!vp) {
                     auto msg = keel::format("Reference to non-existent field '{}'", fname);
-                    throw std::runtime_error(msg.c_str());
+                    throw numkit::Error(msg.c_str());
                 }
                 csl.cslAt(i) = *vp;
             }
@@ -228,7 +230,7 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
         }
         if (!obj.hasField(fname)) {
             auto msg = keel::format("Reference to non-existent field '{}'", fname);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         return obj.field(fname);
     }
@@ -294,10 +296,10 @@ Value TreeWalker::execNodeInner(const ASTNode *node, Environment *env)
                                          : ctx.array->dims().dimSize(ctx.dimension);
             return Value::scalar(keel::as<keel::f64>(sz), engine_.mr_);
         }
-        throw std::runtime_error("'end' used outside of indexing context");
+        throw numkit::Error("'end' used outside of indexing context");
     }
     default:
-        throw std::runtime_error("Unknown AST node type");
+        throw numkit::Error("Unknown AST node type");
     }
 }
 
@@ -371,7 +373,7 @@ Value TreeWalker::execNodeExpand(const ASTNode *node, Environment *env)
         throw;
     } catch (const DebugStopException &) {
         throw;
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         if (node->line > 0)
             throw Error(e.what(), node->line, node->col, "", describeNode(node));
         throw;
@@ -434,11 +436,11 @@ Value TreeWalker::execIdentifier(const ASTNode *node, Environment *env, keel::us
     // referenced outside of any function scope. Inside a function they are
     // setLocal'd on entry so env->get() above finds them.
     if (name == "nargin" || name == "nargout")
-        throw std::runtime_error(
+        throw numkit::Error(
             "You can only call nargin/nargout from within a function.");
 
     auto msg = keel::format("Undefined variable or function: {}", name);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // ============================================================
@@ -503,12 +505,12 @@ void TreeWalker::assignLValue(const ASTNode *lhs, const Value &rhs, Environment 
                 *var = Value::structure();
             var->field(fname) = rhs;
         } else {
-            throw std::runtime_error("Dynamic field assign: unsupported target");
+            throw numkit::Error("Dynamic field assign: unsupported target");
         }
     } else if (lhs->type == NodeType::CELL_INDEX) {
         execCellAssign(lhs, rhs, env);
     } else {
-        throw std::runtime_error("Invalid assignment target");
+        throw numkit::Error("Invalid assignment target");
     }
 
     // If a nested mutation (`obj.Prop.Sub = v`, `obj.Prop(i) = v`,
@@ -693,7 +695,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
 
         auto indices = resolveIndex(lhs->children[1].get(), *var, 0, 1, env);
         if (!rhs.isScalar() && rhs.numel() != indices.size())
-            throw std::runtime_error("Subscripted assignment dimension mismatch");
+            throw numkit::Error("Subscripted assignment dimension mismatch");
         for (auto idx : indices)
             var->ensureSize(idx, engine_.mr_);
         var->indexSet(indices.data(), indices.size(), rhs);
@@ -739,7 +741,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         const keel::usize target2D = (riIsColon ? maxR : rowIdx.size())
                               * (ciIsColon ? maxC : colIdx.size());
         if (!rhs.isScalar() && rhs.numel() != target2D)
-            throw std::runtime_error("Subscripted assignment dimension mismatch");
+            throw numkit::Error("Subscripted assignment dimension mismatch");
         if (maxR > var->dims().rows() || maxC > var->dims().cols())
             var->resize(maxR, maxC, engine_.mr_);
 
@@ -821,7 +823,7 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                               * (ciColon ? maxC : colIdx.size())
                               * (piColon ? maxP : pageIdx.size());
         if (!rhs.isScalar() && rhs.numel() != target3D)
-            throw std::runtime_error("Subscripted assignment dimension mismatch");
+            throw numkit::Error("Subscripted assignment dimension mismatch");
         if (maxR > var->dims().rows() || maxC > var->dims().cols() || maxP > var->dims().pages())
             var->resize3d(std::max(var->dims().rows(), maxR),
                           std::max(var->dims().cols(), maxC),
@@ -878,7 +880,7 @@ Value &TreeWalker::resolveObjectSlot(const ASTNode *node, Environment *env)
     case NodeType::CELL_INDEX:
         return resolveCellSlot(node, env);
     default:
-        throw std::runtime_error("Invalid assignment target");
+        throw numkit::Error("Invalid assignment target");
     }
 }
 
@@ -891,7 +893,7 @@ Value &TreeWalker::resolveCellSlot(const ASTNode *node, Environment *env)
     if (cellVar.isUnset() || cellVar.isEmpty())
         cellVar = Value::cell(0, 0);
     if (!cellVar.isCell())
-        throw std::runtime_error("Cell contents indexing on a non-cell value");
+        throw numkit::Error("Cell contents indexing on a non-cell value");
 
     Value *var = &cellVar;
     const keel::usize nidx = node->children.size() - 1;
@@ -921,11 +923,11 @@ Value &TreeWalker::resolveFieldLValue(const ASTNode *node, Environment *env)
         if (var->isUnset() || var->isEmpty())
             *var = Value::structArray(0, 0, engine_.mr_);
         if (!var->isStruct())
-            throw std::runtime_error("Indexed field assignment on a non-struct value");
+            throw numkit::Error("Indexed field assignment on a non-struct value");
 
         const keel::usize nargs = objNode->children.size() - 1;
         if (nargs > keel::as<keel::usize>(Dims::kMaxRank))
-            throw std::runtime_error("Struct array indexing rank exceeds maximum supported rank");
+            throw numkit::Error("Struct array indexing rank exceeds maximum supported rank");
         keel::Array<keel::usize> coords(nargs);
         for (keel::usize a = 0; a < nargs; ++a) {
             IndexContextGuard guard(indexContextStack_,
@@ -1101,7 +1103,7 @@ Value TreeWalker::execMultiAssign(const ASTNode *node, Environment *env)
     // one value). An unfilled output slot is the unset sentinel.
     for (keel::usize i = 0; i < nout; ++i)
         if (i >= results.size() || results[i].isUnset())
-            throw std::runtime_error("Too many output arguments.");
+            throw numkit::Error("Too many output arguments.");
 
     // Complex-target path: at least one output is a general lvalue
     // (`s.f`, `a(i)`, `c{i}`, ...). lhsTargets is authoritative; a
@@ -1140,7 +1142,7 @@ keel::Array<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
     if (node->type == NodeType::CELL_INDEX) {
         const Value *cell = env->get(node->children[0]->strValue);
         if (!cell || !cell->isCell())
-            throw std::runtime_error("Cell indexing requires a cell array");
+            throw numkit::Error("Cell indexing requires a cell array");
 
         keel::usize nidx = node->children.size() - 1;
         if (nidx == 1) {
@@ -1160,7 +1162,7 @@ keel::Array<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
             return out;
         } else {
             auto msg = keel::format("Cell CSL with {} indices not supported", nidx);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
     }
 
@@ -1170,7 +1172,7 @@ keel::Array<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
             single.push_back(execNode(node, env));
             return single;
         }
-        throw std::runtime_error("Expected function call in multi-assignment");
+        throw numkit::Error("Expected function call in multi-assignment");
     }
 
     // Superclass-qualified multi-output call `[a,b] = method@Base(obj,...)`.
@@ -1291,7 +1293,7 @@ keel::Array<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
                 return outBuf;
             }
         }
-        throw std::runtime_error("Cannot invoke non-function value with multiple outputs");
+        throw numkit::Error("Cannot invoke non-function value with multiple outputs");
     } else {
         funcName = headNode->strValue.clone();
     }
@@ -1356,7 +1358,7 @@ keel::Array<Value> TreeWalker::execCallMulti(const ASTNode *node, Environment *e
 
     auto msg = engine_.formatUndefinedFunctionError(
         funcName, keel::format("Undefined function: {}", funcName));
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // ============================================================
@@ -1364,11 +1366,11 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
 {
     auto *lhs = node->children[0].get();
     if (lhs->type != NodeType::CALL || lhs->children.empty())
-        throw std::runtime_error("Invalid delete assignment syntax");
+        throw numkit::Error("Invalid delete assignment syntax");
 
     auto *target = lhs->children[0].get();
     if (target->type != NodeType::IDENTIFIER)
-        throw std::runtime_error("Invalid delete target");
+        throw numkit::Error("Invalid delete target");
 
     auto *var = env->get(target->strValue);
     if (var && engine_.constantsEnv_
@@ -1377,7 +1379,7 @@ Value TreeWalker::execDeleteAssign(const ASTNode *node, Environment *env)
     }
     if (!var) {
         auto msg = keel::format("Undefined variable: {}", target->strValue);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     keel::usize nargs = lhs->children.size() - 1;

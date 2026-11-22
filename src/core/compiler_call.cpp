@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit {
 

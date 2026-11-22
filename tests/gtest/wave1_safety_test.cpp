@@ -4,6 +4,7 @@
 // numeric correctness fixes across value, ops, sys, and numkit core.
 
 #include <keel/core.h>
+#include <numkit/value/error.hpp>
 #include <keel/complex.h>
 #include <keel/fs.h>
 #include <keel/thread_pool.h>
@@ -282,7 +283,7 @@ TEST(Wave1SysAndMatSafetyTest, MalformedMatFilesAndDeflateCap)
         std::vector<keel::u8> bigZeros(8192, 0);
         auto compressed = numkit::ops::zlibCompress(bigZeros.data(), bigZeros.size(), 6);
         EXPECT_THROW(numkit::ops::zlibDecompress(compressed.data(), compressed.size(), 0, 1024),
-                     std::runtime_error);
+                     numkit::Error);
     }
 
     (void)keel::fs_remove_all(tmpDir);

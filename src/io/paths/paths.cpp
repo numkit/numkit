@@ -3,6 +3,7 @@
 // filesep / fullfile / fileparts / tempdir / tempname.
 
 #include <keel/core.h>
+#include <keel/exception.h>
 #include <keel/fs.h>
 #include <keel/memory.h>
 #include <keel/number.h>
@@ -127,7 +128,7 @@ Value tempdir(FsContext &fs, keel::Allocator *mr)
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(".");
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
     if (resolved.fs) {

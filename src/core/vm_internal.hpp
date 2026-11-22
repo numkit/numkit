@@ -7,13 +7,13 @@
 #include <keel/format.h>
 #include <keel/string.h>
 #include <numkit/core/bytecode.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/index.hpp>
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -48,7 +48,7 @@ struct ResolvedSubscript {
         if (idx.isDoubleScalar()) {
             keel::usize ii = Value::checkedScalarIndex(idx.scalarVal());
             if (ii >= dimSize)
-                throw std::runtime_error("Index exceeds array dimensions");
+                throw numkit::Error("Index exceeds array dimensions");
             r.single = ii;
             r.isSingle = true;
             r.count = 1;
@@ -83,7 +83,7 @@ inline keel::usize checkedIndex(keel::f64 idx, keel::usize numel)
     if (tryIndex0(idx, i)) {
         if (i < numel)
             return i;
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Index {} exceeds array size {}", i + 1, numel).c_str());
     }
     (void) Value::checkedScalarIndex(idx);

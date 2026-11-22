@@ -15,6 +15,7 @@
 #include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
@@ -42,7 +43,7 @@ void figure_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         // figure(f) with a Figure handle — make its figure current.
         auto *rec = fm.findHandle(hid);
         if (!rec || rec->type != "figure")
-            throw std::runtime_error(
+            throw numkit::Error(
                 "figure: value must be a Figure handle or a number");
         id = rec->figureId;
         fm.setFigure(id);
@@ -72,7 +73,7 @@ void close_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             if (hid < 0) continue;
             auto *rec = fm.findHandle(hid);
             if (!rec)
-                throw std::runtime_error("Invalid or deleted object.");
+                throw numkit::Error("Invalid or deleted object.");
             if (rec->type == "figure")
                 fm.closeFigureNotify(rec->figureId);
             else if (rec->type == "waitbar")
@@ -667,7 +668,7 @@ void legend_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
             if (i == 0 && (args[i].isObject() || args[i].isNumeric()))
                 continue;
             if (i > 0 && (args[i].isNumeric() || args[i].isLogical()))
-                throw std::runtime_error("legend: invalid argument (numeric location syntax is not supported)");
+                throw numkit::Error("legend: invalid argument (numeric location syntax is not supported)");
             ax.legendLabels.push_back(argStr(args[i]));
             continue;
         }

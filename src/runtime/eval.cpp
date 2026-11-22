@@ -11,6 +11,7 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/runtime/function_file.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/runtime/runtime.hpp>
 
 #include <numkit/core/callback_builtin.hpp>
@@ -19,7 +20,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit::runtime {
 
@@ -37,11 +37,11 @@ void run_reg(keel::ArrayRef<Value> args, keel::usize,
              keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty() || !args[0].isChar())
-        throw std::runtime_error("run requires a string filename");
+        throw numkit::Error("run requires a string filename");
     keel::String p = args[0].toString();
     auto rp = ctx.engine->resolvePath(p.as_ref());
     if (!rp.fs || !rp.fs->exists(rp.path.as_ref()))
-        throw std::runtime_error(keel::format("run: file not found: {}", p).c_str());
+        throw numkit::Error(keel::format("run: file not found: {}", p).c_str());
     keel::String content = rp.fs->readFile(rp.path.as_ref());
 
     keel::String scriptDir;
@@ -83,13 +83,13 @@ void mfilename_reg(keel::ArrayRef<Value> args, keel::usize,
 {
     bool fullpath = false;
     if (args.size() > 1)
-        throw std::runtime_error("mfilename: too many arguments (expected at most 1)");
+        throw numkit::Error("mfilename: too many arguments (expected at most 1)");
     if (args.size() == 1) {
         if (!args[0].isChar())
-            throw std::runtime_error("mfilename: argument must be 'fullpath'");
+            throw numkit::Error("mfilename: argument must be 'fullpath'");
         const keel::String opt = args[0].toString();
         if (opt != "fullpath")
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("mfilename: unrecognized option '{}' (only 'fullpath' is supported)",
                              opt)
                     .c_str());
@@ -139,7 +139,7 @@ void eval_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         }
     }
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
-        throw std::runtime_error("eval requires a string");
+        throw numkit::Error("eval requires a string");
     const bool suppress = (nargout >= 1);
     outs[0] = ctx.engine->eval(args[0].toString().as_ref(),
                                resolveEvalScope(ctx),
@@ -150,7 +150,7 @@ void evalc_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
-        throw std::runtime_error("evalc requires a string");
+        throw numkit::Error("evalc requires a string");
     keel::String captured;
     auto prevOut = ctx.engine->swapOutputFunc(
         [&captured](keel::StringRef s) { captured.append(s); });
@@ -174,7 +174,7 @@ void vectorize_reg(keel::ArrayRef<Value> args, keel::usize,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("vectorize: not enough input arguments");
+        throw numkit::Error("vectorize: not enough input arguments");
     keel::String src;
     if (args[0].isChar() || args[0].isString()) {
         src = args[0].toString();
@@ -196,9 +196,9 @@ void vectorize_reg(keel::ArrayRef<Value> args, keel::usize,
             }
         }
         if (!converted)
-            throw std::runtime_error("vectorize: unsupported object input");
+            throw numkit::Error("vectorize: unsupported object input");
     } else {
-        throw std::runtime_error("vectorize: input must be a character vector, string, or symbolic expression");
+        throw numkit::Error("vectorize: input must be a character vector, string, or symbolic expression");
     }
     keel::String out;
     out.reserve(src.size() + 16);
@@ -227,19 +227,19 @@ void input_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
-        throw std::runtime_error(
+        throw numkit::Error(
             "input: prompt must be a character vector or string scalar");
     bool asText = false;
     if (args.size() > 1) {
         if (!args[1].isChar() && !args[1].isString())
-            throw std::runtime_error("input: format must be the character 's'");
+            throw numkit::Error("input: format must be the character 's'");
         const keel::String fmt = args[1].toString();
         if (fmt != "s")
-            throw std::runtime_error("input: format must be the character 's'");
+            throw numkit::Error("input: format must be the character 's'");
         asText = true;
     }
     if (nargout > 1)
-        throw std::runtime_error("input: Too many output arguments");
+        throw numkit::Error("input: Too many output arguments");
 
     ctx.engine->outputText(args[0].toString().as_ref());
     keel::String line;
@@ -273,9 +273,9 @@ void evalin_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
-        throw std::runtime_error("evalin: requires (workspace, code)");
+        throw numkit::Error("evalin: requires (workspace, code)");
     if (!args[0].isChar() || !args[1].isChar())
-        throw std::runtime_error("evalin: arguments must be strings");
+        throw numkit::Error("evalin: arguments must be strings");
     keel::String where = args[0].toString();
     keel::String code = args[1].toString();
     Environment *target = nullptr;
@@ -283,12 +283,12 @@ void evalin_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         target = &ctx.engine->workspaceEnv();
     } else if (where == "caller") {
         if (ctx.engine->callerDepth() < 1)
-            throw std::runtime_error(
+            throw numkit::Error(
                 "evalin: 'caller' is not valid in the base workspace");
         target = ctx.engine->callerEnv(1);
         if (!target) target = &ctx.engine->workspaceEnv();
     } else {
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("evalin: workspace must be 'base' or 'caller', got '{}'", where)
                 .c_str());
     }

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <numkit/value/value.hpp>
+#include <numkit/value/error.hpp>
 
 namespace numkit {
 
@@ -10,7 +11,7 @@ namespace numkit {
 inline bool toLogicalScalarBool(const Value &v)
 {
     if (!v.isScalar() || v.isEmpty() || v.isUnset()) {
-        throw std::runtime_error(
+        throw numkit::Error(
             "Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values.");
     }
     return v.toBool();

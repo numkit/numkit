@@ -38,6 +38,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/graphics/library.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 
@@ -1616,7 +1617,7 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     auto &fm = ctx.engine->figureManager();
     auto *rec = fm.findHandle(id);
     if (!rec)
-        throw std::runtime_error("Invalid or deleted object.");
+        throw numkit::Error("Invalid or deleted object.");
     auto *mr = ctx.engine->allocator();
     if (args.size() == 1) {
         const auto cat = settableCatalogFor(rec->type);
@@ -1810,7 +1811,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
     }
     auto *rec = fm.findHandle(id);
     if (!rec)
-        throw std::runtime_error("Invalid or deleted object.");
+        throw numkit::Error("Invalid or deleted object.");
     if (args.size() >= 2 && (args[1].isChar() || args[1].isString())) {
         outs[0] = recordGetProp(fm, rec, args[1].toString(), mr);
         return;
@@ -2191,7 +2192,7 @@ bool graphicsPropGet(const Value &self, keel::StringRef name,
     auto &fm = ctx.engine->figureManager();
     auto *rec = fm.findHandle(id);
     if (!rec)
-        throw std::runtime_error("Invalid or deleted object.");
+        throw numkit::Error("Invalid or deleted object.");
     Value v = recordGetProp(fm, rec, name, ctx.engine->allocator(), /*strict=*/true);
     if (v.isEmpty())
         return false;
@@ -2208,7 +2209,7 @@ bool graphicsPropSet(Value &self, keel::StringRef name,
     auto &fm = ctx.engine->figureManager();
     auto *rec = fm.findHandle(id);
     if (!rec)
-        throw std::runtime_error("Invalid or deleted object.");
+        throw numkit::Error("Invalid or deleted object.");
     recordSetProp(fm, rec, name, val);
     fm.emitModified();
     return true;

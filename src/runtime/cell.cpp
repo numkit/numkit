@@ -13,6 +13,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/runtime/cell.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/builtin/elmat.hpp>  // horzcat / vertcat
 #include <numkit/core/engine.hpp>
 
@@ -20,7 +21,6 @@
 #include <numkit/core/types.hpp>
 #include <numkit/core/vm.hpp>
 
-#include <stdexcept>
 
 #include "_handlefn_helpers.hpp"
 
@@ -846,7 +846,7 @@ void deal_reg(keel::ArrayRef<Value> args, keel::usize nargout,
               keel::MutArrayRef<Value> outs, CallContext &)
 {
     if (args.empty())
-        throw std::runtime_error("deal requires at least 1 argument");
+        throw numkit::Error("deal requires at least 1 argument");
     if (args.size() == 1) {
         for (keel::usize i = 0; i < nargout && i < outs.size(); ++i)
             outs[i] = args[0];
@@ -861,10 +861,10 @@ void celldisp_reg(keel::ArrayRef<Value> args, keel::usize,
                   keel::MutArrayRef<Value>, CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("celldisp requires 1 argument");
+        throw numkit::Error("celldisp requires 1 argument");
     const Value &c = args[0];
     if (!c.isCell())
-        throw std::runtime_error("celldisp: input must be a cell");
+        throw numkit::Error("celldisp: input must be a cell");
     const keel::String name = (args.size() >= 2)
                                   ? args[1].toString()
                                   : keel::String::from("ans");
@@ -880,9 +880,9 @@ void arrayfun_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     if (args.size() < 2)
-        throw std::runtime_error("arrayfun requires at least 2 arguments");
+        throw numkit::Error("arrayfun requires at least 2 arguments");
     if (!args[0].isFuncHandle())
-        throw std::runtime_error("arrayfun: first argument must be a function handle");
+        throw numkit::Error("arrayfun: first argument must be a function handle");
     const Value &handle = args[0];
 
     bool uniformOutput = true;
@@ -904,12 +904,12 @@ void arrayfun_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         inputs.push_back(&args[i]);
     }
     if (inputs.empty())
-        throw std::runtime_error("arrayfun: at least one input array required");
+        throw numkit::Error("arrayfun: at least one input array required");
 
     const keel::usize n = inputs[0]->numel();
     for (const auto *p : inputs) {
         if (p->numel() != n)
-            throw std::runtime_error("arrayfun: all input arrays must be the same size");
+            throw numkit::Error("arrayfun: all input arrays must be the same size");
     }
     auto *mr = ctx.engine->allocator();
 

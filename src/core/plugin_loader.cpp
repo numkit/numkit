@@ -12,11 +12,11 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/plugin_loader.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <algorithm>
 #include <mutex>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -360,7 +360,7 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
                     "loadmodule: failed to load '{}': {}",
                     pathInput,
                     lastErr.empty() ? keel::StringRef(keel::error_message(libRes.error())) : lastErr.as_ref());
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
 
             keel::DynLib lib = keel::move(*libRes);
@@ -368,7 +368,7 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
             if (!initFn) {
                 keel::String msg = keel::format(
                     "loadmodule: library '{}' does not export numkit_plugin_init entry point", pathInput);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
 
             // Pin valid plugin shared libraries for the process lifetime so
@@ -392,7 +392,7 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
     HostPluginContext ctx(engine_, targetNamespace, stem);
     if (!initFn(ctx)) {
         keel::String msg = keel::format("loadmodule: initialization failed for '{}' (ABI mismatch)", pathInput);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     loadedPaths_.insert(keel::move(cacheKey));

@@ -15,7 +15,6 @@
 #include <numkit/value/object.hpp>
 #include <numkit/value/error.hpp>
 
-#include <stdexcept>
 
 namespace numkit::runtime {
 
@@ -122,7 +121,7 @@ void functions_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
                    CallContext &ctx)
 {
     if (args.empty() || !args[0].isFuncHandle())
-        throw std::runtime_error("functions: argument must be a function handle");
+        throw numkit::Error("functions: argument must be a function handle");
     auto *mr = ctx.engine->allocator();
     auto s = Value::structure(mr);
     const keel::StringRef name = args[0].funcHandleNameRef();
@@ -142,7 +141,7 @@ void class_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
                CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("class requires an argument");
+        throw numkit::Error("class requires an argument");
     outs[0] = Value::fromString(
         args[0].isObject()          ? args[0].objectClassNameRef()
         : args[0].isSingleComplex() ? keel::StringRef("single")
@@ -154,7 +153,7 @@ void isa_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
              CallContext &ctx)
 {
     if (args.size() < 2)
-        throw std::runtime_error("isa requires two arguments");
+        throw numkit::Error("isa requires two arguments");
     const keel::StringRef target = args[1].asStringRef();
     const Value &x = args[0];
     bool result = false;
@@ -203,7 +202,7 @@ void properties_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
                     CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("properties requires an argument");
+        throw numkit::Error("properties requires an argument");
     const keel::StringRef cn = args[0].isObject() ? args[0].objectClassNameRef()
                                                   : args[0].asStringRef();
     const BuiltinClass *cls = ctx.engine->findClass(cn);
@@ -218,7 +217,7 @@ void methods_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
                  CallContext &ctx)
 {
     if (args.empty())
-        throw std::runtime_error("methods requires an argument");
+        throw numkit::Error("methods requires an argument");
     const keel::StringRef cn = args[0].isObject() ? args[0].objectClassNameRef()
                                                   : args[0].asStringRef();
     const BuiltinClass *cls = ctx.engine->findClass(cn);

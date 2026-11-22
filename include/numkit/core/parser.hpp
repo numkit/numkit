@@ -6,10 +6,10 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/core/ast.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <initializer_list>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -46,7 +46,7 @@ private:
                 auto msg = keel::format(
                     "Parse error at line {} col {}: Expression or block nesting exceeds maximum supported depth ({})",
                     p.current().line, p.current().col, MAX_NESTING_DEPTH);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
         }
         ~NestingGuard() { --p.nestingDepth_; }

@@ -9,9 +9,9 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/debugger.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/types.hpp>
 
-#include <stdexcept>
 
 namespace numkit {
 
@@ -176,7 +176,7 @@ private:
         {
             if (++depth_ > maxDepth) {
                 auto msg = keel::format("Maximum recursion depth ({}) exceeded", maxDepth);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.c_str());
             }
         }
         ~RecursionGuard() { --depth_; }

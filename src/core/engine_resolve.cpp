@@ -2,6 +2,7 @@
 // Engine symbol & file resolution: namespaces, imports, plugins, search path,
 // builtin M-sources, and on-demand .m-file loading/rehash.
 #include <keel/array.h>
+#include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -11,6 +12,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
@@ -20,7 +22,6 @@
 #include "engine_internal.hpp"
 #include <algorithm>
 #include <climits>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -1072,7 +1073,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                     const BuiltinClass *c = ctx.engine->findClass(cn);
                     if (!c || !c->construct) {
                         auto msg = keel::format("classdef '{}' has no constructor", cn);
-                        throw std::runtime_error(msg.c_str());
+                        throw numkit::Error(msg.c_str());
                     }
                     outs[0] = ctx.engine->constructChecked(c, args, ctx);
                 });

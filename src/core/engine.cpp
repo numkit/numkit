@@ -1,5 +1,6 @@
 // src/engine.cpp
 #include <keel/array.h>
+#include <keel/exception.h>
 #include <keel/core.h>
 #include <keel/env.h>
 #include <keel/format.h>
@@ -14,6 +15,7 @@
 #include <keel/math.h>
 #include <cstdio>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/core/caching_allocator.hpp>
 #include <numkit/core/compiler.hpp>
@@ -172,7 +174,7 @@ void Engine::registerFunctionImpl_(keel::StringRef fullName,
                 leafName);
         }
         auto msg = keel::format("duplicate function registration: {}{}", fullName, hint);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
     externalFuncs_.put(keel::String::from(fullName), keel::move(func));
     shortNameIndex_.get_or_insert(keel::String::from(leafName),
@@ -232,20 +234,20 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
                                                    Environment *env)
 {
     if (!handle.isFuncHandle())
-        throw std::runtime_error("callFunctionHandleMulti: argument is not a function handle");
+        throw numkit::Error("callFunctionHandleMulti: argument is not a function handle");
     Environment *e = env ? env : workspaceEnv_.get();
 
     // TreeWalker mode: dispatch strictly on TreeWalker (which unwraps
     // funcHandleCaptures, resolves externals/imports, and lazy-loads .m files).
     if (backend_ != Backend::VM) {
         if (!treeWalker_)
-            throw std::runtime_error("callFunctionHandleMulti: TreeWalker backend is unavailable");
+            throw numkit::Error("callFunctionHandleMulti: TreeWalker backend is unavailable");
         return treeWalker_->callHandleMultiPublic(handle, args, e, nout);
     }
 
     // VM mode: dispatch strictly on VM (zero TreeWalker fallback).
     if (!vm_)
-        throw std::runtime_error("callFunctionHandleMulti: VM backend is unavailable");
+        throw numkit::Error("callFunctionHandleMulti: VM backend is unavailable");
 
     keel::Array<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
@@ -275,7 +277,7 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
         const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
         if (!cc) {
             auto msg = keel::format("Failed to compile function handle target '@{}'", name);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.c_str());
         }
         return vm_->callReentrant(*cc, args, nout);
     }
@@ -289,7 +291,7 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
     }
 
     auto msg = keel::format("Undefined function in handle: @{}", name);
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 bool Engine::isInsideFunctionCall() const
@@ -377,9 +379,9 @@ keel::String Engine::getEnvVar(keel::StringRef name) const
 keel::String Engine::inputName(keel::i32 k)
 {
     if (k < 1)
-        throw std::runtime_error("inputname: argument index must be >= 1");
+        throw numkit::Error("inputname: argument index must be >= 1");
     if (callerDepth() < 1)
-        throw std::runtime_error(
+        throw numkit::Error(
             "inputname: must be called from within a function");
 
     if (vm_ && backend_ == Backend::VM) {
@@ -1073,7 +1075,7 @@ Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPath) const
             }
         }
         return rp;
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
 }

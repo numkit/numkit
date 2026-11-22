@@ -3,9 +3,9 @@
 #include <keel/hash_map.h>
 #include <keel/utf8.h>
 #include <numkit/core/parser.hpp>
+#include <numkit/value/error.hpp>
 #include <cerrno>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -132,12 +132,12 @@ Token Parser::consume(TokenType t, keel::StringRef msg)
         keel::String err = keel::format(
             "Parse error at line {} col {}: expected token type {}, got '{}'",
             current().line, current().col, keel::as<keel::i32>(t), current().value);
-        throw std::runtime_error(err.c_str());
+        throw numkit::Error(err.c_str());
     }
     keel::String err = keel::format(
         "Parse error at line {} col {}: expected {}, got '{}'",
         current().line, current().col, msg, current().value);
-    throw std::runtime_error(err.c_str());
+    throw numkit::Error(err.c_str());
 }
 
 void Parser::skipNewlines()
@@ -204,7 +204,7 @@ keel::f64 Parser::parseDouble(keel::StringRef text, keel::i32 line, keel::i32 co
     auto throwInvalid = [&]() -> void {
         keel::String err = keel::format(
             "Invalid number literal '{}' at line {} col {}", text, line, col);
-        throw std::runtime_error(err.c_str());
+        throw numkit::Error(err.c_str());
     };
 
     if (clean.empty()) {
@@ -271,7 +271,7 @@ ASTNodePtr Parser::parse()
                 keel::String err = keel::format(
                     "Duplicate function '{}' (first defined at line {}, redefined at line {})",
                     child->strValue, *firstLine, child->line);
-                throw std::runtime_error(err.c_str());
+                throw numkit::Error(err.c_str());
             }
             funcNames.put(child->strValue.clone(), child->line);
         }
@@ -302,7 +302,7 @@ ASTNodePtr Parser::parseStatement()
             auto [ln, cl] = loc();
             keel::String err = keel::format(
                 "Illegal use of reserved keyword \"classdef\" at line {} col {}", ln, cl);
-            throw std::runtime_error(err.c_str());
+            throw numkit::Error(err.c_str());
         }
         return parseClassDef();
     }
@@ -981,7 +981,7 @@ ASTNodePtr Parser::parseFunctionDef()
     } else if (!isAtEnd()) {
         keel::String err = keel::format("Expected 'end' for function '{}' defined at line {}",
                                         node->strValue, node->line);
-        throw std::runtime_error(err.c_str());
+        throw numkit::Error(err.c_str());
     }
 
     skipTerminators();
@@ -1056,7 +1056,7 @@ ASTNodePtr Parser::parseClassDef()
             keel::String err = keel::format(
                 "classdef '{}': expected 'properties', 'methods' or 'enumeration' block at line {}",
                 node->strValue, current().line);
-            throw std::runtime_error(err.c_str());
+            throw numkit::Error(err.c_str());
         }
         advance();                              // consume the block keyword
         keel::Array<keel::String> blockAttrs = parseAttrBlock();
@@ -1162,7 +1162,7 @@ ASTNodePtr Parser::parseClassDef()
         advance();
     } else if (!isAtEnd()) {
         keel::String err = keel::format("Expected 'end' for classdef '{}'", node->strValue);
-        throw std::runtime_error(err.c_str());
+        throw numkit::Error(err.c_str());
     }
     skipTerminators();
     return node;
@@ -1188,7 +1188,7 @@ ASTNodePtr Parser::parseBlock(std::initializer_list<TokenType> terminators)
         if (pos_ == before) {
             keel::String err = keel::format("Parse error: stuck in block at line {} col {}",
                                             current().line, current().col);
-            throw std::runtime_error(err.c_str());
+            throw numkit::Error(err.c_str());
         }
     }
     return block;
@@ -1574,7 +1574,7 @@ ASTNodePtr Parser::parsePrimary()
     default: {
         keel::String err = keel::format("Unexpected token '{}' at line {} col {}",
                                         current().value, ln, cl);
-        throw std::runtime_error(err.c_str());
+        throw numkit::Error(err.c_str());
     }
     }
 }
@@ -1705,7 +1705,7 @@ ASTNodePtr Parser::parseArrayLiteral(TokenType open, TokenType close, NodeType n
             keel::String err = keel::format(
                 "Parse error: stuck in array literal at line {} col {}",
                 current().line, current().col);
-            throw std::runtime_error(err.c_str());
+            throw numkit::Error(err.c_str());
         }
     }
 

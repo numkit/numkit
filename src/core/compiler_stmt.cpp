@@ -3,6 +3,7 @@
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
@@ -10,7 +11,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace numkit {
 
@@ -367,7 +367,7 @@ keel::u16 Compiler::compileWhile(const ASTNode *node)
 keel::u16 Compiler::compileBreak(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
-        throw std::runtime_error("Compiler: break outside of loop");
+        throw numkit::Error("Compiler: break outside of loop");
 
     keel::i32 triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
     for (keel::i32 i = 0; i < triesToPop; ++i)
@@ -385,7 +385,7 @@ keel::u16 Compiler::compileBreak(const ASTNode * /*node*/)
 keel::u16 Compiler::compileContinue(const ASTNode * /*node*/)
 {
     if (loopStack_.empty())
-        throw std::runtime_error("Compiler: continue outside of loop");
+        throw numkit::Error("Compiler: continue outside of loop");
     keel::i32 triesToPop = activeTryDepth_ - loopStack_.back().tryDepthAtEntry;
     for (keel::i32 i = 0; i < triesToPop; ++i)
         emitA(OpCode::TRY_END, 0);
@@ -524,7 +524,7 @@ keel::u16 Compiler::compileColonExpr(const ASTNode *node)
         return dst;
     }
 
-    throw std::runtime_error("Compiler: invalid colon expression");
+    throw numkit::Error("Compiler: invalid colon expression");
 }
 
 keel::u16 Compiler::compileMatrixLiteral(const ASTNode *node)
@@ -1002,7 +1002,7 @@ keel::u16 Compiler::compileFieldStore(const ASTNode *lhs, const ASTNode *rhs,
     }
 
     if (cur->type != NodeType::IDENTIFIER)
-        throw std::runtime_error("Compiler: invalid nested field assign target");
+        throw numkit::Error("Compiler: invalid nested field assign target");
 
     // fieldChain is in reverse: ["b", "a"] for s.a.b
     // Root variable
@@ -1219,7 +1219,7 @@ keel::u16 Compiler::compileCellStore(const ASTNode *lhs, const ASTNode *rhs,
     // lhs = CELL_INDEX node; rhs = RHS expr (used only when inValReg < 0)
     auto *target = lhs->children[0].get();
     if (target->type != NodeType::IDENTIFIER)
-        throw std::runtime_error("Compiler: invalid cell assignment target");
+        throw numkit::Error("Compiler: invalid cell assignment target");
 
     keel::u16 cell = varRegWrite(target->strValue);
     emitUpvalLoadRawIfShared(target->strValue, cell);
@@ -1313,7 +1313,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool 
         // s.(expr) = val
         auto *objNode = target->children[0].get();
         if (objNode->type != NodeType::IDENTIFIER)
-            throw std::runtime_error("Compiler: dynamic field assign requires identifier target");
+            throw numkit::Error("Compiler: dynamic field assign requires identifier target");
         keel::u16 obj = varRegWrite(objNode->strValue);
         emitUpvalLoadRawIfShared(objNode->strValue, obj);
         keel::u16 nameReg = compileNode(target->children[1].get());
@@ -1328,7 +1328,7 @@ void Compiler::compileStoreLValue(const ASTNode *target, keel::u16 valReg, bool 
         break;
     }
     default:
-        throw std::runtime_error("Compiler: unsupported multi-assign target");
+        throw numkit::Error("Compiler: unsupported multi-assign target");
     }
 }
 
@@ -1383,7 +1383,7 @@ keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNod
         cur = cur->children[0].get();
     }
     if (cur->type != NodeType::IDENTIFIER)
-        throw std::runtime_error("Compiler: unsupported lvalue root");
+        throw numkit::Error("Compiler: unsupported lvalue root");
     std::reverse(acc.begin(), acc.end());
     const keel::usize n = acc.size();
     // A paren-index that is NOT the final accessor indexes into a

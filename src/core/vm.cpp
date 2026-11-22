@@ -12,12 +12,12 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/vm.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 
 #include <algorithm>
 #include <cstdio>
-#include <stdexcept>
 #include <utility>
 
 // Forward-declarations from toolboxes/builtin/src/backends/binary_ops_loops.hpp.
@@ -926,7 +926,7 @@ enter_frame:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
                     if (keel::is_nan(bv) || keel::is_nan(cv))
-                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                        throw numkit::Error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 && cv != 0.0);
                 } else
                     { if (tryBinaryOpFrame(I.a, I.op, I.b, I.c, frame, ip)) goto enter_frame;
@@ -936,7 +936,7 @@ enter_frame:
                 if (R[I.b].isDoubleScalar() && R[I.c].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal(), cv = R[I.c].scalarVal();
                     if (keel::is_nan(bv) || keel::is_nan(cv))
-                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                        throw numkit::Error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv != 0.0 || cv != 0.0);
                 } else
                     { if (tryBinaryOpFrame(I.a, I.op, I.b, I.c, frame, ip)) goto enter_frame;
@@ -958,7 +958,7 @@ enter_frame:
                 if (R[I.b].isDoubleScalar()) {
                     keel::f64 bv = R[I.b].scalarVal();
                     if (keel::is_nan(bv))
-                        throw std::runtime_error("NaN values cannot be converted to logicals.");
+                        throw numkit::Error("NaN values cannot be converted to logicals.");
                     R[I.a].setLogicalFast(bv == 0.0);
                 } else
                     { if (tryUnaryOpFrame(I.a, I.op, I.b, frame, ip)) goto enter_frame;
@@ -967,7 +967,7 @@ enter_frame:
             case OpCode::TO_LOGICAL_SCALAR: {
                 const Value &src = R[I.b];
                 if (!src.isScalar() || src.isEmpty() || src.isUnset()) {
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         "Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values.");
                 }
                 R[I.a].setLogicalFast(src.toBool());
@@ -1108,7 +1108,7 @@ enter_frame:
                                         : (tb != ValueType::DOUBLE) ? tb
                                         : ValueType::DOUBLE;
                             if (ta != ValueType::DOUBLE && tb != ValueType::DOUBLE && ta != tb)
-                                throw std::runtime_error(
+                                throw numkit::Error(
                                     "Colon operands must be all the same type, "
                                     "or mixed with real scalar doubles");
                             if (R[I.b].isEmpty() || R[I.c].isEmpty())
@@ -1143,7 +1143,7 @@ enter_frame:
                                 if (ti == ValueType::DOUBLE) continue;
                                 if (!found) { t = ti; found = true; }
                                 else if (ti != t)
-                                    throw std::runtime_error(
+                                    throw numkit::Error(
                                         "Colon operands must be all the same type, "
                                         "or mixed with real scalar doubles");
                             }
@@ -1240,7 +1240,7 @@ enter_frame:
                             : (tb != ValueType::DOUBLE) ? tb
                             : ValueType::DOUBLE;
                 if (ta != ValueType::DOUBLE && tb != ValueType::DOUBLE && ta != tb)
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         "Colon operands must be all the same type, "
                         "or mixed with real scalar doubles");
                 if (R[I.b].isEmpty() || R[I.c].isEmpty()) {
@@ -1279,7 +1279,7 @@ enter_frame:
                     if (nondefs[k] == ValueType::DOUBLE) continue;
                     if (t == ValueType::DOUBLE) t = nondefs[k];
                     else if (t != nondefs[k])
-                        throw std::runtime_error(
+                        throw numkit::Error(
                             "Colon operands must be all the same type, "
                             "or mixed with real scalar doubles");
                 }
@@ -1425,14 +1425,14 @@ enter_frame:
                 if (src.isStruct()) {
                     keel::usize n = src.numel();
                     if (n == 0 && !src.hasField(fname))
-                        throw std::runtime_error(
+                        throw numkit::Error(
                             keel::format("Reference to non-existent field '{}'", fname).c_str());
                     elems.reserve(n + 1);
                     for (keel::usize i = 0; i < n; ++i) {
                         const auto &m = src.structArrayElem(i);
                         const Value *vp = m.get(fname);
                         if (!vp)
-                            throw std::runtime_error(
+                            throw numkit::Error(
                                 keel::format("Reference to non-existent field '{}'", fname).c_str());
                         elems.push_back(*vp);
                     }
@@ -1448,14 +1448,14 @@ enter_frame:
                         Value elem = src.objectSubArray(keel::ArrayRef<keel::usize>(&idx, 1), engine_.mr_);
                         Value out;
                         if (!cls || !cls->propGet || !cls->propGet(elem, fname, out, ctx))
-                            throw std::runtime_error(
+                            throw numkit::Error(
                                 keel::format("No appropriate property '{}' for class '{}'",
                                              fname, src.objectClassNameRef())
                                     .c_str());
                         elems.push_back(keel::move(out));
                     }
                 } else {
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         "Comma-separated list expansion needs a struct or object");
                 }
                 dst = Value::horzcat(elems.data(), elems.size(), engine_.mr_);
@@ -1568,7 +1568,7 @@ enter_frame:
                     keel::usize r = Value::checkedScalarIndex(R[I.c].scalarVal());
                     keel::usize c = Value::checkedScalarIndex(R[I.e].scalarVal());
                     if (r >= hd.rows() || c >= hd.cols())
-                        throw std::runtime_error("Index exceeds array dimensions");
+                        throw numkit::Error("Index exceeds array dimensions");
                     R[I.a].setScalarFast(mv.doubleDataFast()[hd.sub2ind(r, c)]);
                     break;
                 }
@@ -1746,7 +1746,7 @@ enter_frame:
                 Value &obj = R[I.b];
                 const keel::i32 nargs = I.e;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
-                    throw std::runtime_error("Struct index rank exceeds maximum supported rank");
+                    throw numkit::Error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
                 for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.c + k].toScalar());
@@ -1762,14 +1762,14 @@ enter_frame:
                         }
                     }
                     if (linear >= obj.objectCount())
-                        throw std::runtime_error("Index exceeds object array bounds");
+                        throw numkit::Error("Index exceeds object array bounds");
                     R[I.a] = obj.objectSubArray(keel::ArrayRef<keel::usize>(&linear, 1), engine_.mr_);
                     break;
                 }
                 if (obj.isUnset() || obj.isEmpty())
                     obj = Value::structArray(0, 0, engine_.allocator());
                 if (!obj.isStruct())
-                    throw std::runtime_error("Indexed assignment on a non-struct value");
+                    throw numkit::Error("Indexed assignment on a non-struct value");
                 keel::usize linear;
                 if (nargs == 1) {
                     linear = coords[0];
@@ -1785,7 +1785,7 @@ enter_frame:
                 Value &obj = R[I.a];
                 const keel::i32 nargs = I.c;
                 if (nargs <= 0 || nargs > Dims::kMaxRank)
-                    throw std::runtime_error("Struct index rank exceeds maximum supported rank");
+                    throw numkit::Error("Struct index rank exceeds maximum supported rank");
                 keel::usize coords[Dims::kMaxRank];
                 for (keel::i32 k = 0; k < nargs; ++k)
                     coords[k] = Value::checkedScalarIndex(R[I.b + k].toScalar());
@@ -1801,7 +1801,7 @@ enter_frame:
                         }
                     }
                     if (linear >= obj.objectCount())
-                        throw std::runtime_error("Index exceeds object array bounds");
+                        throw numkit::Error("Index exceeds object array bounds");
                     if (!obj.objectIsHandle())
                         obj.objectAssignLinear(keel::ArrayRef<keel::usize>(&linear, 1),
                                                R[I.e], R[I.e], engine_.mr_);
@@ -1810,7 +1810,7 @@ enter_frame:
                 if (obj.isUnset() || obj.isEmpty())
                     obj = Value::structArray(0, 0, engine_.allocator());
                 if (!obj.isStruct())
-                    throw std::runtime_error("Indexed assignment on a non-struct value");
+                    throw numkit::Error("Indexed assignment on a non-struct value");
                 keel::usize linear;
                 if (nargs == 1) {
                     linear = coords[0];
@@ -1820,7 +1820,7 @@ enter_frame:
                 }
                 const Value &val = R[I.e];
                 if (!val.isStruct())
-                    throw std::runtime_error("Cannot assign a non-struct to a struct-array element");
+                    throw numkit::Error("Cannot assign a non-struct to a struct-array element");
                 for (const auto &name : val.fieldNamesInOrder())
                     obj.setField(linear, name, val.field(name));  // BUG #15 order
                 break;
@@ -1926,7 +1926,7 @@ enter_frame:
                 UpvaluePayload *box = asUpvalueBox(R[I.b]);
                 Value v = box ? box->read() : Value();
                 if (I.c == 0 && (v.isUnset() || v.isDeleted())) {
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         keel::format("Undefined function or variable '{}'", chunk.strings[I.d])
                             .c_str());
                 }
@@ -1985,7 +1985,7 @@ enter_frame:
                     }
                 }
                 if (!R[I.b].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 const Value &cell = R[I.b];
                 const Value &sub  = R[I.c];
                 if (sub.isDoubleScalar()) {
@@ -2030,7 +2030,7 @@ enter_frame:
                     }
                 }
                 if (!R[I.b].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 const Value &cell = R[I.b];
                 const Value &rsub = R[I.c];
                 const Value &csub = R[I.e];
@@ -2056,7 +2056,7 @@ enter_frame:
             }
             case OpCode::CELL_GET_MULTI: {
                 if (!R[I.b].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 auto indices = Value::resolveIndices(R[I.c], R[I.b].numel());
                 keel::u16 outBase = I.a, nout = I.e;
                 for (keel::u16 i = 0; i < nout && i < indices.size(); ++i)
@@ -2065,7 +2065,7 @@ enter_frame:
             }
             case OpCode::CELL_GET_MULTI_2D: {
                 if (!R[I.b].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 const Value &cell   = R[I.b];
                 auto         rowIdx = Value::resolveIndices(R[I.c], cell.dims().rows());
                 auto         colIdx = Value::resolveIndices(R[I.d], cell.dims().cols());
@@ -2097,7 +2097,7 @@ enter_frame:
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 const bool isColonSub = R[I.b].isChar() && R[I.b].asStringRef() == ":";
                 if (R[I.b].isLogical() || isColonSub || !R[I.b].isScalar()) {
                     keel::usize maxLen = R[I.a].numel();
@@ -2149,7 +2149,7 @@ enter_frame:
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 keel::usize r = Value::checkedScalarIndex(R[I.b].toScalar()), c = Value::checkedScalarIndex(R[I.c].toScalar());
                 // Auto-grow if needed
                 keel::usize nr = R[I.a].dims().rows(), nc = R[I.a].dims().cols();
@@ -2177,7 +2177,7 @@ enter_frame:
             case OpCode::CELL_GET_ND: {
                 // a=dst, b=cell, c=base, e=ndims
                 if (!R[I.b].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 keel::u16 base = I.c, ndims = I.e;
                 if (ndims == 3) {
                     keel::usize r = Value::checkedScalarIndex(R[base].toScalar());
@@ -2204,7 +2204,7 @@ enter_frame:
                 if (R[I.a].isEmpty())
                     R[I.a] = Value::cell(0, 0);
                 if (!R[I.a].isCell())
-                    throw std::runtime_error("Cell indexing requires a cell array");
+                    throw numkit::Error("Cell indexing requires a cell array");
                 keel::u16 base = I.b, ndims = I.c;
                 if (ndims == 3) {
                     keel::usize r = Value::checkedScalarIndex(R[base].toScalar());
@@ -2399,7 +2399,7 @@ enter_frame:
                 // Multi-output flattened handle call: resolve + push a
                 // MULTI frame over the flattened args (captures appended).
                 if (!R[fhReg].isFuncHandle()) {
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         "VM: multi-output call of a value that is not a "
                         "function handle");
                 }
@@ -2436,12 +2436,12 @@ enter_frame:
                           keel::MutArrayRef<Value>(ob.data(), fnout), ctx);
                     for (keel::u16 i = 0; i < fnout; ++i)
                         if (ob[i].isUnset())
-                            throw std::runtime_error("Too many output arguments.");
+                            throw numkit::Error("Too many output arguments.");
                     for (keel::u16 i = 0; i < fnout; ++i)
                         R[I.a + i] = keel::move(ob[i]);
                     break;
                 }
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("VM: undefined function in handle '@{}'", fName).c_str());
             }
 
@@ -2498,7 +2498,7 @@ enter_frame:
                     if (!inReentrantEval_) {
                         const keel::String &nn = chunk.strings[I.d];
                         if (nn == "nargin" || nn == "nargout")
-                            throw std::runtime_error(
+                            throw numkit::Error(
                                 "You can only call nargin/nargout from within a function.");
                     }
                     // Fallback: check dynamic variables (debug eval, runtime eval)
@@ -2601,7 +2601,7 @@ enter_frame:
                             break;
                         }
                     }
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         keel::format("Undefined function or variable '{}'", chunk.strings[I.d]).c_str());
                 }
                 break;
@@ -2762,7 +2762,7 @@ enter_frame:
             }
 
             default:
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("VM: unimplemented opcode {}", (keel::i32) I.op).c_str());
 
             } // switch
@@ -3441,7 +3441,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
                        const Value *ctorSeed)
 {
     if (callDepth() >= maxRecursion_)
-        throw std::runtime_error("VM: maximum recursion depth exceeded");
+        throw numkit::Error("VM: maximum recursion depth exceeded");
 
     const keel::usize nUpvals = funcChunk.upvalueParamRegs.size();
     const keel::usize userNargs = (nargs >= nUpvals) ? (nargs - nUpvals) : nargs;
@@ -3451,7 +3451,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
     const bool va = !funcChunk.paramNames.empty()
                     && funcChunk.paramNames.back() == "varargin";
     if (!va && userNargs > keel::as<keel::usize>(funcChunk.numParams))
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Too many input arguments for function '{}'", funcChunk.name).c_str());
 
     keel::u32 nregs = funcChunk.numRegisters;
@@ -3691,7 +3691,7 @@ void VM::popCallFrame(Value retVal)
                                    : (retVal.isUnset() ? 0u : 1u);
             if (produced < nout) {
                 returnBuf_.clear();
-                throw std::runtime_error("Too many output arguments.");
+                throw numkit::Error("Too many output arguments.");
             }
             if (!returnBuf_.empty()) {
                 for (keel::usize i = 0; i < nout && i < returnBuf_.size(); ++i)

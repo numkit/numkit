@@ -2,7 +2,7 @@
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/lexer.hpp>
-#include <stdexcept>
+#include <numkit/value/error.hpp>
 
 namespace numkit {
 
@@ -114,7 +114,7 @@ void Lexer::error(keel::StringRef msg)
 void Lexer::error(keel::StringRef msg, keel::i32 line, keel::i32 col)
 {
     keel::String err = keel::format("{} at line {} col {}", msg, line, col);
-    throw std::runtime_error(err.c_str());
+    throw numkit::Error(err.c_str());
 }
 
 // ─── constructor / basic methods ────────────────────────────────────────

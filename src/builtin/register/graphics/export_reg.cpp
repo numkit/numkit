@@ -20,6 +20,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
 #include <numkit/graphics/figure_render.hpp>
@@ -106,7 +107,7 @@ const FigureState *targetFigure(Engine &engine, const Value &v)
     if (hid >= 0) {
         auto *rec = fm.findHandle(hid);
         if (!rec)
-            throw std::runtime_error("Invalid or deleted object.");
+            throw numkit::Error("Invalid or deleted object.");
         return fm.figureOf(rec->figureId);
     }
     if (v.isScalar())
@@ -135,7 +136,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             if (!haveTarget) {
                 out.fig = targetFigure(engine, a);
                 if (!out.fig)
-                    throw std::runtime_error(keel::format(
+                    throw numkit::Error(keel::format(
                         "{}: first argument must be a graphics handle or figure number",
                         who).c_str());
                 haveTarget = true;
@@ -174,11 +175,11 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
     if (needTarget && !out.fig)
         out.fig = &engine.figureManager().current();
     if (!havePath)
-        throw std::runtime_error(keel::format("{}: a filename is required", who).c_str());
+        throw numkit::Error(keel::format("{}: a filename is required", who).c_str());
     if (out.ext.empty())
         out.ext = lowerExtOf(out.path);
     if (out.ext.empty())
-        throw std::runtime_error(keel::format(
+        throw numkit::Error(keel::format(
             "{}: cannot infer the output format from '{}'", who, out.path).c_str());
     return out;
 }
@@ -186,7 +187,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
 void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 {
     if (!ea.fig)
-        throw std::runtime_error(keel::format("{}: no figure to export", who).c_str());
+        throw numkit::Error(keel::format("{}: no figure to export", who).c_str());
     // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
     const keel::i32 W = std::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
@@ -194,7 +195,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)
-        throw std::runtime_error(keel::format("{}: cannot resolve '{}'", who, ea.path).c_str());
+        throw numkit::Error(keel::format("{}: cannot resolve '{}'", who, ea.path).c_str());
 
     if (ea.ext == "svg") {
         rp.fs->writeFile(rp.path,
@@ -214,7 +215,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
         return;
     }
     if (ea.ext.is_one_of({"fig", "emf", "hdf"})) {
-        throw std::runtime_error(keel::format(
+        throw numkit::Error(keel::format(
             "{}: format '.{}' is not supported yet (supported: .png .svg .jpg "
             ".bmp .tga .pnm .tif) — bugs/opened/graphics/figure-export-gaps.md",
             who, ea.ext).c_str());

@@ -15,7 +15,6 @@
 #include <numkit/value/error.hpp>   // numkit::Error (L0) — re-exported here for existing users
 #include <numkit/value/value.hpp>
 
-#include <stdexcept>
 
 namespace numkit {
 

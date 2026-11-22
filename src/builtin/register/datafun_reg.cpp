@@ -21,7 +21,6 @@
 #include <numkit/signal/digital_filtering/filter.hpp>
 
 #include <algorithm>
-#include <stdexcept>
 #include <utility>
 
 namespace numkit::builtin::detail {
@@ -361,7 +360,7 @@ void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 void full_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
               CallContext &) {
     if (args.empty())
-        throw std::runtime_error("full requires 1 argument");
+        throw numkit::Error("full requires 1 argument");
     outs[0] = args[0];
 }
 

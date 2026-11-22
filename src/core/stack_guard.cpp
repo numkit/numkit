@@ -2,8 +2,8 @@
 #include <keel/format.h>
 #include <keel/process.h>
 #include <numkit/core/stack_guard.hpp>
+#include <numkit/value/error.hpp>
 
-#include <stdexcept>
 
 namespace numkit {
 
@@ -13,7 +13,7 @@ void StackGuard::check(const char *stage)
         remaining && *remaining < SAFETY_MARGIN_BYTES) {
         auto msg = keel::format("Stack exhaustion limit reached during {}",
                                 stage ? stage : "operation");
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 }
 

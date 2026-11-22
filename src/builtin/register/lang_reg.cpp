@@ -6,6 +6,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/builtin/lang.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/callback_builtin.hpp>
 #include <numkit/core/types.hpp>
@@ -15,7 +16,6 @@
 #include <numkit/runtime/runtime.hpp>
 
 #include <algorithm>
-#include <stdexcept>
 
 namespace numkit::builtin::detail {
 void runNative_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
@@ -64,7 +64,7 @@ void feval_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     } else if (args[0].isChar() || args[0].isString()) {
         handle = Value::funcHandle(args[0].toString(), ctx.engine->allocator());
     } else {
-        throw std::runtime_error("feval: first argument must be a function handle or name");
+        throw numkit::Error("feval: first argument must be a function handle or name");
     }
     keel::ArrayRef<Value> callArgs(args.data() + 1, args.size() - 1);
     if (nargout <= 1) {

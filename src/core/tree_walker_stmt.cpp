@@ -9,6 +9,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/tree_walker.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/stack_guard.hpp>
@@ -308,7 +309,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
                     const Value *rv = env->get(tail);
                     if (!rv) {
                         auto msg = keel::format("Undefined function or variable '{}'", tail);
-                        throw std::runtime_error(msg.c_str());
+                        throw numkit::Error(msg.c_str());
                     }
                 }
                 // Reuse the expression evaluator: rebuild a tiny
@@ -373,7 +374,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
 
     auto msg = engine_.formatUndefinedFunctionError(
         name, keel::format("Undefined function: {}", name));
-    throw std::runtime_error(msg.c_str());
+    throw numkit::Error(msg.c_str());
 }
 
 // ============================================================
@@ -591,7 +592,7 @@ Value TreeWalker::execGlobalPersistent(const ASTNode *node, Environment *env)
 {
     if (node->type == NodeType::PERSISTENT_STMT) {
         if (activeFrames_.empty())
-            throw std::runtime_error("persistent declarations are only allowed inside functions");
+            throw numkit::Error("persistent declarations are only allowed inside functions");
         for (auto &name : node->paramNames)
             env->declarePersistent(name);
         return Value();
@@ -842,7 +843,7 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     const keel::usize required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size()) {
         auto msg = keel::format("Too many input arguments for function '{}'", func.name);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);
@@ -944,7 +945,7 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     const keel::usize required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size()) {
         auto msg = keel::format("Too many input arguments for function '{}'", func.name);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);
@@ -1040,12 +1041,12 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
                 results.push_back(vaVal->cellAt(k));
         }
         if (results.size() < nout)
-            throw std::runtime_error("Too many output arguments.");
+            throw numkit::Error("Too many output arguments.");
         return results;
     }
 
     if (func.returns.size() < nout)
-        throw std::runtime_error("Too many output arguments.");
+        throw numkit::Error("Too many output arguments.");
     results.reserve(std::min(func.returns.size(), nout));
     for (keel::usize i = 0; i < func.returns.size() && i < nout; ++i)
         results.push_back(readRet(func.returns[i]));
@@ -1074,7 +1075,7 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
     const keel::usize required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size()) {
         auto msg = keel::format("Too many input arguments to constructor '{}'", func.name);
-        throw std::runtime_error(msg.c_str());
+        throw numkit::Error(msg.c_str());
     }
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);

@@ -20,6 +20,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/runtime/containers.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/ops/deflate.hpp>
@@ -33,7 +34,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <numeric>
-#include <stdexcept>
 
 namespace numkit::runtime {
 namespace {
@@ -124,7 +124,7 @@ const KVPayload *require(const Value &m)
 {
     const KVPayload *p = cst(m);
     if (!p)
-        throw std::runtime_error("expected a containers.Map or dictionary");
+        throw numkit::Error("expected a containers.Map or dictionary");
     return p;
 }
 
@@ -201,7 +201,7 @@ void set(Value &m, const Value &key, const Value &val)
 {
     KVPayload *p = mut(m);
     if (!p)
-        throw std::runtime_error("set: expected a containers.Map or dictionary");
+        throw numkit::Error("set: expected a containers.Map or dictionary");
     p->put(key, val);
 }
 
@@ -210,7 +210,7 @@ Value get(const Value &m, const Value &key)
     const KVPayload *p = require(m);
     keel::i32 idx = p->find(key);
     if (idx < 0)
-        throw std::runtime_error("the specified key is not present in this container");
+        throw numkit::Error("the specified key is not present in this container");
     return p->vals[idx];
 }
 
@@ -222,7 +222,7 @@ void remove(Value &m, const Value &key)
 {
     KVPayload *p = mut(m);
     if (!p)
-        throw std::runtime_error("remove: expected a containers.Map or dictionary");
+        throw numkit::Error("remove: expected a containers.Map or dictionary");
     keel::i32 idx = p->find(key);
     if (idx < 0)
         return;
@@ -3187,7 +3187,7 @@ void registerContainersRuntime(Engine &engine)
                 extractKeys(args[0], ks, mr);
                 extractVals(args[1], vs, mr);
                 if (ks.size() != vs.size())
-                    throw std::runtime_error("dictionary: keys and values must match in number");
+                    throw numkit::Error("dictionary: keys and values must match in number");
                 for (keel::usize i = 0; i < ks.size(); ++i)
                     containers::set(d, ks[i], vs[i]);
             }
@@ -3196,14 +3196,14 @@ void registerContainersRuntime(Engine &engine)
         dict.subsref = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> out,
                           CallContext &) {
             if (args.empty())
-                throw std::runtime_error("dictionary: key subscript required");
+                throw numkit::Error("dictionary: key subscript required");
             if (!out.empty())
                 out[0] = containers::get(self, args[0]);
         };
         dict.subsasgn = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
                            CallContext &) {
             if (args.size() < 2)
-                throw std::runtime_error("dictionary: key and value required for assignment");
+                throw numkit::Error("dictionary: key and value required for assignment");
             containers::set(self, args[0], args[args.size() - 1]);
         };
         dict.methods.put(keel::String::from("numEntries"),
@@ -3217,7 +3217,7 @@ void registerContainersRuntime(Engine &engine)
             [](Value &self, keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> out,
                CallContext &ctx) {
                 if (a.empty())
-                    throw std::runtime_error("dictionary.isKey: key argument required");
+                    throw numkit::Error("dictionary.isKey: key argument required");
                 if (!out.empty())
                     out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->allocator());
             });
@@ -3298,14 +3298,14 @@ void registerContainersRuntime(Engine &engine)
         cm.subsref = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> out,
                         CallContext &) {
             if (args.empty())
-                throw std::runtime_error("containers.Map: key subscript required");
+                throw numkit::Error("containers.Map: key subscript required");
             if (!out.empty())
                 out[0] = containers::get(self, args[0]);
         };
         cm.subsasgn = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
                          CallContext &) {
             if (args.size() < 2)
-                throw std::runtime_error("containers.Map: key and value required for assignment");
+                throw numkit::Error("containers.Map: key and value required for assignment");
             containers::set(self, args[0], args[args.size() - 1]);
         };
         cm.methods.put(keel::String::from("keys"),
@@ -3324,7 +3324,7 @@ void registerContainersRuntime(Engine &engine)
             [](Value &self, keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> out,
                CallContext &ctx) {
                 if (a.empty())
-                    throw std::runtime_error("containers.Map.isKey: key argument required");
+                    throw numkit::Error("containers.Map.isKey: key argument required");
                 if (!out.empty())
                     out[0] = Value::logicalScalar(containers::isKey(self, a[0]), ctx.engine->allocator());
             });
@@ -3339,7 +3339,7 @@ void registerContainersRuntime(Engine &engine)
             [](Value &self, keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> out,
                CallContext &) {
                 if (a.empty())
-                    throw std::runtime_error("containers.Map.remove: key argument required");
+                    throw numkit::Error("containers.Map.remove: key argument required");
                 containers::remove(self, a[0]);
                 if (!out.empty())
                     out[0] = self; // returns the (mutated) map
@@ -3641,7 +3641,7 @@ void registerContainersRuntime(Engine &engine)
                        CallContext &ctx) {
             const TablePayload *p = tableCst(self);
             if (!p)
-                throw std::runtime_error("table: invalid table payload");
+                throw numkit::Error("table: invalid table payload");
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             if (args.empty() || args.size() > 2)
@@ -3684,7 +3684,7 @@ void registerContainersRuntime(Engine &engine)
                         CallContext &ctx) {
             TablePayload *p = tableMut(self);
             if (!p)
-                throw std::runtime_error("table: invalid table payload");
+                throw numkit::Error("table: invalid table payload");
             auto *mr = ctx.engine->allocator();
             auto *alloc = mr ? mr : keel::default_allocator();
             if (args.size() < 2 || args.size() > 3)

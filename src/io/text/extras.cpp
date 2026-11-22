@@ -3,6 +3,7 @@
 // fileread / readlines / writelines / readmatrix / writematrix / type.
 
 #include <keel/arena.h>
+#include <keel/exception.h>
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -29,7 +30,7 @@ keel::String slurpFile(FsContext &fs, keel::StringRef filename, const char *fnNa
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(filename);
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
     if (!resolved.fs)
@@ -51,7 +52,7 @@ void spitFile(FsContext &fs, keel::StringRef filename, keel::StringRef content,
     FsContext::ResolvedPath resolved{};
     try {
         resolved = fs.resolvePath(filename);
-    } catch (const std::runtime_error &e) {
+    } catch (const keel::Exception &e) {
         throw Error(e.what());
     }
     if (!resolved.fs)

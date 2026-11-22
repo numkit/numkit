@@ -18,7 +18,7 @@
 #include <cstdlib>
 #include <keel/dynlib.h>
 #include <exception>
-#include <stdexcept>
+#include <numkit/value/error.hpp>
 
 namespace {
 
@@ -186,14 +186,14 @@ int numkit_engine_load_plugin(numkit_engine_ctx *ctx,
         if (keel::fs_is_file(name_or_path)) {
             if (!ctx->engine.pluginLoader().loadModule(name_or_path)) {
                 auto msg = keel::format("Failed to load plugin: {}", name_or_path);
-                throw std::runtime_error(msg.c_str());
+                throw numkit::Error(msg.as_ref());
             }
             return 0;
         }
         keel::String libPath = ctx->engine.pluginLoader().findPackageLibrary(name_or_path);
         if (libPath.empty() || !ctx->engine.pluginLoader().loadModule(libPath)) {
             auto msg = keel::format("Could not locate or load plugin '{}'", name_or_path);
-            throw std::runtime_error(msg.c_str());
+            throw numkit::Error(msg.as_ref());
         }
         return 0;
     } catch (const std::exception &ex) {
@@ -304,7 +304,7 @@ int numkit_engine_call(numkit_engine_ctx *ctx,
                                      keel::String msg = nsStr.empty()
                                          ? keel::format("Undefined function '{}'", nameStr)
                                          : keel::format("Undefined function '{}.{}'", nsStr, nameStr);
-                                     throw std::runtime_error(msg.c_str());
+                                     throw numkit::Error(msg.as_ref());
                                  }
                                  (*fn)(inSpan, nOut, outSpan, callCtx);
                              });

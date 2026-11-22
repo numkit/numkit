@@ -16,13 +16,13 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/vm.hpp>
+#include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 #include "vm_internal.hpp"
 
 #include <algorithm>
 #include <cstdio>
-#include <stdexcept>
 #include <utility>
 
 namespace numkit {
@@ -112,7 +112,7 @@ Value VM::binarySlowPath(OpCode op, const Value &lhs, const Value &rhs)
         if (const auto *fn = engine_.binaryOps_.get(opStr))
             return (*fn)(lhs, rhs);
     }
-    throw std::runtime_error("VM: unsupported binary op");
+    throw numkit::Error("VM: unsupported binary op");
 }
 
 Value VM::unarySlowPath(OpCode op, const Value &operand)
@@ -128,7 +128,7 @@ Value VM::unarySlowPath(OpCode op, const Value &operand)
         if (const auto *fn = engine_.unaryOps_.get(opStr))
             return (*fn)(operand);
     }
-    throw std::runtime_error("VM: unsupported unary op");
+    throw numkit::Error("VM: unsupported unary op");
 }
 
 bool VM::tryBinaryOpFrame(keel::u16 dst, OpCode op, keel::u16 lhsReg, keel::u16 rhsReg,
@@ -242,7 +242,7 @@ bool VM::execIndexSet1DSlow(const Instruction &I, Value *R,
         return false;
     }
     if (R[I.a].isObject())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("'()' assignment is not defined for class '{}'",
                          R[I.a].objectClassNameRef())
                 .c_str());
@@ -356,7 +356,7 @@ bool VM::execIndexSet2DSlow(const Instruction &I, Value *R,
         return false;
     }
     if (R[I.a].isObject())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("'()' assignment is not defined for class '{}'",
                          R[I.a].objectClassNameRef())
                 .c_str());
@@ -452,7 +452,7 @@ bool VM::execIndexSetND(const Instruction &I, Value *R,
         return false;
     }
     if (R[I.a].isObject())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("'()' assignment is not defined for class '{}'",
                          R[I.a].objectClassNameRef())
                 .c_str());
@@ -578,18 +578,18 @@ bool VM::execFieldGet(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
         return false;
     }
     if (!R[objReg].isStruct())
-        throw std::runtime_error("Dot indexing requires a struct");
+        throw numkit::Error("Dot indexing requires a struct");
     if (R[objReg].isStructArray() || R[objReg].numel() == 0) {
         keel::usize n = R[objReg].numel();
         if (n == 0 && !R[objReg].hasField(fname))
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("Reference to non-existent field '{}'", fname).c_str());
         Value csl = Value::csl(n, engine_.mr_);
         for (keel::usize i = 0; i < n; ++i) {
             const auto &m = R[objReg].structArrayElem(i);
             const Value *vp = m.get(fname);
             if (!vp)
-                throw std::runtime_error(
+                throw numkit::Error(
                     keel::format("Reference to non-existent field '{}'", fname).c_str());
             csl.cslAt(i) = *vp;
         }
@@ -597,7 +597,7 @@ bool VM::execFieldGet(keel::u16 dstReg, keel::u16 objReg, keel::StringRef fname,
         return false;
     }
     if (!R[objReg].hasField(fname))
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Reference to non-existent field '{}'", fname).c_str());
     R[dstReg] = R[objReg].field(fname);
     return false;
@@ -616,7 +616,7 @@ void VM::execFieldGetOrCreate(keel::u16 dstReg, keel::u16 objReg, keel::StringRe
                 return;
             }
         }
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("No appropriate property '{}' for class '{}'",
                          fname, R[objReg].objectClassNameRef())
                 .c_str());
@@ -624,7 +624,7 @@ void VM::execFieldGetOrCreate(keel::u16 dstReg, keel::u16 objReg, keel::StringRe
     if (R[objReg].isEmpty())
         R[objReg] = Value::structure();
     if (!R[objReg].isStruct())
-        throw std::runtime_error("Dot indexing requires a struct");
+        throw numkit::Error("Dot indexing requires a struct");
     R[dstReg] = R[objReg].field(fname);
 }
 
@@ -652,7 +652,7 @@ bool VM::execFieldSet(keel::u16 objReg, keel::u16 valReg, keel::StringRef fname,
     if (R[objReg].isEmpty())
         R[objReg] = Value::structure();
     if (!R[objReg].isStruct())
-        throw std::runtime_error("Dot indexing requires a struct");
+        throw numkit::Error("Dot indexing requires a struct");
     if (R[objReg].isStructArray()) {
         R[objReg].setFieldAll(fname, R[valReg]);
     } else if (!lvalDetaches_.empty()
@@ -708,16 +708,16 @@ bool VM::execCallMethod(const Instruction &I, Value *R,
         Value out;
         CallContext ctx{&engine_, currentCallEnv()};
         if (!cls || !cls->propGet || !cls->propGet(obj, mname, out, ctx))
-            throw std::runtime_error(
+            throw numkit::Error(
                 keel::format("No appropriate property '{}' for class '{}'",
                              mname, obj.objectClassNameRef())
                     .c_str());
         return execCallIndirectSpan(out, I.a, argPtr, argN, R, frame, ip);
     }
     if (!obj.isStruct())
-        throw std::runtime_error("Dot indexing requires a struct");
+        throw numkit::Error("Dot indexing requires a struct");
     if (!obj.hasField(mname))
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Reference to non-existent field '{}'", mname).c_str());
     Value fv = obj.field(mname);
     return execCallIndirectSpan(fv, I.a, argPtr, argN, R, frame, ip);
@@ -733,7 +733,7 @@ bool VM::execCallMethodMulti(const Instruction &I, Value *R,
     const keel::String &mname = chunk.strings[I.d];
     Value &obj = R[objReg];
     if (!obj.isObject())
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("Dot-indexing multi-output requires an object; '{}' is not a method of a {}",
                          mname, mtypeName(obj.type()))
                 .c_str());
@@ -761,7 +761,7 @@ bool VM::execCallMethodMulti(const Instruction &I, Value *R,
     }
     const ObjectMethod *mfn = cls ? cls->methods.get(mname) : nullptr;
     if (!mfn)
-        throw std::runtime_error(
+        throw numkit::Error(
             keel::format("No appropriate method '{}' for class '{}'",
                          mname, obj.objectClassNameRef())
                 .c_str());
@@ -772,7 +772,7 @@ bool VM::execCallMethodMulti(const Instruction &I, Value *R,
     (*mfn)(self, args, nout, keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
     for (keel::u16 i = 0; i < nout; ++i)
         if (outBuf[i].isUnset())
-            throw std::runtime_error("Too many output arguments.");
+            throw numkit::Error("Too many output arguments.");
     for (keel::usize i = 0; i < nout; ++i)
         R[outBase + i] = keel::move(outBuf[i]);
     return false;
@@ -886,7 +886,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
             return;
         }
     }
-    throw std::runtime_error("VM: unsupported builtin");
+    throw numkit::Error("VM: unsupported builtin");
 }
 
 const Value *VM::findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
@@ -1157,9 +1157,9 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
                                           ? funcName.substr(pos)
                                           : funcName.substr(pos, nextDot - pos);
                 if (!cur.isStruct())
-                    throw std::runtime_error("Dot indexing requires a struct");
+                    throw numkit::Error("Dot indexing requires a struct");
                 if (!cur.hasField(seg))
-                    throw std::runtime_error(
+                    throw numkit::Error(
                         keel::format("Reference to non-existent field '{}'", seg).c_str());
                 Value nextVal = cur.field(seg);
                 cur = keel::move(nextVal);
@@ -1199,7 +1199,7 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         }
     }
 
-    throw std::runtime_error(
+    throw numkit::Error(
         engine_.formatUndefinedFunctionError(
             funcName, keel::format("VM: undefined function '{}'", funcName)).c_str());
 }
@@ -1215,7 +1215,7 @@ bool VM::execCallNamedMultiSpan(keel::u16 outBase, keel::i32 funcIdx, keel::u16 
     auto writeMultiOutputs = [&](Value *outPtr) {
         for (keel::u16 i = 0; i < nout; ++i)
             if (outPtr[i].isUnset())
-                throw std::runtime_error("Too many output arguments.");
+                throw numkit::Error("Too many output arguments.");
         for (keel::usize i = 0; i < nout; ++i)
             R[outBase + i] = keel::move(outPtr[i]);
     };
@@ -1351,7 +1351,7 @@ bool VM::execCallNamedMultiSpan(keel::u16 outBase, keel::i32 funcIdx, keel::u16 
         return false;
     }
 
-    throw std::runtime_error(
+    throw numkit::Error(
         engine_.formatUndefinedFunctionError(
             funcName, keel::format("VM: undefined function '{}'", funcName)).c_str());
 }
@@ -1481,7 +1481,7 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
         return true;
     }
-    throw std::runtime_error(
+    throw numkit::Error(
         keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
 }
 
@@ -1515,11 +1515,11 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
                 R[outBase + i] = keel::move(outBuf[i]);
             return false;
         }
-        throw std::runtime_error(
+        throw numkit::Error(
             "VM: multi-output call '[...] = f(...)' of a value that is not a "
             "function handle");
     } else {
-        throw std::runtime_error(
+        throw numkit::Error(
             "VM: multi-output call '[...] = f(...)' of a value that is not a "
             "function handle");
     }
@@ -1557,7 +1557,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         (*fnPtr)(as, nout, os, ctx);
         for (keel::u16 i = 0; i < nout; ++i)
             if (outBuf[i].isUnset())
-                throw std::runtime_error("Too many output arguments.");
+                throw numkit::Error("Too many output arguments.");
         for (keel::usize i = 0; i < nout; ++i)
             R[outBase + i] = keel::move(outBuf[i]);
         return false;
@@ -1573,7 +1573,7 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
                       0, nout, true, outBase, nout);
         return true;
     }
-    throw std::runtime_error(
+    throw numkit::Error(
         keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
 }
 
