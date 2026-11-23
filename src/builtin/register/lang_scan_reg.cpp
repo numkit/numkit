@@ -14,7 +14,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/ops/io_helpers.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;

@@ -30,7 +30,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 #include <keel/tuple.h>
 
 namespace numkit::linalg {
@@ -68,7 +67,7 @@ bool isHermitianApprox(const Value &A, keel::f64 tol)
     for (keel::usize i = 0; i < n; ++i)
         for (keel::usize j = i + 1; j < n; ++j) {
             const keel::c64 a = d[i + j * n], b = d[j + i * n];
-            const keel::f64 scale = std::max(1.0, std::max(keel::abs(a), keel::abs(b)));
+            const keel::f64 scale = keel::max(1.0, keel::max(keel::abs(a), keel::abs(b)));
             if (keel::abs(a - keel::conj(b)) > tol * scale)
                 return false;
         }

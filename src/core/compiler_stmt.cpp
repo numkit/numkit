@@ -1,5 +1,6 @@
 // src/core/compiler_stmt.cpp
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
@@ -9,7 +10,6 @@
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
 
-#include <algorithm>
 #include <cstdlib>
 
 namespace numkit {
@@ -213,13 +213,13 @@ keel::u16 Compiler::compileGlobalPersistent(const ASTNode *node)
     for (const auto &name : node->paramNames) {
         varRegWrite(name); // allocate register, mark as assigned
         if (isGlobal) {
-            if (std::find(chunk_.globalNames.begin(), chunk_.globalNames.end(), name)
+            if (keel::find(chunk_.globalNames.begin(), chunk_.globalNames.end(), name)
                 == chunk_.globalNames.end()) {
                 chunk_.globalNames.push_back(name.clone());
             }
             chunk_.ownGlobalDecls.push_back(name.clone());
         } else {
-            if (std::find(chunk_.persistentNames.begin(), chunk_.persistentNames.end(), name)
+            if (keel::find(chunk_.persistentNames.begin(), chunk_.persistentNames.end(), name)
                 == chunk_.persistentNames.end()) {
                 chunk_.persistentNames.push_back(name.clone());
             }
@@ -1384,7 +1384,7 @@ keel::u16 Compiler::compileLValueStore(const ASTNode *lhs, const ASTNode *rhsNod
     }
     if (cur->type != NodeType::IDENTIFIER)
         throw numkit::Error("Compiler: unsupported lvalue root");
-    std::reverse(acc.begin(), acc.end());
+    keel::reverse(acc.begin(), acc.end());
     const keel::usize n = acc.size();
     // A paren-index that is NOT the final accessor indexes into a
     // struct array to reach an element used as a container for the rest

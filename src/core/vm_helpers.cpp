@@ -21,7 +21,6 @@
 #include <numkit/value/index.hpp>
 #include "vm_internal.hpp"
 
-#include <algorithm>
 #include <cstdio>
 
 namespace numkit {
@@ -279,7 +278,7 @@ bool VM::execIndexSet1DSlow(const Instruction &I, Value *R,
 
         if (rhs.isScalar() && !rhs.isComplex()
             && dst.type() == ValueType::DOUBLE && dst.isHeapDouble()) {
-            std::fill_n(dst.doubleDataMut(), n, rhs.toScalar());
+            keel::fill_n(dst.doubleDataMut(), n, rhs.toScalar());
             return false;
         }
         if (sameCount
@@ -309,7 +308,7 @@ bool VM::execIndexSet1DSlow(const Instruction &I, Value *R,
     auto indices = Value::resolveIndicesUnchecked(ix);
     if (!indices.empty() && (R[I.c].isScalar() || R[I.c].numel() == indices.size())) {
         keel::usize maxIdx = 0;
-        for (keel::usize idx : indices) maxIdx = std::max(maxIdx, idx);
+        for (keel::usize idx : indices) maxIdx = keel::max(maxIdx, idx);
         if (R[I.a].isEmpty() || maxIdx >= R[I.a].numel())
             R[I.a].ensureSize(maxIdx, engine_.mr_);
     }
@@ -383,8 +382,8 @@ bool VM::execIndexSet2DSlow(const Instruction &I, Value *R,
         }
     }
     if (maxR > curRows || maxC > curColDim) {
-        const keel::usize propR = std::max(curRows, maxR);
-        const keel::usize propC = std::max(curColDim, maxC);
+        const keel::usize propR = keel::max(curRows, maxR);
+        const keel::usize propC = keel::max(curColDim, maxC);
         const keel::usize targetCnt =
             (riIsColon ? propR : rowIds.count) * (ciIsColon ? propC : colIds.count);
         if (val.isScalar() || val.numel() == targetCnt)
@@ -518,7 +517,7 @@ bool VM::execIndexSetND(const Instruction &I, Value *R,
 
     const keel::i32 nd = keel::as<keel::i32>(ndims);
     const keel::i32 curNd = R[I.a].dims().ndim();
-    const keel::i32 newNd = std::max(nd, curNd);
+    const keel::i32 newNd = keel::max(nd, curNd);
     keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
     for (keel::i32 i = 0; i < newNd; ++i)
         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
@@ -1766,7 +1765,7 @@ void VM::execWho(const Instruction &I, Value *R, const BytecodeChunk &chunk)
             }
         }
     }
-    std::sort(names.begin(), names.end());
+    keel::sort(names.begin(), names.end());
     if (!names.empty()) {
         keel::String os;
         os.append("\nYour variables are:\n\n");
@@ -1839,7 +1838,7 @@ void VM::execWhos(const Instruction &I, Value *R, const BytecodeChunk &chunk)
     names.reserve(liveVals.size());
     for (auto [k, _] : liveVals)
         names.push_back(k.clone());
-    std::sort(names.begin(), names.end());
+    keel::sort(names.begin(), names.end());
     keel::HashSet<keel::StringRef> globalSet;
     for (const auto &gn : chunk.globalNames)
         globalSet.insert(gn.as_ref());

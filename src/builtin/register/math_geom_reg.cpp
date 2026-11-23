@@ -2,6 +2,7 @@
 //
 // CallContext register half (Phase 2b multi-block split).
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/math.h>
 #include <keel/core.h>
 #include <keel/ref.h>
@@ -13,7 +14,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 
 namespace numkit::builtin {
@@ -171,7 +171,7 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     argcheck::checkNargin(args.size(), 2, "histcounts2");
     const auto &xv = args[0];
     const auto &yv = args[1];
-    const keel::usize n = std::min(xv.numel(), yv.numel());
+    const keel::usize n = keel::min(xv.numel(), yv.numel());
     auto *mr = ctx.engine->allocator();
     if (n == 0) {
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
@@ -248,8 +248,8 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     // Wrap the resolved edges as Values and delegate to the public core.
     Value xeV = Value::matrix(1, xedges.size(), ValueType::DOUBLE, mr);
     Value yeV = Value::matrix(1, yedges.size(), ValueType::DOUBLE, mr);
-    std::copy(xedges.begin(), xedges.end(), xeV.doubleDataMut());
-    std::copy(yedges.begin(), yedges.end(), yeV.doubleDataMut());
+    keel::copy(xedges.begin(), xedges.end(), xeV.doubleDataMut());
+    keel::copy(yedges.begin(), yedges.end(), yeV.doubleDataMut());
     outs[0] = histcounts2(xv, yv, xeV, yeV, mr);
 }
 

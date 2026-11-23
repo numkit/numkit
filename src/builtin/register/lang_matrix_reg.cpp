@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -30,7 +31,6 @@
 #include <numkit/ops/rows_helpers.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -58,17 +58,17 @@ namespace { inline void fillOnes(Value &v, ValueType t)
     const keel::usize n = v.numel();
     if (n == 0) return;
     switch (t) {
-      case ValueType::DOUBLE:  { auto *p = v.doubleDataMut();  std::fill(p, p + n, 1.0); break; }
-      case ValueType::SINGLE:  { auto *p = v.singleDataMut();  std::fill(p, p + n, 1.0f); break; }
-      case ValueType::LOGICAL: { auto *p = v.logicalDataMut(); std::fill(p, p + n, keel::u8(1)); break; }
-      case ValueType::INT8:    { auto *p = v.int8DataMut();    std::fill(p, p + n, keel::i8(1)); break; }
-      case ValueType::INT16:   { auto *p = v.int16DataMut();   std::fill(p, p + n, keel::i16(1)); break; }
-      case ValueType::INT32:   { auto *p = v.int32DataMut();   std::fill(p, p + n, keel::i32(1)); break; }
-      case ValueType::INT64:   { auto *p = v.int64DataMut();   std::fill(p, p + n, keel::i64(1)); break; }
-      case ValueType::UINT8:   { auto *p = v.uint8DataMut();   std::fill(p, p + n, keel::u8(1)); break; }
-      case ValueType::UINT16:  { auto *p = v.uint16DataMut();  std::fill(p, p + n, keel::u16(1)); break; }
-      case ValueType::UINT32:  { auto *p = v.uint32DataMut();  std::fill(p, p + n, keel::u32(1)); break; }
-      case ValueType::UINT64:  { auto *p = v.uint64DataMut();  std::fill(p, p + n, keel::u64(1)); break; }
+      case ValueType::DOUBLE:  { auto *p = v.doubleDataMut();  keel::fill(p, p + n, 1.0); break; }
+      case ValueType::SINGLE:  { auto *p = v.singleDataMut();  keel::fill(p, p + n, 1.0f); break; }
+      case ValueType::LOGICAL: { auto *p = v.logicalDataMut(); keel::fill(p, p + n, keel::u8(1)); break; }
+      case ValueType::INT8:    { auto *p = v.int8DataMut();    keel::fill(p, p + n, keel::i8(1)); break; }
+      case ValueType::INT16:   { auto *p = v.int16DataMut();   keel::fill(p, p + n, keel::i16(1)); break; }
+      case ValueType::INT32:   { auto *p = v.int32DataMut();   keel::fill(p, p + n, keel::i32(1)); break; }
+      case ValueType::INT64:   { auto *p = v.int64DataMut();   keel::fill(p, p + n, keel::i64(1)); break; }
+      case ValueType::UINT8:   { auto *p = v.uint8DataMut();   keel::fill(p, p + n, keel::u8(1)); break; }
+      case ValueType::UINT16:  { auto *p = v.uint16DataMut();  keel::fill(p, p + n, keel::u16(1)); break; }
+      case ValueType::UINT32:  { auto *p = v.uint32DataMut();  keel::fill(p, p + n, keel::u32(1)); break; }
+      case ValueType::UINT64:  { auto *p = v.uint64DataMut();  keel::fill(p, p + n, keel::u64(1)); break; }
       default: throw Error("ones: unsupported type for fill",
                            0, 0, "ones", "", "numkit:ones:badType");
     }
@@ -170,7 +170,7 @@ void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
         const keel::usize ni = vi.numel();
         const keel::usize nj = vj.numel();
         const keel::usize nv = vv.numel();
-        const keel::usize len = std::max({ni, nj, nv});
+        const keel::usize len = keel::max({ni, nj, nv});
         keel::usize M = 0, N = 0;
         for (keel::usize k = 0; k < ni; ++k) {
             keel::i64 r = keel::as<keel::i64>(vi.elemAsDouble(k));
@@ -209,14 +209,14 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         const Value &A = args[0];
         const keel::i64 m = keel::as<keel::i64>(A.dims().rows());
         const keel::i64 n = keel::as<keel::i64>(A.dims().cols());
-        const keel::i64 pLen = std::min(m, n);
+        const keel::i64 pLen = keel::min(m, n);
 
         keel::Array<keel::i64> diags(mr);
         if (args.size() == 1) {
             for (keel::i64 k = -(m - 1); k <= n - 1; ++k) {
                 bool anyNz = false;
-                const keel::i64 iStart = std::max(keel::i64{0}, -k);
-                const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+                const keel::i64 iStart = keel::max(keel::i64{0}, -k);
+                const keel::i64 iEnd = keel::min(m - 1, n - 1 - k);
                 for (keel::i64 i = iStart; i <= iEnd; ++i) {
                     const keel::i64 j = i + k;
                     if (A.elemAsDouble(keel::as<keel::usize>(i + j * m)) != 0.0) {
@@ -238,8 +238,8 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         keel::f64 *bd = B.doubleDataMut();
         for (keel::usize col = 0; col < numD; ++col) {
             const keel::i64 k = diags[col];
-            const keel::i64 iStart = std::max(keel::i64{0}, -k);
-            const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+            const keel::i64 iStart = keel::max(keel::i64{0}, -k);
+            const keel::i64 iEnd = keel::min(m - 1, n - 1 - k);
             for (keel::i64 i = iStart; i <= iEnd; ++i) {
                 const keel::i64 j = i + k;
                 const keel::i64 rowB = (m >= n) ? j : i;
@@ -284,8 +284,8 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     const keel::usize numD = dVal.numel();
     for (keel::usize col = 0; col < numD && keel::as<keel::i64>(col) < bCols; ++col) {
         const keel::i64 k = keel::as<keel::i64>(dVal.elemAsDouble(col));
-        const keel::i64 iStart = std::max(keel::i64{0}, -k);
-        const keel::i64 iEnd = std::min(m - 1, n - 1 - k);
+        const keel::i64 iStart = keel::max(keel::i64{0}, -k);
+        const keel::i64 iEnd = keel::min(m - 1, n - 1 - k);
         for (keel::i64 i = iStart; i <= iEnd; ++i) {
             const keel::i64 j = i + k;
             const keel::i64 rowB = (m >= n) ? j : i;
@@ -352,9 +352,9 @@ namespace { void nanInfFill(Value &v, keel::f64 fillD, keel::f32 fillS, ValueTyp
     const keel::usize n = v.numel();
     if (n == 0) return;
     if (t == ValueType::DOUBLE) {
-        auto *p = v.doubleDataMut(); std::fill(p, p + n, fillD);
+        auto *p = v.doubleDataMut(); keel::fill(p, p + n, fillD);
     } else if (t == ValueType::SINGLE) {
-        auto *p = v.singleDataMut(); std::fill(p, p + n, fillS);
+        auto *p = v.singleDataMut(); keel::fill(p, p + n, fillS);
     }
 }}
 
@@ -448,7 +448,7 @@ void eye_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     }
     // Typed eye: zero-fill matrix of `t`, then set diagonal to one.
     auto m = Value::matrix(d.rows, d.cols, t, mr);
-    const keel::usize k = std::min(d.rows, d.cols);
+    const keel::usize k = keel::min(d.rows, d.cols);
     switch (t) {
       case ValueType::SINGLE: { auto *p = m.singleDataMut(); for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1.0f; break; }
       case ValueType::LOGICAL:{ auto *p = m.logicalDataMut(); for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
@@ -676,7 +676,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                         0, 0, "topkrows", "", "numkit:topkrows:notMatrix");
         const keel::usize m = A.dims().rows();
         const keel::usize n = A.dims().cols();
-        const keel::usize kk = std::min(keel::as<keel::usize>(kd), m);
+        const keel::usize kk = keel::min(keel::as<keel::usize>(kd), m);
         if (cols.empty()) {
             cols.reserve(n);
             for (keel::usize j = 0; j < n; ++j) cols.push_back(j);
@@ -699,7 +699,7 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         auto getCplx = [&](keel::usize r, keel::usize c) -> keel::c64 {
             return isCplx ? A.complexData()[r + c * m] : keel::c64(A.elemAsDouble(r + c * m), 0.0);
         };
-        std::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
+        keel::stable_sort(ord.begin(), ord.end(), [&](keel::usize a, keel::usize b) {
             for (keel::usize k2 = 0; k2 < cols.size(); ++k2) {
                 const keel::usize j = cols[k2];
                 const keel::c64 za = getCplx(a, j);
@@ -1407,7 +1407,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             strides[k] = total;
             total *= shape[k];
         }
-        const keel::usize outCount = std::min(D, outs.size());
+        const keel::usize outCount = keel::min(D, outs.size());
         for (keel::usize m = 0; m < outCount; ++m) {
             Value G = Value::matrixND(shape.data(), keel::as<keel::i32>(D), ValueType::DOUBLE, mr);
             keel::f64 *gd = G.doubleDataMut();
@@ -1444,8 +1444,8 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         strides[k] = total;
         total *= shape[k];
     }
-    const keel::usize wantOut = std::max<keel::usize>(1, nargout);
-    const keel::usize outCount = std::min({wantOut, D, outs.size()});
+    const keel::usize wantOut = keel::max<keel::usize>(1, nargout);
+    const keel::usize outCount = keel::min({wantOut, D, outs.size()});
     for (keel::usize m = 0; m < outCount; ++m) {
         Value G = Value::matrixND(shape.data(), keel::as<keel::i32>(D), ValueType::DOUBLE, mr);
         keel::f64 *gd = G.doubleDataMut();

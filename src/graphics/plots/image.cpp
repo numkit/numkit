@@ -12,7 +12,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <cstdio>
 
 namespace numkit {
@@ -167,11 +166,11 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                 if (orow) zs << ",";
                 zs << "[";
                 const keel::usize r0 = orow * step;
-                const keel::usize r1 = std::min(R, r0 + step);
+                const keel::usize r1 = keel::min(R, r0 + step);
                 for (keel::usize ocol = 0; ocol < outC; ++ocol) {
                     if (ocol) zs << ",";
                     const keel::usize c0 = ocol * step;
-                    const keel::usize c1 = std::min(C, c0 + step);
+                    const keel::usize c1 = keel::min(C, c0 + step);
                     keel::i32 sumR = 0, sumG = 0, sumB = 0, sumA = 0;
                     keel::i32 n = 0;
                     for (keel::usize rr = r0; rr < r1; ++rr) {
@@ -267,11 +266,11 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                 if (orow) zs << ",";
                 zs << "[";
                 const keel::usize r0 = orow * step;
-                const keel::usize r1 = std::min(R, r0 + step);
+                const keel::usize r1 = keel::min(R, r0 + step);
                 for (keel::usize ocol = 0; ocol < outC; ++ocol) {
                     if (ocol) zs << ",";
                     const keel::usize c0 = ocol * step;
-                    const keel::usize c1 = std::min(C, c0 + step);
+                    const keel::usize c1 = keel::min(C, c0 + step);
                     keel::i32 sum = 0, n = 0;
                     for (keel::usize cc = c0; cc < c1; ++cc) {
                         for (keel::usize rr = r0; rr < r1; ++rr) {

@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -20,7 +21,6 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -362,7 +362,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 outOfBounds = true;
                 break;
             }
-            auto it = std::upper_bound(g.begin(), g.end(), xq);
+            auto it = keel::upper_bound(g.begin(), g.end(), xq);
             keel::usize i0 = (it == g.begin()) ? 0 : keel::as<keel::usize>((it - g.begin()) - 1);
             if (i0 >= g.size() - 1) i0 = g.size() - 2;
             const keel::f64 denom = g[i0 + 1] - g[i0];

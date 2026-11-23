@@ -6,7 +6,6 @@
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -225,7 +224,7 @@ keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
                 if (idx[w] == -1)
                     frames.push_back({w, 0});
                 else if (on[w])
-                    low[v] = std::min(low[v], idx[w]);
+                    low[v] = keel::min(low[v], idx[w]);
                 continue;
             }
             if (low[v] == idx[v]) {
@@ -245,7 +244,7 @@ keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
             frames.pop_back();
             if (!frames.empty())
                 low[frames.back().first] =
-                    std::min(low[frames.back().first], (keel::i32)lv);
+                    keel::min(low[frames.back().first], (keel::i32)lv);
         }
     }
     return sccs;

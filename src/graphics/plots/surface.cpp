@@ -12,7 +12,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 
@@ -256,7 +255,7 @@ void sliceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
 
     const auto rgbForValue = [&](keel::f64 L) -> keel::StaticArray<keel::i32, 3> {
         const keel::f64 t = (vmx == vmn) ? 0.5 : (L - vmn) / (vmx - vmn);
-        const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
+        const keel::f64 Hd = (1.0 - keel::clamp(t, 0.0, 1.0)) * 240.0;
         const keel::f64 Cr = 0.6;
         const keel::f64 H = Hd / 60.0;
         const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));
@@ -883,9 +882,9 @@ void isosurfaceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     if (!keel::is_finite(vmn)) { vmn = 0; vmx = 1; }
     const keel::f64 t = (vmx == vmn) ? 0.5 : (iso - vmn) / (vmx - vmn);
-    const keel::i32 rcomp = (keel::i32)std::clamp(t * 255.0,        0.0, 255.0);
-    const keel::i32 gcomp = (keel::i32)std::clamp(120.0,            0.0, 255.0);
-    const keel::i32 bcomp = (keel::i32)std::clamp((1 - t) * 255.0,  0.0, 255.0);
+    const keel::i32 rcomp = (keel::i32)keel::clamp(t * 255.0,        0.0, 255.0);
+    const keel::i32 gcomp = (keel::i32)keel::clamp(120.0,            0.0, 255.0);
+    const keel::i32 bcomp = (keel::i32)keel::clamp((1 - t) * 255.0,  0.0, 255.0);
     char buf[64];
     std::snprintf(buf, sizeof buf,
                   "color=#%02x%02x%02x;fillOpacity=0.85;smoothNormals=1",
@@ -988,7 +987,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         return W->elemAsDouble(k * M * N + j * M + i);
     };
     if (Cx && Cy && Cz) {
-        const keel::usize nc = std::min({Cx->numel(), Cy->numel(), Cz->numel()});
+        const keel::usize nc = keel::min({Cx->numel(), Cy->numel(), Cz->numel()});
         for (keel::usize s = 0; s < nc; ++s) {
             const keel::f64 cxv = Cx->elemAsDouble(s);
             const keel::f64 cyv = Cy->elemAsDouble(s);
@@ -1034,7 +1033,7 @@ void coneplotImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     const keel::f64 dx = (N > 1) ? (Xs[N - 1] - Xs[0]) / (N - 1) : 1.0;
     const keel::f64 dy = (M > 1) ? (Ys[M - 1] - Ys[0]) / (M - 1) : 1.0;
     const keel::f64 dz = (P > 1) ? (Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
-    const keel::f64 smallStep = std::min({keel::abs(dx), keel::abs(dy), keel::abs(dz)});
+    const keel::f64 smallStep = keel::min({keel::abs(dx), keel::abs(dy), keel::abs(dz)});
     const keel::f64 coneLen = (smallStep > 0 ? smallStep : 1.0) * 0.7 * S;
     const keel::f64 coneRad = coneLen * 0.25;
 
@@ -1198,12 +1197,12 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
         wo = Wat(ii, jj, kk);
     };
     const auto inRange = [&](keel::f64 xq, keel::f64 yq, keel::f64 zq) {
-        const keel::f64 xMn = std::min(Xs.front(), Xs.back());
-        const keel::f64 xMx = std::max(Xs.front(), Xs.back());
-        const keel::f64 yMn = std::min(Ys.front(), Ys.back());
-        const keel::f64 yMx = std::max(Ys.front(), Ys.back());
-        const keel::f64 zMn = std::min(Zs.front(), Zs.back());
-        const keel::f64 zMx = std::max(Zs.front(), Zs.back());
+        const keel::f64 xMn = keel::min(Xs.front(), Xs.back());
+        const keel::f64 xMx = keel::max(Xs.front(), Xs.back());
+        const keel::f64 yMn = keel::min(Ys.front(), Ys.back());
+        const keel::f64 yMx = keel::max(Ys.front(), Ys.back());
+        const keel::f64 zMn = keel::min(Zs.front(), Zs.back());
+        const keel::f64 zMx = keel::max(Zs.front(), Zs.back());
         return xq >= xMn && xq <= xMx
             && yq >= yMn && yq <= yMx
             && zq >= zMn && zq <= zMx;
@@ -1212,12 +1211,12 @@ void streamtubeImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     const keel::f64 dx = (N > 1) ? keel::abs(Xs[N - 1] - Xs[0]) / (N - 1) : 1.0;
     const keel::f64 dy = (M > 1) ? keel::abs(Ys[M - 1] - Ys[0]) / (M - 1) : 1.0;
     const keel::f64 dz = (P > 1) ? keel::abs(Zs[P - 1] - Zs[0]) / (P - 1) : 1.0;
-    const keel::f64 smallStep = std::min({dx, dy, dz});
+    const keel::f64 smallStep = keel::min({dx, dy, dz});
     const keel::f64 tubeR = smallStep * 0.18;
     constexpr keel::i32 kMaxSteps = 80;
     constexpr keel::i32 kRingN    = 8;
 
-    const keel::usize nSeeds = std::min({sxV->numel(), syV->numel(), szV->numel()});
+    const keel::usize nSeeds = keel::min({sxV->numel(), syV->numel(), szV->numel()});
     for (keel::usize s = 0; s < nSeeds; ++s) {
         keel::Array<keel::StaticArray<keel::f64, 3>> path;
         keel::f64 xq = sxV->elemAsDouble(s);

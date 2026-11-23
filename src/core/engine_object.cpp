@@ -2,6 +2,7 @@
 // Engine object model: BuiltinClass registry, display, operator & subsref
 // dispatch, object-array slice store, and classdef registration/access control.
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -18,7 +19,6 @@
 #include <numkit/core/tree_walker.hpp>
 #include <numkit/core/vm.hpp>
 #include "engine_internal.hpp"
-#include <algorithm>
 
 namespace numkit {
 
@@ -871,7 +871,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         // so a public override of a protected base property stays public.
         keel::Array<PropInfo> merged = base->props.clone();
         for (auto &dp : desc->props) {
-            auto it = std::find_if(merged.begin(), merged.end(),
+            auto it = keel::find_if(merged.begin(), merged.end(),
                                    [&](const PropInfo &m) { return m.name == dp.name; });
             if (it != merged.end())
                 *it = keel::move(dp);
@@ -898,12 +898,12 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         // Abstract method obligations propagate to the subclass (satisfied
         // when the subclass provides a concrete method of the same name).
         for (const auto &am : base->abstractMethods)
-            if (std::find(desc->abstractMethods.begin(), desc->abstractMethods.end(), am)
+            if (keel::find(desc->abstractMethods.begin(), desc->abstractMethods.end(), am)
                 == desc->abstractMethods.end())
                 desc->abstractMethods.push_back(am.clone());
         // Hidden members stay hidden in the subclass.
         for (const auto &hm : base->hiddenMembers)
-            if (std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), hm)
+            if (keel::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), hm)
                 == desc->hiddenMembers.end())
                 desc->hiddenMembers.push_back(hm.clone());
         // Method access: inherit base entries (keeping the base's declaring
@@ -911,7 +911,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         // class declared the method itself (its own access — or public by
         // omission — then wins).
         for (auto [mn, ma] : base->methodAccess)
-            if (std::find(ownMethodNames.begin(), ownMethodNames.end(), mn)
+            if (keel::find(ownMethodNames.begin(), ownMethodNames.end(), mn)
                 == ownMethodNames.end())
                 desc->methodAccess.try_insert(mn.clone(), ma.clone());
         if (!desc->ctor) {
@@ -930,7 +930,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         desc->superclasses.push_back(superName.clone());
         if (const auto *bp = classReg_->classDefs.get(superName))
             for (const auto &a : (*bp)->superclasses)
-                if (std::find(desc->superclasses.begin(), desc->superclasses.end(), a)
+                if (keel::find(desc->superclasses.begin(), desc->superclasses.end(), a)
                     == desc->superclasses.end())
                     desc->superclasses.push_back(a.clone());
     }
@@ -957,9 +957,9 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
                              if (acc != Access::Public)
                                  enforceAccess(ctx.engine, acc, decl, "method", mn);
-                             const keel::usize nout = std::max<keel::usize>(nargout, 1);
+                             const keel::usize nout = keel::max<keel::usize>(nargout, 1);
                              auto results = ctx.engine->invokeClassMethod(*uf, args, nout);
-                             const keel::usize writeN = std::min(nout, results.size());
+                             const keel::usize writeN = keel::min(nout, results.size());
                              for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                                  outs[i] = keel::move(results[i]);
                          });
@@ -989,7 +989,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         cls.hidden.push_back(h.clone());
     cls.propNames.reserve(desc->props.size());
     for (const auto &p : desc->props)
-        if (std::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), p.name) == desc->hiddenMembers.end())
+        if (keel::find(desc->hiddenMembers.begin(), desc->hiddenMembers.end(), p.name) == desc->hiddenMembers.end())
             cls.propNames.push_back(p.name.clone()); // Hidden props omitted from properties()/disp
     cls.superclasses.reserve(desc->superclasses.size());
     for (const auto &s : desc->superclasses)
@@ -1044,7 +1044,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                 meta.isAbstract = m.isAbstract;
                 cls.methodMeta.push_back(keel::move(meta));
             }
-        std::sort(cls.methodMeta.begin(), cls.methodMeta.end(),
+        keel::sort(cls.methodMeta.begin(), cls.methodMeta.end(),
                   [](const MethodMeta &a, const MethodMeta &b) { return a.name < b.name; });
     }
     cls.propGet = [desc](const Value &self, keel::StringRef nameRef, Value &out,
@@ -1087,7 +1087,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             if (pi->setAccess != Access::Public)
                 enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", nameRef);
         } else if (!desc->setters.contains(nameRef)
-                   && std::find(desc->superclasses.begin(), desc->superclasses.end(),
+                   && keel::find(desc->superclasses.begin(), desc->superclasses.end(),
                                 "dynamicprops")
                           == desc->superclasses.end()) {
             auto msg = keel::format("No public property '{}' for class '{}'", nameRef, desc->name);
@@ -1138,12 +1138,12 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             callArgs.push_back(self); // MATLAB: obj is the first parameter
             for (const auto &a : args)
                 callArgs.push_back(a);
-            const keel::usize nout = std::max<keel::usize>(nargout, 1);
+            const keel::usize nout = keel::max<keel::usize>(nargout, 1);
             auto results = ctx.engine->invokeClassMethod(
                 *ufCopy, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
             // Always produce at least one output (the `ans`/expression value
             // when called with nargout==0), bounded by the outs span.
-            const keel::usize writeN = std::min(nout, results.size());
+            const keel::usize writeN = keel::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = keel::move(results[i]);
         });
@@ -1166,10 +1166,10 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                     callArgs.push_back(self); // unary: operand came as self
                 else
                     callArgs.append(args); // binary: [lhs, rhs]
-                const keel::usize nout = std::max<keel::usize>(nargout, 1);
+                const keel::usize nout = keel::max<keel::usize>(nargout, 1);
                 auto results = ctx.engine->invokeClassMethod(
                     *ufOp, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
-                const keel::usize writeN = std::min(nout, results.size());
+                const keel::usize writeN = keel::min(nout, results.size());
                 for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                     outs[i] = keel::move(results[i]);
             });
@@ -1186,9 +1186,9 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                            CallContext &ctx) {
             Value s = buildSubsStruct("()", args, ctx.engine->allocator());
             Value callArgs[2] = {self, s};
-            const keel::usize nout = std::max<keel::usize>(nargout, 1);
+            const keel::usize nout = keel::max<keel::usize>(nargout, 1);
             auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 2), nout);
-            const keel::usize writeN = std::min(nout, results.size());
+            const keel::usize writeN = keel::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = keel::move(results[i]);
         };
@@ -1319,7 +1319,7 @@ void Engine::reregisterDerivedClasses(keel::StringRef base)
     for (auto [name, desc] : classReg_->classDefs) {
         if (name == base)
             continue;
-        if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
+        if (keel::find(desc->superclasses.begin(), desc->superclasses.end(), base)
             != desc->superclasses.end())
             deps.push_back(name.clone());
     }
@@ -1328,7 +1328,7 @@ void Engine::reregisterDerivedClasses(keel::StringRef base)
     // Parent-first: a subclass's transitive-ancestor set strictly contains each
     // ancestor's, so ascending ancestor count is a valid topological order (a
     // base is re-registered before any class that derives from it).
-    std::sort(deps.begin(), deps.end(), [&](const keel::String &a, const keel::String &b) {
+    keel::sort(deps.begin(), deps.end(), [&](const keel::String &a, const keel::String &b) {
         return (*classReg_->classDefs.get(a))->superclasses.size() < (*classReg_->classDefs.get(b))->superclasses.size();
     });
     // RAII restore: a re-register that throws must NOT leave the flag stuck at
@@ -1379,7 +1379,7 @@ keel::Array<Value> Engine::invokeUserFunction_(const UserFunction &uf,
                                                  bool isCtor,
                                                  const Value *ctorSeed)
 {
-    const keel::usize effNout = std::max<keel::usize>(nout, 1);
+    const keel::usize effNout = keel::max<keel::usize>(nout, 1);
     if (backend_ == Backend::VM) {
         if (!vm_)
             throw numkit::Error("VM backend is unavailable");
@@ -1407,7 +1407,7 @@ keel::Array<Value> Engine::invokeUserFunction_(const UserFunction &uf,
 keel::Array<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
                                              keel::usize nout)
 {
-    return invokeUserFunction_(uf, args, std::max<keel::usize>(nout, 1), /*isCtor=*/false);
+    return invokeUserFunction_(uf, args, keel::max<keel::usize>(nout, 1), /*isCtor=*/false);
 }
 
 Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
@@ -1524,7 +1524,7 @@ void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef pro
         if (pi->setAccess != Access::Public)
             enforceAccess(this, pi->setAccess, pi->declClass, "property", prop);
     } else if (!desc.setters.contains(prop)
-               && std::find(desc.superclasses.begin(), desc.superclasses.end(), "dynamicprops")
+               && keel::find(desc.superclasses.begin(), desc.superclasses.end(), "dynamicprops")
                       == desc.superclasses.end()) {
         auto msg = keel::format("No public property '{}' for class '{}'", prop, className);
         throw numkit::Error(msg.c_str());
@@ -1607,7 +1607,7 @@ bool Engine::classCtxAllows(keel::StringRef declClass, bool privateOnly) const
     if (!dp)
         return false;
     const auto &sc = (*dp)->superclasses;
-    return std::find(sc.begin(), sc.end(), declClass) != sc.end();
+    return keel::find(sc.begin(), sc.end(), declClass) != sc.end();
 }
 
 bool Engine::classCtxInCtorOf(keel::StringRef declClass) const

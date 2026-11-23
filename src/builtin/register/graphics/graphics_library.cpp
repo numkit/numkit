@@ -27,6 +27,7 @@
 //     (h.LineWidth, h.LineWidth = 2) through the FigureManager registry.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -47,7 +48,6 @@
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/value/object.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -486,13 +486,13 @@ keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
                                    : (ds.originalRows ? ds.originalRows : 1);
                 auto v = figdetail::parseFlatDoubles(axis == 'x' ? ds.xJson : ds.yJson);
                 if (v.size() < 2 || cells == 0) {
-                    lo = std::min(lo, 0.5);
-                    hi = std::max(hi, cells > 0 ? cells + 0.5 : 1.5);
+                    lo = keel::min(lo, 0.5);
+                    hi = keel::max(hi, cells > 0 ? cells + 0.5 : 1.5);
                 } else {
                     keel::f64 span = v.back() - v.front();
                     keel::f64 sp = cells > 1 ? span / (keel::f64)(cells - 1) : (span > 0 ? span : 1.0);
-                    lo = std::min(lo, v.front() - sp / 2);
-                    hi = std::max(hi, v.back() + sp / 2);
+                    lo = keel::min(lo, v.front() - sp / 2);
+                    hi = keel::max(hi, v.back() + sp / 2);
                 }
                 continue;
             }
@@ -502,8 +502,8 @@ keel::Array<keel::f64> axesAutoTicks(FigureManager &fm,
             const keel::String &j = axis == 'x' ? ds.xJson : ds.yJson;
             for (keel::f64 v : figdetail::parseFlatDoubles(j))
                 if (keel::is_finite(v)) {
-                    lo = std::min(lo, v);
-                    hi = std::max(hi, v);
+                    lo = keel::min(lo, v);
+                    hi = keel::max(hi, v);
                 }
         }
         if (!(hi > lo)) {
@@ -1866,7 +1866,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
     sortedKeys.reserve(fields.size());
     for (auto [k, v] : fields)
         sortedKeys.push_back(k.as_ref());
-    std::sort(sortedKeys.begin(), sortedKeys.end());
+    keel::sort(sortedKeys.begin(), sortedKeys.end());
     for (keel::StringRef k : sortedKeys)
         st.setFieldAll(k, decodeProp(*fields.get(k), mr));
     outs[0] = keel::move(st);
@@ -2046,7 +2046,7 @@ void findobj_reg(keel::ArrayRef<Value> args, keel::usize,
         if (pass)
             hits.push_back(kv.key);
     }
-    std::sort(hits.begin(), hits.end());
+    keel::sort(hits.begin(), hits.end());
     keel::StringRef cls = hits.empty()
         ? keel::StringRef{}
         : fm.findHandle(hits[0])->className.as_ref();
@@ -2084,14 +2084,14 @@ void gobjects_reg(keel::ArrayRef<Value> args, keel::usize,
     keel::usize r = 1, c = 1;
     if (args.size() == 1 && args[0].isNumeric()) {
         if (args[0].numel() == 1) {
-            r = c = keel::as<keel::usize>(std::max(0.0, args[0].toScalar()));
+            r = c = keel::as<keel::usize>(keel::max(0.0, args[0].toScalar()));
         } else if (args[0].numel() >= 2) {
-            r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-            c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
+            r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
+            c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(1)));
         }
     } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-        r = keel::as<keel::usize>(std::max(0.0, args[0].toScalar()));
-        c = keel::as<keel::usize>(std::max(0.0, args[1].toScalar()));
+        r = keel::as<keel::usize>(keel::max(0.0, args[0].toScalar()));
+        c = keel::as<keel::usize>(keel::max(0.0, args[1].toScalar()));
     }
     auto *res = mr ? mr : keel::default_allocator();
     keel::usize n = r * c;

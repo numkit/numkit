@@ -2,6 +2,7 @@
 #pragma once
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/hash_map.h>
 #include <keel/hash_set.h>
@@ -10,7 +11,6 @@
 #include <keel/string.h>
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
-#include <algorithm>
 
 namespace numkit {
 
@@ -139,7 +139,7 @@ private:
         }
         void reset()
         {
-            std::fill(words.begin(), words.end(), 0ULL);
+            keel::fill(words.begin(), words.end(), 0ULL);
         }
         void reset(keel::usize pos)
         {

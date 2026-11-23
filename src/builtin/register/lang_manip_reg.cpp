@@ -19,7 +19,6 @@
 #include <numkit/builtin/detail/elmat/manip_detail.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -75,7 +74,7 @@ void repmat_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     // kernel. Anything else (higher rank, longer tile vector, or non-
     // DOUBLE type) goes through repmatND.
     const auto &inDims = args[0].dims();
-    const keel::i32 outNdim = std::max(inDims.ndim(), keel::as<keel::i32>(tiles.size()));
+    const keel::i32 outNdim = keel::max(inDims.ndim(), keel::as<keel::i32>(tiles.size()));
     if (outNdim <= 3 && tiles.size() <= 3 && args[0].type() == ValueType::DOUBLE) {
         const keel::usize m = tiles[0];
         const keel::usize n = tiles.size() >= 2 ? tiles[1] : 1;
@@ -317,7 +316,7 @@ void ind2sub_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     argcheck::checkNargin(args.size(), 1, 2, "ind2sub");
     argcheck::checkNargin(args.size(), 2, 2, "ind2sub");
     keel::Array<Value> rs = ind2sub(args[0], args[1],
-                                    std::max<keel::usize>(nargout, 1),
+                                    keel::max<keel::usize>(nargout, 1),
                                     ctx.engine->allocator());
     for (keel::usize i = 0; i < rs.size() && i < outs.size(); ++i)
         outs[i] = keel::move(rs[i]);

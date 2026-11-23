@@ -4,6 +4,7 @@
 // JSON/parse helpers come from plot_internal.hpp.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/math.h>
 #include <keel/ref.h>
@@ -11,7 +12,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 
@@ -102,7 +102,7 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         // HSL → RGB ramp helper: blue (240°) at zmn → red (0°) at zmx.
         const auto colorForLevel = [&](keel::f64 L) {
             const keel::f64 t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
-            const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
+            const keel::f64 Hd = (1.0 - keel::clamp(t, 0.0, 1.0)) * 240.0;
             const keel::f64 Cr = 0.6;
             const keel::f64 H = Hd / 60.0;
             const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));
@@ -265,7 +265,7 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         }
         // Bottom band — covers the entire data extent. Drawn first
         // (lightest colour) so descending layers sit on top.
-        std::sort(levels.begin(), levels.end());
+        keel::sort(levels.begin(), levels.end());
 
         const auto interp = [](keel::f64 a, keel::f64 b, keel::f64 va, keel::f64 vb, keel::f64 L) {
             if (keel::abs(vb - va) < 1e-15) return a;
@@ -275,7 +275,7 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         // HSL→RGB ramp same as contour (blue→red across [zmn, zmx]).
         const auto colorForLevel = [&](keel::f64 L) {
             const keel::f64 t = (zmx == zmn) ? 0.5 : (L - zmn) / (zmx - zmn);
-            const keel::f64 Hd = (1.0 - std::clamp(t, 0.0, 1.0)) * 240.0;
+            const keel::f64 Hd = (1.0 - keel::clamp(t, 0.0, 1.0)) * 240.0;
             const keel::f64 Cr = 0.6;
             const keel::f64 H = Hd / 60.0;
             const keel::f64 Xc = Cr * (1.0 - keel::abs(keel::fmod(H, 2.0) - 1.0));

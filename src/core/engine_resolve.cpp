@@ -2,6 +2,7 @@
 // Engine symbol & file resolution: namespaces, imports, plugins, search path,
 // builtin M-sources, and on-demand .m-file loading/rehash.
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -20,7 +21,6 @@
 #include <numkit/core/tree_walker.hpp>
 #include <numkit/core/vm.hpp>
 #include "engine_internal.hpp"
-#include <algorithm>
 
 namespace numkit {
 
@@ -909,7 +909,7 @@ void Engine::reloadEvictedClassBases_(keel::ArrayRef<keel::String> bases)
         bool hasLiveDependent = false;
         for (auto [cn, desc] : classReg_->classDefs) {
             (void)cn;
-            if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
+            if (keel::find(desc->superclasses.begin(), desc->superclasses.end(), base)
                 != desc->superclasses.end()) {
                 hasLiveDependent = true;
                 break;

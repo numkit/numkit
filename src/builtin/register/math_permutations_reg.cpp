@@ -13,7 +13,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)

@@ -16,7 +16,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 
@@ -196,11 +195,11 @@ void heatmapImpl(
                 if (orow) zs << ",";
                 zs << "[";
                 const keel::usize r0 = orow * dr;
-                const keel::usize r1 = std::min(rows, r0 + dr);
+                const keel::usize r1 = keel::min(rows, r0 + dr);
                 for (keel::usize ocol = 0; ocol < outCols; ++ocol) {
                     if (ocol) zs << ",";
                     const keel::usize c0 = ocol * dc;
-                    const keel::usize c1 = std::min(cols, c0 + dc);
+                    const keel::usize c1 = keel::min(cols, c0 + dc);
                     keel::i32 sum = 0;
                     keel::i32 n = 0;
                     for (keel::usize c = c0; c < c1; ++c) {

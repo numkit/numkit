@@ -1,5 +1,6 @@
 // src/core/src/plugin_loader.cpp
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/dynlib.h>
 #include <keel/env.h>
@@ -16,7 +17,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -454,7 +454,7 @@ void PluginLoader::scanManifests_()
                 }
                 return true;
             });
-            std::sort(subdirs.begin(), subdirs.end());
+            keel::sort(subdirs.begin(), subdirs.end());
             for (const auto &subdir : subdirs) {
                 keel::String subManifest = keel::path_join(subdir, "manifest.json");
                 checkManifest(subManifest, subdir);

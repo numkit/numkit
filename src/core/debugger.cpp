@@ -1,10 +1,10 @@
 // src/debugger.cpp
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/environment.hpp>
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -66,7 +66,7 @@ keel::Array<keel::String> DebugContext::variableNames() const
     for (auto &v : frame->variables())
         result.push_back(keel::move(v.name));
 
-    std::sort(result.begin(), result.end());
+    keel::sort(result.begin(), result.end());
     return result;
 }
 

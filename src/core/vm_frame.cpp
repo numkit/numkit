@@ -1,6 +1,7 @@
 // src/core/vm_frame.cpp
 // VM execution lifecycle, re-entrancy, call-frame management, variable sync, and introspection.
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -15,7 +16,6 @@
 #include <numkit/value/index.hpp>
 #include "vm_internal.hpp"
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -29,7 +29,7 @@ void VM::ensureRegStackCapacity(keel::usize needed)
 {
     if (needed <= regStack_.size())
         return;
-    keel::usize newCap = std::max(regStack_.size(), kInitialRegStackSize);
+    keel::usize newCap = keel::max(regStack_.size(), kInitialRegStackSize);
     while (newCap < needed)
         newCap *= 2;
     regStack_.resize(newCap);
@@ -38,7 +38,7 @@ void VM::ensureRegStackCapacity(keel::usize needed)
     R_ = frames_.empty() ? regStack_.data() : frames_.back().R;
     if (auto *ctl = debugCtl()) {
         auto &stack = ctl->callStack();
-        const keel::usize n = std::min(stack.size(), frames_.size());
+        const keel::usize n = keel::min(stack.size(), frames_.size());
         for (keel::usize i = 0; i < n; ++i)
             stack[i].registers = frames_[i].R;
     }
@@ -288,7 +288,7 @@ keel::Array<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
         Restorer &operator=(const Restorer &) = delete;
     } restorer(*this, reentrant, keel::move(outerState), keel::move(savedVarMap));
 
-    const keel::usize nout = std::max<keel::usize>(nargout, 1);
+    const keel::usize nout = keel::max<keel::usize>(nargout, 1);
     const bool multi = nout > 1;
     keel::Array<Value> argbuf(args);
 
@@ -377,8 +377,8 @@ void VM::restorePausedState(keel::UniquePtr<PausedState> s)
     // loop's captured `resolvedFuncs` reference becomes live again.
     chunkCallCache_ = keel::move(s->chunkCallCache);
     // Restore registers (grow regStack_ first if needed)
-    ensureRegStackCapacity(std::max(s->regSnapshot.size(), s->regStackTop));
-    std::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
+    ensureRegStackCapacity(keel::max(s->regSnapshot.size(), s->regStackTop));
+    keel::copy(s->regSnapshot.begin(), s->regSnapshot.end(), regStack_.begin());
     // Fix R pointers in frames (they pointed into regStack_)
     R_ = regStack_.data();
     for (keel::usize fi = 0; fi < frames_.size(); ++fi) {
@@ -425,7 +425,7 @@ ExecStatus VM::startExecution(const BytecodeChunk &chunk, const Value *args, kee
     pausedError_ = nullptr;
 
     keel::u32 nregs = chunk.numRegisters;
-    keel::usize pc = args ? std::min(nargs, keel::as<keel::usize>(chunk.numParams)) : 0;
+    keel::usize pc = args ? keel::min(nargs, keel::as<keel::usize>(chunk.numParams)) : 0;
     keel::Array<Value> argsCopy(pc);
     for (keel::usize i = 0; i < pc; ++i)
         argsCopy[i] = args[i];
@@ -951,7 +951,7 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
             keel::format("Too many input arguments for function '{}'", funcChunk.name).c_str());
 
     keel::u32 nregs = funcChunk.numRegisters;
-    keel::usize pc = std::min(userNargs, keel::as<keel::usize>(funcChunk.numParams));
+    keel::usize pc = keel::min(userNargs, keel::as<keel::usize>(funcChunk.numParams));
 
     // Copy args, upvalue boxes, varargin, and ctorSeed BEFORE ensureRegStackCapacity,
     // since `args` or `ctorSeed` may point into caller registers inside regStack_.
@@ -1163,8 +1163,8 @@ void VM::popCallFrame(Value retVal)
 
     // Restore stack pointers
     regStackTop_ = frame.regBase;
-    forStack_.resize(std::min(forStack_.size(), frame.forStackBase));
-    tryStack_.resize(std::min(tryStack_.size(), frame.tryStackBase));
+    forStack_.resize(keel::min(forStack_.size(), frame.forStackBase));
+    tryStack_.resize(keel::min(tryStack_.size(), frame.tryStackBase));
 
     frames_.pop_back();
     engine_.truncateScriptOrigins(originDepth);

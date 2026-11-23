@@ -15,7 +15,6 @@
 #include <numkit/core/vm.hpp>
 #include <numkit/runtime/runtime.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin::detail {
 void runNative_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);

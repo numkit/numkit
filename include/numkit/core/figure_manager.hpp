@@ -11,7 +11,6 @@
 #include <keel/string.h>
 #include <cstdio>
 #include <cstdlib>
-#include <algorithm>
 
 #include <numkit/ops/decimate.hpp>
 

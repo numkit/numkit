@@ -4,7 +4,6 @@
 #include <keel/math.h>
 #include <numkit/core/figure_manager.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -452,7 +451,7 @@ void FigureManager::maybeDownsampleSeries(DatasetInfo &ds)
     keel::f64 xlo = xSrc.front(), xhi = xSrc.back();
     if (xhi < xlo) keel::swap(xlo, xhi);
     keel::f64 ylo = keel::kInf, yhi = -keel::kInf;
-    for (keel::f64 v : ySrc) if (keel::is_finite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
+    for (keel::f64 v : ySrc) if (keel::is_finite(v)) { ylo = keel::min(ylo, v); yhi = keel::max(yhi, v); }
     if (!keel::is_finite(ylo)) { ylo = 0; yhi = 0; }
     auto prev = decimateM4(xSrc.data(), ySrc.data(), n, xlo, xhi, kSeriesPreviewCols);
     ds.xJson = figdetail::serializeFlatDoubles(prev.x);
@@ -1145,8 +1144,8 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
     // Clamp source-rect to the dataset bounds.
     if (srcR0 < 0) { srcH += srcR0; srcR0 = 0; }
     if (srcC0 < 0) { srcW += srcC0; srcC0 = 0; }
-    const keel::f64 srcR1 = std::min(keel::as<keel::f64>(fullRows), srcR0 + srcH);
-    const keel::f64 srcC1 = std::min(keel::as<keel::f64>(fullCols), srcC0 + srcW);
+    const keel::f64 srcR1 = keel::min(keel::as<keel::f64>(fullRows), srcR0 + srcH);
+    const keel::f64 srcC1 = keel::min(keel::as<keel::f64>(fullCols), srcC0 + srcW);
     if (srcR1 <= srcR0 || srcC1 <= srcC0) return false;
 
     // Log axes need a strictly-positive lower bound.
@@ -1160,7 +1159,7 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
     // up the tree once, subsequent zooms reuse cached levels.
     const keel::f64 rStep0 = (srcR1 - srcR0) / displayH;
     const keel::f64 cStep0 = (srcC1 - srcC0) / displayW;
-    const keel::f64 minStep = std::min(rStep0, cStep0);
+    const keel::f64 minStep = keel::min(rStep0, cStep0);
     keel::i32 level = 0;
     if (minStep > 1.5) {
         level = keel::as<keel::i32>(keel::floor(keel::log2(minStep)));
@@ -1196,8 +1195,8 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
     const keel::f64 lvlC1 = srcC1 / scaleFactor;
     const keel::f64 rStep = (lvlR1 - lvlR0) / displayH;
     const keel::f64 cStep = (lvlC1 - lvlC0) / displayW;
-    const keel::i32 rBlock = std::max(1, keel::as<keel::i32>(keel::ceil(rStep)));
-    const keel::i32 cBlock = std::max(1, keel::as<keel::i32>(keel::ceil(cStep)));
+    const keel::i32 rBlock = keel::max(1, keel::as<keel::i32>(keel::ceil(rStep)));
+    const keel::i32 cBlock = keel::max(1, keel::as<keel::i32>(keel::ceil(cStep)));
 
     // Log-ratios computed in level coords (log preserves ratios).
     const keel::f64 yLogRatio = yLog ? keel::log(lvlR1 / lvlR0) : 0.0;
@@ -1208,15 +1207,15 @@ bool FigureManager::getFigureDisplayTile(keel::i32 figId, keel::i32 axIdx, keel:
         const keel::f64 rCenter = yLog
             ? lvlR0 * keel::exp(v * yLogRatio)
             : lvlR0 + v * (lvlR1 - lvlR0);
-        const keel::i32 rA = std::max(0, keel::as<keel::i32>(rCenter) - rBlock / 2);
-        const keel::i32 rB = std::min(keel::as<keel::i32>(lvlRows), rA + rBlock);
+        const keel::i32 rA = keel::max(0, keel::as<keel::i32>(rCenter) - rBlock / 2);
+        const keel::i32 rB = keel::min(keel::as<keel::i32>(lvlRows), rA + rBlock);
         for (keel::i32 ocol = 0; ocol < displayW; ++ocol) {
             const keel::f64 u = (ocol + 0.5) / displayW;
             const keel::f64 cCenter = xLog
                 ? lvlC0 * keel::exp(u * xLogRatio)
                 : lvlC0 + u * (lvlC1 - lvlC0);
-            const keel::i32 cA = std::max(0, keel::as<keel::i32>(cCenter) - cBlock / 2);
-            const keel::i32 cB = std::min(keel::as<keel::i32>(lvlCols), cA + cBlock);
+            const keel::i32 cA = keel::max(0, keel::as<keel::i32>(cCenter) - cBlock / 2);
+            const keel::i32 cB = keel::min(keel::as<keel::i32>(lvlCols), cA + cBlock);
             keel::i32 sum = 0, n = 0;
             for (keel::i32 cc = cA; cc < cB; ++cc) {
                 for (keel::i32 rr = rA; rr < rB; ++rr) {
@@ -1255,10 +1254,10 @@ void FigureManager::ensureLOD(const DatasetInfo &ds, keel::i32 targetLevel) cons
         child.resize(cRows * cCols);
         for (keel::usize cc = 0; cc < cCols; ++cc) {
             const keel::usize pc0 = 2 * cc;
-            const keel::usize pc1 = std::min(pCols, pc0 + 2);
+            const keel::usize pc1 = keel::min(pCols, pc0 + 2);
             for (keel::usize rr = 0; rr < cRows; ++rr) {
                 const keel::usize pr0 = 2 * rr;
-                const keel::usize pr1 = std::min(pRows, pr0 + 2);
+                const keel::usize pr1 = keel::min(pRows, pr0 + 2);
                 keel::i32 sum = 0, n = 0;
                 for (keel::usize pc = pc0; pc < pc1; ++pc) {
                     for (keel::usize pr = pr0; pr < pr1; ++pr) {
@@ -1303,8 +1302,8 @@ bool FigureManager::getFigureTile(keel::i32 figId, keel::i32 axIdx, keel::i32 ds
     if (c0 < 0) c0 = 0;
     if (h < 0 || w < 0) return false;
 
-    const keel::usize rEnd = std::min(fullRows, keel::as<keel::usize>(r0) + keel::as<keel::usize>(h));
-    const keel::usize cEnd = std::min(fullCols, keel::as<keel::usize>(c0) + keel::as<keel::usize>(w));
+    const keel::usize rEnd = keel::min(fullRows, keel::as<keel::usize>(r0) + keel::as<keel::usize>(h));
+    const keel::usize cEnd = keel::min(fullCols, keel::as<keel::usize>(c0) + keel::as<keel::usize>(w));
     if (keel::as<keel::usize>(r0) >= fullRows || keel::as<keel::usize>(c0) >= fullCols
         || rEnd <= keel::as<keel::usize>(r0) || cEnd <= keel::as<keel::usize>(c0)) {
         return false;
@@ -1322,10 +1321,10 @@ bool FigureManager::getFigureTile(keel::i32 figId, keel::i32 axIdx, keel::i32 ds
     // Row-major output (suits canvas blit). zQuantized is column-major.
     for (keel::usize orow = 0; orow < oH; ++orow) {
         const keel::usize rA = keel::as<keel::usize>(r0) + orow * L;
-        const keel::usize rB = std::min(rEnd, rA + L);
+        const keel::usize rB = keel::min(rEnd, rA + L);
         for (keel::usize ocol = 0; ocol < oW; ++ocol) {
             const keel::usize cA = keel::as<keel::usize>(c0) + ocol * L;
-            const keel::usize cB = std::min(cEnd, cA + L);
+            const keel::usize cB = keel::min(cEnd, cA + L);
             keel::i32 sum = 0;
             keel::i32 n = 0;
             for (keel::usize cc = cA; cc < cB; ++cc) {

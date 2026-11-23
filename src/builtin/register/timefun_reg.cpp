@@ -1,6 +1,7 @@
 // src/bundle/src/register/builtin/timefun_reg.cpp
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/math.h>
@@ -18,7 +19,6 @@
 #include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -138,7 +138,7 @@ inline keel::f64 addCalendarMonths(keel::f64 serialDay, keel::i64 deltaMonths,
     keel::i64 m0 = (c.month - 1) + deltaMonths;
     keel::i64 yNew = c.year + (m0 >= 0 ? m0 / 12 : (m0 - 11) / 12);
     keel::i64 mNew = m0 - (yNew - c.year) * 12 + 1;
-    keel::i64 dNew = std::min(c.day, daysInMonth(yNew, mNew));
+    keel::i64 dNew = keel::min(c.day, daysInMonth(yNew, mNew));
     return composeSerialDay(keel::as<keel::f64>(yNew), keel::as<keel::f64>(mNew),
                             keel::as<keel::f64>(dNew + deltaDays),
                             keel::as<keel::f64>(c.hour), keel::as<keel::f64>(c.minute),
@@ -876,7 +876,7 @@ void datevec_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     } else {
         const keel::usize N = dv.dims().rows();
         const keel::f64 *o = dv.doubleData();
-        for (keel::usize c = 0; c < std::min(nargout, keel::usize(6)); ++c) {
+        for (keel::usize c = 0; c < keel::min(nargout, keel::usize(6)); ++c) {
             if (N == 1) {
                 outs[c] = Value::scalar(o[c * N], mr);
             } else {
@@ -1011,14 +1011,14 @@ void nat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
     keel::usize r = 1, c = 1;
     if (args.size() == 1 && args[0].isNumeric()) {
         if (args[0].numel() == 1) {
-            r = c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
+            r = c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
         } else if (args[0].numel() >= 2) {
-            r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-            c = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(1)));
+            r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
+            c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(1)));
         }
     } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-        r = keel::as<keel::usize>(std::max(0.0, args[0].elemAsDouble(0)));
-        c = keel::as<keel::usize>(std::max(0.0, args[1].elemAsDouble(0)));
+        r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
+        c = keel::as<keel::usize>(keel::max(0.0, args[1].elemAsDouble(0)));
     }
     keel::Array<keel::f64> nats(mr);
     nats.assign(r * c, keel::Limits<keel::f64>::quiet_nan());
@@ -2015,7 +2015,7 @@ void register_timefun(Engine &engine) {
             if (nargout <= 1) {
                 outs[0] = keel::move(dv);
             } else {
-                for (keel::usize k = 0; k < std::min<keel::usize>(nargout, 6); ++k) {
+                for (keel::usize k = 0; k < keel::min<keel::usize>(nargout, 6); ++k) {
                     if (n == 1) {
                         outs[k] = Value::scalar(dst[k * n], mr);
                     } else {
@@ -2067,12 +2067,12 @@ void register_timefun(Engine &engine) {
                                                          : (p ? p->format.as_ref() : keel::StringRef(""));
                 keel::String row = formatDateTimeElem(
                     p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(), f, anyTime);
-                maxW = std::max(maxW, row.size());
+                maxW = keel::max(maxW, row.size());
                 rows.push_back(keel::move(row));
             }
             Value cm = Value::matrix(n, maxW, ValueType::CHAR, mr);
             char *dst = cm.charDataMut();
-            std::fill(dst, dst + n * maxW, ' ');
+            keel::fill(dst, dst + n * maxW, ' ');
             for (keel::usize r = 0; r < n; ++r)
                 for (keel::usize c = 0; c < rows[r].size(); ++c)
                     dst[c * n + r] = rows[r][c];
@@ -2279,7 +2279,7 @@ void register_timefun(Engine &engine) {
             keel::Array<keel::usize> order(mr);
             order.resize(n);
             for (keel::usize i = 0; i < n; ++i) order[i] = i;
-            std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
+            keel::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                 keel::f64 sa = dtElem(self, a)->serialDay;
                 keel::f64 sb = dtElem(self, b)->serialDay;
                 if (keel::is_nan(sa)) return false;
@@ -2420,7 +2420,7 @@ void register_timefun(Engine &engine) {
                 keel::Array<keel::usize> order(mr);
                 order.resize(n);
                 for (keel::usize i = 0; i < n; ++i) order[i] = i;
-                std::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
+                keel::stable_sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
                     keel::f64 sa = dtElem(self, a)->serialDay;
                     keel::f64 sb = dtElem(self, b)->serialDay;
                     if (keel::is_nan(sa)) return false;
@@ -2496,7 +2496,7 @@ void register_timefun(Engine &engine) {
                 }
             }
             if (!stable) {
-                std::sort(items.begin(), items.end(), [&](const Item &a, const Item &b) {
+                keel::sort(items.begin(), items.end(), [&](const Item &a, const Item &b) {
                     return a.sd < b.sd - kTol;
                 });
             }

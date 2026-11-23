@@ -18,7 +18,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/ops/helpers.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;
@@ -377,7 +376,7 @@ void register_randstream(Engine &engine)
             if (!args[i].isChar() && !args[i].isString()) continue;
             keel::String k = args[i].toString();
             if (k.equals_ignore_ascii_case("seed"))
-                seedVal = keel::as<keel::u64>(std::max(0.0, args[i + 1].toScalar()));
+                seedVal = keel::as<keel::u64>(keel::max(0.0, args[i + 1].toScalar()));
         }
         payload->rng.seed(seedVal);
         st->props.put(keel::String("Type", mr), Value::fromString(genType, mr));
@@ -404,9 +403,9 @@ void register_randstream(Engine &engine)
         if (auto *st = self.objectStateMut()) {
             keel::u64 sd = 0;
             if (!args.empty() && args[0].isNumeric())
-                sd = keel::as<keel::u64>(std::max(0.0, args[0].toScalar()));
+                sd = keel::as<keel::u64>(keel::max(0.0, args[0].toScalar()));
             else if (const Value *sv = st->props.get("Seed"))
-                sd = keel::as<keel::u64>(std::max(0.0, sv->toScalar()));
+                sd = keel::as<keel::u64>(keel::max(0.0, sv->toScalar()));
             if (auto *p = dynamic_cast<RandStreamPayload *>(st->native.get()))
                 p->rng.seed(sd);
         }

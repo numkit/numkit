@@ -12,6 +12,7 @@
 // in bugs/opened/graphics/figure-export-gaps.md, never silent.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/math.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -28,7 +29,6 @@
 #include <numkit/image/io/io.hpp>
 #include <numkit/value/argcheck.hpp>
 
-#include <algorithm>
 #include <cstdlib>
 
 namespace numkit {
@@ -153,7 +153,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             if (sl.size() > 2 && sl[1] == 'd')
                 out.ext = keel::String::from(sl.substr(2));
             else if (sl.size() > 2 && sl[1] == 'r')
-                out.dpi = std::max(30, std::atoi(sl.c_str() + 2));
+                out.dpi = keel::max(30, std::atoi(sl.c_str() + 2));
             // other print options (-painters, -opengl, -bestfit, …)
             // accepted and ignored
             continue;
@@ -190,8 +190,8 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
         throw numkit::Error(keel::format("{}: no figure to export", who).c_str());
     // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
-    const keel::i32 W = std::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
-    const keel::i32 H = std::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
+    const keel::i32 W = keel::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
+    const keel::i32 H = keel::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)
@@ -386,7 +386,7 @@ void evalColormap(const char *cname, keel::ArrayRef<Value> args,
     if (m > 0) {
         keel::f64 *d = C.doubleDataMut();
         if (paletteName == "jet") {
-            std::fill(d, d + 3 * m, 0.0);
+            keel::fill(d, d + 3 * m, 0.0);
             const keel::i32 mi = keel::as<keel::i32>(m);
             const keel::i32 n = (mi + 3) / 4;
             const keel::i32 ulen = n + (n - 1) + n;
@@ -443,7 +443,7 @@ void evalColormap(const char *cname, keel::ArrayRef<Value> args,
             const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);
             for (keel::usize i = 0; i < m; ++i) {
                 keel::f64 t = (m == 1) ? 0.0 : keel::as<keel::f64>(i) / keel::as<keel::f64>(m - 1);
-                keel::i32 idx = std::min(tableN - 1, std::max(0, keel::as<keel::i32>(keel::round_i64(t * (tableN - 1)))));
+                keel::i32 idx = keel::min(tableN - 1, keel::max(0, keel::as<keel::i32>(keel::round_i64(t * (tableN - 1)))));
                 d[i]         = tbl[idx * 3 + 0] / 255.0;
                 d[i + m]     = tbl[idx * 3 + 1] / 255.0;
                 d[i + 2 * m] = tbl[idx * 3 + 2] / 255.0;

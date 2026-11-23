@@ -1,5 +1,6 @@
 // src/core/tree_walker_stmt.cpp
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_set.h>
@@ -16,7 +17,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -506,7 +506,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
                 if (!escaped.closureEnv)
                     escaped.closureEnv = resolveClosureEnv(escaped);
                 keel::String dispSrc = escaped.name.clone();
-                std::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
+                keel::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
                 engine_.userFuncs_.put(nestedHandleId.clone(),
                                        keel::make_arc<UserFunction>(keel::move(escaped)));
                 Value h = Value::funcHandle(nestedHandleId, engine_.mr_);
@@ -939,7 +939,7 @@ Value TreeWalker::callUserFunction(const UserFunction &funcIn,
 
     func.usesNarginNargout = 1;
     if (func.usesNarginNargout) {
-        keel::usize nout = std::max(func.returns.size(), keel::usize(1));
+        keel::usize nout = keel::max(func.returns.size(), keel::usize(1));
         localEnv.setLocal("nargin",
                           Value::scalar(keel::as<keel::f64>(args.size()), engine_.mr_));
         localEnv.setLocal("nargout", Value::scalar(keel::as<keel::f64>(nout), engine_.mr_));
@@ -1112,7 +1112,7 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &funcIn,
 
     if (func.returns.size() < nout)
         throw numkit::Error("Too many output arguments.");
-    results.reserve(std::min(func.returns.size(), nout));
+    results.reserve(keel::min(func.returns.size(), nout));
     for (keel::usize i = 0; i < func.returns.size() && i < nout; ++i)
         results.push_back(readRet(func.returns[i]));
     return results;

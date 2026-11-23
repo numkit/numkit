@@ -14,7 +14,6 @@
 #include <numkit/value/argcheck.hpp>
 
 #include <keel/random.h>
-#include <algorithm>
 
 namespace numkit::builtin::detail {
 
@@ -205,8 +204,8 @@ void bsxfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     if ((ar != br && ar != 1 && br != 1) || (ac != bc && ac != 1 && bc != 1)) {
         throw numkit::Error("bsxfun: non-singleton dimensions must match");
     }
-    keel::usize outR = std::max(ar, br);
-    keel::usize outC = std::max(ac, bc);
+    keel::usize outR = keel::max(ar, br);
+    keel::usize outC = keel::max(ac, bc);
     auto res = Value::matrix(outR, outC, ValueType::DOUBLE, mr);
     keel::f64 *outData = res.doubleDataMut();
     for (keel::usize c = 0; c < outC; ++c) {

@@ -28,7 +28,6 @@
 #include <numkit/ops/reductions.hpp>
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -905,7 +904,7 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
 {
     (void)mr;
     if (idx.isEmpty()) return idx;
-    const keel::i32 nd = std::max(2, a0.dims().ndim());
+    const keel::i32 nd = keel::max(2, a0.dims().ndim());
     keel::SmallArray<char, 16> listed(keel::as<keel::usize>(nd) + 1, '\0');
     for (keel::i32 d : redDims)
         if (d >= 1 && d <= nd)
@@ -1014,7 +1013,7 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     outs[0] = keel::move(val);
     if (nargout > 1) {
         if (linear) {
-            keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            keel::i32 effDim = (dim > 0) ? dim : keel::max(1, numkit::ops::firstNonSingletonDim(a0));
             keel::i32 redArr[1] = {effDim};
             outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {
@@ -1076,7 +1075,7 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     outs[0] = keel::move(val);
     if (nargout > 1) {
         if (linear) {
-            keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
+            keel::i32 effDim = (dim > 0) ? dim : keel::max(1, numkit::ops::firstNonSingletonDim(a0));
             keel::i32 redArr[1] = {effDim};
             outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {

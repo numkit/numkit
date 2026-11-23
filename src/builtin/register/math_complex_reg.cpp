@@ -12,7 +12,6 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 

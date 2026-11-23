@@ -17,7 +17,6 @@
 #include <numkit/builtin/detail/strfun/regex_detail.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -62,7 +61,7 @@ inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     static const char *order[] = {"start", "end", "tokenExtents",
                                   "match", "tokens", "names", "split"};
-    const keel::usize k = std::min<keel::usize>(nargout, 7);
+    const keel::usize k = keel::min<keel::usize>(nargout, 7);
     for (keel::usize i = 0; i < k; ++i)
         outs[i] = regexpFind(args[0], args[1], order[i], ignoreCase, mr);
 }

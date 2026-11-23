@@ -1,5 +1,6 @@
 // src/engine.cpp
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/exception.h>
 #include <keel/core.h>
 #include <keel/env.h>
@@ -28,7 +29,6 @@
 #include <numkit/core/vm.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
-#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 
@@ -1060,7 +1060,7 @@ keel::Array<keel::String> Engine::workspaceVarNames() const
     // and don't appear here unless the user has explicitly shadowed them,
     // which matches MATLAB's `who`/`whos` behaviour.
     auto names = workspaceEnv_->localNames();
-    std::sort(names.begin(), names.end());
+    keel::sort(names.begin(), names.end());
     return names;
 }
 

@@ -18,7 +18,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 #include <cstdlib>
@@ -1393,7 +1392,7 @@ void animatedline_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     if (args.size() >= 2 && !args[0].isChar() && !args[1].isChar()) {
         const auto &xa = args[0];
         const auto &ya = args[1];
-        const keel::usize n = std::min(xa.numel(), ya.numel());
+        const keel::usize n = keel::min(xa.numel(), ya.numel());
         ds.animatedX.reserve(n);
         ds.animatedY.reserve(n);
         for (keel::usize i = 0; i < n; ++i) {
@@ -1425,7 +1424,7 @@ void addpoints_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.size() < 3) { outs[0] = Value(); return; }
     const auto &xa = args[1];
     const auto &ya = args[2];
-    const keel::usize n = std::min(xa.numel(), ya.numel());
+    const keel::usize n = keel::min(xa.numel(), ya.numel());
     auto &ds = ax.datasets[(keel::usize)ax.animatedDatasetIdx];
     ds.animatedX.reserve(ds.animatedX.size() + n);
     ds.animatedY.reserve(ds.animatedY.size() + n);

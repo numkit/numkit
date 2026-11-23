@@ -1,7 +1,7 @@
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <numkit/core/dependency_graph.hpp>
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -379,8 +379,8 @@ DependencyGraph::DependencyGraph(keel::Array<StatementFacts> facts)
     }
     // Dedup edges.
     for (auto &d : downstream_) {
-        std::sort(d.begin(), d.end());
-        auto *newEnd = std::unique(d.begin(), d.end());
+        keel::sort(d.begin(), d.end());
+        auto *newEnd = keel::unique(d.begin(), d.end());
         d.resize(newEnd - d.begin());
     }
 }

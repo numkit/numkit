@@ -3,6 +3,7 @@
 // NumKit Package Manager implementation.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/dynlib.h>
 #include <keel/format.h>
@@ -18,7 +19,6 @@
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/toolchain.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <keel/tuple.h>
 
@@ -327,7 +327,7 @@ keel::Array<SemVerTag> fetchRemoteSemVerTags(keel::StringRef gitPath, keel::Stri
             tags.push_back(keel::move(sv));
         }
     }
-    std::sort(tags.begin(), tags.end());
+    keel::sort(tags.begin(), tags.end());
     return tags;
 }
 
@@ -964,7 +964,7 @@ keel::Array<InstalledPackage> PackageManager::scanInstalled(const Engine *engine
         }
         return true;
     });
-    std::sort(pkgs.begin(), pkgs.end(), [](const InstalledPackage &a, const InstalledPackage &b) {
+    keel::sort(pkgs.begin(), pkgs.end(), [](const InstalledPackage &a, const InstalledPackage &b) {
         return a.name < b.name;
     });
     return pkgs;

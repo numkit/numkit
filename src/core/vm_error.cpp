@@ -11,7 +11,6 @@
 #include <numkit/core/vm.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 #include <exception>
 
 namespace numkit {
@@ -90,7 +89,7 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
         while (!tryStack_.empty() && tryStack_.back().frameIndex >= frames_.size() - 1)
             tryStack_.pop_back();
         // Trim for-loop stack
-        forStack_.resize(std::min(forStack_.size(), f.forStackBase));
+        forStack_.resize(keel::min(forStack_.size(), f.forStackBase));
         // Cleanup registers
         for (keel::u32 i = 0; i < f.nregs; ++i)
             if (!f.R[i].isDoubleScalar() && !f.R[i].isEmpty())

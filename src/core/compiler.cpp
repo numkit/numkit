@@ -10,7 +10,6 @@
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
 
-#include <algorithm>
 #include <cstdlib>
 
 namespace numkit {
@@ -1329,7 +1328,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
         if (anyBraceArg) {
-            const keel::u16 noutF = keel::as<keel::u16>(std::max<keel::usize>(nout, 1));
+            const keel::u16 noutF = keel::as<keel::u16>(keel::max<keel::usize>(nout, 1));
             keel::u16 outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          outBase, fhReg, argBase,
@@ -1415,7 +1414,7 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                 emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, fhReg, *uv, 0, nameIdx, 0));
             else
                 emit(Instruction::make_abcde(OpCode::ASSERT_DEF, fhReg, fhReg, 0, nameIdx, 1));
-            const keel::u16 noutF = keel::as<keel::u16>(std::max<keel::usize>(nout, 1));
+            const keel::u16 noutF = keel::as<keel::u16>(keel::max<keel::usize>(nout, 1));
             keel::u16 outBase = reserveRegs(noutF);
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          outBase, fhReg, flatBase,

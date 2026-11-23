@@ -13,6 +13,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/math.h>
 #include <keel/format.h>
 #include <keel/memory.h>
@@ -35,7 +36,6 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 #include <keel/tuple.h>
 
 namespace numkit::linalg {
@@ -86,7 +86,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     Value Aw = detail::widenSingleToDouble(A, mr);
 
     const auto emit = [&](auto tag, auto roData, auto rwData, auto makeR) {
-        using T = std::remove_const_t<keel::RemovePointer<decltype(tag)>>;
+        using T = keel::RemoveConst<keel::RemovePointer<decltype(tag)>>;
         auto R = makeR();
         const keel::usize fail = cholUpperFactor(roData(Aw), rwData(R), n);
         if (fail != 0) {
@@ -277,7 +277,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         keel::Array<keel::usize> perm(mr);
         auto [Q, R] = qr_pivoted(args[0], perm, mr);
         if (econ) {
-            const keel::usize k = std::min(m, n);
+            const keel::usize k = keel::min(m, n);
             Q = firstCols(Q, k, mr);
             R = topLeftBlock(R, k, n, mr);
             vectorP = true;
@@ -292,7 +292,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         } else {
             Value P = Value::matrix(n, n, ValueType::DOUBLE, mr);
             keel::f64 *Pd = P.doubleDataMut();
-            std::fill(Pd, Pd + n * n, 0.0);
+            keel::fill(Pd, Pd + n * n, 0.0);
             for (keel::usize k = 0; k < n; ++k) Pd[perm[k] + k * n] = 1.0;
             outs[2] = detail::narrowDoubleToSingleIf(P, args[0].type() == ValueType::SINGLE, mr);
         }
@@ -302,7 +302,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
     if (nargout >= 2) {
         auto [Q, R] = qr_decompose(args[0], mr);
         if (econ) {
-            const keel::usize k = std::min(m, n);
+            const keel::usize k = keel::min(m, n);
             Q = firstCols(Q, k, mr);
             R = topLeftBlock(R, k, n, mr);
         }
@@ -310,7 +310,7 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
         outs[1] = keel::move(R);
     } else {
         Value R = qr_R_only(args[0], mr);
-        if (econ) R = topLeftBlock(R, std::min(m, n), n, mr);
+        if (econ) R = topLeftBlock(R, keel::min(m, n), n, mr);
         outs[0] = keel::move(R);
     }
 }
@@ -324,7 +324,7 @@ void svd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         auto [U, S, V] = svd_decompose(args[0], mr);
         if (econ) {
             const keel::usize m = args[0].dims().rows(), n = args[0].dims().cols();
-            const keel::usize k = std::min(m, n);
+            const keel::usize k = keel::min(m, n);
             U = firstCols(U, k, mr);
             S = topLeftBlock(S, k, k, mr);
             V = firstCols(V, k, mr);

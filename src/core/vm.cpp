@@ -16,7 +16,6 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 
-#include <algorithm>
 #include <cstdio>
 
 // Forward-declarations from toolboxes/builtin/src/backends/binary_ops_loops.hpp.
@@ -1138,8 +1137,8 @@ enter_frame:
                         R[I.a].doubleDataMutFast()[d.sub2ind(r, c)] = val.scalarVal();
                         break;
                     }
-                    keel::usize newR = std::max(d.rows(), r + 1);
-                    keel::usize newC = std::max(d.cols(), c + 1);
+                    keel::usize newR = keel::max(d.rows(), r + 1);
+                    keel::usize newC = keel::max(d.cols(), c + 1);
                     R[I.a].resize(newR, newC, engine_.mr_);
                     R[I.a].doubleDataMutFast()[R[I.a].heapDims().sub2ind(r, c)] = val.scalarVal();
                     break;
@@ -1682,7 +1681,7 @@ enter_frame:
                 // Auto-grow if needed
                 keel::usize nr = R[I.a].dims().rows(), nc = R[I.a].dims().cols();
                 if (r + 1 > nr || c + 1 > nc) {
-                    keel::usize newR = std::max(nr, r + 1), newC = std::max(nc, c + 1);
+                    keel::usize newR = keel::max(nr, r + 1), newC = keel::max(nc, c + 1);
                     auto grown = Value::cell(newR, newC);
                     for (keel::usize cc = 0; cc < nc; ++cc)
                         for (keel::usize rr = 0; rr < nr; ++rr)
@@ -1741,9 +1740,9 @@ enter_frame:
                     // Auto-grow if needed
                     keel::usize nr = R[I.a].dims().rows(), nc = R[I.a].dims().cols(), np = R[I.a].dims().pages();
                     if (r + 1 > nr || c + 1 > nc || p + 1 > np) {
-                        keel::usize newR = std::max(nr, r + 1);
-                        keel::usize newC = std::max(nc, c + 1);
-                        keel::usize newP = std::max(np, p + 1);
+                        keel::usize newR = keel::max(nr, r + 1);
+                        keel::usize newC = keel::max(nc, c + 1);
+                        keel::usize newP = keel::max(np, p + 1);
                         auto grown = Value::cell3D(newR, newC, newP);
                         // Copy existing elements
                         for (keel::usize pp = 0; pp < np; ++pp)
@@ -1774,7 +1773,7 @@ enter_frame:
                     for (keel::u16 i = 0; i < ndims; ++i)
                         coords[i] = Value::checkedScalarIndex(R[base + i].toScalar());
                     const keel::i32 curNd = R[I.a].dims().ndim();
-                    const keel::i32 newNd = std::max(keel::as<keel::i32>(ndims), curNd);
+                    const keel::i32 newNd = keel::max(keel::as<keel::i32>(ndims), curNd);
                     keel::Array<keel::usize> need(newNd, keel::as<keel::usize>(1));
                     for (keel::i32 i = 0; i < newNd; ++i)
                         need[i] = (i < curNd) ? R[I.a].dims().dim(i) : 1;
@@ -1886,7 +1885,7 @@ enter_frame:
                 keel::usize argN = splat.size();
                 auto results = engine_.superMethod(
                     base, method, keel::ArrayRef<Value>(argPtr, argN),
-                    std::max<keel::usize>(nout, 1));
+                    keel::max<keel::usize>(nout, 1));
                 for (keel::u16 i = 0; i < nout; ++i)
                     R[outBase + i] = (i < results.size()) ? keel::move(results[i]) : Value();
                 break;

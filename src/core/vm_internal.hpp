@@ -13,7 +13,6 @@
 #include <numkit/value/index.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 
 namespace numkit {
 
@@ -32,9 +31,9 @@ struct ResolvedSubscript {
 
     keel::usize maxPlusOne(keel::usize currentMax) const noexcept {
         if (isColon) return currentMax;
-        if (isSingle) return std::max(currentMax, single + 1);
+        if (isSingle) return keel::max(currentMax, single + 1);
         for (keel::usize v : vec)
-            currentMax = std::max(currentMax, v + 1);
+            currentMax = keel::max(currentMax, v + 1);
         return currentMax;
     }
 

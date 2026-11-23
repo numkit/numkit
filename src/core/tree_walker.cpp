@@ -16,7 +16,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -782,8 +781,8 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 && tryResolveScalarIndex(lhs->children[2].get(), *var, 1, 2, env, ci)) {
                 keel::usize needR = ri + 1, needC = ci + 1;
                 if (needR > var->dims().rows() || needC > var->dims().cols())
-                    var->resize(std::max(var->dims().rows(), needR),
-                                std::max(var->dims().cols(), needC),
+                    var->resize(keel::max(var->dims().rows(), needR),
+                                keel::max(var->dims().cols(), needC),
                                 engine_.mr_);
                 var->elemSet(var->dims().sub2ind(ri, ci), rhs);
                 return;
@@ -800,9 +799,9 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
 
         keel::usize maxR = var->dims().rows(), maxC = var->dims().cols();
         for (auto r : rowIdx)
-            maxR = std::max(maxR, r + 1);
+            maxR = keel::max(maxR, r + 1);
         for (auto c : colIdx)
-            maxC = std::max(maxC, c + 1);
+            maxC = keel::max(maxC, c + 1);
         if (var->isEmpty()) {
             if (riIsColon && ciIsColon) {
                 maxR = rhs.dims().rows();
@@ -835,9 +834,9 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
                 keel::usize needR = ri + 1, needC = ci + 1, needP = pi + 1;
                 if (needR > var->dims().rows() || needC > var->dims().cols()
                     || needP > var->dims().pages())
-                    var->resize3d(std::max(var->dims().rows(), needR),
-                                  std::max(var->dims().cols(), needC),
-                                  std::max(var->dims().pages(), needP),
+                    var->resize3d(keel::max(var->dims().rows(), needR),
+                                  keel::max(var->dims().cols(), needC),
+                                  keel::max(var->dims().pages(), needP),
                                   engine_.mr_);
                 var->elemSet(var->dims().sub2ind(ri, ci, pi), rhs);
                 return;
@@ -857,11 +856,11 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
 
         keel::usize maxR = var->dims().rows(), maxC = var->dims().cols(), maxP = var->dims().pages();
         for (auto r : rowIdx)
-            maxR = std::max(maxR, r + 1);
+            maxR = keel::max(maxR, r + 1);
         for (auto c : colIdx)
-            maxC = std::max(maxC, c + 1);
+            maxC = keel::max(maxC, c + 1);
         for (auto p : pageIdx)
-            maxP = std::max(maxP, p + 1);
+            maxP = keel::max(maxP, p + 1);
         if (var->isEmpty() && (!rhs.isScalar() || (var->dims().rows() == 0 && var->dims().cols() == 0 && !rhs.isEmpty()))) {
             const keel::i32 nColons = (riColon ? 1 : 0) + (ciColon ? 1 : 0) + (piColon ? 1 : 0);
             const keel::usize nonColonProd = (riColon ? 1 : rowIdx.size())
@@ -900,9 +899,9 @@ void TreeWalker::execIndexedAssign(const ASTNode *lhs, const Value &rhs, Environ
         if (!rhs.isScalar() && rhs.numel() != target3D)
             throw numkit::Error("Subscripted assignment dimension mismatch");
         if (maxR > var->dims().rows() || maxC > var->dims().cols() || maxP > var->dims().pages())
-            var->resize3d(std::max(var->dims().rows(), maxR),
-                          std::max(var->dims().cols(), maxC),
-                          std::max(var->dims().pages(), maxP),
+            var->resize3d(keel::max(var->dims().rows(), maxR),
+                          keel::max(var->dims().cols(), maxC),
+                          keel::max(var->dims().pages(), maxP),
                           engine_.mr_);
 
         if (riColon) rowIdx = resolveIndex(rSub, *var, 0, 3, env);

@@ -4,6 +4,7 @@
 // groupsummary, grouptransform, groupfilter, splitapply).
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/math.h>
 #include <keel/core.h>
 #include <keel/hash_map.h>
@@ -15,7 +16,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 
 namespace numkit::builtin::detail {
@@ -76,7 +76,7 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         return;
     }
 
-    std::sort(gids.begin(), gids.end());
+    keel::sort(gids.begin(), gids.end());
 
     keel::usize nGroups = gids.size();
     auto result = Value::matrix(nGroups, 1, ValueType::DOUBLE, mr);
@@ -175,7 +175,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 existing->push_back(i);
             }
         }
-        std::sort(gids.begin(), gids.end());
+        keel::sort(gids.begin(), gids.end());
 
         auto B = (nCols == 1) ? Value::matrix(nRows, 1, ValueType::DOUBLE, mr)
                               : Value::matrix(nRows, nCols, ValueType::DOUBLE, mr);
@@ -263,7 +263,7 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             existing->push_back(i);
         }
     }
-    std::sort(gids.begin(), gids.end());
+    keel::sort(gids.begin(), gids.end());
 
     keel::Array<keel::u8> keep(nRows, 0, mr);
     auto Aget = [&](keel::usize r, keel::usize c) {

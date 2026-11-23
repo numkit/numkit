@@ -1,4 +1,5 @@
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/fs.h>
@@ -15,7 +16,6 @@
 #include <numkit/runtime/runtime.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 
-#include <algorithm>
 #include <numkit/core/build_info.hpp>
 
 namespace numkit::builtin::detail {
@@ -455,7 +455,7 @@ void dir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             if (globMatch(patPart, e.name))
                 entries.push_back(keel::move(e));
         }
-        std::sort(entries.begin(), entries.end(),
+        keel::sort(entries.begin(), entries.end(),
                   [](const DirEntry &a, const DirEntry &b) { return a.name < b.name; });
     } else {
         rp = ctx.engine->resolvePath(target);

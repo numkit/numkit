@@ -16,7 +16,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -268,7 +267,7 @@ Value TreeWalker::execCall(const ASTNode *node, Environment *env, keel::usize na
 
     // Superclass-qualified call `lhs@Base(args)` (classdef super-call).
     if (funcNode->type == NodeType::SUPERCLASS_REF) {
-        auto results = execSuperCall(funcNode, node, env, std::max<keel::usize>(nargout, 1));
+        auto results = execSuperCall(funcNode, node, env, keel::max<keel::usize>(nargout, 1));
         return results.empty() ? Value() : keel::move(results[0]);
     }
 
@@ -1000,7 +999,7 @@ Value TreeWalker::execMatrixLiteral(const ASTNode *node, Environment *env)
             for (auto &v : rowElems) {
                 s.append(v.asStringRef());
             }
-            maxCols = std::max(maxCols, s.size());
+            maxCols = keel::max(maxCols, s.size());
             strs.push_back(keel::move(s));
         }
         if (strs.size() == 1)

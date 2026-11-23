@@ -14,7 +14,6 @@
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/value/c_api_bridge.hpp>
 
-#include <algorithm>
 #include <cstdlib>
 #include <keel/dynlib.h>
 #include <exception>
@@ -401,7 +400,7 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
         }
         if (s.empty()) s = val.toString();
         if (!buf || buf_cap == 0) return s.size();
-        keel::usize n = std::min(s.size(), buf_cap - 1);
+        keel::usize n = keel::min(s.size(), buf_cap - 1);
         if (n > 0) keel::mem_copy(buf, s.data(), n);
         buf[n] = '\0';
         return s.size();

@@ -11,7 +11,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <cstdio>
 
 namespace numkit {
@@ -196,7 +195,7 @@ void polarhistogram_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     (void)nargout;
     if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
     keel::i32 nbins = (args.size() >= 2 && args[1].numel() == 1)
-                ? std::max(1, (keel::i32)args[1].toScalar())
+                ? keel::max(1, (keel::i32)args[1].toScalar())
                 : 36;
     keel::String tx, ty;
     computeAngularHistogram(args[0], nbins, tx, ty);
@@ -257,7 +256,7 @@ void rose_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     (void)nargout;
     if (args.empty() || args[0].numel() == 0) { outs[0] = Value(); return; }
     keel::i32 nbins = (args.size() >= 2 && args[1].numel() == 1)
-                ? std::max(1, (keel::i32)args[1].toScalar())
+                ? keel::max(1, (keel::i32)args[1].toScalar())
                 : 20;
     keel::String tx, ty;
     computeAngularHistogram(args[0], nbins, tx, ty);

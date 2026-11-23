@@ -1,4 +1,5 @@
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -7,7 +8,6 @@
 #include <keel/utf8.h>
 #include <numkit/core/help/help_catalog.hpp>
 
-#include <algorithm>
 #include <initializer_list>
 
 namespace numkit::bundle {
@@ -152,7 +152,7 @@ keel::Array<keel::String> HelpCatalog::getCategoryFunctions(keel::StringRef catN
             }
         }
     }
-    std::sort(list.begin(), list.end());
+    keel::sort(list.begin(), list.end());
     return list;
 }
 
@@ -162,7 +162,7 @@ keel::Array<keel::String> HelpCatalog::getAllFunctions() const {
     for (auto [name, _] : functionIndex_) {
         list.push_back(name.clone());
     }
-    std::sort(list.begin(), list.end());
+    keel::sort(list.begin(), list.end());
     return list;
 }
 

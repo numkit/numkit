@@ -4,6 +4,7 @@
 // Engine-coupled glue: marshals CallContext args/outs into the engine-free
 // compute API declared in the headers below. See project_layering_refactor.
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
@@ -23,7 +24,6 @@
 #include <numkit/ops/helpers.hpp>
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -42,9 +42,9 @@ static Value orientUniqueVec(const Value &v, bool column,
     if (column == isCol) return v; // already in the desired orientation
     Value out = Value::matrix(column ? k : 1, column ? 1 : k, v.type(), mr);
     if (v.type() == ValueType::COMPLEX)
-        std::copy(v.complexData(), v.complexData() + k, out.complexDataMut());
+        keel::copy(v.complexData(), v.complexData() + k, out.complexDataMut());
     else
-        std::copy(v.doubleData(), v.doubleData() + k, out.doubleDataMut());
+        keel::copy(v.doubleData(), v.doubleData() + k, out.doubleDataMut());
     return out;
 }
 
@@ -191,7 +191,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             sorted.reserve(idxMap.size());
             for (auto [k, v] : idxMap)
                 sorted.push_back(StrIdxPair{k.clone(sa), v});
-            std::sort(sorted.begin(), sorted.end(),
+            keel::sort(sorted.begin(), sorted.end(),
                       [](const StrIdxPair &a, const StrIdxPair &b) { return a.str.as_ref() < b.str.as_ref(); });
             keel::HashMap<keel::String, keel::usize> rankMap(sa);
             for (keel::usize k = 0; k < sorted.size(); ++k) {
@@ -391,7 +391,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         const keel::usize ne = edges.numel();
         auto e = Value::matrix(1, ne, ValueType::DOUBLE, mr);
         const keel::f64 *src = edges.doubleData();
-        std::copy(src, src + ne, e.doubleDataMut());
+        keel::copy(src, src + ne, e.doubleDataMut());
         outs[1] = e;
     }
 
@@ -409,7 +409,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             if (nbins == 0 || keel::is_nan(v) || v < ed[0] || v > ed[nbins]) {
                 bd[idx] = 0.0;
             } else {
-                const keel::usize b = keel::as<keel::usize>(std::upper_bound(ed, ed + nbins, v) - ed);
+                const keel::usize b = keel::as<keel::usize>(keel::upper_bound(ed, ed + nbins, v) - ed);
                 bd[idx] = keel::as<keel::f64>(b);
             }
         }
@@ -620,7 +620,7 @@ void emitSetopIndices(SetOpKind kind, const Value &A, const Value &B,
         }
         auto colOf = [&](const keel::Array<keel::f64> &v) {
             Value c = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
-            if (!v.empty()) std::copy(v.begin(), v.end(), c.doubleDataMut());
+            if (!v.empty()) keel::copy(v.begin(), v.end(), c.doubleDataMut());
             return c;
         };
         if (nargout >= 2) outs[1] = colOf(iaVec);
@@ -677,7 +677,7 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
     const keel::usize cols = (ar > 0) ? ac : bc;
     auto makeColVec = [&](keel::ArrayRef<keel::f64> v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
-        if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
+        if (!v.empty()) keel::copy(v.begin(), v.end(), col.doubleDataMut());
         return col;
     };
 
@@ -740,7 +740,7 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
         if (bset.contains(key) != wantInB) continue;
         if (seen.try_insert(keel::move(key), char{1}).inserted) nonNan.push_back(r);
     }
-    std::sort(nonNan.begin(), nonNan.end(),
+    keel::sort(nonNan.begin(), nonNan.end(),
               [ad, ac, ar](keel::usize a, keel::usize b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
     nonNan.append(nanIdx);
     if (nargout >= 2) {
@@ -779,7 +779,7 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
     const keel::usize nr = ar + br;
     auto makeColVec = [&](keel::ArrayRef<keel::f64> v) {
         Value col = Value::matrix(v.size(), 1, ValueType::DOUBLE, mr);
-        if (!v.empty()) std::copy(v.begin(), v.end(), col.doubleDataMut());
+        if (!v.empty()) keel::copy(v.begin(), v.end(), col.doubleDataMut());
         return col;
     };
     if (nr == 0) {
@@ -818,7 +818,7 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
         if (other.contains(key)) continue;
         if (seen.try_insert(keel::move(key), char{1}).inserted) nonNan.push_back(ci);
     }
-    std::sort(nonNan.begin(), nonNan.end(),
+    keel::sort(nonNan.begin(), nonNan.end(),
               [cdp, cols, nr](keel::usize a, keel::usize b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });
     nonNan.append(nanIdx);
     if (nargout >= 2) {

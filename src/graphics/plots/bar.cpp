@@ -4,6 +4,7 @@
 // JSON/parse helpers come from plot_internal.hpp.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/math.h>
@@ -14,7 +15,6 @@
 #include <numkit/builtin/datafun.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 
@@ -147,7 +147,7 @@ void bar_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         // Grouped: exact groupWidth = min(0.8, m / (m + 1.5)) bar center offsets
         // so Bar.XEndPoints matches standard grouped bar layout.
         const keel::f64 m = keel::as<keel::f64>(Yc);
-        const keel::f64 groupWidth = std::min(0.8, m / (m + 1.5));
+        const keel::f64 groupWidth = keel::min(0.8, m / (m + 1.5));
         for (keel::usize cc = 0; cc < Yc; ++cc) {
             DatasetInfo ds;
             ds.type.assign("bar");
@@ -197,7 +197,7 @@ void cdfImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (keel::is_finite(v)) xs.push_back(v);
     }
     if (xs.empty()) { outs[0] = Value(); return; }
-    std::sort(xs.begin(), xs.end());
+    keel::sort(xs.begin(), xs.end());
     const keel::usize N = xs.size();
 
     StrBuf sx, sy;
@@ -241,14 +241,14 @@ void qqplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         if (keel::is_finite(v)) xs.push_back(v);
     }
     if (xs.size() < 2) { outs[0] = Value(); return; }
-    std::sort(xs.begin(), xs.end());
+    keel::sort(xs.begin(), xs.end());
     const keel::usize N = xs.size();
 
     // Probit (inverse normal CDF) — Abramowitz & Stegun 26.2.23
     // rational approx, good to ~4.5e-4 absolute error. Mirrors
     // the upper tail; the lower tail is its negative.
     const auto probit = [](keel::f64 p) {
-        p = std::max(1e-15, std::min(1.0 - 1e-15, p));
+        p = keel::max(1e-15, keel::min(1.0 - 1e-15, p));
         const bool lower = (p < 0.5);
         const keel::f64 q = lower ? p : (1.0 - p);
         const keel::f64 t = keel::sqrt(-2.0 * keel::log(q));
@@ -317,7 +317,7 @@ void pareto_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         if (keel::is_finite(v)) ys.push_back(v);
     }
     if (ys.empty()) { outs[0] = Value(); return; }
-    std::sort(ys.begin(), ys.end(), [](keel::f64 a, keel::f64 b) { return a > b; });
+    keel::sort(ys.begin(), ys.end(), [](keel::f64 a, keel::f64 b) { return a > b; });
     keel::f64 sum = 0;
     for (keel::f64 v : ys) sum += v;
     if (sum == 0) sum = 1;
@@ -366,7 +366,7 @@ void histfit_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     if (xs.size() < 2) { outs[0] = Value(); return; }
     keel::i32 nbins = 10;
     if (args.size() >= 2 && args[1].numel() == 1)
-        nbins = std::max(1, (keel::i32)args[1].toScalar());
+        nbins = keel::max(1, (keel::i32)args[1].toScalar());
 
     keel::f64 mn = xs[0], mx = xs[0];
     for (keel::f64 v : xs) {
@@ -441,7 +441,7 @@ void gscatter_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     const auto &X = args[0];
     const auto &Y = args[1];
     const auto &G = args[2];
-    const keel::usize N = std::min({X.numel(), Y.numel(), G.numel()});
+    const keel::usize N = keel::min({X.numel(), Y.numel(), G.numel()});
     if (N == 0) { outs[0] = Value(); return; }
 
     // Group indices: distinct values in G, preserving first-seen
@@ -620,15 +620,15 @@ void hist_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         }
     } else {
         keel::i32 bins = (args.size() >= 2 && !args[1].isEmpty())
-            ? std::max(1, keel::as<keel::i32>(args[1].toScalar()))
+            ? keel::max(1, keel::as<keel::i32>(args[1].toScalar()))
             : 10;
         keel::f64 mn = (data.numel() > 0) ? data.elemAsDouble(0) : 0.0;
         keel::f64 mx = mn;
         for (keel::usize i = 1; i < data.numel(); ++i) {
             const keel::f64 v = data.elemAsDouble(i);
             if (!keel::is_nan(v)) {
-                mn = std::min(mn, v);
-                mx = std::max(mx, v);
+                mn = keel::min(mn, v);
+                mx = keel::max(mx, v);
             }
         }
         keel::f64 bw = (mx - mn) / bins;
@@ -714,7 +714,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             haveEdges = true;
         } else if (args[1].isNumeric() && args[1].numel() == 1) {
             spec.hasNumBins = true;
-            spec.numBins = std::max(1.0, keel::floor(args[1].toScalar()));
+            spec.numBins = keel::max(1.0, keel::floor(args[1].toScalar()));
         }
         optStart = 2;
     }
@@ -757,7 +757,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             else if (m == "cumcount")     norm = numkit::builtin::HistNorm::CumCount;
             else if (m == "cdf")          norm = numkit::builtin::HistNorm::Cdf;
         } else if (key == "facealpha" && val.isNumeric()) {
-            faceAlpha = std::min(1.0, std::max(0.0, val.elemAsDouble(0)));
+            faceAlpha = keel::min(1.0, keel::max(0.0, val.elemAsDouble(0)));
         } else if (key == "facecolor" || key == "edgecolor") {
             char hex[8];
             keel::String *kv = (key == "facecolor") ? &faceKV : &edgeKV;
@@ -837,7 +837,7 @@ void histogram2_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     }
     const auto &X = args[0];
     const auto &Y = args[1];
-    const keel::usize N = std::min(X.numel(), Y.numel());
+    const keel::usize N = keel::min(X.numel(), Y.numel());
 
     keel::i32 nx = 10, ny = 10;
     if (args.size() >= 3) {
@@ -936,9 +936,9 @@ void patchImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     const auto &X = args[0];
     const auto &Y = args[1];
     const keel::usize R = X.dims().rows();
-    const keel::usize C = std::max<keel::usize>(1, X.dims().cols());
+    const keel::usize C = keel::max<keel::usize>(1, X.dims().cols());
     if (R == 0) { outs[0] = Value(); return; }
-    if (Y.dims().rows() != R || std::max<keel::usize>(1, Y.dims().cols()) != C) {
+    if (Y.dims().rows() != R || keel::max<keel::usize>(1, Y.dims().cols()) != C) {
         outs[0] = Value();
         return;
     }
@@ -960,7 +960,7 @@ void patchImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::String color = keel::String::from("#1f77b4");
     keel::usize colorIdx = 2;
     if (args.size() >= 4 && args[2].isNumeric()
-        && args[2].dims().rows() == R && std::max<keel::usize>(1, args[2].dims().cols()) == C) {
+        && args[2].dims().rows() == R && keel::max<keel::usize>(1, args[2].dims().cols()) == C) {
         colorIdx = 3;
     }
     if (args.size() > colorIdx) {
@@ -982,9 +982,9 @@ void patchImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 }
             }
         } else if (Carg.numel() >= 3) {
-            const keel::i32 r = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(0), 0.0, 1.0));
-            const keel::i32 g = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(1), 0.0, 1.0));
-            const keel::i32 b = (keel::i32)keel::round(255 * std::clamp(Carg.elemAsDouble(2), 0.0, 1.0));
+            const keel::i32 r = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(0), 0.0, 1.0));
+            const keel::i32 g = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(1), 0.0, 1.0));
+            const keel::i32 b = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(2), 0.0, 1.0));
             char buf[16];
             std::snprintf(buf, sizeof buf, "#%02x%02x%02x", r, g, b);
             color.assign(buf);
@@ -1123,8 +1123,8 @@ void boxImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         return;
     }
     const auto &M = args[0];
-    const keel::usize R = std::max<keel::usize>(1, M.dims().rows());
-    const keel::usize C = std::max<keel::usize>(1, M.dims().cols());
+    const keel::usize R = keel::max<keel::usize>(1, M.dims().rows());
+    const keel::usize C = keel::max<keel::usize>(1, M.dims().cols());
     // Treat 1×N or N×1 as a single column; matrix → C columns.
     const bool single = (R == 1 || C == 1);
     const keel::usize nBoxes = single ? 1 : C;
@@ -1144,7 +1144,7 @@ void boxImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             if (keel::is_finite(v)) col.push_back(v);
         }
         if (col.size() < 2) continue;
-        std::sort(col.begin(), col.end());
+        keel::sort(col.begin(), col.end());
         const keel::f64 q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
         const keel::f64 q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
         const keel::f64 q3 = col[(keel::usize)((col.size() - 1) * 0.75)];
@@ -1258,8 +1258,8 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
         return;
     }
     const auto &M = args[0];
-    const keel::usize R = std::max<keel::usize>(1, M.dims().rows());
-    const keel::usize Cmat = std::max<keel::usize>(1, M.dims().cols());
+    const keel::usize R = keel::max<keel::usize>(1, M.dims().rows());
+    const keel::usize Cmat = keel::max<keel::usize>(1, M.dims().cols());
     const bool single = (R == 1 || Cmat == 1);
     const keel::usize nViolins = single ? 1 : Cmat;
     const keel::usize nPerColumn = single ? M.numel() : R;
@@ -1289,7 +1289,7 @@ void violinplot_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
         const keel::f64 bw = 1.06 * sd * keel::pow((keel::f64)col.size(), -0.2);
         if (bw <= 0) continue;
 
-        std::sort(col.begin(), col.end());
+        keel::sort(col.begin(), col.end());
         const keel::f64 mn = col.front(), mx = col.back();
         const keel::f64 q1 = col[(keel::usize)((col.size() - 1) * 0.25)];
         const keel::f64 q2 = col[(keel::usize)((col.size() - 1) * 0.50)];
@@ -1422,7 +1422,7 @@ void fill3_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     if (args.size() < 3) { outs[0] = Value(); return; }
     const auto &X = args[0], &Y = args[1], &Z = args[2];
     const keel::usize R = X.dims().rows();
-    const keel::usize C = std::max<keel::usize>(1, X.dims().cols());
+    const keel::usize C = keel::max<keel::usize>(1, X.dims().cols());
     if (R == 0) { outs[0] = Value(); return; }
     if (Y.dims().rows() != R || Z.dims().rows() != R) {
         outs[0] = Value(); return;
@@ -1502,7 +1502,7 @@ void swarmchart_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.size() < 2) { outs[0] = Value(); return; }
     const auto &xv = args[0];
     const auto &yv = args[1];
-    const keel::usize n = std::min(xv.numel(), yv.numel());
+    const keel::usize n = keel::min(xv.numel(), yv.numel());
     auto *mr = gc.mr;
     auto Xjit = Value::matrix(1, n, ValueType::DOUBLE, mr);
     keel::f64 *xj = Xjit.doubleDataMut();
@@ -1525,7 +1525,7 @@ void swarmchart_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             buckets[bi].idxs.push_back(i);
         }
     }
-    std::sort(buckets.begin(), buckets.end(),
+    keel::sort(buckets.begin(), buckets.end(),
               [](const Bucket &a, const Bucket &b) { return a.key < b.key; });
     // Per bucket, spread points uniformly in [-half, +half] of
     // the slot width. Slot = 0.35 × the smallest gap between
@@ -1541,7 +1541,7 @@ void swarmchart_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             prev = bk.key;
         }
     }
-    const keel::f64 half = std::min(0.4, 0.35 * minGap);
+    const keel::f64 half = keel::min(0.4, 0.35 * minGap);
     for (const auto &bk : buckets) {
         const keel::usize m = bk.idxs.size();
         if (m <= 1) continue;

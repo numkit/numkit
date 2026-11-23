@@ -19,13 +19,13 @@
 #pragma once
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/small_array.h>
 #include <keel/string.h>
-#include <algorithm>
 
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -52,7 +52,7 @@ inline keel::SmallArray<keel::i32, 8> parseDimSet(const Value &a, keel::StringRe
     for (keel::usize i = 0; i < a.numel(); ++i)
         set.push_back(argcheck::dimArg(a.elemAsDouble(i), fn));
     keel::SmallArray<keel::i32, 8> sorted = set.clone();
-    std::sort(sorted.begin(), sorted.end());
+    keel::sort(sorted.begin(), sorted.end());
     for (keel::usize i = 1; i < sorted.size(); ++i)
         if (sorted[i] == sorted[i - 1])
             throw Error(keel::format("{}: dimension vector entries "
@@ -67,7 +67,7 @@ inline keel::SmallArray<keel::i32, 8> parseDimSet(const Value &a, keel::StringRe
 // 2-D (a row vector has a dimension 2).
 inline keel::i32 realRank(const Value &x)
 {
-    return std::max(2, x.dims().ndim());
+    return keel::max(2, x.dims().ndim());
 }
 
 // True when every real dimension of x is listed. Extra entries beyond

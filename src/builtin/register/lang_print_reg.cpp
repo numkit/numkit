@@ -10,7 +10,6 @@
 #include <numkit/value/shape_ops.hpp>
 #include <numkit/value/value.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;

@@ -20,7 +20,6 @@
 #include <numkit/builtin/detail/strfun/strings_detail.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 #include <cstring>
 
 namespace numkit::builtin {
@@ -386,7 +385,7 @@ static keel::usize defaultPadWidth(const Value &s)
         keel::usize mx = 0;
         const keel::usize nn = s.numel();
         for (keel::usize i = 0; i < nn; ++i)
-            mx = std::max(mx, s.cellAt(i).toString().size());
+            mx = keel::max(mx, s.cellAt(i).toString().size());
         return mx;
     }
     if (s.isString()) {
@@ -395,7 +394,7 @@ static keel::usize defaultPadWidth(const Value &s)
         keel::usize mx = 0;
         const keel::usize nn = s.numel();
         for (keel::usize i = 0; i < nn; ++i)
-            mx = std::max(mx, s.stringElem(i).size());
+            mx = keel::max(mx, s.stringElem(i).size());
         return mx;
     }
     return s.toString().size();

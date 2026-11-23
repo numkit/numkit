@@ -22,7 +22,6 @@
 #include <numkit/ops/poly_helpers.hpp>
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -437,7 +436,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         return;
     }
 
-    const keel::usize M = hasLadder ? std::max(nK_in, (nV_in > 0 ? nV_in - 1 : keel::usize(0))) : nK_in;
+    const keel::usize M = hasLadder ? keel::max(nK_in, (nV_in > 0 ? nV_in - 1 : keel::usize(0))) : nK_in;
     const bool isCx = K.isComplex() || (hasLadder && args[1].isComplex());
 
     auto readCx = [](const Value &v, keel::usize idx) -> keel::c64 {
@@ -481,7 +480,7 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto makeRow = [&](keel::ArrayRef<keel::c64> vec) -> Value {
         if (isCx) {
             Value out = Value::matrix(1, vec.size(), ValueType::COMPLEX, mr);
-            std::copy(vec.begin(), vec.end(), out.complexDataMut());
+            keel::copy(vec.begin(), vec.end(), out.complexDataMut());
             return out;
         }
         Value out = Value::matrix(1, vec.size(), ValueType::DOUBLE, mr);

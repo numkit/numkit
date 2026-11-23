@@ -8,7 +8,6 @@
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
 
-#include <algorithm>
 #include <cstdlib>
 
 namespace numkit {
@@ -339,7 +338,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
                                          keel::as<keel::u16>(argRegs.size()),
-                                         std::max<keel::usize>(nargoutContext_, 1)));
+                                         keel::max<keel::usize>(nargoutContext_, 1)));
             return dst;
         }
         keel::Array<keel::u16> argRegs;
@@ -532,7 +531,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
             emit(Instruction::make_abcde(OpCode::CALL_INDIRECT_FLATTEN,
                                          dst, fhReg, argBase,
                                          keel::as<keel::u16>(argRegs.size()),
-                                         std::max<keel::usize>(nargoutContext_, 1)));
+                                         keel::max<keel::usize>(nargoutContext_, 1)));
             return dst;
         }
 
@@ -1293,7 +1292,7 @@ keel::u16 Compiler::compileSuperCall(const ASTNode *callNode, const ASTNode *sup
     if (explicitOutBase >= 0) {
         outBase = keel::as<keel::u16>(explicitOutBase);
     } else {
-        outBase = reserveRegs(std::max<keel::u16>(nout, 1));
+        outBase = reserveRegs(keel::max<keel::u16>(nout, 1));
     }
     keel::i32 qualIdx = addStringConstant(keel::format("{}>{}", base, lhs->strValue));
     emit(Instruction::make_abcde(OpCode::CALL_SUPER_METHOD, outBase, argBase, nargs, qualIdx,

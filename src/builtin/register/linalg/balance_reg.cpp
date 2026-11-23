@@ -8,6 +8,7 @@
 // Phase 2b compute/register split — see project_layering_refactor memory.
 
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/format.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -19,7 +20,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <algorithm>
 
 namespace numkit::linalg {
 namespace detail {
@@ -53,7 +53,7 @@ void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         // 2-out: [T, B] where T = diag(d).
         Value T = Value::matrix(n, n, ValueType::DOUBLE, mr);
         keel::f64 *td = T.doubleDataMut();
-        std::fill(td, td + n * n, 0.0);
+        keel::fill(td, td + n * n, 0.0);
         for (keel::usize i = 0; i < n; ++i) td[i + i * n] = R.d_col.elemAsDouble(i);
         outs[0] = detail::narrowDoubleToSingleIf(T, R.d_col.type() == ValueType::SINGLE, mr);
         outs[1] = keel::move(R.B);

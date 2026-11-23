@@ -1,4 +1,5 @@
 #include <keel/core.h>
+#include <keel/algo.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/arena.h>
@@ -20,7 +21,6 @@
 #include <numkit/signal/convolution/convolution.hpp>
 #include <numkit/signal/digital_filtering/filter.hpp>
 
-#include <algorithm>
 
 namespace numkit::builtin::detail {
 
@@ -140,7 +140,7 @@ keel::Array<keel::usize> resolveOutShape(const Value &subs, const keel::usize *u
     }
     keel::Array<keel::usize> shape(D, mr);
     if (N == 0) {
-        return keel::Array<keel::usize>(std::max<keel::usize>(D, 1), 0, mr);
+        return keel::Array<keel::usize>(keel::max<keel::usize>(D, 1), 0, mr);
     }
     const keel::f64 *p = subs.doubleData();
     for (keel::usize c = 0; c < D; ++c) {
@@ -230,7 +230,7 @@ Value accumarrayGeneral(const Value &subs, const Value &vals,
         if (cnt[i] == 0) { dst[i] = fillVal; continue; }
         const keel::usize len = cnt[i];
         Value g = Value::matrix(len, 1, ValueType::DOUBLE, mr);
-        std::copy(ordered.begin() + off[i], ordered.begin() + off[i] + len,
+        keel::copy(ordered.begin() + off[i], ordered.begin() + off[i] + len,
                   g.doubleDataMut());
         Value callArgs[1] = { keel::move(g) };
         Value res = ctx.engine->callFunctionHandle(handle,

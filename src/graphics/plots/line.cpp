@@ -4,6 +4,7 @@
 // JSON/parse helpers come from plot_internal.hpp.
 
 #include <keel/array.h>
+#include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/math.h>
 #include <keel/ref.h>
@@ -12,7 +13,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
 
@@ -233,7 +233,7 @@ void stem3_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     const auto &X = args[0];
     const auto &Y = args[1];
     const auto &Z = args[2];
-    const keel::usize N = std::min({X.numel(), Y.numel(), Z.numel()});
+    const keel::usize N = keel::min({X.numel(), Y.numel(), Z.numel()});
     if (N == 0) { outs[0] = Value(); return; }
 
     // Stems: 2 points per stem with null between stems. elemAsDouble:
@@ -319,7 +319,7 @@ void feather_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
     fm.prepareForPlot();
     const auto &U = args[0];
     const auto &V = args[1];
-    const keel::usize N = std::min(U.numel(), V.numel());
+    const keel::usize N = keel::min(U.numel(), V.numel());
     if (N == 0) { outs[0] = Value(); return; }
     StrBuf xs, ys, us, vs;
     xs << '['; ys << '['; us << '['; vs << '[';
@@ -842,7 +842,7 @@ void streamImpl(bool autoSlice,
         if (args.size() < 6) { outs[0] = Value(); return; }
         const auto &SX = args[4];
         const auto &SY = args[5];
-        const keel::usize N = std::min(SX.numel(), SY.numel());
+        const keel::usize N = keel::min(SX.numel(), SY.numel());
         for (keel::usize k = 0; k < N; ++k)
             seeds.emplace_back(SX.elemAsDouble(k), SY.elemAsDouble(k));
     }
@@ -850,7 +850,7 @@ void streamImpl(bool autoSlice,
     // RK4 trace from a single seed in `dir` ∈ {+1, -1}. Appends
     // points to xs/ys (with a leading null when we already have
     // points from a prior trace).
-    const keel::f64 h = std::min(dxAvg, dyAvg) * 0.4;
+    const keel::f64 h = keel::min(dxAvg, dyAvg) * 0.4;
     const keel::i32 maxSteps = 800;
     const keel::f64 eps = 1e-9;
 
@@ -1307,8 +1307,8 @@ void voronoi_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     // 25% margin gives boundary cells visible "wedge" room.
     // Smaller margin (10%) made the rays look chopped at data
     // edge; larger gives the MATLAB-style bounded-but-airy view.
-    const keel::f64 xPad = std::max(0.1, (xMax - xMin) * 0.25);
-    const keel::f64 yPad = std::max(0.1, (yMax - yMin) * 0.25);
+    const keel::f64 xPad = keel::max(0.1, (xMax - xMin) * 0.25);
+    const keel::f64 yPad = keel::max(0.1, (yMax - yMin) * 0.25);
     const keel::f64 clipXLo = xMin - xPad, clipXHi = xMax + xPad;
     const keel::f64 clipYLo = yMin - yPad, clipYHi = yMax + yPad;
 
@@ -1327,7 +1327,7 @@ void voronoi_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             edgeTris.push_back(EdgeTri{u, v, t});
         }
     }
-    std::sort(edgeTris.begin(), edgeTris.end(), [](const EdgeTri &a, const EdgeTri &b) {
+    keel::sort(edgeTris.begin(), edgeTris.end(), [](const EdgeTri &a, const EdgeTri &b) {
         return a.u != b.u ? a.u < b.u : (a.v != b.v ? a.v < b.v : a.t < b.t);
     });
     // We DON'T pre-clip emitted segments to the data bbox: rays
