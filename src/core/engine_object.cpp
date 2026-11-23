@@ -29,13 +29,15 @@ void Engine::registerClass(BuiltinClass cls)
         throw numkit::Error(msg.c_str());
     }
     keel::String key = cls.name.clone();
-    classes_.put(keel::move(key), keel::move(cls));
+    classes_.put(keel::move(key), keel::make_arc<BuiltinClass>(keel::move(cls)));
     bumpCallCacheEpoch();
 }
 
 const BuiltinClass *Engine::findClass(keel::StringRef name) const
 {
-    return classes_.get(name);
+    if (const auto *entry = classes_.get(name))
+        return entry->get();
+    return nullptr;
 }
 
 keel::String Engine::formatObjectDisplay(keel::StringRef name, const Value &obj) const

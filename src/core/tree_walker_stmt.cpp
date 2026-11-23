@@ -201,12 +201,14 @@ Value TreeWalker::execFunctionDef(const ASTNode *node, Environment *env)
     // mode behaves the same as in VM mode (local functions survive).
     if (engine_.inScriptScope()) {
         keel::String key = func.name.clone();
-        engine_.scriptLocalUserFuncs_.put(keel::move(key), keel::move(func));
+        engine_.scriptLocalUserFuncs_.put(keel::move(key),
+                                          keel::make_arc<UserFunction>(keel::move(func)));
     } else {
         if (auto *cp = engine_.compilerPtr())
             cp->eraseCompiledFunc(func.name);
         keel::String key = func.name.clone();
-        engine_.userFuncs_.put(keel::move(key), keel::move(func));
+        engine_.userFuncs_.put(keel::move(key),
+                               keel::make_arc<UserFunction>(keel::move(func)));
     }
     return Value();
 }
@@ -390,7 +392,8 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
                     escaped.closureEnv = resolveClosureEnv(escaped);
                 keel::String dispSrc = escaped.name.clone();
                 std::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
-                engine_.userFuncs_.put(nestedHandleId.clone(), keel::move(escaped));
+                engine_.userFuncs_.put(nestedHandleId.clone(),
+                                       keel::make_arc<UserFunction>(keel::move(escaped)));
                 Value h = Value::funcHandle(nestedHandleId, engine_.mr_);
                 h.setFuncHandleSource(dispSrc);
                 return h;
@@ -547,7 +550,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     // at the command window keeps '' — masking any caller's file later.
     engine_.captureScriptOrigin(uf);
 
-    engine_.userFuncs_.put(anonName.clone(), keel::move(uf));
+    engine_.userFuncs_.put(anonName.clone(), keel::make_arc<UserFunction>(keel::move(uf)));
     Value h = Value::funcHandle(anonName, engine_.mr_);
     h.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
     if (!capturedVals.empty())
@@ -834,12 +837,16 @@ static keel::Array<keel::String> extractCallerArgNames(const ASTNode *callNode,
     return names;
 }
 
-Value TreeWalker::callUserFunction(const UserFunction &func,
+Value TreeWalker::callUserFunction(const UserFunction &funcIn,
                                     keel::ArrayRef<Value> args,
                                     Environment *env,
                                     const ASTNode *callNode)
 {
     (void) env;
+    // Pin the active UserFunction Arc (when owned by Engine) so `clear functions`
+    // or `rehash` during the body cannot free `func` mid-call.
+    keel::Arc<UserFunction> pinnedFunc = engine_.lookupUserFunctionLocalArc(funcIn.name);
+    const UserFunction &func = (pinnedFunc && pinnedFunc.get() == &funcIn) ? *pinnedFunc : funcIn;
     RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
 
     // varargin: the LAST declared parameter absorbs any extra arguments
@@ -939,13 +946,15 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     return val ? *val : Value();
 }
 
-keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
+keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &funcIn,
                                                       keel::ArrayRef<Value> args,
                                                       Environment *env,
                                                       keel::usize nout,
                                                       const ASTNode *callNode)
 {
     (void) env;
+    keel::Arc<UserFunction> pinnedFunc = engine_.lookupUserFunctionLocalArc(funcIn.name);
+    const UserFunction &func = (pinnedFunc && pinnedFunc.get() == &funcIn) ? *pinnedFunc : funcIn;
     RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
 
     const bool va = !func.params.empty() && func.params.back() == "varargin";

@@ -264,24 +264,29 @@ keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
 const ExternalFunc *Engine::findExternal(keel::StringRef name,
                                          const Environment *env) const
 {
+    auto getExt = [this](keel::StringRef key) -> const ExternalFunc * {
+        if (const auto *e = externalFuncs_.get(key))
+            return e->get();
+        return nullptr;
+    };
+
     // 1. Direct hit — covers core, promotions, and already-qualified names.
-    if (const ExternalFunc *direct = externalFuncs_.get(name))
+    if (const ExternalFunc *direct = getExt(name))
         return direct;
 
     // 2. Walk active imports across env→parent → workspaceEnv fallback.
     //    The workspace fallback is a pragmatic relaxation so that REPL /
     //    test code with imports at the top can flatten
-    //    those names inside nested function bodies too. MATLAB-strict
-    //    mode would scope imports to the declaring function only.
+    //    those names inside nested function bodies too.
     const ExternalFunc *hit = nullptr;
     walkImportCandidates_(name, env, workspaceEnv_.get(), shortNameIndex_,
         [&](keel::StringRef qualified) {
-            if (const ExternalFunc *q = externalFuncs_.get(qualified)) {
+            if (const ExternalFunc *q = getExt(qualified)) {
                 hit = q;
                 return true;
             }
             if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(qualified)) {
-                if (const ExternalFunc *q2 = externalFuncs_.get(qualified)) {
+                if (const ExternalFunc *q2 = getExt(qualified)) {
                     hit = q2;
                     return true;
                 }
@@ -302,7 +307,7 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
         return true;
     };
 
-    // 3. Bare-name fallback (MATLAB semantics in Compat mode; core-only in Isolated mode):
+    // 3. Bare-name fallback (Compat mode; core-only in Isolated mode):
     //    shortNameIndex_ maps leaf names to full qualified names.
     //    For the rare leaf-name collision across namespaces, pick by namespace
     //    registration order (namespaceOrder_), which is deterministic.
@@ -312,7 +317,7 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
             // Fast path: unique leaf name (99%+ of cases) — one lookup.
             if (vec->size() == 1) {
                 if (allowBareFromFull((*vec)[0])) {
-                    if (const ExternalFunc *f = externalFuncs_.get((*vec)[0]))
+                    if (const ExternalFunc *f = getExt((*vec)[0]))
                         return f;
                 }
             } else {
@@ -340,7 +345,7 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                     }
                 }
                 if (best) {
-                    if (const ExternalFunc *f = externalFuncs_.get(*best))
+                    if (const ExternalFunc *f = getExt(*best))
                         return f;
                 }
             }
@@ -354,14 +359,14 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
     //    imported names were already handled in Step 2.
     if (isQualified || namespaceMode_ == NamespaceMode::Compat) {
         if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
-            if (const ExternalFunc *f = externalFuncs_.get(name))
+            if (const ExternalFunc *f = getExt(name))
                 return f;
             if (!isQualified) {
                 if (const auto *vec2 = shortNameIndex_.get(name)) {
                     for (const auto &full : *vec2) {
                         if (!allowBareFromFull(full))
                             continue;
-                        if (const ExternalFunc *f = externalFuncs_.get(full))
+                        if (const ExternalFunc *f = getExt(full))
                             return f;
                     }
                 }
@@ -527,11 +532,30 @@ bool Engine::hasUserFunction(keel::StringRef name) const
            || userFuncs_.contains(name);
 }
 
+keel::Arc<UserFunction> Engine::lookupUserFunctionLocalArc(keel::StringRef name) const
+{
+    if (const auto *f = scriptLocalUserFuncs_.get(name))
+        return *f;
+    if (const auto *f = userFuncs_.get(name))
+        return *f;
+    return nullptr;
+}
+
 const UserFunction *Engine::lookupUserFunctionLocal(keel::StringRef name) const
 {
-    if (const UserFunction *f = scriptLocalUserFuncs_.get(name))
-        return f;
-    return userFuncs_.get(name);
+    if (const auto *f = scriptLocalUserFuncs_.get(name))
+        return f->get();
+    if (const auto *f = userFuncs_.get(name))
+        return f->get();
+    return nullptr;
+}
+
+keel::Arc<UserFunction> Engine::lookupUserFunctionArc(keel::StringRef name,
+                                                      const Environment *env)
+{
+    if (const UserFunction *uf = lookupUserFunction(name, env))
+        return lookupUserFunctionLocalArc(uf->name);
+    return nullptr;
 }
 
 const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
@@ -653,10 +677,11 @@ void Engine::adoptUserFunction(keel::StringRef name,
                                 bool scriptScope)
 {
     clearPersistentForFunc(name);
+    auto arc = keel::make_arc<UserFunction>(keel::move(uf));
     if (scriptScope)
-        scriptLocalUserFuncs_.put(keel::String::from(name), keel::move(uf));
+        scriptLocalUserFuncs_.put(keel::String::from(name), keel::move(arc));
     else
-        userFuncs_.put(keel::String::from(name), keel::move(uf));
+        userFuncs_.put(keel::String::from(name), keel::move(arc));
     bumpCallCacheEpoch();
 }
 
@@ -692,7 +717,7 @@ void Engine::adoptBuiltinMSource_(keel::StringRef src)
             }
         }
         keel::String key = func.name.clone();
-        userFuncs_.put(keel::move(key), keel::move(func));
+        userFuncs_.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(func)));
         bumpCallCacheEpoch();
     };
     if (ast->type == NodeType::FUNCTION_DEF) {
@@ -741,6 +766,25 @@ void Engine::reinstallBuiltinSources()
         adoptBuiltinClassSource_(src);
 }
 
+void Engine::evictUserFunction_(keel::StringRef name)
+{
+    userFuncs_.remove(name);
+    clearPersistentForFunc(name);
+    const keel::String subPrefix = keel::format("{}>", name);
+    keel::Array<keel::String> staleSubs;
+    for (auto [k, v] : userFuncs_) {
+        (void)v;
+        if (k.size() > subPrefix.size() && k.starts_with(subPrefix))
+            staleSubs.push_back(k.clone());
+    }
+    for (const auto &sk : staleSubs) {
+        userFuncs_.remove(sk);
+        clearPersistentForFunc(sk);
+    }
+    if (compiler_)
+        compiler_->eraseCompiledFunc(name);
+}
+
 void Engine::rehashMFiles()
 {
     // Drop cache entries AND the user-function/compiled mirrors created
@@ -752,10 +796,7 @@ void Engine::rehashMFiles()
     // compiled functions (contradicting the "kept" promise above).
     keel::Array<keel::String> unregisteredClasses;
     for (auto [name, entry] : mFileCache_) {
-        userFuncs_.remove(name);
-        clearPersistentForFunc(name);
-        if (compiler_)
-            compiler_->eraseCompiledFunc(name);
+        evictUserFunction_(name);
         if (classDefs_.contains(name)) {
             // A class loaded from `Name.m`: evicting the bare chunk above is not
             // enough — the class machinery (registry, descriptor, `Name>method`
@@ -825,10 +866,7 @@ void Engine::refreshStaleMFiles()
     for (const auto &name : stale) {
         if (const auto *entry = mFileCache_.get(name)) {
             const bool hadExternal = entry->hasExternal;
-            userFuncs_.remove(name);
-            clearPersistentForFunc(name);
-            if (compiler_)
-                compiler_->eraseCompiledFunc(name);
+            evictUserFunction_(name);
             if (classDefs_.contains(name)) {
                 dropFileClassCtorExternal_(name);
                 unregisterClassDef(name);
@@ -983,19 +1021,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             if (hadExternal)
                 dropFileClassCtorExternal_(name);
             mFileCache_.remove(name);
-            userFuncs_.remove(name);
-            // Drop any previously loaded file-private subfunctions ("name>sub").
-            {
-                const keel::String subPrefix = keel::format("{}>", name);
-                keel::Array<keel::String> staleSubs;
-                for (auto [k, v] : userFuncs_) {
-                    (void)v;
-                    if (k.size() > subPrefix.size() && k.starts_with(subPrefix))
-                        staleSubs.push_back(k.clone());
-                }
-                for (const auto &sk : staleSubs)
-                    userFuncs_.remove(sk);
-            }
+            evictUserFunction_(name);
             bumpCallCacheEpoch();
         }
 
@@ -1224,7 +1250,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
         }
-        userFuncs_.put(keel::String::from(name), keel::move(func));
+        userFuncs_.put(keel::String::from(name), keel::make_arc<UserFunction>(keel::move(func)));
         if (compiler_)
             compiler_->setChunkOrigin(name, rpFsName, scriptDir, rpPath);
 
@@ -1263,12 +1289,12 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             lf.sourceDir    = scriptDir.clone();
             lf.sourceFile   = keel::String::from(rpPath);
             lf.fileSubfuncs = fileSubfuncs;
-            userFuncs_.put(subKey.clone(), keel::move(lf));
+            userFuncs_.put(subKey.clone(), keel::make_arc<UserFunction>(keel::move(lf)));
             if (compiler_)
                 compiler_->setChunkOrigin(subKey, rpFsName, scriptDir, rpPath);
         }
 
-        return userFuncs_.get(name);
+        return lookupUserFunctionLocal(name);
     }
     mFileMissCache_.insert(keel::move(missKey));
     return nullptr;

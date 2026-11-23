@@ -1466,13 +1466,13 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
     }
 
     // External function
-    if (const ExternalFunc *extFn = engine_.externalFuncs_.get(funcName)) {
+    if (const ExternalFunc *extFn = engine_.findExternal(funcName, currentCallEnv())) {
         keel::ArrayRef<Value> as(argsBuf.data(), na);
         Value ob[1];
         keel::MutArrayRef<Value> os(ob, 1);
         CallContext ctx{&engine_, currentCallEnv()};
         (*extFn)(as, 1, os, ctx);
-        R[dstReg] = keel::move(ob[0]);
+        frames_.back().R[dstReg] = keel::move(ob[0]);
         return false;
     }
 

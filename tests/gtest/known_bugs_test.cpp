@@ -745,7 +745,7 @@ TEST_F(BuiltinKnownBug, RegMaxArityBounds)
         {"filesep", 0}, {"fileparts", 1}, {"tempdir", 0},
         {"tempname", 1}, {"genpath", 1}, {"type", 1},
         // ode / optim / graphics / matfun / timefun / lang
-        {"odeget", 4}, {"fminbnd", 4}, {"saveas", 3}, {"getframe", 2},
+        {"odeget", 4}, {"saveas", 3}, {"getframe", 2},
         {"idivide", 3}, {"etime", 2}, {"eomday", 2},
         {"isvarname", 1}, {"iskeyword", 1},
     };

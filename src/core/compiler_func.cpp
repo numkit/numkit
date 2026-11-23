@@ -102,6 +102,18 @@ Compiler::AnonOriginSentry::~AnonOriginSentry()
 void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
                                         const ASTNode *funcDef)
 {
+    // registerFunctionAs is exclusively for global functions (m-files and
+    // embedded builtin .m sources). Force scriptDepth_ == 0 during compilation
+    // so neither the function nor any nested functions inside it ever land in
+    // scriptLocalCompiledFuncs_ when lazily loaded while a script is running.
+    struct GlobalScopeGuard
+    {
+        keel::i32 &depth;
+        keel::i32 saved;
+        explicit GlobalScopeGuard(keel::i32 &d) : depth(d), saved(d) { depth = 0; }
+        ~GlobalScopeGuard() { depth = saved; }
+    } globalGuard(scriptDepth_);
+
     BytecodeChunk funcChunk;
     if (funcDef->strValue == qualifiedName) {
         funcChunk = compileFunction(funcDef);
@@ -127,13 +139,8 @@ void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
     uf.fileSubfuncs = fileSubfuncs_;
 
     auto funcChunkArc = keel::make_arc<BytecodeChunk>(keel::move(funcChunk));
-    if (scriptDepth_ > 0) {
-        scriptLocalCompiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunkArc));
-        engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/true);
-    } else {
-        compiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunkArc));
-        engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/false);
-    }
+    compiledFuncs_.put(keel::String::from(qualifiedName), keel::move(funcChunkArc));
+    engine_.adoptUserFunction(qualifiedName, keel::move(uf), /*scriptScope=*/false);
 }
 
 void Compiler::setChunkOrigin(keel::StringRef qualifiedName,

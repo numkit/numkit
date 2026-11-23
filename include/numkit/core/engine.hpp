@@ -499,10 +499,13 @@ public:
     // bypass imports (e.g. `which`, `exist`).
     const UserFunction *lookupUserFunction(keel::StringRef name,
                                             const Environment *env);
+    keel::Arc<UserFunction> lookupUserFunctionArc(keel::StringRef name,
+                                                  const Environment *env);
 
     // Const variant — never triggers the m-file resolver. Use for
     // pure introspection / "is this CURRENTLY known" checks.
     const UserFunction *lookupUserFunctionLocal(keel::StringRef name) const;
+    keel::Arc<UserFunction> lookupUserFunctionLocalArc(keel::StringRef name) const;
 
     // Clear workspace-scope user functions. Script-local functions
     // live in a separate bucket (see beginScript/endScript) and are
@@ -817,10 +820,12 @@ private:
 
     keel::HashMap<keel::String, BinaryOpFunc> binaryOps_;
     keel::HashMap<keel::String, UnaryOpFunc> unaryOps_;
-    keel::HashMap<keel::String, ExternalFunc> externalFuncs_;
+    // Arc-backed symbol maps guarantee pointer stability across open-addressing
+    // HashMap rehashes (returned const T* and cached CallCacheEntry pointers stay valid).
+    keel::HashMap<keel::String, keel::Arc<ExternalFunc>> externalFuncs_;
 
     // Object-model class registry (object_model.md). Keyed by class name.
-    keel::HashMap<keel::String, BuiltinClass> classes_;
+    keel::HashMap<keel::String, keel::Arc<BuiltinClass>> classes_;
     // Parsed user classdef descriptors (property defaults, ctor + method
     // UserFunctions), kept for inheritance merges. Full type in engine.cpp.
     keel::HashMap<keel::String, keel::Arc<ClassDefDesc>> classDefs_;
@@ -836,7 +841,7 @@ private:
     // (state-machine callbacks). Keyed by builtin name; consulted by the VM
     // before the synchronous external path. Full type in callback_builtin.hpp.
     keel::HashMap<keel::String, keel::Arc<CallbackBuiltin>> callbackBuiltins_;
-    keel::HashMap<keel::String, UserFunction> userFuncs_;
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> userFuncs_;
     keel::HashMap<keel::String, keel::Arc<keel::HashMap<keel::String, Value>>> persistentStore_;
     keel::String lastWarnMsg_;
     keel::String lastWarnId_;
@@ -935,8 +940,8 @@ private:
     // cleared by `clear all`. Managed by begin/endScript (which
     // drives both this map and the compiler's matching bucket) so
     // file-scoped functions survive a mid-script clear.
-    keel::HashMap<keel::String, UserFunction> scriptLocalUserFuncs_;
-    keel::Array<keel::HashMap<keel::String, UserFunction>> savedScriptLocalUserFuncs_;
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> scriptLocalUserFuncs_;
+    keel::Array<keel::HashMap<keel::String, keel::Arc<UserFunction>>> savedScriptLocalUserFuncs_;
 
     // ── M-file resolver state (Phase 9) ───────────────────────────
     keel::Array<keel::String> mPath_;
@@ -952,6 +957,10 @@ private:
     };
     keel::HashMap<keel::String, MFileCacheEntry> mFileCache_;
     keel::HashSet<keel::String> mFileMissCache_;
+    // Evict a global user function plus its file-private subfunctions ("name>*"),
+    // persistent buckets, and compiled VM chunks in one place.
+    void evictUserFunction_(keel::StringRef name);
+
     // Helper — returns nullptr if `name`.m can't be located in any of
     // (script-origin, mPath_-list) or fails to parse. On success caches
     // the parsed UserFunction in userFuncs_ and the compiled chunk in

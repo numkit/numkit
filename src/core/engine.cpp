@@ -176,7 +176,8 @@ void Engine::registerFunctionImpl_(keel::StringRef fullName,
         auto msg = keel::format("duplicate function registration: {}{}", fullName, hint);
         throw numkit::Error(msg.c_str());
     }
-    externalFuncs_.put(keel::String::from(fullName), keel::move(func));
+    externalFuncs_.put(keel::String::from(fullName),
+                       keel::make_arc<ExternalFunc>(keel::move(func)));
     shortNameIndex_.get_or_insert(keel::String::from(leafName),
                                   keel::SmallArray<keel::String, 2>{})
         .push_back(keel::String::from(fullName));
@@ -472,7 +473,7 @@ void Engine::beginScript(const ASTNode *ast)
         uf.body = keel::Arc<const ASTNode>(cloneNode(f->children[0].get()));
         uf.closureEnv = nullptr;
         keel::String key = uf.name.clone();
-        scriptLocalUserFuncs_.put(keel::move(key), keel::move(uf));
+        scriptLocalUserFuncs_.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(uf)));
     };
     if (ast->type == NodeType::BLOCK) {
         for (const auto &c : ast->children)
