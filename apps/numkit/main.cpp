@@ -12,6 +12,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/fs.h>
+#include <keel/os_signal.h>
 #include <keel/process.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -24,7 +25,6 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/build_info.hpp>
 
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,36 +36,26 @@ using numkit::Lexer;
 using numkit::StandardEngine;
 using numkit::TokenType;
 
-keel::Atomic<Engine *> gSigIntEngine{nullptr};
 keel::Atomic<bool> gSigIntSeen{false};
 
-void onSigInt(int)
+void onOsInterrupt(keel::OsSignal, void *userData) noexcept
 {
     gSigIntSeen.store(true, keel::MemoryOrder::Release);
-    if (Engine *eng = gSigIntEngine.load(keel::MemoryOrder::Acquire))
+    if (auto *eng = static_cast<Engine *>(userData))
         eng->requestCancel();
-    std::signal(SIGINT, &onSigInt);
 }
 
 class SignalInterruptGuard
 {
 public:
     explicit SignalInterruptGuard(Engine &engine)
-        : prevHandler_(std::signal(SIGINT, &onSigInt))
+        : guard_(keel::OsSignalGuard::subscribe(keel::OsSignal::Interrupt, &onOsInterrupt, &engine))
     {
         gSigIntSeen.store(false, keel::MemoryOrder::Release);
-        gSigIntEngine.store(&engine, keel::MemoryOrder::Release);
     }
-    ~SignalInterruptGuard()
-    {
-        gSigIntEngine.store(nullptr, keel::MemoryOrder::Release);
-        std::signal(SIGINT, prevHandler_);
-    }
-    SignalInterruptGuard(const SignalInterruptGuard &) = delete;
-    SignalInterruptGuard &operator=(const SignalInterruptGuard &) = delete;
 
 private:
-    void (*prevHandler_)(int);
+    keel::OsSignalGuard guard_;
 };
 
 // Decide whether the accumulated buffer is still waiting for more input.
@@ -450,6 +440,9 @@ void printVersion()
 
 int main(int argc, char **argv)
 {
+    (void)keel::os_signal_ignore(keel::OsSignal::Pipe);
+    (void)keel::os_crash_install_handler();
+
     if (argc >= 2 && keel::StringRef(argv[1]) == "pkg") {
         return runPkgCommand(argc, argv);
     }
