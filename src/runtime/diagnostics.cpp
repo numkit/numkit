@@ -171,8 +171,35 @@ void assertCond(keel::ArrayRef<Value> args)
 
 namespace detail {
 
-void error_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
+void restoreExceptionStack(const Value &me, CallContext &ctx)
 {
+    if (!ctx.engine || !me.isStruct() || !me.hasField("stack"))
+        return;
+    const Value &st = me.field("stack");
+    if (!st.isStruct() || st.numel() == 0)
+        return;
+    keel::Array<CallStackFrame> frames;
+    frames.reserve(st.numel());
+    const bool isArr = st.isStructArray();
+    for (keel::usize i = 0; i < st.numel(); ++i) {
+        const auto &fields = isArr ? st.structArrayElem(i) : st.structFields();
+        CallStackFrame fr;
+        if (const Value *fv = fields.get("file"))
+            fr.file = fv->toString();
+        if (const Value *nv = fields.get("name"))
+            fr.name = nv->toString();
+        if (const Value *lv = fields.get("line"))
+            fr.line = keel::as<keel::i32>(lv->toScalar());
+        frames.push_back(keel::move(fr));
+    }
+    if (!frames.empty())
+        ctx.engine->setLastErrorStack(keel::move(frames));
+}
+
+void error_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
+{
+    if (!args.empty() && args[0].isStruct())
+        restoreExceptionStack(args[0], ctx);
     error(args);
 }
 
@@ -213,19 +240,21 @@ void MException_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
     outs[0] = mexception(args, ctx.engine->allocator());
 }
 
-void rethrow_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
+void rethrow_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     if (args.empty())
         throw Error("rethrow requires an MException struct", 0, 0, "rethrow", "",
                      "numkit:rethrow:nargin");
+    restoreExceptionStack(args[0], ctx);
     rethrowStruct(args[0]);
 }
 
-void throw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &)
+void throw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
     if (args.empty())
         throw Error("throw requires an MException struct", 0, 0, "throw", "",
                      "numkit:throw:nargin");
+    restoreExceptionStack(args[0], ctx);
     rethrowStruct(args[0]);
 }
 

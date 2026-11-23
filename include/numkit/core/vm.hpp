@@ -79,6 +79,19 @@ public:
         scriptLocalFuncs_ = scriptLocal;
     }
 
+    keel::Arc<BytecodeChunk> findCompiledFuncArc(keel::StringRef name) const
+    {
+        if (scriptLocalFuncs_) {
+            if (const auto *c = scriptLocalFuncs_->get(name))
+                return *c;
+        }
+        if (compiledFuncs_) {
+            if (const auto *c = compiledFuncs_->get(name))
+                return *c;
+        }
+        return {};
+    }
+
     const BytecodeChunk *findCompiledFunc(keel::StringRef name) const
     {
         if (scriptLocalFuncs_) {
@@ -207,6 +220,9 @@ private:
     // ── Explicit call frame stack (non-recursive VM) ────────
     struct CallFrame
     {
+        // Pins compiled function chunks on the active call stack so
+        // `clear functions` or `rehash` mid-call cannot free `chunk`.
+        keel::Arc<BytecodeChunk> chunkOwner;
         const BytecodeChunk *chunk = nullptr;
         const Instruction *ip = nullptr; // saved instruction pointer
         Value *R = nullptr;             // register base for this frame

@@ -1007,7 +1007,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
     }
 
     // Case 2: @(params) expr — anonymous function with possible closure capture.
-    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, keel::MemoryOrder::Relaxed);
     keel::String anonName = keel::format("__anon_{}", id);
 
     // Build a synthetic function AST node

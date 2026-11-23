@@ -548,6 +548,21 @@ TEST_P(Wave2VmTwIndependenceTest, MExceptionStackAndEvalSafeTracebackParity)
     EXPECT_EQ(std::string(res.errorStack[2].name.as_ref()), "outer_err");
     EXPECT_GT(res.errorStack[0].line, 0);
 
+    // rethrow(e) preserves the original stack from inner_err -> mid_err -> outer_err
+    auto rethrown = engine.evalSafe(R"(
+        try
+            outer_err();
+        catch e
+            rethrow(e);
+        end
+    )");
+    ASSERT_FALSE(rethrown.ok);
+    EXPECT_EQ(std::string(rethrown.errorId.as_ref()), "s6:test:boom");
+    ASSERT_GE(rethrown.errorStack.size(), 3u);
+    EXPECT_EQ(std::string(rethrown.errorStack[0].name.as_ref()), "inner_err");
+    EXPECT_EQ(std::string(rethrown.errorStack[1].name.as_ref()), "mid_err");
+    EXPECT_EQ(std::string(rethrown.errorStack[2].name.as_ref()), "outer_err");
+
     // Constructed MException carries an empty stack field
     eval("me = MException('s6:manual', 'manual msg');");
     EXPECT_TRUE(evalBool("isfield(me, 'stack') && isempty(me.stack)"));

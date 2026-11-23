@@ -11,12 +11,12 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <keel/sync.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 
 #include <algorithm>
-#include <mutex>
 
 namespace numkit {
 
@@ -288,7 +288,7 @@ PluginLoader::~PluginLoader() = default;
 
 namespace {
 struct PinnedPluginRegistry {
-    std::mutex mutex;
+    keel::Mutex mutex;
     keel::HashMap<keel::String, NumkitPluginInitFn> loadedInitFns;
     keel::Array<void *> pinnedHandles;
 };
@@ -321,7 +321,7 @@ bool PluginLoader::loadModule(keel::StringRef pathInput, keel::StringRef targetN
     NumkitPluginInitFn initFn = nullptr;
     {
         auto &reg = pinnedPluginRegistry();
-        std::lock_guard<std::mutex> lock(reg.mutex);
+        keel::LockGuard<keel::Mutex> lock(reg.mutex);
         if (const auto *fnPtr = reg.loadedInitFns.get(normPath)) {
             initFn = *fnPtr;
         } else {

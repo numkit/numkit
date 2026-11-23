@@ -3345,6 +3345,9 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
 
     // Push call frame
     CallFrame cf;
+    cf.chunkOwner = findCompiledFuncArc(funcChunk.name);
+    if (cf.chunkOwner.get() != &funcChunk)
+        cf.chunkOwner = {};
     cf.chunk = &funcChunk;
     cf.ip = funcChunk.code.data();
     cf.R = newR;

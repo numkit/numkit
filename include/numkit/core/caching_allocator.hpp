@@ -16,8 +16,7 @@
 #include <keel/hash.h>
 #include <keel/hash_map.h>
 #include <keel/memory.h>
-
-#include <mutex>
+#include <keel/sync.h>
 
 namespace numkit {
 
@@ -51,7 +50,7 @@ public:
     {
         bool hadCached = false;
         {
-            std::lock_guard<std::mutex> lk(mu_);
+            keel::LockGuard<keel::Mutex> lk(mu_);
             hadCached = (cachedBytes_ > 0);
             for (auto entry : free_) {
                 for (void *p : entry.value) {
@@ -85,7 +84,7 @@ private:
 
     void *takeCached(keel::usize bytes, keel::usize align) noexcept
     {
-        std::lock_guard<std::mutex> lk(mu_);
+        keel::LockGuard<keel::Mutex> lk(mu_);
         if (keel::Array<void *> *bucket = free_.get(BlockKey{bytes, align})) {
             if (!bucket->empty()) {
                 void *p = bucket->back();
@@ -113,7 +112,7 @@ private:
         auto *self = static_cast<CachingAllocator *>(ctx);
         if (bytes >= self->minCache_) {
             try {
-                std::lock_guard<std::mutex> lk(self->mu_);
+                keel::LockGuard<keel::Mutex> lk(self->mu_);
                 if (bytes <= self->maxCached_ && self->cachedBytes_ <= self->maxCached_ - bytes) {
                     BlockKey key{bytes, align};
                     keel::Array<void *> *bucket = self->free_.get(key);
@@ -157,7 +156,7 @@ private:
     keel::Allocator                                           *upstream_;
     keel::usize                                                minCache_;
     keel::usize                                                maxCached_;
-    std::mutex                                                 mu_;
+    keel::Mutex                                                mu_;
     keel::HashMap<BlockKey, keel::Array<void *>, BlockKeyHash> free_;
     keel::usize                                                cachedBytes_ = 0;
 };

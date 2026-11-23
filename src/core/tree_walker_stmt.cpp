@@ -390,7 +390,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     if (!node->strValue.empty() && node->children.empty()) {
         if (env) {
             if (const UserFunction *nf = env->findNestedFunc(node->strValue)) {
-                keel::i32 nid = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+                keel::i32 nid = engine_.anonNameCounter_.fetch_add(1, keel::MemoryOrder::Relaxed);
                 keel::String nestedHandleId = keel::format("__nested_fh_{}", nid);
                 UserFunction escaped = nf->clone();
                 if (!escaped.closureEnv)
@@ -415,7 +415,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     // Engine-wide counter (shared with the VM compiler) — see the comment
     // on Engine::anonNameCounter_: a TreeWalker-executed literal must never
     // mint an id a compiled chunk already owns.
-    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, std::memory_order_relaxed);
+    keel::i32 id = engine_.anonNameCounter_.fetch_add(1, keel::MemoryOrder::Relaxed);
     keel::String anonName = keel::format("__anon_{}", id);
 
     UserFunction uf;

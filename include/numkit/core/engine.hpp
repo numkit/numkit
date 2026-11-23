@@ -20,8 +20,6 @@
 #include <numkit/sys/fs_context.hpp>
 #include <numkit/ops/rng_context.hpp>
 
-#include <atomic>
-
 namespace numkit {
 
 class TreeWalker;
@@ -1046,7 +1044,7 @@ private:
     // compiledFuncs_ / userFuncs_ (a TreeWalker-executed literal that
     // re-used a low id used to shadow a compiled chunk and run a
     // foreign body — bugs/opened/core/anon-table-resolution-corruption.md).
-    std::atomic<keel::i32> anonNameCounter_{0};
+    keel::Atomic<keel::i32> anonNameCounter_{0};
 
     keel::UniquePtr<Compiler> compiler_;
 

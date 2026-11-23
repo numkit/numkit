@@ -2,6 +2,7 @@
 //
 // filesep / fullfile / fileparts / tempdir / tempname.
 
+#include <keel/atomic.h>
 #include <keel/core.h>
 #include <keel/exception.h>
 #include <keel/fs.h>
@@ -17,9 +18,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
-
-#include <atomic>
-#include <cstdint>
 
 namespace numkit::io {
 
@@ -145,8 +143,8 @@ Value tempdir(FsContext &fs, keel::Allocator *mr)
 
 Value tempname(FsContext &fs, keel::Allocator *mr)
 {
-    static std::atomic<keel::u64> counter{0};
-    const keel::u64 n = counter.fetch_add(1, std::memory_order_relaxed);
+    static keel::Atomic<keel::u64> counter{0};
+    const keel::u64 n = counter.fetch_add(1, keel::MemoryOrder::Relaxed);
     const keel::u64 pid = keel::process_id();
     const keel::u64 ns = keel::monotonic_ns();
 
