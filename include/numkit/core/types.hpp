@@ -79,6 +79,28 @@ enum class FlowSignal : keel::u8 { NONE = 0, BREAK, CONTINUE, RETURN };
 // so value/ops/toolboxes can throw it without pulling in the engine.
 
 // ============================================================
+// Unified call-stack frame (shared by VM, TreeWalker, MException.stack, CLI)
+// ============================================================
+struct CallStackFrame
+{
+    keel::String file;
+    keel::String name;
+    keel::i32 line = 0;
+
+    CallStackFrame clone(keel::Allocator *alloc = nullptr) const
+    {
+        return {file.clone(alloc), name.clone(alloc), line};
+    }
+};
+
+// Build an exception struct with `identifier`, `message`, and `stack`
+// (N×1 struct array with fields `file`, `name`, `line`; empty 0×1 when empty).
+Value makeExceptionStruct(keel::StringRef message,
+                          keel::StringRef identifier,
+                          keel::ArrayRef<CallStackFrame> stack,
+                          keel::Allocator *mr);
+
+// ============================================================
 // User-defined function descriptor
 // ============================================================
 struct UserFunction

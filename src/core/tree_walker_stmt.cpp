@@ -569,26 +569,28 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
             return result;
         return result;
     } catch (const Error &mle) {
+        auto stack = engine_.takeLastErrorStack();
+        if (stack.empty())
+            stack = captureCallStack();
         if (node->children.size() > 1) {
             if (!node->strValue.empty()) {
-                auto err = Value::structure();
-                err.field("message") = Value::fromString(mle.what(), engine_.mr_);
                 keel::StringRef id = mle.identifier().empty()
                                          ? keel::StringRef("numkit:error")
                                          : mle.identifier().as_ref();
-                err.field("identifier") = Value::fromString(id, engine_.mr_);
-                env->set(node->strValue, err);
+                Value err = makeExceptionStruct(mle.what(), id, stack.as_ref(), engine_.mr_);
+                env->set(node->strValue, keel::move(err));
             }
             return execNode(node->children[1].get(), env);
         }
         return Value();
     } catch (const std::exception &e) {
+        auto stack = engine_.takeLastErrorStack();
+        if (stack.empty())
+            stack = captureCallStack();
         if (node->children.size() > 1) {
             if (!node->strValue.empty()) {
-                auto err = Value::structure();
-                err.field("message") = Value::fromString(e.what(), engine_.mr_);
-                err.field("identifier") = Value::fromString("numkit:error", engine_.mr_);
-                env->set(node->strValue, err);
+                Value err = makeExceptionStruct(e.what(), "numkit:error", stack.as_ref(), engine_.mr_);
+                env->set(node->strValue, keel::move(err));
             }
             return execNode(node->children[1].get(), env);
         }
@@ -798,6 +800,12 @@ Value TreeWalker::callUserFunction(const UserFunction &funcIn,
 
     FrameGuard frameGuard(activeFrames_, &localEnv,
                           extractCallerArgNames(callNode, engine_));
+    const keel::String *curSf = engine_.currentScriptFile();
+    keel::StringRef traceFile = func.originKnown
+                                    ? func.sourceFile.as_ref()
+                                    : (curSf ? curSf->as_ref() : keel::StringRef{});
+    TraceGuard traceGuard(callTrace_, traceFile, func.name.as_ref(),
+                          func.body ? func.body->line : 0);
 
     for (keel::usize i = 0; i < required && i < args.size(); ++i)
         localEnv.setLocal(func.params[i], args[i]);
@@ -904,6 +912,12 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &funcIn,
 
     FrameGuard frameGuard(activeFrames_, &localEnv,
                           extractCallerArgNames(callNode, engine_));
+    const keel::String *curSf = engine_.currentScriptFile();
+    keel::StringRef traceFile = func.originKnown
+                                    ? func.sourceFile.as_ref()
+                                    : (curSf ? curSf->as_ref() : keel::StringRef{});
+    TraceGuard traceGuard(callTrace_, traceFile, func.name.as_ref(),
+                          func.body ? func.body->line : 0);
 
     for (keel::usize i = 0; i < required && i < args.size(); ++i)
         localEnv.setLocal(func.params[i], args[i]);
@@ -1035,6 +1049,12 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
         twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
 
     FrameGuard frameGuard(activeFrames_, &localEnv, {});
+    const keel::String *curSf = engine_.currentScriptFile();
+    keel::StringRef traceFile = func.originKnown
+                                    ? func.sourceFile.as_ref()
+                                    : (curSf ? curSf->as_ref() : keel::StringRef{});
+    TraceGuard traceGuard(callTrace_, traceFile, func.name.as_ref(),
+                          func.body ? func.body->line : 0);
 
     for (keel::usize i = 0; i < required && i < args.size(); ++i)
         localEnv.setLocal(func.params[i], args[i]);

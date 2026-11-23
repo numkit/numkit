@@ -97,6 +97,16 @@ void reportError(const Engine::EvalResult &r, keel::StringRef prefix)
                      prefix, r.errorLine, r.errorCol, r.errorMessage, ctx, id);
     else
         keel::eprint("{}{}{}{}\n", prefix, r.errorMessage, ctx, id);
+    if (r.errorStack.size() > 1 || (!r.errorStack.empty() && !r.errorStack[0].file.empty())) {
+        for (const auto &fr : r.errorStack) {
+            if (!fr.file.empty() && fr.line > 0)
+                keel::eprint("  in {} ({}:{})\n", fr.name, fr.file, fr.line);
+            else if (fr.line > 0)
+                keel::eprint("  in {} (line {})\n", fr.name, fr.line);
+            else
+                keel::eprint("  in {}\n", fr.name);
+        }
+    }
 }
 
 int runEval(keel::StringRef code)

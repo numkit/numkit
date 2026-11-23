@@ -26,6 +26,15 @@ TreeWalker::TreeWalker(Engine &engine)
     : engine_(engine)
 {}
 
+keel::Array<CallStackFrame> TreeWalker::captureCallStack() const
+{
+    keel::Array<CallStackFrame> out;
+    out.reserve(callTrace_.size());
+    for (keel::usize i = callTrace_.size(); i-- > 0;)
+        out.push_back(callTrace_[i].clone());
+    return out;
+}
+
 Value TreeWalker::execute(const ASTNode *ast, Environment *env)
 {
     // Pre-scan: register all top-level function definitions before executing
@@ -37,6 +46,12 @@ Value TreeWalker::execute(const ASTNode *ast, Environment *env)
                 execFunctionDef(child.get(), env);
         }
     }
+
+    const keel::String *sf = engine_.currentScriptFile();
+    TraceGuard traceGuard(callTrace_,
+                          sf ? sf->as_ref() : keel::StringRef{},
+                          topLevelName_.as_ref(),
+                          ast ? ast->line : 0);
 
     keel::Optional<DebugController::FrameGuard> dbgFrame;
     if (auto *ctl = debugCtl()) {
@@ -362,20 +377,38 @@ Value TreeWalker::execNodeExpand(const ASTNode *node, Environment *env)
         return Value();
 
     StackGuard::check("tree walker execution");
+    if (node->line > 0 && !callTrace_.empty())
+        callTrace_.back().line = node->line;
 
     try {
         return execNodeInner(node, env);
     } catch (Error &e) {
+        if (engine_.lastErrorStack().empty())
+            engine_.setLastErrorStack(captureCallStack());
         // Enrich with this node's source location if the inner throw
         // didn't already attach one (e.g. from a public C++ library API).
-        if (node->line > 0)
-            e.attachIfMissing(node->line, node->col, "", describeNode(node));
+        if (node->line > 0) {
+            keel::StringRef fn = callTrace_.empty() ? keel::StringRef{} : callTrace_.back().name.as_ref();
+            e.attachIfMissing(node->line, node->col, fn, describeNode(node));
+        }
         throw;
     } catch (const DebugStopException &) {
         throw;
     } catch (const keel::Exception &e) {
-        if (node->line > 0)
-            throw Error(e.what(), node->line, node->col, "", describeNode(node));
+        if (engine_.lastErrorStack().empty())
+            engine_.setLastErrorStack(captureCallStack());
+        if (node->line > 0) {
+            keel::StringRef fn = callTrace_.empty() ? keel::StringRef{} : callTrace_.back().name.as_ref();
+            throw Error(e.what(), node->line, node->col, fn, describeNode(node));
+        }
+        throw;
+    } catch (const std::exception &e) {
+        if (engine_.lastErrorStack().empty())
+            engine_.setLastErrorStack(captureCallStack());
+        if (node->line > 0) {
+            keel::StringRef fn = callTrace_.empty() ? keel::StringRef{} : callTrace_.back().name.as_ref();
+            throw Error(e.what(), node->line, node->col, fn, describeNode(node));
+        }
         throw;
     }
 }

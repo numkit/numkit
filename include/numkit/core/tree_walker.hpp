@@ -41,6 +41,7 @@ public:
         keel::Array<keel::String> callerArgNames;
     };
     const keel::Array<ActiveFrame> &activeFrames() const { return activeFrames_; }
+    keel::Array<CallStackFrame> captureCallStack() const;
 
     // ── Public callback API ───────────────────────────────────
     // Used by Engine::callFunctionHandle so that builtins (e.g.
@@ -101,6 +102,29 @@ private:
     // callUserFunction(), popped on exit (RAII). Lifetime safe because
     // each localEnv lives on the C++ stack frame of the same call.
     keel::Array<ActiveFrame> activeFrames_;
+
+    // Unified call-stack trace (script + function frames, outermost→innermost)
+    // for MException.stack and CLI tracebacks. Maintained via TraceGuard RAII.
+    keel::Array<CallStackFrame> callTrace_;
+
+    class TraceGuard
+    {
+    public:
+        TraceGuard(keel::Array<CallStackFrame> &trace,
+                   keel::StringRef file,
+                   keel::StringRef name,
+                   keel::i32 line)
+            : trace_(trace)
+        {
+            trace_.push_back(CallStackFrame{keel::String(file), keel::String(name), line});
+        }
+        ~TraceGuard() { trace_.pop_back(); }
+        TraceGuard(const TraceGuard &) = delete;
+        TraceGuard &operator=(const TraceGuard &) = delete;
+
+    private:
+        keel::Array<CallStackFrame> &trace_;
+    };
 
     // Active heap-allocated lexical Environments (`Arc<Environment>`), pushed
     // when entering a function frame that may host nested functions so

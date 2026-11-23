@@ -404,8 +404,16 @@ public:
         keel::i32 errorCol = 0;
         keel::String errorFunc;
         keel::String errorContext;  // e.g. "in call to 'sin'"
+        keel::Array<CallStackFrame> errorStack;
     };
     EvalResult evalSafe(keel::StringRef code);
+
+    // Unified call stack introspection across VM and TreeWalker (innermost first).
+    keel::Array<CallStackFrame> captureCallStack() const;
+    const keel::Array<CallStackFrame> &lastErrorStack() const { return lastErrorStack_; }
+    void setLastErrorStack(keel::Array<CallStackFrame> stack) { lastErrorStack_ = keel::move(stack); }
+    keel::Array<CallStackFrame> takeLastErrorStack() { return keel::exchange(lastErrorStack_, {}); }
+    void clearLastErrorStack() { lastErrorStack_.clear(); }
 
     // Backend selection
     // Run a user function body on the TreeWalker from inside VM
@@ -1035,6 +1043,7 @@ private:
     keel::Array<FusionRule> fusionRules_;
     bool fusionEnabled_ = true;
     keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
+    keel::Array<CallStackFrame> lastErrorStack_;
 
     // Sync VM's exported variables to workspaceEnv (called after execute, even on error)
     void syncVMToWorkspace();

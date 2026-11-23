@@ -123,6 +123,7 @@ public:
     }
 
     keel::i32 callDepth() const;
+    keel::Array<CallStackFrame> captureCallStack() const;
 
     keel::StringRef currentMethodClass() const
     {
@@ -340,6 +341,9 @@ private:
     void exportTopLevelVariables();
 
     bool dispatchTryCatch(const char *msg, const char *identifier);
+    static keel::String describeInstruction(const Instruction &instr,
+                                            const BytecodeChunk &chunk);
+    void enrichError(Error &mle, const Instruction *ip, const BytecodeChunk &chunk);
     [[noreturn]] void enrichAndThrow(const std::exception &ex,
                                      const Instruction *ip,
                                      const BytecodeChunk &chunk);

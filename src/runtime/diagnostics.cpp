@@ -106,9 +106,10 @@ Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr)
     keel::String msg = (args.size() > 2)
                            ? formatOnce(second, args, 2)
                            : keel::move(second);
-    auto me = Value::structure();
+    auto me = Value::structure(mr);
     me.field("identifier") = Value::fromString(id, mr);
     me.field("message") = Value::fromString(msg, mr);
+    me.field("stack") = Value::structArray(0, 1, mr);
     return me;
 }
 

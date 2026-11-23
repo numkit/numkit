@@ -679,6 +679,8 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
 Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
 {
     auto src = keel::make_arc<const keel::String>(keel::String::from(code));
+    if (callerDepth() == 0)
+        lastErrorStack_.clear();
     refreshStaleMFiles();
     if (backend_ == Backend::VM && vm_)
         vm_->flushWorkspaceFrame();
@@ -785,6 +787,40 @@ Value Engine::evalStatement(const ASTNode *stmt,
 }
 
 // ============================================================
+// Unified exception struct & call stack introspection
+// ============================================================
+Value makeExceptionStruct(keel::StringRef message,
+                          keel::StringRef identifier,
+                          keel::ArrayRef<CallStackFrame> stack,
+                          keel::Allocator *mr)
+{
+    Value err = Value::structure(mr);
+    err.field("identifier") = Value::fromString(identifier, mr);
+    err.field("message") = Value::fromString(message, mr);
+    Value st = Value::structArray(stack.size(), 1, mr);
+    for (keel::usize i = 0; i < stack.size(); ++i) {
+        st.setField(i, "file", Value::fromString(stack[i].file, mr));
+        st.setField(i, "name", Value::fromString(stack[i].name, mr));
+        st.setField(i, "line", Value::scalar(keel::as<keel::f64>(stack[i].line), mr));
+    }
+    err.field("stack") = keel::move(st);
+    return err;
+}
+
+keel::Array<CallStackFrame> Engine::captureCallStack() const
+{
+    if (backend_ == Backend::VM && vm_) {
+        auto vmStack = vm_->captureCallStack();
+        if (!vmStack.empty() || !treeWalker_)
+            return vmStack;
+        return treeWalker_->captureCallStack();
+    }
+    if (treeWalker_)
+        return treeWalker_->captureCallStack();
+    return {};
+}
+
+// ============================================================
 // evalSafe
 // ============================================================
 Engine::EvalResult Engine::evalSafe(keel::StringRef code)
@@ -803,12 +839,15 @@ Engine::EvalResult Engine::evalSafe(keel::StringRef code)
         r.errorCol = e.col();
         r.errorFunc = e.funcName().clone();
         r.errorContext = e.context().clone();
+        r.errorStack = takeLastErrorStack();
     } catch (const std::exception &e) {
         r.ok = false;
         r.errorMessage.assign(e.what());
+        r.errorStack = takeLastErrorStack();
     } catch (...) {
         r.ok = false;
         r.errorMessage.assign("Unknown exception");
+        r.errorStack = takeLastErrorStack();
     }
     return r;
 }

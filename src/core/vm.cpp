@@ -95,15 +95,6 @@ void VM::ensureRegStackCapacity(keel::usize needed)
     }
 }
 
-// Single source of truth for inline-builtin id → name. Must track the unary
-// (0-15) and binary (20-25) ids in Compiler::resolveBuiltinId; holes (16-19)
-// are nullptr. Shared by describeInstruction (error text) and execCallBuiltin
-// (generic external fallback) so the two can never drift out of sync.
-static const char *builtinIdName(keel::i32 bid)
-{
-    return fastBuiltinName(static_cast<FastBuiltinId>(bid));
-}
-
 // Fast scalar check for VM arithmetic — accepts double scalars AND logical scalar tags
 static inline bool isArithScalar(const Value &v)
 {
@@ -126,9 +117,9 @@ static void writeChunkVar(const BytecodeChunk &chunk, Value *R, keel::u32 nregs,
     }
 }
 
-static void exportChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
-                                             const BytecodeChunk &chunk, const Value *R,
-                                             keel::u32 nregs, bool isTopLevel)
+void exportChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                      const BytecodeChunk &chunk, const Value *R,
+                                      keel::u32 nregs, bool isTopLevel)
 {
     for (const auto &gname : chunk.globalNames) {
         for (const auto &[vname, reg] : chunk.varMap) {
@@ -164,9 +155,9 @@ static void exportChunkGlobalsAndPersistents(Engine &engine, Environment &global
     }
 }
 
-static void importChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
-                                             const BytecodeChunk &chunk, Value *R,
-                                             keel::u32 nregs, bool isTopLevel, bool seedMissing)
+void importChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                      const BytecodeChunk &chunk, Value *R,
+                                      keel::u32 nregs, bool isTopLevel, bool seedMissing)
 {
     for (const auto &gname : chunk.globalNames) {
         for (const auto &[vname, reg] : chunk.varMap) {
@@ -584,11 +575,6 @@ void VM::rollbackLvalDetaches()
         }
     }
 }
-
-// Forward declarations for helpers defined later in this translation unit
-// but called from dispatchLoop's catch blocks.
-static keel::String describeInstruction(const Instruction &instr,
-                                        const BytecodeChunk &chunk);
 
 ExecStatus VM::dispatchLoop()
 {
@@ -2286,6 +2272,7 @@ enter_frame:
 
             // ── General function calls ───────────────────────────
             case OpCode::CALL: {
+                frame.ip = ip;
                 if (execCallNamedSingleSpan(I.a, I.d, I.e,
                                             I.c ? &R[I.b] : nullptr, I.c,
                                             R, frame, ip, resolvedFuncs))
@@ -2294,6 +2281,7 @@ enter_frame:
             }
 
             case OpCode::CALL_FLATTEN: {
+                frame.ip = ip;
                 SplatArgs splat = splatCallArgs(R, I.b, I.c);
                 if (execCallNamedSingleSpan(I.a, I.d, I.e,
                                             splat.data(), splat.size(),
@@ -2304,6 +2292,7 @@ enter_frame:
 
             case OpCode::CALL_MULTI:
             case OpCode::CALL_FLATTEN_MULTI: {
+                frame.ip = ip;
                 SplatArgs splat = splatCallArgs(R, I.b, I.c);
                 if (execCallNamedMultiSpan(I.a, I.d, I.e,
                                            splat.data(), splat.size(),
@@ -2314,17 +2303,20 @@ enter_frame:
 
             // ── Indirect function call (func handle) or array indexing ─
             case OpCode::CALL_METHOD: {
+                frame.ip = ip;
                 if (execCallMethod(I, R, frame, ip))
                     goto enter_frame;
                 break;
             }
             case OpCode::CALL_METHOD_MULTI: {
+                frame.ip = ip;
                 if (execCallMethodMulti(I, R, frame, ip))
                     goto enter_frame;
                 break;
             }
             // ── Superclass calls inside a classdef body ──
             case OpCode::CALL_SUPER_CTOR: {
+                frame.ip = ip;
                 // obj = obj@Base(args): a=dst, b=objReg(seed), c=argBase,
                 // d=baseNameIdx, e=nargs.
                 const keel::String &base = chunk.strings[I.d];
@@ -2336,6 +2328,7 @@ enter_frame:
                 break;
             }
             case OpCode::CALL_SUPER_METHOD: {
+                frame.ip = ip;
                 // [outs] = method@Base(obj, args): a=outBase, b=argBase
                 // (obj at [0]), c=nargs, d=idx of "Base>method", e=nout.
                 // The receiver at [0] is an object (never a CSL), so the
@@ -2357,16 +2350,19 @@ enter_frame:
                 break;
             }
             case OpCode::CALL_INDIRECT:
+                frame.ip = ip;
                 if (execCallIndirect(I, R, frame, ip))
                     goto enter_frame;
                 break;
 
             case OpCode::CALL_INDIRECT_MULTI:
+                frame.ip = ip;
                 if (execCallIndirectMulti(I, R, frame, ip))
                     goto enter_frame;
                 break;
 
             case OpCode::CALL_INDIRECT_FLATTEN: {
+                frame.ip = ip;
                 // f(c{:}) with a variable callee: flatten any CSL arg,
                 // then the CALL_INDIRECT(_MULTI) dispatch over the
                 // flattened span (bugs/closed/lang/handle-call-csl-splat).
@@ -2701,25 +2697,16 @@ enter_frame:
         throw; // pass through — not a user error
     } catch (Error &mle) {
         rollbackLvalDetaches();
+        frame.ip = ip;
         keel::String id = mle.identifier().empty()
                               ? keel::String::from("numkit:error")
                               : mle.identifier().clone();
         if (dispatchTryCatch(mle.what(), id.c_str()))
             goto enter_frame;
-        // Enrich with current instruction's source location if missing
-        // (e.g. Error thrown from a public C++ library API that didn't
-        // know its call site).
-        keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
-        if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
-            mle.attachIfMissing(chunk.sourceMap[instrIdx].line,
-                                chunk.sourceMap[instrIdx].col,
-                                chunk.name,
-                                describeInstruction(*ip, chunk));
-        }
+        enrichError(mle, ip, chunk);
         if (stopOnError_ && debugCtl()) {
             // dbstop if error: pause at the failing instruction with frames
             // intact; resumeExecution() rethrows the stored exception later.
-            frame.ip = ip;
             errorPauseMsg_.assign(mle.what());
             pausedError_ = std::current_exception();
             atErrorPause_ = true;
@@ -2728,10 +2715,10 @@ enter_frame:
         throw;
     } catch (const std::exception &ex) {
         rollbackLvalDetaches();
+        frame.ip = ip;
         if (dispatchTryCatch(ex.what(), "numkit:error"))
             goto enter_frame;
         if (stopOnError_ && debugCtl()) {
-            frame.ip = ip;
             errorPauseMsg_.assign(ex.what());
             pausedError_ = std::current_exception();
             atErrorPause_ = true;
@@ -2793,200 +2780,8 @@ void VM::exportTopLevelVariables()
                                      topFrame.nregs, topFrame.isScriptFrame);
 }
 
-// ============================================================
-// Exception helpers
-// ============================================================
-
-bool VM::dispatchTryCatch(const char *msg, const char *identifier)
-{
-    if (tryStack_.empty())
-        return false;
-
-    TryHandler th = tryStack_.back();
-    tryStack_.pop_back();
-
-    // Unwind call frames to the handler's frame (exception may propagate across calls)
-    while (frames_.size() > th.frameIndex + 1) {
-        CallFrame &f = frames_.back();
-        if (f.chunk) {
-            exportChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *f.chunk, f.R, f.nregs,
-                                             f.isScriptFrame);
-        }
-        // Drop the unwound frames' provenance pushes: the lowest unwound
-        // frame's originDepth is the cut point — entries below it belong to
-        // surviving frames or non-VM scopes (the run() builtin).
-        engine_.truncateScriptOrigins(f.originDepth);
-        // Pop debug frame
-        if (auto *ctl = debugCtl())
-            ctl->popFrame();
-        // Remove try handlers from this frame
-        while (!tryStack_.empty() && tryStack_.back().frameIndex >= frames_.size() - 1)
-            tryStack_.pop_back();
-        // Trim for-loop stack
-        forStack_.resize(std::min(forStack_.size(), f.forStackBase));
-        // Cleanup registers
-        for (keel::u32 i = 0; i < f.nregs; ++i)
-            if (!f.R[i].isDoubleScalar() && !f.R[i].isEmpty())
-                f.R[i] = Value();
-        regStackTop_ = f.regBase;
-        frames_.pop_back();
-    }
-
-    // Restore for-loop stack to the state at TRY_BEGIN
-    if (forStack_.size() > th.forStackSize)
-        forStack_.resize(th.forStackSize);
-
-    // Set up catch context in the handler's frame
-    CallFrame &frame = frames_.back();
-    R_ = frame.R;
-    if (frame.chunk) {
-        importChunkGlobalsAndPersistents(engine_, *engine_.globalsEnv_, *frame.chunk, frame.R,
-                                         frame.nregs, frame.isScriptFrame, /*seedMissing=*/false);
-    }
-
-    Value err = Value::structure();
-    err.field("message") = Value::fromString(msg, engine_.mr_);
-    err.field("identifier") = Value::fromString(identifier, engine_.mr_);
-    frame.R[th.exReg] = keel::move(err);
-    frame.ip = th.catchIp;
-    return true;
-}
-
-// Derive error context description from the opcode + operands at throw time.
-// This is the VM equivalent of TreeWalker's describeNode() — zero storage overhead,
-// only runs on the error path.
-static keel::String describeInstruction(const Instruction &instr,
-                                        const BytecodeChunk &chunk)
-{
-    switch (instr.op) {
-    // Function calls
-    case OpCode::CALL:
-    case OpCode::CALL_FLATTEN:
-    case OpCode::CALL_MULTI:
-    case OpCode::CALL_FLATTEN_MULTI: {
-        keel::i32 funcIdx = instr.d;
-        if (funcIdx >= 0 && funcIdx < (keel::i32)chunk.strings.size())
-            return keel::format("in call to '{}'", chunk.strings[funcIdx]);
-        return keel::String::from("in function call");
-    }
-    case OpCode::CALL_BUILTIN: {
-        const char *nm = builtinIdName(instr.d);
-        return nm ? keel::format("in call to '{}'", nm)
-                  : keel::String::from("in builtin call");
-    }
-    case OpCode::CALL_INDIRECT:
-    case OpCode::CALL_INDIRECT_FLATTEN:
-    case OpCode::CALL_INDIRECT_MULTI:
-        return keel::String::from("in function call");
-    case OpCode::CALL_METHOD:
-    case OpCode::CALL_METHOD_MULTI: {
-        keel::i32 nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return keel::format("in method call '.{}'", chunk.strings[nameIdx]);
-        return keel::String::from("in method call");
-    }
-
-    // Cell indexing
-    case OpCode::CELL_GET:
-    case OpCode::CELL_GET_OR_CREATE:
-    case OpCode::CELL_SET:
-    case OpCode::CELL_GET_2D:
-    case OpCode::CELL_SET_2D:
-    case OpCode::CELL_GET_MULTI:
-    case OpCode::CELL_GET_ND:
-    case OpCode::CELL_SET_ND:
-        return keel::String::from("in cell indexing");
-
-    // Field access
-    case OpCode::FIELD_GET:
-    case OpCode::FIELD_GET_OR_CREATE:
-    case OpCode::FIELD_SET: {
-        keel::i32 nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return keel::format("in field access '.{}'", chunk.strings[nameIdx]);
-        return keel::String::from("in field access");
-    }
-    case OpCode::FIELD_GET_DYN:
-    case OpCode::FIELD_GET_OR_CREATE_DYN:
-    case OpCode::FIELD_SET_DYN:
-        return keel::String::from("in dynamic field access");
-    case OpCode::STRUCT_ELEM_FIELD_SET: {
-        keel::i32 nameIdx = instr.d;
-        if (nameIdx >= 0 && nameIdx < (keel::i32)chunk.strings.size())
-            return keel::format("in struct-array element write '.{}'", chunk.strings[nameIdx]);
-        return keel::String::from("in struct-array element write");
-    }
-    case OpCode::STRUCT_ELEM_GET_OR_CREATE:
-    case OpCode::STRUCT_ELEM_SET:
-        return keel::String::from("in struct-array element access");
-
-    // Binary operators (base and scalar-specialized variants share text)
-    case OpCode::ADD:  case OpCode::ADD_SS:  return keel::String::from("in operator '+'");
-    case OpCode::SUB:  case OpCode::SUB_SS:  return keel::String::from("in operator '-'");
-    case OpCode::MUL:  case OpCode::MUL_SS:  return keel::String::from("in operator '*'");
-    case OpCode::RDIV: case OpCode::RDIV_SS: return keel::String::from("in operator '/'");
-    case OpCode::LDIV: return keel::String::from("in operator '\\'");
-    case OpCode::POW:  case OpCode::POW_SS:  return keel::String::from("in operator '^'");
-    case OpCode::EMUL: return keel::String::from("in operator '.*'");
-    case OpCode::ERDIV:return keel::String::from("in operator './'");
-    case OpCode::ELDIV:return keel::String::from("in operator '.\\'");
-    case OpCode::EPOW: return keel::String::from("in operator '.^'");
-
-    // Unary operators
-    case OpCode::NEG:        case OpCode::NEG_S: return keel::String::from("in unary operator '-'");
-    case OpCode::NOT:        return keel::String::from("in unary operator '~'");
-    case OpCode::CTRANSPOSE:
-    case OpCode::TRANSPOSE:  return keel::String::from("in transpose operator");
-
-    // Colon expressions
-    case OpCode::COLON:
-    case OpCode::COLON3:
-        return keel::String::from("in colon expression");
-
-    // Matrix/cell construction
-    case OpCode::HORZCAT:
-    case OpCode::HORZCAT_APPEND:
-    case OpCode::VERTCAT:
-    case OpCode::VERTCAT_APPEND:
-        return keel::String::from("in matrix construction");
-    case OpCode::CELL_LITERAL:
-        return keel::String::from("in cell construction");
-    case OpCode::CLOSURE_MAKE:
-        return keel::String::from("in anonymous function creation");
-
-    // Indexing
-    case OpCode::INDEX_GET:
-    case OpCode::INDEX_GET_2D:
-    case OpCode::INDEX_GET_ND:
-    case OpCode::INDEX_SET:
-    case OpCode::INDEX_SET_2D:
-    case OpCode::INDEX_SET_ND:
-    case OpCode::INDEX_DELETE:
-    case OpCode::INDEX_DELETE_2D:
-    case OpCode::INDEX_DELETE_ND:
-        return keel::String::from("in array indexing");
-
-    default:
-        return keel::String{};
-    }
-}
-
-[[noreturn]] void VM::enrichAndThrow(const std::exception &ex,
-                                     const Instruction *ip,
-                                     const BytecodeChunk &chunk)
-{
-    keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
-    if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
-        keel::String context = describeInstruction(*ip, chunk);
-        throw Error(ex.what(),
-                    chunk.sourceMap[instrIdx].line,
-                    chunk.sourceMap[instrIdx].col,
-                    chunk.name,
-                    context);
-    }
-    // No source location available — wrap in Error anyway for consistency
-    throw Error(ex.what());
-}
+// Exception helpers (dispatchTryCatch, describeInstruction, enrichError,
+// enrichAndThrow, captureCallStack) live in src/core/vm_error.cpp.
 
 // ============================================================
 // Debugger helpers

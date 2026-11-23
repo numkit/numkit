@@ -183,4 +183,11 @@ inline SplatArgs splatCallArgs(const Value *R, keel::u16 base, keel::u16 n)
     return r;
 }
 
+void exportChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                      const BytecodeChunk &chunk, const Value *R,
+                                      keel::u32 nregs, bool isTopLevel);
+void importChunkGlobalsAndPersistents(Engine &engine, Environment &globalsEnv,
+                                      const BytecodeChunk &chunk, Value *R,
+                                      keel::u32 nregs, bool isTopLevel, bool seedMissing);
+
 } // namespace numkit
