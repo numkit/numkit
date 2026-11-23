@@ -26,11 +26,11 @@ void ode23_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     auto cb = [&ctx, &handle](keel::ArrayRef<Value> a, keel::MutArrayRef<Value> o,
                               keel::Allocator * /*mr*/) {
         Value r = ctx.engine->callFunctionHandle(handle, a);
-        if (!o.empty()) o[0] = std::move(r);
+        if (!o.empty()) o[0] = keel::move(r);
     };
     auto [tv, yv] = ode23(cb, args[1], args[2], opts_v, mr);
-    outs[0] = std::move(tv);
-    if (nargout >= 2) outs[1] = std::move(yv);
+    outs[0] = keel::move(tv);
+    if (nargout >= 2) outs[1] = keel::move(yv);
 }
 
 } // namespace detail

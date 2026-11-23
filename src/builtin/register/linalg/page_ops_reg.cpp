@@ -20,7 +20,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <utility>
 
 namespace numkit::linalg {
 namespace detail {
@@ -37,8 +36,8 @@ void pageeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [V, D] = pageeig_VD(args[0], mr);
-        outs[0] = std::move(V);
-        outs[1] = std::move(D);
+        outs[0] = keel::move(V);
+        outs[1] = keel::move(D);
     } else {
         outs[0] = pageeig_values(args[0], mr);
     }
@@ -50,9 +49,9 @@ void pagesvd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [U, S, V] = pagesvd_decompose(args[0], mr);
-        outs[0] = std::move(U);
-        outs[1] = std::move(S);
-        if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(V);
+        outs[0] = keel::move(U);
+        outs[1] = keel::move(S);
+        if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(V);
     } else {
         outs[0] = pagesvd_values(args[0], mr);
     }

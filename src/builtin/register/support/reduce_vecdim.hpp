@@ -26,7 +26,6 @@
 #include <keel/small_array.h>
 #include <keel/string.h>
 #include <algorithm>
-#include <utility>
 
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -117,7 +116,7 @@ inline Value collapseDims(const Value &x, keel::ArrayRef<keel::i32> set,
     if (shape.empty())               // every real dim listed
         shape.push_back(1);
     shape.push_back(red);
-    return builtin::reshape(std::move(p), keel::ArrayRef<keel::usize>(shape.data(), shape.size()), mr);
+    return builtin::reshape(keel::move(p), keel::ArrayRef<keel::usize>(shape.data(), shape.size()), mr);
 }
 
 // Reshape a reduction RESULT of the collapsed array back to the
@@ -141,7 +140,7 @@ inline Value expandReduced(Value reduced, const Value &x, keel::ArrayRef<keel::i
         shape.pop_back();
     if (shape.size() == 1)
         shape.push_back(1);
-    return builtin::reshape(std::move(reduced),
+    return builtin::reshape(keel::move(reduced),
                             keel::ArrayRef<keel::usize>(shape.data(), shape.size()), mr);
 }
 

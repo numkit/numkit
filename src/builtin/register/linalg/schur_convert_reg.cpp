@@ -15,7 +15,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <utility>
 
 namespace numkit::linalg {
 namespace detail {
@@ -24,16 +23,16 @@ void cdf2rdf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     argcheck::checkNargin(args.size(), 2, 2, "cdf2rdf");
     auto [VR, DR] = cdf2rdf(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(VR);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(DR);
+    outs[0] = keel::move(VR);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(DR);
 }
 
 void rsf2csf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, 2, "rsf2csf");
     auto [U, T] = rsf2csf(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(U);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(T);
+    outs[0] = keel::move(U);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(T);
 }
 
 } // namespace detail

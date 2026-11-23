@@ -145,7 +145,7 @@ void heaviside_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
         else if (v == 0.0) dst[i] = 0.5;
         else               dst[i] = 1.0;
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -188,7 +188,7 @@ void sinint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
         }
         dst[i] = sgn * si;
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -212,7 +212,7 @@ void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
             else if (keel::is_inf(v)) dst[i] = 0.0;
             else dst[i] = evalPosCi(v);
         }
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     } else {
         Value out = Value::matrix(x.dims().rows(), x.dims().cols(), ValueType::COMPLEX, mr);
         auto *dst = out.complexDataMut();
@@ -223,7 +223,7 @@ void cosint_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
             else if (keel::is_inf(v)) dst[i] = {0.0, (v < 0.0) ? kPi : 0.0};
             else dst[i] = {evalPosCi(keel::abs(v)), (v < 0.0) ? kPi : 0.0};
         }
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     }
 }
 
@@ -245,7 +245,7 @@ void lambertw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     keel::f64 *dst = out.doubleDataMut();
     for (keel::usize i = 0; i < n; ++i)
         dst[i] = evalLambertW(branch, x.elemAsDouble(i));
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void debug_noop_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,

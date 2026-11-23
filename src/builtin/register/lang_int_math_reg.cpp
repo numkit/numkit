@@ -21,8 +21,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -208,7 +206,7 @@ void bitcmp_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
     Value r = bitcmp(input, width, mr);
     if (!explicitType.empty())
         r = cast(r, explicitType, mr);
-    outs[0] = std::move(r);
+    outs[0] = keel::move(r);
 }
 
 void bitset_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,

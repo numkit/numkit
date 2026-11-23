@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <tuple>
 
 namespace numkit::builtin::detail {
 
@@ -873,7 +872,7 @@ void datevec_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto *mr = ctx.engine->allocator();
     Value dv = numkit::builtin::datevec(args, mr);
     if (nargout <= 1) {
-        outs[0] = std::move(dv);
+        outs[0] = keel::move(dv);
     } else {
         const keel::usize N = dv.dims().rows();
         const keel::f64 *o = dv.doubleData();
@@ -885,7 +884,7 @@ void datevec_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 keel::f64 *p = col.doubleDataMut();
                 for (keel::usize i = 0; i < N; ++i)
                     p[i] = o[i + c * N];
-                outs[c] = std::move(col);
+                outs[c] = keel::move(col);
             }
         }
     }
@@ -1002,7 +1001,7 @@ void isnat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
         const auto *p = dtElem(args[0], i);
         dst[i] = (!p || !keel::is_finite(p->serialDay)) ? 1 : 0;
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void nat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -1185,7 +1184,7 @@ void register_timefun(Engine &engine) {
                 s.stringElemSet(i, p ? formatDurationElem(p->seconds, p->format)
                                      : keel::String::from("00:00:00"));
             }
-            outs[0] = std::move(s);
+            outs[0] = keel::move(s);
         });
         dur.methods.put(keel::String("hms", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs,
                                 CallContext &ctx) {
@@ -1205,11 +1204,11 @@ void register_timefun(Engine &engine) {
                 m.doubleDataMut()[i] = sign * mm;
                 s.doubleDataMut()[i] = sign * ss;
             }
-            outs[0] = (n == 1) ? Value::scalar(h.doubleData()[0], mr) : std::move(h);
+            outs[0] = (n == 1) ? Value::scalar(h.doubleData()[0], mr) : keel::move(h);
             if (nargout >= 2)
-                outs[1] = (n == 1) ? Value::scalar(m.doubleData()[0], mr) : std::move(m);
+                outs[1] = (n == 1) ? Value::scalar(m.doubleData()[0], mr) : keel::move(m);
             if (nargout >= 3)
-                outs[2] = (n == 1) ? Value::scalar(s.doubleData()[0], mr) : std::move(s);
+                outs[2] = (n == 1) ? Value::scalar(s.doubleData()[0], mr) : keel::move(s);
         });
 
         dur.ops.put(keel::String("uminus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
@@ -1328,7 +1327,7 @@ void register_timefun(Engine &engine) {
                         keel::f64 s2 = durElem(rhs, rhs.objectCount() == 1 ? 0 : i)->seconds;
                         out.doubleDataMut()[i] = s1 / s2;
                     }
-                    outs[0] = std::move(out);
+                    outs[0] = keel::move(out);
                     return;
                 }
                 const Value &dVal = lhs.isObject() ? lhs : rhs;
@@ -1386,7 +1385,7 @@ void register_timefun(Engine &engine) {
                     keel::f64 s2 = durElem(rhs, rhs.objectCount() == 1 ? 0 : i)->seconds;
                     out.logicalDataMut()[i] = cmp1(s1, s2) ? 1 : 0;
                 }
-                outs[0] = std::move(out);
+                outs[0] = keel::move(out);
             };
         };
         dur.ops.put(keel::String("eq", clsAlloc), durCmp(0));
@@ -1423,7 +1422,7 @@ void register_timefun(Engine &engine) {
             return os;
         };
 
-        engine.registerClass(std::move(dur));
+        engine.registerClass(keel::move(dur));
     }
 
     // ── BuiltinClass: calendarDuration ─────────────────────────────────────
@@ -1514,7 +1513,7 @@ void register_timefun(Engine &engine) {
                 const auto *p = calElem(self, i);
                 s.stringElemSet(i, p ? formatCalDurElem(*p) : keel::String::from("0d"));
             }
-            outs[0] = std::move(s);
+            outs[0] = keel::move(s);
         });
 
         cal.ops.put(keel::String("uminus", clsAlloc), [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
@@ -1606,7 +1605,7 @@ void register_timefun(Engine &engine) {
                     const auto *c2 = calElem(rhs, rhs.objectCount() == 1 ? 0 : i);
                     out.logicalDataMut()[i] = eq1(c1, c2) ? 1 : 0;
                 }
-                outs[0] = std::move(out);
+                outs[0] = keel::move(out);
             };
         };
         cal.ops.put(keel::String("eq", clsAlloc), calEq(false));
@@ -1639,7 +1638,7 @@ void register_timefun(Engine &engine) {
             return os;
         };
 
-        engine.registerClass(std::move(cal));
+        engine.registerClass(keel::move(cal));
     }
 
     // ── BuiltinClass: datetime ─────────────────────────────────────────────
@@ -2014,7 +2013,7 @@ void register_timefun(Engine &engine) {
                 }
             }
             if (nargout <= 1) {
-                outs[0] = std::move(dv);
+                outs[0] = keel::move(dv);
             } else {
                 for (keel::usize k = 0; k < std::min<keel::usize>(nargout, 6); ++k) {
                     if (n == 1) {
@@ -2023,7 +2022,7 @@ void register_timefun(Engine &engine) {
                         Value col = Value::matrix(n, 1, ValueType::DOUBLE, mr);
                         for (keel::usize i = 0; i < n; ++i)
                             col.doubleDataMut()[i] = dst[i + k * n];
-                        outs[k] = std::move(col);
+                        outs[k] = keel::move(col);
                     }
                 }
             }
@@ -2069,7 +2068,7 @@ void register_timefun(Engine &engine) {
                 keel::String row = formatDateTimeElem(
                     p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(), f, anyTime);
                 maxW = std::max(maxW, row.size());
-                rows.push_back(std::move(row));
+                rows.push_back(keel::move(row));
             }
             Value cm = Value::matrix(n, maxW, ValueType::CHAR, mr);
             char *dst = cm.charDataMut();
@@ -2077,7 +2076,7 @@ void register_timefun(Engine &engine) {
             for (keel::usize r = 0; r < n; ++r)
                 for (keel::usize c = 0; c < rows[r].size(); ++c)
                     dst[c * n + r] = rows[r][c];
-            outs[0] = std::move(cm);
+            outs[0] = keel::move(cm);
         });
         dt.methods.put(keel::String("datestr", clsAlloc),
                        [](Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
@@ -2127,7 +2126,7 @@ void register_timefun(Engine &engine) {
                     i, formatDateTimeElem(p ? p->serialDay : keel::Limits<keel::f64>::quiet_nan(),
                                           f, anyTime));
             }
-            outs[0] = std::move(s);
+            outs[0] = keel::move(s);
         });
         dt.methods.put(keel::String("cellstr", clsAlloc),
                        [hasNonZeroTime](Value &self, keel::ArrayRef<Value> args, keel::usize,
@@ -2148,7 +2147,7 @@ void register_timefun(Engine &engine) {
                                        f, anyTime),
                     mr);
             }
-            outs[0] = std::move(c);
+            outs[0] = keel::move(c);
         });
 
         auto dtIsNat = [](Value &self, keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
@@ -2165,7 +2164,7 @@ void register_timefun(Engine &engine) {
                 const auto *p = dtElem(self, i);
                 out.logicalDataMut()[i] = (!p || !keel::is_finite(p->serialDay)) ? 1 : 0;
             }
-            outs[0] = std::move(out);
+            outs[0] = keel::move(out);
         };
         dt.methods.put(keel::String("isnat", clsAlloc), dtIsNat);
         dt.methods.put(keel::String("isnan", clsAlloc), dtIsNat);
@@ -2299,7 +2298,7 @@ void register_timefun(Engine &engine) {
                 Value idx = makeArrayFromDims(self.dims(), ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < n; ++i)
                     idx.doubleDataMut()[i] = keel::as<keel::f64>(order[i] + 1);
-                outs[1] = std::move(idx);
+                outs[1] = keel::move(idx);
             }
         });
 
@@ -2450,13 +2449,13 @@ void register_timefun(Engine &engine) {
                 Value iaVal = Value::matrix(ia.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < ia.size(); ++i)
                     iaVal.doubleDataMut()[i] = keel::as<keel::f64>(ia[i]);
-                outs[1] = std::move(iaVal);
+                outs[1] = keel::move(iaVal);
             }
             if (nargout >= 3) {
                 Value icVal = Value::matrix(n, 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < n; ++i)
                     icVal.doubleDataMut()[i] = keel::as<keel::f64>(ic[i]);
-                outs[2] = std::move(icVal);
+                outs[2] = keel::move(icVal);
             }
         });
 
@@ -2516,13 +2515,13 @@ void register_timefun(Engine &engine) {
                 Value iaVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < items.size(); ++i)
                     iaVal.doubleDataMut()[i] = keel::as<keel::f64>(items[i].ia);
-                outs[1] = std::move(iaVal);
+                outs[1] = keel::move(iaVal);
             }
             if (nargout >= 3) {
                 Value ibVal = Value::matrix(items.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < items.size(); ++i)
                     ibVal.doubleDataMut()[i] = keel::as<keel::f64>(items[i].ib);
-                outs[2] = std::move(ibVal);
+                outs[2] = keel::move(ibVal);
             }
         });
 
@@ -2553,9 +2552,9 @@ void register_timefun(Engine &engine) {
                 lia.logicalDataMut()[i] = found > 0 ? 1 : 0;
                 locb.doubleDataMut()[i] = keel::as<keel::f64>(found);
             }
-            outs[0] = std::move(lia);
+            outs[0] = keel::move(lia);
             if (nargout >= 2)
-                outs[1] = std::move(locb);
+                outs[1] = keel::move(locb);
         });
 
         // Operators on datetime
@@ -2701,7 +2700,7 @@ void register_timefun(Engine &engine) {
                     keel::f64 s2 = dtElem(rhs, rhs.objectCount() == 1 ? 0 : i)->serialDay;
                     out.logicalDataMut()[i] = cmp1(s1, s2) ? 1 : 0;
                 }
-                outs[0] = std::move(out);
+                outs[0] = keel::move(out);
             };
         };
         dt.ops.put(keel::String("eq", clsAlloc), dtCmp(0));
@@ -2793,7 +2792,7 @@ void register_timefun(Engine &engine) {
             return os;
         };
 
-        engine.registerClass(std::move(dt));
+        engine.registerClass(keel::move(dt));
     }
 }
 

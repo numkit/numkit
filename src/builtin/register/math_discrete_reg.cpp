@@ -24,8 +24,6 @@
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -173,7 +171,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                 } else {
                     keel::usize pos = uniqStrs.size();
                     seen.put(s.clone(sa), pos);
-                    uniqStrs.push_back(std::move(s));
+                    uniqStrs.push_back(keel::move(s));
                     iaVec.push_back(i);
                     icVec[i] = keel::as<keel::f64>(pos + 1);
                 }
@@ -182,8 +180,8 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             keel::HashMap<keel::String, keel::usize> idxMap(sa);
             for (keel::usize i = 0; i < n; ++i) {
                 keel::String s = getElemStr(i);
-                if (last) idxMap.put(std::move(s), i);
-                else idxMap.try_insert(std::move(s), i);
+                if (last) idxMap.put(keel::move(s), i);
+                else idxMap.try_insert(keel::move(s), i);
             }
             struct StrIdxPair {
                 keel::String str;
@@ -198,7 +196,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             keel::HashMap<keel::String, keel::usize> rankMap(sa);
             for (keel::usize k = 0; k < sorted.size(); ++k) {
                 rankMap.put(sorted[k].str.clone(sa), k);
-                uniqStrs.push_back(std::move(sorted[k].str));
+                uniqStrs.push_back(keel::move(sorted[k].str));
                 iaVec.push_back(sorted[k].idx);
             }
             for (keel::usize i = 0; i < n; ++i) {
@@ -219,18 +217,18 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             else
                 cOut.cellAt(j) = Value::fromString(uniqStrs[j], mr);
         }
-        outs[0] = std::move(cOut);
+        outs[0] = keel::move(cOut);
         if (nargout > 1) {
             Value iaOut = Value::matrix(k, k == 0 ? 0 : 1, ValueType::DOUBLE, mr);
             for (keel::usize j = 0; j < k; ++j)
                 iaOut.doubleDataMut()[j] = keel::as<keel::f64>(iaVec[j] + 1);
-            outs[1] = std::move(iaOut);
+            outs[1] = keel::move(iaOut);
         }
         if (nargout > 2) {
             Value icOut = Value::matrix(n, n == 0 ? 0 : 1, ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < n; ++i)
                 icOut.doubleDataMut()[i] = icVec[i];
-            outs[2] = std::move(icOut);
+            outs[2] = keel::move(icOut);
         }
         return;
     }
@@ -244,7 +242,7 @@ void unique_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         // keeps rows in first-occurrence order (default 'sorted').
         if (nargout <= 1) { outs[0] = narrowVals(uniqueRows(x, stable, mr)); return; }
         auto [c, ia, ic] = uniqueRowsWithIndices(x, stable, last, mr);
-        outs[0] = narrowVals(std::move(c));
+        outs[0] = narrowVals(keel::move(c));
         if (nargout > 1) outs[1] = orientUniqueVec(ia, /*column=*/true, mr);
         if (nargout > 2) outs[2] = orientUniqueVec(ic, /*column=*/true, mr);
         return;
@@ -415,7 +413,7 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 bd[idx] = keel::as<keel::f64>(b);
             }
         }
-        outs[2] = std::move(binOut);
+        outs[2] = keel::move(binOut);
     }
 }
 
@@ -440,7 +438,7 @@ void histc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
             const keel::usize b = histcBin(p[i], e, nE);
             bd[i] = (b == keel::Limits<keel::usize>::kMax) ? 0.0 : keel::as<keel::f64>(b + 1);
         }
-        outs[1] = std::move(binOut);
+        outs[1] = keel::move(binOut);
     }
 }
 
@@ -448,7 +446,7 @@ void histc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
 // equals some row of B; loc(i) is the LOWEST 1-based B-row index (0 if absent).
 // Both outputs are column vectors of height size(A,1). 2-D DOUBLE only; a row
 // containing NaN never matches. vs MATLAB R2025b.
-std::pair<Value, Value>
+keel::Pair<Value, Value>
 ismemberRows(const Value &A, const Value &B, bool wantLoc, keel::Allocator *mr)
 {
     validateUniqueRowsInput(A, "ismember");
@@ -467,7 +465,7 @@ ismemberRows(const Value &A, const Value &B, bool wantLoc, keel::Allocator *mr)
         loc = Value::matrix(ar, 1, ValueType::DOUBLE, mr);
         if (ar > 0) lo = loc.doubleDataMut();
     }
-    if (ar == 0) return {std::move(tf), std::move(loc)};
+    if (ar == 0) return {keel::move(tf), keel::move(loc)};
 
     const keel::f64 *ad = A.doubleData();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
@@ -490,7 +488,7 @@ ismemberRows(const Value &A, const Value &B, bool wantLoc, keel::Allocator *mr)
         tfd[r] = found ? 1 : 0;
         if (lo) lo[r] = found ? *found : 0.0;
     }
-    return {std::move(tf), std::move(loc)};
+    return {keel::move(tf), keel::move(loc)};
 }
 
 // ismember(a,b): tf membership mask; [tf,loc] = ismember(...) also returns
@@ -515,15 +513,15 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             }
         if (rows) {
             auto [tf, loc] = ismemberRows(A, B, /*wantLoc=*/nargout > 1, mr);
-            outs[0] = std::move(tf);
-            if (nargout > 1) outs[1] = std::move(loc);
+            outs[0] = keel::move(tf);
+            if (nargout > 1) outs[1] = keel::move(loc);
             return;
         }
     }
     if (A.type() == ValueType::COMPLEX || B.type() == ValueType::COMPLEX) {
         auto [tf, loc] = ismemberComplex(A, B, /*wantLoc=*/nargout > 1, mr);
-        outs[0] = std::move(tf);
-        if (nargout > 1) outs[1] = std::move(loc);
+        outs[0] = keel::move(tf);
+        if (nargout > 1) outs[1] = keel::move(loc);
         return;
     }
     outs[0] = ismember(A, B, mr);
@@ -544,7 +542,7 @@ void ismember_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             const keel::f64 *found = keel::is_nan(v) ? nullptr : idxB.get(v);
             lo[i] = found ? *found : 0.0;
         }
-        outs[1] = std::move(loc);
+        outs[1] = keel::move(loc);
     }
 }
 
@@ -740,7 +738,7 @@ Value setOpRows(const Value &A, const Value &B, SetOpKind kind,
         }
         RowKey key = extractRow(ad, ac, ar, r, scratch.allocator());
         if (bset.contains(key) != wantInB) continue;
-        if (seen.try_insert(std::move(key), char{1}).inserted) nonNan.push_back(r);
+        if (seen.try_insert(keel::move(key), char{1}).inserted) nonNan.push_back(r);
     }
     std::sort(nonNan.begin(), nonNan.end(),
               [ad, ac, ar](keel::usize a, keel::usize b) { return rowLexCmp(ad, ac, ar, a, b) < 0; });
@@ -818,7 +816,7 @@ Value setxorRows(const Value &A, const Value &B, const char *fn,
         RowKey key = extractRow(cdp, cols, nr, ci, scratch.allocator());
         const auto &other = fromA ? bset : aset;
         if (other.contains(key)) continue;
-        if (seen.try_insert(std::move(key), char{1}).inserted) nonNan.push_back(ci);
+        if (seen.try_insert(keel::move(key), char{1}).inserted) nonNan.push_back(ci);
     }
     std::sort(nonNan.begin(), nonNan.end(),
               [cdp, cols, nr](keel::usize a, keel::usize b) { return rowLexCmp(cdp, cols, nr, a, b) < 0; });

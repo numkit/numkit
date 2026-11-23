@@ -13,7 +13,6 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <utility>
 
 // Each registered adapter in ops/*_reg.cpp enforces argcheck::checkNargin.
 namespace numkit::builtin::detail {

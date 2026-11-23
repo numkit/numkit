@@ -29,8 +29,6 @@
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -435,7 +433,7 @@ Value runComplexReduction(const Value &x, keel::i32 dim, keel::Allocator *mr, bo
               ? reduceComplexAlongDim(x, dim, mr, Op::cInit(), Op::cAccum, Op::cFinalize)
               : reduceComplexAll(x, mr, Op::cInit(), Op::cAccum, Op::cFinalize);
     // all-real reduction result narrows to real (MATLAB: isreal(sum(complex...))).
-    return numkit::narrowComplex(std::move(r), mr);
+    return numkit::narrowComplex(keel::move(r), mr);
 }
 
 template <typename Op>
@@ -913,8 +911,8 @@ Value toLinearMaxMinIndex(const Value &idx, const Value &a0,
         if (d >= 1 && d <= nd)
             listed[keel::as<keel::usize>(d)] = 1;
 
-    keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> nonListedDims;
-    keel::SmallArray<std::pair<keel::usize, keel::usize>, 8> listedDims;
+    keel::SmallArray<keel::Pair<keel::usize, keel::usize>, 8> nonListedDims;
+    keel::SmallArray<keel::Pair<keel::usize, keel::usize>, 8> listedDims;
     keel::usize stride = 1;
     for (keel::i32 d = 1; d <= nd; ++d) {
         keel::usize sz = (d <= a0.dims().ndim()) ? a0.dims().dim(d - 1) : 1;
@@ -983,8 +981,8 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (isStringArg(args[i]) && lowercaseStr(args[i]) == "all") {
             Value flat = reshape(a0, a0.numel(), 1, 0, mr);
             auto [v, ix] = omitNan ? maxOmitNan(flat, 0, mr) : max(flat, 0, mr);
-            outs[0] = std::move(v);
-            if (nargout > 1) outs[1] = std::move(ix);
+            outs[0] = keel::move(v);
+            if (nargout > 1) outs[1] = keel::move(ix);
             return;
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
@@ -1005,22 +1003,22 @@ void max_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         auto [val, idx] = omitNan
             ? maxOmitNan(c, keel::as<keel::i32>(c.dims().ndim()), mr)
             : max(c, keel::as<keel::i32>(c.dims().ndim()), mr);
-        outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
+        outs[0] = vecdim::expandReduced(keel::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
-            outs[1] = vecdim::expandReduced(std::move(linIdx), a0, vecdimSet, mr);
+            outs[1] = vecdim::expandReduced(keel::move(linIdx), a0, vecdimSet, mr);
         }
         return;
     }
     auto [val, idx] = omitNan ? maxOmitNan(a0, dim, mr) : max(a0, dim, mr);
-    outs[0] = std::move(val);
+    outs[0] = keel::move(val);
     if (nargout > 1) {
         if (linear) {
             keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
             keel::i32 redArr[1] = {effDim};
             outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {
-            outs[1] = std::move(idx);
+            outs[1] = keel::move(idx);
         }
     }
 }
@@ -1045,8 +1043,8 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         if (isStringArg(args[i]) && lowercaseStr(args[i]) == "all") {
             Value flat = reshape(a0, a0.numel(), 1, 0, mr);
             auto [v, ix] = omitNan ? minOmitNan(flat, 0, mr) : min(flat, 0, mr);
-            outs[0] = std::move(v);
-            if (nargout > 1) outs[1] = std::move(ix);
+            outs[0] = keel::move(v);
+            if (nargout > 1) outs[1] = keel::move(ix);
             return;
         }
     // Reduction: optional dim as args[2] (scalar or vecdim).
@@ -1067,22 +1065,22 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         auto [val, idx] = omitNan
             ? minOmitNan(c, keel::as<keel::i32>(c.dims().ndim()), mr)
             : min(c, keel::as<keel::i32>(c.dims().ndim()), mr);
-        outs[0] = vecdim::expandReduced(std::move(val), a0, vecdimSet, mr);
+        outs[0] = vecdim::expandReduced(keel::move(val), a0, vecdimSet, mr);
         if (nargout > 1) {
             Value linIdx = toLinearMaxMinIndex(idx, a0, vecdimSet, mr);
-            outs[1] = vecdim::expandReduced(std::move(linIdx), a0, vecdimSet, mr);
+            outs[1] = vecdim::expandReduced(keel::move(linIdx), a0, vecdimSet, mr);
         }
         return;
     }
     auto [val, idx] = omitNan ? minOmitNan(a0, dim, mr) : min(a0, dim, mr);
-    outs[0] = std::move(val);
+    outs[0] = keel::move(val);
     if (nargout > 1) {
         if (linear) {
             keel::i32 effDim = (dim > 0) ? dim : std::max(1, numkit::ops::firstNonSingletonDim(a0));
             keel::i32 redArr[1] = {effDim};
             outs[1] = toLinearMaxMinIndex(idx, a0, keel::ArrayRef<keel::i32>(redArr, 1), mr);
         } else {
-            outs[1] = std::move(idx);
+            outs[1] = keel::move(idx);
         }
     }
 }

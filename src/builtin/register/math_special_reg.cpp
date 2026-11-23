@@ -16,8 +16,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -114,9 +112,9 @@ void psi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
         keel::f32 *sd = sOut.singleDataMut();
         for (keel::usize i = 0; i < X.numel(); ++i)
             sd[i] = keel::as<keel::f32>(od[i]);
-        outs[0] = std::move(sOut);
+        outs[0] = keel::move(sOut);
     } else {
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     }
 }
 
@@ -197,8 +195,8 @@ void ellipke_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     argcheck::checkNargin(args.size(), 1, 2, "ellipke");
     auto res = ellipke(args[0], ctx.engine->allocator());
-    outs[0] = std::move(res.K);
-    if (nargout > 1) outs[1] = std::move(res.E);
+    outs[0] = keel::move(res.K);
+    if (nargout > 1) outs[1] = keel::move(res.E);
 }
 
 void airy_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
@@ -237,9 +235,9 @@ void ellipj_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     argcheck::checkNargin(args.size(), 1, 3, "ellipj");
     argcheck::checkNargin(args.size(), 2, 3, "ellipj");
     auto r = ellipj(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(r.sn);
-    if (nargout > 1) outs[1] = std::move(r.cn);
-    if (nargout > 2) outs[2] = std::move(r.dn);
+    outs[0] = keel::move(r.sn);
+    if (nargout > 1) outs[1] = keel::move(r.cn);
+    if (nargout > 2) outs[2] = keel::move(r.dn);
 }
 
 } // namespace detail

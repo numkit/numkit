@@ -178,7 +178,7 @@ Value makeContainer(keel::StringRef cls, bool isHandle, keel::Allocator *mr)
         mr = keel::default_allocator();
     auto st = keel::make_arc_in<ObjectState>(mr, mr);
     st->native = keel::make_arc_in<KVPayload>(mr, mr);
-    return Value::object(cls, std::move(st), isHandle, mr);
+    return Value::object(cls, keel::move(st), isHandle, mr);
 }
 
 } // namespace
@@ -387,7 +387,7 @@ struct TablePayload : NativePayload
                         s.push_back(cd[i + j * r]);
                     while (!s.empty() && s[s.size() - 1] == ' ')
                         s.pop_back();
-                    out.push_back(std::move(s));
+                    out.push_back(keel::move(s));
                 }
             }
             return out;
@@ -439,7 +439,7 @@ struct TablePayload : NativePayload
         Value vn = Value::cell(1, varNames.size(), mr);
         for (keel::usize i = 0; i < varNames.size(); ++i)
             vn.cellAt(i) = Value::fromString(varNames[i], mr);
-        st.field("VariableNames") = std::move(vn);
+        st.field("VariableNames") = keel::move(vn);
 
         if (rowNames.empty()) {
             st.field("RowNames") = Value::cell(0, 0, mr);
@@ -447,13 +447,13 @@ struct TablePayload : NativePayload
             Value rn = Value::cell(rowNames.size(), 1, mr);
             for (keel::usize i = 0; i < rowNames.size(); ++i)
                 rn.cellAt(i) = Value::fromString(rowNames[i], mr);
-            st.field("RowNames") = std::move(rn);
+            st.field("RowNames") = keel::move(rn);
         }
 
         Value dn = Value::cell(1, 2, mr);
         dn.cellAt(0) = Value::fromString(dimNames.size() > 0 ? dimNames[0].as_ref() : keel::StringRef("Row"), mr);
         dn.cellAt(1) = Value::fromString(dimNames.size() > 1 ? dimNames[1].as_ref() : keel::StringRef("Variables"), mr);
-        st.field("DimensionNames") = std::move(dn);
+        st.field("DimensionNames") = keel::move(dn);
 
         st.field("Description") = Value::fromString(description, mr);
 
@@ -463,7 +463,7 @@ struct TablePayload : NativePayload
             Value vu = Value::cell(1, varUnits.size(), mr);
             for (keel::usize i = 0; i < varUnits.size(); ++i)
                 vu.cellAt(i) = Value::fromString(varUnits[i], mr);
-            st.field("VariableUnits") = std::move(vu);
+            st.field("VariableUnits") = keel::move(vu);
         }
 
         if (varDescriptions.empty()) {
@@ -472,7 +472,7 @@ struct TablePayload : NativePayload
             Value vd = Value::cell(1, varDescriptions.size(), mr);
             for (keel::usize i = 0; i < varDescriptions.size(); ++i)
                 vd.cellAt(i) = Value::fromString(varDescriptions[i], mr);
-            st.field("VariableDescriptions") = std::move(vd);
+            st.field("VariableDescriptions") = keel::move(vd);
         }
         return st;
     }
@@ -485,7 +485,7 @@ struct TablePayload : NativePayload
         if (st.hasField("VariableNames")) {
             auto vn = extractNames(st.field("VariableNames"), "table", "VariableNames");
             validateUniqueNames(vn, cols.size(), "table", "VariableNames");
-            varNames = std::move(vn);
+            varNames = keel::move(vn);
         }
         if (st.hasField("RowNames")) {
             const Value &rnv = st.field("RowNames");
@@ -494,13 +494,13 @@ struct TablePayload : NativePayload
             } else {
                 auto rn = extractNames(rnv, "table", "RowNames");
                 validateUniqueNames(rn, nrows, "table", "RowNames");
-                rowNames = std::move(rn);
+                rowNames = keel::move(rn);
             }
         }
         if (st.hasField("DimensionNames")) {
             auto dn = extractNames(st.field("DimensionNames"), "table", "DimensionNames");
             validateUniqueNames(dn, 2, "table", "DimensionNames");
-            dimNames = std::move(dn);
+            dimNames = keel::move(dn);
         }
         if (st.hasField("Description")) {
             description.assign(st.field("Description").toString().as_ref());
@@ -514,7 +514,7 @@ struct TablePayload : NativePayload
                 if (vu.size() != cols.size())
                     throw Error("table: VariableUnits length must match table width",
                                 0, 0, "table", "", "numkit:table:invalidVariableUnits");
-                varUnits = std::move(vu);
+                varUnits = keel::move(vu);
             }
         }
         if (st.hasField("VariableDescriptions")) {
@@ -526,7 +526,7 @@ struct TablePayload : NativePayload
                 if (vd.size() != cols.size())
                     throw Error("table: VariableDescriptions length must match table width",
                                 0, 0, "table", "", "numkit:table:invalidVariableDescriptions");
-                varDescriptions = std::move(vd);
+                varDescriptions = keel::move(vd);
             }
         }
     }
@@ -552,8 +552,8 @@ static auto makeTableValue = [](keel::Arc<TablePayload> payload,
         mr = keel::default_allocator();
     auto st = keel::make_arc_in<ObjectState>(mr, mr);
     const char *clsName = (payload && payload->isTimetable) ? "timetable" : "table";
-    st->native = std::move(payload);
-    return Value::object(clsName, std::move(st), false, mr);
+    st->native = keel::move(payload);
+    return Value::object(clsName, keel::move(st), false, mr);
 };
 
 static auto iequalsTableOpt = [](keel::StringRef a, const char *b) -> bool {
@@ -645,7 +645,7 @@ static auto extractBraceArray = [](const TablePayload *p,
         allString &= s.isString();
         allLogical &= s.isLogical();
         allNumeric &= (s.isNumeric() || s.isLogical());
-        sliced.push_back(std::move(s));
+        sliced.push_back(keel::move(s));
     }
 
     const keel::usize nr = rIdx.size();
@@ -906,21 +906,21 @@ void innerjoinImpl(const TablePayload *lp, const TablePayload *rp,
         keel::String vn = rp->varNames[j].clone(alloc);
         if (res->findVar(vn) >= 0)
             vn.append("_right");
-        res->varNames.push_back(std::move(vn));
+        res->varNames.push_back(keel::move(vn));
         res->cols.push_back(sliceColumnRows(rp->cols[j], rMatch.as_ref(), mr));
     }
-    outs[0] = makeTableValue(std::move(res), mr);
+    outs[0] = makeTableValue(keel::move(res), mr);
     if (nargout >= 2 && outs.size() >= 2) {
         Value ia = Value::matrix(lMatch.size(), 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < lMatch.size(); ++i)
             ia.doubleDataMut()[i] = keel::as<keel::f64>(lMatch[i] + 1);
-        outs[1] = std::move(ia);
+        outs[1] = keel::move(ia);
     }
     if (nargout >= 3 && outs.size() >= 3) {
         Value ib = Value::matrix(rMatch.size(), 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < rMatch.size(); ++i)
             ib.doubleDataMut()[i] = keel::as<keel::f64>(rMatch[i] + 1);
-        outs[2] = std::move(ib);
+        outs[2] = keel::move(ib);
     }
 }
 
@@ -967,7 +967,7 @@ keel::Arc<TablePayload> retimeOne(const TablePayload *p, keel::StringRef newTime
                     st->native = origSt->native->clone(alloc);
             }
         }
-        return Value::object("datetime", std::move(st), false, alloc);
+        return Value::object("datetime", keel::move(st), false, alloc);
     };
     bool quarterly = iequalsTableOpt(newTimeBasis, "quarterly");
     bool yearly = iequalsTableOpt(newTimeBasis, "yearly") || iequalsTableOpt(newTimeBasis, "annual");
@@ -983,7 +983,7 @@ keel::Arc<TablePayload> retimeOne(const TablePayload *p, keel::StringRef newTime
         if (buckets.empty() || buckets.back().y != y || buckets.back().b != bKey) {
             keel::Array<keel::usize> bRows(alloc);
             bRows.push_back(r);
-            buckets.push_back(Bucket{y, bKey, std::move(bRows)});
+            buckets.push_back(Bucket{y, bKey, keel::move(bRows)});
         } else {
             buckets.back().rows.push_back(r);
         }
@@ -1024,7 +1024,7 @@ keel::Arc<TablePayload> retimeOne(const TablePayload *p, keel::StringRef newTime
             }
             dst[g] = val;
         }
-        res->cols.push_back(std::move(outCol));
+        res->cols.push_back(keel::move(outCol));
     }
     return res;
 }
@@ -1088,8 +1088,8 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
                 filtDt.push_back(allDt[k]);
             }
         }
-        allSd = std::move(filtSd);
-        allDt = std::move(filtDt);
+        allSd = keel::move(filtSd);
+        allDt = keel::move(filtDt);
     }
     keel::Array<keel::usize> ord(alloc);
     ord.resize(allSd.size());
@@ -1126,7 +1126,7 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
         for (keel::usize j = 0; j < tp->width(); ++j) {
             keel::String vn = tp->varNames[j].clone(alloc);
             if (res->findVar(vn) >= 0) vn.append("_2");
-            res->varNames.push_back(std::move(vn));
+            res->varNames.push_back(keel::move(vn));
             const Value &src = tp->cols[j];
             Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
             keel::f64 *dst = col.doubleDataMut();
@@ -1135,12 +1135,12 @@ void syncImpl(keel::ArrayRef<Value> allArgs, keel::MutArrayRef<Value> outs, Call
                        ? src.elemAsDouble(keel::as<keel::usize>(rowMap[i]))
                        : keel::Limits<keel::f64>::quiet_nan();
             }
-            res->cols.push_back(std::move(col));
+            res->cols.push_back(keel::move(col));
         }
     };
     for (const auto *tp : tables)
         appendTableCols(tp);
-    outs[0] = makeTableValue(std::move(res), mr);
+    outs[0] = makeTableValue(keel::move(res), mr);
 }
 
 void innerjoin_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1244,7 +1244,7 @@ void adftest_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 piv = i;
         if (piv != k) {
             for (keel::usize j = 0; j < 2 * numParams; ++j)
-                std::swap(aug[k * 2 * numParams + j], aug[piv * 2 * numParams + j]);
+                keel::swap(aug[k * 2 * numParams + j], aug[piv * 2 * numParams + j]);
         }
         keel::f64 diag = aug[k * 2 * numParams + k];
         for (keel::usize j = 0; j < 2 * numParams; ++j)
@@ -1431,21 +1431,21 @@ void array2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
         if (iequalsTableOpt(key, "VariableNames")) {
             auto vn = TablePayload::extractNames(val, "array2table", "VariableNames", alloc);
             TablePayload::validateUniqueNames(vn, nc, "array2table", "VariableNames");
-            p->varNames = std::move(vn);
+            p->varNames = keel::move(vn);
         } else if (iequalsTableOpt(key, "RowNames")) {
             auto rn = TablePayload::extractNames(val, "array2table", "RowNames", alloc);
             TablePayload::validateUniqueNames(rn, nr, "array2table", "RowNames");
-            p->rowNames = std::move(rn);
+            p->rowNames = keel::move(rn);
         } else if (iequalsTableOpt(key, "DimensionNames")) {
             auto dn = TablePayload::extractNames(val, "array2table", "DimensionNames", alloc);
             TablePayload::validateUniqueNames(dn, 2, "array2table", "DimensionNames");
-            p->dimNames = std::move(dn);
+            p->dimNames = keel::move(dn);
         } else {
             throw Error(keel::format("array2table: unrecognized parameter '{}'", key),
                         0, 0, "array2table", "", "numkit:array2table:unknownOption");
         }
     }
-    outs[0] = makeTableValue(std::move(p), mr);
+    outs[0] = makeTableValue(keel::move(p), mr);
 }
 
 void cell2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1474,22 +1474,22 @@ void cell2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
             Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < nr; ++i)
                 col.doubleDataMut()[i] = C.cellAt(i + j * nr).toScalar();
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         } else if (allLogicalScalar) {
             Value col = Value::matrix(nr, 1, ValueType::LOGICAL, mr);
             for (keel::usize i = 0; i < nr; ++i)
                 col.logicalDataMut()[i] = C.cellAt(i + j * nr).toBool() ? 1 : 0;
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         } else if (allStringScalar) {
             Value col = Value::stringArray(nr, 1, mr);
             for (keel::usize i = 0; i < nr; ++i)
                 col.stringElemSet(i, C.cellAt(i + j * nr).stringElem(0));
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         } else {
             Value col = Value::cell(nr, 1, mr);
             for (keel::usize i = 0; i < nr; ++i)
                 col.cellAt(i) = C.cellAt(i + j * nr);
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         }
         p->varNames.push_back(keel::format_alloc(alloc, "Var{}", j + 1));
     }
@@ -1499,21 +1499,21 @@ void cell2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
         if (iequalsTableOpt(key, "VariableNames")) {
             auto vn = TablePayload::extractNames(val, "cell2table", "VariableNames", alloc);
             TablePayload::validateUniqueNames(vn, nc, "cell2table", "VariableNames");
-            p->varNames = std::move(vn);
+            p->varNames = keel::move(vn);
         } else if (iequalsTableOpt(key, "RowNames")) {
             auto rn = TablePayload::extractNames(val, "cell2table", "RowNames", alloc);
             TablePayload::validateUniqueNames(rn, nr, "cell2table", "RowNames");
-            p->rowNames = std::move(rn);
+            p->rowNames = keel::move(rn);
         } else if (iequalsTableOpt(key, "DimensionNames")) {
             auto dn = TablePayload::extractNames(val, "cell2table", "DimensionNames", alloc);
             TablePayload::validateUniqueNames(dn, 2, "cell2table", "DimensionNames");
-            p->dimNames = std::move(dn);
+            p->dimNames = keel::move(dn);
         } else {
             throw Error(keel::format("cell2table: unrecognized parameter '{}'", key),
                         0, 0, "cell2table", "", "numkit:cell2table:unknownOption");
         }
     }
-    outs[0] = makeTableValue(std::move(p), mr);
+    outs[0] = makeTableValue(keel::move(p), mr);
 }
 
 void table2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1535,7 +1535,7 @@ void table2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
             }
         }
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void struct2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1603,36 +1603,36 @@ void struct2table_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
                     const Value &el = getElem(i, fn);
                     col.doubleDataMut()[i] = el.toScalar();
                 }
-                p->cols.push_back(std::move(col));
+                p->cols.push_back(keel::move(col));
             } else if (allLogicalScalar) {
                 Value col = Value::matrix(nr, 1, ValueType::LOGICAL, mr);
                 for (keel::usize i = 0; i < nr; ++i) {
                     const Value &el = getElem(i, fn);
                     col.logicalDataMut()[i] = el.toBool() ? 1 : 0;
                 }
-                p->cols.push_back(std::move(col));
+                p->cols.push_back(keel::move(col));
             } else if (allStringScalar) {
                 Value col = Value::stringArray(nr, 1, mr);
                 for (keel::usize i = 0; i < nr; ++i) {
                     const Value &el = getElem(i, fn);
                     col.stringElemSet(i, el.stringElem(0));
                 }
-                p->cols.push_back(std::move(col));
+                p->cols.push_back(keel::move(col));
             } else {
                 Value col = Value::cell(nr, 1, mr);
                 for (keel::usize i = 0; i < nr; ++i) {
                     const Value &el = getElem(i, fn);
                     col.cellAt(i) = el;
                 }
-                p->cols.push_back(std::move(col));
+                p->cols.push_back(keel::move(col));
             }
         }
     }
     if (!rnames.empty()) {
         TablePayload::validateUniqueNames(rnames, p->nrows, "struct2table", "RowNames");
-        p->rowNames = std::move(rnames);
+        p->rowNames = keel::move(rnames);
     }
-    outs[0] = makeTableValue(std::move(p), mr);
+    outs[0] = makeTableValue(keel::move(p), mr);
 }
 
 void table2struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1656,7 +1656,7 @@ void table2struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
         Value s = Value::structure(mr);
         for (keel::usize j = 0; j < p->width(); ++j)
             s.field(p->varNames[j]) = p->cols[j];
-        outs[0] = std::move(s);
+        outs[0] = keel::move(s);
         return;
     }
     if (p->nrows == 1) {
@@ -1669,7 +1669,7 @@ void table2struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
             else
                 s.field(p->varNames[j]) = sliceColumnRows(col, keel::ArrayRef<keel::usize>(&r0, 1), mr);
         }
-        outs[0] = std::move(s);
+        outs[0] = keel::move(s);
         return;
     }
     Value sa = Value::structArray(p->nrows, 1, mr);
@@ -1684,7 +1684,7 @@ void table2struct_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
                 sa.setField(i, p->varNames[j], sliceColumnRows(col, keel::ArrayRef<keel::usize>(&i, 1), mr));
         }
     }
-    outs[0] = std::move(sa);
+    outs[0] = keel::move(sa);
 }
 
 void addvars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1741,14 +1741,14 @@ void addvars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
             throw Error(keel::format("addvars: duplicate variable name '{}'", nm),
                         0, 0, "addvars", "", "numkit:addvars:duplicateName");
         const keel::usize pos = std::min(insertPos + k, out->varNames.size());
-        out->varNames.push_back(std::move(nm));
+        out->varNames.push_back(keel::move(nm));
         for (keel::usize idx = out->varNames.size() - 1; idx > pos; --idx)
-            std::swap(out->varNames[idx], out->varNames[idx - 1]);
+            keel::swap(out->varNames[idx], out->varNames[idx - 1]);
         out->cols.push_back(col);
         for (keel::usize idx = out->cols.size() - 1; idx > pos; --idx)
-            std::swap(out->cols[idx], out->cols[idx - 1]);
+            keel::swap(out->cols[idx], out->cols[idx - 1]);
     }
-    outs[0] = makeTableValue(std::move(out), mr);
+    outs[0] = makeTableValue(keel::move(out), mr);
 }
 
 void removevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1776,7 +1776,7 @@ void removevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
     }
     if (out->cols.empty() && out->rowNames.empty())
         out->nrows = 0;
-    outs[0] = makeTableValue(std::move(out), mr);
+    outs[0] = makeTableValue(keel::move(out), mr);
 }
 
 void renamevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1795,9 +1795,9 @@ void renamevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
                     0, 0, "renamevars", "", "numkit:renamevars:countMismatch");
     auto out = p->cloneTable(alloc);
     for (keel::usize k = 0; k < targetIdx.size(); ++k)
-        out->varNames[targetIdx[k]] = std::move(newNames[k]);
+        out->varNames[targetIdx[k]] = keel::move(newNames[k]);
     TablePayload::validateUniqueNames(out->varNames, out->width(), "renamevars", "VariableNames");
-    outs[0] = makeTableValue(std::move(out), mr);
+    outs[0] = makeTableValue(keel::move(out), mr);
 }
 
 void movevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1846,7 +1846,7 @@ void movevars_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
         out->varNames.push_back(p->varNames[j].clone(alloc));
         out->cols.push_back(p->cols[j]);
     }
-    outs[0] = makeTableValue(std::move(out), mr);
+    outs[0] = makeTableValue(keel::move(out), mr);
 }
 
 // ── Identifier sanitization + Spreadsheet / Delimited Table I/O ──────────
@@ -1889,12 +1889,12 @@ void makeValidName_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::Mu
         Value out = Value::stringArray(in.dims().rows(), in.dims().cols(), mr);
         for (keel::usize i = 0; i < in.numel(); ++i)
             out.stringElemSet(i, convOne(in.stringElem(i)));
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     } else if (in.isCell()) {
         Value out = Value::cell(in.dims().rows(), in.dims().cols(), mr);
         for (keel::usize i = 0; i < in.numel(); ++i)
             out.cellAt(i) = Value::fromString(convOne(in.cellAt(i).toString()), mr);
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     } else {
         throw Error("makeValidName: input must be a char vector, string array, or cell array of char vectors",
                     0, 0, "makeValidName", "", "numkit:makeValidName:invalidInput");
@@ -1968,7 +1968,7 @@ static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
         keel::u32 localOff = u32(cdPos + 42);
         if (cdPos + 46 + nameLen <= bytes.size()) {
             keel::String name = keel::String::from(bytes.substr(cdPos + 46, nameLen));
-            entries.put(std::move(name), ZipEntry{method, compSz, uncompSz, localOff});
+            entries.put(keel::move(name), ZipEntry{method, compSz, uncompSz, localOff});
         }
         cdPos += 46 + nameLen + extraLen + commentLen;
     }
@@ -2023,7 +2023,7 @@ static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
                 accum.append(unescapeXmlStr(sstXml.substr(tOpenEnd + 1, tClose - (tOpenEnd + 1))).as_ref());
                 tPos = tClose + 4;
             }
-            sst.push_back(std::move(accum));
+            sst.push_back(keel::move(accum));
             pos = siClose + 5;
         }
     }
@@ -2149,7 +2149,7 @@ static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
             }
         }
         keel::usize r0 = rowNum - 1, c0 = colNum - 1;
-        cells.push_back(RawCell{r0, c0, isStr, std::move(valText)});
+        cells.push_back(RawCell{r0, c0, isStr, keel::move(valText)});
         if (r0 + 1 > maxR) maxR = r0 + 1;
         if (c0 + 1 > maxC) maxC = c0 + 1;
     }
@@ -2158,10 +2158,10 @@ static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
     for (keel::usize r = 0; r < maxR; ++r) {
         keel::Array<GridCell> row;
         row.resize(maxC);
-        grid.push_back(std::move(row));
+        grid.push_back(keel::move(row));
     }
     for (auto &cell : cells)
-        grid[cell.r][cell.c] = GridCell{true, cell.isStr, std::move(cell.text)};
+        grid[cell.r][cell.c] = GridCell{true, cell.isStr, keel::move(cell.text)};
     return grid;
 };
 
@@ -2210,7 +2210,7 @@ static auto parseCsvGrid = [](keel::StringRef content) -> keel::Array<keel::Arra
                     ++i;
                 if (i < line.size()) ++i;
                 bool present = !tok.empty();
-                row.push_back(GridCell{present, true, std::move(tok)});
+                row.push_back(GridCell{present, true, keel::move(tok)});
             } else {
                 keel::usize nextSep = i;
                 while (nextSep < line.size() && line[nextSep] != ',' && line[nextSep] != '\t')
@@ -2221,14 +2221,14 @@ static auto parseCsvGrid = [](keel::StringRef content) -> keel::Array<keel::Arra
                 while (b > a && keel::is_ascii_space(rawTok[b - 1])) --b;
                 keel::String tok = keel::String::from(rawTok.substr(a, b - a));
                 bool present = !tok.empty();
-                row.push_back(GridCell{present, false, std::move(tok)});
+                row.push_back(GridCell{present, false, keel::move(tok)});
                 if (nextSep == line.size())
                     break;
                 i = nextSep + 1;
             }
         }
         if (row.size() > maxC) maxC = row.size();
-        rows.push_back(std::move(row));
+        rows.push_back(keel::move(row));
     }
     for (auto &r : rows)
         r.resize(maxC);
@@ -2306,7 +2306,7 @@ void detectImportOptions_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutA
             keel::i32 suffix = 1;
             while (hasVarName(nm.as_ref()))
                 nm = keel::format_alloc(alloc, "{}_{}", base, suffix++);
-            varNames.push_back(std::move(nm));
+            varNames.push_back(keel::move(nm));
         }
     }
     Value vnCell = Value::cell(1, varNames.size(), mr);
@@ -2322,15 +2322,15 @@ void detectImportOptions_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutA
     }
     Value opts = Value::structure(mr);
     opts.field("VariableNames") = vnCell;
-    opts.field("OriginalVariableNames") = std::move(vnOrigCell);
+    opts.field("OriginalVariableNames") = keel::move(vnOrigCell);
     opts.field("SelectedVariableNames") = vnCell;
-    opts.field("VariableTypes") = std::move(vtCell);
+    opts.field("VariableTypes") = keel::move(vtCell);
     opts.field("Sheet") = Value::fromString(sheetName, mr);
     opts.field("SheetNum") = Value::scalar(keel::as<keel::f64>(sheetNum), mr);
     opts.field("PreserveVariableNames") = Value::logicalScalar(preserveNames, mr);
     opts.field("VariableNamingRule") = Value::fromString(preserveNames ? "preserve" : "modify", mr);
     opts.field("TreatAsMissing") = Value::cell(0, 0, mr);
-    outs[0] = std::move(opts);
+    outs[0] = keel::move(opts);
 }
 
 void setvaropts_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -2353,10 +2353,10 @@ void setvaropts_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
             Value c = Value::cell(1, tokens.size(), mr);
             for (keel::usize j = 0; j < tokens.size(); ++j)
                 c.cellAt(j) = Value::fromString(tokens[j], mr);
-            opts.field("TreatAsMissing") = std::move(c);
+            opts.field("TreatAsMissing") = keel::move(c);
         }
     }
-    outs[0] = std::move(opts);
+    outs[0] = keel::move(opts);
 }
 
 void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -2416,7 +2416,7 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
                       : parseCsvGrid(raw.as_ref());
     auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
     if (grid.empty()) {
-        outs[0] = makeTableValue(std::move(p), mr);
+        outs[0] = makeTableValue(keel::move(p), mr);
         return;
     }
     const keel::usize maxR = grid.size();
@@ -2435,7 +2435,7 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
         while (p->findVar(nm) >= 0) {
             nm = keel::format_alloc(alloc, "{}_{}", base, suffix++);
         }
-        p->varNames.push_back(std::move(nm));
+        p->varNames.push_back(keel::move(nm));
 
         keel::usize numCount = 0, strCount = 0;
         for (keel::usize r = 1; r < maxR; ++r) {
@@ -2461,15 +2461,15 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
                     tryParseCellDouble(cell.text, d);
                 dst[r - 1] = d;
             }
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         } else {
             Value col = Value::cell(nrows, 1, mr);
             for (keel::usize r = 1; r < maxR; ++r)
                 col.cellAt(r - 1) = Value::fromString(grid[r][c].text, mr);
-            p->cols.push_back(std::move(col));
+            p->cols.push_back(keel::move(col));
         }
     }
-    outs[0] = makeTableValue(std::move(p), mr);
+    outs[0] = makeTableValue(keel::move(p), mr);
 }
 
 void categorical_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -2520,7 +2520,7 @@ void categorical_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
             }
         }
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 static auto buildXlsxBytes = [](const TablePayload *p) -> keel::String {
@@ -2649,8 +2649,8 @@ static auto buildXlsxBytes = [](const TablePayload *p) -> keel::String {
             "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
             "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>"
             "</styleSheet>")});
-    files.push_back(Entry{keel::String::from("xl/sharedStrings.xml"), std::move(ss)});
-    files.push_back(Entry{keel::String::from("xl/worksheets/sheet1.xml"), std::move(sh)});
+    files.push_back(Entry{keel::String::from("xl/sharedStrings.xml"), keel::move(ss)});
+    files.push_back(Entry{keel::String::from("xl/worksheets/sheet1.xml"), keel::move(sh)});
 
     auto crc32Buf = [](keel::StringRef buf) -> keel::u32 {
         keel::u32 crc = 0xFFFFFFFFu;
@@ -2749,7 +2749,7 @@ void writetable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<V
             }
             os.push_back('\n');
         }
-        payload = std::move(os);
+        payload = keel::move(os);
     }
     FsContext::ResolvedPath resolved{};
     try {
@@ -2813,7 +2813,7 @@ void xlsread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 dst[c * nr + r] = d;
             }
         }
-        outs[0] = std::move(num);
+        outs[0] = keel::move(num);
     } else {
         outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, mr);
     }
@@ -2827,7 +2827,7 @@ void xlsread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 txt.cellAt(c * maxR + r) = Value::fromString(
                     (grid[r][c].present && !isNum) ? grid[r][c].text.as_ref() : keel::StringRef(""), mr);
             }
-        outs[1] = std::move(txt);
+        outs[1] = keel::move(txt);
     }
     if (nargout >= 3 && outs.size() >= 3) {
         Value rawOut = Value::cell(maxR, maxC, mr);
@@ -2843,7 +2843,7 @@ void xlsread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 else
                     rawOut.cellAt(c * maxR + r) = Value::fromString(cell.text, mr);
             }
-        outs[2] = std::move(rawOut);
+        outs[2] = keel::move(rawOut);
     }
 }
 
@@ -2909,7 +2909,7 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
             col.assign(N, 0.0);
             for (keel::usize i = 0; i < N && i < xc.numel(); ++i)
                 col[i] = xc.elemAsDouble(i);
-            Xcols.push_back(std::move(col));
+            Xcols.push_back(keel::move(col));
         }
     } else {
         argcheck::checkNargin(args.size(), 2, 8, "fitlm");
@@ -2925,7 +2925,7 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
             col.resize(N);
             for (keel::usize i = 0; i < N; ++i)
                 col[i] = X.elemAsDouble(i);
-            Xcols.push_back(std::move(col));
+            Xcols.push_back(keel::move(col));
             predNames.push_back(keel::String::from("x1", alloc));
         } else {
             for (keel::usize j = 0; j < xc; ++j) {
@@ -2933,7 +2933,7 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
                 col.assign(N, 0.0);
                 for (keel::usize i = 0; i < N && i < xr; ++i)
                     col[i] = X.elemAsDouble(j * xr + i);
-                Xcols.push_back(std::move(col));
+                Xcols.push_back(keel::move(col));
                 predNames.push_back(keel::format_alloc(alloc, "x{}", j + 1));
             }
         }
@@ -2980,7 +2980,7 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
         }
         if (piv != p) {
             for (keel::usize c = 0; c < W; ++c)
-                std::swap(aug[p * W + c], aug[piv * W + c]);
+                keel::swap(aug[p * W + c], aug[piv * W + c]);
         }
         keel::f64 diag = aug[p * W + p];
         if (keel::abs(diag) < 1e-15) continue;
@@ -3043,33 +3043,33 @@ void fitlm_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     }
 
     Value coefs = Value::structure(mr);
-    coefs.field("Estimate") = std::move(estV);
-    coefs.field("SE")       = std::move(seV);
-    coefs.field("tStat")    = std::move(tV);
-    coefs.field("pValue")   = std::move(pV);
+    coefs.field("Estimate") = keel::move(estV);
+    coefs.field("SE")       = keel::move(seV);
+    coefs.field("tStat")    = keel::move(tV);
+    coefs.field("pValue")   = keel::move(pV);
 
     Value rsq = Value::structure(mr);
     rsq.field("Ordinary") = Value::scalar(r2Ord, mr);
     rsq.field("Adjusted") = Value::scalar(r2Adj, mr);
 
     Value resStruct = Value::structure(mr);
-    resStruct.field("Raw") = std::move(rawRes);
+    resStruct.field("Raw") = keel::move(rawRes);
 
     Value pNamesCell = Value::cell(1, P, mr);
     for (keel::usize j = 0; j < P; ++j)
         pNamesCell.cellAt(j) = Value::fromString(predNames[j], mr);
 
     Value mdl = Value::structure(mr);
-    mdl.field("Coefficients")    = std::move(coefs);
-    mdl.field("Rsquared")        = std::move(rsq);
-    mdl.field("Fitted")          = std::move(fitted);
-    mdl.field("Residuals")       = std::move(resStruct);
+    mdl.field("Coefficients")    = keel::move(coefs);
+    mdl.field("Rsquared")        = keel::move(rsq);
+    mdl.field("Fitted")          = keel::move(fitted);
+    mdl.field("Residuals")       = keel::move(resStruct);
     mdl.field("MSE")             = Value::scalar(mse, mr);
     mdl.field("RMSE")            = Value::scalar(keel::sqrt(mse), mr);
     mdl.field("DFE")             = Value::scalar(dfe, mr);
     mdl.field("NumObservations") = Value::scalar(keel::as<keel::f64>(N), mr);
-    mdl.field("PredictorNames")  = std::move(pNamesCell);
-    outs[0] = std::move(mdl);
+    mdl.field("PredictorNames")  = keel::move(pNamesCell);
+    outs[0] = keel::move(mdl);
 }
 
 void predict_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -3106,7 +3106,7 @@ void predict_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
                     yp[i] += bj * col.elemAsDouble(i);
             }
         }
-        outs[0] = std::move(ypred);
+        outs[0] = keel::move(ypred);
         return;
     }
 
@@ -3116,7 +3116,7 @@ void predict_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         keel::f64 b1 = (P == 1) ? est.elemAsDouble(1) : 0.0;
         for (keel::usize i = 0; i < Xnew.numel(); ++i)
             yp[i] = b0 + b1 * Xnew.elemAsDouble(i);
-        outs[0] = std::move(ypred);
+        outs[0] = keel::move(ypred);
         return;
     }
 
@@ -3130,7 +3130,7 @@ void predict_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
             s += est.elemAsDouble(j + 1) * Xnew.elemAsDouble(j * M + i);
         yp[i] = s;
     }
-    outs[0] = std::move(ypred);
+    outs[0] = keel::move(ypred);
 }
 
 
@@ -3262,7 +3262,7 @@ void registerContainersRuntime(Engine &engine)
             }
             return os;
         };
-        engine.registerClass(std::move(dict));
+        engine.registerClass(keel::move(dict));
     }
 
     // ── containers.Map (handle semantics) ────────────────────
@@ -3371,7 +3371,7 @@ void registerContainersRuntime(Engine &engine)
                 "    ValueType: {}\n",
                 p->count(), p->keyType, p->valType);
         };
-        engine.registerClass(std::move(cm));
+        engine.registerClass(keel::move(cm));
     }
 
 
@@ -3384,7 +3384,7 @@ void registerContainersRuntime(Engine &engine)
             auto *alloc = mr ? mr : keel::default_allocator();
             auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             if (args.empty())
-                return makeTableValue(std::move(p), mr);
+                return makeTableValue(keel::move(p), mr);
 
             // Form 1: table('Size', [r, c], 'VariableTypes', {...}, ...)
             if (args.size() >= 4 && (args[0].isChar() || args[0].isString())
@@ -3423,7 +3423,7 @@ void registerContainersRuntime(Engine &engine)
                         Value col = Value::matrix(nr, 1, ValueType::DOUBLE, mr);
                         if (iequalsTableOpt(vt, "doublenan"))
                             std::fill_n(col.doubleDataMut(), nr, keel::Limits<keel::f64>::quiet_nan());
-                        p->cols.push_back(std::move(col));
+                        p->cols.push_back(keel::move(col));
                     } else if (iequalsTableOpt(vt, "logical")) {
                         p->cols.push_back(Value::matrix(nr, 1, ValueType::LOGICAL, mr));
                     } else if (iequalsTableOpt(vt, "string")) {
@@ -3434,7 +3434,7 @@ void registerContainersRuntime(Engine &engine)
                             col.cellAt(r) = iequalsTableOpt(vt, "cellstr")
                                 ? Value::fromString("", mr)
                                 : Value::matrix(0, 0, ValueType::DOUBLE, mr);
-                        p->cols.push_back(std::move(col));
+                        p->cols.push_back(keel::move(col));
                     } else {
                         p->cols.push_back(Value::matrix(nr, 1, ValueType::DOUBLE, mr));
                     }
@@ -3442,17 +3442,17 @@ void registerContainersRuntime(Engine &engine)
                 }
                 if (!vnames.empty()) {
                     TablePayload::validateUniqueNames(vnames, nc, "table", "VariableNames");
-                    p->varNames = std::move(vnames);
+                    p->varNames = keel::move(vnames);
                 }
                 if (!rnames.empty()) {
                     TablePayload::validateUniqueNames(rnames, nr, "table", "RowNames");
-                    p->rowNames = std::move(rnames);
+                    p->rowNames = keel::move(rnames);
                 }
                 if (!dnames.empty()) {
                     TablePayload::validateUniqueNames(dnames, 2, "table", "DimensionNames");
-                    p->dimNames = std::move(dnames);
+                    p->dimNames = keel::move(dnames);
                 }
-                return makeTableValue(std::move(p), mr);
+                return makeTableValue(keel::move(p), mr);
             }
 
             // Form 2: table(var1, var2, ..., Name, Value, ...)
@@ -3492,7 +3492,7 @@ void registerContainersRuntime(Engine &engine)
                             inferredName.assign(vname.as_ref());
                     });
                 }
-                p->varNames.push_back(inferredName.empty() ? keel::format_alloc(alloc, "Var{}", j + 1) : std::move(inferredName));
+                p->varNames.push_back(inferredName.empty() ? keel::format_alloc(alloc, "Var{}", j + 1) : keel::move(inferredName));
             }
 
             for (keel::usize i = dataEnd; i + 1 < args.size(); i += 2) {
@@ -3501,19 +3501,19 @@ void registerContainersRuntime(Engine &engine)
                 if (iequalsTableOpt(key, "VariableNames")) {
                     auto vn = TablePayload::extractNames(val, "table", "VariableNames", alloc);
                     TablePayload::validateUniqueNames(vn, p->cols.size(), "table", "VariableNames");
-                    p->varNames = std::move(vn);
+                    p->varNames = keel::move(vn);
                 } else if (iequalsTableOpt(key, "RowNames")) {
                     if (val.isEmpty()) {
                         p->rowNames.clear();
                     } else {
                         auto rn = TablePayload::extractNames(val, "table", "RowNames", alloc);
                         TablePayload::validateUniqueNames(rn, p->nrows, "table", "RowNames");
-                        p->rowNames = std::move(rn);
+                        p->rowNames = keel::move(rn);
                     }
                 } else if (iequalsTableOpt(key, "DimensionNames")) {
                     auto dn = TablePayload::extractNames(val, "table", "DimensionNames", alloc);
                     TablePayload::validateUniqueNames(dn, 2, "table", "DimensionNames");
-                    p->dimNames = std::move(dn);
+                    p->dimNames = keel::move(dn);
                 } else if (iequalsTableOpt(key, "VariableUnits")) {
                     p->varUnits = TablePayload::extractNames(val, "table", "VariableUnits", alloc);
                 } else if (iequalsTableOpt(key, "VariableDescriptions")) {
@@ -3521,7 +3521,7 @@ void registerContainersRuntime(Engine &engine)
                 }
             }
 
-            return makeTableValue(std::move(p), mr);
+            return makeTableValue(keel::move(p), mr);
         };
 
         auto initTableCommon = [&](BuiltinClass &c) {
@@ -3602,7 +3602,7 @@ void registerContainersRuntime(Engine &engine)
                 } else {
                     auto rn = TablePayload::extractNames(val, "table", "RowNames");
                     TablePayload::validateUniqueNames(rn, p->nrows, "table", "RowNames");
-                    p->rowNames = std::move(rn);
+                    p->rowNames = keel::move(rn);
                 }
                 return true;
             }
@@ -3677,7 +3677,7 @@ void registerContainersRuntime(Engine &engine)
                     sub->rowNames.push_back(p->rowNames[ri].clone(alloc));
             }
             if (!out.empty())
-                out[0] = makeTableValue(std::move(sub), mr);
+                out[0] = makeTableValue(keel::move(sub), mr);
         };
 
         c.subsasgn = [](Value &self, keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
@@ -3720,7 +3720,7 @@ void registerContainersRuntime(Engine &engine)
                     if (!p->rowNames.empty()) {
                         keel::Array<keel::String> nrn(alloc);
                         for (keel::usize i : keep) nrn.push_back(p->rowNames[i].clone(alloc));
-                        p->rowNames = std::move(nrn);
+                        p->rowNames = keel::move(nrn);
                     }
                     p->nrows = keep.size();
                     return;
@@ -3738,8 +3738,8 @@ void registerContainersRuntime(Engine &engine)
                             ncols.push_back(p->cols[j]);
                         }
                     }
-                    p->varNames = std::move(nvn);
-                    p->cols = std::move(ncols);
+                    p->varNames = keel::move(nvn);
+                    p->cols = keel::move(ncols);
                     if (p->cols.empty() && p->rowNames.empty())
                         p->nrows = 0;
                     return;
@@ -3923,7 +3923,7 @@ void registerContainersRuntime(Engine &engine)
             Value sz = Value::matrix(1, 2, ValueType::DOUBLE, mr);
             sz.doubleDataMut()[0] = keel::as<keel::f64>(p->nrows);
             sz.doubleDataMut()[1] = keel::as<keel::f64>(p->width());
-            out[0] = std::move(sz);
+            out[0] = keel::move(sz);
         });
 
         c.methods.put(keel::String::from("head"),
@@ -3945,7 +3945,7 @@ void registerContainersRuntime(Engine &engine)
                 sub->rowTimes = sliceColumnRows(p->rowTimes, rIdx.as_ref(), mr);
             if (!sub->rowNames.empty())
                 sub->rowNames.resize(take);
-            out[0] = makeTableValue(std::move(sub), mr);
+            out[0] = makeTableValue(keel::move(sub), mr);
         });
 
         c.methods.put(keel::String::from("tail"),
@@ -3969,9 +3969,9 @@ void registerContainersRuntime(Engine &engine)
             if (!sub->rowNames.empty()) {
                 keel::Array<keel::String> nrn(alloc);
                 for (keel::usize r : rIdx) nrn.push_back(p->rowNames[r].clone(alloc));
-                sub->rowNames = std::move(nrn);
+                sub->rowNames = keel::move(nrn);
             }
-            out[0] = makeTableValue(std::move(sub), mr);
+            out[0] = makeTableValue(keel::move(sub), mr);
         });
 
         c.methods.put(keel::String::from("summary"),
@@ -3987,7 +3987,7 @@ void registerContainersRuntime(Engine &engine)
                 Value sz = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 sz.doubleDataMut()[0] = keel::as<keel::f64>(col.dims().rows());
                 sz.doubleDataMut()[1] = keel::as<keel::f64>(col.dims().cols());
-                vs.field("Size") = std::move(sz);
+                vs.field("Size") = keel::move(sz);
                 vs.field("Type") = col.isObject()
                                  ? Value::fromString(col.objectClassNameRef(), mr)
                                  : Value::fromString(mtypeName(col.type()), mr);
@@ -4015,10 +4015,10 @@ void registerContainersRuntime(Engine &engine)
                         vs.field("Max") = Value::scalar(mx, mr);
                     }
                 }
-                s.field(p->varNames[j]) = std::move(vs);
+                s.field(p->varNames[j]) = keel::move(vs);
             }
             if (nargout > 0)
-                out[0] = std::move(s);
+                out[0] = keel::move(s);
         });
 
         c.methods.put(keel::String::from("sortrows"),
@@ -4079,14 +4079,14 @@ void registerContainersRuntime(Engine &engine)
             if (!sub->rowNames.empty()) {
                 keel::Array<keel::String> nrn(alloc);
                 for (keel::usize r : ord) nrn.push_back(p->rowNames[r].clone(alloc));
-                sub->rowNames = std::move(nrn);
+                sub->rowNames = keel::move(nrn);
             }
-            out[0] = makeTableValue(std::move(sub), mr);
+            out[0] = makeTableValue(keel::move(sub), mr);
             if (nargout >= 2) {
                 Value idx = Value::matrix(ord.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize i = 0; i < ord.size(); ++i)
                     idx.doubleDataMut()[i] = keel::as<keel::f64>(ord[i] + 1);
-                out[1] = std::move(idx);
+                out[1] = keel::move(idx);
             }
         });
 
@@ -4174,14 +4174,14 @@ void registerContainersRuntime(Engine &engine)
             if (!sub->rowNames.empty()) {
                 keel::Array<keel::String> nrn(alloc);
                 for (keel::usize r : ord) nrn.push_back(p->rowNames[r].clone(alloc));
-                sub->rowNames = std::move(nrn);
+                sub->rowNames = keel::move(nrn);
             }
-            out[0] = makeTableValue(std::move(sub), mr);
+            out[0] = makeTableValue(keel::move(sub), mr);
             if (nargout >= 2) {
                 Value idx = Value::matrix(ord.size(), 1, ValueType::DOUBLE, mr);
                 for (keel::usize r = 0; r < ord.size(); ++r)
                     idx.doubleDataMut()[r] = keel::as<keel::f64>(ord[r] + 1);
-                out[1] = std::move(idx);
+                out[1] = keel::move(idx);
             }
         });
 
@@ -4263,11 +4263,11 @@ void registerContainersRuntime(Engine &engine)
             if (!sub->rowNames.empty()) {
                 keel::Array<keel::String> nrn(alloc);
                 for (keel::usize r : keepRows) nrn.push_back(p->rowNames[r].clone(alloc));
-                sub->rowNames = std::move(nrn);
+                sub->rowNames = keel::move(nrn);
             }
-            out[0] = makeTableValue(std::move(sub), mr);
+            out[0] = makeTableValue(keel::move(sub), mr);
             if (nargout >= 2 && out.size() >= 2)
-                out[1] = std::move(tfRemoved);
+                out[1] = keel::move(tfRemoved);
         });
 
         c.methods.put(keel::String::from("groupsummary"),
@@ -4322,7 +4322,7 @@ void registerContainersRuntime(Engine &engine)
                     repRows.push_back(idx);
                     keel::Array<keel::usize> g(alloc);
                     g.push_back(idx);
-                    groupMembers.push_back(std::move(g));
+                    groupMembers.push_back(keel::move(g));
                 } else {
                     keel::usize prev = repRows.back();
                     bool same = true;
@@ -4338,7 +4338,7 @@ void registerContainersRuntime(Engine &engine)
                         repRows.push_back(idx);
                         keel::Array<keel::usize> g(alloc);
                         g.push_back(idx);
-                        groupMembers.push_back(std::move(g));
+                        groupMembers.push_back(keel::move(g));
                     }
                 }
             }
@@ -4354,7 +4354,7 @@ void registerContainersRuntime(Engine &engine)
             for (keel::usize g = 0; g < ng; ++g)
                 gcCol.doubleDataMut()[g] = keel::as<keel::f64>(groupMembers[g].size());
             res->varNames.push_back(keel::String::from("GroupCount", alloc));
-            res->cols.push_back(std::move(gcCol));
+            res->cols.push_back(keel::move(gcCol));
 
             for (const keel::String &m : methods) {
                 for (keel::usize dc : dataCols) {
@@ -4407,10 +4407,10 @@ void registerContainersRuntime(Engine &engine)
                         dst[g] = val;
                     }
                     res->varNames.push_back(keel::format_alloc(alloc, "{}_{}", m, p->varNames[dc]));
-                    res->cols.push_back(std::move(statCol));
+                    res->cols.push_back(keel::move(statCol));
                 }
             }
-            out[0] = makeTableValue(std::move(res), mr);
+            out[0] = makeTableValue(keel::move(res), mr);
         });
 
         auto horzcatFn = [](Value &lhs, keel::ArrayRef<Value> args, keel::usize,
@@ -4443,7 +4443,7 @@ void registerContainersRuntime(Engine &engine)
                 if (out->rowNames.empty() && !rp->rowNames.empty())
                     out->rowNames = rp->rowNames.clone(alloc);
             }
-            outs[0] = makeTableValue(std::move(out), mr);
+            outs[0] = makeTableValue(keel::move(out), mr);
         };
         c.ops.put(keel::String::from("horzcat"), horzcatFn);
         c.methods.put(keel::String::from("horzcat"), horzcatFn);
@@ -4494,7 +4494,7 @@ void registerContainersRuntime(Engine &engine)
                             for (keel::usize r = 0; r < nr2; ++r)
                                 col.cellAt((nr1 + r) + colC * totR) = c2.cellAt(r + colC * nr2);
                         }
-                        out->cols[j] = std::move(col);
+                        out->cols[j] = keel::move(col);
                     } else if (c1.isString() && c2.isString()) {
                         Value col = Value::stringArray(totR, nc, mr);
                         for (keel::usize colC = 0; colC < nc; ++colC) {
@@ -4503,7 +4503,7 @@ void registerContainersRuntime(Engine &engine)
                             for (keel::usize r = 0; r < nr2; ++r)
                                 col.stringElemSet((nr1 + r) + colC * totR, c2.stringElem(r + colC * nr2));
                         }
-                        out->cols[j] = std::move(col);
+                        out->cols[j] = keel::move(col);
                     } else if (c1.isLogical() && c2.isLogical()) {
                         Value col = Value::matrix(totR, nc, ValueType::LOGICAL, mr);
                         for (keel::usize colC = 0; colC < nc; ++colC) {
@@ -4512,7 +4512,7 @@ void registerContainersRuntime(Engine &engine)
                             for (keel::usize r = 0; r < nr2; ++r)
                                 col.logicalDataMut()[(nr1 + r) + colC * totR] = c2.logicalData()[r + colC * nr2];
                         }
-                        out->cols[j] = std::move(col);
+                        out->cols[j] = keel::move(col);
                     } else {
                         Value col = Value::matrix(totR, nc, ValueType::DOUBLE, mr);
                         for (keel::usize colC = 0; colC < nc; ++colC) {
@@ -4521,7 +4521,7 @@ void registerContainersRuntime(Engine &engine)
                             for (keel::usize r = 0; r < nr2; ++r)
                                 col.doubleDataMut()[(nr1 + r) + colC * totR] = c2.elemAsDouble(r + colC * nr2);
                         }
-                        out->cols[j] = std::move(col);
+                        out->cols[j] = keel::move(col);
                     }
                 }
                 if (!out->rowNames.empty() && !rp->rowNames.empty()) {
@@ -4531,7 +4531,7 @@ void registerContainersRuntime(Engine &engine)
                     out->rowNames.clear();
                 }
             }
-            outs[0] = makeTableValue(std::move(out), mr);
+            outs[0] = makeTableValue(keel::move(out), mr);
         };
         c.ops.put(keel::String::from("vertcat"), vertcatFn);
         c.methods.put(keel::String::from("vertcat"), vertcatFn);
@@ -4570,7 +4570,7 @@ void registerContainersRuntime(Engine &engine)
             for (keel::usize i = 0; i < p->nrows; ++i) {
                 keel::Array<keel::String> row;
                 row.resize(ncols);
-                cells.push_back(std::move(row));
+                cells.push_back(keel::move(row));
             }
             for (keel::usize j = 0; j < ncols; ++j) {
                 colWidths[j] = std::max<keel::usize>(4, p->varNames[j].size());
@@ -4652,7 +4652,7 @@ void registerContainersRuntime(Engine &engine)
             auto p = keel::make_arc_in<TablePayload>(alloc, alloc);
             p->isTimetable = true;
             if (args.empty())
-                return makeTableValue(std::move(p), mr);
+                return makeTableValue(keel::move(p), mr);
             keel::usize dataEnd = args.size();
             while (dataEnd >= 2 && (args[dataEnd - 2].isChar() || args[dataEnd - 2].isString())
                    && (isKnownTableOption(args[dataEnd - 2]) || iequalsTableOpt(args[dataEnd - 2].toString(), "RowTimes"))) {
@@ -4689,7 +4689,7 @@ void registerContainersRuntime(Engine &engine)
                         p->rowTimesName = p->dimNames[0].clone(alloc);
                 }
             }
-            return makeTableValue(std::move(p), mr);
+            return makeTableValue(keel::move(p), mr);
         };
 
 
@@ -4732,7 +4732,7 @@ void registerContainersRuntime(Engine &engine)
                         dst[i + j * nr] = miss ? 1 : 0;
                     }
                 }
-                outs[0] = std::move(tf);
+                outs[0] = keel::move(tf);
                 return;
             }
             outs[0] = Value::matrix(0, 0, ValueType::LOGICAL, mr);
@@ -4740,8 +4740,8 @@ void registerContainersRuntime(Engine &engine)
         tbl.methods.put(keel::String::from("ismissing"), ismissingFn);
         tt.methods.put(keel::String::from("ismissing"), ismissingFn);
 
-        engine.registerClass(std::move(tbl));
-        engine.registerClass(std::move(tt));
+        engine.registerClass(keel::move(tbl));
+        engine.registerClass(keel::move(tt));
 
     }
 

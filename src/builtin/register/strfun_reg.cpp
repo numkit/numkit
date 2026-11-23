@@ -9,7 +9,6 @@
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 
-#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -127,7 +126,7 @@ void strmatch_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     } else {
         auto out = Value::matrix(hits.size(), 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < hits.size(); ++i) out.doubleDataMut()[i] = hits[i];
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
     }
 }
 

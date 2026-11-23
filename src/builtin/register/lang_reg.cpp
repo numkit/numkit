@@ -37,11 +37,11 @@ struct FevalCallbackBuiltin : CallbackBuiltin
         cont->handle = args[0];
         cont->n = 1;
         cont->dest = dest;
-        cont->makeArgs = [callArgs = std::move(callArgs)](keel::usize) -> keel::Array<Value> {
+        cont->makeArgs = [callArgs = keel::move(callArgs)](keel::usize) -> keel::Array<Value> {
             return callArgs.clone();
         };
         cont->pack = [](keel::Array<Value> &results) -> Value {
-            return results.empty() ? Value() : std::move(results[0]);
+            return results.empty() ? Value() : keel::move(results[0]);
         };
         cont->results.reserve(1);
         return cont;
@@ -72,7 +72,7 @@ void feval_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     } else {
         auto rs = ctx.engine->callFunctionHandleMulti(handle, callArgs, nargout, ctx.env);
         for (keel::usize i = 0; i < nargout && i < outs.size() && i < rs.size(); ++i)
-            outs[i] = std::move(rs[i]);
+            outs[i] = keel::move(rs[i]);
     }
 }
 
@@ -101,8 +101,8 @@ void fwdCall_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     }
     Value cell = Value::cell(1, n, ctx.engine->allocator());
     for (keel::usize i = 0; i < n && i < rs.size(); ++i)
-        cell.cellAt(i) = std::move(rs[i]);
-    outs[0] = std::move(cell);
+        cell.cellAt(i) = keel::move(rs[i]);
+    outs[0] = keel::move(cell);
 }
 
 void iskeyword_reg(keel::ArrayRef<Value> args, keel::usize,

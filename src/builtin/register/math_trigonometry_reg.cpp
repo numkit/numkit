@@ -17,8 +17,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -99,14 +97,14 @@ void cart2pol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto *mr = ctx.engine->allocator();
     if (args.size() >= 3) {
         auto [theta, rho, z] = cart2pol(args[0], args[1], args[2], mr);
-        outs[0] = std::move(theta);
-        if (nargout > 1) outs[1] = std::move(rho);
-        if (nargout > 2) outs[2] = std::move(z);
+        outs[0] = keel::move(theta);
+        if (nargout > 1) outs[1] = keel::move(rho);
+        if (nargout > 2) outs[2] = keel::move(z);
         return;
     }
     auto [theta, rho] = cart2pol(args[0], args[1], mr);
-    outs[0] = std::move(theta);
-    if (nargout > 1) outs[1] = std::move(rho);
+    outs[0] = keel::move(theta);
+    if (nargout > 1) outs[1] = keel::move(rho);
 }
 
 void pol2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -116,14 +114,14 @@ void pol2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto *mr = ctx.engine->allocator();
     if (args.size() >= 3) {
         auto [xv, yv, zv] = pol2cart(args[0], args[1], args[2], mr);
-        outs[0] = std::move(xv);
-        if (nargout > 1) outs[1] = std::move(yv);
-        if (nargout > 2) outs[2] = std::move(zv);
+        outs[0] = keel::move(xv);
+        if (nargout > 1) outs[1] = keel::move(yv);
+        if (nargout > 2) outs[2] = keel::move(zv);
         return;
     }
     auto [xv, yv] = pol2cart(args[0], args[1], mr);
-    outs[0] = std::move(xv);
-    if (nargout > 1) outs[1] = std::move(yv);
+    outs[0] = keel::move(xv);
+    if (nargout > 1) outs[1] = keel::move(yv);
 }
 
 void cart2sph_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -131,9 +129,9 @@ void cart2sph_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, 3, "cart2sph");
     argcheck::checkNargin(args.size(), 3, 3, "cart2sph");
     auto [az, el, r] = cart2sph(args[0], args[1], args[2], ctx.engine->allocator());
-    outs[0] = std::move(az);
-    if (nargout > 1) outs[1] = std::move(el);
-    if (nargout > 2) outs[2] = std::move(r);
+    outs[0] = keel::move(az);
+    if (nargout > 1) outs[1] = keel::move(el);
+    if (nargout > 2) outs[2] = keel::move(r);
 }
 
 void sph2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -141,9 +139,9 @@ void sph2cart_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, 3, "sph2cart");
     argcheck::checkNargin(args.size(), 3, 3, "sph2cart");
     auto [xv, yv, zv] = sph2cart(args[0], args[1], args[2], ctx.engine->allocator());
-    outs[0] = std::move(xv);
-    if (nargout > 1) outs[1] = std::move(yv);
-    if (nargout > 2) outs[2] = std::move(zv);
+    outs[0] = keel::move(xv);
+    if (nargout > 1) outs[1] = keel::move(yv);
+    if (nargout > 2) outs[2] = keel::move(zv);
 }
 
 } // namespace detail

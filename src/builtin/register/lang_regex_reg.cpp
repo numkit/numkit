@@ -18,8 +18,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -51,7 +49,7 @@ inline void regexpDispatch(keel::ArrayRef<Value> args, keel::usize nargout,
         for (keel::usize j = 0; j < lo.size(); ++j)
             lo[j] = keel::to_ascii_lower(lo[j]);
         if (lo == "once") { once = true; continue; }
-        if (opt.empty()) opt = std::move(o);
+        if (opt.empty()) opt = keel::move(o);
     }
     if (once) {
         // 'once' forces a single scalarised output (opt may be "" → 'start').

@@ -4,7 +4,6 @@
 #include <numkit/core/ast.hpp>
 #include <numkit/core/elem_regions.hpp>
 
-#include <utility>
 
 namespace numkit {
 namespace depdetail {
@@ -49,7 +48,7 @@ AxisRange axisOf(const ASTNode *n)
                 return AxisRange{AxisRange::UNRESOLVED, 0, 0};
         keel::i64 lo = v[0], hi = (nv == 2) ? v[1] : v[2];
         if (lo > hi)
-            std::swap(lo, hi);
+            keel::swap(lo, hi);
         return AxisRange{AxisRange::RANGE, lo, hi};
     }
     keel::i64 x = 0;

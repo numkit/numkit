@@ -19,8 +19,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -37,7 +35,7 @@ void numericConstructor_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutAr
     if (args.empty()) {
         auto r = Value::matrix(1, 1, targetType, mr);
         *static_cast<T *>(r.rawDataMut()) = static_cast<T>(0);
-        outs[0] = std::move(r);
+        outs[0] = keel::move(r);
         return;
     }
     outs[0] = numericConstructor<T>(targetType, args[0], mr);
@@ -202,7 +200,7 @@ void cast_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
         Value r = cast(args[0], cname, mr);
         if (args[2].isComplex() && !r.isComplex())
             r = complex(r, mr);
-        outs[0] = std::move(r);
+        outs[0] = keel::move(r);
         return;
     }
     outs[0] = cast(args[0], args[1].toString(), mr);

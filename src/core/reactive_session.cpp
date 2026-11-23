@@ -7,7 +7,6 @@
 #include <numkit/core/parser.hpp>
 
 #include <algorithm>
-#include <utility>
 
 namespace numkit {
 
@@ -207,7 +206,7 @@ keel::Array<keel::Array<keel::usize>> ReactiveSession::detectCycles() const
     keel::Array<keel::i32> idx(n, -1), low(n, 0);
     keel::Array<char> on(n, 0);
     keel::Array<keel::usize> st;
-    keel::Array<std::pair<keel::usize, keel::usize>> frames;   // {v, next-child}
+    keel::Array<keel::Pair<keel::usize, keel::usize>> frames;   // {v, next-child}
     keel::i32 ctr = 0;
     for (keel::usize r = 0; r < n; ++r) {
         if (idx[r] != -1)

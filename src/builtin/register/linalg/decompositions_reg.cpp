@@ -36,7 +36,7 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
+#include <keel/tuple.h>
 
 namespace numkit::linalg {
 namespace detail {
@@ -237,11 +237,11 @@ void lu_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
 
     if (nargout >= 2) {
         auto [L, U, P] = lu_decompose(args[0], mr);
-        outs[0] = std::move(L);
-        outs[1] = std::move(U);
+        outs[0] = keel::move(L);
+        outs[1] = keel::move(U);
         if (nargout >= 3)
             outs[2] = (vectorP && nargout >= 3) ? permMatrixToVector(P, mr)
-                                                : std::move(P);
+                                                : keel::move(P);
     } else {
         outs[0] = lu_combined(args[0], mr);
     }
@@ -282,13 +282,13 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
             R = topLeftBlock(R, k, n, mr);
             vectorP = true;
         }
-        outs[0] = std::move(Q);
-        outs[1] = std::move(R);
+        outs[0] = keel::move(Q);
+        outs[1] = keel::move(R);
         if (vectorP) {
             Value p = Value::matrix(1, n, ValueType::DOUBLE, mr);
             keel::f64 *pd = p.doubleDataMut();
             for (keel::usize k = 0; k < n; ++k) pd[k] = keel::as<keel::f64>(perm[k] + 1);
-            outs[2] = std::move(p);
+            outs[2] = keel::move(p);
         } else {
             Value P = Value::matrix(n, n, ValueType::DOUBLE, mr);
             keel::f64 *Pd = P.doubleDataMut();
@@ -306,12 +306,12 @@ void qr_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
             Q = firstCols(Q, k, mr);
             R = topLeftBlock(R, k, n, mr);
         }
-        outs[0] = std::move(Q);
-        outs[1] = std::move(R);
+        outs[0] = keel::move(Q);
+        outs[1] = keel::move(R);
     } else {
         Value R = qr_R_only(args[0], mr);
         if (econ) R = topLeftBlock(R, std::min(m, n), n, mr);
-        outs[0] = std::move(R);
+        outs[0] = keel::move(R);
     }
 }
 
@@ -329,9 +329,9 @@ void svd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             S = topLeftBlock(S, k, k, mr);
             V = firstCols(V, k, mr);
         }
-        outs[0] = std::move(U);
-        outs[1] = std::move(S);
-        if (nargout >= 3) outs[2] = std::move(V);
+        outs[0] = keel::move(U);
+        outs[1] = keel::move(S);
+        if (nargout >= 3) outs[2] = keel::move(V);
     } else {
         outs[0] = svd_values(args[0], mr);
     }
@@ -341,8 +341,8 @@ void qrupdate_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
 {
     argcheck::checkNargin(args.size(), 4, 4, "qrupdate");
     auto [Q1, R1] = qrupdate(args[0], args[1], args[2], args[3], ctx.engine->allocator());
-    outs[0] = std::move(Q1);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
+    outs[0] = keel::move(Q1);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(R1);
 }
 
 void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -366,8 +366,8 @@ void qrinsert_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto [Q1, R1] = isRow
         ? qrinsert_row(args[0], args[1], keel::as<keel::usize>(kd), args[3], ctx.engine->allocator())
         : qrinsert(args[0], args[1], keel::as<keel::usize>(kd), args[3], ctx.engine->allocator());
-    outs[0] = std::move(Q1);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
+    outs[0] = keel::move(Q1);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(R1);
 }
 
 void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -391,8 +391,8 @@ void qrdelete_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto [Q1, R1] = isRow
         ? qrdelete_row(args[0], args[1], keel::as<keel::usize>(kd), ctx.engine->allocator())
         : qrdelete(args[0], args[1], keel::as<keel::usize>(kd), ctx.engine->allocator());
-    outs[0] = std::move(Q1);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(R1);
+    outs[0] = keel::move(Q1);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(R1);
 }
 
 void cholupdate_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -417,10 +417,10 @@ void qz_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<V
 {
     argcheck::checkNargin(args.size(), 2, 3, "qz");
     auto [AA, BB, Q, Z] = qz(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(AA);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(BB);
-    if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(Q);
-    if (nargout >= 4 && outs.size() >= 4) outs[3] = std::move(Z);
+    outs[0] = keel::move(AA);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(BB);
+    if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(Q);
+    if (nargout >= 4 && outs.size() >= 4) outs[3] = keel::move(Z);
 }
 
 void gsvd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -430,11 +430,11 @@ void gsvd_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         outs[0] = gsvd_values(args[0], args[1], ctx.engine->allocator());
     } else {
         auto [U, V, X, C, S] = gsvd(args[0], args[1], ctx.engine->allocator());
-        outs[0] = std::move(U);
-        if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(V);
-        if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(X);
-        if (nargout >= 4 && outs.size() >= 4) outs[3] = std::move(C);
-        if (nargout >= 5 && outs.size() >= 5) outs[4] = std::move(S);
+        outs[0] = keel::move(U);
+        if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(V);
+        if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(X);
+        if (nargout >= 4 && outs.size() >= 4) outs[3] = keel::move(C);
+        if (nargout >= 5 && outs.size() >= 5) outs[4] = keel::move(S);
     }
 }
 
@@ -443,14 +443,14 @@ void ordqz_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     argcheck::checkNargin(args.size(), 5, 5, "ordqz");
     Value AA, BB, Q, Z;
     if (args[4].isChar() || args[4].isString()) {
-        std::tie(AA, BB, Q, Z) = ordqz(args[0], args[1], args[2], args[3], args[4].toString(), ctx.engine->allocator());
+        keel::tie(AA, BB, Q, Z) = ordqz(args[0], args[1], args[2], args[3], args[4].toString(), ctx.engine->allocator());
     } else {
-        std::tie(AA, BB, Q, Z) = ordqz(args[0], args[1], args[2], args[3], args[4], ctx.engine->allocator());
+        keel::tie(AA, BB, Q, Z) = ordqz(args[0], args[1], args[2], args[3], args[4], ctx.engine->allocator());
     }
-    outs[0] = std::move(AA);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(BB);
-    if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(Q);
-    if (nargout >= 4 && outs.size() >= 4) outs[3] = std::move(Z);
+    outs[0] = keel::move(AA);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(BB);
+    if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(Q);
+    if (nargout >= 4 && outs.size() >= 4) outs[3] = keel::move(Z);
 }
 
 void ordschur_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -458,12 +458,12 @@ void ordschur_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 3, 3, "ordschur");
     Value U, T;
     if (args[2].isChar() || args[2].isString()) {
-        std::tie(U, T) = ordschur(args[0], args[1], args[2].toString(), ctx.engine->allocator());
+        keel::tie(U, T) = ordschur(args[0], args[1], args[2].toString(), ctx.engine->allocator());
     } else {
-        std::tie(U, T) = ordschur(args[0], args[1], args[2], ctx.engine->allocator());
+        keel::tie(U, T) = ordschur(args[0], args[1], args[2], ctx.engine->allocator());
     }
-    outs[0] = std::move(U);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(T);
+    outs[0] = keel::move(U);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(T);
 }
 
 void eigs_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -504,8 +504,8 @@ void eigs_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     } else {
         auto [V, D] = hasB ? eigs_generalized(A, args[1], k, sigma, mr)
                            : eigs(A, k, sigma, mr);
-        outs[0] = std::move(V);
-        if (outs.size() >= 2) outs[1] = std::move(D);
+        outs[0] = keel::move(V);
+        if (outs.size() >= 2) outs[1] = keel::move(D);
         if (nargout >= 3 && outs.size() >= 3) outs[2] = Value::scalar(0.0);
     }
 }
@@ -520,9 +520,9 @@ void svds_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         outs[0] = svds_values(args[0], k, ctx.engine->allocator());
     } else {
         auto [U, S, V] = svds(args[0], k, ctx.engine->allocator());
-        outs[0] = std::move(U);
-        if (outs.size() >= 2) outs[1] = std::move(S);
-        if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(V);
+        outs[0] = keel::move(U);
+        if (outs.size() >= 2) outs[1] = keel::move(S);
+        if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(V);
     }
 }
 
@@ -531,18 +531,18 @@ void svdsketch_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
     argcheck::checkNargin(args.size(), 1, 2, "svdsketch");
     keel::f64 tol = (args.size() >= 2 && !args[1].isEmpty()) ? args[1].toScalar() : 1e-6;
     auto [U, S, V] = svdsketch(args[0], tol, ctx.engine->allocator());
-    outs[0] = std::move(U);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(S);
-    if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(V);
+    outs[0] = keel::move(U);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(S);
+    if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(V);
 }
 
 void svdappend_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 4, 4, "svdappend");
     auto [U, S, V] = svdappend(args[0], args[1], args[2], args[3], ctx.engine->allocator());
-    outs[0] = std::move(U);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(S);
-    if (nargout >= 3 && outs.size() >= 3) outs[2] = std::move(V);
+    outs[0] = keel::move(U);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(S);
+    if (nargout >= 3 && outs.size() >= 3) outs[2] = keel::move(V);
 }
 
 } // namespace detail

@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <utility>
 
 // Forward-declarations from toolboxes/builtin/src/backends/binary_ops_loops.hpp.
 // Linked from the same nk library; lets the VM bypass the public
@@ -187,7 +186,7 @@ enter_frame:
                     }
                     break;
                 }
-                R[I.a] = collapseCsl(std::move(R[I.b]));
+                R[I.a] = collapseCsl(keel::move(R[I.b]));
                 break;
             case OpCode::COLON_ALL:
                 R[I.a] = Value::fromString(":", engine_.mr_);
@@ -208,7 +207,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*endFn)(self, keel::ArrayRef<Value>(eargs, 2), 1,
                                      keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -511,7 +510,7 @@ enter_frame:
                     Value fout;
                     if (rule.execute(&R[I.b], I.c, fout, engine_.mr_)) {
                         engine_.noteFusionHit();
-                        R[I.a] = std::move(fout);
+                        R[I.a] = keel::move(fout);
                         ip += keel::as<keel::i32>(I.e) + 1;
                         continue;
                     }
@@ -596,7 +595,7 @@ enter_frame:
                     ip += I.d;
                     continue;
                 }
-                forStack_.push_back(std::move(fs));
+                forStack_.push_back(keel::move(fs));
                 forSetVar(R[I.a], forStack_.back());
                 break;
             }
@@ -626,7 +625,7 @@ enter_frame:
                                     CallContext ctx{&engine_, currentCallEnv()};
                                     (*colonOp)(self, keel::ArrayRef<Value>(ops, 2), 1,
                                                keel::MutArrayRef<Value>(out, 1), ctx);
-                                    rangeVal = std::move(out[0]);
+                                    rangeVal = keel::move(out[0]);
                                 }
                             }
                         }
@@ -659,7 +658,7 @@ enter_frame:
                                     CallContext ctx{&engine_, currentCallEnv()};
                                     (*colonOp)(self, keel::ArrayRef<Value>(ops, 3), 1,
                                                keel::MutArrayRef<Value>(out, 1), ctx);
-                                    rangeVal = std::move(out[0]);
+                                    rangeVal = keel::move(out[0]);
                                 }
                             }
                         }
@@ -686,7 +685,7 @@ enter_frame:
                     ForState fs;
                     fs.index = 0;
                     if (!rangeVal.isEmpty()) {
-                        fs.range = std::move(rangeVal);
+                        fs.range = keel::move(rangeVal);
                         fs.rangeType = fs.range.type();
                         const auto &dims = fs.range.dims();
                         fs.rows = dims.rows();
@@ -699,7 +698,7 @@ enter_frame:
                         ip += I.d;
                         continue;
                     }
-                    forStack_.push_back(std::move(fs));
+                    forStack_.push_back(keel::move(fs));
                     forSetVar(R[I.a], forStack_.back());
                     break;
                 }
@@ -725,7 +724,7 @@ enter_frame:
                 fs.lazy = true;
                 fs.lazyStart = start;
                 fs.lazyStep  = step;
-                forStack_.push_back(std::move(fs));
+                forStack_.push_back(keel::move(fs));
                 forSetVar(R[I.a], forStack_.back());
                 break;
             }
@@ -759,7 +758,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*colonOp)(self, keel::ArrayRef<Value>(ops, 2), 1,
                                        keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -796,7 +795,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*colonOp)(self, keel::ArrayRef<Value>(ops, 3), 1,
                                        keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -842,7 +841,7 @@ enter_frame:
                                 CallContext ctx{&engine_, currentCallEnv()};
                                 (*catOp)(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
                                          keel::MutArrayRef<Value>(out, 1), ctx);
-                                R[I.a] = std::move(out[0]);
+                                R[I.a] = keel::move(out[0]);
                                 handled = true;
                             }
                         }
@@ -874,7 +873,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*catOp)(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
                                      keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -898,7 +897,7 @@ enter_frame:
                                 CallContext ctx{&engine_, currentCallEnv()};
                                 (*catOp)(self, keel::ArrayRef<Value>(&R[I.b + 1], I.c - 1), 1,
                                          keel::MutArrayRef<Value>(out, 1), ctx);
-                                R[I.a] = std::move(out[0]);
+                                R[I.a] = keel::move(out[0]);
                                 handled = true;
                             }
                         }
@@ -934,7 +933,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*catOp)(self, keel::ArrayRef<Value>(&elems[1], 1), 1,
                                      keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -1036,7 +1035,7 @@ enter_frame:
                     Value out;
                     if (engine_.tryObjectSubsref(R[I.b], keel::ArrayRef<Value>(idxArgs, 1), 1,
                                                  out, currentCallEnv())) {
-                        R[I.a] = std::move(out);
+                        R[I.a] = keel::move(out);
                         break;
                     }
                     // No custom subsref → builtin object-array indexing.
@@ -1070,7 +1069,7 @@ enter_frame:
                         if (res.dims().rows() != ix.dims().rows() || res.dims().cols() != ix.dims().cols())
                             res = res.reshape(ix.dims().rows(), ix.dims().cols(), engine_.mr_);
                     }
-                    R[I.a] = std::move(res);
+                    R[I.a] = keel::move(res);
                 }
                 break;
             }
@@ -1086,7 +1085,7 @@ enter_frame:
                     Value out;
                     if (engine_.tryObjectSubsref(R[I.b], keel::ArrayRef<Value>(idxArgs, 2), 1,
                                                  out, currentCallEnv())) {
-                        R[I.a] = std::move(out);
+                        R[I.a] = keel::move(out);
                         break;
                     }
                 }
@@ -1416,7 +1415,7 @@ enter_frame:
                 Value fh = R[base];
                 if (count > 1)
                     fh.setFuncHandleCaptures(&R[base + 1], count - 1);
-                R[I.a] = std::move(fh);
+                R[I.a] = keel::move(fh);
                 break;
             }
             case OpCode::UPVAL_NEW: {
@@ -1473,7 +1472,7 @@ enter_frame:
                 for (keel::u16 i = 0; i < count; ++i) {
                     cell.cellAt(i) = R[base + i];
                 }
-                R[I.a] = std::move(cell);
+                R[I.a] = keel::move(cell);
                 break;
             }
             case OpCode::CELL_APPEND_FLATTEN: {
@@ -1508,7 +1507,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*bgFn)(self, keel::ArrayRef<Value>(args, 1), 1,
                                     keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -1528,7 +1527,7 @@ enter_frame:
                     Value csl = Value::csl(ids.size());
                     for (keel::usize k = 0; k < ids.size(); ++k)
                         csl.cslAt(k) = cell.cellAt(ids[k]);
-                    R[I.a] = std::move(csl);
+                    R[I.a] = keel::move(csl);
                 }
                 break;
             }
@@ -1553,7 +1552,7 @@ enter_frame:
                             CallContext ctx{&engine_, currentCallEnv()};
                             (*bgFn)(self, keel::ArrayRef<Value>(args, 2), 1,
                                     keel::MutArrayRef<Value>(out, 1), ctx);
-                            R[I.a] = std::move(out[0]);
+                            R[I.a] = keel::move(out[0]);
                             break;
                         }
                     }
@@ -1579,7 +1578,7 @@ enter_frame:
                     for (keel::usize c : cols)
                         for (keel::usize r : rows)
                             csl.cslAt(k++) = cell.cellAt(cell.dims().sub2ind(r, c));
-                    R[I.a] = std::move(csl);
+                    R[I.a] = keel::move(csl);
                 }
                 break;
             }
@@ -1655,7 +1654,7 @@ enter_frame:
                     && lvalDetaches_.back().valRegAbs == frame.regBase + I.c
                     && lvalDetaches_.back().cellLinearIdx == i) {
                     lvalDetaches_.pop_back();
-                    R[I.a].cellAt(i) = std::move(R[I.c]);
+                    R[I.a].cellAt(i) = keel::move(R[I.c]);
                 } else {
                     R[I.a].cellAt(i) = R[I.c];
                 }
@@ -1688,7 +1687,7 @@ enter_frame:
                     for (keel::usize cc = 0; cc < nc; ++cc)
                         for (keel::usize rr = 0; rr < nr; ++rr)
                             grown.cellAt(cc * newR + rr) = R[I.a].cellAt(cc * nr + rr);
-                    R[I.a] = std::move(grown);
+                    R[I.a] = keel::move(grown);
                 }
                 keel::usize lin = R[I.a].dims().sub2ind(r, c);
                 if (!lvalDetaches_.empty()
@@ -1697,7 +1696,7 @@ enter_frame:
                     && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
                     && lvalDetaches_.back().cellLinearIdx == lin) {
                     lvalDetaches_.pop_back();
-                    R[I.a].cellAt(lin) = std::move(R[I.e]);
+                    R[I.a].cellAt(lin) = keel::move(R[I.e]);
                 } else {
                     R[I.a].cellAt(lin) = R[I.e];
                 }
@@ -1754,7 +1753,7 @@ enter_frame:
                                     keel::usize newIdx = rr + cc * newR + pp * newR * newC;
                                     grown.cellAt(newIdx) = R[I.a].cellAt(oldIdx);
                                 }
-                        R[I.a] = std::move(grown);
+                        R[I.a] = keel::move(grown);
                     }
                     keel::usize idx = R[I.a].dims().sub2ind(r, c, p);
                     if (!lvalDetaches_.empty()
@@ -1763,7 +1762,7 @@ enter_frame:
                         && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
                         && lvalDetaches_.back().cellLinearIdx == idx) {
                         lvalDetaches_.pop_back();
-                        R[I.a].cellAt(idx) = std::move(R[I.e]);
+                        R[I.a].cellAt(idx) = keel::move(R[I.e]);
                     } else {
                         R[I.a].cellAt(idx) = R[I.e];
                     }
@@ -1800,7 +1799,7 @@ enter_frame:
                         && lvalDetaches_.back().valRegAbs == frame.regBase + I.e
                         && lvalDetaches_.back().cellLinearIdx == idx) {
                         lvalDetaches_.pop_back();
-                        R[I.a].cellAt(idx) = std::move(R[I.e]);
+                        R[I.a].cellAt(idx) = keel::move(R[I.e]);
                     } else {
                         R[I.a].cellAt(idx) = R[I.e];
                     }

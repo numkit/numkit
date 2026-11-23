@@ -20,7 +20,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <utility>
 
 namespace numkit::linalg {
 namespace detail {
@@ -46,7 +45,7 @@ void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const keel::usize n = R.B.dims().rows();
 
     if (nargout <= 1) {
-        outs[0] = std::move(R.B);
+        outs[0] = keel::move(R.B);
         return;
     }
 
@@ -57,14 +56,14 @@ void balance_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         std::fill(td, td + n * n, 0.0);
         for (keel::usize i = 0; i < n; ++i) td[i + i * n] = R.d_col.elemAsDouble(i);
         outs[0] = detail::narrowDoubleToSingleIf(T, R.d_col.type() == ValueType::SINGLE, mr);
-        outs[1] = std::move(R.B);
+        outs[1] = keel::move(R.B);
         return;
     }
 
     // 3-out: [S, P, B].
-    outs[0] = std::move(R.d_col);
-    outs[1] = std::move(R.perm_col);
-    if (outs.size() >= 3) outs[2] = std::move(R.B);
+    outs[0] = keel::move(R.d_col);
+    outs[1] = keel::move(R.perm_col);
+    if (outs.size() >= 3) outs[2] = keel::move(R.B);
 }
 
 } // namespace detail

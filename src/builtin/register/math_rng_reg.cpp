@@ -19,8 +19,6 @@
 #include <numkit/ops/helpers.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;
@@ -97,7 +95,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
             d[32] = keel::as<keel::f64>(rngRef.v5SwbIdx());
             d[33] = rngRef.v5SwbBorrow();
             d[34] = keel::as<keel::f64>(rngRef.v5SwbJ()) * 2.2204460492503131e-16;
-            outs[0] = std::move(st);
+            outs[0] = keel::move(st);
             return;
         }
         if (flag == "twister") {
@@ -108,7 +106,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
             keel::u32 *d = st.uint32DataMut();
             for (keel::usize i = 0; i < 624; ++i) d[i] = mt[i];
             d[624] = keel::as<keel::u32>(idx);
-            outs[0] = std::move(st);
+            outs[0] = keel::move(st);
             return;
         }
     }
@@ -172,7 +170,7 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
             out = randND(rngRef, keel::ArrayRef<keel::usize>(dims.data(), dims.size()), mr);
         }
     }
-    outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : std::move(out);
+    outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : keel::move(out);
 }
 
 void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs,
@@ -196,7 +194,7 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             auto st = Value::matrix(2, 1, ValueType::DOUBLE, ctx.engine->allocator());
             st.doubleDataMut()[0] = keel::as<keel::f64>(rngRef.v5RandnIcng());
             st.doubleDataMut()[1] = keel::as<keel::f64>(rngRef.v5RandnJsr());
-            outs[0] = std::move(st);
+            outs[0] = keel::move(st);
             return;
         }
     }
@@ -245,7 +243,7 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             out = randnND(rngRef, keel::ArrayRef<keel::usize>(dims.data(), dims.size()), mr);
         }
     }
-    outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : std::move(out);
+    outs[0] = (t == ValueType::SINGLE) ? castDoubleToSingle(out, mr) : keel::move(out);
 }
 
 // Cast a DOUBLE Value to any integer or single class (for randi typed
@@ -338,10 +336,10 @@ void randi_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             const keel::f64 span = keel::as<keel::f64>(imax - imin + 1);
             for (keel::usize i = 0; i < m.numel(); ++i)
                 m.doubleDataMut()[i] = keel::as<keel::f64>(imin) + keel::floor(rngRef.nextUniform() * span);
-            dbl_out = std::move(m);
+            dbl_out = keel::move(m);
         }
     }
-    outs[0] = (t == ValueType::DOUBLE) ? std::move(dbl_out)
+    outs[0] = (t == ValueType::DOUBLE) ? keel::move(dbl_out)
                                        : castDoubleToType(dbl_out, t, mr);
 }
 
@@ -445,7 +443,7 @@ void register_randstream(Engine &engine)
         for (const auto &a : args) fullArgs.push_back(a);
         randperm_reg(keel::ArrayRef<Value>(fullArgs.data(), fullArgs.size()), nargout, outs, ctx);
     });
-    engine.registerClass(std::move(rs));
+    engine.registerClass(keel::move(rs));
 }
 
 void rng_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -460,7 +458,7 @@ void rng_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         prev = ctx.engine->rng().state(mr);
 
     if (args.empty()) {
-        if (nargout > 0) outs[0] = std::move(prev);
+        if (nargout > 0) outs[0] = keel::move(prev);
         return;
     }
 
@@ -498,7 +496,7 @@ void rng_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                      0, 0, "rng", "", "numkit:rng:badArg");
     }
 
-    if (nargout > 0) outs[0] = std::move(prev);
+    if (nargout > 0) outs[0] = keel::move(prev);
 }
 
 } // namespace detail

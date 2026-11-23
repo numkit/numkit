@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 
@@ -152,7 +151,7 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                     const Pt B   = { interp(xL, xR, v_bl, v_br, L), yB };
                     const Pt Le  = { xL, interp(yT, yB, v_tl, v_bl, L) };
 
-                    keel::StaticArray<std::pair<Pt, Pt>, 2> segs;
+                    keel::StaticArray<keel::Pair<Pt, Pt>, 2> segs;
                     keel::i32 nseg = 0;
                     switch (code) {
                         case 1:  case 14: segs[nseg++] = { Le, T }; break;

@@ -23,8 +23,6 @@
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c cross-area (reshape/poly_of_matrix)
@@ -63,8 +61,8 @@ void polyder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         return;
     }
     auto [num, den] = polyder(args[0], args[1], mr);
-    outs[0] = std::move(num);
-    if (nargout > 1) outs[1] = std::move(den);
+    outs[0] = keel::move(num);
+    if (nargout > 1) outs[1] = keel::move(den);
 }
 
 void polyint_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -81,9 +79,9 @@ void tf2zp_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     argcheck::checkNargin(args.size(), 1, 2, "tf2zp");
     argcheck::checkNargin(args.size(), 2, 2, "tf2zp");
     auto [zr, pr, kr] = tf2zp(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(zr);
-    if (nargout > 1) outs[1] = std::move(pr);
-    if (nargout > 2) outs[2] = std::move(kr);
+    outs[0] = keel::move(zr);
+    if (nargout > 1) outs[1] = keel::move(pr);
+    if (nargout > 2) outs[2] = keel::move(kr);
 }
 
 void zp2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -91,8 +89,8 @@ void zp2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     argcheck::checkNargin(args.size(), 1, 3, "zp2tf");
     argcheck::checkNargin(args.size(), 3, 3, "zp2tf");
     auto [bv, av] = zp2tf(args[0], args[1], args[2].toScalar(), ctx.engine->allocator());
-    outs[0] = std::move(bv);
-    if (nargout > 1) outs[1] = std::move(av);
+    outs[0] = keel::move(bv);
+    if (nargout > 1) outs[1] = keel::move(av);
 }
 
 namespace {
@@ -156,7 +154,7 @@ void polyfitCore(const keel::f64 *xx, const keel::f64 *yd, keel::usize m, keel::
         }
         if (maxRow != k)
             for (keel::i32 c = 0; c <= np; ++c)
-                std::swap(aug[k * (np + 1) + c], aug[maxRow * (np + 1) + c]);
+                keel::swap(aug[k * (np + 1) + c], aug[maxRow * (np + 1) + c]);
         const keel::f64 pivot = aug[k * (np + 1) + k];
         if (keel::abs(pivot) < 1e-15)
             throw Error("polyfit: singular matrix",
@@ -251,7 +249,7 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 
     auto p = Value::matrix(1, np, ValueType::DOUBLE, mr);
     for (keel::i32 j = 0; j < np; ++j) p.doubleDataMut()[j] = pbuf[j];
-    outs[0] = std::move(p);
+    outs[0] = keel::move(p);
 
     Value S = Value::structure(mr);
     auto Rmat = Value::matrix(np, np, ValueType::DOUBLE, mr);
@@ -267,13 +265,13 @@ void polyfit_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     keel::f64 sstot = 0.0;
     for (keel::usize i = 0; i < m; ++i) { const keel::f64 d = yd[i] - yMean; sstot += d * d; }
     S.setFieldAll("rsquared", Value::scalar(1.0 - (normr * normr) / sstot, mr));
-    outs[1] = std::move(S);
+    outs[1] = keel::move(S);
 
     if (nargout >= 3) {
         auto mu = Value::matrix(2, 1, ValueType::DOUBLE, mr);
         mu.doubleDataMut()[0] = mu0;
         mu.doubleDataMut()[1] = mu1;
-        outs[2] = std::move(mu);
+        outs[2] = keel::move(mu);
     }
 }
 
@@ -339,7 +337,7 @@ void polyval_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         for (keel::usize j = 0; j < np; ++j) ss += erow[j] * erow[j];
         dd[i] = scale * keel::sqrt(1.0 + ss);
     }
-    outs[1] = std::move(delta);
+    outs[1] = keel::move(delta);
 }
 
 void poly_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -374,8 +372,8 @@ void padecoef_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     const keel::f64 T = args[0].toScalar();
     const keel::i32    N = keel::as<keel::i32>(argcheck::roundLength(args[1], 2, "N", "padecoef"));
     auto p = padecoef(T, N, ctx.engine->allocator());
-    outs[0] = std::move(p.num);
-    if (nargout > 1) outs[1] = std::move(p.den);
+    outs[0] = keel::move(p.num);
+    if (nargout > 1) outs[1] = keel::move(p.den);
 }
 
 void polydiv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -383,8 +381,8 @@ void polydiv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     argcheck::checkNargin(args.size(), 1, 2, "polydiv");
     argcheck::checkNargin(args.size(), 2, 2, "polydiv");
     auto res = polydiv(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(res.q);
-    if (nargout > 1) outs[1] = std::move(res.r);
+    outs[0] = keel::move(res.q);
+    if (nargout > 1) outs[1] = keel::move(res.r);
 }
 
 } // namespace detail
@@ -396,9 +394,9 @@ void residue_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     argcheck::checkNargin(args.size(), 1, 3, "residue");
     argcheck::checkNargin(args.size(), 2, 3, "residue");
     auto res = residue(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(res.r);
-    if (nargout > 1) outs[1] = std::move(res.p);
-    if (nargout > 2) outs[2] = std::move(res.k);
+    outs[0] = keel::move(res.r);
+    if (nargout > 1) outs[1] = keel::move(res.p);
+    if (nargout > 2) outs[2] = keel::move(res.k);
 }
 
 void residuez_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -406,9 +404,9 @@ void residuez_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     argcheck::checkNargin(args.size(), 1, 3, "residuez");
     argcheck::checkNargin(args.size(), 2, 3, "residuez");
     auto res = residuez(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(res.r);
-    if (nargout > 1) outs[1] = std::move(res.p);
-    if (nargout > 2) outs[2] = std::move(res.k);
+    outs[0] = keel::move(res.r);
+    if (nargout > 1) outs[1] = keel::move(res.p);
+    if (nargout > 2) outs[2] = keel::move(res.k);
 }
 
 void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -471,12 +469,12 @@ void latc2tf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             Jnext[j] += J[j];
         for (keel::usize j = 0; j < m; ++j)
             Jnext[j + 1] += km * Bprev[j];
-        J = std::move(Jnext);
+        J = keel::move(Jnext);
         if (hasLadder) {
             keel::Array<keel::c64> Bm(m + 1, sa);
             for (keel::usize j = 0; j <= m; ++j)
                 Bm[j] = keel::conj(J[m - j]);
-            Brows.push_back(std::move(Bm));
+            Brows.push_back(keel::move(Bm));
         }
     }
 

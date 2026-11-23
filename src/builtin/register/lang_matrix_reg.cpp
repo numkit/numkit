@@ -31,8 +31,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -86,7 +84,7 @@ void ones_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     stripTrailingOnes(d);
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     fillOnes(m, t);
-    outs[0] = std::move(m);
+    outs[0] = keel::move(m);
 }
 
 // MATLAB's colon function: colon(j, k) = j:k, colon(j, i, k) = j:i:k.
@@ -196,7 +194,7 @@ void sparse_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
                 od[(r - 1) + (c - 1) * M] += val;
             }
         }
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
         return;
     }
 }
@@ -250,13 +248,13 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                         A.elemAsDouble(keel::as<keel::usize>(i + j * m));
             }
         }
-        outs[0] = std::move(B);
+        outs[0] = keel::move(B);
         if (nargout >= 2 && args.size() == 1) {
             Value dOut = Value::matrix(numD, 1, ValueType::DOUBLE, mr);
             keel::f64 *dd = dOut.doubleDataMut();
             for (keel::usize idx = 0; idx < numD; ++idx)
                 dd[idx] = keel::as<keel::f64>(diags[idx]);
-            outs[1] = std::move(dOut);
+            outs[1] = keel::move(dOut);
         }
         return;
     }
@@ -297,7 +295,7 @@ void spdiags_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             od[keel::as<keel::usize>(i + j * m)] = val;
         }
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 // Zero-fill incomplete Cholesky factorization ichol(A [, opts]):
@@ -341,7 +339,7 @@ void ichol_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
             }
         }
     }
-    outs[0] = std::move(L);
+    outs[0] = keel::move(L);
 }
 
 // `nan` / `NaN` / `inf` / `Inf` are MATLAB built-in functions (not
@@ -378,7 +376,7 @@ void nan_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, keel::Limits<keel::f64>::quiet_nan(),
                   keel::Limits<keel::f32>::quiet_nan(), t);
-    outs[0] = std::move(m);
+    outs[0] = keel::move(m);
 }
 
 void inf_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -399,7 +397,7 @@ void inf_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
     auto m = createMatrixND(d.data(), d.size(), t, mr);
     nanInfFill(m, keel::Limits<keel::f64>::infinity(),
                   keel::Limits<keel::f32>::infinity(), t);
-    outs[0] = std::move(m);
+    outs[0] = keel::move(m);
 }
 
 // `true` and `false` are MATLAB built-in functions (not constants):
@@ -419,7 +417,7 @@ void true_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     auto v = createMatrixND(d.data(), d.size(), ValueType::LOGICAL, mr);
     keel::u8 *p = v.logicalDataMut();
     for (keel::usize i = 0; i < v.numel(); ++i) p[i] = 1;
-    outs[0] = std::move(v);
+    outs[0] = keel::move(v);
 }
 
 void false_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -464,7 +462,7 @@ void eye_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArray
       case ValueType::UINT64: { auto *p = m.uint64DataMut();  for (keel::usize i = 0; i < k; ++i) p[i + i*d.rows] = 1; break; }
       default: throw Error("eye: unsupported type", 0, 0, "eye", "", "numkit:eye:badType");
     }
-    outs[0] = std::move(m);
+    outs[0] = keel::move(m);
 }
 
 void magic_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -733,13 +731,13 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                     out.doubleDataMut()[dstLin] = A.elemAsDouble(srcLin);
             }
         }
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
         if (nargout >= 2) {
             auto I = Value::matrix(kk, 1, ValueType::DOUBLE, mr);
             keel::f64 *id = I.doubleDataMut();
             for (keel::usize k2 = 0; k2 < kk; ++k2)
                 id[k2] = keel::as<keel::f64>(ord[k2] + 1);
-            outs[1] = std::move(I);
+            outs[1] = keel::move(I);
         }
         return;
     }
@@ -749,13 +747,13 @@ void topkrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                             keel::ArrayRef<keel::usize>(cols.data(), cols.size()),
                             keel::ArrayRef<keel::u8>(desc.data(), desc.size()),
                             (nargout >= 2) ? &idx_out : nullptr, mr);
-    outs[0] = std::move(B);
+    outs[0] = keel::move(B);
     if (nargout >= 2) {
         auto I = Value::matrix(idx_out.size(), 1, ValueType::DOUBLE, mr);
         keel::f64 *id = I.doubleDataMut();
         for (keel::usize k2 = 0; k2 < idx_out.size(); ++k2)
             id[k2] = keel::f64(idx_out[k2] + 1);  // 1-indexed
-        outs[1] = std::move(I);
+        outs[1] = keel::move(I);
     }
 }
 
@@ -938,9 +936,9 @@ void sphere_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[0], 1, "n", "sphere"), 1, "n", "sphere"));
     auto s = sphere(n, ctx.engine->allocator());
-    outs[0] = std::move(s.X);
-    if (nargout > 1) outs[1] = std::move(s.Y);
-    if (nargout > 2) outs[2] = std::move(s.Z);
+    outs[0] = keel::move(s.X);
+    if (nargout > 1) outs[1] = keel::move(s.Y);
+    if (nargout > 2) outs[2] = keel::move(s.Z);
 }
 
 void cylinder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -970,9 +968,9 @@ void cylinder_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         }
     }
     auto s = cylinder(R, n, mr);
-    outs[0] = std::move(s.X);
-    if (nargout > 1) outs[1] = std::move(s.Y);
-    if (nargout > 2) outs[2] = std::move(s.Z);
+    outs[0] = keel::move(s.X);
+    if (nargout > 1) outs[1] = keel::move(s.Y);
+    if (nargout > 2) outs[2] = keel::move(s.Z);
 }
 
 void ellipsoid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -990,9 +988,9 @@ void ellipsoid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
         n = keel::as<keel::usize>(argcheck::expectedPositiveInteger(
             argcheck::expectedReal(args[6], 7, "n", "ellipsoid"), 7, "n", "ellipsoid"));
     auto s = ellipsoid(xc, yc, zc, xr, yr, zr, n, ctx.engine->allocator());
-    outs[0] = std::move(s.X);
-    if (nargout > 1) outs[1] = std::move(s.Y);
-    if (nargout > 2) outs[2] = std::move(s.Z);
+    outs[0] = keel::move(s.X);
+    if (nargout > 1) outs[1] = keel::move(s.Y);
+    if (nargout > 2) outs[2] = keel::move(s.Z);
 }
 
 void pagemtimes_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1077,7 +1075,7 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         auto [sortedD, idxD] = sort(xd, dim, descend, nanPlace, mr);
         outs[0] = doubleToIntegerExact(sortedD, vt, mr);
         if (nargout > 1)
-            outs[1] = std::move(idxD);
+            outs[1] = keel::move(idxD);
         return;
     }
     // Logical: MATLAB keeps the logical class on the sorted VALUES (the index
@@ -1090,7 +1088,7 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         auto [sortedD, idxD] = sort(xd, dim, descend, nanPlace, mr);
         outs[0] = logicalizeCumResult(sortedD, mr);
         if (nargout > 1)
-            outs[1] = std::move(idxD);
+            outs[1] = keel::move(idxD);
         return;
     }
     // Char: MATLAB sorts char by code point and PRESERVES the char class on the
@@ -1102,13 +1100,13 @@ void sort_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         auto [sortedD, idxD] = sort(xd, dim, descend, nanPlace, mr);
         outs[0] = charizeSortResult(sortedD, mr);
         if (nargout > 1)
-            outs[1] = std::move(idxD);
+            outs[1] = keel::move(idxD);
         return;
     }
     auto [sorted, idx] = sort(args[0], dim, descend, nanPlace, mr);
-    outs[0] = std::move(sorted);
+    outs[0] = keel::move(sorted);
     if (nargout > 1)
-        outs[1] = std::move(idx);
+        outs[1] = keel::move(idx);
 }
 
 void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1206,9 +1204,9 @@ void sortrows_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         }
     }
     auto [sorted, idx] = sortrows(args[0], keel::ArrayRef<keel::i32>(cols.data(), cols.size()), mr);
-    outs[0] = std::move(sorted);
+    outs[0] = keel::move(sorted);
     if (nargout > 1)
-        outs[1] = std::move(idx);
+        outs[1] = keel::move(idx);
 }
 
 void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -1272,7 +1270,7 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         keel::f64 *rd = r.doubleDataMut();
         for (keel::usize t = 0; t < count; ++t)
             rd[t] = keel::as<keel::f64>(lin[start + t] + 1);
-        outs[0] = std::move(r);
+        outs[0] = keel::move(r);
         return;
     }
 
@@ -1288,8 +1286,8 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
         rd[t] = keel::as<keel::f64>(i % R + 1);
         cd[t] = keel::as<keel::f64>(i / R + 1);
     }
-    outs[0] = std::move(rowV);
-    outs[1] = std::move(colV);
+    outs[0] = keel::move(rowV);
+    outs[1] = keel::move(colV);
 
     if (nargout >= 3) {
         if (x.type() == ValueType::COMPLEX) {
@@ -1297,12 +1295,12 @@ void find_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
             const keel::c64 *src = x.complexData();
             keel::c64 *vd = valV.complexDataMut();
             for (keel::usize t = 0; t < count; ++t) vd[t] = src[lin[start + t]];
-            outs[2] = std::move(valV);
+            outs[2] = keel::move(valV);
         } else {
             Value valV = mk(ValueType::DOUBLE);
             keel::f64 *vd = valV.doubleDataMut();
             for (keel::usize t = 0; t < count; ++t) vd[t] = x.elemAsDouble(lin[start + t]);
-            outs[2] = std::move(valV);
+            outs[2] = keel::move(valV);
         }
     }
 }
@@ -1354,21 +1352,21 @@ void meshgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     if (args.size() == 1) {
         // meshgrid(x) ≡ meshgrid(x, x). See BUGS.md #21.
         auto [X, Y] = meshgrid(args[0], args[0], mr);
-        outs[0] = std::move(X);
-        if (nargout > 1) outs[1] = std::move(Y);
+        outs[0] = keel::move(X);
+        if (nargout > 1) outs[1] = keel::move(Y);
         return;
     }
     if (args.size() == 2) {
         auto [X, Y] = meshgrid(args[0], args[1], mr);
-        outs[0] = std::move(X);
-        if (nargout > 1) outs[1] = std::move(Y);
+        outs[0] = keel::move(X);
+        if (nargout > 1) outs[1] = keel::move(Y);
         return;
     }
     if (args.size() == 3) {
         auto [X, Y, Z] = meshgrid(args[0], args[1], args[2], mr);
-        outs[0] = std::move(X);
-        if (nargout > 1) outs[1] = std::move(Y);
-        if (nargout > 2) outs[2] = std::move(Z);
+        outs[0] = keel::move(X);
+        if (nargout > 1) outs[1] = keel::move(Y);
+        if (nargout > 2) outs[2] = keel::move(Z);
         return;
     }
     throw Error("meshgrid: 4+ inputs are not supported",
@@ -1387,15 +1385,15 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
         }
         if (nargout == 2) {
             auto [X, Y] = ndgrid(args[0], args[0], mr);
-            outs[0] = std::move(X);
-            outs[1] = std::move(Y);
+            outs[0] = keel::move(X);
+            outs[1] = keel::move(Y);
             return;
         }
         if (nargout == 3) {
             auto [X, Y, Z] = ndgrid(args[0], args[0], args[0], mr);
-            outs[0] = std::move(X);
-            outs[1] = std::move(Y);
-            outs[2] = std::move(Z);
+            outs[0] = keel::move(X);
+            outs[1] = keel::move(Y);
+            outs[2] = keel::move(Z);
             return;
         }
         const keel::usize D = nargout;
@@ -1418,21 +1416,21 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                 const keel::usize coord = (lin / stride_m) % n0;
                 gd[lin] = args[0].elemAsDouble(coord);
             }
-            outs[m] = std::move(G);
+            outs[m] = keel::move(G);
         }
         return;
     }
     if (args.size() == 2) {
         auto [X, Y] = ndgrid(args[0], args[1], mr);
-        outs[0] = std::move(X);
-        if (nargout > 1) outs[1] = std::move(Y);
+        outs[0] = keel::move(X);
+        if (nargout > 1) outs[1] = keel::move(Y);
         return;
     }
     if (args.size() == 3) {
         auto [X, Y, Z] = ndgrid(args[0], args[1], args[2], mr);
-        outs[0] = std::move(X);
-        if (nargout > 1) outs[1] = std::move(Y);
-        if (nargout > 2) outs[2] = std::move(Z);
+        outs[0] = keel::move(X);
+        if (nargout > 1) outs[1] = keel::move(Y);
+        if (nargout > 2) outs[2] = keel::move(Z);
         return;
     }
     const keel::usize D = args.size();
@@ -1457,7 +1455,7 @@ void ndgrid_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             const keel::usize coord = (lin / stride_m) % len_m;
             gd[lin] = args[m].elemAsDouble(coord);
         }
-        outs[m] = std::move(G);
+        outs[m] = keel::move(G);
     }
 }
 

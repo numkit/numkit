@@ -304,9 +304,9 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
             for (keel::usize ch = 0; ch < 3; ++ch)
                 d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
     Value s = Value::structure(mr);
-    s.field("cdata") = std::move(A);
+    s.field("cdata") = keel::move(A);
     s.field("colormap") = Value::Empty;
-    if (!outs.empty()) outs[0] = std::move(s);
+    if (!outs.empty()) outs[0] = keel::move(s);
 }
 
 void frame2im_reg(keel::ArrayRef<Value> args, keel::usize nargout,
@@ -323,8 +323,8 @@ void frame2im_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (f.hasField("colormap"))
             cmap = f.field("colormap");
     }
-    if (!outs.empty()) outs[0] = std::move(cdata);
-    if (nargout >= 2 && outs.size() >= 2) outs[1] = std::move(cmap);
+    if (!outs.empty()) outs[0] = keel::move(cdata);
+    if (nargout >= 2 && outs.size() >= 2) outs[1] = keel::move(cmap);
 }
 
 void im2frame_reg(keel::ArrayRef<Value> args, keel::usize,
@@ -335,7 +335,7 @@ void im2frame_reg(keel::ArrayRef<Value> args, keel::usize,
     Value s = Value::structure(mr);
     s.field("cdata") = args[0];
     s.field("colormap") = (args.size() >= 2) ? args[1] : Value::Empty;
-    if (!outs.empty()) outs[0] = std::move(s);
+    if (!outs.empty()) outs[0] = keel::move(s);
 }
 
 void chartNoop_reg(keel::ArrayRef<Value>, keel::usize nargout,
@@ -358,16 +358,16 @@ void dendrogram_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     Value H = Value::matrix(m, 1, ValueType::DOUBLE, mr);
     for (keel::usize i = 0; i < m; ++i) H.doubleDataMut()[i] = 1.0;
-    outs[0] = std::move(H);
+    outs[0] = keel::move(H);
     if (nargout >= 2 && outs.size() >= 2) {
         Value T = Value::matrix(m + 1, 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i <= m; ++i) T.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
-        outs[1] = std::move(T);
+        outs[1] = keel::move(T);
     }
     if (nargout >= 3 && outs.size() >= 3) {
         Value P = Value::matrix(1, m + 1, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i <= m; ++i) P.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
-        outs[2] = std::move(P);
+        outs[2] = keel::move(P);
     }
 }
 
@@ -450,7 +450,7 @@ void evalColormap(const char *cname, keel::ArrayRef<Value> args,
             }
         }
     }
-    if (!outs.empty()) outs[0] = std::move(C);
+    if (!outs.empty()) outs[0] = keel::move(C);
 }
 
 template <const char *Palette>

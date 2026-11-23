@@ -15,7 +15,6 @@
 #include <numkit/value/value.hpp>
 
 #include <exception>
-#include <utility>
 
 namespace numkit {
 
@@ -106,7 +105,7 @@ public:
     }
 
     // After execute(), get exported variables for environment sync
-    const keel::Array<std::pair<keel::String, Value>> &lastVarMap() const { return lastVarMap_; }
+    const keel::Array<keel::Pair<keel::String, Value>> &lastVarMap() const { return lastVarMap_; }
     void clearLastVarMap() { lastVarMap_.clear(); }
 
     void setFrameDynVars(keel::HashMap<keel::String, Value> *dv);
@@ -332,7 +331,7 @@ private:
     keel::Array<keel::UniquePtr<Environment>> envPool_;
 
     // Exported variables after execution
-    keel::Array<std::pair<keel::String, Value>> lastVarMap_;
+    keel::Array<keel::Pair<keel::String, Value>> lastVarMap_;
 
     // Multi-return buffer (unbounded; cleared after distribution)
     keel::Array<Value> returnBuf_;

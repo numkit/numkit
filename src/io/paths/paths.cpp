@@ -3,6 +3,7 @@
 // filesep / fullfile / fileparts / tempdir / tempname.
 
 #include <keel/atomic.h>
+#include <keel/tuple.h>
 #include <keel/core.h>
 #include <keel/exception.h>
 #include <keel/fs.h>
@@ -86,7 +87,7 @@ Value fullfile(keel::ArrayRef<keel::StringRef> parts,
     return fullfileImpl(parts, mr);
 }
 
-std::tuple<Value, Value, Value>
+keel::Tuple<Value, Value, Value>
 fileparts(keel::StringRef path, keel::Allocator *mr)
 {
     // Find last separator.
@@ -113,7 +114,7 @@ fileparts(keel::StringRef path, keel::Allocator *mr)
             ext = base.substr(dot);
         }
     }
-    return std::make_tuple(charValue(mr, folder),
+    return keel::make_tuple(charValue(mr, folder),
                            charValue(mr, name),
                            charValue(mr, ext));
 }

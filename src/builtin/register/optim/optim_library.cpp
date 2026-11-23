@@ -54,7 +54,7 @@ void optimoptions_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
         if (args[i].isChar() || args[i].isString())
             st.field(args[i].toString()) = args[i + 1];
     }
-    outs[0] = std::move(st);
+    outs[0] = keel::move(st);
 }
 
 } // namespace

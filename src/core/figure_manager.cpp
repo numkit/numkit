@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <utility>
 
 namespace numkit {
 
@@ -451,7 +450,7 @@ void FigureManager::maybeDownsampleSeries(DatasetInfo &ds)
         }
     }
     keel::f64 xlo = xSrc.front(), xhi = xSrc.back();
-    if (xhi < xlo) std::swap(xlo, xhi);
+    if (xhi < xlo) keel::swap(xlo, xhi);
     keel::f64 ylo = keel::kInf, yhi = -keel::kInf;
     for (keel::f64 v : ySrc) if (keel::is_finite(v)) { ylo = std::min(ylo, v); yhi = std::max(yhi, v); }
     if (!keel::is_finite(ylo)) { ylo = 0; yhi = 0; }

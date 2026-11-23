@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 
@@ -64,7 +63,7 @@ void bar_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::usize Yc = yArg->dims().cols();
     const bool matrix = (Yr > 1 && Yc > 1);
     bool transposeY = (matrix && xArg && xArg->numel() == Yc && Yr != Yc);
-    if (transposeY) std::swap(Yr, Yc);
+    if (transposeY) keel::swap(Yr, Yc);
     // Vector path (back-compat): single dataset.
     if (!matrix) {
         DatasetInfo ds;
@@ -764,7 +763,7 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             keel::String *kv = (key == "facecolor") ? &faceKV : &edgeKV;
             if (val.isChar() || val.isString()) {
                 keel::String c = lowerStr(val.toString());
-                static const std::pair<const char *, const char *> shorts[] = {
+                static const keel::Pair<const char *, const char *> shorts[] = {
                     {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                     {"k", "#000000"}, {"y", "#ffff00"}, {"m", "#ff00ff"},
                     {"c", "#00ffff"}, {"w", "#ffffff"},

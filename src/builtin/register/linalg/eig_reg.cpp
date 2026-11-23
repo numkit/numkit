@@ -31,7 +31,7 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
+#include <keel/tuple.h>
 
 namespace numkit::linalg {
 namespace detail {
@@ -48,8 +48,8 @@ void polyeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [V, e] = polyeig_VE(args, mr);
-        outs[0] = std::move(V);
-        outs[1] = std::move(e);
+        outs[0] = keel::move(V);
+        outs[1] = keel::move(e);
     } else {
         outs[0] = polyeig_values(args, mr);
     }
@@ -90,7 +90,7 @@ Value eigValuesAuto(const Value &M, keel::Allocator *mr)
 }
 
 // [V, D] of M, choosing the symmetric or general path automatically.
-std::tuple<Value, Value> eigVDAuto(const Value &M, keel::Allocator *mr)
+keel::Tuple<Value, Value> eigVDAuto(const Value &M, keel::Allocator *mr)
 {
     if (M.isComplex()) {
         auto [V, D] = eig_general_VD(M, mr);
@@ -103,9 +103,9 @@ std::tuple<Value, Value> eigVDAuto(const Value &M, keel::Allocator *mr)
             auto Dr = Value::matrix(D.dims().rows(), D.dims().cols(), ValueType::DOUBLE, mr);
             for (keel::usize i = 0; i < n; ++i)
                 Dr.doubleDataMut()[i] = dd[i].real();
-            return std::make_tuple(std::move(V), std::move(Dr));
+            return keel::make_tuple(keel::move(V), keel::move(Dr));
         }
-        return std::make_tuple(std::move(V), std::move(D));
+        return keel::make_tuple(keel::move(V), keel::move(D));
     }
     return isSymmetricApprox(M, 1e-10) ? eig_symmetric(M, mr)
                                        : eig_general_VD(M, mr);
@@ -200,14 +200,14 @@ void eig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
                 Value M = numkit::builtin::mtimes(inv(Bw, mr), Aw, mr);
                 outs[2] = detail::narrowDoubleToSingleIf(leftEigenvectors(M, D, mr), wantSingle, mr);
             }
-            outs[0] = std::move(V);
-            outs[1] = std::move(D);
+            outs[0] = keel::move(V);
+            outs[1] = keel::move(D);
             return;
         }
         if (wantMatrix) {
             auto [V, D] = eig_generalized_VD(*A, *B, mr);
             (void)V;
-            outs[0] = std::move(D);
+            outs[0] = keel::move(D);
             return;
         }
         outs[0] = eig_generalized_values(*A, *B, mr);
@@ -238,8 +238,8 @@ void hess_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     auto *mr = ctx.engine->allocator();
     if (nargout >= 2) {
         auto [P, H] = hess(args[0], mr);
-        outs[0] = std::move(P);
-        outs[1] = std::move(H);
+        outs[0] = keel::move(P);
+        outs[1] = keel::move(H);
     } else {
         outs[0] = hess_H_only(args[0], mr);
     }
@@ -253,10 +253,10 @@ void schur_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
                       ? schur_sym(args[0], mr)
                       : schur_general(args[0], mr);
     if (nargout >= 2) {
-        outs[0] = std::move(U);
-        outs[1] = std::move(T);
+        outs[0] = keel::move(U);
+        outs[1] = keel::move(T);
     } else {
-        outs[0] = std::move(T);
+        outs[0] = keel::move(T);
     }
 }
 

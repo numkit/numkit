@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 

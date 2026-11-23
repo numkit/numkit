@@ -50,7 +50,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <utility>
 
 #ifdef _WIN32
 extern "C" {
@@ -77,7 +76,7 @@ constexpr const char *kRootClass        = "matlab.ui.Root";
 // Builtin name → Text slot for the title/label family (adapter wrap).
 keel::StringRef textSlotOf(keel::StringRef fnName)
 {
-    static constexpr std::pair<const char *, const char *> kSlots[] = {
+    static constexpr keel::Pair<const char *, const char *> kSlots[] = {
         {"title", "title"}, {"subtitle", "subtitle"}, {"sgtitle", "sgtitle"},
         {"xlabel", "xlabel"}, {"ylabel", "ylabel"}, {"zlabel", "zlabel"},
     };
@@ -90,7 +89,7 @@ keel::StringRef textSlotOf(keel::StringRef fnName)
 // Axes PROPERTY name → Text slot (get(gca,'Title') family — capitalized).
 keel::StringRef textSlotOfProp(keel::StringRef prop)
 {
-    static constexpr std::pair<const char *, const char *> kSlots[] = {
+    static constexpr keel::Pair<const char *, const char *> kSlots[] = {
         {"Title", "title"}, {"Subtitle", "subtitle"},
         {"XLabel", "xlabel"}, {"YLabel", "ylabel"}, {"ZLabel", "zlabel"},
     };
@@ -332,7 +331,7 @@ StyleParts parseStyle(keel::StringRef s)
     }
     // Compact dialect — mirrors the renderer's STYLE_COLOR map so a
     // rebuilt style keeps the same visual colour the plot was drawn with.
-    static constexpr std::pair<char, const char *> kCharColor[] = {
+    static constexpr keel::Pair<char, const char *> kCharColor[] = {
         {'r', "#f07070"}, {'g', "#6ee7a0"}, {'b', "#60d0f0"},
         {'k', "#d4d4f0"}, {'m', "#e070c0"}, {'c', "#60d0f0"},
         {'y', "#e8d060"}, {'w', "#ffffff"},
@@ -1076,7 +1075,7 @@ keel::String canonicalPropName(keel::StringRef raw)
     for (char &ch : low)
         if (ch >= 'A' && ch <= 'Z')
             ch = keel::as<char>(ch - 'A' + 'a');
-    static const std::pair<const char *, const char *> kNames[] = {
+    static const keel::Pair<const char *, const char *> kNames[] = {
         {"xlim", "XLim"}, {"ylim", "YLim"}, {"zlim", "ZLim"}, {"clim", "CLim"},
         {"xtick", "XTick"}, {"ytick", "YTick"}, {"ztick", "ZTick"},
         {"xticklabel", "XTickLabel"}, {"yticklabel", "YTickLabel"}, {"zticklabel", "ZTickLabel"},
@@ -1247,7 +1246,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             else {
                 Value sp = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 sp.doubleDataMut()[0] = 1.0; sp.doubleDataMut()[1] = 1.0;
-                st.field("TileSpan") = std::move(sp);
+                st.field("TileSpan") = keel::move(sp);
             }
             return st;
         }
@@ -1653,10 +1652,10 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 Value c = Value::cell(entry.choices.size(), 1, mr);
                 for (keel::usize i = 0; i < entry.choices.size(); ++i)
                     c.cellAt(i) = Value::fromString(entry.choices[i], mr);
-                st.setFieldAll(entry.key, std::move(c));
+                st.setFieldAll(entry.key, keel::move(c));
             }
         }
-        outs[0] = std::move(st);
+        outs[0] = keel::move(st);
         return;
     }
     if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
@@ -1699,7 +1698,7 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             Value c = Value::cell(choices.size(), 1, mr);
             for (keel::usize i = 0; i < choices.size(); ++i)
                 c.cellAt(i) = Value::fromString(choices[i], mr);
-            outs[0] = std::move(c);
+            outs[0] = keel::move(c);
         }
         return;
     }
@@ -1740,7 +1739,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
             if (lprop == "pointerlocation") {
                 Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.0;
-                outs[0] = std::move(v);
+                outs[0] = keel::move(v);
                 return;
             }
             if (lprop == "screensize") {
@@ -1762,14 +1761,14 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
 #endif
                 v.doubleDataMut()[2] = w;
                 v.doubleDataMut()[3] = h;
-                outs[0] = std::move(v);
+                outs[0] = keel::move(v);
                 return;
             }
             if (lprop == "position" || lprop == "outerposition") {
                 Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = 0.13; v.doubleDataMut()[1] = 0.11;
                 v.doubleDataMut()[2] = 0.775; v.doubleDataMut()[3] = 0.815;
-                outs[0] = std::move(v);
+                outs[0] = keel::move(v);
                 return;
             }
             if (lprop == "nextplot") {
@@ -1783,13 +1782,13 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
             if (lprop == "xlim" || lprop == "ylim" || lprop == "zlim" || lprop == "clim") {
                 Value v = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 1.0;
-                outs[0] = std::move(v);
+                outs[0] = keel::move(v);
                 return;
             }
             if (lprop == "xtick" || lprop == "ytick" || lprop == "ztick") {
                 Value v = Value::matrix(1, 3, ValueType::DOUBLE, mr);
                 v.doubleDataMut()[0] = 0.0; v.doubleDataMut()[1] = 0.5; v.doubleDataMut()[2] = 1.0;
-                outs[0] = std::move(v);
+                outs[0] = keel::move(v);
                 return;
             }
             if (lprop.find("fontangle") != keel::kInvalidIndex || lprop.find("fontweight") != keel::kInvalidIndex) {
@@ -1870,7 +1869,7 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
     std::sort(sortedKeys.begin(), sortedKeys.end());
     for (keel::StringRef k : sortedKeys)
         st.setFieldAll(k, decodeProp(*fields.get(k), mr));
-    outs[0] = std::move(st);
+    outs[0] = keel::move(st);
 }
 
 void findobj_reg(keel::ArrayRef<Value> args, keel::usize,
@@ -2145,7 +2144,7 @@ void videoWriter_reg(keel::ArrayRef<Value> args, keel::usize,
     s.setFieldAll("Filename", Value::fromString(fn, mr));
     s.setFieldAll("FrameRate", Value::scalar(30.0, mr));
     s.setFieldAll("Quality", Value::scalar(75.0, mr));
-    outs[0] = std::move(s);
+    outs[0] = keel::move(s);
 }
 
 void open_reg(keel::ArrayRef<Value>, keel::usize nargout,
@@ -2167,7 +2166,7 @@ void graphStub_reg(keel::ArrayRef<Value> args, keel::usize,
     auto *mr = ctx.engine->allocator();
     Value s = Value::structure(mr);
     if (!args.empty()) s.setFieldAll("Adj", args[0]);
-    outs[0] = std::move(s);
+    outs[0] = keel::move(s);
 }
 
 void listfonts_reg(keel::ArrayRef<Value>, keel::usize,
@@ -2195,7 +2194,7 @@ bool graphicsPropGet(const Value &self, keel::StringRef name,
     Value v = recordGetProp(fm, rec, name, ctx.engine->allocator(), /*strict=*/true);
     if (v.isEmpty())
         return false;
-    out = std::move(v);
+    out = keel::move(v);
     return true;
 }
 
@@ -2622,7 +2621,7 @@ void GraphicsLibrary::install(Engine &engine)
                         handleVal = makeAxesHandle(fm, mr);
                     }
                     if (nargout >= 1 || name == "gcf" || name == "gca")
-                        outs[0] = std::move(handleVal);
+                        outs[0] = keel::move(handleVal);
                     else
                         outs[0] = Value();
                 } else if (name == "subplot" && nargout >= 1) {

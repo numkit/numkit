@@ -22,7 +22,6 @@
 #include <keel/static_array.h>
 #include <cstdio>
 #include <cstdlib>
-#include <utility>
 
 namespace numkit {
 
@@ -224,7 +223,7 @@ void queryOrSetLim(FigureManager &fm, keel::String &limJson,
     Value res = Value::matrix(1, 2, ValueType::DOUBLE);
     res.doubleDataMut()[0] = lo;
     res.doubleDataMut()[1] = hi;
-    outs[0] = std::move(res);
+    outs[0] = keel::move(res);
 }
 void hold_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, GraphicsContext &gc)
 {
@@ -441,7 +440,7 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
         if (cv.isChar()) {
             keel::String s = cv.toString();
             s.to_ascii_lower_in_place();
-            static const std::pair<const char *, const char *> kMap[] = {
+            static const keel::Pair<const char *, const char *> kMap[] = {
                 {"r", "#ff0000"}, {"g", "#008000"}, {"b", "#0000ff"},
                 {"k", "#000000"}, {"w", "#ffffff"}, {"y", "#ffff00"},
                 {"m", "#ff00ff"}, {"c", "#00ffff"},
@@ -780,7 +779,7 @@ void colorbar_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
         Value s = Value::structure(gc.mr);
         s.setField(0, "Layout", Value::structure(gc.mr));
         s.setField(0, "Label", Value::structure(gc.mr));
-        outs[0] = std::move(s);
+        outs[0] = keel::move(s);
     } else {
         outs[0] = Value();
     }
@@ -835,7 +834,7 @@ void axis_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
     out.doubleDataMut()[1] = xl.elemAsDouble(1);
     out.doubleDataMut()[2] = yl.elemAsDouble(0);
     out.doubleDataMut()[3] = yl.elemAsDouble(1);
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 // xdir / ydir — direct setters. MATLAB also accepts
 // set(gca, 'XDir', 'reverse'); we ship the direct form here,
@@ -898,7 +897,7 @@ void colormap_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
             p[64 + i] = v;
             p[128 + i] = v;
         }
-        outs[0] = std::move(cm);
+        outs[0] = keel::move(cm);
         return;
     }
     auto &fm = gc.fm;
@@ -1404,7 +1403,7 @@ void animatedline_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     }
     rebuildAnimatedJson(ds);
     auto &ax = fm.currentAxes();
-    ax.datasets.push_back(std::move(ds));
+    ax.datasets.push_back(keel::move(ds));
     ax.animatedDatasetIdx = (keel::i32)ax.datasets.size() - 1;
     fm.current().modified = true;
     fm.emitModified();
@@ -1479,8 +1478,8 @@ void getpoints_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
         keel::copy_n(xv.doubleDataMut(), ds.animatedX.data(), n);
         keel::copy_n(yv.doubleDataMut(), ds.animatedY.data(), n);
     }
-    outs[0] = std::move(xv);
-    if (nargout >= 2) outs[1] = std::move(yv);
+    outs[0] = keel::move(xv);
+    if (nargout >= 2) outs[1] = keel::move(yv);
 }
 // drawnow — flush figure state. Engine emits figure JSON on
 // every modification; drawnow just bumps modified + emits to be

@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 
@@ -827,7 +826,7 @@ void streamImpl(bool autoSlice,
     };
 
     // Build the seed list.
-    keel::Array<std::pair<keel::f64, keel::f64>> seeds;
+    keel::Array<keel::Pair<keel::f64, keel::f64>> seeds;
     if (autoSlice) {
         // 5×5 evenly spaced inside the grid (1 cell margin so the
         // first integration step has data on every side).
@@ -1270,7 +1269,7 @@ void voronoi_plot(keel::ArrayRef<Value> args, keel::usize nargout,
                 const keel::f64 s = sa2(a, b, c);
                 if (keel::abs(s) < 1e-15) continue;
                 keel::usize va=a, vb=b, vc=c;
-                if (s < 0) std::swap(vb, vc);
+                if (s < 0) keel::swap(vb, vc);
                 bool ok = true;
                 for (keel::usize p = 0; p < n; ++p) {
                     if (p == va || p == vb || p == vc) continue;
@@ -1324,7 +1323,7 @@ void voronoi_plot(keel::ArrayRef<Value> args, keel::usize nargout,
         const auto &T = tris[t];
         for (keel::i32 e = 0; e < 3; ++e) {
             keel::usize u = T[e], v = T[(e + 1) % 3];
-            if (u > v) std::swap(u, v);
+            if (u > v) keel::swap(u, v);
             edgeTris.push_back(EdgeTri{u, v, t});
         }
     }

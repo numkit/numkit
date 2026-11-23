@@ -15,8 +15,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -129,7 +127,7 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     argcheck::checkNargin(args.size(), 2, "convhull");
     Value K = convhull(args[0], args[1], ctx.engine->allocator());
     if (nargout != 0) {
-        outs[0] = std::move(K);
+        outs[0] = keel::move(K);
         return;
     }
     // Auto-plot the hull polygon when called with no LHS (MATLAB
@@ -153,7 +151,7 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     ds.xJson = keel::move(xs);
     ds.yJson = keel::move(ys);
     ds.style.assign("color=#1f77b4");
-    fm.pushDataset(std::move(ds));
+    fm.pushDataset(keel::move(ds));
     fm.emitModified();
 }
 
@@ -324,9 +322,9 @@ void griddata_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nargout >= 3 && outs.size() >= 3) {
         outs[0] = xq;
         outs[1] = yq;
-        outs[2] = std::move(vq);
+        outs[2] = keel::move(vq);
     } else {
-        outs[0] = std::move(vq);
+        outs[0] = keel::move(vq);
     }
 }
 
@@ -360,9 +358,9 @@ void matchpairs_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.size() >= 3 && args[2].isChar())
         mode = args[2].toString();
     auto r = matchpairs(args[0], cU, mode, ctx.engine->allocator());
-    outs[0] = std::move(r.M);
-    if (nargout > 1) outs[1] = std::move(r.uR);
-    if (nargout > 2) outs[2] = std::move(r.uC);
+    outs[0] = keel::move(r.M);
+    if (nargout > 1) outs[1] = keel::move(r.uR);
+    if (nargout > 2) outs[2] = keel::move(r.uC);
 }
 
 void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
@@ -402,9 +400,9 @@ void dsearchn_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (nargout >= 2)
             D.doubleDataMut()[q] = keel::sqrt(bestDistSq);
     }
-    outs[0] = std::move(K);
+    outs[0] = keel::move(K);
     if (nargout >= 2 && outs.size() >= 2)
-        outs[1] = std::move(D);
+        outs[1] = keel::move(D);
 }
 
 } // namespace detail

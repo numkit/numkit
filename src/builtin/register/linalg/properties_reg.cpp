@@ -22,7 +22,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <utility>
 
 namespace numkit::linalg {
 namespace detail {
@@ -112,12 +111,12 @@ void condeig_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     // Eig dispatch matches the eig_reg path.
     if (!A.isComplex() && isSymmetricApprox(A, 1e-10)) {
         auto [V, D] = eig_symmetric(A, mr);
-        outs[0] = std::move(V);
-        outs[1] = std::move(D);
+        outs[0] = keel::move(V);
+        outs[1] = keel::move(D);
     } else {
         auto [V, D] = eig_general_VD(A, mr);
-        outs[0] = std::move(V);
-        outs[1] = std::move(D);
+        outs[0] = keel::move(V);
+        outs[1] = keel::move(D);
     }
     if (nargout >= 3 && outs.size() >= 3)
         outs[2] = condeig(A, mr);

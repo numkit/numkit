@@ -25,7 +25,6 @@ void sscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, Ca
 void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 #include <cstdio>
-#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -224,7 +223,7 @@ struct JsonParser {
             return v;
         }
         Value cell = Value::cell(elems.size(), 1, mr);
-        for (keel::usize i = 0; i < elems.size(); ++i) cell.cellAt(i) = std::move(elems[i]);
+        for (keel::usize i = 0; i < elems.size(); ++i) cell.cellAt(i) = keel::move(elems[i]);
         return cell;
     }
 
@@ -244,14 +243,14 @@ struct JsonParser {
             if (pos < s.size() && s[pos] == ':') ++pos;
             Value val = parseValue();
             fields.push_back(keel::move(key));
-            vals.push_back(std::move(val));
+            vals.push_back(keel::move(val));
             skipWs();
             if (pos < s.size() && s[pos] == ',') { ++pos; continue; }
             if (pos < s.size() && s[pos] == '}') { ++pos; break; }
             break;
         }
         Value st = Value::structure(mr);
-        for (keel::usize i = 0; i < fields.size(); ++i) st.setField(0, fields[i], std::move(vals[i]));
+        for (keel::usize i = 0; i < fields.size(); ++i) st.setField(0, fields[i], keel::move(vals[i]));
         return st;
     }
 };

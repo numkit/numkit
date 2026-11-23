@@ -23,7 +23,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 
@@ -858,7 +857,7 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
                     Value out[1];
                     CallContext ctx{&engine_, currentCallEnv()};
                     (*mfn)(self, rest, 1, keel::MutArrayRef<Value>(out, 1), ctx);
-                    R[I.a] = std::move(out[0]);
+                    R[I.a] = keel::move(out[0]);
                     return;
                 }
             }
@@ -878,11 +877,11 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
                 if (&R[argBase + i] == &R[I.a])
                     canHint = false;
             if (canHint)
-                ob[0] = std::move(R[I.a]);
+                ob[0] = keel::move(R[I.a]);
             keel::MutArrayRef<Value> os(ob, 1);
             CallContext ctx{&engine_, currentCallEnv()};
             (*fnPtr)(as, 1, os, ctx);
-            R[I.a] = std::move(ob[0]);
+            R[I.a] = keel::move(ob[0]);
             return;
         }
     }

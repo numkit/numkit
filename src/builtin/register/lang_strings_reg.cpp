@@ -22,8 +22,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -113,7 +111,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                 expr.push_back(']');
                 Value v = ctx.engine->eval(expr, /*suppressTopLevelDisplay=*/true);
                 if (v.isNumeric() || v.isLogical()) {
-                    result = std::move(v);
+                    result = keel::move(v);
                     ok = true;
                 }
             } catch (...) {
@@ -121,7 +119,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             }
         }
     }
-    outs[0] = ok ? std::move(result) : Value::Empty;
+    outs[0] = ok ? keel::move(result) : Value::Empty;
     if (nargout >= 2 && outs.size() >= 2)
         outs[1] = Value::logicalScalar(ok, mr);
 }
@@ -652,8 +650,8 @@ void rat_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         Nd[i] = keel::as<keel::f64>(exp.p);
         Dd[i] = keel::as<keel::f64>(exp.q);
     }
-    outs[0] = std::move(N);
-    outs[1] = std::move(D);
+    outs[0] = keel::move(N);
+    outs[1] = keel::move(D);
 }
 
 void rats_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -675,8 +673,8 @@ void strtok_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                                    : keel::String::from(" \t\r\n\f\v");
     auto [tok, rem] = numkit::builtin::strtok(args[0], delim,
                                               ctx.engine->allocator());
-    outs[0] = std::move(tok);
-    if (nargout > 1) outs[1] = std::move(rem);
+    outs[0] = keel::move(tok);
+    if (nargout > 1) outs[1] = keel::move(rem);
 }
 
 // ── Pack 36 adapters ─────────────────────────────────────────────────

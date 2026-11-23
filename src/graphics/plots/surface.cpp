@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <keel/static_array.h>
 #include <cstdio>
-#include <utility>
 
 namespace numkit {
 

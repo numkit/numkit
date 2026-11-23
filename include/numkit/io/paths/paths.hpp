@@ -9,7 +9,7 @@
 #include <keel/string.h>
 #include <numkit/value/value.hpp>
 
-#include <tuple>
+#include <keel/tuple.h>
 
 #include <numkit/sys/fs_context.hpp>
 
@@ -58,7 +58,7 @@ Value fullfile(keel::ArrayRef<keel::StringRef> parts,
 /// @param mr    Memory resource (nullptr → process default).
 /// @return      `(folder, name, ext)` triple of CHAR values.
 /// @see fullfile
-std::tuple<Value, Value, Value>
+keel::Tuple<Value, Value, Value>
 fileparts(keel::StringRef path,
           keel::Allocator *mr = nullptr);
 

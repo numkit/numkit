@@ -20,7 +20,7 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <tuple>
+#include <keel/tuple.h>
 
 namespace numkit::pkg {
 
@@ -199,7 +199,7 @@ struct SemVerTag {
 
     bool operator<(const SemVerTag &o) const
     {
-        return std::tie(major, minor, patch) < std::tie(o.major, o.minor, o.patch);
+        return keel::tie(major, minor, patch) < keel::tie(o.major, o.minor, o.patch);
     }
 };
 

@@ -16,7 +16,6 @@
 #include "vm_internal.hpp"
 
 #include <algorithm>
-#include <utility>
 
 namespace numkit {
 
@@ -250,18 +249,18 @@ keel::Array<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
     // popCallFrame's top-level (frames_.size()==1) branch repopulates
     // lastVarMap_ from the callee's locals; snapshot+restore so the outer's
     // pending workspace export is not clobbered by this nested run.
-    keel::Array<std::pair<keel::String, Value>> savedVarMap = keel::move(lastVarMap_);
+    keel::Array<keel::Pair<keel::String, Value>> savedVarMap = keel::move(lastVarMap_);
 
     struct Restorer
     {
         VM &vm;
         bool reentrant = false;
         keel::UniquePtr<PausedState> st;
-        keel::Array<std::pair<keel::String, Value>> vm_savedVarMap;
+        keel::Array<keel::Pair<keel::String, Value>> vm_savedVarMap;
         bool done = false;
 
         Restorer(VM &v, bool r, keel::UniquePtr<PausedState> s,
-                 keel::Array<std::pair<keel::String, Value>> svm)
+                 keel::Array<keel::Pair<keel::String, Value>> svm)
             : vm(v), reentrant(r), st(keel::move(s)), vm_savedVarMap(keel::move(svm))
         {}
 
@@ -515,7 +514,7 @@ ExecStatus VM::resumeExecution()
 // would otherwise make syncVMToWorkspace remove() it (cascading into globalsEnv_
 // and clobbering the live value). Global membership is O(1) via a set built once
 // — and skipped entirely when the chunk declares no globals (the common case).
-static void rebuildLocalVarMap(keel::Array<std::pair<keel::String, Value>> &out,
+static void rebuildLocalVarMap(keel::Array<keel::Pair<keel::String, Value>> &out,
                                const BytecodeChunk &chunk, const Value *R, keel::u32 nregs)
 {
     out.clear();
@@ -1316,7 +1315,7 @@ void VM::forSetVar(Value &varReg, const ForState &fs)
         const keel::f64 *src = fs.data + fs.index * rows;
         for (keel::usize r = 0; r < rows; ++r)
             dst[r] = src[r];
-        varReg = std::move(col);
+        varReg = keel::move(col);
         return;
     }
 

@@ -21,8 +21,6 @@
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -338,7 +336,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                     gdVec[k] = Gd.elemAsDouble(k * st);
             }
         }
-        grids.push_back(std::move(gdVec));
+        grids.push_back(keel::move(gdVec));
     }
 
     const Value &Xq0 = args[qStart];
@@ -400,7 +398,7 @@ void interpn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             od[q] = acc;
         }
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 // polyfit_reg / polyval_reg → math/elementary/polynomials.cpp

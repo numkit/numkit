@@ -15,7 +15,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <utility>
 
 namespace numkit::optim {
 
@@ -73,7 +72,7 @@ void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
         out.setField(0, "funcCount", Value::scalar(1.0, mr));
         out.setField(0, "algorithm", Value::fromString(who, mr));
         out.setField(0, "message", Value::fromString("Optimization terminated.", mr));
-        outs[3] = std::move(out);
+        outs[3] = keel::move(out);
     }
 }
 } // anon
@@ -87,7 +86,7 @@ void fzero_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     auto *mr = ctx.engine->allocator();
     const Value &v = args[1];
@@ -133,7 +132,7 @@ void fminbnd_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
         if (extra.empty()) {
             auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
             for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-                ou[i] = std::move(r[i]);
+                ou[i] = keel::move(r[i]);
             return;
         }
         keel::Array<Value> full;
@@ -144,7 +143,7 @@ void fminbnd_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutA
             full.push_back(extra[i]);
         auto r = ctx.engine->callFunctionHandleMulti(handle, full.as_ref(), ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = fminbnd(cb, lo, hi, tol, ctx.engine->allocator());
     emitFvalExitflag(ctx, args[0], outs[0], outs, "fminbnd", extra);
@@ -160,7 +159,7 @@ void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     auto *mr = ctx.engine->allocator();
 
@@ -180,9 +179,9 @@ void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::M
         Value row = Value::matrix(1, n, ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < n; ++i)
             row.doubleDataMut()[i] = r.doubleData()[i];
-        r = std::move(row);
+        r = keel::move(row);
     }
-    outs[0] = std::move(r);
+    outs[0] = keel::move(r);
     emitFvalExitflag(ctx, args[0], outs[0], outs, "fminsearch");
 }
 

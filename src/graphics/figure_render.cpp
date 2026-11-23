@@ -134,7 +134,7 @@ inline bool textColorSpec(keel::StringRef v, Rgb &out)
     // MATLAB-exact named colours (short letters are the SAME values:
     // 'r' == 'red' == (1,0,0)) — NOT the soft series palette, which is
     // a deliberate nk aesthetic for LINES only.
-    static const std::pair<const char *, Rgb> kNames[] = {
+    static const keel::Pair<const char *, Rgb> kNames[] = {
         {"red", {255, 0, 0}},       {"green", {0, 128, 0}},
         {"blue", {0, 0, 255}},      {"cyan", {0, 255, 255}},
         {"magenta", {255, 0, 255}}, {"yellow", {255, 255, 0}},
@@ -1155,9 +1155,9 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
     keel::f64 px0 = plot.x0, px1 = plot.x1;
     keel::f64 py0 = plot.y1, py1 = plot.y0;   // y DOWN: data-up = pixel-up
     if (ax.xDir == "reverse")
-        std::swap(px0, px1);
+        keel::swap(px0, px1);
     if (ax.yDir == "reverse")
-        std::swap(py0, py1);
+        keel::swap(py0, py1);
     auto X = [&](keel::f64 v) { return XR.map(v, px0, px1); };
     auto Y = [&](keel::f64 v) { return YR.map(v, py0, py1); };
     auto Y2 = [&](keel::f64 v) { return YR2.map(v, py0, py1); };

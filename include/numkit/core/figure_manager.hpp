@@ -10,7 +10,6 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <cstdio>
-#include <utility>
 #include <cstdlib>
 #include <algorithm>
 
@@ -141,7 +140,7 @@ struct DatasetInfo
     // Memory cost: 4/3× original (geometric series). For 16k×42k uint8 =
     // 670 MB → pyramid total ~890 MB.
     mutable keel::Array<keel::Array<keel::u8>> lodLevels;
-    mutable keel::Array<std::pair<keel::usize, keel::usize>> lodDims;
+    mutable keel::Array<keel::Pair<keel::usize, keel::usize>> lodDims;
 
     // ── Per-vertex colours for fill3 / polygon3d datasets.
     // Layout: parallel to xJson/yJson/zJson — for each finite (x, y, z)

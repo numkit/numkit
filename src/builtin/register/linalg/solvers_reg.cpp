@@ -18,7 +18,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
 
-#include <utility>
 
 namespace numkit::linalg {
 namespace detail {
@@ -61,7 +60,7 @@ void lsqnonneg_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             Value::fromString(R.algorithm, mr);
         out_struct.field("message") =
             Value::fromString(R.message, mr);
-        outs[4] = std::move(out_struct);
+        outs[4] = keel::move(out_struct);
     }
 }
 

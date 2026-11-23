@@ -20,8 +20,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -322,7 +320,7 @@ void ind2sub_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                                     std::max<keel::usize>(nargout, 1),
                                     ctx.engine->allocator());
     for (keel::usize i = 0; i < rs.size() && i < outs.size(); ++i)
-        outs[i] = std::move(rs[i]);
+        outs[i] = keel::move(rs[i]);
 }
 
 } // namespace detail

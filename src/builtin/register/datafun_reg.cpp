@@ -21,7 +21,6 @@
 #include <numkit/signal/digital_filtering/filter.hpp>
 
 #include <algorithm>
-#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -233,7 +232,7 @@ Value accumarrayGeneral(const Value &subs, const Value &vals,
         Value g = Value::matrix(len, 1, ValueType::DOUBLE, mr);
         std::copy(ordered.begin() + off[i], ordered.begin() + off[i] + len,
                   g.doubleDataMut());
-        Value callArgs[1] = { std::move(g) };
+        Value callArgs[1] = { keel::move(g) };
         Value res = ctx.engine->callFunctionHandle(handle,
                                                    keel::ArrayRef<Value>(callArgs, 1));
         dst[i] = res.toScalar();
@@ -311,7 +310,7 @@ void accumarray_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         Value res = accumarray(args[0], vals, shapeSpan, op, fillVal, mr);
         if (valsInt && (op == AccumReducer::Max || op == AccumReducer::Min))
             res = doubleToIntegerExact(res, valsArg.type(), mr);
-        outs[0] = std::move(res);
+        outs[0] = keel::move(res);
     }
 }
 
@@ -335,7 +334,7 @@ void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         for (keel::usize i = 0; i < v.numel(); ++i)
             out.doubleDataMut()[i] =
                 (v.doubleData()[i] > 0.5) ? 1.0 : keel::kNaN;
-        outs[0] = std::move(out);
+        outs[0] = keel::move(out);
         return;
     }
     // Matrix: each column -> row index of the value closest to 1;
@@ -354,7 +353,7 @@ void vec2ind_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
         }
         out.doubleDataMut()[j] = best;
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void full_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -386,7 +385,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                     zd[q1 + q2 * Q] = keel::sqrt(acc);
                 }
             }
-            outs[0] = std::move(Z);
+            outs[0] = keel::move(Z);
         } else {
             Value Z = Value::matrix(Q, Q, ValueType::DOUBLE, mr);
             keel::f64 *zd = Z.doubleDataMut();
@@ -400,7 +399,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                     zd[q1 + q2 * Q] = keel::sqrt(acc);
                 }
             }
-            outs[0] = std::move(Z);
+            outs[0] = keel::move(Z);
         }
         return;
     }
@@ -430,7 +429,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                 zd[s + q * S] = keel::sqrt(acc);
             }
         }
-        outs[0] = std::move(Z);
+        outs[0] = keel::move(Z);
     } else {
         Value Z = Value::matrix(S, Q, ValueType::DOUBLE, mr);
         keel::f64 *zd = Z.doubleDataMut();
@@ -444,7 +443,7 @@ void dist_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> 
                 zd[s + q * S] = keel::sqrt(acc);
             }
         }
-        outs[0] = std::move(Z);
+        outs[0] = keel::move(Z);
     }
 }
 
@@ -680,9 +679,9 @@ void deconv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
                 CallContext &ctx) {
     argcheck::checkNargin(args.size(), 2, 3, "deconv");
     auto [q, r] = signal::deconv(args[0], args[1], ctx.engine->allocator());
-    outs[0] = std::move(q);
+    outs[0] = keel::move(q);
     if (nargout > 1)
-        outs[1] = std::move(r);
+        outs[1] = keel::move(r);
 }
 
 void filter_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -697,9 +696,9 @@ void filter_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     }
     const Value zi = hasZi ? args[3] : Value();
     signal::FilterState st = signal::filter(args[0], args[1], args[2], zi, mr);
-    outs[0] = std::move(st.y);
+    outs[0] = keel::move(st.y);
     if (nargout > 1)
-        outs[1] = std::move(st.zf);
+        outs[1] = keel::move(st.zf);
 }
 
 void filter2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,

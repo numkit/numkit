@@ -16,7 +16,6 @@
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <algorithm>
-#include <utility>
 #include <numkit/core/build_info.hpp>
 
 namespace numkit::builtin::detail {
@@ -114,12 +113,12 @@ void checkFsKind(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
         Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
         for (keel::usize i = 0; i < args[0].numel(); ++i)
             res.logicalDataMut()[i] = checkOne(args[0].stringElem(i)) ? 1 : 0;
-        outs[0] = std::move(res);
+        outs[0] = keel::move(res);
     } else if (args[0].isCell()) {
         Value res = Value::matrix(args[0].dims().rows(), args[0].dims().cols(), ValueType::LOGICAL, mr);
         for (keel::usize i = 0; i < args[0].numel(); ++i)
             res.logicalDataMut()[i] = checkOne(args[0].cellAt(i).toString()) ? 1 : 0;
-        outs[0] = std::move(res);
+        outs[0] = keel::move(res);
     } else {
         outs[0] = Value::logicalScalar(false, mr);
     }
@@ -508,7 +507,7 @@ void dir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
         fields.put(keel::String("datenum", mr), Value::scalar(est ? keel::f64(est->mtime) : 0.0, mr));
         fields.put(keel::String("date", mr),    Value::fromString("", mr));
     }
-    outs[0] = std::move(arr);
+    outs[0] = keel::move(arr);
 }
 
 void ls_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -589,7 +588,7 @@ void optimset_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
             throw numkit::Error("optimset: option name must be a string");
         s.field(args[i].toString()) = args[i + 1];
     }
-    outs[0] = std::move(s);
+    outs[0] = keel::move(s);
 }
 
 void optimget_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -702,7 +701,7 @@ void profile_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<V
         Value s = Value::structure(mr);
         s.field("FunctionTable") = Value::structArray(0, 1, mr);
         s.field("ProfilerStatus") = Value::fromString("off", mr);
-        outs[0] = std::move(s);
+        outs[0] = keel::move(s);
     } else {
         outs[0] = Value();
     }

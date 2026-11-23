@@ -19,8 +19,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <tuple>
-#include <utility>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -97,7 +95,7 @@ void shiftdim_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     }
     // Auto form: [B, k] = shiftdim(A).
     auto res = shiftdimAuto(args[0], mr);
-    outs[0] = std::move(res.v);
+    outs[0] = keel::move(res.v);
     if (nargout > 1)
         outs[1] = Value::scalar(keel::as<keel::f64>(res.dropped), mr);
 }

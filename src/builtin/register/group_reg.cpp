@@ -17,7 +17,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -27,8 +26,8 @@ void findgroups_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 {
     argcheck::checkNargin(args.size(), 1, "findgroups");
     FindgroupsResult r = findgroups(args[0], ctx.engine->allocator());
-    outs[0] = std::move(r.G);
-    if (nargout >= 2) outs[1] = std::move(r.ID);
+    outs[0] = keel::move(r.G);
+    if (nargout >= 2) outs[1] = keel::move(r.ID);
 }
 
 // ── splitapply ───────────────────────────────────────────────────────
@@ -92,14 +91,14 @@ void splitapply_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
             keel::f64 *sd = sub.doubleDataMut();
             for (keel::usize j = 0; j < idxs.size(); ++j)
                 sd[j] = args[1 + k].elemAsDouble(idxs[j]);
-            callArgs[k] = std::move(sub);
+            callArgs[k] = keel::move(sub);
         }
         Value r = ctx.engine->callFunctionHandle(
             fn, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), ctx.env);
         rd[gIdx++] = r.toScalar();
     }
 
-    outs[0] = std::move(result);
+    outs[0] = keel::move(result);
 }
 
 // ── groupcounts ──────────────────────────────────────────────────────
@@ -108,9 +107,9 @@ void groupcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 {
     argcheck::checkNargin(args.size(), 1, "groupcounts");
     GroupcountsResult r = groupcounts(args[0], ctx.engine->allocator());
-    outs[0] = std::move(r.C);
-    if (nargout >= 2) outs[1] = std::move(r.GR);
-    if (nargout >= 3) outs[2] = std::move(r.P);
+    outs[0] = keel::move(r.C);
+    if (nargout >= 2) outs[1] = keel::move(r.GR);
+    if (nargout >= 3) outs[2] = keel::move(r.P);
 }
 
 // ── groupsummary ─────────────────────────────────────────────────────
@@ -126,9 +125,9 @@ void groupsummary_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::String method = m.toString();
 
     GroupsummaryResult r = groupsummary(args[0], args[1], method, ctx.engine->allocator());
-    outs[0] = std::move(r.B);
-    if (nargout >= 2) outs[1] = std::move(r.BG);
-    if (nargout >= 3) outs[2] = std::move(r.BC);
+    outs[0] = keel::move(r.B);
+    if (nargout >= 2) outs[1] = keel::move(r.BG);
+    if (nargout >= 3) outs[2] = keel::move(r.BC);
 }
 
 // ── grouptransform ───────────────────────────────────────────────────
@@ -216,7 +215,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 }
             }
         }
-        outs[0] = std::move(B);
+        outs[0] = keel::move(B);
     }
 
     if (nargout >= 2) {
@@ -224,7 +223,7 @@ void grouptransform_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::f64 *gd = BG.doubleDataMut();
         for (keel::usize i = 0; i < nRows; ++i)
             gd[i] = G.elemAsDouble(i);
-        outs[1] = std::move(BG);
+        outs[1] = keel::move(BG);
     }
 }
 
@@ -311,14 +310,14 @@ void groupfilter_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     for (keel::usize c = 0; c < nCols; ++c)
         for (keel::usize j = 0; j < kRows; ++j)
             bd[j + c * kRows] = Aget(kept_idx[j], c);
-    outs[0] = std::move(B);
+    outs[0] = keel::move(B);
 
     if (nargout >= 2) {
         auto BG = Value::matrix(kRows, 1, ValueType::DOUBLE, mr);
         keel::f64 *gd = BG.doubleDataMut();
         for (keel::usize j = 0; j < kRows; ++j)
             gd[j] = G.elemAsDouble(kept_idx[j]);
-        outs[1] = std::move(BG);
+        outs[1] = keel::move(BG);
     }
 }
 

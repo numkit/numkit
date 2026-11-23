@@ -13,7 +13,6 @@
 #include <keel/format.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
-#include <tuple>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/builtin/detail/polyfun/integration_detail.hpp>
 #include <numkit/core/engine.hpp>
@@ -72,7 +71,7 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                     rp[i] = (fp[i + 1] - fp[i - 1]) / (xp[i + 1] - xp[i - 1]);
                 rp[n - 1] = (fp[n - 1] - fp[n - 2]) / (xp[n - 1] - xp[n - 2]);
             }
-            outs[0] = std::move(res);
+            outs[0] = keel::move(res);
             return;
         }
         // Vector / 2-D matrix — unchanged fast paths.
@@ -86,8 +85,8 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             return;
         }
         auto [fx, fy] = gradient2(args[0], hx, hy, mr);
-        outs[0] = std::move(fx);
-        outs[1] = std::move(fy);
+        outs[0] = keel::move(fx);
+        outs[1] = keel::move(fy);
         return;
     }
 
@@ -106,7 +105,7 @@ void gradient_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     }
     auto results = gradientND(args[0], hs.data(), hs.size(), nout, mr);
     for (keel::usize o = 0; o < nout && o < outs.size(); ++o)
-        outs[o] = std::move(results[o]);
+        outs[o] = keel::move(results[o]);
 }
 
 void del2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -202,9 +201,9 @@ void gk15_nodes_reg(keel::ArrayRef<Value> /*args*/, keel::usize /*nargout*/, kee
     }
     for (keel::i32 i = 0; i < 7; ++i)
         wg.doubleDataMut()[i] = kGaussW[i];
-    if (outs.size() >= 1) outs[0] = std::move(xk);
-    if (outs.size() >= 2) outs[1] = std::move(wk);
-    if (outs.size() >= 3) outs[2] = std::move(wg);
+    if (outs.size() >= 1) outs[0] = keel::move(xk);
+    if (outs.size() >= 2) outs[1] = keel::move(wk);
+    if (outs.size() >= 3) outs[2] = keel::move(wg);
 }
 
 static bool isCallableHandleArg(const Value &v)
@@ -241,7 +240,7 @@ void integral_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mut
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = integral(cb, a, b, absTol, ctx.engine->allocator());
 }
@@ -271,7 +270,7 @@ void integral2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->allocator());
 }
@@ -292,7 +291,7 @@ void integral3_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::Mu
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = integral3(cb, a, b, c, d, e, f, absTol, ctx.engine->allocator());
 }
@@ -313,7 +312,7 @@ void quadgk_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = integral(cb, a, b, absTol, ctx.engine->allocator());
     if (outs.size() >= 2) outs[1] = Value::scalar(absTol, ctx.engine->allocator());
@@ -334,7 +333,7 @@ void quad2d_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutAr
                                keel::Allocator * /*mr*/) {
         auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
-            ou[i] = std::move(r[i]);
+            ou[i] = keel::move(r[i]);
     };
     outs[0] = integral2(cb, a, b, c, d, absTol, ctx.engine->allocator());
 }

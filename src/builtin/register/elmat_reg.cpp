@@ -15,7 +15,6 @@
 
 #include <keel/random.h>
 #include <algorithm>
-#include <utility>
 
 namespace numkit::builtin::detail {
 
@@ -154,7 +153,7 @@ void rands_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
     keel::f64 *p = out.doubleDataMut();
     auto &rng = ctx.engine->rng();
     for (keel::usize i = 0; i < m * n; ++i) p[i] = keel::random::uniform_f64(rng, -1.0, 1.0);
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 void head_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -223,7 +222,7 @@ void bsxfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
             outData[c * outR + r] = callOut.toScalar();
         }
     }
-    outs[0] = std::move(res);
+    outs[0] = keel::move(res);
 }
 
 void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -239,7 +238,7 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
         if (s == "single") {
             Value out = Value::matrix(1, 1, ValueType::SINGLE, mr);
             out.singleDataMut()[0] = keel::Limits<keel::f32>::kEpsilon;
-            outs[0] = std::move(out);
+            outs[0] = keel::move(out);
         } else if (s == "double") {
             outs[0] = Value::scalar(keel::Limits<keel::f64>::kEpsilon, mr);
         } else {
@@ -290,7 +289,7 @@ void eps_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
             }
         }
     }
-    outs[0] = std::move(out);
+    outs[0] = keel::move(out);
 }
 
 } // namespace
