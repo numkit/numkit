@@ -274,14 +274,8 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
             return vm_->callReentrant(*fc, args, nout);
     }
 
-    if (const UserFunction *uf = lookupUserFunction(name, e)) {
-        const BytecodeChunk *cc = ensureClassMethodChunk(*uf);
-        if (!cc) {
-            auto msg = keel::format("Failed to compile function handle target '@{}'", name);
-            throw numkit::Error(msg.c_str());
-        }
-        return vm_->callReentrant(*cc, args, nout);
-    }
+    if (const UserFunction *uf = lookupUserFunction(name, e))
+        return invokeUserFunction_(*uf, args, nout);
 
     // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
     if (const ExternalFunc *fn = findExternal(name, e)) {
@@ -295,38 +289,41 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
     throw numkit::Error(msg.c_str());
 }
 
+void Engine::writeThroughScopeVar_(Environment *env, keel::StringRef name, const Value &val)
+{
+    if (useVM_())
+        vm_->writeToFrameMatchingEnv(env, name, val);
+}
+
+void Engine::syncScopeClearAll_(Environment *env)
+{
+    if (useVM_())
+        vm_->syncEnvRemovalsToFrame(env);
+}
+
 bool Engine::isInsideFunctionCall() const
 {
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->callDepth() > 0;
-    if (treeWalker_)
-        return treeWalker_->callDepth() > 0;
-    return false;
+    return treeWalker_ && treeWalker_->callDepth() > 0;
 }
 
 // ── Frame stack introspection ───────────────────────────────────
 
 keel::i32 Engine::callerDepth() const
 {
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->callDepth();
-    if (treeWalker_)
-        return keel::as<keel::i32>(treeWalker_->activeFrames().size());
-    return 0;
+    return treeWalker_ ? keel::as<keel::i32>(treeWalker_->activeFrames().size()) : 0;
 }
 
 Environment *Engine::callerEnv(keel::i32 n)
 {
     if (n < 0) n = 0;
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->callerEnvAtDepth(n);
-    if (treeWalker_) {
-        const auto &frames = treeWalker_->activeFrames();
-        if (n < keel::as<keel::i32>(frames.size()))
-            return frames[frames.size() - 1 - n].env;
-        return workspaceEnv_.get();
-    }
-    return workspaceEnv_.get();
+    return treeWalker_ ? treeWalker_->callerEnvAtDepth(n, workspaceEnv_.get())
+                       : workspaceEnv_.get();
 }
 
 void Engine::assignToCaller(keel::i32 n, keel::StringRef name, Value val)
@@ -335,28 +332,26 @@ void Engine::assignToCaller(keel::i32 n, keel::StringRef name, Value val)
     if (!env) env = workspaceEnv_.get();
     // Write-through to register if VM caller frame has the name in its
     // varMap (so static reads pick up the new value).
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         vm_->assignInCallerFrame(n, name, val);
     env->set(name, keel::move(val));
 }
 
 void Engine::assignInBase(keel::StringRef name, Value val)
 {
-    if (vm_ && backend_ == Backend::VM)
-        vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
+    writeThroughScopeVar_(workspaceEnv_.get(), name, val);
     workspaceEnv_->set(name, keel::move(val));
 }
 
 void Engine::syncFrameToEnv(Environment *env)
 {
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         vm_->syncFrameToEnv(env);
 }
 
 void Engine::syncEnvRemovalsToFrame(Environment *env)
 {
-    if (vm_ && backend_ == Backend::VM)
-        vm_->syncEnvRemovalsToFrame(env);
+    syncScopeClearAll_(env);
 }
 
 void Engine::clearPersistentForFunc(keel::StringRef funcName)
@@ -385,53 +380,27 @@ keel::String Engine::inputName(keel::i32 k)
         throw numkit::Error(
             "inputname: must be called from within a function");
 
-    if (vm_ && backend_ == Backend::VM) {
-        const auto names = vm_->currentFrameCallerArgNames();
-        if (k > keel::as<keel::i32>(names.size()))
-            return {};  // beyond known names: arg wasn't recorded
-        return names[k - 1].clone();
-    }
-    if (treeWalker_) {
-        const auto &frames = treeWalker_->activeFrames();
-        if (frames.empty()) return {};
-        const auto &names = frames.back().callerArgNames;
-        if (k > keel::as<keel::i32>(names.size()))
-            return {};
-        return names[k - 1].clone();
-    }
-    return {};
+    const auto names = useVM_()
+                           ? vm_->currentFrameCallerArgNames()
+                           : (treeWalker_ ? treeWalker_->currentFrameCallerArgNames()
+                                          : keel::ArrayRef<keel::String>{});
+    if (k > keel::as<keel::i32>(names.size()))
+        return {};
+    return names[k - 1].clone();
 }
 
 keel::i64 Engine::currentFunctionNargin() const
 {
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->currentFunctionNargin();
-    if (treeWalker_) {
-        const auto &frames = treeWalker_->activeFrames();
-        for (keel::usize i = frames.size(); i > 0; --i) {
-            if (auto *env = frames[i - 1].env) {
-                if (const Value *v = env->getLocal("nargin"))
-                    return keel::as<keel::i64>(v->toScalar());
-            }
-        }
-    }
-    return -1;
+    return treeWalker_ ? treeWalker_->currentFunctionNargin() : -1;
 }
 
 keel::i64 Engine::currentFunctionNargout() const
 {
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->currentFunctionNargout();
-    if (treeWalker_) {
-        const auto &frames = treeWalker_->activeFrames();
-        for (keel::usize i = frames.size(); i > 0; --i) {
-            if (auto *env = frames[i - 1].env) {
-                if (const Value *v = env->getLocal("nargout"))
-                    return keel::as<keel::i64>(v->toScalar());
-            }
-        }
-    }
-    return -1;
+    return treeWalker_ ? treeWalker_->currentFunctionNargout() : -1;
 }
 
 void Engine::clearUserFunctions()
@@ -683,7 +652,7 @@ Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
     if (callerDepth() == 0)
         lastErrorStack_.clear();
     refreshStaleMFiles();
-    if (backend_ == Backend::VM && vm_)
+    if (useVM_())
         vm_->flushWorkspaceFrame();
 
     Lexer lexer(*src);
@@ -810,15 +779,13 @@ Value makeExceptionStruct(keel::StringRef message,
 
 keel::Array<CallStackFrame> Engine::captureCallStack() const
 {
-    if (backend_ == Backend::VM && vm_) {
+    if (useVM_()) {
         auto vmStack = vm_->captureCallStack();
         if (!vmStack.empty() || !treeWalker_)
             return vmStack;
         return treeWalker_->captureCallStack();
     }
-    if (treeWalker_)
-        return treeWalker_->captureCallStack();
-    return {};
+    return treeWalker_ ? treeWalker_->captureCallStack() : keel::Array<CallStackFrame>{};
 }
 
 // ============================================================
@@ -885,21 +852,18 @@ void Engine::syncVMToWorkspace()
 {
     if (clearAllCalled_) {
         workspaceEnv_->clearAll();
-        if (vm_ && backend_ == Backend::VM)
-            vm_->syncEnvRemovalsToFrame(workspaceEnv_.get());
+        syncScopeClearAll_(workspaceEnv_.get());
         clearAllCalled_ = false;
     }
     for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             workspaceEnv_->remove(name);
-            if (vm_ && backend_ == Backend::VM)
-                vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, val);
+            writeThroughScopeVar_(workspaceEnv_.get(), name, val);
         } else {
             Value *gsVal = workspaceEnv_->isGlobal(name) ? globalsEnv_->get(name) : nullptr;
             const Value &finalVal = gsVal ? *gsVal : val;
             workspaceEnv_->set(name, finalVal);
-            if (vm_ && backend_ == Backend::VM)
-                vm_->writeToFrameMatchingEnv(workspaceEnv_.get(), name, finalVal);
+            writeThroughScopeVar_(workspaceEnv_.get(), name, finalVal);
         }
     }
 }
@@ -912,23 +876,17 @@ void Engine::syncVMToScope(Environment *scope)
     }
     if (clearAllCalled_) {
         scope->clearAll();
-        if (vm_ && backend_ == Backend::VM)
-            vm_->syncEnvRemovalsToFrame(scope);
+        syncScopeClearAll_(scope);
         clearAllCalled_ = false;
     }
     for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
             scope->remove(name);
-            if (vm_ && backend_ == Backend::VM)
-                vm_->writeToFrameMatchingEnv(scope, name, val);
+            writeThroughScopeVar_(scope, name, val);
             continue;
         }
         scope->set(name, val);
-        // VM mode: write-through to the scope-owning frame's static
-        // register slot if any, so subsequent register-based reads in
-        // the caller pick up the value.
-        if (vm_ && backend_ == Backend::VM)
-            vm_->writeToFrameMatchingEnv(scope, name, val);
+        writeThroughScopeVar_(scope, name, val);
     }
 }
 

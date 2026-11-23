@@ -40,6 +40,10 @@ public:
         keel::Array<keel::String> callerArgNames;
     };
     const keel::Array<ActiveFrame> &activeFrames() const { return activeFrames_; }
+    Environment *callerEnvAtDepth(keel::i32 n, Environment *fallback) const;
+    keel::ArrayRef<keel::String> currentFrameCallerArgNames() const;
+    keel::i64 currentFunctionNargin() const;
+    keel::i64 currentFunctionNargout() const;
     keel::Array<CallStackFrame> captureCallStack() const;
 
     // ── Public callback API ───────────────────────────────────

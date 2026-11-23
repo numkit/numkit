@@ -1069,6 +1069,17 @@ private:
     keel::i32 maxRecursionDepth_ = 500;
     keel::Atomic<bool> cancelRequested_{false};
 
+    // Backend dispatch facade helpers — single entry points for VM vs TreeWalker
+    // selection, variable write-through, and user-function / classdef invocation.
+    [[nodiscard]] bool useVM_() const noexcept { return backend_ == Backend::VM && vm_ != nullptr; }
+    void writeThroughScopeVar_(Environment *env, keel::StringRef name, const Value &val);
+    void syncScopeClearAll_(Environment *env);
+    keel::Array<Value> invokeUserFunction_(const UserFunction &uf,
+                                           keel::ArrayRef<Value> args,
+                                           keel::usize nout,
+                                           bool isCtor = false,
+                                           const Value *ctorSeed = nullptr);
+
     // Sync VM's exported variables to workspaceEnv (called after execute, even on error)
     void syncVMToWorkspace();
 

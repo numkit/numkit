@@ -26,6 +26,44 @@ TreeWalker::TreeWalker(Engine &engine)
     : engine_(engine)
 {}
 
+Environment *TreeWalker::callerEnvAtDepth(keel::i32 n, Environment *fallback) const
+{
+    if (n < 0)
+        n = 0;
+    if (n < keel::as<keel::i32>(activeFrames_.size()))
+        return activeFrames_[activeFrames_.size() - 1 - n].env;
+    return fallback;
+}
+
+keel::ArrayRef<keel::String> TreeWalker::currentFrameCallerArgNames() const
+{
+    if (activeFrames_.empty())
+        return {};
+    return activeFrames_.back().callerArgNames.as_ref();
+}
+
+keel::i64 TreeWalker::currentFunctionNargin() const
+{
+    for (keel::usize i = activeFrames_.size(); i > 0; --i) {
+        if (auto *env = activeFrames_[i - 1].env) {
+            if (const Value *v = env->getLocal("nargin"))
+                return keel::as<keel::i64>(v->toScalar());
+        }
+    }
+    return -1;
+}
+
+keel::i64 TreeWalker::currentFunctionNargout() const
+{
+    for (keel::usize i = activeFrames_.size(); i > 0; --i) {
+        if (auto *env = activeFrames_[i - 1].env) {
+            if (const Value *v = env->getLocal("nargout"))
+                return keel::as<keel::i64>(v->toScalar());
+        }
+    }
+    return -1;
+}
+
 keel::Array<CallStackFrame> TreeWalker::captureCallStack() const
 {
     keel::Array<CallStackFrame> out;

@@ -1373,52 +1373,48 @@ struct ClassCtxGuard
 };
 } // namespace
 
+keel::Array<Value> Engine::invokeUserFunction_(const UserFunction &uf,
+                                                 keel::ArrayRef<Value> args,
+                                                 keel::usize nout,
+                                                 bool isCtor,
+                                                 const Value *ctorSeed)
+{
+    const keel::usize effNout = std::max<keel::usize>(nout, 1);
+    if (backend_ == Backend::VM) {
+        if (!vm_)
+            throw numkit::Error("VM backend is unavailable");
+        const BytecodeChunk *cc = ensureClassMethodChunk(uf);
+        if (!cc) {
+            auto msg = keel::format("Failed to compile function '{}'", uf.name);
+            throw numkit::Error(msg.c_str());
+        }
+        return vm_->callReentrant(*cc, args, effNout, uf.ownerClass, isCtor, ctorSeed);
+    }
+    if (!treeWalker_)
+        throw numkit::Error("TreeWalker backend is unavailable");
+    if (!uf.ownerClass.empty()) {
+        ClassCtxGuard ctx(this, uf.ownerClass, isCtor);
+        if (isCtor) {
+            keel::Array<Value> out;
+            out.push_back(treeWalker_->runClassCtor(uf, ctorSeed ? *ctorSeed : Value(), args));
+            return out;
+        }
+        return treeWalker_->runClassMethod(uf, args, effNout);
+    }
+    return treeWalker_->callUserFunctionMulti(uf, args, workspaceEnv_.get(), effNout);
+}
+
 keel::Array<Value> Engine::invokeClassMethod(const UserFunction &uf, keel::ArrayRef<Value> args,
                                              keel::usize nout)
 {
-    // Under the VM backend, run the body on the VM (P4) so C++-initiated
-    // classdef callbacks — operator methods, subsref/subsasgn, custom
-    // disp/display, super-method targets, and method calls made from a builtin —
-    // execute on the same engine as the rest of the program. callReentrant
-    // carries the class context on the frame (ownerClass), so no ClassCtxGuard
-    // is needed. Falls back to the TreeWalker if the body can't VM-compile.
-    if (backend_ == Backend::VM) {
-        if (!vm_)
-            throw numkit::Error("classdef methods require an active VM");
-        const BytecodeChunk *cc = ensureClassMethodChunk(uf);
-        if (!cc) {
-            auto msg = keel::format("Failed to compile classdef method '{}'", uf.name);
-            throw numkit::Error(msg.c_str());
-        }
-        return vm_->callReentrant(*cc, args, std::max<keel::usize>(nout, 1), uf.ownerClass,
-                                  /*isCtor=*/false);
-    }
-    if (treeWalker_) {
-        ClassCtxGuard ctx(this, uf.ownerClass, /*isCtor=*/false);
-        return treeWalker_->runClassMethod(uf, args, nout);
-    }
-    throw numkit::Error("classdef methods require the interpreter backend");
+    return invokeUserFunction_(uf, args, std::max<keel::usize>(nout, 1), /*isCtor=*/false);
 }
 
 Value Engine::invokeClassCtor(const UserFunction &ctor, const Value &seed,
                               keel::ArrayRef<Value> args)
 {
-    if (backend_ == Backend::VM) {
-        if (!vm_)
-            throw numkit::Error("classdef constructor requires an active VM");
-        const BytecodeChunk *cc = ensureClassMethodChunk(ctor);
-        if (!cc) {
-            auto msg = keel::format("Failed to compile classdef constructor '{}'", ctor.name);
-            throw numkit::Error(msg.c_str());
-        }
-        auto r = vm_->callReentrant(*cc, args, 1, ctor.ownerClass, /*isCtor=*/true, &seed);
-        return r.empty() ? seed : keel::move(r[0]);
-    }
-    if (treeWalker_) {
-        ClassCtxGuard ctx(this, ctor.ownerClass, /*isCtor=*/true);
-        return treeWalker_->runClassCtor(ctor, seed, args);
-    }
-    throw numkit::Error("classdef constructor requires the interpreter backend");
+    auto r = invokeUserFunction_(ctor, args, 1, /*isCtor=*/true, &seed);
+    return r.empty() ? seed : keel::move(r[0]);
 }
 
 Value Engine::evalConstExpr(const ASTNode *expr)
@@ -1592,7 +1588,7 @@ keel::StringRef Engine::currentClassCtx_() const
 {
     if (!classCtx_.empty())
         return classCtx_.back().className.as_ref();
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->currentMethodClass();
     return {};
 }
@@ -1618,7 +1614,7 @@ bool Engine::classCtxInCtorOf(keel::StringRef declClass) const
 {
     if (!classCtx_.empty())
         return classCtx_.back().isCtor && classCtx_.back().className == declClass;
-    if (vm_ && backend_ == Backend::VM)
+    if (useVM_())
         return vm_->currentMethodIsCtor() && vm_->currentMethodClass() == declClass;
     return false;
 }
