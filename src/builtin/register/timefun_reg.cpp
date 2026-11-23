@@ -19,7 +19,6 @@
 #include <numkit/value/value.hpp>
 
 #include <algorithm>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <tuple>

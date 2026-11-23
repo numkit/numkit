@@ -19,7 +19,6 @@
 
 #include <numkit/ops/io_helpers.hpp>
 
-#include <cstdint>
 
 namespace numkit::io {
 using namespace ::numkit::ops;
@@ -270,7 +269,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     if (!f || !f->forRead)
         throw Error("fread: invalid file identifier");
 
-    numkit::ops::SizeSpec sz{numkit::ops::SizeSpec::Kind::Flat, SIZE_MAX, 0, 0};
+    numkit::ops::SizeSpec sz{numkit::ops::SizeSpec::Kind::Flat, keel::Limits<keel::usize>::kMax, 0, 0};
     if (args.size() >= 2)
         sz = numkit::ops::parseReadSize(args[1], "fread");
 
@@ -308,7 +307,7 @@ void fread(FsContext &fs, keel::ArrayRef<Value> args, keel::usize nargout, keel:
     keel::usize stride = bsize + skip;
     keel::usize maxElems = (available < bsize) ? 0 : (1 + (available - bsize) / stride);
     keel::usize n = keel::min(sz.limit, maxElems);
-    if (sz.limit != SIZE_MAX && n < sz.limit)
+    if (sz.limit != keel::Limits<keel::usize>::kMax && n < sz.limit)
         f->lastError = keel::String::from("End of file reached.");
 
     keel::ArenaTemp scratch = keel::get_scratch(mr);

@@ -8,7 +8,6 @@
 #include <keel/smart_ptr.h>
 #include <numkit/value/value.hpp>
 
-#include <cstddef>
 
 // State-machine callbacks (vm_callbacks_plan.md).
 //

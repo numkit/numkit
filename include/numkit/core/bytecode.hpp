@@ -8,7 +8,6 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/value/value.hpp>
-#include <cstdint>
 
 namespace numkit {
 

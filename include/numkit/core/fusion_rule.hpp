@@ -29,7 +29,6 @@
 #include <keel/function.h>
 #include <keel/memory.h>
 #include <keel/optional.h>
-#include <cstddef>
 
 namespace numkit {
 

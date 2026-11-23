@@ -29,9 +29,7 @@
 #include <numkit/builtin/detail/datafun/reductions_detail.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 namespace numkit::builtin {
@@ -142,7 +140,7 @@ ValueType resolveNativeOutType(ValueType inType, const char *fn)
 template <typename T>
 inline T toOutT(keel::f64 v)
 {
-    if constexpr (std::is_floating_point_v<T>) {
+    if constexpr (keel::IsFloatingPoint<T>) {
         return static_cast<T>(v);
     } else {
         if (keel::is_nan(v)) return T{};
@@ -518,7 +516,7 @@ inline void nanAccumDouble(keel::f64 &acc, keel::usize &count, keel::f64 v)
 template <typename T, typename Op>
 inline T nanFinalize(keel::f64 acc, keel::usize nonNanCount)
 {
-    if constexpr (std::is_same_v<Op, MeanOp>)
+    if constexpr (keel::IsSame<Op, MeanOp>)
         return toOutT<T>(nonNanCount == 0 ? keel::kNaN
                                           : acc / keel::as<keel::f64>(nonNanCount));
     else
@@ -648,7 +646,7 @@ Value runComplexNanReduction(const Value &x, keel::i32 dim, keel::Allocator *mr,
     auto readC = [&](keel::usize i) { return readElemAsComplex(x, i, typeMatches); };
 
     auto finalizeOne = [](keel::c64 acc, keel::usize count) -> keel::c64 {
-        if constexpr (std::is_same_v<Op, MeanOp>)
+        if constexpr (keel::IsSame<Op, MeanOp>)
             return count == 0 ? keel::c64(keel::kNaN, 0.0)
                               : acc / keel::as<keel::f64>(count);
         else

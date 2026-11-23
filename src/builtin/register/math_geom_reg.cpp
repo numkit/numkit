@@ -15,8 +15,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <cstddef>
-#include <cstdint>
 #include <tuple>
 #include <utility>
 

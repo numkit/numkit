@@ -32,7 +32,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

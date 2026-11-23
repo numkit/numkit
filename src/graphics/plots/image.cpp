@@ -13,7 +13,6 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <algorithm>
-#include <climits>
 #include <cstdio>
 #include <utility>
 

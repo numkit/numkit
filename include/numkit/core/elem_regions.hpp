@@ -31,7 +31,6 @@
 #include <keel/core.h>
 #include <keel/hash_map.h>
 #include <keel/string.h>
-#include <cstddef>
 
 namespace numkit {
 

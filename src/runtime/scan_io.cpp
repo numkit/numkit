@@ -44,7 +44,7 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     if (!f || !f->forRead)
         throw Error("fscanf: invalid file identifier");
 
-    numkit::ops::SizeSpec sz{numkit::ops::SizeSpec::Kind::Flat, SIZE_MAX, 0, 0};
+    numkit::ops::SizeSpec sz{numkit::ops::SizeSpec::Kind::Flat, keel::Limits<keel::usize>::kMax, 0, 0};
     if (args.size() >= 3)
         sz = numkit::ops::parseReadSize(args[2], "fscanf");
 
@@ -59,7 +59,7 @@ void fscanf(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, kee
     // "input exhausted" from "fewer items matched than requested".
     if (f->cursor >= f->buffer.size())
         f->lastError = keel::String::from("End of file reached.");
-    else if (sz.limit != SIZE_MAX && r.count < sz.limit)
+    else if (sz.limit != keel::Limits<keel::usize>::kMax && r.count < sz.limit)
         f->lastError = keel::String::from("Matching failure.");
 }
 
@@ -172,7 +172,7 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
 
     // Optional positional N, then name-value pairs.
     keel::usize argIdx = 2;
-    keel::usize cycleCap = SIZE_MAX;
+    keel::usize cycleCap = keel::Limits<keel::usize>::kMax;
     if (argIdx < args.size() && args[argIdx].isScalar() && !args[argIdx].isChar()) {
         keel::f64 d = args[argIdx].toScalar();
         if (!keel::is_inf(d)) {

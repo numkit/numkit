@@ -43,7 +43,6 @@
 #include <numkit/core/types.hpp>
 #include <numkit/core/figure_manager.hpp>
 
-#include <cstdint>
 
 namespace numkit {
 

@@ -30,7 +30,6 @@
 #include <numkit/sys/env.hpp>
 #include <algorithm>
 #include <cerrno>
-#include <climits>
 #include <cstdlib>
 
 #include "engine_internal.hpp"

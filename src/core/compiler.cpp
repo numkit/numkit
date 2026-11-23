@@ -646,7 +646,7 @@ void Compiler::patchJump(keel::usize instrPos, keel::i32 offset)
 // here so no caller can wrap it silently (PVS V1029 family).
 keel::i32 Compiler::appendConstant(Value v)
 {
-    if (chunk_.constants.size() >= keel::as<keel::usize>(INT32_MAX))
+    if (chunk_.constants.size() >= keel::as<keel::usize>(keel::Limits<keel::i32>::kMax))
         throw numkit::Error(
             "Compiler: constant pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = keel::as<keel::i32>(chunk_.constants.size());
@@ -656,7 +656,7 @@ keel::i32 Compiler::appendConstant(Value v)
 
 keel::i32 Compiler::appendString(keel::StringRef s)
 {
-    if (chunk_.strings.size() >= keel::as<keel::usize>(INT32_MAX))
+    if (chunk_.strings.size() >= keel::as<keel::usize>(keel::Limits<keel::i32>::kMax))
         throw numkit::Error(
             "Compiler: string pool limit exceeded (>2^31-1 entries in one chunk)");
     keel::i32 idx = keel::as<keel::i32>(chunk_.strings.size());

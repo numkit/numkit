@@ -19,9 +19,7 @@
 #include <numkit/ops/helpers.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 namespace numkit::builtin {
@@ -269,7 +267,7 @@ namespace { Value castDoubleToType(const Value &src, ValueType t, keel::Allocato
     const keel::usize n = src.numel();
     const keel::f64 *sp = src.doubleData();
     auto cast_loop = [&](auto *dp, auto /*tag*/) {
-        using T = std::remove_pointer_t<decltype(dp)>;
+        using T = keel::RemovePointer<decltype(dp)>;
         for (keel::usize i = 0; i < n; ++i) dp[i] = static_cast<T>(sp[i]);
     };
     switch (t) {

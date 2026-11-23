@@ -23,8 +23,6 @@
 #include <numkit/builtin/detail/polyfun/polynomials_detail.hpp>
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <tuple>
 #include <utility>
 

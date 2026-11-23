@@ -36,9 +36,7 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <tuple>
-#include <type_traits>
 
 namespace numkit::linalg {
 namespace detail {
@@ -88,7 +86,7 @@ void chol_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
     Value Aw = detail::widenSingleToDouble(A, mr);
 
     const auto emit = [&](auto tag, auto roData, auto rwData, auto makeR) {
-        using T = std::remove_const_t<std::remove_pointer_t<decltype(tag)>>;
+        using T = std::remove_const_t<keel::RemovePointer<decltype(tag)>>;
         auto R = makeR();
         const keel::usize fail = cholUpperFactor(roData(Aw), rwData(R), n);
         if (fail != 0) {

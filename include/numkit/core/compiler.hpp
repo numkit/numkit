@@ -11,7 +11,6 @@
 #include <numkit/core/ast.hpp>
 #include <numkit/core/bytecode.hpp>
 #include <algorithm>
-#include <cstdint>
 
 namespace numkit {
 

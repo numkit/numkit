@@ -30,7 +30,6 @@
 #include <numkit/core/figure_manager.hpp>  // FigureManager, DatasetInfo, AxesState
 #include <numkit/value/value.hpp>            // Value, ValueType
 
-#include <cstddef>
 
 namespace numkit {
 

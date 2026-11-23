@@ -1115,7 +1115,7 @@ enter_frame:
                 const Value &ix = R[I.b];
                 if (R[I.a].isHeapDouble() && R[I.a].heapRefCount() == 1
                     && ix.isDoubleScalar() && R[I.c].isDoubleScalar()) {
-                    keel::usize i = checkedIndex(ix.scalarVal(), SIZE_MAX);
+                    keel::usize i = checkedIndex(ix.scalarVal(), keel::Limits<keel::usize>::kMax);
                     if (i < R[I.a].heapDims().numel()) {
                         R[I.a].doubleDataMutFast()[i] = R[I.c].scalarVal();
                         break;

@@ -13,7 +13,6 @@
 #include <utility>
 #include <cstdlib>
 #include <algorithm>
-#include <cstdint>
 
 #include <numkit/ops/decimate.hpp>
 

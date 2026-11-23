@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <climits>
 #include <cstdio>
 #include <utility>
 
@@ -1534,9 +1533,9 @@ void swarmchart_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     // distinct X values, capped at 0.4 absolute.
     keel::f64 minGap = 1.0;
     if (buckets.size() > 1) {
-        keel::i64 prev = LONG_MIN;
+        keel::i64 prev = keel::Limits<keel::i64>::kMin;
         for (const auto &bk : buckets) {
-            if (prev != LONG_MIN) {
+            if (prev != keel::Limits<keel::i64>::kMin) {
                 const keel::f64 g = keel::abs((keel::f64)(bk.key - prev));
                 if (g < minGap || minGap == 1.0) minGap = g;
             }

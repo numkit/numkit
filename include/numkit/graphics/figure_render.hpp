@@ -11,8 +11,6 @@
 #include <keel/string.h>
 #include <numkit/core/figure_manager.hpp>
 
-#include <cstddef>
-#include <cstdint>
 
 namespace numkit {
 namespace figrender {

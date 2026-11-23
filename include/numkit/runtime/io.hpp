@@ -8,7 +8,6 @@
 
 #include <keel/core.h>
 #include <keel/ref.h>
-#include <cstddef>
 #include <numkit/value/value.hpp>
 
 namespace numkit {

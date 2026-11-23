@@ -16,7 +16,6 @@
 #include <numkit/sys/process.hpp>
 #include <numkit/value/argcheck.hpp>
 
-#include <cstdint>
 
 namespace numkit::builtin {
 namespace detail {

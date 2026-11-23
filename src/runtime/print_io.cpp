@@ -21,7 +21,6 @@
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
 
-#include <cstddef>
 
 namespace numkit::runtime {
 

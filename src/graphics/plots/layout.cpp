@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <keel/static_array.h>
-#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>

@@ -28,7 +28,6 @@
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp> // mtypeName (whos)
 
-#include <cstdint>
 #include <regex>
 
 namespace numkit::runtime {

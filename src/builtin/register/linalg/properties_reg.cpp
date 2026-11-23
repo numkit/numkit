@@ -22,7 +22,6 @@
 #include <numkit/value/error.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <utility>
 
 namespace numkit::linalg {

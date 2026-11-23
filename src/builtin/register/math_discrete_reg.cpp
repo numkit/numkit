@@ -24,7 +24,6 @@
 #include <numkit/ops/rows_helpers.hpp>  // numkit::ops::collectRowsByIndex
 
 #include <algorithm>
-#include <cstddef>
 #include <tuple>
 #include <utility>
 
@@ -439,7 +438,7 @@ void histc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRe
         const keel::usize n = x.numel();
         for (keel::usize i = 0; i < n; ++i) {
             const keel::usize b = histcBin(p[i], e, nE);
-            bd[i] = (b == SIZE_MAX) ? 0.0 : keel::as<keel::f64>(b + 1);
+            bd[i] = (b == keel::Limits<keel::usize>::kMax) ? 0.0 : keel::as<keel::f64>(b + 1);
         }
         outs[1] = std::move(binOut);
     }

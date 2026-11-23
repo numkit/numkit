@@ -21,7 +21,6 @@
 #include <numkit/builtin/detail/polyfun/interp_detail.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <tuple>
 #include <utility>
 

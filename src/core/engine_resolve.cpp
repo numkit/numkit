@@ -21,7 +21,6 @@
 #include <numkit/core/vm.hpp>
 #include "engine_internal.hpp"
 #include <algorithm>
-#include <climits>
 
 namespace numkit {
 
@@ -334,7 +333,7 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                     return keel::as<keel::i32>(namespaceOrder_.size());
                 };
                 const keel::String *best = nullptr;
-                keel::i32 bestRank = INT_MAX;
+                keel::i32 bestRank = keel::Limits<keel::i32>::kMax;
                 for (const auto &full : *vec) {
                     if (!allowBareFromFull(full))
                         continue;
@@ -413,7 +412,7 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
         return keel::as<keel::i32>(namespaceOrder_.size());
     };
     const keel::String *best = nullptr;
-    keel::i32 bestRank = INT_MAX;
+    keel::i32 bestRank = keel::Limits<keel::i32>::kMax;
     for (const auto &full : *vec) {
         if (!allowBareFromFull(full))
             continue;

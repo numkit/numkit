@@ -17,7 +17,6 @@
 #include <numkit/core/figure_manager.hpp>      // DatasetInfo
 #include <numkit/value/value.hpp>                // Value
 
-#include <cstddef>
 #include <cstdio>
 
 namespace numkit {

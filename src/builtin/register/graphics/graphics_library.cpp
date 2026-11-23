@@ -48,7 +48,6 @@
 #include <numkit/value/object.hpp>
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <utility>
