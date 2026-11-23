@@ -13,8 +13,12 @@
 #include <numkit/core/bytecode.hpp>
 #include <numkit/core/compiler.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 using namespace m_test;
 
@@ -352,6 +356,300 @@ TEST(Wave2BackendSwitchAndRegGrowthTest, SwitchBackendsAndGrowRegStackMidCallbac
         return static_cast<double>(n) * static_cast<double>(n + 1) + 321.0 * static_cast<double>(n);
     };
     EXPECT_DOUBLE_EQ(r, expectedFor(220) + expectedFor(5));
+}
+
+// ── Stage 1–5 Architecture Invariant Parity Suite (TW + VM) ──────────────
+
+// 9. Pointer-stable symbol tables under mid-call HashMap rehash & clear functions
+TEST_P(Wave2VmTwIndependenceTest, SymbolTableRehashMidCallSafety)
+{
+    eval(R"(
+        function out = rehash_driver(n)
+            acc = 0;
+            for k = 1:n
+                f = @(x) x + k;
+                acc = acc + f(1);
+            end
+            % Trigger clear functions while rehash_driver itself is active on the stack.
+            clear functions;
+            out = acc + 100;
+        end
+    )");
+    // Sum_{k=1..40} (1 + k) = 40 + 820 = 860, plus 100 = 960
+    EXPECT_DOUBLE_EQ(evalScalar("rehash_driver(40)"), 960.0);
+    EXPECT_EQ(engine.callerDepth(), 0);
+}
+
+// 10. End-less subfunctions, file-private isolation, handle escape, rehash eviction,
+//     and m-file lazy load inside a script with local functions (scriptDepth_ > 0)
+TEST_P(Wave2VmTwIndependenceTest, EndlessSubfunctionsFilePrivateAndEviction)
+{
+    namespace fs = std::filesystem;
+    const auto tag = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path tmpDir = fs::temp_directory_path() / ("numkit_s6_mfiles_" + tag);
+    fs::create_directories(tmpDir);
+    struct DirCleanup {
+        fs::path p;
+        ~DirCleanup() {
+            std::error_code ec;
+            fs::remove_all(p, ec);
+        }
+    } cleanup{tmpDir};
+
+    auto writeFile = [&](const std::string &name, const std::string &body) {
+        std::ofstream ofs(tmpDir / name, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(ofs.good());
+        ofs << body;
+    };
+
+    // End-less main + two end-less subfunctions; variable `t` must not be clobbered.
+    writeFile("alpha_s6.m", R"(function [val, fh] = alpha_s6(x)
+t = x * 2;
+val = helper(t) + extra_step(x);
+fh = @helper;
+
+function y = helper(a)
+y = a + 100;
+
+function z = extra_step(b)
+z = b * 3;
+)");
+
+    // Second m-file with a same-named private subfunction `helper` returning +200.
+    writeFile("beta_s6.m", R"(function val = beta_s6(x)
+val = helper(x);
+
+function y = helper(a)
+y = a + 200;
+)");
+
+    eval("addpath('" + tmpDir.string() + "');");
+
+    // Both files resolve their own private `helper` without cross-contamination.
+    eval("[va, h_alpha] = alpha_s6(5);");
+    EXPECT_DOUBLE_EQ(getVar("va"), (5.0 * 2.0 + 100.0) + (5.0 * 3.0)); // 125
+    EXPECT_DOUBLE_EQ(evalScalar("beta_s6(5)"), 205.0);
+
+    // File-private `helper` must NOT be callable directly from top-level.
+    auto bareHelper = engine.evalSafe("helper(5)");
+    EXPECT_FALSE(bareHelper.ok);
+
+    // Returned function handle @helper still invokes alpha_s6's private helper.
+    EXPECT_DOUBLE_EQ(evalScalar("h_alpha(7)"), 107.0);
+
+    // Update alpha_s6.m on disk and rehash -> evicts both main and `alpha_s6>helper`.
+    writeFile("alpha_s6.m", R"(function [val, fh] = alpha_s6(x)
+t = x * 2;
+val = helper(t) + extra_step(x);
+fh = @helper;
+
+function y = helper(a)
+y = a + 1000;
+
+function z = extra_step(b)
+z = b * 3;
+)");
+    engine.rehashMFiles();
+    eval("[va2, h_alpha2] = alpha_s6(5);");
+    EXPECT_DOUBLE_EQ(getVar("va2"), (5.0 * 2.0 + 1000.0) + (5.0 * 3.0)); // 1025
+    EXPECT_DOUBLE_EQ(evalScalar("h_alpha2(7)"), 1007.0);
+
+    // Lazy-loading an m-file inside a script that also defines local functions
+    // (scriptDepth_ > 0) must register the m-file globally so it survives script exit.
+    writeFile("gamma_s6.m", R"(function y = gamma_s6(x)
+y = x + 77;
+)");
+    eval(R"(
+        r_script = local_caller(3);
+        function y = local_caller(a)
+            y = gamma_s6(a);
+        end
+    )");
+    EXPECT_DOUBLE_EQ(getVar("r_script"), 80.0);
+    EXPECT_DOUBLE_EQ(evalScalar("gamma_s6(10)"), 87.0);
+}
+
+// 11. mayInjectVars_ zero-arg builtins and strict function scope isolation
+TEST_P(Wave2VmTwIndependenceTest, MayInjectVarsAndScopeIsolationParity)
+{
+    // Zero-arg builtin inside a function containing eval (mayInjectVars_ = true)
+    eval(R"(
+        function n = test_may_inject()
+            eval('z_dyn = 42;');
+            h1 = figure;
+            h2 = figure;
+            n = z_dyn + double(h2.Number > h1.Number);
+            close all;
+        end
+    )");
+    EXPECT_DOUBLE_EQ(evalScalar("test_may_inject()"), 43.0);
+
+    // Script struct `s.g` must NEVER leak into a function scope.
+    eval(R"(
+        s.g = 99;
+        function y = isolated_fn()
+            y = s.g;
+        end
+    )");
+    auto leaked = engine.evalSafe("isolated_fn()");
+    EXPECT_FALSE(leaked.ok);
+}
+
+// 12. Unified call stack: MException.stack and EvalResult.errorStack parity
+TEST_P(Wave2VmTwIndependenceTest, MExceptionStackAndEvalSafeTracebackParity)
+{
+    eval(R"(
+        function inner_err()
+            error('s6:test:boom', 'something broke');
+        end
+        function mid_err()
+            inner_err();
+        end
+        function outer_err()
+            mid_err();
+        end
+    )");
+
+    // Caught via try/catch -> e.stack has innermost frame first
+    eval(R"(
+        try
+            outer_err();
+        catch e
+            caught_id = e.identifier;
+            caught_msg = e.message;
+            stack_len = numel(e.stack);
+            f1 = e.stack(1).name;
+            f2 = e.stack(2).name;
+            f3 = e.stack(3).name;
+            l1 = e.stack(1).line;
+            l2 = e.stack(2).line;
+            l3 = e.stack(3).line;
+        end
+    )");
+    EXPECT_EQ(evalString("caught_id"), "s6:test:boom");
+    EXPECT_EQ(evalString("caught_msg"), "something broke");
+    EXPECT_GE(getVar("stack_len"), 3.0);
+    EXPECT_EQ(evalString("f1"), "inner_err");
+    EXPECT_EQ(evalString("f2"), "mid_err");
+    EXPECT_EQ(evalString("f3"), "outer_err");
+    EXPECT_GT(getVar("l1"), 0.0);
+    EXPECT_GT(getVar("l2"), 0.0);
+    EXPECT_GT(getVar("l3"), 0.0);
+
+    // Uncaught via evalSafe -> EvalResult::errorStack matches
+    auto res = engine.evalSafe("outer_err();");
+    ASSERT_FALSE(res.ok);
+    EXPECT_EQ(std::string(res.errorId.as_ref()), "s6:test:boom");
+    EXPECT_EQ(std::string(res.errorMessage.as_ref()), "something broke");
+    ASSERT_GE(res.errorStack.size(), 3u);
+    EXPECT_EQ(std::string(res.errorStack[0].name.as_ref()), "inner_err");
+    EXPECT_EQ(std::string(res.errorStack[1].name.as_ref()), "mid_err");
+    EXPECT_EQ(std::string(res.errorStack[2].name.as_ref()), "outer_err");
+    EXPECT_GT(res.errorStack[0].line, 0);
+
+    // Constructed MException carries an empty stack field
+    eval("me = MException('s6:manual', 'manual msg');");
+    EXPECT_TRUE(evalBool("isfield(me, 'stack') && isempty(me.stack)"));
+    EXPECT_EQ(engine.callerDepth(), 0);
+}
+
+// 13. Cooperative cancellation (while + try/catch shield + for loop + clean recovery)
+TEST_P(Wave2VmTwIndependenceTest, CooperativeCancellationParity)
+{
+    // Interrupt an infinite while loop that tries to swallow errors with try/catch
+    std::thread canceller1([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        engine.requestCancel();
+    });
+    auto r1 = engine.evalSafe(R"(
+        x = 0;
+        while true
+            try
+                x = x + 1;
+            catch
+            end
+        end
+    )");
+    canceller1.join();
+
+    EXPECT_FALSE(r1.ok);
+    EXPECT_EQ(std::string(r1.errorId.as_ref()), "numkit:interrupted");
+    EXPECT_EQ(engine.callerDepth(), 0);
+
+    // After clearCancel(), engine executes normally again
+    engine.clearCancel();
+    EXPECT_DOUBLE_EQ(evalScalar("1 + 2"), 3.0);
+
+    // Interrupt a long nested for-loop cleanly (bounded range size so TW doesn't allocate 1e9 doubles)
+    std::thread canceller2([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        engine.requestCancel();
+    });
+    auto r2 = engine.evalSafe(R"(
+        s = 0;
+        for a = 1:10000
+            for b = 1:10000
+                s = s + 1;
+            end
+        end
+    )");
+    canceller2.join();
+
+    EXPECT_FALSE(r2.ok);
+    EXPECT_EQ(std::string(r2.errorId.as_ref()), "numkit:interrupted");
+    EXPECT_EQ(engine.callerDepth(), 0);
+
+    engine.clearCancel();
+    EXPECT_DOUBLE_EQ(evalScalar("6 * 7"), 42.0);
+}
+
+// 14. Unified maxRecursionDepth and RAII re-entrancy recovery across eval/callbacks
+TEST_P(Wave2VmTwIndependenceTest, UnifiedMaxRecursionAndReentrantRecovery)
+{
+    engine.setMaxRecursionDepth(15);
+    EXPECT_EQ(engine.maxRecursionDepth(), 15);
+
+    eval(R"(
+        function y = rec_sum(n)
+            if n <= 1
+                y = 1;
+            else
+                y = n + rec_sum(n - 1);
+            end
+        end
+    )");
+
+    // Depth 14 <= 15 succeeds identically on TW and VM
+    EXPECT_DOUBLE_EQ(evalScalar("rec_sum(14)"), 105.0);
+
+    // Depth 20 > 15 triggers numkit:recursionLimit identically on TW and VM
+    auto ovf = engine.evalSafe("rec_sum(20)");
+    EXPECT_FALSE(ovf.ok);
+    EXPECT_EQ(std::string(ovf.errorId.as_ref()), "numkit:recursionLimit");
+    EXPECT_EQ(engine.callerDepth(), 0);
+
+    // Re-entrant callback/eval error must leave engine state spotless
+    eval(R"(
+        function y = boom_cb(x)
+            if x > 2
+                error('s6:cb:fail', 'cb failed');
+            end
+            y = x * 10;
+        end
+    )");
+    auto cbErr = engine.evalSafe("cellfun(@boom_cb, {1, 2, 3})");
+    EXPECT_FALSE(cbErr.ok);
+    EXPECT_EQ(std::string(cbErr.errorId.as_ref()), "s6:cb:fail");
+    EXPECT_EQ(engine.callerDepth(), 0);
+
+    auto evalErr = engine.evalSafe("eval('boom_cb(5)')");
+    EXPECT_FALSE(evalErr.ok);
+    EXPECT_EQ(std::string(evalErr.errorId.as_ref()), "s6:cb:fail");
+    EXPECT_EQ(engine.callerDepth(), 0);
+
+    // Subsequent calls work cleanly
+    EXPECT_DOUBLE_EQ(evalScalar("rec_sum(10)"), 55.0);
 }
 
 INSTANTIATE_DUAL(Wave2VmTwIndependenceTest);
