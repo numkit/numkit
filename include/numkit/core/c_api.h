@@ -105,6 +105,11 @@ NUMKIT_ENGINE_API size_t numkit_engine_format(numkit_engine_ctx *ctx,
                                               char *buf,
                                               size_t buf_cap);
 
+/* Cooperative execution cancellation (safe to call from another thread). */
+NUMKIT_ENGINE_API void numkit_engine_request_cancel(numkit_engine_ctx *ctx);
+NUMKIT_ENGINE_API void numkit_engine_clear_cancel(numkit_engine_ctx *ctx);
+NUMKIT_ENGINE_API int numkit_engine_is_cancel_requested(const numkit_engine_ctx *ctx);
+
 #ifdef __cplusplus
 }
 #endif

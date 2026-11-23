@@ -414,6 +414,13 @@ public:
     keel::Array<CallStackFrame> takeLastErrorStack() { return keel::exchange(lastErrorStack_, {}); }
     void clearLastErrorStack() { lastErrorStack_.clear(); }
 
+    // Per-engine lasterror state (structured with message, identifier, stack).
+    void recordLastError(keel::StringRef msg, keel::StringRef id,
+                         keel::ArrayRef<CallStackFrame> stack);
+    void setLastError(const Value &errStruct);
+    void resetLastError() { lastErrorStruct_ = Value(); }
+    Value lastError() const;
+
     // Backend selection
     // Run a user function body on the TreeWalker from inside VM
     // dispatch — the register-exhaustion fallback contract for chunk-less
@@ -1064,6 +1071,7 @@ private:
     bool fusionEnabled_ = true;
     keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
     keel::Array<CallStackFrame> lastErrorStack_;
+    Value lastErrorStruct_;
     keel::i32 maxRecursionDepth_ = 500;
     keel::Atomic<bool> cancelRequested_{false};
 

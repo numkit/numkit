@@ -2,6 +2,7 @@
 
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/string.h>
@@ -263,6 +264,99 @@ void assert_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
     assertCond(args);
 }
 
+void dbstack_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                 CallContext &ctx)
+{
+    keel::usize omit = 0;
+    bool completeNames = false;
+    for (const auto &a : args) {
+        if (a.isChar() || a.isString()) {
+            keel::String s = a.toString();
+            if (s == "-completenames") {
+                completeNames = true;
+            } else {
+                throw Error("dbstack: unknown option", 0, 0, "dbstack", "",
+                            "numkit:dbstack:badOption");
+            }
+        } else if (a.isNumeric() && a.isScalar()) {
+            keel::f64 v = a.toScalar();
+            if (v < 0.0 || !keel::is_finite(v))
+                throw Error("dbstack: omit count must be a non-negative integer",
+                            0, 0, "dbstack", "", "numkit:dbstack:badOmit");
+            omit = keel::as<keel::usize>(v);
+        } else {
+            throw Error("dbstack: invalid argument", 0, 0, "dbstack", "",
+                        "numkit:dbstack:badArg");
+        }
+    }
+
+    auto fullStack = ctx.engine->captureCallStack();
+    const keel::usize startIdx = (omit < fullStack.size()) ? omit : fullStack.size();
+    const keel::usize count = fullStack.size() - startIdx;
+    keel::Allocator *mr = ctx.engine->allocator();
+
+    auto displayName = [&](const keel::String &nm) -> keel::StringRef {
+        if (completeNames)
+            return nm.as_ref();
+        keel::usize gt = nm.rfind('>');
+        if (gt != keel::kInvalidIndex && gt + 1 < nm.size())
+            return nm.as_ref().substr(gt + 1);
+        return nm.as_ref();
+    };
+
+    if (nargout == 0) {
+        for (keel::usize i = 0; i < count; ++i) {
+            const auto &fr = fullStack[startIdx + i];
+            const char *prefix = (i == 0) ? "> In " : "  In ";
+            if (fr.line > 0)
+                ctx.engine->outputText(keel::format("{}{} (line {})\n",
+                                                    prefix, displayName(fr.name), fr.line));
+            else
+                ctx.engine->outputText(keel::format("{}{}\n", prefix, displayName(fr.name)));
+        }
+        return;
+    }
+
+    Value st = Value::structArray(count, 1, mr);
+    for (keel::usize i = 0; i < count; ++i) {
+        const auto &fr = fullStack[startIdx + i];
+        st.setField(i, "file", Value::fromString(fr.file, mr));
+        st.setField(i, "name", Value::fromString(displayName(fr.name), mr));
+        st.setField(i, "line", Value::scalar(keel::as<keel::f64>(fr.line), mr));
+    }
+    outs[0] = keel::move(st);
+    if (nargout >= 2)
+        outs[1] = Value::scalar(count > 0 ? 1.0 : 0.0, mr);
+}
+
+void lasterror_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
+                   CallContext &ctx)
+{
+    if (args.empty()) {
+        if (nargout > 0 || !outs.empty())
+            outs[0] = ctx.engine->lastError();
+        return;
+    }
+    if (args[0].isChar() || args[0].isString()) {
+        if (args[0].toString() == "reset") {
+            ctx.engine->resetLastError();
+            if (nargout > 0)
+                outs[0] = ctx.engine->lastError();
+            return;
+        }
+        throw Error("lasterror: expected 'reset' or an error struct",
+                    0, 0, "lasterror", "", "numkit:lasterror:badArg");
+    }
+    if (args[0].isStruct()) {
+        ctx.engine->setLastError(args[0]);
+        if (nargout > 0)
+            outs[0] = ctx.engine->lastError();
+        return;
+    }
+    throw Error("lasterror: expected 'reset' or an error struct",
+                0, 0, "lasterror", "", "numkit:lasterror:badArg");
+}
+
 } // namespace detail
 
 void registerDiagnosticsRuntime(Engine &engine)
@@ -270,6 +364,8 @@ void registerDiagnosticsRuntime(Engine &engine)
     engine.registerFunction("error",      &detail::error_reg);
     engine.registerFunction("warning",    &detail::warning_reg);
     engine.registerFunction("lastwarn",   &detail::lastwarn_reg);
+    engine.registerFunction("lasterror",  &detail::lasterror_reg);
+    engine.registerFunction("dbstack",    &detail::dbstack_reg);
     engine.registerFunction("MException", &detail::MException_reg);
     engine.registerFunction("rethrow",    &detail::rethrow_reg);
     engine.registerFunction("throw",      &detail::throw_reg);

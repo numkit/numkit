@@ -411,4 +411,21 @@ keel::usize numkit_engine_format(numkit_engine_ctx *ctx,
     }
 }
 
+void numkit_engine_request_cancel(numkit_engine_ctx *ctx)
+{
+    if (ctx)
+        ctx->engine.requestCancel();
+}
+
+void numkit_engine_clear_cancel(numkit_engine_ctx *ctx)
+{
+    if (ctx)
+        ctx->engine.clearCancel();
+}
+
+int numkit_engine_is_cancel_requested(const numkit_engine_ctx *ctx)
+{
+    return (ctx && ctx->engine.isCancelRequested()) ? 1 : 0;
+}
+
 } // extern "C"

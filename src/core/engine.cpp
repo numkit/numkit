@@ -788,6 +788,24 @@ keel::Array<CallStackFrame> Engine::captureCallStack() const
     return treeWalker_ ? treeWalker_->captureCallStack() : keel::Array<CallStackFrame>{};
 }
 
+void Engine::recordLastError(keel::StringRef msg, keel::StringRef id,
+                             keel::ArrayRef<CallStackFrame> stack)
+{
+    lastErrorStruct_ = makeExceptionStruct(msg, id, stack, mr_);
+}
+
+void Engine::setLastError(const Value &errStruct)
+{
+    lastErrorStruct_ = errStruct;
+}
+
+Value Engine::lastError() const
+{
+    if (lastErrorStruct_.isStruct())
+        return lastErrorStruct_;
+    return makeExceptionStruct("", "", {}, mr_);
+}
+
 // ============================================================
 // evalSafe
 // ============================================================

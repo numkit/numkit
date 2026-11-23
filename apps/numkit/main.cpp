@@ -8,6 +8,7 @@
 //   numkit -v | --version   display version info
 
 #include <keel/array.h>
+#include <keel/atomic.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/fs.h>
@@ -23,6 +24,7 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/core/build_info.hpp>
 
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +35,38 @@ using numkit::Engine;
 using numkit::Lexer;
 using numkit::StandardEngine;
 using numkit::TokenType;
+
+keel::Atomic<Engine *> gSigIntEngine{nullptr};
+keel::Atomic<bool> gSigIntSeen{false};
+
+void onSigInt(int)
+{
+    gSigIntSeen.store(true, keel::MemoryOrder::Release);
+    if (Engine *eng = gSigIntEngine.load(keel::MemoryOrder::Acquire))
+        eng->requestCancel();
+    std::signal(SIGINT, &onSigInt);
+}
+
+class SignalInterruptGuard
+{
+public:
+    explicit SignalInterruptGuard(Engine &engine)
+        : prevHandler_(std::signal(SIGINT, &onSigInt))
+    {
+        gSigIntSeen.store(false, keel::MemoryOrder::Release);
+        gSigIntEngine.store(&engine, keel::MemoryOrder::Release);
+    }
+    ~SignalInterruptGuard()
+    {
+        gSigIntEngine.store(nullptr, keel::MemoryOrder::Release);
+        std::signal(SIGINT, prevHandler_);
+    }
+    SignalInterruptGuard(const SignalInterruptGuard &) = delete;
+    SignalInterruptGuard &operator=(const SignalInterruptGuard &) = delete;
+
+private:
+    void (*prevHandler_)(int);
+};
 
 // Decide whether the accumulated buffer is still waiting for more input.
 bool isIncompleteInput(keel::StringRef src)
@@ -112,6 +146,7 @@ void reportError(const Engine::EvalResult &r, keel::StringRef prefix)
 int runEval(keel::StringRef code)
 {
     StandardEngine engine;
+    SignalInterruptGuard sigGuard(engine);
     {
         auto cwd = keel::fs_current_dir();
         if (cwd.is_ok()) {
@@ -130,6 +165,7 @@ int runEval(keel::StringRef code)
 int runScript(keel::StringRef path)
 {
     StandardEngine engine;
+    SignalInterruptGuard sigGuard(engine);
     auto textRes = keel::fs_read_text(path);
     if (!textRes.is_ok()) {
         keel::eprint("numkit: cannot open '{}'\n", path);
@@ -189,6 +225,7 @@ bool readStdinLine(keel::String &line)
 int runRepl()
 {
     StandardEngine engine;
+    SignalInterruptGuard sigGuard(engine);
 
     keel::print("NumKit 1.0.0 (interactive REPL)\n"
                 "Type 'help' for info, 'quit' or 'exit' to leave.\n\n");
@@ -199,8 +236,22 @@ int runRepl()
         const char *prompt = accum.empty() ? ">> " : "... ";
         std::fwrite(prompt, 1, std::strlen(prompt), stdout);
         std::fflush(stdout);
-        if (!readStdinLine(line))
+        if (!readStdinLine(line)) {
+            if (gSigIntSeen.exchange(false, keel::MemoryOrder::AcqRel)) {
+                std::clearerr(stdin);
+                engine.clearCancel();
+                accum.clear();
+                keel::print("\n");
+                continue;
+            }
             break;
+        }
+        if (gSigIntSeen.exchange(false, keel::MemoryOrder::AcqRel)) {
+            engine.clearCancel();
+            accum.clear();
+            keel::print("\n");
+            continue;
+        }
 
         if (accum.empty()) {
             if (line == "quit" || line == "exit")
@@ -215,7 +266,10 @@ int runRepl()
         if (isIncompleteInput(accum))
             continue;
 
+        engine.clearCancel();
         auto r = engine.evalSafe(accum);
+        gSigIntSeen.store(false, keel::MemoryOrder::Release);
+        engine.clearCancel();
         if (!r.ok)
             reportError(r, "Error: ");
         accum.clear();

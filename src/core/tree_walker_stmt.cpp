@@ -37,7 +37,117 @@ Value TreeWalker::execIf(const ASTNode *node, Environment *env)
 Value TreeWalker::execFor(const ASTNode *node, Environment *env)
 {
     const keel::String &varName = node->strValue;
-    auto rangeVal = execNode(node->children[0].get(), env);
+    const ASTNode *rangeExpr = node->children[0].get();
+
+    // Lazy O(1)-memory fast path for `for v = start:stop` and `for v = start:step:stop`
+    // when all operands are DOUBLE (matches VM FOR_INIT_RANGE semantics and lets
+    // `for k = 1:1e9` react to requestCancel() immediately without allocating 8 GB).
+    Value rangeVal;
+    if (rangeExpr && rangeExpr->type == NodeType::COLON_EXPR
+        && (rangeExpr->children.size() == 2 || rangeExpr->children.size() == 3)) {
+        auto colonScalar = [](const Value &v) -> keel::f64 {
+            return (v.numel() > 1 && v.isNumeric()) ? v.elemAsDouble(0) : v.toScalar();
+        };
+        const bool hasStep = (rangeExpr->children.size() == 3);
+        Value a = execNode(rangeExpr->children[0].get(), env);
+        Value mid = hasStep ? execNode(rangeExpr->children[1].get(), env) : Value();
+        Value b = execNode(rangeExpr->children[hasStep ? 2 : 1].get(), env);
+
+        const bool allDouble = (a.type() == ValueType::DOUBLE)
+                               && (b.type() == ValueType::DOUBLE)
+                               && (!hasStep || mid.type() == ValueType::DOUBLE);
+        if (allDouble) {
+            if (a.isEmpty() || b.isEmpty() || (hasStep && mid.isEmpty())) {
+                env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_));
+                return Value();
+            }
+            const keel::f64 start = colonScalar(a);
+            const keel::f64 step = hasStep ? colonScalar(mid) : 1.0;
+            const keel::f64 stop = colonScalar(b);
+            const keel::usize count = Value::colonCount(start, step, stop);
+            if (count == 0) {
+                env->set(varName, Value::matrix(0, 0, ValueType::DOUBLE, engine_.mr_));
+                return Value();
+            }
+            env->set(varName, Value::scalar(0.0, engine_.mr_));
+            Value *varPtr = env->get(varName);
+            keel::f64 *slot = varPtr->doubleDataMut();
+            for (keel::usize c = 0; c < count; ++c) {
+                engine_.checkCancelled();
+                *slot = start + keel::as<keel::f64>(c) * step;
+                execNode(node->children[1].get(), env);
+                if (flowSignal_ == FlowSignal::BREAK) {
+                    flowSignal_ = FlowSignal::NONE;
+                    break;
+                }
+                if (flowSignal_ == FlowSignal::CONTINUE) {
+                    flowSignal_ = FlowSignal::NONE;
+                    continue;
+                }
+                if (flowSignal_ == FlowSignal::RETURN)
+                    return Value();
+                varPtr = env->get(varName);
+                if (!varPtr || !varPtr->isScalar() || varPtr->type() != ValueType::DOUBLE) {
+                    for (keel::usize c2 = c + 1; c2 < count; ++c2) {
+                        engine_.checkCancelled();
+                        env->set(varName, Value::scalar(start + keel::as<keel::f64>(c2) * step, engine_.mr_));
+                        execNode(node->children[1].get(), env);
+                        if (flowSignal_ == FlowSignal::BREAK) {
+                            flowSignal_ = FlowSignal::NONE;
+                            return Value();
+                        }
+                        if (flowSignal_ == FlowSignal::CONTINUE) {
+                            flowSignal_ = FlowSignal::NONE;
+                            continue;
+                        }
+                        if (flowSignal_ == FlowSignal::RETURN)
+                            return Value();
+                    }
+                    return Value();
+                }
+                slot = varPtr->doubleDataMut();
+            }
+            return Value();
+        }
+
+        // Non-DOUBLE or object colon operands: materialize from already-evaluated values
+        // (never re-evaluate side-effecting subexpressions).
+        if (a.isObject() || b.isObject() || (hasStep && mid.isObject())) {
+            const Value &dom = a.isObject() ? a : (b.isObject() ? b : mid);
+            const BuiltinClass *cls = engine_.findClass(dom.objectClassNameRef());
+            if (const auto *m = cls ? cls->ops.get("colon") : nullptr) {
+                Value self = dom;
+                Value ops[3] = {a, hasStep ? mid : b, b};
+                Value outBuf[1];
+                CallContext ctx{&engine_, env};
+                (*m)(self, keel::ArrayRef<Value>(ops, hasStep ? 3 : 2), 1,
+                     keel::MutArrayRef<Value>(outBuf, 1), ctx);
+                rangeVal = keel::move(outBuf[0]);
+            }
+        }
+        if (rangeVal.isUnset()) {
+            ValueType ts[3] = {a.type(), hasStep ? mid.type() : ValueType::DOUBLE, b.type()};
+            ValueType t = ValueType::DOUBLE;
+            bool found = false;
+            for (ValueType ti : ts) {
+                if (ti == ValueType::DOUBLE) continue;
+                if (!found) { t = ti; found = true; }
+                else if (ti != t)
+                    throw numkit::Error(
+                        "Colon operands must be all the same type, "
+                        "or mixed with real scalar doubles");
+            }
+            if (a.isEmpty() || b.isEmpty() || (hasStep && mid.isEmpty()))
+                rangeVal = Value::matrix(1, 0, t, engine_.mr_);
+            else if (hasStep)
+                rangeVal = Value::colonRangeTyped(colonScalar(a), colonScalar(mid), colonScalar(b),
+                                                  t, engine_.mr_);
+            else
+                rangeVal = Value::colonRangeTyped(colonScalar(a), colonScalar(b), t, engine_.mr_);
+        }
+    } else {
+        rangeVal = execNode(rangeExpr, env);
+    }
 
     // Empty range — body never executes
     if (rangeVal.isEmpty()) {
@@ -578,11 +688,12 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
         auto stack = engine_.takeLastErrorStack();
         if (stack.empty())
             stack = captureCallStack();
+        keel::StringRef id = mle.identifier().empty()
+                                 ? keel::StringRef("numkit:error")
+                                 : mle.identifier().as_ref();
+        engine_.recordLastError(mle.what(), id, stack.as_ref());
         if (node->children.size() > 1) {
             if (!node->strValue.empty()) {
-                keel::StringRef id = mle.identifier().empty()
-                                         ? keel::StringRef("numkit:error")
-                                         : mle.identifier().as_ref();
                 Value err = makeExceptionStruct(mle.what(), id, stack.as_ref(), engine_.mr_);
                 env->set(node->strValue, keel::move(err));
             }
@@ -593,6 +704,7 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
         auto stack = engine_.takeLastErrorStack();
         if (stack.empty())
             stack = captureCallStack();
+        engine_.recordLastError(e.what(), "numkit:error", stack.as_ref());
         if (node->children.size() > 1) {
             if (!node->strValue.empty()) {
                 Value err = makeExceptionStruct(e.what(), "numkit:error", stack.as_ref(), engine_.mr_);

@@ -111,6 +111,7 @@ bool VM::dispatchTryCatch(const char *msg, const char *identifier)
                                          frame.nregs, frame.isScriptFrame, /*seedMissing=*/false);
     }
 
+    engine_.recordLastError(msg, identifier, stack.as_ref());
     frame.R[th.exReg] = makeExceptionStruct(msg, identifier, stack.as_ref(), engine_.mr_);
     frame.ip = th.catchIp;
     return true;
@@ -239,6 +240,10 @@ void VM::enrichError(Error &mle, const Instruction *ip, const BytecodeChunk &chu
 {
     if (engine_.lastErrorStack().empty())
         engine_.setLastErrorStack(captureCallStack());
+    keel::StringRef id = mle.identifier().empty()
+                             ? keel::StringRef("numkit:error")
+                             : mle.identifier().as_ref();
+    engine_.recordLastError(mle.what(), id, engine_.lastErrorStack().as_ref());
     keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
     if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
         mle.attachIfMissing(chunk.sourceMap[instrIdx].line,
@@ -254,6 +259,7 @@ void VM::enrichError(Error &mle, const Instruction *ip, const BytecodeChunk &chu
 {
     if (engine_.lastErrorStack().empty())
         engine_.setLastErrorStack(captureCallStack());
+    engine_.recordLastError(ex.what(), "numkit:error", engine_.lastErrorStack().as_ref());
     keel::usize instrIdx = keel::as<keel::usize>(ip - chunk.code.data());
     if (instrIdx < chunk.sourceMap.size() && chunk.sourceMap[instrIdx].line > 0) {
         keel::String context = describeInstruction(*ip, chunk);

@@ -3,7 +3,9 @@
 // Standalone C-ABI tests for `numkit/numkit` (`numkit_c` Full Engine).
 #include <numkit/core/c_api.h>
 
+#include <chrono>
 #include <gtest/gtest.h>
+#include <thread>
 
 namespace {
 
@@ -66,6 +68,37 @@ TEST(NumkitEngineCApi, EvalWorkspaceCallbackAndResolve)
     EXPECT_DOUBLE_EQ(numkit_val_as_double(sinOut, &err), 0.0);
     numkit_val_release(sinOut);
     numkit_val_release(zero);
+
+    numkit_engine_destroy(ctx);
+    EXPECT_EQ(numkit_debug_live_values(), base);
+}
+
+TEST(NumkitEngineCApi, CooperativeCancelFromHostThread)
+{
+    const int64_t base = numkit_debug_live_values();
+    numkit_error err{};
+    numkit_engine_ctx *ctx = numkit_engine_create(&err);
+    ASSERT_NE(ctx, nullptr) << err.message;
+    EXPECT_EQ(numkit_engine_is_cancel_requested(ctx), 0);
+
+    std::thread canceller([ctx]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        numkit_engine_request_cancel(ctx);
+    });
+    numkit_val *interrupted = numkit_engine_eval(ctx, "x = 0; while true; x = x + 1; end", &err);
+    canceller.join();
+
+    EXPECT_EQ(interrupted, nullptr);
+    EXPECT_NE(err.code, 0);
+    EXPECT_EQ(numkit_engine_is_cancel_requested(ctx), 1);
+
+    numkit_engine_clear_cancel(ctx);
+    EXPECT_EQ(numkit_engine_is_cancel_requested(ctx), 0);
+
+    numkit_val *ok = numkit_engine_eval(ctx, "6 * 7", &err);
+    ASSERT_NE(ok, nullptr) << err.message;
+    EXPECT_DOUBLE_EQ(numkit_val_as_double(ok, &err), 42.0);
+    numkit_val_release(ok);
 
     numkit_engine_destroy(ctx);
     EXPECT_EQ(numkit_debug_live_values(), base);

@@ -421,8 +421,13 @@ Value TreeWalker::execNodeExpand(const ASTNode *node, Environment *env)
     try {
         return execNodeInner(node, env);
     } catch (Error &e) {
-        if (engine_.lastErrorStack().empty())
+        if (engine_.lastErrorStack().empty()) {
             engine_.setLastErrorStack(captureCallStack());
+            keel::StringRef id = e.identifier().empty()
+                                     ? keel::StringRef("numkit:error")
+                                     : e.identifier().as_ref();
+            engine_.recordLastError(e.what(), id, engine_.lastErrorStack().as_ref());
+        }
         // Enrich with this node's source location if the inner throw
         // didn't already attach one (e.g. from a public C++ library API).
         if (node->line > 0) {

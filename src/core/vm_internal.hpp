@@ -110,6 +110,17 @@ inline Value readChunkVar(const BytecodeChunk &chunk, const Value *R, keel::u32 
     return (reg < nregs) ? R[reg] : Value();
 }
 
+inline void writeChunkVar(const BytecodeChunk &chunk, Value *R, keel::u32 nregs,
+                          keel::StringRef name, keel::u16 reg, const Value &val)
+{
+    if (reg < nregs)
+        R[reg] = val;
+    if (const keel::u16 *uv = chunk.upvalueBoxRegs.get(name); uv && *uv < nregs) {
+        if (UpvaluePayload *box = asUpvalueBox(R[*uv]))
+            box->write(val);
+    }
+}
+
 // Resolve one assignment subscript to 0-based indices for an object-array
 // slice store: ':' expands to the whole current dimension; everything else
 // (scalar / range / vector / logical) is grow-friendly (unchecked).

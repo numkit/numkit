@@ -596,17 +596,15 @@ TEST_P(Wave2VmTwIndependenceTest, CooperativeCancellationParity)
     engine.clearCancel();
     EXPECT_DOUBLE_EQ(evalScalar("1 + 2"), 3.0);
 
-    // Interrupt a long nested for-loop cleanly (bounded range size so TW doesn't allocate 1e9 doubles)
+    // Interrupt a huge 1:1e9 for-loop cleanly in O(1) memory on BOTH TW and VM
     std::thread canceller2([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
         engine.requestCancel();
     });
     auto r2 = engine.evalSafe(R"(
         s = 0;
-        for a = 1:10000
-            for b = 1:10000
-                s = s + 1;
-            end
+        for k = 1:1e9
+            s = s + 1;
         end
     )");
     canceller2.join();
@@ -665,6 +663,46 @@ TEST_P(Wave2VmTwIndependenceTest, UnifiedMaxRecursionAndReentrantRecovery)
 
     // Subsequent calls work cleanly
     EXPECT_DOUBLE_EQ(evalScalar("rec_sum(10)"), 55.0);
+}
+
+// 15. dbstack() and lasterror() parity across TW and VM
+TEST_P(Wave2VmTwIndependenceTest, DbstackAndLasterrorParity)
+{
+    eval(R"(
+        function [st, st1, idx] = leaf_stack()
+            [st, idx] = dbstack;
+            st1 = dbstack(1);
+        end
+        function [st, st1, idx] = mid_stack()
+            [st, st1, idx] = leaf_stack();
+        end
+    )");
+    eval("[st, st1, idx] = mid_stack();");
+    EXPECT_DOUBLE_EQ(getVar("idx"), 1.0);
+    EXPECT_GE(evalScalar("numel(st)"), 2.0);
+    EXPECT_EQ(evalString("st(1).name"), "leaf_stack");
+    EXPECT_EQ(evalString("st(2).name"), "mid_stack");
+    EXPECT_GT(evalScalar("st(1).line"), 0.0);
+    // dbstack(1) omits innermost frame `leaf_stack`
+    EXPECT_EQ(evalString("st1(1).name"), "mid_stack");
+
+    // lasterror records caught errors and resets cleanly via lasterror('reset')
+    eval(R"(
+        lasterror('reset');
+        le0 = lasterror;
+        try
+            error('s6:lasterr:tag', 'captured by lasterror');
+        catch
+        end
+        le1 = lasterror;
+        lasterror('reset');
+        le2 = lasterror;
+    )");
+    EXPECT_TRUE(evalBool("isempty(le0.message) && isempty(le0.identifier) && isempty(le0.stack)"));
+    EXPECT_EQ(evalString("le1.identifier"), "s6:lasterr:tag");
+    EXPECT_EQ(evalString("le1.message"), "captured by lasterror");
+    EXPECT_GE(evalScalar("numel(le1.stack)"), 1.0);
+    EXPECT_TRUE(evalBool("isempty(le2.message) && isempty(le2.identifier) && isempty(le2.stack)"));
 }
 
 INSTANTIATE_DUAL(Wave2VmTwIndependenceTest);
