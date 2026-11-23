@@ -395,6 +395,11 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
                 h.setFuncHandleSource(dispSrc);
                 return h;
             }
+            if (const keel::StringRef sub = env->findFileSubfunc(node->strValue); !sub.empty()) {
+                Value h = Value::funcHandle(sub, engine_.mr_);
+                h.setFuncHandleSource(node->strValue);
+                return h;
+            }
         }
         return Value::funcHandle(node->strValue, engine_.mr_);
     }
@@ -865,6 +870,8 @@ Value TreeWalker::callUserFunction(const UserFunction &func,
     }
     LexicalEnvGuard lexGuard(activeLexicalEnvs_, heapEnv);
     Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    if (func.fileSubfuncs)
+        localEnv.setFileSubfuncs(func.fileSubfuncs);
     localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
     if (useLexicalHeap)
         twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
@@ -967,6 +974,8 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &func,
     }
     LexicalEnvGuard lexGuard(activeLexicalEnvs_, heapEnv);
     Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    if (func.fileSubfuncs)
+        localEnv.setFileSubfuncs(func.fileSubfuncs);
     localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
     if (useLexicalHeap)
         twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);
@@ -1097,6 +1106,8 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
     }
     LexicalEnvGuard lexGuard(activeLexicalEnvs_, heapEnv);
     Environment &localEnv = useLexicalHeap ? *heapEnv : *stackEnv;
+    if (func.fileSubfuncs)
+        localEnv.setFileSubfuncs(func.fileSubfuncs);
     localEnv.bindPersistentBucket(engine_.persistentBucketPtr(func.name));
     if (useLexicalHeap)
         twPopulateLexicalEnv(func, heapEnv, directNested, resolvedClosure);

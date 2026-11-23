@@ -37,23 +37,34 @@ void requireFuncHandle(const Value &fn, const char *who)
 }
 
 // Evaluate the objective at a point (scalar or vector Value) → scalar.
-keel::f64 evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt)
+keel::f64 evalHandleScalar(CallContext &ctx, const Value &handle, const Value &pt,
+                           keel::ArrayRef<Value> extra = {})
 {
-    Value a[1] = { pt };
-    auto r = ctx.engine->callFunctionHandleMulti(handle, keel::ArrayRef<Value>(a, 1), 1);
+    if (extra.empty()) {
+        Value a[1] = { pt };
+        auto r = ctx.engine->callFunctionHandleMulti(handle, keel::ArrayRef<Value>(a, 1), 1);
+        return r.empty() ? keel::kNaN : r[0].toScalar();
+    }
+    keel::Array<Value> a;
+    a.reserve(1 + extra.size());
+    a.push_back(pt);
+    for (keel::usize i = 0; i < extra.size(); ++i)
+        a.push_back(extra[i]);
+    auto r = ctx.engine->callFunctionHandleMulti(handle, a.as_ref(), 1);
     return r.empty() ? keel::kNaN : r[0].toScalar();
 }
 
 // Emit the optional fval / exitflag outputs (and reject the not-yet-
 // supported `output` struct). `x` is the result point, `who` the fn name.
 // Reaching here means the solver converged (it throws otherwise) → the
-// MATLAB exit flag is 1.
+// exit flag is 1.
 void emitFvalExitflag(CallContext &ctx, const Value &handle, const Value &x,
-                      keel::MutArrayRef<Value> outs, const char *who)
+                      keel::MutArrayRef<Value> outs, const char *who,
+                      keel::ArrayRef<Value> extra = {})
 {
     auto *mr = ctx.engine->allocator();
     if (outs.size() >= 2)
-        outs[1] = Value::scalar(evalHandleScalar(ctx, handle, x), mr);
+        outs[1] = Value::scalar(evalHandleScalar(ctx, handle, x, extra), mr);
     if (outs.size() >= 3)
         outs[2] = Value::scalar(1.0, mr);   // converged
     if (outs.size() >= 4) {
@@ -94,20 +105,49 @@ void fzero_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
 
 void fminbnd_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 3, 4, "fminbnd");
+    argcheck::checkNargin(args.size(), 3, "fminbnd");
     requireFuncHandle(args[0], "fminbnd");
     const keel::f64 lo = args[1].toScalar();
     const keel::f64 hi = args[2].toScalar();
-    const keel::f64 tol = (args.size() >= 4 && !args[3].isEmpty()) ? args[3].toScalar() : 1e-6;
+    keel::f64 tol = 1e-6;
+    if (args.size() >= 4 && !args[3].isEmpty()) {
+        if (args[3].isStruct()) {
+            const auto names = args[3].fieldNamesInOrder();
+            for (const auto &fn : names) {
+                if (fn.equals_ignore_ascii_case("TolX")) {
+                    const Value &tv = args[3].field(fn);
+                    if (tv.isNumeric() && tv.isScalar() && !tv.isEmpty())
+                        tol = tv.toScalar();
+                    break;
+                }
+            }
+        } else {
+            tol = args[3].toScalar();
+        }
+    }
+    const keel::ArrayRef<Value> extra =
+        (args.size() > 4) ? args.slice(4) : keel::ArrayRef<Value>{};
     auto handle = args[0];
-    auto cb = [&ctx, &handle](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
-                               keel::Allocator * /*mr*/) {
-        auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
+    auto cb = [&ctx, &handle, extra](keel::ArrayRef<Value> ar, keel::MutArrayRef<Value> ou,
+                                     keel::Allocator * /*mr*/) {
+        if (extra.empty()) {
+            auto r = ctx.engine->callFunctionHandleMulti(handle, ar, ou.size());
+            for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
+                ou[i] = std::move(r[i]);
+            return;
+        }
+        keel::Array<Value> full;
+        full.reserve(ar.size() + extra.size());
+        for (keel::usize i = 0; i < ar.size(); ++i)
+            full.push_back(ar[i]);
+        for (keel::usize i = 0; i < extra.size(); ++i)
+            full.push_back(extra[i]);
+        auto r = ctx.engine->callFunctionHandleMulti(handle, full.as_ref(), ou.size());
         for (keel::usize i = 0; i < ou.size() && i < r.size(); ++i)
             ou[i] = std::move(r[i]);
     };
     outs[0] = fminbnd(cb, lo, hi, tol, ctx.engine->allocator());
-    emitFvalExitflag(ctx, args[0], outs[0], outs, "fminbnd");
+    emitFvalExitflag(ctx, args[0], outs[0], outs, "fminbnd", extra);
 }
 
 void fminsearch_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)

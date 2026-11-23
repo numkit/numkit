@@ -6,6 +6,8 @@
 // their own files, e.g. sort-missingplacement -> matrix_test.cpp.)
 
 #include <numkit/core/engine.hpp>
+#include <keel/format.h>
+#include <keel/fs.h>
 #include <keel/math.h>
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/core/engine.hpp>
@@ -1182,6 +1184,80 @@ TEST_F(BuiltinKnownBug, FunctionScopeIsolationDottedFallback)
         "function y = iso_reader()\n"
         "    y = s_iso.g;\n"
         "end\n"), keel::Exception);
+}
+
+// End-less function m-files with multiple subfunctions:
+// 1. All sibling subfunctions (2nd, 3rd, ...) must be hoisted as siblings rather
+//    than swallowed as nested functions (and must not share lexical variables
+//    like `t` with the main function).
+// 2. Subfunctions with identical names in different m-files must stay file-private
+//    (including zero-arg calls and `@sub` function handles passed across files).
+TEST_F(BuiltinKnownBug, EndlessSubfunctionsHoistingAndFileIsolation)
+{
+    auto tmpRes = keel::fs_create_temp_dir("numkit_subfn_");
+    ASSERT_TRUE(tmpRes.is_ok());
+    const keel::String tmpDir = keel::move(tmpRes.value());
+    const keel::String fAlpha = keel::format("{}/sub_alpha_b4.m", tmpDir);
+    const keel::String fBeta  = keel::format("{}/sub_beta_b4.m", tmpDir);
+    const keel::String fCall  = keel::format("{}/sub_caller_b4.m", tmpDir);
+
+    (void)keel::fs_write_text(fAlpha,
+        "function [val, t_out, fh_res] = sub_alpha_b4(t)\n"
+        "d = DataStructure;\n"
+        "s = ClobberT(t);\n"
+        "val = d.tag + s + SecondHelper(t);\n"
+        "t_out = t;\n"
+        "fh_res = sub_caller_b4(@LocalHandle, t);\n"
+        "\n"
+        "function r = ClobberT(a)\n"
+        "t = [100; 200];\n"
+        "r = a + t(1);\n"
+        "\n"
+        "function d = DataStructure\n"
+        "d = struct('tag', 10);\n"
+        "\n"
+        "function r = SecondHelper(x)\n"
+        "r = x * 2;\n"
+        "\n"
+        "function r = LocalHandle(x)\n"
+        "r = x + 1000;\n");
+
+    (void)keel::fs_write_text(fBeta,
+        "function [val, fh_res] = sub_beta_b4(t)\n"
+        "d = DataStructure;\n"
+        "val = d.tag + t;\n"
+        "fh_res = sub_caller_b4(@LocalHandle, t);\n"
+        "\n"
+        "function d = DataStructure\n"
+        "d = struct('tag', 200);\n"
+        "\n"
+        "function r = LocalHandle(x)\n"
+        "r = x + 2000;\n");
+
+    (void)keel::fs_write_text(fCall,
+        "function y = sub_caller_b4(fn, x)\n"
+        "y = fn(x);\n");
+
+    eval(keel::format("addpath('{}');\n"
+                      "[va, ta, fa] = sub_alpha_b4(3);\n"
+                      "[vb, fb] = sub_beta_b4(5);\n", tmpDir).c_str());
+
+    (void)keel::fs_remove_all(tmpDir);
+
+    EXPECT_DOUBLE_EQ(evalScalar("ta"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("va"), 10.0 + 103.0 + 6.0);
+    EXPECT_DOUBLE_EQ(evalScalar("fa"), 1003.0);
+    EXPECT_DOUBLE_EQ(evalScalar("vb"), 205.0);
+    EXPECT_DOUBLE_EQ(evalScalar("fb"), 2005.0);
+}
+
+// fminbnd accepts optimset struct as 4th argument and extra parameters p1, p2, ...
+TEST_F(BuiltinKnownBug, FminbndOptimsetAndExtraParams)
+{
+    eval("fn = @(x, a, b) (x - a).^2 + b;\n"
+         "[xmin, fval] = fminbnd(fn, 0, 10, optimset('TolX', 1e-12), 3.5, 2.0);\n");
+    EXPECT_NEAR(evalScalar("xmin"), 3.5, 1e-9);
+    EXPECT_NEAR(evalScalar("fval"), 2.0, 1e-12);
 }
 
 

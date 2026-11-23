@@ -83,6 +83,11 @@ public:
     bool hasLocalSlot(keel::StringRef name) const;
     void defineNestedFunc(keel::StringRef name, UserFunction uf);
     const UserFunction *findNestedFunc(keel::StringRef name) const;
+    void setFileSubfuncs(keel::Arc<keel::HashMap<keel::String, keel::String>> subs) noexcept
+    {
+        fileSubfuncs_ = keel::move(subs);
+    }
+    keel::StringRef findFileSubfunc(keel::StringRef name) const;
     const keel::Arc<Environment> &owningParentArc() const noexcept { return owningParent_; }
 
     // Names this environment has declared `global`. The VALUE of each lives in
@@ -143,6 +148,7 @@ private:
     keel::HashSet<keel::String> persistents_;
     keel::HashSet<keel::String> lexicalVars_;
     keel::UniquePtr<keel::HashMap<keel::String, UserFunction>> nestedFuncs_;
+    keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs_;
     keel::Array<Import> activeImports_;
     Environment *parent_ = nullptr;             // non-owning, for lookup
     keel::Arc<Environment> owningParent_;       // owning, for snapshots only

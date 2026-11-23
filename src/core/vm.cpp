@@ -2578,7 +2578,12 @@ enter_frame:
                     {
                         const keel::String &nn = chunk.strings[I.d];
                         const keel::usize nout = I.e;
-                        if (auto *uf = engine_.lookupUserFunction(nn, currentCallEnv())) {
+                        keel::StringRef subLookup = nn.as_ref();
+                        if (chunk.fileSubfuncs) {
+                            if (const keel::String *q = chunk.fileSubfuncs->get(nn))
+                                subLookup = q->as_ref();
+                        }
+                        if (auto *uf = engine_.lookupUserFunction(subLookup, currentCallEnv())) {
                             const BytecodeChunk *found = findCompiledFunc(uf->name);
                             if (!found)
                                 found = engine_.ensureClassMethodChunk(*uf);

@@ -537,6 +537,12 @@ const UserFunction *Engine::lookupUserFunctionLocal(keel::StringRef name) const
 const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
                                                 const Environment *env)
 {
+    if (env) {
+        if (const keel::StringRef sub = env->findFileSubfunc(name); !sub.empty()) {
+            if (auto *f = lookupUserFunctionLocal(sub))
+                return f;
+        }
+    }
     if (auto *f = lookupUserFunctionLocal(name))
         return f;
     // Direct path: parse-and-load <name>.m (or +pkg/.../<leaf>.m for a
@@ -978,6 +984,18 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 dropFileClassCtorExternal_(name);
             mFileCache_.remove(name);
             userFuncs_.remove(name);
+            // Drop any previously loaded file-private subfunctions ("name>sub").
+            {
+                const keel::String subPrefix = keel::format("{}>", name);
+                keel::Array<keel::String> staleSubs;
+                for (auto [k, v] : userFuncs_) {
+                    (void)v;
+                    if (k.size() > subPrefix.size() && k.starts_with(subPrefix))
+                        staleSubs.push_back(k.clone());
+                }
+                for (const auto &sk : staleSubs)
+                    userFuncs_.remove(sk);
+            }
             bumpCallCacheEpoch();
         }
 
@@ -1147,6 +1165,36 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
         // can host functions with the same leaf without colliding.
         UserFunction func;
         func.name = keel::String::from(name);
+        // Collect file-private local (sub)functions up front so BOTH the main
+        // function and every subfunction resolve bare subfunction calls and
+        // `@sub` handles to their file-qualified `"main>sub"` keys without
+        // colliding across files or polluting the global function namespace.
+        keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs;
+        keel::Array<const ASTNode *> subFuncDefs;
+        if (ast->type == NodeType::BLOCK) {
+            for (const auto &c : ast->children) {
+                if (!c || c->type != NodeType::FUNCTION_DEF || c.get() == funcDef)
+                    continue;
+                const keel::String &ln = c->strValue;
+                if (ln.empty() || ln == name || ln == leafName || c->children.empty())
+                    continue;
+                if (!fileSubfuncs)
+                    fileSubfuncs = keel::make_arc<keel::HashMap<keel::String, keel::String>>();
+                if (fileSubfuncs->contains(ln))
+                    continue;
+                fileSubfuncs->put(ln.clone(), keel::format("{}>{}", name, ln));
+                subFuncDefs.push_back(c.get());
+            }
+        }
+        // If the main function header name differs from the file name, allow
+        // self-calls using the header name inside the file too.
+        if (!funcDef->strValue.empty() && funcDef->strValue != name) {
+            if (!fileSubfuncs)
+                fileSubfuncs = keel::make_arc<keel::HashMap<keel::String, keel::String>>();
+            if (!fileSubfuncs->contains(funcDef->strValue))
+                fileSubfuncs->put(funcDef->strValue.clone(), keel::String::from(name));
+        }
+
         func.params = funcDef->paramNames.clone();
         func.returns = funcDef->returnNames.clone();
         func.body = keel::Arc<const ASTNode>(cloneNode(funcDef->children[0].get()));
@@ -1155,6 +1203,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
         func.sourceFs = keel::String::from(rpFsName);
         func.sourceDir = scriptDir.clone();
         func.sourceFile = keel::String::from(rpPath);
+        func.fileSubfuncs = fileSubfuncs;
 
         // Register for VM dispatch (mirrors what execFunctionDef +
         // beginScript pre-compile pass do for in-script function defs).
@@ -1170,7 +1219,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 // inside the body capture THIS file (their origin frame
                 // is not active yet at resolve-time compilation).
                 compiler_->registerFunctionAs(name, funcDef, rpFsName,
-                                              scriptDir, rpPath);
+                                              scriptDir, rpPath, fileSubfuncs);
             } catch (const std::exception &) {
                 // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
@@ -1191,47 +1240,32 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
         mFileCache_.put(keel::String::from(name), keel::move(e));
         bumpCallCacheEpoch();
 
-        // Register the file's OTHER top-level functions as local
-        // (sub)functions — a `.m` file may define a main function followed by
-        // helper functions that the main one calls (a core MATLAB feature).
-        // We register them under their bare names so the entry's calls
-        // resolve, mirroring how beginScript registers entry-SCRIPT locals.
-        // Guard: never shadow an existing builtin / already-loaded function
-        // (keeps locals from leaking over the global namespace). File-private
-        // scoping is a known simplification — same-named locals in two files
-        // resolve to the first loaded.
-        if (ast->type == NodeType::BLOCK) {
-            for (const auto &c : ast->children) {
-                if (!c || c->type != NodeType::FUNCTION_DEF || c.get() == funcDef)
-                    continue;
-                const keel::String &ln = c->strValue;
-                if (ln.empty() || ln == name || ln == leafName)
-                    continue;
-                if (externalFuncs_.contains(ln) || userFuncs_.contains(ln))
-                    continue;
-                if (c->children.empty())
-                    continue;
-                if (compiler_) {
-                    try {
-                        compiler_->registerFunctionAs(ln, c.get(), rpFsName,
-                                                      scriptDir, rpPath);
-                    }
-                    catch (const std::exception &) { /* TW still dispatches via userFuncs_ */ }
+        // Register each file-private subfunction under `"main>sub"`.
+        for (const ASTNode *sf : subFuncDefs) {
+            const keel::String &ln = sf->strValue;
+            const keel::String subKey = keel::format("{}>{}", name, ln);
+            if (compiler_) {
+                try {
+                    compiler_->registerFunctionAs(subKey, sf, rpFsName,
+                                                  scriptDir, rpPath, fileSubfuncs);
+                } catch (const std::exception &) {
+                    /* TW still dispatches via userFuncs_ */
                 }
-                UserFunction lf;
-                lf.name       = ln.clone();
-                lf.params     = c->paramNames.clone();
-                lf.returns    = c->returnNames.clone();
-                lf.body       = keel::Arc<const ASTNode>(cloneNode(c->children[0].get()));
-                lf.closureEnv = nullptr;
-                lf.originKnown = true;
-                lf.sourceFs   = keel::String::from(rpFsName);
-                lf.sourceDir  = scriptDir.clone();
-                lf.sourceFile = keel::String::from(rpPath);
-                userFuncs_.put(ln.clone(), keel::move(lf));
-                if (compiler_)
-                    compiler_->setChunkOrigin(ln, rpFsName, scriptDir, rpPath);
             }
+            UserFunction lf;
+            lf.name         = subKey.clone();
+            lf.params       = sf->paramNames.clone();
+            lf.returns      = sf->returnNames.clone();
+            lf.body         = keel::Arc<const ASTNode>(cloneNode(sf->children[0].get()));
+            lf.closureEnv   = nullptr;
+            lf.originKnown  = true;
+            lf.sourceFs     = keel::String::from(rpFsName);
+            lf.sourceDir    = scriptDir.clone();
+            lf.sourceFile   = keel::String::from(rpPath);
+            lf.fileSubfuncs = fileSubfuncs;
+            userFuncs_.put(subKey.clone(), keel::move(lf));
+            if (compiler_)
+                compiler_->setChunkOrigin(subKey, rpFsName, scriptDir, rpPath);
         }
 
         return userFuncs_.get(name);

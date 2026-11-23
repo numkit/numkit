@@ -53,7 +53,8 @@ public:
     // origin frame, and the compile-time capture must agree.
     void registerFunctionAs(keel::StringRef qualifiedName,
                              const ASTNode *funcDef, keel::StringRef fsName,
-                             keel::StringRef scriptDir, keel::StringRef scriptFile);
+                             keel::StringRef scriptDir, keel::StringRef scriptFile,
+                             keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs = nullptr);
 
     // Stamp m-file provenance onto an already-registered chunk. The
     // engine's m-file resolver compiles first and learns the concrete
@@ -184,12 +185,23 @@ private:
     keel::String anonOriginFs_;
     keel::String anonOriginDir_;
     keel::String anonOriginFile_;
+    keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs_;
+
+    keel::StringRef resolveFileSubfunc(keel::StringRef name) const
+    {
+        if (fileSubfuncs_) {
+            if (const keel::String *q = fileSubfuncs_->get(name))
+                return q->as_ref();
+        }
+        return {};
+    }
 
     class AnonOriginSentry
     {
     public:
         AnonOriginSentry(Compiler &c, bool known, keel::String fs,
-                         keel::String dir, keel::String file);
+                         keel::String dir, keel::String file,
+                         keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs = nullptr);
         ~AnonOriginSentry();
         AnonOriginSentry(const AnonOriginSentry &) = delete;
         AnonOriginSentry &operator=(const AnonOriginSentry &) = delete;
@@ -197,6 +209,7 @@ private:
         Compiler &c_;
         bool known_;
         keel::String fs_, dir_, file_;
+        keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs_;
     };
     friend class AnonOriginSentry;
 

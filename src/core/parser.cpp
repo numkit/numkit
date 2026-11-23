@@ -251,6 +251,42 @@ keel::f64 Parser::parseDouble(keel::StringRef text, keel::i32 line, keel::i32 co
 // Точка входа
 // ============================================================
 
+namespace {
+
+// End-less function files (`function main ... function sub1 ... function sub2 ...`)
+// have no `end` keywords separating sibling subfunctions, so parseFunctionDef's
+// parseBlock({KW_END}) parses subsequent `function` definitions inside the first
+// function's body block. Because an end-less function cannot own nested functions,
+// hoist any FUNCTION_DEF children out of end-less functions into sibling top-level
+// declarations (recursing along end-less chains).
+void hoistEndlessSubfunctions(ASTNode *fn, keel::Array<ASTNodePtr> &out)
+{
+    if (!fn || fn->type != NodeType::FUNCTION_DEF || fn->endLine != 0 || fn->children.empty())
+        return;
+    ASTNode *body = fn->children[0].get();
+    if (!body || body->type != NodeType::BLOCK)
+        return;
+    keel::Array<ASTNodePtr> kept;
+    keel::Array<ASTNodePtr> hoisted;
+    kept.reserve(body->children.size());
+    for (auto &c : body->children) {
+        if (c && c->type == NodeType::FUNCTION_DEF) {
+            hoisted.push_back(keel::move(c));
+        } else {
+            kept.push_back(keel::move(c));
+        }
+    }
+    body->children = keel::move(kept);
+    for (auto &sib : hoisted) {
+        ASTNode *sibPtr = sib.get();
+        out.push_back(keel::move(sib));
+        if (sibPtr->endLine == 0)
+            hoistEndlessSubfunctions(sibPtr, out);
+    }
+}
+
+} // namespace
+
 ASTNodePtr Parser::parse()
 {
     auto [ln, cl] = loc();
@@ -258,8 +294,12 @@ ASTNodePtr Parser::parse()
     skipNewlines();
     while (!isAtEnd()) {
         auto stmt = parseStatement();
-        if (stmt)
+        if (stmt) {
+            ASTNode *stmtPtr = stmt.get();
             block->children.push_back(keel::move(stmt));
+            if (stmtPtr->type == NodeType::FUNCTION_DEF && stmtPtr->endLine == 0)
+                hoistEndlessSubfunctions(stmtPtr, block->children);
+        }
         skipNewlines();
     }
 

@@ -64,25 +64,30 @@ void Compiler::registerFunctionAs(keel::StringRef qualifiedName,
 void Compiler::registerFunctionAs(keel::StringRef qualifiedName,
                                    const ASTNode *funcDef, keel::StringRef fsName,
                                    keel::StringRef scriptDir,
-                                   keel::StringRef scriptFile)
+                                   keel::StringRef scriptFile,
+                                   keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs)
 {
     AnonOriginSentry sentry(*this, /*known=*/true, keel::String::from(fsName),
-                            keel::String::from(scriptDir), keel::String::from(scriptFile));
+                            keel::String::from(scriptDir), keel::String::from(scriptFile),
+                            keel::move(fileSubfuncs));
     registerFunctionAsImpl_(qualifiedName, funcDef);
 }
 
-Compiler::AnonOriginSentry::AnonOriginSentry(Compiler &c, bool known, keel::String fs,
-                                             keel::String dir, keel::String file)
+Compiler::AnonOriginSentry::AnonOriginSentry(
+    Compiler &c, bool known, keel::String fs, keel::String dir, keel::String file,
+    keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs)
     : c_(c)
     , known_(c.anonOriginKnown_)
     , fs_(keel::move(c.anonOriginFs_))
     , dir_(keel::move(c.anonOriginDir_))
     , file_(keel::move(c.anonOriginFile_))
+    , fileSubfuncs_(keel::move(c.fileSubfuncs_))
 {
     c_.anonOriginKnown_ = known;
     c_.anonOriginFs_ = keel::move(fs);
     c_.anonOriginDir_ = keel::move(dir);
     c_.anonOriginFile_ = keel::move(file);
+    c_.fileSubfuncs_ = keel::move(fileSubfuncs);
 }
 
 Compiler::AnonOriginSentry::~AnonOriginSentry()
@@ -91,6 +96,7 @@ Compiler::AnonOriginSentry::~AnonOriginSentry()
     c_.anonOriginFs_ = keel::move(fs_);
     c_.anonOriginDir_ = keel::move(dir_);
     c_.anonOriginFile_ = keel::move(file_);
+    c_.fileSubfuncs_ = keel::move(fileSubfuncs_);
 }
 
 void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
@@ -118,6 +124,7 @@ void Compiler::registerFunctionAsImpl_(keel::StringRef qualifiedName,
     uf.returns = funcDef->returnNames.clone();
     uf.body = keel::Arc<const ASTNode>(cloneNode(funcDef->children[0].get()));
     uf.closureEnv = nullptr;
+    uf.fileSubfuncs = fileSubfuncs_;
 
     auto funcChunkArc = keel::make_arc<BytecodeChunk>(keel::move(funcChunk));
     if (scriptDepth_ > 0) {
@@ -423,6 +430,7 @@ BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
                 .c_str());
     chunk_.numParams = keel::as<keel::u16>(funcDef->paramNames.size());
     chunk_.numReturns = keel::as<keel::u16>(funcDef->returnNames.size());
+    chunk_.fileSubfuncs = fileSubfuncs_;
     varRegisters_.clear();
     loopStack_.clear();
     constRegCache_.clear();

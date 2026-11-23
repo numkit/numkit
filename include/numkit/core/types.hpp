@@ -111,6 +111,9 @@ struct UserFunction
     keel::String sourceDir;
     keel::String sourceFile;
     keel::usize numUpvalueCaptures = 0;
+    // File-private local subfunction map (bareName -> "mainName>bareName")
+    // shared across the main function and all subfunctions of an m-file.
+    keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs;
 
     UserFunction clone(keel::Allocator *alloc = nullptr) const
     {
@@ -128,6 +131,7 @@ struct UserFunction
         cp.sourceDir = sourceDir.clone(alloc);
         cp.sourceFile = sourceFile.clone(alloc);
         cp.numUpvalueCaptures = numUpvalueCaptures;
+        cp.fileSubfuncs = fileSubfuncs;
         return cp;
     }
 };

@@ -471,6 +471,9 @@ struct BytecodeChunk
     keel::String originFs;
     keel::String originDir;
     keel::String originFile;
+    // File-private subfunction table (bareName -> "mainName>bareName") for
+    // m-file functions and their subfunctions/anonymous closures.
+    keel::Arc<keel::HashMap<keel::String, keel::String>> fileSubfuncs;
 
     BytecodeChunk clone(keel::Allocator *alloc = nullptr) const
     {
@@ -505,6 +508,7 @@ struct BytecodeChunk
         cp.originFs = originFs.clone(alloc);
         cp.originDir = originDir.clone(alloc);
         cp.originFile = originFile.clone(alloc);
+        cp.fileSubfuncs = fileSubfuncs;
         return cp;
     }
 };

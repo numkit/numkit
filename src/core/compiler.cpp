@@ -500,6 +500,21 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
         return dst;
     }
 
+    // Zero-arg file-private subfunction call in expression context (`y = DefaultDataStructure`)
+    if (const keel::StringRef sub = resolveFileSubfunc(name); !sub.empty()) {
+        if (!mayInjectVars_) {
+            keel::u16 argBase = nextReg_;
+            keel::u16 dst = tempReg();
+            keel::i32 funcIdx = addStringConstant(sub);
+            emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, nargoutContext_));
+            return dst;
+        }
+        keel::u16 dst = tempReg();
+        keel::i32 nameIdx = addStringConstant(name);
+        emit(Instruction::make_abcde(OpCode::ASSERT_DEF, dst, 0, 1, nameIdx, nargoutContext_));
+        return dst;
+    }
+
     // Check workspaceEnv
     if (isTopLevel_ && !engine_.isReservedName(name)) {
         Value *existing = engine_.getVariable(name);
@@ -1380,8 +1395,10 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
                     emitAB(OpCode::MOVE, slot, argRegs[i]);
             }
             keel::u16 outBase = reserveRegs(nout);
+            keel::StringRef subName = nit ? keel::StringRef{} : resolveFileSubfunc(fname);
             keel::i32 funcIdx = addStringConstant(
-                nit ? nit->compiledName.as_ref() : fname.as_ref());
+                nit ? nit->compiledName.as_ref()
+                    : (!subName.empty() ? subName : fname.as_ref()));
             emit(Instruction::make_abcde(OpCode::CALL_FLATTEN_MULTI, outBase, argBase,
                                          keel::as<keel::u16>(argRegs.size()), funcIdx,
                                          keel::as<keel::u16>(nout)));
@@ -1477,8 +1494,10 @@ keel::u16 Compiler::compileMultiAssign(const ASTNode *node)
         return outRegs.empty() ? 0 : outRegs[0];
     }
 
+    keel::StringRef subName = nestedIt ? keel::StringRef{} : resolveFileSubfunc(funcName);
     keel::i32 funcIdx = addStringConstant(
-        nestedIt ? nestedIt->compiledName.as_ref() : funcName.as_ref());
+        nestedIt ? nestedIt->compiledName.as_ref()
+                 : (!subName.empty() ? subName : funcName.as_ref()));
 
     // CALL_MULTI: a=outBase, d=funcIdx, b=argBase, c=nargs, e=nout
     keel::usize callMultiIdx = chunk_.code.size();
@@ -1833,6 +1852,24 @@ keel::u16 Compiler::compileExprStmt(const ASTNode *node)
                 keel::i32 funcIdx = addStringConstant(nit->compiledName);
                 emit(Instruction::make_abcde(OpCode::CALL, dst, argBase,
                                              keel::as<keel::u16>(nit->upvalueNames.size()),
+                                             funcIdx, node->captureResult ? 1 : 0));
+                if (node->captureResult)
+                    return dst;
+                if (!node->suppressOutput) {
+                    keel::i32 nameIdx = addStringConstant("ans");
+                    emitAD(OpCode::DISPLAY, dst, nameIdx);
+                }
+                keel::u16 ansReg = varRegWrite("ans");
+                emitABC(OpCode::COLLAPSE, ansReg, dst, 1);
+                emitUpvalStoreIfShared("ans", ansReg);
+                return ansReg;
+            }
+            if (const keel::StringRef sub = resolveFileSubfunc(name);
+                !sub.empty() && !mayInjectVars_) {
+                keel::u16 argBase = nextReg_;
+                keel::u16 dst = tempReg();
+                keel::i32 funcIdx = addStringConstant(sub);
+                emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0,
                                              funcIdx, node->captureResult ? 1 : 0));
                 if (node->captureResult)
                     return dst;

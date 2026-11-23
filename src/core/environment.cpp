@@ -224,6 +224,17 @@ const UserFunction *Environment::findNestedFunc(keel::StringRef name) const
     return nullptr;
 }
 
+keel::StringRef Environment::findFileSubfunc(keel::StringRef name) const
+{
+    if (fileSubfuncs_) {
+        if (const keel::String *q = fileSubfuncs_->get(name))
+            return q->as_ref();
+    }
+    if (parent_)
+        return parent_->findFileSubfunc(name);
+    return {};
+}
+
 void Environment::forEachLocal(
     keel::FunctionRef<void(const keel::String &, const Value &)> fn) const
 {
@@ -263,6 +274,7 @@ keel::Arc<Environment> Environment::snapshot(keel::Arc<Environment> newParent,
         snap->nestedFuncs_ =
             keel::make_unique<keel::HashMap<keel::String, UserFunction>>(nestedFuncs_->clone());
     }
+    snap->fileSubfuncs_ = fileSubfuncs_;
 
     return snap;
 }
@@ -339,6 +351,7 @@ void Environment::reset(Environment *parent, Environment *gs)
     lexicalVars_.clear();
     isLexicalScope_ = false;
     nestedFuncs_.reset();
+    fileSubfuncs_.reset();
     activeImports_.clear();
     parent_ = parent;
     owningParent_.reset();

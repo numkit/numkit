@@ -600,8 +600,12 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
         }
     }
 
+    // File-private local subfunction in the current m-file shadows builtins/globals.
+    const keel::StringRef fileSub = resolveFileSubfunc(name);
+    const keel::StringRef callTarget = fileSub.empty() ? name.as_ref() : fileSub;
+
     // Fast path: 1-arg inline builtins — skip MOVE, pass arg register directly
-    if (!mayInjectVars_) {
+    if (!mayInjectVars_ && fileSub.empty()) {
         FastBuiltinId builtinId = resolveBuiltinId(name, nargs);
         if (builtinId != FastBuiltinId::None && nargs == 1) {
             keel::u16 arg = compileNode(node->children[1].get());
@@ -644,7 +648,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
                 emitAB(OpCode::MOVE, slot, argRegs[i]);
         }
         keel::u16 dst     = tempReg();
-        keel::i32 funcIdx = addStringConstant(name);
+        keel::i32 funcIdx = addStringConstant(callTarget);
         emit(Instruction::make_abcde(OpCode::CALL_FLATTEN, dst, argBase,
                                      keel::as<keel::u16>(argRegs.size()), funcIdx,
                                      callNargout));
@@ -668,7 +672,9 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     keel::u16 dst = tempReg();
 
     // Try to resolve as inline scalar builtin
-    FastBuiltinId builtinId = mayInjectVars_ ? FastBuiltinId::None : resolveBuiltinId(name, nargs);
+    FastBuiltinId builtinId = (mayInjectVars_ || !fileSub.empty())
+                                  ? FastBuiltinId::None
+                                  : resolveBuiltinId(name, nargs);
     if (builtinId != FastBuiltinId::None) {
         emit(Instruction::make_abcde(OpCode::CALL_BUILTIN,
                                      dst,
@@ -680,7 +686,7 @@ keel::u16 Compiler::compileCall(const ASTNode *node)
     }
 
     // General CALL
-    keel::i32 funcIdx = addStringConstant(name);
+    keel::i32 funcIdx = addStringConstant(callTarget);
     keel::usize callIdx = chunk_.code.size();
     emit(Instruction::make_abcde(OpCode::CALL,
                                  dst,
@@ -895,8 +901,12 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
     }
 
     keel::u16 dst = tempReg();
+    keel::StringRef cmdSub = (!ninfo && !varRegisters_.contains(name) && !upvalueRegs_.contains(name))
+                                 ? resolveFileSubfunc(name)
+                                 : keel::StringRef{};
     keel::i32 funcIdx = addStringConstant(
-        ninfo ? ninfo->compiledName.as_ref() : name.as_ref());
+        ninfo ? ninfo->compiledName.as_ref()
+              : (!cmdSub.empty() ? cmdSub : name.as_ref()));
     emit(
         Instruction::make_abcde(OpCode::CALL, dst, argBase,
                                 keel::as<keel::u16>(totalCallArgs), funcIdx,
@@ -986,7 +996,11 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         if (const NestedFuncInfo *ninfo = nestedFuncInfo_.get(node->strValue))
             return emitNestedFuncHandle(*ninfo);
         keel::u16 dst = tempReg();
-        Value fh = Value::funcHandle(node->strValue, engine_.allocator());
+        keel::StringRef sub = resolveFileSubfunc(node->strValue);
+        Value fh = Value::funcHandle(sub.empty() ? node->strValue.as_ref() : sub,
+                                     engine_.allocator());
+        if (!sub.empty())
+            fh.setFuncHandleSource(node->strValue);
         keel::i32 constIdx = appendConstant(keel::move(fh));
         emitAD(OpCode::LOAD_CONST, dst, constIdx);
         return dst;
@@ -1175,6 +1189,7 @@ keel::u16 Compiler::compileAnonFunc(const ASTNode *node)
         uf.returns = funcNode->returnNames.clone();   // {"__result__"} or {"varargout"}
         uf.body = keel::Arc<const ASTNode>(cloneNode(funcNode->children[0].get()));
         uf.closureEnv = nullptr;
+        uf.fileSubfuncs = fileSubfuncs_;
         engine_.captureScriptOrigin(uf);
         engine_.adoptUserFunction(anonName, keel::move(uf));
     }
