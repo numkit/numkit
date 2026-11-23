@@ -23,7 +23,6 @@ public:
     explicit TreeWalker(Engine &engine);
 
     Value execute(const ASTNode *ast, Environment *env);
-    void setMaxRecursionDepth(keel::i32 d) { maxRecursionDepth_ = d; }
 
     // True when executing inside a user function (not top-level script)
     keel::i32 callDepth() const { return currentRecursionDepth_; }
@@ -88,7 +87,6 @@ private:
 
     FlowSignal flowSignal_ = FlowSignal::NONE;
     keel::i32 currentRecursionDepth_ = 0;
-    keel::i32 maxRecursionDepth_ = 500;
 
     struct IndexContext
     {
@@ -199,8 +197,9 @@ private:
             : depth_(depth)
         {
             if (++depth_ > maxDepth) {
+                --depth_;
                 auto msg = keel::format("Maximum recursion depth ({}) exceeded", maxDepth);
-                throw numkit::Error(msg.c_str());
+                throw numkit::Error(msg.c_str(), 0, 0, "", "", "numkit:recursionLimit");
             }
         }
         ~RecursionGuard() { --depth_; }

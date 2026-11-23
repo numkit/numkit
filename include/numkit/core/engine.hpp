@@ -2,6 +2,7 @@
 #pragma once
 
 #include <keel/array.h>
+#include <keel/atomic.h>
 #include <keel/core.h>
 #include <keel/function.h>
 #include <keel/hash_map.h>
@@ -452,6 +453,27 @@ public:
     void setInputProvider(InputProvider p) { inputProvider_ = keel::move(p); }
     const InputProvider &inputProvider() const { return inputProvider_; }
     void setMaxRecursionDepth(keel::i32 depth);
+    keel::i32 maxRecursionDepth() const noexcept { return maxRecursionDepth_; }
+
+    // Cooperative execution cancellation (checked on loop back-edges and call
+    // entries in both VM and TreeWalker). Thread-safe via keel::Atomic<bool>.
+    void requestCancel() noexcept
+    {
+        cancelRequested_.store(true, keel::MemoryOrder::Release);
+    }
+    void clearCancel() noexcept
+    {
+        cancelRequested_.store(false, keel::MemoryOrder::Release);
+    }
+    [[nodiscard]] bool isCancelRequested() const noexcept
+    {
+        return cancelRequested_.load(keel::MemoryOrder::Acquire);
+    }
+    void checkCancelled() const
+    {
+        if (isCancelRequested())
+            throw Error("Execution interrupted", 0, 0, "", "", "numkit:interrupted");
+    }
 
     keel::Array<keel::String> workspaceVarNames() const;
     void outputText(keel::StringRef s);
@@ -1044,6 +1066,8 @@ private:
     bool fusionEnabled_ = true;
     keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
     keel::Array<CallStackFrame> lastErrorStack_;
+    keel::i32 maxRecursionDepth_ = 500;
+    keel::Atomic<bool> cancelRequested_{false};
 
     // Sync VM's exported variables to workspaceEnv (called after execute, even on error)
     void syncVMToWorkspace();

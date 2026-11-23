@@ -60,6 +60,7 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
         Value *varPtr = env->get(varName);
         keel::f64 *slot = varPtr->doubleDataMut();
         for (keel::usize c = 0; c < count; ++c) {
+            engine_.checkCancelled();
             *slot = src[c];
             execNode(node->children[1].get(), env);
             if (flowSignal_ == FlowSignal::BREAK) {
@@ -75,6 +76,7 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
             varPtr = env->get(varName);
             if (!varPtr || !varPtr->isScalar() || varPtr->type() != ValueType::DOUBLE) {
                 for (keel::usize c2 = c + 1; c2 < count; ++c2) {
+                    engine_.checkCancelled();
                     env->set(varName, Value::scalar(src[c2], engine_.mr_));
                     execNode(node->children[1].get(), env);
                     if (flowSignal_ == FlowSignal::BREAK) {
@@ -98,6 +100,7 @@ Value TreeWalker::execFor(const ASTNode *node, Environment *env)
     // Unified path for all ValueTypes (DOUBLE matrix, SINGLE, INT8..UINT64,
     // COMPLEX, LOGICAL, CHAR, CELL, STRING, STRUCT, OBJECT) and N-D arrays.
     for (keel::usize c = 0; c < count; ++c) {
+        engine_.checkCancelled();
         if (rows == 1) {
             env->set(varName, rangeVal.elemAt(c, engine_.mr_));
         } else {
@@ -122,6 +125,7 @@ Value TreeWalker::execWhile(const ASTNode *node, Environment *env)
 {
     auto *condNode = node->children[0].get();
     for (;;) {
+        engine_.checkCancelled();
         if (!condTruth(execNode(condNode, env)))
             break;
         execNode(node->children[1].get(), env);
@@ -569,6 +573,8 @@ Value TreeWalker::execTryCatch(const ASTNode *node, Environment *env)
             return result;
         return result;
     } catch (const Error &mle) {
+        if (mle.identifier() == "numkit:interrupted")
+            throw;
         auto stack = engine_.takeLastErrorStack();
         if (stack.empty())
             stack = captureCallStack();
@@ -762,7 +768,8 @@ Value TreeWalker::callUserFunction(const UserFunction &funcIn,
     // or `rehash` during the body cannot free `func` mid-call.
     keel::Arc<UserFunction> pinnedFunc = engine_.lookupUserFunctionLocalArc(funcIn.name);
     const UserFunction &func = (pinnedFunc && pinnedFunc.get() == &funcIn) ? *pinnedFunc : funcIn;
-    RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
+    engine_.checkCancelled();
+    RecursionGuard rguard(currentRecursionDepth_, engine_.maxRecursionDepth());
 
     // varargin: the LAST declared parameter absorbs any extra arguments
     // (packed into a 1xN cell; empty 0x0 cell when there are none).
@@ -876,7 +883,8 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &funcIn,
     (void) env;
     keel::Arc<UserFunction> pinnedFunc = engine_.lookupUserFunctionLocalArc(funcIn.name);
     const UserFunction &func = (pinnedFunc && pinnedFunc.get() == &funcIn) ? *pinnedFunc : funcIn;
-    RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
+    engine_.checkCancelled();
+    RecursionGuard rguard(currentRecursionDepth_, engine_.maxRecursionDepth());
 
     const bool va = !func.params.empty() && func.params.back() == "varargin";
     const keel::usize required = va ? func.params.size() - 1 : func.params.size();
@@ -1015,7 +1023,8 @@ Value TreeWalker::evalExpressionPublic(const ASTNode *expr, Environment *env)
 Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
                                keel::ArrayRef<Value> args)
 {
-    RecursionGuard rguard(currentRecursionDepth_, maxRecursionDepth_);
+    engine_.checkCancelled();
+    RecursionGuard rguard(currentRecursionDepth_, engine_.maxRecursionDepth());
     const bool va = !func.params.empty() && func.params.back() == "varargin";
     const keel::usize required = va ? func.params.size() - 1 : func.params.size();
     if (!va && args.size() > func.params.size()) {

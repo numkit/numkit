@@ -507,8 +507,7 @@ Engine::OutputFunc Engine::swapOutputFunc(OutputFunc f)
 
 void Engine::setMaxRecursionDepth(keel::i32 d)
 {
-    treeWalker_->setMaxRecursionDepth(d);
-    vm_->setMaxRecursionDepth(d);
+    maxRecursionDepth_ = (d > 0) ? d : 1;
 }
 
 void Engine::outputText(keel::StringRef s)

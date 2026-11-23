@@ -678,6 +678,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
 }
 Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
 {
+    checkCancelled();
     auto src = keel::make_arc<const keel::String>(keel::String::from(code));
     if (callerDepth() == 0)
         lastErrorStack_.clear();
@@ -934,6 +935,7 @@ void Engine::syncVMToScope(Environment *scope)
 Value Engine::eval(keel::StringRef code, Environment *scope,
                    bool suppressTopLevelDisplay)
 {
+    checkCancelled();
     if (!scope || scope == workspaceEnv_.get())
         return eval(code, suppressTopLevelDisplay);
 

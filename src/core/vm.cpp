@@ -243,22 +243,25 @@ Value VM::execute(const BytecodeChunk &chunk, const Value *args, keel::usize nar
     if (reentrant)
         outerState = savePausedState();
 
-    // RAII: export variables and cleanup on ANY exit path (success, exception,
-    // debug stop). Top-level only — re-entrant runs restore the outer frames
-    // explicitly below so the dispatch loop can resume.
+    // RAII: cleanup abandoned inner frames (including truncating leaked
+    // scriptOriginStack_ entries) and restore any outer PausedState on EVERY
+    // exit path (success, exception, interrupt, or debug stop).
     struct ExecuteGuard
     {
         VM &vm;
         bool reentrant = false;
-        ExecuteGuard(VM &v, bool r) : vm(v), reentrant(r) {}
-        ~ExecuteGuard()
+        keel::UniquePtr<PausedState> outerState;
+        bool committed = false;
+
+        ExecuteGuard(VM &v, bool r, keel::UniquePtr<PausedState> st)
+            : vm(v), reentrant(r), outerState(keel::move(st))
+        {}
+
+        void cleanupCurrentFrames(bool exportVars)
         {
-            if (reentrant)
-                return; // restoration happens on the success path below
             if (!vm.frames_.empty()) {
-                vm.exportTopLevelVariables();
-                // Abandoned frames (error unwind) — drop their origin pushes
-                // down to the depth this run started at.
+                if (exportVars)
+                    vm.exportTopLevelVariables();
                 vm.engine_.truncateScriptOrigins(vm.frames_.front().originDepth);
             }
             vm.frames_.clear();
@@ -267,37 +270,36 @@ Value VM::execute(const BytecodeChunk &chunk, const Value *args, keel::usize nar
             vm.regStackTop_ = 0;
             vm.R_ = nullptr;
         }
+
+        void finish(bool exportVars)
+        {
+            if (committed)
+                return;
+            committed = true;
+            cleanupCurrentFrames(exportVars);
+            if (reentrant && outerState)
+                vm.restorePausedState(keel::move(outerState));
+        }
+
+        ~ExecuteGuard()
+        {
+            finish(/*exportVars=*/!reentrant);
+        }
         ExecuteGuard(const ExecuteGuard &) = delete;
         ExecuteGuard &operator=(const ExecuteGuard &) = delete;
-    } guard(*this, reentrant);
+    } guard(*this, reentrant, keel::move(outerState));
 
-    ExecStatus status;
-    try {
-        status = startExecution(chunk, args, nargs);
-    } catch (...) {
-        // Inner threw before producing a result. Restore the outer so the
-        // outer's catch handler sees consistent VM state, then rethrow.
-        if (reentrant)
-            restorePausedState(keel::move(outerState));
-        throw;
-    }
+    ExecStatus status = startExecution(chunk, args, nargs);
 
     if (status == ExecStatus::Paused) {
-        // Legacy API: convert pause to exception. The non-reentrant guard
-        // wipes state; the reentrant path restores the outer first.
-        if (reentrant)
-            restorePausedState(keel::move(outerState));
+        // Legacy API: convert pause to exception. Clean inner frames and
+        // restore outer state before unwinding.
+        guard.finish(/*exportVars=*/!reentrant);
         throw DebugStopException();
     }
 
     Value result = keel::move(lastResult_);
-    if (reentrant) {
-        // Commit any workspace exports the inner script produced, then
-        // bring back the outer frame stack so dispatch can resume.
-        if (!frames_.empty())
-            exportTopLevelVariables();
-        restorePausedState(keel::move(outerState));
-    }
+    guard.finish(/*exportVars=*/true);
     return result;
 }
 
@@ -328,17 +330,35 @@ keel::Array<Value> VM::callReentrant(const BytecodeChunk &chunk, keel::ArrayRef<
         keel::UniquePtr<PausedState> st;
         keel::Array<std::pair<keel::String, Value>> vm_savedVarMap;
         bool done = false;
+
+        Restorer(VM &v, bool r, keel::UniquePtr<PausedState> s,
+                 keel::Array<std::pair<keel::String, Value>> svm)
+            : vm(v), reentrant(r), st(keel::move(s)), vm_savedVarMap(keel::move(svm))
+        {}
+
         void run()
         {
             if (done)
                 return;
             done = true;
+            // Clean up any abandoned inner frames (exception / interrupt /
+            // debug-stop unwind) so scriptOriginStack_ and frames_ never leak.
+            if (!vm.frames_.empty()) {
+                vm.engine_.truncateScriptOrigins(vm.frames_.front().originDepth);
+                vm.frames_.clear();
+                vm.forStack_.clear();
+                vm.tryStack_.clear();
+                vm.regStackTop_ = 0;
+                vm.R_ = nullptr;
+            }
             vm.lastVarMap_ = keel::move(vm_savedVarMap);
-            if (reentrant)
+            if (reentrant && st)
                 vm.restorePausedState(keel::move(st));
         }
         ~Restorer() { run(); }
-    } restorer{*this, reentrant, keel::move(outerState), keel::move(savedVarMap)};
+        Restorer(const Restorer &) = delete;
+        Restorer &operator=(const Restorer &) = delete;
+    } restorer(*this, reentrant, keel::move(outerState), keel::move(savedVarMap));
 
     const keel::usize nout = std::max<keel::usize>(nargout, 1);
     const bool multi = nout > 1;
@@ -991,11 +1011,15 @@ enter_frame:
 
             // ── Control flow ─────────────────────────────────────
             case OpCode::JMP:
+                if (I.d < 0)
+                    engine_.checkCancelled();
                 ip += I.d;
                 continue;
             case OpCode::JMP_TRUE:
                 if (R[I.a].isLogicalScalar()) {
                     if (R[I.a].isLogicalTrue()) {
+                        if (I.d < 0)
+                            engine_.checkCancelled();
                         ip += I.d;
                         continue;
                     }
@@ -1006,6 +1030,8 @@ enter_frame:
                     break;
                 }
                 if (R[I.a].toBool()) {
+                    if (I.d < 0)
+                        engine_.checkCancelled();
                     ip += I.d;
                     continue;
                 }
@@ -1013,6 +1039,8 @@ enter_frame:
             case OpCode::JMP_FALSE:
                 if (R[I.a].isLogicalScalar()) {
                     if (R[I.a].isLogicalFalse()) {
+                        if (I.d < 0)
+                            engine_.checkCancelled();
                         ip += I.d;
                         continue;
                     }
@@ -1020,10 +1048,14 @@ enter_frame:
                 }
                 if (R[I.a].isEmpty() && !R[I.a].isUnset()
                     && (R[I.a].isNumeric() || R[I.a].isLogical() || R[I.a].isChar())) {
+                    if (I.d < 0)
+                        engine_.checkCancelled();
                     ip += I.d;
                     continue;
                 }
                 if (!R[I.a].toBool()) {
+                    if (I.d < 0)
+                        engine_.checkCancelled();
                     ip += I.d;
                     continue;
                 }
@@ -1191,6 +1223,7 @@ enter_frame:
                 auto &fs = forStack_.back();
                 fs.index++;
                 if (fs.index < fs.count) {
+                    engine_.checkCancelled();
                     forSetVar(R[I.a], fs);
                     ip += I.d;
                     continue;
@@ -2701,7 +2734,7 @@ enter_frame:
         keel::String id = mle.identifier().empty()
                               ? keel::String::from("numkit:error")
                               : mle.identifier().clone();
-        if (dispatchTryCatch(mle.what(), id.c_str()))
+        if (id != "numkit:interrupted" && dispatchTryCatch(mle.what(), id.c_str()))
             goto enter_frame;
         enrichError(mle, ip, chunk);
         if (stopOnError_ && debugCtl()) {
@@ -3163,8 +3196,12 @@ void VM::pushCallFrame(const BytecodeChunk &funcChunk, const Value *args, keel::
                        keel::StringRef ownerClass, bool isCtor,
                        const Value *ctorSeed)
 {
-    if (callDepth() >= maxRecursion_)
-        throw numkit::Error("VM: maximum recursion depth exceeded");
+    engine_.checkCancelled();
+    const keel::i32 maxRec = engine_.maxRecursionDepth();
+    if (callDepth() >= maxRec)
+        throw numkit::Error(
+            keel::format("Maximum recursion depth ({}) exceeded", maxRec).c_str(),
+            0, 0, "", "", "numkit:recursionLimit");
 
     const keel::usize nUpvals = funcChunk.upvalueParamRegs.size();
     const keel::usize userNargs = (nargs >= nUpvals) ? (nargs - nUpvals) : nargs;
