@@ -456,32 +456,55 @@ keel::u16 Compiler::emitNestedFuncHandle(const NestedFuncInfo &info)
     return dst;
 }
 
+Compiler::ResolvedSymbol Compiler::resolveSymbol(keel::StringRef name) const
+{
+    if (const keel::u16 *uv = upvalueRegs_.get(name))
+        return {ResolvedSymbol::Kind::Upvalue, *uv, nullptr, name};
+    if (const keel::u16 *vr = varRegisters_.get(name))
+        return {ResolvedSymbol::Kind::LocalVar, *vr, nullptr, name};
+    if (const NestedFuncInfo *nit = nestedFuncInfo_.get(name))
+        return {ResolvedSymbol::Kind::NestedFunc, kInvalidReg, nit, nit->compiledName.as_ref()};
+    if (const keel::StringRef sub = resolveFileSubfunc(name); !sub.empty())
+        return {ResolvedSymbol::Kind::FileSubfunc, kInvalidReg, nullptr, sub};
+    if (isTopLevel_ && !engine_.isReservedName(name)) {
+        if (Value *existing = engine_.getVariable(name); existing != nullptr)
+            return {ResolvedSymbol::Kind::WorkspaceVar, kInvalidReg, nullptr, name};
+    }
+    if (engine_.isReservedName(name)) {
+        const bool topLevelPseudo = isTopLevel_ && (name == "nargin" || name == "nargout");
+        if (!topLevelPseudo)
+            return {ResolvedSymbol::Kind::Reserved, kInvalidReg, nullptr, name};
+    }
+    const BuiltinClass *kls = engine_.findClass(name);
+    if (engine_.hasFunction(name) || engine_.isKnownLeafName(name) || (kls && kls->construct))
+        return {ResolvedSymbol::Kind::KnownFunc, kInvalidReg, nullptr, name};
+    return {ResolvedSymbol::Kind::Dynamic, kInvalidReg, nullptr, name};
+}
+
 keel::u16 Compiler::varRegRead(keel::StringRef name)
 {
-    // Shared lexical upvalue read (outer <-> nested function)
-    if (const keel::u16 *uv = upvalueRegs_.get(name)) {
+    const ResolvedSymbol sym = resolveSymbol(name);
+    switch (sym.kind) {
+    case ResolvedSymbol::Kind::Upvalue: {
         keel::u16 reg = varRegLookup(name, /*preloadReserved=*/false);
         keel::i32 nameIdx = addStringConstant(name);
-        emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, *uv, 0, nameIdx, 0));
+        emit(Instruction::make_abcde(OpCode::UPVAL_LOAD, reg, sym.reg, 0, nameIdx, 0));
         scalarRegs_.reset(reg);
         return reg;
     }
-
-    // Check if variable is already known (local scope)
-    if (const keel::u16 *vr = varRegisters_.get(name)) {
+    case ResolvedSymbol::Kind::LocalVar: {
         if (!engine_.isReservedName(name)) {
-            if (mayClear_ || !definedRegs_.test(*vr)) {
+            if (mayClear_ || !definedRegs_.test(sym.reg)) {
                 keel::i32 nameIdx = addStringConstant(name);
-                emit(Instruction::make_abcde(OpCode::ASSERT_DEF, *vr, *vr, 0, nameIdx, nargoutContext_));
-                if (!mayClear_ && *vr < chunk_.numParams)
-                    definedRegs_.set(*vr);
+                emit(Instruction::make_abcde(OpCode::ASSERT_DEF, sym.reg, sym.reg, 0, nameIdx, nargoutContext_));
+                if (!mayClear_ && sym.reg < chunk_.numParams)
+                    definedRegs_.set(sym.reg);
             }
         }
-        return *vr;
+        return sym.reg;
     }
-
-    // Zero-arg nested function call in expression context (`y = inner`)
-    if (const NestedFuncInfo *nit = nestedFuncInfo_.get(name)) {
+    case ResolvedSymbol::Kind::NestedFunc: {
+        const NestedFuncInfo *nit = sym.nested;
         keel::u16 argBase = keel::as<keel::u16>(nextReg_);
         for (const auto &uvName : nit->upvalueNames) {
             keel::u16 slot = tempReg();
@@ -499,64 +522,33 @@ keel::u16 Compiler::varRegRead(keel::StringRef name)
                                      funcIdx, nargoutContext_));
         return dst;
     }
-
-    // Zero-arg file-private subfunction call in expression context (`y = DefaultDataStructure`)
-    if (const keel::StringRef sub = resolveFileSubfunc(name); !sub.empty()) {
+    case ResolvedSymbol::Kind::FileSubfunc:
+    case ResolvedSymbol::Kind::KnownFunc: {
         if (!mayInjectVars_) {
             keel::u16 argBase = nextReg_;
             keel::u16 dst = tempReg();
-            keel::i32 funcIdx = addStringConstant(sub);
+            keel::i32 funcIdx = addStringConstant(sym.targetName);
             emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, nargoutContext_));
             return dst;
         }
+        // Under mayInjectVars_, check dynamic vars before falling back to 0-arg call
+        // without registering `name` in varRegisters_ (keeps subsequent `name(arg)` calls intact).
         keel::u16 dst = tempReg();
         keel::i32 nameIdx = addStringConstant(name);
         emit(Instruction::make_abcde(OpCode::ASSERT_DEF, dst, 0, 1, nameIdx, nargoutContext_));
         return dst;
     }
-
-    // Check workspaceEnv
-    if (isTopLevel_ && !engine_.isReservedName(name)) {
-        Value *existing = engine_.getVariable(name);
-        if (existing)
-            return varRegLookup(name); // will import from workspaceEnv (including empty values)
-    }
-
-    if (engine_.isReservedName(name)) {
-        const bool topLevelPseudo = isTopLevel_ && (name == "nargin" || name == "nargout");
-        if (!topLevelPseudo)
-            return varRegLookup(name);
-    }
-
-    // Check if it's a known function — emit zero-arg CALL unless dynamic
-    // variable injection (`load`/`eval`/`evalin`/`run`) may shadow it in frame.env,
-    // in which case ASSERT_DEF checks dynVars/frame.env first and falls back to 0-arg CALL.
-    const BuiltinClass *kls = engine_.findClass(name);
-    const bool isKnownFunc = engine_.hasFunction(name) || engine_.isKnownLeafName(name)
-                             || (kls && kls->construct);
-    if (!mayInjectVars_ && isKnownFunc) {
-        keel::u16 argBase = nextReg_;
-        keel::u16 dst = tempReg();
-        keel::i32 funcIdx = addStringConstant(name);
-        emit(Instruction::make_abcde(OpCode::CALL, dst, argBase, 0, funcIdx, nargoutContext_));
-        return dst;
-    }
-
-    // Unknown variable (or known function shadowed when mayInjectVars_ is true):
-    // emit runtime check. For known functions under mayInjectVars_, write into a
-    // fresh temp register WITHOUT registering `name` in varRegisters_ — otherwise
-    // subsequent `name(arg)` calls (e.g. `h = figure; figure(h);`) would miscompile
-    // as CALL_INDIRECT/array-indexing, and repeated zero-arg calls would cache.
-    if (isKnownFunc) {
-        keel::u16 dst = tempReg();
+    case ResolvedSymbol::Kind::WorkspaceVar:
+    case ResolvedSymbol::Kind::Reserved:
+        return varRegLookup(name);
+    case ResolvedSymbol::Kind::Dynamic: {
+        keel::u16 reg = varRegLookup(name);
         keel::i32 nameIdx = addStringConstant(name);
-        emit(Instruction::make_abcde(OpCode::ASSERT_DEF, dst, 0, 1, nameIdx, nargoutContext_));
-        return dst;
+        emit(Instruction::make_abcde(OpCode::ASSERT_DEF, reg, reg, 0, nameIdx, nargoutContext_));
+        return reg;
     }
-    keel::u16 reg = varRegLookup(name);
-    keel::i32 nameIdx = addStringConstant(name);
-    emit(Instruction::make_abcde(OpCode::ASSERT_DEF, reg, reg, 0, nameIdx, nargoutContext_));
-    return reg;
+    }
+    return kInvalidReg;
 }
 
 keel::u16 Compiler::tempReg()

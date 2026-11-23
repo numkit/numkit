@@ -558,6 +558,26 @@ keel::Arc<UserFunction> Engine::lookupUserFunctionArc(keel::StringRef name,
     return nullptr;
 }
 
+Engine::ResolvedCallable Engine::resolveCallable(
+    keel::StringRef name,
+    const Environment *env,
+    const keel::HashMap<keel::String, keel::String> *fileSubfuncs)
+{
+    if (fileSubfuncs) {
+        if (const keel::String *q = fileSubfuncs->get(name)) {
+            if (const UserFunction *sf = lookupUserFunctionLocal(*q))
+                return {ResolvedCallable::Kind::UserFunc, sf, nullptr, nullptr};
+        }
+    }
+    if (const UserFunction *uf = lookupUserFunction(name, env))
+        return {ResolvedCallable::Kind::UserFunc, uf, nullptr, nullptr};
+    if (const ExternalFunc *ext = findExternal(name, env))
+        return {ResolvedCallable::Kind::External, nullptr, ext, nullptr};
+    if (const BuiltinClass *cls = findClass(name); cls && cls->construct)
+        return {ResolvedCallable::Kind::ClassCtor, nullptr, nullptr, cls};
+    return {};
+}
+
 const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
                                                 const Environment *env)
 {

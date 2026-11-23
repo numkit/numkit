@@ -9,6 +9,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/core/tree_walker.hpp>
+#include "scope_analysis.hpp"
 #include <numkit/value/error.hpp>
 #include <numkit/core/compiler.hpp>
 #include <numkit/core/engine.hpp>
@@ -619,94 +620,6 @@ Value TreeWalker::execGlobalPersistent(const ASTNode *node, Environment *env)
 
 namespace {
 
-void twCollectDirectNestedDefs(const ASTNode *node, keel::Array<const ASTNode *> &out)
-{
-    if (!node)
-        return;
-    if (node->type == NodeType::FUNCTION_DEF) {
-        out.push_back(node);
-        return;
-    }
-    if (node->type == NodeType::CLASSDEF_DEF)
-        return;
-    for (const auto &ch : node->children)
-        twCollectDirectNestedDefs(ch.get(), out);
-    for (const auto &b : node->branches) {
-        twCollectDirectNestedDefs(b.cond.get(), out);
-        twCollectDirectNestedDefs(b.body.get(), out);
-    }
-    if (node->elseBranch)
-        twCollectDirectNestedDefs(node->elseBranch.get(), out);
-}
-
-const ASTNode *twRootTargetId(const ASTNode *lhs)
-{
-    const ASTNode *cur = lhs;
-    while (cur && !cur->children.empty()
-           && (cur->type == NodeType::CALL || cur->type == NodeType::FIELD_ACCESS
-               || cur->type == NodeType::DYNAMIC_FIELD_ACCESS
-               || cur->type == NodeType::CELL_INDEX)) {
-        cur = cur->children[0].get();
-    }
-    return (cur && cur->type == NodeType::IDENTIFIER) ? cur : nullptr;
-}
-
-void twScanBodyLexical(const ASTNode *node,
-                       keel::HashSet<keel::String> &assigned,
-                       keel::HashSet<keel::String> &identifiers,
-                       keel::HashSet<keel::String> &ownGlobPers)
-{
-    if (!node || node->type == NodeType::FUNCTION_DEF || node->type == NodeType::CLASSDEF_DEF)
-        return;
-    switch (node->type) {
-    case NodeType::IDENTIFIER:
-        if (!node->strValue.empty())
-            identifiers.insert(node->strValue.clone());
-        break;
-    case NodeType::ASSIGN:
-    case NodeType::DELETE_ASSIGN:
-        if (!node->children.empty()) {
-            if (const ASTNode *id = twRootTargetId(node->children[0].get()))
-                assigned.insert(id->strValue.clone());
-        }
-        break;
-    case NodeType::MULTI_ASSIGN:
-        for (const auto &rn : node->returnNames)
-            if (!rn.empty() && rn != "~")
-                assigned.insert(rn.clone());
-        for (const auto &lt : node->lhsTargets) {
-            if (const ASTNode *id = twRootTargetId(lt.get()))
-                assigned.insert(id->strValue.clone());
-        }
-        break;
-    case NodeType::FOR_STMT:
-        if (!node->strValue.empty())
-            assigned.insert(node->strValue.clone());
-        break;
-    case NodeType::TRY_STMT:
-        if (!node->strValue.empty() && node->children.size() > 1)
-            assigned.insert(node->strValue.clone());
-        break;
-    case NodeType::GLOBAL_STMT:
-    case NodeType::PERSISTENT_STMT:
-        for (const auto &nm : node->paramNames)
-            ownGlobPers.insert(nm.clone());
-        break;
-    default:
-        break;
-    }
-    for (const auto &lt : node->lhsTargets)
-        twScanBodyLexical(lt.get(), assigned, identifiers, ownGlobPers);
-    for (const auto &ch : node->children)
-        twScanBodyLexical(ch.get(), assigned, identifiers, ownGlobPers);
-    for (const auto &b : node->branches) {
-        twScanBodyLexical(b.cond.get(), assigned, identifiers, ownGlobPers);
-        twScanBodyLexical(b.body.get(), assigned, identifiers, ownGlobPers);
-    }
-    if (node->elseBranch)
-        twScanBodyLexical(node->elseBranch.get(), assigned, identifiers, ownGlobPers);
-}
-
 void twCollectDescendantAssigned(const ASTNode *nestedFn,
                                  keel::HashSet<keel::String> &descAssigned)
 {
@@ -716,7 +629,7 @@ void twCollectDescendantAssigned(const ASTNode *nestedFn,
     keel::HashSet<keel::String> localAssigned;
     keel::HashSet<keel::String> localIds;
     keel::HashSet<keel::String> localGP;
-    twScanBodyLexical(nb, localAssigned, localIds, localGP);
+    scope::scanBodyLexical(nb, localAssigned, localIds, localGP);
     keel::HashSet<keel::String> ownShadow = localGP.clone();
     for (const auto &p : nestedFn->paramNames) ownShadow.insert(p.clone());
     for (const auto &r : nestedFn->returnNames) ownShadow.insert(r.clone());
@@ -725,7 +638,7 @@ void twCollectDescendantAssigned(const ASTNode *nestedFn,
             descAssigned.insert(a.clone());
 
     keel::Array<const ASTNode *> deeper;
-    twCollectDirectNestedDefs(nb, deeper);
+    scope::collectDirectNestedDefs(nb, deeper);
     for (const ASTNode *d : deeper) {
         keel::HashSet<keel::String> sub;
         twCollectDescendantAssigned(d, sub);
@@ -755,7 +668,7 @@ void twPopulateLexicalEnv(const UserFunction &func,
     keel::HashSet<keel::String> assigned;
     keel::HashSet<keel::String> identifiers;
     keel::HashSet<keel::String> ownGlobPers;
-    twScanBodyLexical(func.body.get(), assigned, identifiers, ownGlobPers);
+    scope::scanBodyLexical(func.body.get(), assigned, identifiers, ownGlobPers);
 
     for (const auto &p : func.params) heapEnv->declareLexicalVar(p);
     for (const auto &r : func.returns) heapEnv->declareLexicalVar(r);
@@ -860,7 +773,7 @@ Value TreeWalker::callUserFunction(const UserFunction &funcIn,
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);
     keel::Array<const ASTNode *> directNested;
-    twCollectDirectNestedDefs(func.body.get(), directNested);
+    scope::collectDirectNestedDefs(func.body.get(), directNested);
     const bool useLexicalHeap =
         !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
 
@@ -966,7 +879,7 @@ keel::Array<Value> TreeWalker::callUserFunctionMulti(const UserFunction &funcIn,
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);
     keel::Array<const ASTNode *> directNested;
-    twCollectDirectNestedDefs(func.body.get(), directNested);
+    scope::collectDirectNestedDefs(func.body.get(), directNested);
     const bool useLexicalHeap =
         !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
 
@@ -1098,7 +1011,7 @@ Value TreeWalker::runClassCtor(const UserFunction &func, const Value &seed,
 
     keel::Arc<Environment> resolvedClosure = resolveClosureEnv(func);
     keel::Array<const ASTNode *> directNested;
-    twCollectDirectNestedDefs(func.body.get(), directNested);
+    scope::collectDirectNestedDefs(func.body.get(), directNested);
     const bool useLexicalHeap =
         !directNested.empty() || (resolvedClosure && resolvedClosure->isLexicalScope());
 

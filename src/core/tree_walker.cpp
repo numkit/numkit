@@ -417,19 +417,18 @@ Value TreeWalker::execIdentifier(const ASTNode *node, Environment *env, keel::us
         if (const UserFunction *nf = env->findNestedFunc(name))
             return callUserFunction(*nf, {}, env);
     }
-    if (auto *_uf = engine_.lookupUserFunction(name, env))
-        return callUserFunction(*_uf, {}, env);
-    if (const ExternalFunc *fn = engine_.findExternal(name, env)) {
+    const auto resolved = engine_.resolveCallable(name, env);
+    if (resolved.kind == Engine::ResolvedCallable::Kind::UserFunc)
+        return callUserFunction(*resolved.userFunc, {}, env);
+    if (resolved.kind == Engine::ResolvedCallable::Kind::External) {
         Value outBuf[1];
         CallContext ctx{&engine_, env};
-        (*fn)({}, nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
+        (*resolved.extFunc)({}, nargout, keel::MutArrayRef<Value>(outBuf, 1), ctx);
         return outBuf[0].isEmpty() ? Value() : outBuf[0];
     }
-    // Bare class name constructs a default instance (`x = MyClass`), like
-    // MATLAB — when the name is a registered class and not shadowed above.
-    if (const BuiltinClass *cls = engine_.findClass(name); cls && cls->construct) {
+    if (resolved.kind == Engine::ResolvedCallable::Kind::ClassCtor) {
         CallContext ctx{&engine_, env};
-        return engine_.constructChecked(cls, keel::ArrayRef<Value>(nullptr, 0), ctx);
+        return engine_.constructChecked(resolved.builtinClass, keel::ArrayRef<Value>(nullptr, 0), ctx);
     }
 
     // MATLAB-exact error for the nargin/nargout pseudo-vars when they're

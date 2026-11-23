@@ -196,6 +196,27 @@ private:
         return {};
     }
 
+    struct NestedFuncInfo;
+    struct ResolvedSymbol
+    {
+        enum class Kind : keel::u8
+        {
+            Upvalue,      // shared lexical upvalue (upvalueRegs_)
+            LocalVar,     // local register (varRegisters_)
+            NestedFunc,   // lexically enclosing/sibling nested function
+            FileSubfunc,  // file-private m-file subfunction
+            WorkspaceVar, // existing top-level workspace variable
+            Reserved,     // reserved builtin/host constant
+            KnownFunc,    // registered external/user function or class ctor
+            Dynamic,      // unresolved at compile time
+        };
+        Kind kind = Kind::Dynamic;
+        keel::u16 reg = kInvalidReg;
+        const NestedFuncInfo *nested = nullptr;
+        keel::StringRef targetName;
+    };
+    ResolvedSymbol resolveSymbol(keel::StringRef name) const;
+
     class AnonOriginSentry
     {
     public:

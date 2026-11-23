@@ -377,6 +377,11 @@ private:
     void execCallBuiltin(const Instruction &I, Value *R);
     const Value *findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
                                  const Value *R, const keel::String &name) const;
+    // Unified scope-isolated dynamic variable lookup shared by ASSERT_DEF and
+    // execCallNamedSingleSpan fallbacks. Never leaks workspaceEnv into function frames.
+    keel::Optional<Value> lookupDynamicVar(const BytecodeChunk &chunk, const CallFrame &frame,
+                                           const Value *R, keel::StringRef name,
+                                           bool checkParentFunc) const;
     bool execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 nargout_val,
                                  const Value *AB, keel::usize NF, Value *&R,
                                  CallFrame &frame, const Instruction *ip,

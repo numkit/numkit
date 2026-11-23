@@ -2492,119 +2492,46 @@ enter_frame:
             case OpCode::ASSERT_DEF: {
                 if (I.c == 0 && !R[I.a].isUnset() && !R[I.a].isDeleted())
                     break;
-                {
-                    // nargin/nargout at top level are illegal —
-                    // this check must precede the env fallbacks below
-                    // (workspaceEnv HOLDS a top-level nargin value, which
-                    // would otherwise silently resolve the name).
-                    if (!inReentrantEval_) {
-                        const keel::String &nn = chunk.strings[I.d];
-                        if (nn == "nargin" || nn == "nargout")
-                            throw numkit::Error(
-                                "You can only call nargin/nargout from within a function.");
-                    }
-                    // Fallback: check dynamic variables (debug eval, runtime eval)
-                    if (frame.dynVars) {
-                        if (const Value *dv = frame.dynVars->get(chunk.strings[I.d]);
-                            dv && !dv->isDeleted()) {
-                            R[I.a] = *dv;
-                            break;
-                        }
-                    }
-                    if (frame.isScriptFrame) {
-                        Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                        const Value *wv = scopeEnv.get(chunk.strings[I.d]);
-                        if (wv && !wv->isUnset() && !wv->isDeleted()) {
-                            R[I.a] = *wv;
-                            break;
-                        }
-                    } else if (frame.env) {
-                        const Value *lv = frame.env->getLocal(
-                            chunk.strings[I.d]);
-                        if (lv && !lv->isUnset() && !lv->isDeleted()) {
-                            R[I.a] = *lv;
-                            break;
-                        }
-                    }
-                    if (!chunk.parentFuncName.empty()) {
-                        const keel::String &nn = chunk.strings[I.d];
-                        bool foundInParent = false;
-                        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
-                            const CallFrame &pf = frames_[fi];
-                            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                                continue;
-                            for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                if (vname == nn && reg < pf.nregs) {
-                                    Value pv = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
-                                    if (!pv.isUnset() && !pv.isDeleted()) {
-                                        R[I.a] = keel::move(pv);
-                                        foundInParent = true;
-                                    }
-                                    break;
-                                }
-                            }
-                            if (foundInParent)
-                                break;
-                        }
-                        if (!foundInParent) {
-                            for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0 && !foundInParent; --psi) {
-                                const VM::PausedState *ps = activePausedStates_[psi];
-                                if (!ps) continue;
-                                for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
-                                    const CallFrame &pf = ps->frames[fi];
-                                    if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                                        continue;
-                                    if (pf.regBase + pf.nregs > ps->regSnapshot.size())
-                                        continue;
-                                    const Value *psR = &ps->regSnapshot[pf.regBase];
-                                    for (const auto &[vname, reg] : pf.chunk->varMap) {
-                                        if (vname == nn && reg < pf.nregs) {
-                                            Value pv = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
-                                            if (!pv.isUnset() && !pv.isDeleted()) {
-                                                R[I.a] = keel::move(pv);
-                                                foundInParent = true;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                    if (foundInParent)
-                                        break;
-                                }
-                            }
-                        }
-                        if (foundInParent)
-                            break;
-                    }
-                    {
-                        const keel::String &nn = chunk.strings[I.d];
-                        const keel::usize nout = I.e;
-                        keel::StringRef subLookup = nn.as_ref();
-                        if (chunk.fileSubfuncs) {
-                            if (const keel::String *q = chunk.fileSubfuncs->get(nn))
-                                subLookup = q->as_ref();
-                        }
-                        if (auto *uf = engine_.lookupUserFunction(subLookup, currentCallEnv())) {
-                            const BytecodeChunk *found = findCompiledFunc(uf->name);
-                            if (!found)
-                                found = engine_.ensureClassMethodChunk(*uf);
-                            frame.ip = ip + 1;
-                            pushCallFrame(*found, nullptr, 0, I.a, nout);
-                            goto enter_frame;
-                        }
-                        if (const ExternalFunc *fnPtr = engine_.findExternal(nn, currentCallEnv())) {
-                            Value ob[1];
-                            keel::MutArrayRef<Value> os(ob, 1);
-                            CallContext ctx{&engine_, currentCallEnv()};
-                            (*fnPtr)(keel::ArrayRef<Value>(nullptr, 0), nout, os, ctx);
-                            R = frames_.back().R;
-                            R[I.a] = keel::move(ob[0]);
-                            break;
-                        }
-                    }
+                const keel::String &nn = chunk.strings[I.d];
+                if (!inReentrantEval_ && (nn == "nargin" || nn == "nargout"))
                     throw numkit::Error(
-                        keel::format("Undefined function or variable '{}'", chunk.strings[I.d]).c_str());
+                        "You can only call nargin/nargout from within a function.");
+                // When I.c == 0, R[I.a] may be deleted (explicitly cleared in this frame):
+                // check dynamic/env/parent only if R[I.a] wasn't explicitly cleared here,
+                // wait — ASSERT_DEF for cleared vars still falls back to functions below.
+                if (auto dynVal = lookupDynamicVar(chunk, frame, /*R=*/nullptr, nn, /*checkParentFunc=*/true)) {
+                    R[I.a] = keel::move(*dynVal);
+                    break;
                 }
-                break;
+                const keel::usize nout = I.e;
+                auto resolved = engine_.resolveCallable(nn, currentCallEnv(),
+                                                        chunk.fileSubfuncs.get());
+                if (resolved.kind == Engine::ResolvedCallable::Kind::UserFunc) {
+                    const BytecodeChunk *found = findCompiledFunc(resolved.userFunc->name);
+                    if (!found)
+                        found = engine_.ensureClassMethodChunk(*resolved.userFunc);
+                    frame.ip = ip + 1;
+                    pushCallFrame(*found, nullptr, 0, I.a, nout);
+                    goto enter_frame;
+                }
+                if (resolved.kind == Engine::ResolvedCallable::Kind::External) {
+                    Value ob[1];
+                    keel::MutArrayRef<Value> os(ob, 1);
+                    CallContext ctx{&engine_, currentCallEnv()};
+                    (*resolved.extFunc)(keel::ArrayRef<Value>(nullptr, 0), nout, os, ctx);
+                    R = frames_.back().R;
+                    R[I.a] = keel::move(ob[0]);
+                    break;
+                }
+                if (resolved.kind == Engine::ResolvedCallable::Kind::ClassCtor) {
+                    CallContext ctx{&engine_, currentCallEnv()};
+                    R[I.a] = engine_.constructChecked(resolved.builtinClass,
+                                                      keel::ArrayRef<Value>(nullptr, 0), ctx);
+                    R = frames_.back().R;
+                    break;
+                }
+                throw numkit::Error(
+                    keel::format("Undefined function or variable '{}'", nn).c_str());
             }
 
             case OpCode::CLEAR_VAR:

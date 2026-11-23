@@ -507,6 +507,24 @@ public:
     const UserFunction *lookupUserFunctionLocal(keel::StringRef name) const;
     keel::Arc<UserFunction> lookupUserFunctionLocalArc(keel::StringRef name) const;
 
+    // Unified runtime callable resolution order shared by VM, TreeWalker, and feval:
+    //   1. File-private subfunction (`fileSubfuncs` or `env->findFileSubfunc`)
+    //   2. User function (`lookupUserFunction`: script-local -> workspace -> m-file -> imports)
+    //   3. External / builtin function (`findExternal`)
+    //   4. Registered class constructor (`findClass` with `construct`)
+    struct ResolvedCallable
+    {
+        enum class Kind : keel::u8 { None, UserFunc, External, ClassCtor };
+        Kind kind = Kind::None;
+        const UserFunction *userFunc = nullptr;
+        const ExternalFunc *extFunc = nullptr;
+        const BuiltinClass *builtinClass = nullptr;
+    };
+    ResolvedCallable resolveCallable(
+        keel::StringRef name,
+        const Environment *env,
+        const keel::HashMap<keel::String, keel::String> *fileSubfuncs = nullptr);
+
     // Clear workspace-scope user functions. Script-local functions
     // live in a separate bucket (see beginScript/endScript) and are
     // untouched — MATLAB treats file-scoped functions as lexically

@@ -8,6 +8,7 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
+#include "scope_analysis.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -258,68 +259,9 @@ void Compiler::promoteScriptLocalsToWorkspace()
     scriptLocalCompiledFuncs_.clear();
 }
 
-namespace {
-
-void collectScopeGlobalPersistentDecls(const ASTNode *node,
-                                       keel::Array<keel::String> &globals,
-                                       keel::Array<keel::String> &persistents)
-{
-    if (!node || node->type == NodeType::FUNCTION_DEF || node->type == NodeType::ANON_FUNC)
-        return;
-    if (node->type == NodeType::GLOBAL_STMT) {
-        for (const auto &nm : node->paramNames) {
-            bool found = false;
-            for (const auto &g : globals)
-                if (g == nm) { found = true; break; }
-            if (!found)
-                globals.push_back(nm.clone());
-        }
-        return;
-    }
-    if (node->type == NodeType::PERSISTENT_STMT) {
-        for (const auto &nm : node->paramNames) {
-            bool found = false;
-            for (const auto &p : persistents)
-                if (p == nm) { found = true; break; }
-            if (!found)
-                persistents.push_back(nm.clone());
-        }
-        return;
-    }
-    for (const auto &ch : node->children)
-        collectScopeGlobalPersistentDecls(ch.get(), globals, persistents);
-    for (const auto &[cond, body] : node->branches) {
-        collectScopeGlobalPersistentDecls(cond.get(), globals, persistents);
-        collectScopeGlobalPersistentDecls(body.get(), globals, persistents);
-    }
-    if (node->elseBranch)
-        collectScopeGlobalPersistentDecls(node->elseBranch.get(), globals, persistents);
-}
-
-void collectDirectNestedDefs(const ASTNode *node, keel::Array<const ASTNode *> &out)
-{
-    if (!node || node->type == NodeType::ANON_FUNC)
-        return;
-    if (node->type == NodeType::FUNCTION_DEF) {
-        out.push_back(node);
-        return;
-    }
-    for (const auto &ch : node->children)
-        collectDirectNestedDefs(ch.get(), out);
-    for (const auto &[cond, body] : node->branches) {
-        collectDirectNestedDefs(cond.get(), out);
-        collectDirectNestedDefs(body.get(), out);
-    }
-    if (node->elseBranch)
-        collectDirectNestedDefs(node->elseBranch.get(), out);
-}
-
-bool isPseudoScopeVar(keel::StringRef name)
-{
-    return name == "nargin" || name == "nargout" || name == "varargin" || name == "varargout";
-}
-
-} // namespace
+using scope::collectDirectNestedDefs;
+using scope::collectScopeGlobalPersistentDecls;
+using scope::isPseudoScopeVar;
 
 BytecodeChunk Compiler::compileFunction(const ASTNode *funcDef,
                                         keel::Arc<const keel::String> sourceCode)

@@ -889,6 +889,73 @@ void VM::execCallBuiltin(const Instruction &I, Value *R)
     throw numkit::Error("VM: unsupported builtin");
 }
 
+keel::Optional<Value> VM::lookupDynamicVar(const BytecodeChunk &chunk, const CallFrame &frame,
+                                           const Value *R, keel::StringRef name,
+                                           bool checkParentFunc) const
+{
+    // If this chunk explicitly cleared a locally assigned variable, do not
+    // resurrect it from dynVars or workspaceEnv.
+    if (R && chunk.assignedVars.contains(name)) {
+        for (const auto &[vn, reg] : chunk.varMap) {
+            if (vn == name && reg < chunk.numRegisters) {
+                Value rv = readChunkVar(chunk, R, chunk.numRegisters, vn, reg);
+                if (rv.isDeleted())
+                    return keel::kNullOpt;
+                break;
+            }
+        }
+    }
+    if (frame.dynVars) {
+        if (const Value *dvp = frame.dynVars->get(name);
+            dvp && !dvp->isUnset() && !dvp->isDeleted())
+            return *dvp;
+    }
+    if (frame.isScriptFrame) {
+        Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
+        if (const Value *wv = scopeEnv.get(name); wv && !wv->isUnset() && !wv->isDeleted())
+            return *wv;
+    } else if (frame.env) {
+        if (const Value *lv = frame.env->getLocal(name); lv && !lv->isUnset() && !lv->isDeleted())
+            return *lv;
+    }
+    if (checkParentFunc && !chunk.parentFuncName.empty()) {
+        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
+            const CallFrame &pf = frames_[fi];
+            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                continue;
+            for (const auto &[vname, reg] : pf.chunk->varMap) {
+                if (vname == name && reg < pf.nregs) {
+                    Value v = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
+                    if (!v.isUnset() && !v.isDeleted())
+                        return v;
+                    break;
+                }
+            }
+        }
+        for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
+            const VM::PausedState *ps = activePausedStates_[psi];
+            if (!ps) continue;
+            for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
+                const CallFrame &pf = ps->frames[fi];
+                if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
+                    continue;
+                if (pf.regBase + pf.nregs > ps->regSnapshot.size())
+                    continue;
+                const Value *psR = &ps->regSnapshot[pf.regBase];
+                for (const auto &[vname, reg] : pf.chunk->varMap) {
+                    if (vname == name && reg < pf.nregs) {
+                        Value v = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
+                        if (!v.isUnset() && !v.isDeleted())
+                            return v;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return keel::kNullOpt;
+}
+
 const Value *VM::findDynLocalVar(const BytecodeChunk &chunk, const CallFrame &frame,
                                  const Value *R, const keel::String &name) const
 {
@@ -1089,70 +1156,11 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         return false;
     }
 
-    // Fallback: nested-function parent-frame variable or workspace struct/var.
-    auto findParentVar = [&](keel::StringRef varName) -> keel::Optional<Value> {
-        if (chunk.parentFuncName.empty())
-            return keel::kNullOpt;
-        for (keel::i32 fi = keel::as<keel::i32>(frames_.size()) - 2; fi >= 0; --fi) {
-            const CallFrame &pf = frames_[fi];
-            if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                continue;
-            for (const auto &[vname, reg] : pf.chunk->varMap) {
-                if (vname == varName && reg < pf.nregs) {
-                    Value v = readChunkVar(*pf.chunk, pf.R, pf.nregs, vname, reg);
-                    if (!v.isUnset() && !v.isDeleted())
-                        return v;
-                    break;
-                }
-            }
-        }
-        for (keel::i32 psi = keel::as<keel::i32>(activePausedStates_.size()) - 1; psi >= 0; --psi) {
-            const VM::PausedState *ps = activePausedStates_[psi];
-            if (!ps) continue;
-            for (keel::i32 fi = keel::as<keel::i32>(ps->frames.size()) - 1; fi >= 0; --fi) {
-                const CallFrame &pf = ps->frames[fi];
-                if (!pf.chunk || pf.chunk->name != chunk.parentFuncName)
-                    continue;
-                if (pf.regBase + pf.nregs > ps->regSnapshot.size())
-                    continue;
-                const Value *psR = &ps->regSnapshot[pf.regBase];
-                for (const auto &[vname, reg] : pf.chunk->varMap) {
-                    if (vname == varName && reg < pf.nregs) {
-                        Value v = readChunkVar(*pf.chunk, psR, pf.nregs, vname, reg);
-                        if (!v.isUnset() && !v.isDeleted())
-                            return v;
-                        break;
-                    }
-                }
-            }
-        }
-        return keel::kNullOpt;
-    };
-
+    // Fallback: nested-function parent-frame variable or scope-isolated dynamic struct/var.
     const keel::usize dot = funcName.find('.');
     if (dot != keel::kInvalidIndex) {
         keel::StringRef root = funcName.substr(0, dot);
-        keel::Optional<Value> rootOpt;
-        if (frame.dynVars) {
-            if (const Value *dvp = frame.dynVars->get(root);
-                dvp && !dvp->isUnset() && !dvp->isDeleted())
-                rootOpt = *dvp;
-        }
-        if (!rootOpt)
-            rootOpt = findParentVar(root);
-        if (!rootOpt) {
-            if (frame.isScriptFrame) {
-                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                if (const Value *wv = scopeEnv.get(root);
-                    wv && !wv->isUnset() && !wv->isDeleted())
-                    rootOpt = *wv;
-            } else if (frame.env) {
-                if (const Value *ev = frame.env->getLocal(root);
-                    ev && !ev->isUnset() && !ev->isDeleted())
-                    rootOpt = *ev;
-            }
-        }
-        if (rootOpt) {
+        if (auto rootOpt = lookupDynamicVar(chunk, frame, R, root, /*checkParentFunc=*/true)) {
             Value cur = keel::move(*rootOpt);
             keel::usize pos = dot + 1;
             while (pos < funcName.size()) {
@@ -1179,27 +1187,7 @@ bool VM::execCallNamedSingleSpan(keel::u16 dstReg, keel::i32 funcIdx, keel::u16 
         }
     }
     if (dot == keel::kInvalidIndex && NF > 0) {
-        keel::Optional<Value> varOpt;
-        if (frame.dynVars) {
-            if (const Value *dvp = frame.dynVars->get(funcName);
-                dvp && !dvp->isUnset() && !dvp->isDeleted())
-                varOpt = *dvp;
-        }
-        if (!varOpt)
-            varOpt = findParentVar(funcName);
-        if (!varOpt) {
-            if (frame.isScriptFrame) {
-                Environment &scopeEnv = inheritedScope_ ? *inheritedScope_ : engine_.workspaceEnv();
-                if (const Value *wv = scopeEnv.get(funcName);
-                    wv && !wv->isUnset() && !wv->isDeleted())
-                    varOpt = *wv;
-            } else if (frame.env) {
-                if (const Value *ev = frame.env->getLocal(funcName);
-                    ev && !ev->isUnset() && !ev->isDeleted())
-                    varOpt = *ev;
-            }
-        }
-        if (varOpt) {
+        if (auto varOpt = lookupDynamicVar(chunk, frame, R, funcName, /*checkParentFunc=*/true)) {
             Value target = keel::move(*varOpt);
             return execCallIndirectSpan(target, dstReg, AB, NF, R, frame, ip);
         }
