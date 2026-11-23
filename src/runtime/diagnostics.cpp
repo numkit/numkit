@@ -55,13 +55,6 @@ void error(keel::ArrayRef<Value> args)
     throw Error(msg);
 }
 
-// thread_local last-warning state. Updated by warning() and lastwarnSet,
-// read by lastwarnGet. Private storage — TU-local accessor only.
-namespace {
-thread_local keel::String gLastWarnMsg;
-thread_local keel::String gLastWarnId;
-}
-
 void warning(Engine &engine, keel::ArrayRef<Value> args)
 {
     if (args.empty())
@@ -81,20 +74,7 @@ void warning(Engine &engine, keel::ArrayRef<Value> args)
         msg = keel::move(first);
     }
     engine.setLastWarn(msg, id);
-    gLastWarnMsg.assign(msg);
-    gLastWarnId.assign(id);
     engine.outputText(keel::format("Warning: {}\n", msg));
-}
-
-LastWarn lastwarnGet()
-{
-    return { gLastWarnMsg.clone(), gLastWarnId.clone() };
-}
-
-void lastwarnSet(keel::StringRef msg, keel::StringRef id)
-{
-    gLastWarnMsg.assign(msg);
-    gLastWarnId.assign(id);
 }
 
 Value mexception(keel::ArrayRef<Value> args, keel::Allocator *mr)

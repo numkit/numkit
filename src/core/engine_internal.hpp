@@ -5,9 +5,11 @@
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/hash_map.h>
+#include <keel/hash_set.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/types.hpp>
+#include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
 
 namespace numkit {
@@ -103,6 +105,44 @@ struct ClassDefDesc
     bool isAbstract = false;                      // an abstract method is unimplemented
     bool isSealed = false;                        // `Sealed` — cannot be subclassed
     keel::Array<keel::String> hiddenMembers;      // `Hidden` props/methods (own + inherited)
+};
+
+// Active classdef method/constructor frame on the TreeWalker access-control stack.
+struct ClassCtxFrame
+{
+    keel::String className;
+    bool isCtor = false;
+};
+
+// Encapsulated class-registry and classdef metadata state owned by Engine.
+struct ClassRegistryState
+{
+    keel::HashMap<keel::String, keel::Arc<BuiltinClass>> classes;
+    keel::HashMap<keel::String, keel::Arc<ClassDefDesc>> classDefs;
+    keel::HashMap<keel::String, keel::Arc<const ASTNode>> classDefAst;
+    bool suppressDependentCascade = false;
+    keel::Array<keel::String> activePropAccessors;
+    keel::Array<keel::String> builtinClassSourceTexts;
+    keel::Array<ClassCtxFrame> classCtx;
+};
+
+struct MFileCacheEntry
+{
+    keel::String fullPath;                    // VFS-prefixed, the resolved location
+    keel::i64 mtime = 0;                      // 0 if backend can't supply mtime
+    keel::i64 mtimeNs = 0;                    // nanosecond mtime when available
+    keel::i64 fileSize = -1;                  // file size from stat (-1 if unknown)
+    keel::String contentHash;                 // fallback when mtime is unavailable
+    keel::Arc<const keel::String> sourceCode; // keeps AST live
+    bool hasExternal = false;                 // true when resolveMFile_ registered externalFuncs_[name]
+};
+
+// Encapsulated m-file search path and cache state owned by Engine.
+struct MFileResolverState
+{
+    keel::Array<keel::String> mPath;
+    keel::HashMap<keel::String, MFileCacheEntry> mFileCache;
+    keel::HashSet<keel::String> mFileMissCache;
 };
 
 inline bool hasPathSepOrColon(keel::StringRef s) noexcept

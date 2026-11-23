@@ -703,6 +703,13 @@ TEST_P(Wave2VmTwIndependenceTest, DbstackAndLasterrorParity)
     EXPECT_EQ(evalString("le1.message"), "captured by lasterror");
     EXPECT_GE(evalScalar("numel(le1.stack)"), 1.0);
     EXPECT_TRUE(evalBool("isempty(le2.message) && isempty(le2.identifier) && isempty(le2.stack)"));
+
+    // Syntax errors during parse also populate lasterror()
+    auto synErr = engine.evalSafe("1 +");
+    EXPECT_FALSE(synErr.ok);
+    eval("le_syn = lasterror;");
+    EXPECT_FALSE(evalBool("isempty(le_syn.message)"));
+    EXPECT_EQ(evalString("le_syn.identifier"), "numkit:syntaxError");
 }
 
 INSTANTIATE_DUAL(Wave2VmTwIndependenceTest);

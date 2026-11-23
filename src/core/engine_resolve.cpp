@@ -648,11 +648,11 @@ void Engine::addPath(keel::StringRef dir)
         }
     } catch (...) {}
     // De-dup: ignore if already present.
-    for (const auto &p : mPath_) {
+    for (const auto &p : mFileReg_->mPath) {
         if (p == effectiveDir || p == dir) return;
     }
-    mFileMissCache_.clear();
-    mPath_.push_back(keel::move(effectiveDir));
+    mFileReg_->mFileMissCache.clear();
+    mFileReg_->mPath.push_back(keel::move(effectiveDir));
     bumpCallCacheEpoch();
 }
 
@@ -681,10 +681,10 @@ void Engine::rmPath(keel::StringRef dir)
                 : rp.path.clone();
         }
     } catch (...) {}
-    for (keel::usize i = 0; i < mPath_.size(); ++i) {
-        if (mPath_[i] == dir || mPath_[i] == effectiveDir) {
-            mFileMissCache_.clear();
-            mPath_.remove_at(i);
+    for (keel::usize i = 0; i < mFileReg_->mPath.size(); ++i) {
+        if (mFileReg_->mPath[i] == dir || mFileReg_->mPath[i] == effectiveDir) {
+            mFileReg_->mFileMissCache.clear();
+            mFileReg_->mPath.remove_at(i);
             bumpCallCacheEpoch();
             break;
         }
@@ -750,7 +750,7 @@ void Engine::adoptBuiltinMSource_(keel::StringRef src)
 
 void Engine::registerBuiltinClassSource(keel::StringRef src)
 {
-    builtinClassSourceTexts_.push_back(keel::String::from(src));
+    classReg_->builtinClassSourceTexts.push_back(keel::String::from(src));
     adoptBuiltinClassSource_(src);
 }
 
@@ -781,7 +781,7 @@ void Engine::reinstallBuiltinSources()
 {
     for (const auto &src : builtinMSourceTexts_)
         adoptBuiltinMSource_(src);
-    for (const auto &src : builtinClassSourceTexts_)
+    for (const auto &src : classReg_->builtinClassSourceTexts)
         adoptBuiltinClassSource_(src);
 }
 
@@ -814,9 +814,9 @@ void Engine::rehashMFiles()
     // key — NOT clearCompiledFuncs(), which would also nuke script-defined
     // compiled functions (contradicting the "kept" promise above).
     keel::Array<keel::String> unregisteredClasses;
-    for (auto [name, entry] : mFileCache_) {
+    for (auto [name, entry] : mFileReg_->mFileCache) {
         evictUserFunction_(name);
-        if (classDefs_.contains(name)) {
+        if (classReg_->classDefs.contains(name)) {
             // A class loaded from `Name.m`: evicting the bare chunk above is not
             // enough — the class machinery (registry, descriptor, `Name>method`
             // chunks, qualified externals) and the bare constructor external all
@@ -830,8 +830,8 @@ void Engine::rehashMFiles()
             dropFileClassCtorExternal_(name);
         }
     }
-    mFileCache_.clear();
-    mFileMissCache_.clear();
+    mFileReg_->mFileCache.clear();
+    mFileReg_->mFileMissCache.clear();
     bumpCallCacheEpoch();
 
     // An INLINE subclass of a just-unregistered file base survives rehash still
@@ -843,12 +843,12 @@ void Engine::rehashMFiles()
 
 void Engine::refreshStaleMFiles()
 {
-    mFileMissCache_.clear();
-    if (mFileCache_.empty())
+    mFileReg_->mFileMissCache.clear();
+    if (mFileReg_->mFileCache.empty())
         return;
     keel::Array<keel::String> stale;
     keel::Array<keel::String> evictedClasses;
-    for (auto [name, entry] : mFileCache_) {
+    for (auto [name, entry] : mFileReg_->mFileCache) {
         ResolvedPath rp;
         try {
             rp = resolvePath(entry.fullPath);
@@ -883,17 +883,17 @@ void Engine::refreshStaleMFiles()
     if (!stale.empty())
         bumpCallCacheEpoch();
     for (const auto &name : stale) {
-        if (const auto *entry = mFileCache_.get(name)) {
+        if (const auto *entry = mFileReg_->mFileCache.get(name)) {
             const bool hadExternal = entry->hasExternal;
             evictUserFunction_(name);
-            if (classDefs_.contains(name)) {
+            if (classReg_->classDefs.contains(name)) {
                 dropFileClassCtorExternal_(name);
                 unregisterClassDef(name);
                 evictedClasses.push_back(name.clone());
             } else if (hadExternal) {
                 dropFileClassCtorExternal_(name);
             }
-            mFileCache_.remove(name);
+            mFileReg_->mFileCache.remove(name);
         }
     }
     // Without this cascade an inline subclass of an evicted base keeps its
@@ -908,7 +908,7 @@ void Engine::reloadEvictedClassBases_(keel::ArrayRef<keel::String> bases)
         if (findClass(base))
             continue; // already pulled back in by an earlier base's reload
         bool hasLiveDependent = false;
-        for (auto [cn, desc] : classDefs_) {
+        for (auto [cn, desc] : classReg_->classDefs) {
             (void)cn;
             if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
                 != desc->superclasses.end()) {
@@ -939,7 +939,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
     keel::String missKey = !curDirRef.empty()
                                ? keel::format("{}\n{}", curDirRef, name)
                                : keel::String::from(name);
-    if (mFileMissCache_.contains(missKey))
+    if (mFileReg_->mFileMissCache.contains(missKey))
         return nullptr;
 
     // Build search-path list: script-dir first (if any), then mPath_.
@@ -949,10 +949,10 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
     // script's FS via `resolvePath` (which also falls back to the
     // origin's fsName when the relative path has no scheme).
     keel::Array<keel::StringRef> searchDirs;
-    searchDirs.reserve(mPath_.size() + (curDirRef.empty() ? 0 : 1));
+    searchDirs.reserve(mFileReg_->mPath.size() + (curDirRef.empty() ? 0 : 1));
     if (!curDirRef.empty())
         searchDirs.push_back(curDirRef);
-    for (const auto &p : mPath_)
+    for (const auto &p : mFileReg_->mPath)
         searchDirs.push_back(p.as_ref());
 
     // Decompose dotted name. "pkg.sub.foo" → +pkg/+sub/foo.m. The leaf
@@ -1018,7 +1018,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             : keel::String::from(rpPath);
 
         // Cache hit? Validate via mtime; re-parse if stale.
-        if (const auto *ce = mFileCache_.get(name);
+        if (const auto *ce = mFileReg_->mFileCache.get(name);
             ce && (ce->fullPath == cachePath || ce->fullPath == userPath)) {
             auto st = rp.fs->stat(rp.path);
             const bool haveCachedStat = (ce->mtime != 0 || ce->mtimeNs != 0);
@@ -1039,7 +1039,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             const bool hadExternal = ce->hasExternal;
             if (hadExternal)
                 dropFileClassCtorExternal_(name);
-            mFileCache_.remove(name);
+            mFileReg_->mFileCache.remove(name);
             evictUserFunction_(name);
             bumpCallCacheEpoch();
         }
@@ -1149,7 +1149,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 }
                 ce.sourceCode = keel::make_arc<const keel::String>(keel::move(content));
                 ce.hasExternal = true;
-                mFileCache_.put(keel::String::from(name), keel::move(ce));
+                mFileReg_->mFileCache.put(keel::String::from(name), keel::move(ce));
                 bumpCallCacheEpoch();
                 return nullptr; // class + ctor-external resolve the call
             }
@@ -1198,7 +1198,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 }
                 ce.sourceCode = keel::move(srcPtr);
                 ce.hasExternal = true;
-                mFileCache_.put(keel::String::from(name), keel::move(ce));
+                mFileReg_->mFileCache.put(keel::String::from(name), keel::move(ce));
                 bumpCallCacheEpoch();
                 return nullptr;
             }
@@ -1282,7 +1282,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             e.fileSize = st->size;
         }
         e.sourceCode = keel::make_arc<const keel::String>(keel::move(content));
-        mFileCache_.put(keel::String::from(name), keel::move(e));
+        mFileReg_->mFileCache.put(keel::String::from(name), keel::move(e));
         bumpCallCacheEpoch();
 
         // Register each file-private subfunction under `"main>sub"`.
@@ -1315,7 +1315,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
 
         return lookupUserFunctionLocal(name);
     }
-    mFileMissCache_.insert(keel::move(missKey));
+    mFileReg_->mFileMissCache.insert(keel::move(missKey));
     return nullptr;
 }
 

@@ -149,6 +149,7 @@ keel::Array<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
                                                     keel::usize nout,
                                                     const ASTNode *callNode)
 {
+    engine_.checkCancelled();
     keel::Array<Value> withCaptures;
     if (handle.funcHandleCaptureCount() > 0) {
         const keel::usize ncaps = handle.funcHandleCaptureCount();

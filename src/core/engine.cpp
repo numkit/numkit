@@ -47,6 +47,8 @@ Engine::Engine() : Engine(numkit::defaultCachedAllocator()) {}
 
 Engine::Engine(keel::Allocator *mr)
     : mr_(mr ? mr : numkit::defaultCachedAllocator())
+    , classReg_(keel::make_unique<ClassRegistryState>())
+    , mFileReg_(keel::make_unique<MFileResolverState>())
 {
     globalsEnv_ = keel::make_arc<Environment>();
     constantsEnv_ = keel::make_unique<Environment>(nullptr, globalsEnv_.get());
@@ -95,17 +97,78 @@ Engine::~Engine()
     scriptLocalUserFuncs_.clear();
     savedScriptLocalUserFuncs_.clear();
     userFuncs_.clear();
-    classDefAst_.clear();
-    classDefs_.clear();
-    classes_.clear();
+    if (classReg_) {
+        classReg_->classDefAst.clear();
+        classReg_->classDefs.clear();
+        classReg_->classes.clear();
+    }
     callbackBuiltins_.clear();
     fusionRules_.clear();
     binaryOps_.clear();
     unaryOps_.clear();
     externalFuncs_.clear();
     shortNameIndex_.clear();
+    mFileReg_.reset();
+    classReg_.reset();
     pluginLoader_.reset();
     figureManager_.reset();
+}
+
+const keel::Array<keel::String> &Engine::path() const
+{
+    return mFileReg_->mPath;
+}
+
+void Engine::pushPropAccessor(keel::StringRef accessorName)
+{
+    classReg_->activePropAccessors.push_back(keel::String::from(accessorName));
+}
+
+void Engine::popPropAccessor()
+{
+    if (!classReg_->activePropAccessors.empty())
+        classReg_->activePropAccessors.pop_back();
+}
+
+void Engine::setCwd(keel::StringRef p)
+{
+    mFileReg_->mFileMissCache.clear();
+    bumpCallCacheEpoch();
+    fsCtx_.setCwd(p);
+}
+
+bool Engine::closeFile(keel::i32 fid)
+{
+    mFileReg_->mFileMissCache.clear();
+    bumpCallCacheEpoch();
+    return fsCtx_.closeFile(fid);
+}
+
+void Engine::closeAllFiles()
+{
+    if (mFileReg_)
+        mFileReg_->mFileMissCache.clear();
+    bumpCallCacheEpoch();
+    fsCtx_.closeAllFiles();
+}
+
+keel::UniquePtr<ASTNode> Engine::parseCode_(keel::StringRef code)
+{
+    try {
+        Lexer lexer(code);
+        auto tokens = lexer.tokenize();
+        Parser parser(keel::move(tokens));
+        return parser.parse();
+    } catch (const Error &e) {
+        keel::StringRef id = e.identifier().empty()
+                                 ? keel::StringRef("numkit:syntaxError")
+                                 : e.identifier().as_ref();
+        recordLastError(e.what(), id, {});
+        throw;
+    } catch (const std::exception &e) {
+        recordLastError(e.what(), "numkit:syntaxError", {});
+        throw;
+    }
 }
 
 void Engine::reinstallConstants()
@@ -234,6 +297,7 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
                                                    keel::usize nout,
                                                    Environment *env)
 {
+    checkCancelled();
     if (!handle.isFuncHandle())
         throw numkit::Error("callFunctionHandleMulti: argument is not a function handle");
     Environment *e = env ? env : workspaceEnv_.get();
@@ -655,10 +719,7 @@ Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
     if (useVM_())
         vm_->flushWorkspaceFrame();
 
-    Lexer lexer(*src);
-    auto tokens = lexer.tokenize();
-    Parser parser(keel::move(tokens));
-    auto ast = parser.parse();
+    auto ast = parseCode_(*src);
     if (suppressTopLevelDisplay)
         markTopLevelSuppressed(ast.get());
 
@@ -920,10 +981,7 @@ Value Engine::eval(keel::StringRef code, Environment *scope,
     // exit (with VM register write-through where applicable). Used by
     // evalin, and by eval/run when called from inside a user function
     // (so script-defined vars stay scoped to the caller's frame).
-    Lexer lexer(code);
-    auto tokens = lexer.tokenize();
-    Parser parser(keel::move(tokens));
-    auto ast = parser.parse();
+    auto ast = parseCode_(code);
     auto src = keel::make_arc<const keel::String>(keel::String::from(code));
     if (suppressTopLevelDisplay)
         markTopLevelSuppressed(ast.get());
@@ -1011,9 +1069,8 @@ keel::Array<keel::String> Engine::workspaceVarNames() const
 // Virtual filesystem registry + path resolver
 //
 // State + logic live in FsContext (fs/, L0). Engine HAS-A FsContext and
-// forwards; resolvePath additionally rethrows the fs-layer std::runtime_error
-// as numkit::Error so the MATLAB-visible error type is unchanged for
-// in-engine callers.
+// forwards; resolvePath normalizes fs-layer exceptions into numkit::Error
+// so the user-visible error type is consistent for in-engine callers.
 // ============================================================
 
 void Engine::registerVirtualFS(keel::UniquePtr<VirtualFS> fs)
@@ -1065,9 +1122,8 @@ const keel::String *Engine::currentScriptFile() const
 
 Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPath) const
 {
-    // FsContext throws std::runtime_error for unknown/unavailable
-    // filesystems; rethrow as numkit::Error so the MATLAB-visible error type
-    // (and message) is exactly what in-engine callers saw before.
+    // FsContext throws numkit::Error / keel::Exception for unknown/unavailable
+    // filesystems; normalize to numkit::Error for in-engine callers.
     try {
         ResolvedPath rp = fsCtx_.resolvePath(userPath);
         if ((!rp.fs || !rp.fs->exists(rp.path)) &&
@@ -1077,7 +1133,7 @@ Engine::ResolvedPath Engine::resolvePath(keel::StringRef userPath) const
                 rp.path = keel::String::from(userPath);
                 return rp;
             }
-            for (const auto &dir : mPath_) {
+            for (const auto &dir : mFileReg_->mPath) {
                 if (dir.empty()) continue;
                 keel::String candPath = dir.clone();
                 if (candPath.back() != '/' && candPath.back() != '\\')

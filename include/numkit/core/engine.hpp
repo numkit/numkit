@@ -27,7 +27,8 @@ class VM;
 class Compiler;
 class FigureManager;
 class DebugFacade;       // grouped debugger handle (engine.debug()); defined below
-struct ClassDefDesc;     // user-classdef descriptor; full type in engine.cpp
+struct ClassRegistryState;  // encapsulated class registry/classdef state; engine_internal.hpp
+struct MFileResolverState;  // encapsulated m-file search path & cache; engine_internal.hpp
 struct CallbackBuiltin;  // higher-order builtin driver; callback_builtin.hpp
 class PluginLoader;      // dynamic module loader and resolver
 
@@ -66,7 +67,7 @@ public:
     //          (e.g. "signal.transforms"). The full name in the
     //          registry equals "ns.name". `ns=""` is equivalent to the
     //          1-arg form.
-    // Both forms throw std::runtime_error on duplicate full names.
+    // Both forms throw numkit::Error on duplicate full names.
     // See namespace_design.md for the rules.
     void registerFunction(keel::StringRef name, ExternalFunc func) override;
     void registerFunction(keel::StringRef ns,
@@ -588,7 +589,7 @@ public:
     // "native:/scripts", "local:/work", or just a relative path).
     void addPath(keel::StringRef dir);
     void rmPath(keel::StringRef dir);
-    const keel::Array<keel::String> &path() const { return mPath_; }
+    const keel::Array<keel::String> &path() const;
 
     // Drop all cached m-file entries — next lookup re-scans the disk.
     // Powers MATLAB's `rehash` builtin.
@@ -746,15 +747,8 @@ public:
 
     // Property accessor recursion guard (`get.Prop` / `set.Prop`)
     bool isPropAccessorActive(keel::StringRef accessorName) const;
-    void pushPropAccessor(keel::StringRef accessorName)
-    {
-        activePropAccessors_.push_back(keel::String::from(accessorName));
-    }
-    void popPropAccessor()
-    {
-        if (!activePropAccessors_.empty())
-            activePropAccessors_.pop_back();
-    }
+    void pushPropAccessor(keel::StringRef accessorName);
+    void popPropAccessor();
 
     // Returns the source-text name of the k-th input arg as written at
     // the call site of the currently-running user function (1-indexed,
@@ -829,7 +823,7 @@ public:
     // without having to call setCwd, while still letting in-engine
     // `cd` calls take precedence once they happen.
     const keel::String &cwd() const { return fsCtx_.cwd(); }
-    void setCwd(keel::StringRef p) { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.setCwd(p); }
+    void setCwd(keel::StringRef p);
 
     // The path-resolution result type lives on FsContext (fs/, L0); aliased
     // here so existing callers keep writing Engine::ResolvedPath.
@@ -859,8 +853,8 @@ public:
     using OpenFile = FsContext::OpenFile;
     keel::i32 openFile(keel::StringRef userPath, keel::StringRef mode)
     { return fsCtx_.openFile(userPath, mode); }
-    bool closeFile(keel::i32 fid) { mFileMissCache_.clear(); bumpCallCacheEpoch(); return fsCtx_.closeFile(fid); }
-    void closeAllFiles() { mFileMissCache_.clear(); bumpCallCacheEpoch(); fsCtx_.closeAllFiles(); }
+    bool closeFile(keel::i32 fid);
+    void closeAllFiles();
     OpenFile *findFile(keel::i32 fid) { return fsCtx_.findFile(fid); }
     keel::Array<keel::i32> openFileIds() const { return fsCtx_.openFileIds(); }
     const keel::String &lastFopenError() const { return fsCtx_.lastFopenError(); }
@@ -877,19 +871,8 @@ private:
     // HashMap rehashes (returned const T* and cached CallCacheEntry pointers stay valid).
     keel::HashMap<keel::String, keel::Arc<ExternalFunc>> externalFuncs_;
 
-    // Object-model class registry (object_model.md). Keyed by class name.
-    keel::HashMap<keel::String, keel::Arc<BuiltinClass>> classes_;
-    // Parsed user classdef descriptors (property defaults, ctor + method
-    // UserFunctions), kept for inheritance merges. Full type in engine.cpp.
-    keel::HashMap<keel::String, keel::Arc<ClassDefDesc>> classDefs_;
-    // Cloned source AST per registered classdef, so a base-class redefinition
-    // can re-merge its (transitive) subclasses from scratch. Keyed by the
-    // class's registry name (qualified for packaged classes).
-    keel::HashMap<keel::String, keel::Arc<const ASTNode>> classDefAst_;
-    // Re-entrancy guard for reregisterDerivedClasses: while a cascade is
-    // re-registering subclasses, their own registerClassDef calls must not each
-    // launch another (redundant, overlapping) cascade.
-    bool suppressDependentCascade_ = false;
+    // Encapsulated object-model class registry & classdef metadata (engine_internal.hpp).
+    keel::UniquePtr<ClassRegistryState> classReg_;
     // Higher-order builtins that can run callbacks as pausable VM frames
     // (state-machine callbacks). Keyed by builtin name; consulted by the VM
     // before the synchronous external path. Full type in callback_builtin.hpp.
@@ -899,30 +882,14 @@ private:
     keel::String lastWarnMsg_;
     keel::String lastWarnId_;
     keel::HashMap<keel::String, keel::String> envOverlay_;
-    keel::Array<keel::String> activePropAccessors_;
     // Startup registration sources retained for post-clear replay
-    // (reinstallBuiltinSources): m-source function texts and classdef
-    // source texts. Cleared functions/classes reload from disk in MATLAB —
-    // these have no disk backing, so the engine re-registers them.
+    // (reinstallBuiltinSources): m-source function texts.
     keel::Array<keel::String> builtinMSourceTexts_;
-    keel::Array<keel::String> builtinClassSourceTexts_;
     // Parse+adopt halves of the public register entry points, factored out
     // for replay without re-appending to the retention lists.
     void adoptBuiltinMSource_(keel::StringRef src);
     void adoptBuiltinClassSource_(keel::StringRef src);
 
-    // Class-execution context stack for classdef member-access enforcement
-    // (private / protected / immutable). Each frame is the class whose
-    // method or constructor body is currently running; push/pop happens in
-    // invokeClassMethod / invokeClassCtor. An access check compares the
-    // member's declaring class against the top frame. Empty == script scope
-    // (only public members reachable).
-    struct ClassCtxFrame
-    {
-        keel::String className;
-        bool isCtor;
-    };
-    keel::Array<ClassCtxFrame> classCtx_;
     // Currently-executing class (TW callback guard, else VM top method frame;
     // empty == script scope). Backs classCtxAllows / classCtxInCtorOf.
     keel::StringRef currentClassCtx_() const;
@@ -938,7 +905,7 @@ private:
     NamespaceMode namespaceMode_ = NamespaceMode::Compat;
 
     // Internal helper used by both registerFunction overloads.
-    // Throws std::runtime_error if `fullName` already registered.
+    // Throws numkit::Error if `fullName` already registered.
     void registerFunctionImpl_(keel::StringRef fullName,
                                keel::StringRef leafName,
                                ExternalFunc func);
@@ -996,23 +963,14 @@ private:
     keel::HashMap<keel::String, keel::Arc<UserFunction>> scriptLocalUserFuncs_;
     keel::Array<keel::HashMap<keel::String, keel::Arc<UserFunction>>> savedScriptLocalUserFuncs_;
 
-    // ── M-file resolver state (Phase 9) ───────────────────────────
-    keel::Array<keel::String> mPath_;
-    struct MFileCacheEntry
-    {
-        keel::String fullPath;                  // VFS-prefixed, the resolved location
-        keel::i64 mtime = 0;                    // 0 if backend can't supply mtime
-        keel::i64 mtimeNs = 0;                  // nanosecond mtime when available
-        keel::i64 fileSize = -1;                // file size from stat (-1 if unknown)
-        keel::String contentHash;               // fallback when mtime is unavailable
-        keel::Arc<const keel::String> sourceCode; // keeps AST live
-        bool hasExternal = false;               // true when resolveMFile_ registered externalFuncs_[name]
-    };
-    keel::HashMap<keel::String, MFileCacheEntry> mFileCache_;
-    keel::HashSet<keel::String> mFileMissCache_;
+    // ── M-file resolver state (encapsulated in engine_internal.hpp) ──
+    keel::UniquePtr<MFileResolverState> mFileReg_;
     // Evict a global user function plus its file-private subfunctions ("name>*"),
     // persistent buckets, and compiled VM chunks in one place.
     void evictUserFunction_(keel::StringRef name);
+
+    // Lex + parse helper that records syntax errors into lasterror before throwing.
+    keel::UniquePtr<ASTNode> parseCode_(keel::StringRef code);
 
     // Helper — returns nullptr if `name`.m can't be located in any of
     // (script-origin, mPath_-list) or fails to parse. On success caches

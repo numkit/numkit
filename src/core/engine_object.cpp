@@ -24,18 +24,18 @@ namespace numkit {
 
 void Engine::registerClass(BuiltinClass cls)
 {
-    if (classes_.contains(cls.name)) {
+    if (classReg_->classes.contains(cls.name)) {
         auto msg = keel::format("Engine::registerClass: duplicate class '{}'", cls.name);
         throw numkit::Error(msg.c_str());
     }
     keel::String key = cls.name.clone();
-    classes_.put(keel::move(key), keel::make_arc<BuiltinClass>(keel::move(cls)));
+    classReg_->classes.put(keel::move(key), keel::make_arc<BuiltinClass>(keel::move(cls)));
     bumpCallCacheEpoch();
 }
 
 const BuiltinClass *Engine::findClass(keel::StringRef name) const
 {
-    if (const auto *entry = classes_.get(name))
+    if (const auto *entry = classReg_->classes.get(name))
         return entry->get();
     return nullptr;
 }
@@ -616,7 +616,7 @@ static Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
 
 void Engine::unregisterClassDef(keel::StringRef name)
 {
-    if (const auto *dp = classDefs_.get(name)) {
+    if (const auto *dp = classReg_->classDefs.get(name)) {
         const ClassDefDesc &desc = **dp;
         // Remove the `Name.member` qualified externals registered for Static
         // methods and Constant properties. registerFunctionImpl_ throws on a
@@ -640,7 +640,7 @@ void Engine::unregisterClassDef(keel::StringRef name)
         for (const auto &p : desc.props)
             if (p.isConstant)
                 dropExternal(p.name);
-        classDefs_.remove(name);
+        classReg_->classDefs.remove(name);
     }
     // Drop compiled method chunks ("Name>method") so rewritten bodies recompile
     // instead of serving the stale cache.
@@ -649,10 +649,10 @@ void Engine::unregisterClassDef(keel::StringRef name)
     clearPersistentForFunc(name);
     // Source AST kept for derived-class re-merge — drop it too (the cascade in
     // reregisterDerivedClasses holds its own Arc across this erase).
-    classDefAst_.remove(name);
+    classReg_->classDefAst.remove(name);
     // Drop the registry class last: registerClass throws on a duplicate, so the
     // re-registration that follows depends on this entry being gone.
-    classes_.remove(name);
+    classReg_->classes.remove(name);
     bumpCallCacheEpoch();
 }
 
@@ -662,7 +662,7 @@ void Engine::dropFileClassCtorExternal_(keel::StringRef name)
     // from `Name.m`. Guard on mFileCache_ membership: only a file-loaded class
     // has this external, so we never erase a core builtin that merely shares a
     // name with an inline classdef.
-    if (!mFileCache_.contains(name))
+    if (!mFileReg_->mFileCache.contains(name))
         return;
     externalFuncs_.remove(name);
     if (auto *vec = shortNameIndex_.get(name)) {
@@ -682,8 +682,8 @@ void Engine::clearClassDefs()
     // Built-in classes live in classes_ but NOT classDefs_, so iterating
     // classDefs_ touches only user classes.
     keel::Array<keel::String> names;
-    names.reserve(classDefs_.size());
-    for (auto [k, v] : classDefs_) {
+    names.reserve(classReg_->classDefs.size());
+    for (auto [k, v] : classReg_->classDefs) {
         (void)v;
         names.push_back(k.clone());
     }
@@ -849,7 +849,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
     // would register Derived with the base members missing. Inline classes
     // that aren't on the path simply stay unregistered (recorded for isa).
     for (const auto &superName : cd->paramNames)
-        if (superName != "handle" && !classDefs_.contains(superName))
+        if (superName != "handle" && !classReg_->classDefs.contains(superName))
             resolveMFile_(superName);
 
     // ── Inheritance: merge registered superclasses (base members first,
@@ -857,7 +857,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
     for (const auto &superName : cd->paramNames) {
         if (superName == "handle")
             continue;
-        const auto *bp = classDefs_.get(superName);
+        const auto *bp = classReg_->classDefs.get(superName);
         if (!bp)
             continue; // unknown / non-classdef base — skip (still recorded below)
         const auto &base = *bp;
@@ -928,7 +928,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         if (superName == "handle")
             continue;
         desc->superclasses.push_back(superName.clone());
-        if (const auto *bp = classDefs_.get(superName))
+        if (const auto *bp = classReg_->classDefs.get(superName))
             for (const auto &a : (*bp)->superclasses)
                 if (std::find(desc->superclasses.begin(), desc->superclasses.end(), a)
                     == desc->superclasses.end())
@@ -941,7 +941,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             desc->isAbstract = true;
             break;
         }
-    classDefs_.put(desc->name.clone(), desc);
+    classReg_->classDefs.put(desc->name.clone(), desc);
 
     // Register `ClassName.member` qualified externals for every Static method
     // and Constant property — own AND inherited (the merged maps above hold
@@ -1299,7 +1299,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
     // transient — resolveMFile_'s parsed AST is freed once this returns, and on
     // a redefinition `cd` may alias the very entry we overwrite here (the
     // cascade holds its own Arc to keep it alive across this clone).
-    classDefAst_.put(className.clone(), keel::Arc<const ASTNode>(cloneNode(cd)));
+    classReg_->classDefAst.put(className.clone(), keel::Arc<const ASTNode>(cloneNode(cd)));
 
     // Re-register every class that (transitively) derives from this one, so the
     // new members propagate to subclasses (which hold a snapshot of the base's
@@ -1308,7 +1308,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
     // reference — the subclass recorded the base name but registered without its
     // members). No-op when nothing derives from `className`. Guarded so the
     // nested registerClassDef calls don't each re-cascade.
-    if (!suppressDependentCascade_)
+    if (!classReg_->suppressDependentCascade)
         reregisterDerivedClasses(className);
 }
 
@@ -1316,7 +1316,7 @@ void Engine::reregisterDerivedClasses(keel::StringRef base)
 {
     // Classes whose transitive superclasses include `base`.
     keel::Array<keel::String> deps;
-    for (auto [name, desc] : classDefs_) {
+    for (auto [name, desc] : classReg_->classDefs) {
         if (name == base)
             continue;
         if (std::find(desc->superclasses.begin(), desc->superclasses.end(), base)
@@ -1329,7 +1329,7 @@ void Engine::reregisterDerivedClasses(keel::StringRef base)
     // ancestor's, so ascending ancestor count is a valid topological order (a
     // base is re-registered before any class that derives from it).
     std::sort(deps.begin(), deps.end(), [&](const keel::String &a, const keel::String &b) {
-        return (*classDefs_.get(a))->superclasses.size() < (*classDefs_.get(b))->superclasses.size();
+        return (*classReg_->classDefs.get(a))->superclasses.size() < (*classReg_->classDefs.get(b))->superclasses.size();
     });
     // RAII restore: a re-register that throws must NOT leave the flag stuck at
     // true — that would silently disable propagation for the rest of the
@@ -1342,9 +1342,9 @@ void Engine::reregisterDerivedClasses(keel::StringRef base)
         ~CascadeGuard() { flag = prev; }
         CascadeGuard(const CascadeGuard &) = delete;
         CascadeGuard &operator=(const CascadeGuard &) = delete;
-    } guard(suppressDependentCascade_);
+    } guard(classReg_->suppressDependentCascade);
     for (const auto &name : deps) {
-        const auto *astPtr = classDefAst_.get(name);
+        const auto *astPtr = classReg_->classDefAst.get(name);
         if (!astPtr || !*astPtr)
             continue;
         // Hold our own ref: registerClassDef → unregisterClassDef erases the map
@@ -1454,7 +1454,7 @@ const BytecodeChunk *Engine::ensureClassMethodChunk(const UserFunction &uf)
 
 void Engine::enforceMethodAccess(keel::StringRef className, keel::StringRef method)
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp)
         return;
     if (const auto *ma = (*dp)->methodAccess.get(method))
@@ -1464,7 +1464,7 @@ void Engine::enforceMethodAccess(keel::StringRef className, keel::StringRef meth
 const UserFunction *Engine::classGetter(keel::StringRef className,
                                         keel::StringRef prop) const
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp)
         return nullptr;
     const auto *gp = (*dp)->getters.get(prop);
@@ -1478,7 +1478,7 @@ const UserFunction *Engine::classGetter(keel::StringRef className,
 const UserFunction *Engine::classSetter(keel::StringRef className,
                                         keel::StringRef prop) const
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp)
         return nullptr;
     const auto *sp = (*dp)->setters.get(prop);
@@ -1491,7 +1491,7 @@ const UserFunction *Engine::classSetter(keel::StringRef className,
 
 bool Engine::isPropAccessorActive(keel::StringRef accessorName) const
 {
-    for (const auto &a : activePropAccessors_)
+    for (const auto &a : classReg_->activePropAccessors)
         if (a == accessorName)
             return true;
     if (vm_ && vm_->hasActiveFrameNamed(accessorName))
@@ -1501,7 +1501,7 @@ bool Engine::isPropAccessorActive(keel::StringRef accessorName) const
 
 void Engine::enforcePropGetAccess(keel::StringRef className, keel::StringRef prop)
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp || !(*dp)->anyNonPublicProp)
         return;
     if (const PropInfo *pi = findProp(**dp, prop); pi && pi->getAccess != Access::Public)
@@ -1510,7 +1510,7 @@ void Engine::enforcePropGetAccess(keel::StringRef className, keel::StringRef pro
 
 void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef prop)
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp)
         return;
     const ClassDefDesc &desc = **dp;
@@ -1534,7 +1534,7 @@ void Engine::enforcePropSetAccess(keel::StringRef className, keel::StringRef pro
 Value Engine::superConstruct(keel::StringRef base, const Value &seed,
                              keel::ArrayRef<Value> args)
 {
-    const auto *dp = classDefs_.get(base);
+    const auto *dp = classReg_->classDefs.get(base);
     if (!dp) {
         auto msg = keel::format("superclass '{}' is not a classdef", base);
         throw numkit::Error(msg.c_str());
@@ -1550,7 +1550,7 @@ Value Engine::superConstruct(keel::StringRef base, const Value &seed,
 keel::Array<Value> Engine::superMethod(keel::StringRef base, keel::StringRef method,
                                        keel::ArrayRef<Value> args, keel::usize nout)
 {
-    const auto *dp = classDefs_.get(base);
+    const auto *dp = classReg_->classDefs.get(base);
     if (!dp) {
         auto msg = keel::format("superclass '{}' is not a classdef", base);
         throw numkit::Error(msg.c_str());
@@ -1571,13 +1571,13 @@ keel::Array<Value> Engine::superMethod(keel::StringRef base, keel::StringRef met
 
 void Engine::pushClassCtx(keel::StringRef className, bool isCtor)
 {
-    classCtx_.push_back({keel::String::from(className), isCtor});
+    classReg_->classCtx.push_back({keel::String::from(className), isCtor});
 }
 
 void Engine::popClassCtx()
 {
-    if (!classCtx_.empty())
-        classCtx_.pop_back();
+    if (!classReg_->classCtx.empty())
+        classReg_->classCtx.pop_back();
 }
 
 // The class whose method/constructor is currently executing. A TW callback's
@@ -1586,8 +1586,8 @@ void Engine::popClassCtx()
 // scope. (No separate VM stack — read on demand, so it stays exception-safe.)
 keel::StringRef Engine::currentClassCtx_() const
 {
-    if (!classCtx_.empty())
-        return classCtx_.back().className.as_ref();
+    if (!classReg_->classCtx.empty())
+        return classReg_->classCtx.back().className.as_ref();
     if (useVM_())
         return vm_->currentMethodClass();
     return {};
@@ -1603,7 +1603,7 @@ bool Engine::classCtxAllows(keel::StringRef declClass, bool privateOnly) const
     if (privateOnly)
         return false;
     // protected: the running class must be a subclass of the declaring class.
-    const auto *dp = classDefs_.get(ctx);
+    const auto *dp = classReg_->classDefs.get(ctx);
     if (!dp)
         return false;
     const auto &sc = (*dp)->superclasses;
@@ -1612,8 +1612,8 @@ bool Engine::classCtxAllows(keel::StringRef declClass, bool privateOnly) const
 
 bool Engine::classCtxInCtorOf(keel::StringRef declClass) const
 {
-    if (!classCtx_.empty())
-        return classCtx_.back().isCtor && classCtx_.back().className == declClass;
+    if (!classReg_->classCtx.empty())
+        return classReg_->classCtx.back().isCtor && classReg_->classCtx.back().className == declClass;
     if (useVM_())
         return vm_->currentMethodIsCtor() && vm_->currentMethodClass() == declClass;
     return false;
@@ -1621,7 +1621,7 @@ bool Engine::classCtxInCtorOf(keel::StringRef declClass) const
 
 void Engine::enforceCtorAccess(keel::StringRef className)
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (dp && (*dp)->ctorAccess != Access::Public) {
         const Access lvl = (*dp)->ctorAccess;
         if (!classCtxAllows((*dp)->ctorDeclClass, /*privateOnly=*/lvl == Access::Private)) {
@@ -1640,7 +1640,7 @@ Value Engine::constructChecked(const BuiltinClass *cls, keel::ArrayRef<Value> ar
 
 Value Engine::makeDefaultInstance(keel::StringRef className)
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp) {
         auto msg = keel::format("'{}' is not a classdef", className);
         throw numkit::Error(msg.c_str());
@@ -1659,7 +1659,7 @@ Value Engine::makeDefaultInstance(keel::StringRef className)
 
 const UserFunction *Engine::classCtor(keel::StringRef className) const
 {
-    const auto *dp = classDefs_.get(className);
+    const auto *dp = classReg_->classDefs.get(className);
     if (!dp || !(*dp)->ctor)
         return nullptr;
     return (*dp)->ctor.get();

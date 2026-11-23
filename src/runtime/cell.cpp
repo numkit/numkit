@@ -553,7 +553,8 @@ static Value cellfunN(keel::ArrayRef<Value> cells, bool uniformOutput, Apply app
 //   length | ndims | prodofsize   → double per cell
 //   size, C, k                    → size(C{i}, k)
 //   isclass, C, 'classname'       → isa(C{i}, classname)
-static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
+static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr,
+                               const Engine *engine)
 {
     const keel::String name = hf::lowerName(args[0].toString());
     if (args.size() < 2 || !args[1].isCell())
@@ -593,6 +594,8 @@ static Value cellfunStringForm(keel::ArrayRef<Value> args, keel::Allocator *mr)
     const ValueType outT = wantLogical ? ValueType::LOGICAL : ValueType::DOUBLE;
     Value out = allocMatrixShape(d, outT, mr);
     for (keel::usize i = 0; i < n; ++i) {
+        if (engine && (i & 1023u) == 0u)
+            engine->checkCancelled();
         const Value e = C.cellAt(i);
         keel::f64 val = 0.0;
         if (name == "isempty")          val = (e.isEmpty() || e.numel() == 0) ? 1.0 : 0.0;
@@ -626,7 +629,7 @@ void cellfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 
     // Legacy string-function-name form: cellfun('isempty', C), cellfun('size', C, k), …
     if (args[0].isChar() || args[0].isString()) {
-        outs[0] = cellfunStringForm(args, mr);
+        outs[0] = cellfunStringForm(args, mr, ctx.engine);
         return;
     }
 

@@ -40,36 +40,11 @@ void registerDiagnosticsRuntime(Engine &engine);
 ///
 /// Same form-dispatch as @ref error but does not throw — writes
 /// `"Warning: ...\n"` via `engine.outputText()` and updates the
-/// most-recent-warning state (see @ref lastwarnGet).
+/// engine's most-recent-warning state (`engine.setLastWarn`).
 ///
 /// @param engine  Engine whose output stream receives the message.
 /// @param args    Form-dispatched as for @ref error.
 void warning(Engine &engine, keel::ArrayRef<Value> args);  // lint: engine-io
-
-/// @brief Snapshot of the most-recent warning.
-struct LastWarn {
-    keel::String msg;  ///< Last warning's formatted message.
-    keel::String id;   ///< Last warning's identifier (`""` if unset).
-};
-
-/// @brief Read most-recent warning state (`[msg, id] = lastwarn()`).
-///
-/// Storage is `thread_local` in the implementation TU, so concurrent
-/// engines on different threads each see their own last-warning.
-///
-/// @return Snapshot of the last `warning(...)` call.
-/// @see warning, lastwarnSet
-LastWarn lastwarnGet();
-
-/// @brief Overwrite the most-recent warning state.
-///
-/// Used internally by @ref warning; also exposed as the
-/// `lastwarn(MSG, ID)` setter form.
-///
-/// @param msg  New message.
-/// @param id   New identifier.
-/// @see lastwarnGet
-void lastwarnSet(keel::StringRef msg, keel::StringRef id);
 
 /// @brief Build an MException-like struct (`me = MException(id, msg, args...)`).
 ///
