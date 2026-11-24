@@ -17,7 +17,6 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <keel/static_array.h>
-#include <cstdio>
 
 namespace numkit::detail {
 

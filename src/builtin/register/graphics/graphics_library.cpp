@@ -48,7 +48,7 @@
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/value/object.hpp>
 
-#include <cstdio>
+#include <keel/number.h>
 
 #ifdef _WIN32
 extern "C" {
@@ -181,8 +181,7 @@ const HandleTypeEntry *findHandleType(keel::StringRef fnName)
 keel::String formatPropDouble(keel::f64 d)
 {
     char buf[40];
-    std::snprintf(buf, sizeof buf, "%.17g", d);
-    return keel::String::from(buf);
+    return keel::String::from(keel::format_f64_general_to(buf, d, 17));
 }
 
 keel::String encodeProp(const Value &v)
@@ -375,12 +374,10 @@ keel::String rgbToHex(const Value &v)
         if (i > 255) i = 255;
         return i;
     };
-    char buf[8];
-    std::snprintf(buf, sizeof buf, "#%02x%02x%02x",
-                  clamp255(v.numel() > 0 ? v.elemAsDouble(0) : 0),
-                  clamp255(v.numel() > 1 ? v.elemAsDouble(1) : 0),
-                  clamp255(v.numel() > 2 ? v.elemAsDouble(2) : 0));
-    return keel::String::from(buf);
+    return keel::format("#{:02x}{:02x}{:02x}",
+                        clamp255(v.numel() > 0 ? v.elemAsDouble(0) : 0),
+                        clamp255(v.numel() > 1 ? v.elemAsDouble(1) : 0),
+                        clamp255(v.numel() > 2 ? v.elemAsDouble(2) : 0));
 }
 
 // ── Render-effect: apply one property to the backing DatasetInfo ─────
@@ -1385,12 +1382,21 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     {'w', {1, 1, 1}},       {'y', {1, 1, 0}},
                     {'m', {1, 0, 1}},       {'c', {0, 1, 1}},
                 };
+                auto parseHexRgb = [](keel::StringRef hex6, keel::u32 &R, keel::u32 &G, keel::u32 &B) -> bool {
+                    if (hex6.size() < 6) return false;
+                    auto r = keel::parse_u64(hex6.substr(0, 2), 16);
+                    auto g = keel::parse_u64(hex6.substr(2, 2), 16);
+                    auto b = keel::parse_u64(hex6.substr(4, 2), 16);
+                    if (!r.is_ok() || !g.is_ok() || !b.is_ok()) return false;
+                    R = keel::as<keel::u32>(r.value());
+                    G = keel::as<keel::u32>(g.value());
+                    B = keel::as<keel::u32>(b.value());
+                    return true;
+                };
                 keel::usize hp = s.find("color=#");
                 if (hp != keel::kInvalidIndex) {
                     keel::u32 R = 0, G = 0, B = 0;
-                    if (std::sscanf(s.c_str() + hp + 7, "%02x%02x%02x", &R,
-                                    &G, &B)
-                        == 3)
+                    if (parseHexRgb(s.as_ref().substr(hp + 7), R, G, B))
                         return rgb(R / 255.0, G / 255.0, B / 255.0);
                 } else {
                     // kv color= segment or a bare linespec letter; the
@@ -1422,9 +1428,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                     if (cand.size() > 1 && cand[0] == '#'
                         && cand.size() >= 7) {
                         keel::u32 R = 0, G = 0, B = 0;
-                        if (std::sscanf(cand.c_str() + 1, "%02x%02x%02x",
-                                        &R, &G, &B)
-                            == 3)
+                        if (parseHexRgb(cand.as_ref().substr(1), R, G, B))
                             return rgb(R / 255.0, G / 255.0, B / 255.0);
                     }
                 }

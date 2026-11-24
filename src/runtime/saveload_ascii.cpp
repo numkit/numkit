@@ -14,8 +14,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>
-#include <cstdio>
-#include <cstdlib>
+#include <keel/number.h>
 
 namespace numkit::runtime {
 
@@ -41,10 +40,8 @@ void saveAscii(Engine &engine, Environment &env,
         for (keel::usize r = 0; r < rows; ++r) {
             for (keel::usize c = 0; c < cols; ++c) {
                 if (c > 0) out.push_back(' ');
-                char buf[32];
-                keel::i32 len = std::snprintf(buf, sizeof(buf), "%.17g", (*v)(r, c));
-                if (len > 0)
-                    out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
+                char buf[64];
+                out.append(keel::format_f64_general_to(buf, (*v)(r, c), 17));
             }
             out.push_back('\n');
         }
@@ -96,13 +93,13 @@ void loadAscii(Engine &engine, Environment &env,
         while (q < line.size()) {
             while (q < line.size() && (keel::is_ascii_space(line[q]) || line[q] == ',')) ++q;
             if (q >= line.size()) break;
-            const char *start = line.c_str() + q;
-            char *endp = nullptr;
-            keel::f64 v = std::strtod(start, &endp);
-            if (endp == start)
-                throw Error(keel::format("load: parse error near '{}'", line.substr(q)));
-            row.push_back(v);
-            q = keel::as<keel::usize>(endp - line.c_str());
+            keel::usize tstart = q;
+            while (q < line.size() && !keel::is_ascii_space(line[q]) && line[q] != ',') ++q;
+            keel::StringRef tok = line.as_ref().substr(tstart, q - tstart);
+            auto parsed = keel::parse_f64(tok);
+            if (!parsed.is_ok())
+                throw Error(keel::format("load: parse error near '{}'", line.substr(tstart)));
+            row.push_back(parsed.value());
         }
         rows.push_back(keel::move(row));
     }

@@ -11,7 +11,6 @@
 #include <numkit/pkg/package_manager.hpp>
 #include <numkit/value/error.hpp>
 
-#include <cstdio>
 
 namespace numkit::runtime {
 namespace detail {

@@ -29,7 +29,7 @@
 #include <numkit/image/io/io.hpp>
 #include <numkit/value/argcheck.hpp>
 
-#include <cstdlib>
+#include <keel/number.h>
 
 namespace numkit {
 
@@ -152,8 +152,12 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             // print-style flags: -dpng / -dsvg / -r150 / -ochr…
             if (sl.size() > 2 && sl[1] == 'd')
                 out.ext = keel::String::from(sl.substr(2));
-            else if (sl.size() > 2 && sl[1] == 'r')
-                out.dpi = keel::max(30, std::atoi(sl.c_str() + 2));
+            else if (sl.size() > 2 && sl[1] == 'r') {
+                keel::i32 dpiVal = 0;
+                if (auto parsed = keel::parse_i64(sl.substr(2)); parsed.is_ok())
+                    dpiVal = keel::as<keel::i32>(parsed.value());
+                out.dpi = keel::max(30, dpiVal);
+            }
             // other print options (-painters, -opengl, -bestfit, …)
             // accepted and ignored
             continue;

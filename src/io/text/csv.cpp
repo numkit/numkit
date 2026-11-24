@@ -19,8 +19,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/sys/fs_context.hpp>
 
-#include <cstdio>
-#include <cstdlib>
+#include <keel/number.h>
 
 namespace numkit::io {
 
@@ -72,11 +71,8 @@ keel::Array<keel::f64> parseCsvLine(keel::Allocator *mr, keel::StringRef raw)
                 --n;
             keel::f64 v = 0.0;
             if (n > 0) {
-                keel::SmallString<64> cell(keel::StringRef(p, n), mr);
-                char *endp = nullptr;
-                keel::f64 parsed = std::strtod(cell.c_str(), &endp);
-                if (endp != cell.c_str())
-                    v = parsed;
+                if (auto parsed = keel::parse_f64(keel::StringRef(p, n)); parsed.is_ok())
+                    v = parsed.value();
             }
             out.push_back(v);
             start = i + 1;
@@ -178,10 +174,8 @@ keel::String csvwriteToString(const Value &M, keel::usize offR, keel::usize offC
         out.push_back('\n');
 
     auto writeCell = [&](keel::f64 v) {
-        char buf[32];
-        keel::i32 len = std::snprintf(buf, sizeof(buf), "%.15g", v);
-        if (len > 0)
-            out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
+        char buf[64];
+        out.append(keel::format_f64_general_to(buf, v, 15));
     };
 
     for (keel::usize r = 0; r < R; ++r) {

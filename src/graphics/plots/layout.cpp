@@ -19,8 +19,8 @@
 #include <numkit/graphics/graphics_handle.hpp>
 
 #include <keel/static_array.h>
-#include <cstdio>
-#include <cstdlib>
+#include <keel/format.h>
+#include <keel/number.h>
 
 namespace numkit {
 
@@ -181,17 +181,32 @@ void queryOrSetLim(FigureManager &fm, keel::String &limJson,
                 continue;
             }
             const keel::String &j = (axisChar == 'x') ? ds.xJson : (axisChar == 'y' ? ds.yJson : ds.zJson);
-            const char *base = j.c_str();
             keel::usize pos = 0;
             while (pos < j.size()) {
                 if (keel::is_ascii_digit(j[pos]) || j[pos] == '-' || j[pos] == '+') {
-                    char *endptr = nullptr;
-                    keel::f64 v = std::strtod(base + pos, &endptr);
-                    if (endptr && endptr > base + pos && keel::is_finite(v)) {
-                        if (v < dmin) dmin = v;
-                        if (v > dmax) dmax = v;
-                        pos = keel::as<keel::usize>(endptr - base);
-                        continue;
+                    keel::usize endp = pos;
+                    if (j[endp] == '-' || j[endp] == '+') ++endp;
+                    keel::usize dstart = endp;
+                    while (endp < j.size() && keel::is_ascii_digit(j[endp])) ++endp;
+                    if (endp < j.size() && j[endp] == '.') {
+                        ++endp;
+                        while (endp < j.size() && keel::is_ascii_digit(j[endp])) ++endp;
+                    }
+                    if (endp > dstart && endp < j.size() && (j[endp] == 'e' || j[endp] == 'E')) {
+                        keel::usize eq = endp + 1;
+                        if (eq < j.size() && (j[eq] == '+' || j[eq] == '-')) ++eq;
+                        keel::usize ed = eq;
+                        while (eq < j.size() && keel::is_ascii_digit(j[eq])) ++eq;
+                        if (eq > ed) endp = eq;
+                    }
+                    if (endp > dstart) {
+                        if (auto parsed = keel::parse_f64(j.as_ref().substr(pos, endp - pos));
+                            parsed.is_ok() && keel::is_finite(parsed.value())) {
+                            if (parsed.value() < dmin) dmin = parsed.value();
+                            if (parsed.value() > dmax) dmax = parsed.value();
+                            pos = endp;
+                            continue;
+                        }
                     }
                 }
                 ++pos;
@@ -435,7 +450,6 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
     }
     // Name-Value walk.
     auto colorToHex = [](const Value &cv, keel::String &hexOut) -> bool {
-        char buf[8];
         if (cv.isChar()) {
             keel::String s = cv.toString();
             s.to_ascii_lower_in_place();
@@ -455,11 +469,10 @@ void annotation_plot(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::
             return false;
         }
         if (cv.isNumeric() && cv.numel() >= 3) {
-            std::snprintf(buf, sizeof buf, "#%02x%02x%02x",
-                          (keel::u32)(cv.elemAsDouble(0) * 255 + 0.5),
-                          (keel::u32)(cv.elemAsDouble(1) * 255 + 0.5),
-                          (keel::u32)(cv.elemAsDouble(2) * 255 + 0.5));
-            hexOut.assign(buf);
+            hexOut = keel::format("#{:02x}{:02x}{:02x}",
+                                  (keel::u32)(cv.elemAsDouble(0) * 255 + 0.5),
+                                  (keel::u32)(cv.elemAsDouble(1) * 255 + 0.5),
+                                  (keel::u32)(cv.elemAsDouble(2) * 255 + 0.5));
             return true;
         }
         return false;

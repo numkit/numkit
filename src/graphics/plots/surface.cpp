@@ -13,7 +13,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <keel/static_array.h>
-#include <cstdio>
+#include <keel/format.h>
 
 namespace numkit {
 
@@ -885,11 +885,8 @@ void isosurfaceImpl(keel::ArrayRef<Value> args, keel::usize nargout,
     const keel::i32 rcomp = (keel::i32)keel::clamp(t * 255.0,        0.0, 255.0);
     const keel::i32 gcomp = (keel::i32)keel::clamp(120.0,            0.0, 255.0);
     const keel::i32 bcomp = (keel::i32)keel::clamp((1 - t) * 255.0,  0.0, 255.0);
-    char buf[64];
-    std::snprintf(buf, sizeof buf,
-                  "color=#%02x%02x%02x;fillOpacity=0.85;smoothNormals=1",
-                  rcomp, gcomp, bcomp);
-    ds.style.assign(buf);
+    ds.style = keel::format("color=#{:02x}{:02x}{:02x};fillOpacity=0.85;smoothNormals=1",
+                            rcomp, gcomp, bcomp);
     fm.pushDataset(keel::move(ds));
     fm.emitModified();
     outs[0] = Value();

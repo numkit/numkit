@@ -12,7 +12,6 @@
 #include "plot_internal.hpp"
 #include <numkit/graphics/graphics_context.hpp>
 
-#include <cstdio>
 
 namespace numkit {
 

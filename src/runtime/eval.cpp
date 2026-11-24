@@ -18,8 +18,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 
-#include <cstdio>
-#include <cstdlib>
+#include <keel/io.h>
 
 namespace numkit::runtime {
 
@@ -247,17 +246,17 @@ void input_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (provider) {
         line = provider();
     } else {
-        char buf[256];
-        while (std::fgets(buf, sizeof(buf), stdin) != nullptr) {
-            keel::StringRef chunk(buf);
-            if (!chunk.empty() && chunk.back() == '\n') {
-                chunk.remove_suffix(1);
-                if (!chunk.empty() && chunk.back() == '\r')
-                    chunk.remove_suffix(1);
-                line.append(chunk);
+        keel::u8 ch = 0;
+        while (true) {
+            auto r = keel::stdin_read(keel::MutArrayRef<keel::u8>(&ch, 1));
+            if (!r.is_ok() || r.value() == 0)
+                break;
+            if (ch == '\n') {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
                 break;
             }
-            line.append(chunk);
+            line.push_back(keel::as<char>(ch));
         }
     }
     if (asText)

@@ -18,7 +18,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
-#include <cstdio>
+#include <keel/number.h>
 
 namespace numkit::io {
 
@@ -209,9 +209,7 @@ keel::String writematrixToString(const Value &m)
                 keel::format_into(out, "{}", keel::as<keel::i64>(v));
             } else {
                 char buf[64];
-                keel::i32 len = std::snprintf(buf, sizeof(buf), "%.15g", v);
-                if (len > 0)
-                    out.append(keel::StringRef(buf, keel::as<keel::usize>(len)));
+                out.append(keel::format_f64_general_to(buf, v, 15));
             }
         }
         out.push_back('\n');

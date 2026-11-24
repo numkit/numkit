@@ -17,7 +17,7 @@
 #include <numkit/graphics/figure_manager.hpp>      // DatasetInfo
 #include <numkit/value/value.hpp>                // Value
 
-#include <cstdio>
+#include <keel/number.h>
 
 namespace numkit {
 
@@ -59,17 +59,17 @@ struct StrBuf {
     StrBuf &operator<<(keel::i32 v)
     {
         char tmp[32];
-        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%d", v);
+        keel::usize n = keel::format_i64(tmp, sizeof(tmp), keel::as<keel::i64>(v));
         if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, n));
         return *this;
     }
     StrBuf &operator<<(keel::u32 v)
     {
         char tmp[32];
-        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%u", v);
+        keel::usize n = keel::format_u64(tmp, sizeof(tmp), keel::as<keel::u64>(v));
         if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, n));
         return *this;
     }
     StrBuf &operator<<(keel::i64 v)
@@ -95,9 +95,9 @@ struct StrBuf {
     StrBuf &operator<<(keel::f64 v)
     {
         char tmp[64];
-        keel::i32 n = std::snprintf(tmp, sizeof(tmp), "%.6g", v);
+        keel::usize n = keel::format_f64_general(tmp, sizeof(tmp), v, 6);
         if (n > 0)
-            buf.append(keel::StringRef(tmp, keel::as<keel::usize>(n)));
+            buf.append(keel::StringRef(tmp, n));
         return *this;
     }
 };

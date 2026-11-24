@@ -13,7 +13,7 @@
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <keel/static_array.h>
-#include <cstdio>
+#include <keel/format.h>
 
 namespace numkit {
 
@@ -117,9 +117,7 @@ void contour_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             const keel::i32 R8 = (keel::i32)((r1 + m) * 255);
             const keel::i32 G8 = (keel::i32)((g1 + m) * 255);
             const keel::i32 B8 = (keel::i32)((b1 + m) * 255);
-            char buf[24];
-            std::snprintf(buf, sizeof buf, "color=#%02x%02x%02x", R8, G8, B8);
-            return keel::String::from(buf);
+            return keel::format("color=#{:02x}{:02x}{:02x}", R8, G8, B8);
         };
 
         // Marching squares per level. Each cell's 4-bit code (TL, TR, BR, BL)
@@ -290,9 +288,7 @@ void contourf_plot(keel::ArrayRef<Value> args, keel::usize nargout,
             const keel::i32 R8 = (keel::i32)((r1 + m) * 255);
             const keel::i32 G8 = (keel::i32)((g1 + m) * 255);
             const keel::i32 B8 = (keel::i32)((b1 + m) * 255);
-            char buf[48];
-            std::snprintf(buf, sizeof buf, "color=#%02x%02x%02x;fillOpacity=1.0", R8, G8, B8);
-            return keel::String::from(buf);
+            return keel::format("color=#{:02x}{:02x}{:02x};fillOpacity=1.0", R8, G8, B8);
         };
 
         // Bottom layer — full extent — coloured at the lowest band so

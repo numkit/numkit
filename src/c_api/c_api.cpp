@@ -14,7 +14,6 @@
 #include <numkit/core/standard_engine.hpp>
 #include <numkit/value/c_api_bridge.hpp>
 
-#include <cstdlib>
 #include <keel/dynlib.h>
 #include <exception>
 #include <numkit/value/error.hpp>

@@ -19,8 +19,7 @@
 #include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
 
-#include <cstdio>
-#include <cstdlib>
+#include <keel/number.h>
 
 namespace numkit::builtin::detail {
 
@@ -158,15 +157,14 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
     if (f.empty()) {
         f = anyTimeInArray ? keel::StringRef("dd-MMM-uuuu HH:mm:ss") : keel::StringRef("dd-MMM-uuuu");
     }
-    char y4[16], m2[8], d2[8], h2[8], mi2[8], s2[16];
-    std::snprintf(y4, sizeof(y4), "%04lld", keel::as<keel::i64>(c.year));
-    std::snprintf(m2, sizeof(m2), "%02lld", keel::as<keel::i64>(c.month));
-    std::snprintf(d2, sizeof(d2), "%02lld", keel::as<keel::i64>(c.day));
-    std::snprintf(h2, sizeof(h2), "%02lld", keel::as<keel::i64>(c.hour));
-    std::snprintf(mi2, sizeof(mi2), "%02lld", keel::as<keel::i64>(c.minute));
+    keel::String y4 = keel::format("{:04}", keel::as<keel::i64>(c.year));
+    keel::String m2 = keel::format("{:02}", keel::as<keel::i64>(c.month));
+    keel::String d2 = keel::format("{:02}", keel::as<keel::i64>(c.day));
+    keel::String h2 = keel::format("{:02}", keel::as<keel::i64>(c.hour));
+    keel::String mi2 = keel::format("{:02}", keel::as<keel::i64>(c.minute));
     keel::i32 wholeSec = keel::as<keel::i32>(keel::floor(c.second + 1e-9));
     keel::f64 fracSec = c.second - wholeSec;
-    std::snprintf(s2, sizeof(s2), "%02d", wholeSec);
+    keel::String s2 = keel::format("{:02}", wholeSec);
     const char *mmm = (c.month >= 1 && c.month <= 12) ? kMonthShort[c.month - 1] : "Jan";
 
     if (f == "dd-MMM-uuuu" || f == "dd-MMM-yyyy")
@@ -188,9 +186,7 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
             res.append(y4);
             i += 4;
         } else if (matchAt(i, "uu") || matchAt(i, "yy")) {
-            char y2[8];
-            std::snprintf(y2, sizeof(y2), "%02lld", keel::as<keel::i64>(c.year % 100));
-            res.append(y2);
+            keel::format_into(res, "{:02}", keel::as<keel::i64>(c.year % 100));
             i += 2;
         } else if (matchAt(i, "QQQ")) {
             keel::i32 q = keel::as<keel::i32>((c.month - 1) / 3 + 1);
@@ -217,9 +213,7 @@ inline keel::String formatDateTimeElem(keel::f64 serialDay, keel::StringRef fmt,
             i += 2;
         } else if (matchAt(i, "ss.SSS")) {
             keel::i32 ms = keel::as<keel::i32>(keel::round(fracSec * 1000.0));
-            char msBuf[16];
-            std::snprintf(msBuf, sizeof(msBuf), "%s.%03d", s2, ms);
-            res.append(msBuf);
+            keel::format_into(res, "{}.{:03}", s2, ms);
             i += 6;
         } else if (matchAt(i, "ss")) {
             res.append(s2);
@@ -260,12 +254,15 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     };
     auto readInt = [&](const char *&p, keel::i32 &out) -> bool {
         skipWs(p);
-        char *ep = nullptr;
-        keel::i64 val = std::strtol(p, &ep, 10);
-        if (ep == p)
-            return false;
-        out = keel::as<keel::i32>(val);
-        p = ep;
+        const char *q = p;
+        if (*q == '+' || *q == '-') ++q;
+        const char *dstart = q;
+        while (*q && keel::is_ascii_digit(*q)) ++q;
+        if (q == dstart) return false;
+        auto parsed = keel::parse_i64(keel::StringRef(p, keel::as<keel::usize>(q - p)));
+        if (!parsed.is_ok()) return false;
+        out = keel::as<keel::i32>(parsed.value());
+        p = q;
         return true;
     };
     auto readChar = [&](const char *&p, char &out) -> bool {
@@ -277,12 +274,26 @@ inline keel::f64 parseDateTimeString(keel::StringRef raw, keel::Allocator *mr)
     };
     auto readDouble = [&](const char *&p, keel::f64 &out) -> bool {
         skipWs(p);
-        char *ep = nullptr;
-        keel::f64 val = std::strtod(p, &ep);
-        if (ep == p)
-            return false;
-        out = val;
-        p = ep;
+        const char *q = p;
+        if (*q == '+' || *q == '-') ++q;
+        const char *dstart = q;
+        while (*q && keel::is_ascii_digit(*q)) ++q;
+        if (*q == '.') {
+            ++q;
+            while (*q && keel::is_ascii_digit(*q)) ++q;
+        }
+        if (q == dstart || (q == dstart + 1 && *dstart == '.')) return false;
+        if (*q == 'e' || *q == 'E') {
+            const char *eq = q + 1;
+            if (*eq == '+' || *eq == '-') ++eq;
+            const char *ed = eq;
+            while (*eq && keel::is_ascii_digit(*eq)) ++eq;
+            if (eq > ed) q = eq;
+        }
+        auto parsed = keel::parse_f64(keel::StringRef(p, keel::as<keel::usize>(q - p)));
+        if (!parsed.is_ok()) return false;
+        out = parsed.value();
+        p = q;
         return true;
     };
 
@@ -515,22 +526,12 @@ inline keel::String formatDurationElem(keel::f64 sec, keel::StringRef fmt)
     keel::i64 hh = wholeSec / 3600;
     keel::i64 mm = (wholeSec % 3600) / 60;
     keel::i64 ss = wholeSec % 60;
-    char buf[64];
     if (ms == 0) {
-        std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld",
-                      neg ? "-" : "",
-                      keel::as<keel::i64>(hh),
-                      keel::as<keel::i64>(mm),
-                      keel::as<keel::i64>(ss));
-    } else {
-        std::snprintf(buf, sizeof(buf), "%s%02lld:%02lld:%02lld.%03lld",
-                      neg ? "-" : "",
-                      keel::as<keel::i64>(hh),
-                      keel::as<keel::i64>(mm),
-                      keel::as<keel::i64>(ss),
-                      keel::as<keel::i64>(ms));
+        return keel::format("{}{:02}:{:02}:{:02}",
+                            neg ? "-" : "", hh, mm, ss);
     }
-    return keel::String::from(buf);
+    return keel::format("{}{:02}:{:02}:{:02}.{:03}",
+                        neg ? "-" : "", hh, mm, ss, ms);
 }
 
 inline keel::String formatCalDurElem(const CalDurElemPayload &cd)
