@@ -499,7 +499,7 @@ keel::String DebugSession::runInDebugScope(keel::StringRef code, bool applyChang
             genv.declareGlobal(g);
         for (const auto &imp : preEvalImports)
             genv.pushImport(imp.clone());
-        engine_.clearAllCalled_ = false;
+        engine_.resetClearAllFlag();
 
         if (prevEvalOut)
             engine_.setOutputFunc(keel::move(prevEvalOut));

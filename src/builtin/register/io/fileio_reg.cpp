@@ -21,7 +21,7 @@ namespace numkit::io::detail {
     void FN##_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)      \
     {                                                                                              \
         argcheck::checkNargin(args.size(), MIN_A, MAX_A, #FN);                                     \
-        FN(ctx.engine->fsContext(), args, nargout, outs, ctx.engine->allocator());                  \
+        FN(coreEngine(ctx).fsContext(), args, nargout, outs, ctx.engine->allocator());                  \
     }
 
 void fopen_reg(keel::ArrayRef<Value> args, keel::usize nargout,
@@ -37,7 +37,7 @@ void fopen_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         const bool isReadOnly = !mode.empty() && mode[0] == 'r'
                                 && mode.find('+') == keel::kInvalidIndex;
         if (isReadOnly && rawPath != "all") {
-            auto &fsc = ctx.engine->fsContext();
+            auto &fsc = coreEngine(ctx).fsContext();
             auto cwdRp = fsc.resolvePath(rawPath.as_ref());
             const bool foundInCwd = cwdRp.fs
                 && (cwdRp.fs->exists(cwdRp.path)
@@ -57,7 +57,7 @@ void fopen_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             }
         }
     }
-    fopen(ctx.engine->fsContext(), args, nargout, outs, mr);
+    fopen(coreEngine(ctx).fsContext(), args, nargout, outs, mr);
 }
 
 NUMKIT_FILEIO_REG(fclose,  1, 1)

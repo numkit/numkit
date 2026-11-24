@@ -54,13 +54,13 @@ void fileparts_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
 void tempdir_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 0, "tempdir");
-    outs[0] = tempdir(ctx.engine->fsContext(), ctx.engine->allocator());
+    outs[0] = tempdir(coreEngine(ctx).fsContext(), ctx.engine->allocator());
 }
 
 void tempname_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 0, 1, "tempname");
-    outs[0] = tempname(ctx.engine->fsContext(), ctx.engine->allocator());
+    outs[0] = tempname(coreEngine(ctx).fsContext(), ctx.engine->allocator());
 }
 
 // ── genpath: recursive path string from a directory tree ────────────
@@ -102,7 +102,7 @@ void genpath_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
                      0, 0, "genpath", "", "numkit:genpath:nargin");
     keel::String result;
     const keel::String root = args[0].toString();
-    genpathCollect(*ctx.engine, root, result);
+    genpathCollect(coreEngine(ctx), root, result);
     outs[0] = Value::fromString(result, ctx.engine->allocator());
 }
 

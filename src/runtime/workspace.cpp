@@ -25,10 +25,9 @@
 #include <numkit/core/environment.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)
+#include <numkit/builtin/strfun.hpp>   // regexValidate / regexSearch
 #include <numkit/value/value.hpp>
 #include <numkit/value/value_type.hpp> // mtypeName (whos)
-
-#include <regex>
 
 namespace numkit::runtime {
 
@@ -63,16 +62,16 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto *env = ctx.env;
-    ctx.engine->syncFrameToEnv(env);
-    bool insideFunc = ctx.engine->isInsideFunctionCall();
+    coreEngine(ctx).syncFrameToEnv(env);
+    bool insideFunc = coreEngine(ctx).isInsideFunctionCall();
 
     if (args.empty()) {
         env->clearAll();
         if (!insideFunc) {
-            ctx.engine->reinstallConstants();
-            ctx.engine->markClearAll();
+            coreEngine(ctx).reinstallConstants();
+            coreEngine(ctx).markClearAll();
         }
-        ctx.engine->syncEnvRemovalsToFrame(env);
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
         outs[0] = Value();
         return;
     }
@@ -82,13 +81,14 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
                              : keel::String();
 
     if (first == "-regexp") {
-        keel::Array<keel::UniquePtr<std::regex>> pats;
+        keel::Array<keel::String> pats;
         for (keel::usize i = 1; i < args.size(); ++i) {
             if (!args[i].isChar() && !args[i].isString()) continue;
             keel::String patStr = args[i].toString();
             try {
-                pats.push_back(keel::make_unique<std::regex>(patStr.c_str(), patStr.size()));
-            } catch (const std::regex_error &) {
+                builtin::regexValidate(patStr);
+                pats.push_back(keel::move(patStr));
+            } catch (const Error &) {
                 throw numkit::Error(
                     keel::format("clear -regexp: invalid pattern '{}'", patStr).c_str());
             }
@@ -99,8 +99,8 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
             for (const auto &g : e->globalNames()) candidates.push_back(g.clone());
             for (const auto &p : e->persistentNames()) candidates.push_back(p.clone());
             for (const auto &n : candidates) {
-                for (const auto &re : pats) {
-                    if (std::regex_search(n.c_str(), *re)) {
+                for (const auto &pat : pats) {
+                    if (builtin::regexSearch(n, pat)) {
                         e->remove(n);
                         break;
                     }
@@ -108,10 +108,10 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
             }
         };
         applyTo(env);
-        ctx.engine->syncEnvRemovalsToFrame(env);
-        if (!insideFunc && env != &ctx.engine->workspaceEnv()) {
-            applyTo(&ctx.engine->workspaceEnv());
-            ctx.engine->syncEnvRemovalsToFrame(&ctx.engine->workspaceEnv());
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
+        if (!insideFunc && env != &coreEngine(ctx).workspaceEnv()) {
+            applyTo(&coreEngine(ctx).workspaceEnv());
+            coreEngine(ctx).syncEnvRemovalsToFrame(&coreEngine(ctx).workspaceEnv());
         }
         outs[0] = Value();
         return;
@@ -121,7 +121,7 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
         if (args.size() == 1) {
             if (gs) gs->clearAll();
             env->clearAll();
-            if (!insideFunc) ctx.engine->markClearAll();
+            if (!insideFunc) coreEngine(ctx).markClearAll();
         } else {
             for (keel::usize i = 1; i < args.size(); ++i) {
                 if (args[i].isChar() || args[i].isString()) {
@@ -131,7 +131,7 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
                 }
             }
         }
-        ctx.engine->syncEnvRemovalsToFrame(env);
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
         outs[0] = Value();
         return;
     }
@@ -144,30 +144,30 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
     if (first == "*") {
         env->clearAll();
         if (!insideFunc) {
-            ctx.engine->reinstallConstants();
-            ctx.engine->markClearAll();
+            coreEngine(ctx).reinstallConstants();
+            coreEngine(ctx).markClearAll();
         }
-        ctx.engine->syncEnvRemovalsToFrame(env);
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
     } else if (first == "all" || first == "classes") {
         if (insideFunc) {
             env->clearAll();
-            ctx.engine->syncEnvRemovalsToFrame(env);
+            coreEngine(ctx).syncEnvRemovalsToFrame(env);
         } else {
             env->clearAll();
-            ctx.engine->clearAllPersistent();
-            ctx.engine->clearUserFunctions();
-            ctx.engine->clearClassDefs();
-            ctx.engine->reinstallBuiltinSources();
+            coreEngine(ctx).clearAllPersistent();
+            coreEngine(ctx).clearUserFunctions();
+            coreEngine(ctx).clearClassDefs();
+            coreEngine(ctx).reinstallBuiltinSources();
             ctx.engine->figureManager().closeAll();
-            ctx.engine->reinstallConstants();
-            ctx.engine->markClearAll();
-            ctx.engine->syncEnvRemovalsToFrame(env);
+            coreEngine(ctx).reinstallConstants();
+            coreEngine(ctx).markClearAll();
+            coreEngine(ctx).syncEnvRemovalsToFrame(env);
         }
     } else if (first == "functions") {
         if (!insideFunc) {
-            ctx.engine->clearAllPersistent();
-            ctx.engine->clearUserFunctions();
-            ctx.engine->reinstallBuiltinSources();
+            coreEngine(ctx).clearAllPersistent();
+            coreEngine(ctx).clearUserFunctions();
+            coreEngine(ctx).reinstallBuiltinSources();
         }
     } else {
         for (auto &a : args) {
@@ -175,10 +175,10 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
                 keel::String vname = a.toString();
                 env->remove(vname);
                 if (!insideFunc)
-                    ctx.engine->clearPersistentForFunc(vname);
+                    coreEngine(ctx).clearPersistentForFunc(vname);
             }
         }
-        ctx.engine->syncEnvRemovalsToFrame(env);
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
     }
     outs[0] = Value();
 }
@@ -228,7 +228,7 @@ void import_reg(keel::ArrayRef<Value> args, keel::usize,
         imp.alias = asString(args[2], 2);
         if (imp.alias.empty()) fail("alias name must be non-empty");
         if (!imp.path.empty()) {
-            ctx.engine->pluginLoader().tryAutoLoadForFunction(
+            coreEngine(ctx).pluginLoader().tryAutoLoadForFunction(
                 keel::format("{}.", imp.path[0]));
         }
         ctx.env->pushImport(keel::move(imp));
@@ -241,7 +241,7 @@ void import_reg(keel::ArrayRef<Value> args, keel::usize,
         Import imp;
         parseSpec(spec, imp);
         if (!imp.path.empty()) {
-            ctx.engine->pluginLoader().tryAutoLoadForFunction(
+            coreEngine(ctx).pluginLoader().tryAutoLoadForFunction(
                 keel::format("{}.", imp.path[0]));
         }
         ctx.env->pushImport(keel::move(imp));
@@ -263,9 +263,9 @@ void assignin_reg(keel::ArrayRef<Value> args, keel::usize,
     if (name.empty())
         throw numkit::Error("assignin: name must be non-empty");
     if (where == "base") {
-        ctx.engine->assignInBase(name, args[2]);
+        coreEngine(ctx).assignInBase(name, args[2]);
     } else if (where == "caller") {
-        if (ctx.engine->callerDepth() < 1)
+        if (coreEngine(ctx).callerDepth() < 1)
             throw numkit::Error(
                 "assignin: 'caller' is not valid in the base workspace");
         ctx.engine->assignToCaller(1, name, args[2]);
@@ -285,7 +285,7 @@ void inputname_reg(keel::ArrayRef<Value> args, keel::usize,
     keel::i32 k = keel::as<keel::i32>(kd);
     if (keel::as<keel::f64>(k) != kd || k < 1)
         throw numkit::Error("inputname: k must be a positive integer");
-    keel::String name = ctx.engine->inputName(k);
+    keel::String name = coreEngine(ctx).inputName(k);
     outs[0] = Value::fromString(name, ctx.engine->allocator());
 }
 
@@ -330,7 +330,7 @@ void who_reg(keel::ArrayRef<Value> args, keel::usize nargout,
              keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto *env = ctx.env;
-    ctx.engine->syncFrameToEnv(env);
+    coreEngine(ctx).syncFrameToEnv(env);
 
     if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
         if (args.size() < 2 || !args[1].isChar())
@@ -341,7 +341,7 @@ void who_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             throw numkit::Error(
                 keel::format("who -file: file not found: {}", fname).c_str());
         keel::StringRef stem = extractStem(fname);
-        ctx.engine->outputText(keel::format("\nYour variables are:\n\n{}  \n\n", stem));
+        coreEngine(ctx).outputText(keel::format("\nYour variables are:\n\n{}  \n\n", stem));
         outs[0] = Value();
         return;
     }
@@ -368,7 +368,7 @@ void who_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         }
         out.append("\n\n");
     }
-    ctx.engine->outputText(out);
+    coreEngine(ctx).outputText(out);
     outs[0] = Value();
 }
 
@@ -376,7 +376,7 @@ void whos_reg(keel::ArrayRef<Value> args, keel::usize nargout,
               keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto *env = ctx.env;
-    ctx.engine->syncFrameToEnv(env);
+    coreEngine(ctx).syncFrameToEnv(env);
 
     if (!args.empty() && args[0].isChar() && args[0].toString() == "-file") {
         if (args.size() < 2 || !args[1].isChar())
@@ -395,7 +395,7 @@ void whos_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         for (keel::usize i = stem.size(); i < 8; ++i)
             out.push_back(' ');
         keel::format_into(out, "  ?       {}  double\n", bytes);
-        ctx.engine->outputText(out);
+        coreEngine(ctx).outputText(out);
         outs[0] = Value();
         return;
     }
@@ -479,7 +479,7 @@ void whos_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         }
         out.push_back('\n');
     }
-    ctx.engine->outputText(out);
+    coreEngine(ctx).outputText(out);
     outs[0] = Value();
 }
 
@@ -490,7 +490,7 @@ void exist_reg(keel::ArrayRef<Value> args, keel::usize,
         throw numkit::Error("exist requires a name argument");
     keel::String varName = args[0].toString();
     auto *env = ctx.env;
-    ctx.engine->syncFrameToEnv(env);
+    coreEngine(ctx).syncFrameToEnv(env);
 
     keel::String typeFilter;
     if (args.size() >= 2 && (args[1].isChar() || args[1].isString()))
@@ -498,7 +498,7 @@ void exist_reg(keel::ArrayRef<Value> args, keel::usize,
 
     if (typeFilter == "class") {
         if (!ctx.engine->findClass(varName))
-            (void)ctx.engine->lookupUserFunction(varName, env);
+            (void)coreEngine(ctx).lookupUserFunction(varName, env);
         keel::f64 c = ctx.engine->findClass(varName) ? 8.0 : 0.0;
         outs[0] = Value::scalar(c, ctx.engine->allocator());
         return;
@@ -529,11 +529,11 @@ void exist_reg(keel::ArrayRef<Value> args, keel::usize,
         isVar = (env->get(varName) != nullptr);
     }
     bool isCls = (ctx.engine->findClass(varName) != nullptr);
-    bool isFunc = ctx.engine->hasFunction(varName);
+    bool isFunc = coreEngine(ctx).hasFunction(varName);
     bool isToolboxFunc = !isFunc && (ctx.engine->findExternal(varName, env) != nullptr);
 
     auto findMFile = [&]() -> bool {
-        for (const auto &dir : ctx.engine->path()) {
+        for (const auto &dir : coreEngine(ctx).path()) {
             keel::String p = dir.clone();
             if (!p.empty() && p.back() != '/' && p.back() != '\\')
                 p.push_back('/');
@@ -554,7 +554,7 @@ void exist_reg(keel::ArrayRef<Value> args, keel::usize,
     } else if (typeFilter == "var") {
         if (isVar) code = 1;
     } else if (typeFilter == "builtin") {
-        if (ctx.engine->hasExternalFunction(varName)) code = 5;
+        if (coreEngine(ctx).hasExternalFunction(varName)) code = 5;
     } else if (typeFilter == "file") {
         if (isToolboxFunc)           code = 2;
         else if (vfsExists(varName)) code = 2;
@@ -570,7 +570,7 @@ void clearvars_reg(keel::ArrayRef<Value> args, keel::usize,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto *env = ctx.env;
-    ctx.engine->syncFrameToEnv(env);
+    coreEngine(ctx).syncFrameToEnv(env);
     if (args.empty()) {
         for (const auto &n : env->localNames())
             env->remove(n);
@@ -580,7 +580,7 @@ void clearvars_reg(keel::ArrayRef<Value> args, keel::usize,
             pnames.push_back(p.clone());
         for (const auto &n : pnames)
             env->remove(n);
-        ctx.engine->syncEnvRemovalsToFrame(env);
+        coreEngine(ctx).syncEnvRemovalsToFrame(env);
         outs[0] = Value();
         return;
     }
@@ -609,7 +609,7 @@ void clearvars_reg(keel::ArrayRef<Value> args, keel::usize,
     } else {
         for (const auto &n : names) env->remove(n);
     }
-    ctx.engine->syncEnvRemovalsToFrame(env);
+    coreEngine(ctx).syncEnvRemovalsToFrame(env);
     outs[0] = Value();
 }
 

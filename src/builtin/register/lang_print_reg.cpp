@@ -20,10 +20,10 @@ void disp_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>,
 {
     argcheck::checkNargin(args.size(), 1, 1, "disp");
     if (args[0].isObject()) {
-        ctx.engine->outputText(ctx.engine->formatObjectDisplay("", args[0]));
+        coreEngine(ctx).outputText(coreEngine(ctx).formatObjectDisplay("", args[0]));
         return;
     }
-    ctx.engine->outputText(dispFormat(args[0]));
+    coreEngine(ctx).outputText(dispFormat(args[0]));
 }
 
 void display_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
@@ -33,17 +33,17 @@ void display_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
                             ? args[1].toString()
                             : keel::String("ans", ctx.engine->allocator());
     if (args[0].isObject()) {
-        ctx.engine->displayObject(name, args[0]);
+        coreEngine(ctx).displayObject(name, args[0]);
         return;
     }
-    ctx.engine->outputText(args[0].formatDisplay(name));
+    coreEngine(ctx).outputText(args[0].formatDisplay(name));
 }
 
 void fprintf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "fprintf");
-    keel::usize count = ::numkit::runtime::fprintf(*ctx.engine, args);
+    keel::usize count = ::numkit::runtime::fprintf(coreEngine(ctx), args);
     if (nargout >= 1 && !outs.empty())
         outs[0] = Value::scalar(keel::as<keel::f64>(count), ctx.engine->allocator());
 }

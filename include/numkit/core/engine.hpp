@@ -27,8 +27,10 @@ class VM;
 class Compiler;
 class FigureManager;
 class DebugFacade;       // grouped debugger handle (engine.debug()); defined below
-struct ClassRegistryState;  // encapsulated class registry/classdef state; engine_internal.hpp
-struct MFileResolverState;  // encapsulated m-file search path & cache; engine_internal.hpp
+struct FunctionRegistryState; // encapsulated function/namespace/persistent state; engine_internal.hpp
+struct ClassRegistryState;    // encapsulated class registry/classdef state; engine_internal.hpp
+struct MFileResolverState;    // encapsulated m-file search path & cache; engine_internal.hpp
+struct SessionState;          // encapsulated session/warning/error/timer/fusion state; engine_internal.hpp
 struct CallbackBuiltin;  // higher-order builtin driver; callback_builtin.hpp
 class PluginLoader;      // dynamic module loader and resolver
 
@@ -73,11 +75,16 @@ public:
     void registerFunction(keel::StringRef ns,
                           keel::StringRef name,
                           ExternalFunc func) override;
+    bool registerFunctionIfAbsent(keel::StringRef name, ExternalFunc func);
+    bool registerFunctionIfAbsent(keel::StringRef ns,
+                                  keel::StringRef name,
+                                  ExternalFunc func);
 
     // ── Class registry (object model — see object_model.md) ──────
     // Register a builtin (C++-backed) class. Later, user classdef
     // populates the same registry via an adapter. Throws on duplicate.
     void registerClass(BuiltinClass cls) override;
+    bool registerClassIfAbsent(BuiltinClass cls);
     // Look up a registered class by name (e.g. "containers.Map"), or
     // nullptr. Used by constructor / method / property dispatch.
     const BuiltinClass *findClass(keel::StringRef name) const override;
@@ -317,8 +324,8 @@ public:
     // Top-level namespaces in registration order. `compat` shows up
     // here once the first MATLAB-mirror library calls
     // registerFunction("compat", …).
-    void setNamespaceMode(NamespaceMode mode) noexcept { namespaceMode_ = mode; bumpCallCacheEpoch(); }
-    NamespaceMode namespaceMode() const noexcept { return namespaceMode_; }
+    void setNamespaceMode(NamespaceMode mode) noexcept;
+    NamespaceMode namespaceMode() const noexcept;
 
     void markPluginNamespace(keel::StringRef topNs, bool isolated = false);
     bool isPluginNamespace(keel::StringRef topNs) const;
@@ -326,15 +333,12 @@ public:
     keel::String formatUndefinedFunctionError(keel::StringRef funcName,
                                               keel::StringRef baseMsg) const;
 
-    const keel::Array<keel::String> &namespaces() const { return namespaceOrder_; }
+    const keel::Array<keel::String> &namespaces() const;
 
     // Multimap from leaf name (last segment) to full names
     // (incl. all promotions, aliases). Used by the resolver to
     // implement `import x.*` wildcard lookups in O(1).
-    const keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> &shortNameIndex() const
-    {
-        return shortNameIndex_;
-    }
+    const keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> &shortNameIndex() const;
 
     // Runtime resolver: given a name (possibly short), looks it up considering
     // the active imports in `env` (and its parent chain). Returns nullptr
@@ -379,7 +383,7 @@ public:
     // runOneChunk) the VM script-split uses. ReactiveSession is the
     // only intended caller; the statement must outlive the call and
     // belong to a program parsed by THIS engine's parser.
-    Value evalStatement(const ASTNode *stmt,
+    Value evalStatement(ASTNode *stmt,
                         keel::Arc<const keel::String> src);
     // See engine.cpp: rewrites variable-headed glued -// COMMAND_CALLs
     // into binary expressions BEFORE compiling (MATLAB-probed rule).
@@ -410,16 +414,16 @@ public:
 
     // Unified call stack introspection across VM and TreeWalker (innermost first).
     keel::Array<CallStackFrame> captureCallStack() const;
-    const keel::Array<CallStackFrame> &lastErrorStack() const { return lastErrorStack_; }
-    void setLastErrorStack(keel::Array<CallStackFrame> stack) { lastErrorStack_ = keel::move(stack); }
-    keel::Array<CallStackFrame> takeLastErrorStack() { return keel::exchange(lastErrorStack_, {}); }
-    void clearLastErrorStack() { lastErrorStack_.clear(); }
+    const keel::Array<CallStackFrame> &lastErrorStack() const;
+    void setLastErrorStack(keel::Array<CallStackFrame> stack);
+    keel::Array<CallStackFrame> takeLastErrorStack();
+    void clearLastErrorStack();
 
     // Per-engine lasterror state (structured with message, identifier, stack).
     void recordLastError(keel::StringRef msg, keel::StringRef id,
                          keel::ArrayRef<CallStackFrame> stack);
     void setLastError(const Value &errStruct);
-    void resetLastError() { lastErrorStruct_ = Value(); }
+    void resetLastError();
     Value lastError() const;
 
     // Backend selection
@@ -434,16 +438,16 @@ public:
     // Element-wise fusion (see fusion_rule.hpp). The standard library
     // registers concrete rules; both backends consult them when enabled.
     // Disabled instantly (no rebuild) via setFusion(false) / NUMKIT_FUSE=0.
-    void addFusionRule(FusionRule rule) { fusionRules_.push_back(keel::move(rule)); }
-    const keel::Array<FusionRule> &fusionRules() const { return fusionRules_; }
-    void setFusion(bool on) { fusionEnabled_ = on; }
-    bool fusionEnabled() const { return fusionEnabled_ && !fusionRules_.empty(); }
+    void addFusionRule(FusionRule rule);
+    const keel::Array<FusionRule> &fusionRules() const;
+    void setFusion(bool on);
+    bool fusionEnabled() const;
     // Fusion-fire telemetry: both backends call noteFusionHit() each time a rule's
     // execute() returns true. Lets tests PROVE a kernel actually fires (a parity
     // test alone can't — a silent decline gives the same fused==unfused result).
-    void noteFusionHit() { ++fusionHits_; }
-    keel::usize fusionHits() const { return fusionHits_; }
-    void resetFusionHits() { fusionHits_ = 0; }
+    void noteFusionHit();
+    keel::usize fusionHits() const;
+    void resetFusionHits();
 
     using OutputFunc = keel::Function<void(keel::StringRef)>;
     void setOutputFunc(OutputFunc f);
@@ -667,13 +671,9 @@ public:
     bool isReservedName(keel::StringRef name) const;
 
     // Tic/toc timer access — used by workspace builtins
-    void setTicTimer(TimePoint tp)
-    {
-        ticBase_ = tp;
-        ticCalled_ = true;
-    }
-    TimePoint ticTimer() const { return ticBase_; }
-    bool ticWasCalled() const { return ticCalled_; }
+    void setTicTimer(TimePoint tp);
+    TimePoint ticTimer() const;
+    bool ticWasCalled() const;
 
     // Returns true when executing inside a user function call (not top-level script).
     // Used by clear() to avoid modifying workspaceEnv from within function scope.
@@ -706,43 +706,17 @@ public:
     void syncEnvRemovalsToFrame(Environment *env);
 
     // Per-function persistent variable storage (isolated per function & per Engine)
-    const keel::Arc<keel::HashMap<keel::String, Value>> &persistentBucketPtr(keel::StringRef funcName)
-    {
-        if (auto *existing = persistentStore_.get(funcName)) {
-            if (!*existing)
-                *existing = keel::make_arc<keel::HashMap<keel::String, Value>>();
-            return *existing;
-        }
-        auto res = persistentStore_.try_insert(
-            keel::String::from(funcName),
-            keel::make_arc<keel::HashMap<keel::String, Value>>());
-        return *res.value;
-    }
-    keel::HashMap<keel::String, Value> &persistentBucket(keel::StringRef funcName)
-    {
-        return *persistentBucketPtr(funcName);
-    }
+    const keel::Arc<keel::HashMap<keel::String, Value>> &persistentBucketPtr(keel::StringRef funcName);
+    keel::HashMap<keel::String, Value> &persistentBucket(keel::StringRef funcName);
     void clearPersistentForFunc(keel::StringRef funcName);
-    void clearAllPersistent()
-    {
-        for (auto [k, b] : persistentStore_)
-            if (b)
-                b->clear();
-    }
+    void clearAllPersistent();
 
     // Per-Engine warning state (`lastwarn`) and environment variable overlay (`setenv`/`getenv`)
-    void setLastWarn(keel::StringRef msg, keel::StringRef id = {})
-    {
-        lastWarnMsg_.assign(msg);
-        lastWarnId_.assign(id);
-    }
-    const keel::String &lastWarnMsg() const noexcept { return lastWarnMsg_; }
-    const keel::String &lastWarnId() const noexcept { return lastWarnId_; }
+    void setLastWarn(keel::StringRef msg, keel::StringRef id = {});
+    const keel::String &lastWarnMsg() const noexcept;
+    const keel::String &lastWarnId() const noexcept;
 
-    void setEnvVar(keel::StringRef name, keel::StringRef val)
-    {
-        envOverlay_.put(keel::String::from(name), keel::String::from(val));
-    }
+    void setEnvVar(keel::StringRef name, keel::StringRef val);
     keel::String getEnvVar(keel::StringRef name) const;
 
     // Property accessor recursion guard (`get.Prop` / `set.Prop`)
@@ -867,24 +841,13 @@ private:
 
     keel::HashMap<keel::String, BinaryOpFunc> binaryOps_;
     keel::HashMap<keel::String, UnaryOpFunc> unaryOps_;
-    // Arc-backed symbol maps guarantee pointer stability across open-addressing
-    // HashMap rehashes (returned const T* and cached CallCacheEntry pointers stay valid).
-    keel::HashMap<keel::String, keel::Arc<ExternalFunc>> externalFuncs_;
 
-    // Encapsulated object-model class registry & classdef metadata (engine_internal.hpp).
+    // Encapsulated engine subsystem states (defined in src/core/engine_internal.hpp).
+    keel::UniquePtr<FunctionRegistryState> funcReg_;
     keel::UniquePtr<ClassRegistryState> classReg_;
-    // Higher-order builtins that can run callbacks as pausable VM frames
-    // (state-machine callbacks). Keyed by builtin name; consulted by the VM
-    // before the synchronous external path. Full type in callback_builtin.hpp.
-    keel::HashMap<keel::String, keel::Arc<CallbackBuiltin>> callbackBuiltins_;
-    keel::HashMap<keel::String, keel::Arc<UserFunction>> userFuncs_;
-    keel::HashMap<keel::String, keel::Arc<keel::HashMap<keel::String, Value>>> persistentStore_;
-    keel::String lastWarnMsg_;
-    keel::String lastWarnId_;
-    keel::HashMap<keel::String, keel::String> envOverlay_;
-    // Startup registration sources retained for post-clear replay
-    // (reinstallBuiltinSources): m-source function texts.
-    keel::Array<keel::String> builtinMSourceTexts_;
+    keel::UniquePtr<MFileResolverState> mFileReg_;
+    keel::UniquePtr<SessionState> session_;
+
     // Parse+adopt halves of the public register entry points, factored out
     // for replay without re-appending to the retention lists.
     void adoptBuiltinMSource_(keel::StringRef src);
@@ -894,21 +857,15 @@ private:
     // empty == script scope). Backs classCtxAllows / classCtxInCtorOf.
     keel::StringRef currentClassCtx_() const;
 
-    // Auxiliary indices into externalFuncs_, populated by registerFunction.
-    // The full-name keys in externalFuncs_ are authoritative; these indices
-    // exist purely to accelerate namespace-aware lookups (Phase 6).
-    keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> shortNameIndex_;
-    keel::Array<keel::String> namespaceOrder_;
-    keel::HashSet<keel::String> namespaceSet_;
-    keel::HashSet<keel::String> pluginNamespaces_;
-    keel::HashSet<keel::String> isolatedPluginNamespaces_;
-    NamespaceMode namespaceMode_ = NamespaceMode::Compat;
-
     // Internal helper used by both registerFunction overloads.
-    // Throws numkit::Error if `fullName` already registered.
-    void registerFunctionImpl_(keel::StringRef fullName,
+    // Throws numkit::Error if `fullName` already registered unless `ignoreDuplicate` is true.
+    bool registerFunctionImpl_(keel::StringRef fullName,
                                keel::StringRef leafName,
-                               ExternalFunc func);
+                               ExternalFunc func,
+                               bool ignoreDuplicate = false);
+    bool hasDirectExternalFunction(keel::StringRef name) const;
+    void putUserFunction(keel::String key, keel::Arc<UserFunction> uf);
+    void putScriptLocalUserFunction(keel::String key, keel::Arc<UserFunction> uf);
 
     // Shared body of registerClassDef / registerClassDefFrom. `originKnown`
     // + the fs/dir/file triple is the classdef file's provenance, stamped
@@ -925,46 +882,22 @@ private:
     // externals, and the compiled method chunks. Called by registerClassDef
     // when `Name` is already registered, instead of the old idempotent skip.
     void unregisterClassDef(keel::StringRef name);
-    // Remove the bare constructor external `externalFuncs_[name]` that
+    // Remove the bare constructor external `externalFuncs[name]` that
     // resolveMFile_ registers for a class loaded from `Name.m`. Guarded by
-    // mFileCache_ membership so an inline `classdef sum` can never erase the
+    // mFileCache membership so an inline `classdef sum` can never erase the
     // core `sum` builtin that merely shares the name.
     void dropFileClassCtorExternal_(keel::StringRef name);
     // After `base` is (re)registered, re-register every class that transitively
     // derives from it (parent-first), so subclasses — which hold a snapshot of
     // the base's methods/props — pick up the new definition. Guarded by
-    // suppressDependentCascade_ against re-entrant fan-out.
+    // suppressDependentCascade against re-entrant fan-out.
     void reregisterDerivedClasses(keel::StringRef base);
 
     OutputFunc outputFunc_;
     InputProvider inputProvider_;   // empty → input() reads stdin
     keel::UniquePtr<FigureManager> figureManager_;
-    mutable keel::UniquePtr<PluginLoader> pluginLoader_;
-    keel::HashMap<keel::String, PluginContext::VarDeclExtractor> varDeclCommands_;
+    keel::UniquePtr<PluginLoader> pluginLoader_;
 
-    // Tic/toc timer
-    TimePoint ticBase_{};
-    bool ticCalled_ = false;
-
-    // Tracks whether clear/clear all was called during VM execution
-    // so that export wipes workspaceEnv before writing back.
-    bool clearAllCalled_ = false;
-
-    // Host-registered constants — (name → value). Restored into
-    // constantsEnv_ alongside the built-ins by reinstallConstants() so
-    // `clear all` does not drop them. Name presence also feeds
-    // isReservedName() so these behave the same as `pi`/`eps`/…
-    keel::HashMap<keel::String, Value> userConstants_;
-
-    // Script-lexical user functions — peer to userFuncs_ but never
-    // cleared by `clear all`. Managed by begin/endScript (which
-    // drives both this map and the compiler's matching bucket) so
-    // file-scoped functions survive a mid-script clear.
-    keel::HashMap<keel::String, keel::Arc<UserFunction>> scriptLocalUserFuncs_;
-    keel::Array<keel::HashMap<keel::String, keel::Arc<UserFunction>>> savedScriptLocalUserFuncs_;
-
-    // ── M-file resolver state (encapsulated in engine_internal.hpp) ──
-    keel::UniquePtr<MFileResolverState> mFileReg_;
     // Evict a global user function plus its file-private subfunctions ("name>*"),
     // persistent buckets, and compiled VM chunks in one place.
     void evictUserFunction_(keel::StringRef name);
@@ -973,8 +906,8 @@ private:
     keel::UniquePtr<ASTNode> parseCode_(keel::StringRef code);
 
     // Helper — returns nullptr if `name`.m can't be located in any of
-    // (script-origin, mPath_-list) or fails to parse. On success caches
-    // the parsed UserFunction in userFuncs_ and the compiled chunk in
+    // (script-origin, mPath-list) or fails to parse. On success caches
+    // the parsed UserFunction in userFuncs and the compiled chunk in
     // the Compiler.
     const UserFunction *resolveMFile_(keel::StringRef name);
 
@@ -996,7 +929,8 @@ private:
     ops::RngContext rng_;
 
 public:
-    void markClearAll() { clearAllCalled_ = true; }
+    void markClearAll();
+    void resetClearAllFlag();
     keel::u64 callCacheEpoch() const noexcept { return callCacheEpoch_; }
     void bumpCallCacheEpoch() noexcept { ++callCacheEpoch_; }
 
@@ -1006,7 +940,7 @@ private:
     // Engine-wide anonymous-function name counter. The VM compiler and
     // the TreeWalker fallback mint __anon_<N> names from this ONE source
     // so independently-numbered closures can never collide in
-    // compiledFuncs_ / userFuncs_ (a TreeWalker-executed literal that
+    // compiledFuncs_ / userFuncs (a TreeWalker-executed literal that
     // re-used a low id used to shadow a compiled chunk and run a
     // foreign body — bugs/opened/core/anon-table-resolution-corruption.md).
     keel::Atomic<keel::i32> anonNameCounter_{0};
@@ -1015,21 +949,12 @@ private:
 
 public:
     Compiler *compilerPtr() { return compiler_.get(); }
-    bool inScriptScope() const { return !savedScriptLocalUserFuncs_.empty(); }
+    bool inScriptScope() const;
 
 private:
     Value evalConstExpr(const ASTNode *expr);
     keel::UniquePtr<VM> vm_;
     Backend backend_ = Backend::VM;
-
-    // Element-wise fusion: registered idiom→kernel rules + on/off gate.
-    // Default reflects NUMKIT_FUSE (set in the ctor); the registry is empty
-    // until the standard library installs rules, so a bare Engine is unaffected.
-    keel::Array<FusionRule> fusionRules_;
-    bool fusionEnabled_ = true;
-    keel::usize fusionHits_ = 0;  // count of rule.execute()==true (fire telemetry)
-    keel::Array<CallStackFrame> lastErrorStack_;
-    Value lastErrorStruct_;
     keel::i32 maxRecursionDepth_ = 500;
     keel::Atomic<bool> cancelRequested_{false};
 
@@ -1085,5 +1010,16 @@ private:
 };
 
 inline DebugFacade Engine::debug() { return DebugFacade(*this); }
+
+// Safe downcast from unified CallContext::engine (PluginContext*) to L2 Engine.
+inline Engine &coreEngine(CallContext &ctx) noexcept
+{
+    return *static_cast<Engine *>(ctx.engine);
+}
+
+inline Engine *coreEnginePtr(CallContext &ctx) noexcept
+{
+    return static_cast<Engine *>(ctx.engine);
+}
 
 } // namespace numkit

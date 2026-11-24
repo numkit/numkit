@@ -49,7 +49,6 @@
 #include <numkit/value/object.hpp>
 
 #include <cstdio>
-#include <cstring>
 
 #ifdef _WIN32
 extern "C" {
@@ -1376,7 +1375,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
             } else if (name == "Marker") {
                 static const char *kMarkers = "o+*.xsd^v<>ph";
                 for (char mc : s)
-                    if (mc && std::strchr(kMarkers, mc))
+                    if (mc && keel::StringRef(kMarkers).find(mc) != keel::kInvalidIndex)
                         return strv(keel::StringRef(&mc, 1));
             } else {
                 struct ColEntry { char c; keel::f64 rgb[3]; };
@@ -1409,7 +1408,7 @@ Value recordGetProp(FigureManager &fm, FigureManager::HandleRecord *rec,
                         cand = s.clone();
                     } else {
                         for (char ch : s)
-                            if (std::strchr("rgbcymwkv", ch)) {
+                            if (keel::StringRef("rgbcymwkv").find(ch) != keel::kInvalidIndex) {
                                 cand.push_back(ch);
                                 break;
                             }
@@ -1640,7 +1639,7 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 }
                 text.push_back('\n');
             }
-            ctx.engine->outputText(text);
+            coreEngine(ctx).outputText(text);
             outs[0] = Value();
             return;
         }
@@ -1688,7 +1687,7 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             } else {
                 text.append("Property does not have a fixed set of property values.\n");
             }
-            ctx.engine->outputText(text);
+            coreEngine(ctx).outputText(text);
             outs[0] = Value();
             return;
         }

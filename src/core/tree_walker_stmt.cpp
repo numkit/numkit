@@ -1,5 +1,6 @@
 // src/core/tree_walker_stmt.cpp
 #include <keel/array.h>
+#include <keel/number.h>
 #include <keel/algo.h>
 #include <keel/core.h>
 #include <keel/format.h>
@@ -17,8 +18,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <cstdio>
-#include <cstdlib>
 
 namespace numkit {
 
@@ -316,14 +315,14 @@ Value TreeWalker::execFunctionDef(const ASTNode *node, Environment *env)
     // mode behaves the same as in VM mode (local functions survive).
     if (engine_.inScriptScope()) {
         keel::String key = func.name.clone();
-        engine_.scriptLocalUserFuncs_.put(keel::move(key),
-                                          keel::make_arc<UserFunction>(keel::move(func)));
+        engine_.putScriptLocalUserFunction(keel::move(key),
+                                           keel::make_arc<UserFunction>(keel::move(func)));
     } else {
         if (auto *cp = engine_.compilerPtr())
             cp->eraseCompiledFunc(func.name);
         keel::String key = func.name.clone();
-        engine_.userFuncs_.put(keel::move(key),
-                               keel::make_arc<UserFunction>(keel::move(func)));
+        engine_.putUserFunction(keel::move(key),
+                                keel::make_arc<UserFunction>(keel::move(func)));
     }
     return Value();
 }
@@ -410,10 +409,10 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
                             && !isUnshadowedConst)
                                ? cand : nullptr;
         if (lhs) {
-            const keel::String tail = keel::String::from(arg.substr(1));
-            char *endp = nullptr;
-            const keel::f64 parsedNum = std::strtod(tail.c_str(), &endp);
-            const bool isNum = !tail.empty() && endp == tail.c_str() + tail.size();
+            const keel::StringRef tail = arg.substr(1);
+            auto parsed = keel::parse_f64(tail);
+            const bool isNum = parsed.is_ok();
+            const keel::f64 parsedNum = isNum ? parsed.value() : 0.0;
             bool isIdent = !tail.empty()
                            && (keel::is_ascii_alpha(tail[0])
                                || tail[0] == '_');
@@ -438,7 +437,7 @@ Value TreeWalker::execCommandCall(const ASTNode *node, Environment *env)
                 auto r = keel::make_unique<ASTNode>(
                     isNum ? NodeType::NUMBER_LITERAL : NodeType::IDENTIFIER);
                 if (isNum) r->numValue = parsedNum;
-                else r->strValue = tail.clone();
+                else r->strValue = keel::String::from(tail);
                 bin->children.push_back(keel::move(l));
                 bin->children.push_back(keel::move(r));
                 Value result = execBinaryOp(bin.get(), env);
@@ -507,8 +506,8 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
                     escaped.closureEnv = resolveClosureEnv(escaped);
                 keel::String dispSrc = escaped.name.clone();
                 keel::replace(dispSrc.begin(), dispSrc.end(), '>', '/');
-                engine_.userFuncs_.put(nestedHandleId.clone(),
-                                       keel::make_arc<UserFunction>(keel::move(escaped)));
+                engine_.putUserFunction(nestedHandleId.clone(),
+                                        keel::make_arc<UserFunction>(keel::move(escaped)));
                 Value h = Value::funcHandle(nestedHandleId, engine_.mr_);
                 h.setFuncHandleSource(dispSrc);
                 return h;
@@ -665,7 +664,7 @@ Value TreeWalker::execAnonFunc(const ASTNode *node, Environment *env)
     // at the command window keeps '' — masking any caller's file later.
     engine_.captureScriptOrigin(uf);
 
-    engine_.userFuncs_.put(anonName.clone(), keel::make_arc<UserFunction>(keel::move(uf)));
+    engine_.putUserFunction(anonName.clone(), keel::make_arc<UserFunction>(keel::move(uf)));
     Value h = Value::funcHandle(anonName, engine_.mr_);
     h.setFuncHandleSource(node->strValue);   // reconstructed "@(...)..." for func2str
     if (!capturedVals.empty())

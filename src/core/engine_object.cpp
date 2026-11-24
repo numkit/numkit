@@ -2,8 +2,8 @@
 // Engine object model: BuiltinClass registry, display, operator & subsref
 // dispatch, object-array slice store, and classdef registration/access control.
 #include <keel/array.h>
+#include <keel/number.h>
 #include <keel/algo.h>
-#include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -31,6 +31,16 @@ void Engine::registerClass(BuiltinClass cls)
     keel::String key = cls.name.clone();
     classReg_->classes.put(keel::move(key), keel::make_arc<BuiltinClass>(keel::move(cls)));
     bumpCallCacheEpoch();
+}
+
+bool Engine::registerClassIfAbsent(BuiltinClass cls)
+{
+    if (classReg_->classes.contains(cls.name))
+        return false;
+    keel::String key = cls.name.clone();
+    classReg_->classes.put(keel::move(key), keel::make_arc<BuiltinClass>(keel::move(cls)));
+    bumpCallCacheEpoch();
+    return true;
 }
 
 const BuiltinClass *Engine::findClass(keel::StringRef name) const
@@ -623,14 +633,14 @@ void Engine::unregisterClassDef(keel::StringRef name)
         // duplicate full name, so these MUST be cleared before re-registration.
         auto dropExternal = [&](keel::StringRef leaf) {
             keel::String full = keel::format("{}.{}", name, leaf);
-            externalFuncs_.remove(full);
-            if (auto *vec = shortNameIndex_.get(leaf)) {
+            funcReg_->externalFuncs.remove(full);
+            if (auto *vec = funcReg_->shortNameIndex.get(leaf)) {
                 for (keel::usize i = vec->size(); i > 0; --i) {
                     if ((*vec)[i - 1] == full)
                         vec->remove_at(i - 1);
                 }
                 if (vec->empty())
-                    shortNameIndex_.remove(leaf);
+                    funcReg_->shortNameIndex.remove(leaf);
             }
         };
         for (auto [sname, si] : desc.statics) {
@@ -664,14 +674,14 @@ void Engine::dropFileClassCtorExternal_(keel::StringRef name)
     // name with an inline classdef.
     if (!mFileReg_->mFileCache.contains(name))
         return;
-    externalFuncs_.remove(name);
-    if (auto *vec = shortNameIndex_.get(name)) {
+    funcReg_->externalFuncs.remove(name);
+    if (auto *vec = funcReg_->shortNameIndex.get(name)) {
         for (keel::usize i = vec->size(); i > 0; --i) {
             if ((*vec)[i - 1] == name)
                 vec->remove_at(i - 1);
         }
         if (vec->empty())
-            shortNameIndex_.remove(name);
+            funcReg_->shortNameIndex.remove(name);
     }
     bumpCallCacheEpoch();
 }
@@ -956,9 +966,9 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                              keel::ArrayRef<Value> args, keel::usize nargout,
                              keel::MutArrayRef<Value> outs, CallContext &ctx) {
                              if (acc != Access::Public)
-                                 enforceAccess(ctx.engine, acc, decl, "method", mn);
+                                 enforceAccess(coreEnginePtr(ctx), acc, decl, "method", mn);
                              const keel::usize nout = keel::max<keel::usize>(nargout, 1);
-                             auto results = ctx.engine->invokeClassMethod(*uf, args, nout);
+                             auto results = coreEngine(ctx).invokeClassMethod(*uf, args, nout);
                              const keel::usize writeN = keel::min(nout, results.size());
                              for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                                  outs[i] = keel::move(results[i]);
@@ -976,7 +986,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                              keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                              CallContext &ctx) {
                              if (getLvl != Access::Public)
-                                 enforceAccess(ctx.engine, getLvl, decl, "property", pn);
+                                 enforceAccess(coreEnginePtr(ctx), getLvl, decl, "property", pn);
                              outs[0] = *cval;
                          });
     }
@@ -1052,16 +1062,16 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         if (desc->anyNonPublicProp)
             if (const PropInfo *pi = findProp(*desc, nameRef);
                 pi && pi->getAccess != Access::Public)
-                enforceAccess(ctx.engine, pi->getAccess, pi->declClass, "property", nameRef);
+                enforceAccess(coreEnginePtr(ctx), pi->getAccess, pi->declClass, "property", nameRef);
         if (const auto *gp = desc->getters.get(nameRef);
-            gp && !ctx.engine->isPropAccessorActive((*gp)->name)) {
+            gp && !coreEngine(ctx).isPropAccessorActive((*gp)->name)) {
             struct AccessorGuard {
                 Engine *eng;
                 ~AccessorGuard() { eng->popPropAccessor(); }
             };
-            ctx.engine->pushPropAccessor((*gp)->name);
-            AccessorGuard guard{ctx.engine};
-            auto r = ctx.engine->invokeClassMethod(**gp,
+            coreEngine(ctx).pushPropAccessor((*gp)->name);
+            AccessorGuard guard{coreEnginePtr(ctx)};
+            auto r = coreEngine(ctx).invokeClassMethod(**gp,
                                                    keel::ArrayRef<Value>(&self, 1), 1);
             out = r.empty() ? Value() : keel::move(r[0]);
             return true;
@@ -1085,7 +1095,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                 throw numkit::Error(msg.c_str());
             }
             if (pi->setAccess != Access::Public)
-                enforceAccess(ctx.engine, pi->setAccess, pi->declClass, "property", nameRef);
+                enforceAccess(coreEnginePtr(ctx), pi->setAccess, pi->declClass, "property", nameRef);
         } else if (!desc->setters.contains(nameRef)
                    && keel::find(desc->superclasses.begin(), desc->superclasses.end(),
                                 "dynamicprops")
@@ -1094,15 +1104,15 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             throw numkit::Error(msg.c_str());
         }
         if (const auto *sp = desc->setters.get(nameRef);
-            sp && !ctx.engine->isPropAccessorActive((*sp)->name)) {
+            sp && !coreEngine(ctx).isPropAccessorActive((*sp)->name)) {
             struct AccessorGuard {
                 Engine *eng;
                 ~AccessorGuard() { eng->popPropAccessor(); }
             };
-            ctx.engine->pushPropAccessor((*sp)->name);
-            AccessorGuard guard{ctx.engine};
+            coreEngine(ctx).pushPropAccessor((*sp)->name);
+            AccessorGuard guard{coreEnginePtr(ctx)};
             Value callArgs[2] = {self, val};
-            auto r = ctx.engine->invokeClassMethod(**sp,
+            auto r = coreEngine(ctx).invokeClassMethod(**sp,
                                                    keel::ArrayRef<Value>(callArgs, 2), 1);
             if (!r.empty() && r[0].isObject())
                 self = keel::move(r[0]);
@@ -1112,9 +1122,9 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
         return true;
     };
     cls.construct = [desc](keel::ArrayRef<Value> args, CallContext &ctx) -> Value {
-        Value obj = ctx.engine->makeDefaultInstance(desc->name);
+        Value obj = coreEngine(ctx).makeDefaultInstance(desc->name);
         if (desc->ctor)
-            obj = ctx.engine->invokeClassCtor(*desc->ctor, obj, args);
+            obj = coreEngine(ctx).invokeClassCtor(*desc->ctor, obj, args);
         return obj;
     };
     for (auto [mname, uf] : desc->methods) {
@@ -1132,14 +1142,14 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                             Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
             if (mlevel != Access::Public)
-                enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
+                enforceAccess(coreEnginePtr(ctx), mlevel, mdecl, "method", nameCopy);
             keel::Array<Value> callArgs;
             callArgs.reserve(args.size() + 1);
             callArgs.push_back(self); // MATLAB: obj is the first parameter
             for (const auto &a : args)
                 callArgs.push_back(a);
             const keel::usize nout = keel::max<keel::usize>(nargout, 1);
-            auto results = ctx.engine->invokeClassMethod(
+            auto results = coreEngine(ctx).invokeClassMethod(
                 *ufCopy, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
             // Always produce at least one output (the `ans`/expression value
             // when called with nargout==0), bounded by the outs span.
@@ -1160,14 +1170,14 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                             Value &self, keel::ArrayRef<Value> args, keel::usize nargout,
                             keel::MutArrayRef<Value> outs, CallContext &ctx) {
                 if (mlevel != Access::Public)
-                    enforceAccess(ctx.engine, mlevel, mdecl, "method", nameCopy);
+                    enforceAccess(coreEnginePtr(ctx), mlevel, mdecl, "method", nameCopy);
                 keel::Array<Value> callArgs;
                 if (args.empty())
                     callArgs.push_back(self); // unary: operand came as self
                 else
                     callArgs.append(args); // binary: [lhs, rhs]
                 const keel::usize nout = keel::max<keel::usize>(nargout, 1);
-                auto results = ctx.engine->invokeClassMethod(
+                auto results = coreEngine(ctx).invokeClassMethod(
                     *ufOp, keel::ArrayRef<Value>(callArgs.data(), callArgs.size()), nout);
                 const keel::usize writeN = keel::min(nout, results.size());
                 for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
@@ -1187,7 +1197,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             Value s = buildSubsStruct("()", args, ctx.engine->allocator());
             Value callArgs[2] = {self, s};
             const keel::usize nout = keel::max<keel::usize>(nargout, 1);
-            auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 2), nout);
+            auto results = coreEngine(ctx).invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 2), nout);
             const keel::usize writeN = keel::min(nout, results.size());
             for (keel::usize i = 0; i < writeN && i < outs.size(); ++i)
                 outs[i] = keel::move(results[i]);
@@ -1202,7 +1212,7 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
             Value s = buildSubsStruct("()", keel::ArrayRef<Value>(args.data(), nsub),
                                       ctx.engine->allocator());
             Value callArgs[3] = {self, s, nsub < args.size() ? args[nsub] : Value()};
-            auto results = ctx.engine->invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 3), 1);
+            auto results = coreEngine(ctx).invokeClassMethod(*uf, keel::ArrayRef<Value>(callArgs, 3), 1);
             // Value class: subsasgn returns the modified object → write back.
             // Handle class: it mutates shared state in place (write-back of the
             // returned handle is harmless).
@@ -1221,10 +1231,10 @@ void Engine::registerClassDefImpl_(const ASTNode *cd, keel::StringRef qualifiedN
                 if (const Value *vp = st->props.get(p.name);
                     vp && vp->isScalar() && vp->type() == ValueType::DOUBLE) {
                     char numBuf[64];
-                    keel::i32 n = std::snprintf(numBuf, sizeof(numBuf), "%f", vp->toScalar());
+                    keel::usize n = keel::format_f64_fixed(numBuf, sizeof(numBuf), vp->toScalar(), 6);
                     if (n > 0) {
                         body.append(": ");
-                        body.append(keel::StringRef(numBuf, keel::as<keel::usize>(n)));
+                        body.append(keel::StringRef(numBuf, n));
                     }
                 }
             }

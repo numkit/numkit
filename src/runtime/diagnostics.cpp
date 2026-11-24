@@ -174,7 +174,7 @@ void restoreExceptionStack(const Value &me, CallContext &ctx)
         frames.push_back(keel::move(fr));
     }
     if (!frames.empty())
-        ctx.engine->setLastErrorStack(keel::move(frames));
+        coreEngine(ctx).setLastErrorStack(keel::move(frames));
 }
 
 void error_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
@@ -186,7 +186,7 @@ void error_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
 
 void warning_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>, CallContext &ctx)
 {
-    warning(*ctx.engine, args);
+    warning(coreEngine(ctx), args);
 }
 
 void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs,
@@ -195,8 +195,8 @@ void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     auto *mr = ctx.engine->allocator();
     // Two-output read form: [msg, id] = lastwarn();
     if (args.empty()) {
-        outs[0] = Value::fromString(ctx.engine->lastWarnMsg(), mr);
-        if (nargout > 1) outs[1] = Value::fromString(ctx.engine->lastWarnId(), mr);
+        outs[0] = Value::fromString(coreEngine(ctx).lastWarnMsg(), mr);
+        if (nargout > 1) outs[1] = Value::fromString(coreEngine(ctx).lastWarnId(), mr);
         return;
     }
     // Set form: lastwarn(msg) or lastwarn(msg, id).
@@ -211,7 +211,7 @@ void lastwarn_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
                          0, 0, "lastwarn", "", "numkit:lastwarn:badId");
         id = args[1].toString();
     }
-    ctx.engine->setLastWarn(msg, id);
+    coreEngine(ctx).setLastWarn(msg, id);
     // MATLAB's set form returns nothing; we mirror that.
     if (nargout > 0) outs[0] = Value::fromString("", mr);
 }
@@ -270,7 +270,7 @@ void dbstack_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         }
     }
 
-    auto fullStack = ctx.engine->captureCallStack();
+    auto fullStack = coreEngine(ctx).captureCallStack();
     const keel::usize startIdx = (omit < fullStack.size()) ? omit : fullStack.size();
     const keel::usize count = fullStack.size() - startIdx;
     keel::Allocator *mr = ctx.engine->allocator();
@@ -289,10 +289,10 @@ void dbstack_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             const auto &fr = fullStack[startIdx + i];
             const char *prefix = (i == 0) ? "> In " : "  In ";
             if (fr.line > 0)
-                ctx.engine->outputText(keel::format("{}{} (line {})\n",
+                coreEngine(ctx).outputText(keel::format("{}{} (line {})\n",
                                                     prefix, displayName(fr.name), fr.line));
             else
-                ctx.engine->outputText(keel::format("{}{}\n", prefix, displayName(fr.name)));
+                coreEngine(ctx).outputText(keel::format("{}{}\n", prefix, displayName(fr.name)));
         }
         return;
     }
@@ -314,23 +314,23 @@ void lasterror_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
 {
     if (args.empty()) {
         if (nargout > 0 || !outs.empty())
-            outs[0] = ctx.engine->lastError();
+            outs[0] = coreEngine(ctx).lastError();
         return;
     }
     if (args[0].isChar() || args[0].isString()) {
         if (args[0].toString() == "reset") {
-            ctx.engine->resetLastError();
+            coreEngine(ctx).resetLastError();
             if (nargout > 0)
-                outs[0] = ctx.engine->lastError();
+                outs[0] = coreEngine(ctx).lastError();
             return;
         }
         throw Error("lasterror: expected 'reset' or an error struct",
                     0, 0, "lasterror", "", "numkit:lasterror:badArg");
     }
     if (args[0].isStruct()) {
-        ctx.engine->setLastError(args[0]);
+        coreEngine(ctx).setLastError(args[0]);
         if (nargout > 0)
-            outs[0] = ctx.engine->lastError();
+            outs[0] = coreEngine(ctx).lastError();
         return;
     }
     throw Error("lasterror: expected 'reset' or an error struct",

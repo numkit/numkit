@@ -135,9 +135,9 @@ static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
             const HelpEntry *func = catalog.findFunction(query);
             if (func) {
                 text = catalog.formatFunction(func->name);
-            } else if (ctx.engine->hasUserFunction(query)) {
+            } else if (coreEngine(ctx).hasUserFunction(query)) {
                 text = keel::format("{} is a user-defined function.\n", query);
-            } else if (ctx.engine->hasExternalFunction(query)) {
+            } else if (coreEngine(ctx).hasExternalFunction(query)) {
                 text = keel::format("{} is a built-in function.\n", query);
             } else {
                 text = keel::format("'{}' not found. Type 'help' for a list of topics.\n", query);
@@ -148,7 +148,7 @@ static void help_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
     if (nargout > 0) {
         outs[0] = Value::fromString(text, ctx.engine->allocator());
     } else {
-        ctx.engine->outputText(text);
+        coreEngine(ctx).outputText(text);
         outs[0] = Value();
     }
 }
@@ -170,7 +170,7 @@ static void what_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutA
             if ((i + 1) % 4 == 0 || i + 1 == funcs.size()) out.push_back('\n');
         }
         out.push_back('\n');
-        ctx.engine->outputText(out);
+        coreEngine(ctx).outputText(out);
         outs[0] = Value();
     }
 }
@@ -187,7 +187,7 @@ static void inmem_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArray
     keel::Array<keel::String> userFuncs;
     keel::Array<keel::String> classes;
 
-    for (const auto &name : ctx.engine->namespaces()) {
+    for (const auto &name : coreEngine(ctx).namespaces()) {
         classes.push_back(name.clone());
     }
 

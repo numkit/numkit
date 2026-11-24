@@ -31,7 +31,7 @@
 #include <numkit/linalg/svd_sketch.hpp>
 #include <numkit/linalg/detail/decompositions_detail.hpp>   // cholUpperFactor / transposeSquare / qr_pivoted
 
-#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->allocator()
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/error.hpp>

@@ -128,7 +128,7 @@ void narginchk_reg(keel::ArrayRef<Value> args, keel::usize,
     argcheck::checkNargin(args.size(), 2, 2, "narginchk");
     const keel::f64 lo = args[0].toScalar();
     const keel::f64 hi = args[1].toScalar();
-    const keel::i64 n = ctx.engine->currentFunctionNargin();
+    const keel::i64 n = coreEngine(ctx).currentFunctionNargin();
     if (n >= 0) {
         if (keel::as<keel::f64>(n) < lo)
             throw Error("Not enough input arguments.",
@@ -154,7 +154,7 @@ void nargoutchk_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         else outs[0] = Value::fromString("", mr);
         return;
     }
-    const keel::i64 n = ctx.engine->currentFunctionNargout();
+    const keel::i64 n = coreEngine(ctx).currentFunctionNargout();
     if (n >= 0) {
         if (keel::as<keel::f64>(n) < lo)
             throw Error("Not enough output arguments.",

@@ -10,7 +10,6 @@
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
 
-#include <cstdlib>
 
 namespace numkit {
 

@@ -2,10 +2,10 @@
 // Out-of-line implementations for FigureManager, figure state clones,
 // JSON serialization, and LOD tile resampling.
 #include <keel/math.h>
+#include <keel/io.h>
+#include <keel/number.h>
 #include <numkit/core/figure_manager.hpp>
 
-#include <cstdio>
-#include <cstdlib>
 
 namespace numkit {
 
@@ -40,11 +40,11 @@ keel::Array<keel::f64> parseFlatDoubles(const keel::String &j) {
             p += 4;
             continue;
         }
-        char *q = nullptr;
-        keel::f64 v = std::strtod(p, &q);
-        if (q == p) { ++p; continue; }   // skip an unparseable token
-        out.push_back(v);
-        p = q;
+        const char *tokStart = p;
+        while (p < end && *p != ' ' && *p != ',' && *p != ']' && *p != '"' && *p != '\t' && *p != '\n') ++p;
+        auto parsed = keel::parse_f64(keel::StringRef(tokStart, keel::as<keel::usize>(p - tokStart)));
+        if (!parsed.is_ok()) continue;   // skip an unparseable token
+        out.push_back(parsed.value());
     }
     return out;
 }
@@ -60,8 +60,8 @@ keel::String serializeFlatDoubles(keel::ArrayRef<keel::f64> v) {
         if (keel::is_nan(x)) out.append("null");
         else if (keel::is_inf(x)) out.append(x > 0 ? "\"Inf\"" : "\"-Inf\"");
         else {
-            keel::i32 n = std::snprintf(buf, sizeof(buf), "%.17g", x);
-            if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
+            keel::usize n = keel::format_f64(buf, sizeof(buf), x);
+            if (n > 0) out.append(keel::StringRef(buf, n));
         }
     }
     out.push_back(']');
@@ -74,20 +74,20 @@ keel::String serializeFlatDoubles(const keel::Array<keel::f64> &v) {
 
 void appendDouble(keel::String &out, keel::f64 v) {
     char buf[64];
-    keel::i32 n = std::snprintf(buf, sizeof(buf), "%.6g", v);
-    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
+    keel::usize n = keel::format_f64_general(buf, sizeof(buf), v, 6);
+    if (n > 0) out.append(keel::StringRef(buf, n));
 }
 
 void appendInt(keel::String &out, keel::i32 v) {
     char buf[32];
-    keel::i32 n = std::snprintf(buf, sizeof(buf), "%d", v);
-    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
+    keel::usize n = keel::format_i64(buf, sizeof(buf), v);
+    if (n > 0) out.append(keel::StringRef(buf, n));
 }
 
 void appendUsize(keel::String &out, keel::usize v) {
     char buf[32];
-    keel::i32 n = std::snprintf(buf, sizeof(buf), "%zu", v);
-    if (n > 0) out.append(keel::StringRef(buf, keel::as<keel::usize>(n)));
+    keel::usize n = keel::format_u64(buf, sizeof(buf), keel::as<keel::u64>(v));
+    if (n > 0) out.append(keel::StringRef(buf, n));
 }
 
 }  // namespace figdetail
@@ -1396,8 +1396,8 @@ void FigureManager::emitRawOutput_(keel::StringRef text) const
     if (outputFunc_) {
         outputFunc_(text);
     } else if (!text.empty()) {
-        std::fwrite(text.data(), 1, text.size(), stdout);
-        std::fflush(stdout);
+        keel::stdout_write(text);
+        keel::stdout_flush();
     }
 }
 

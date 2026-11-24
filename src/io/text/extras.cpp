@@ -3,6 +3,7 @@
 // fileread / readlines / writelines / readmatrix / writematrix / type.
 
 #include <keel/arena.h>
+#include <keel/number.h>
 #include <keel/exception.h>
 #include <keel/array.h>
 #include <keel/core.h>
@@ -17,9 +18,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/sys/fs_context.hpp>
-#include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 
 namespace numkit::io {
 
@@ -107,19 +106,12 @@ keel::StringRef trimWs(keel::StringRef s)
 
 bool tryParseDouble(keel::StringRef tok, keel::f64 &out)
 {
-    if (tok.empty()) { out = 0.0; return true; }   // empty cell → 0
-    keel::SmallString<128> buf(tok);
-    char *endp = nullptr;
-    errno = 0;
-    keel::f64 val = std::strtod(buf.c_str(), &endp);
-    if (endp == buf.c_str() || errno == ERANGE)
+    keel::StringRef trimmed = trimWs(tok);
+    if (trimmed.empty()) { out = 0.0; return true; }   // empty cell → 0
+    auto parsed = keel::parse_f64(trimmed);
+    if (!parsed.is_ok())
         return false;
-    // Trailing junk → not a clean number.
-    while (*endp != '\0' && keel::is_ascii_space(*endp))
-        ++endp;
-    if (*endp != '\0')
-        return false;
-    out = val;
+    out = parsed.value();
     return true;
 }
 

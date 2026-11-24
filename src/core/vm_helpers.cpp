@@ -21,7 +21,6 @@
 #include <numkit/value/index.hpp>
 #include "vm_internal.hpp"
 
-#include <cstdio>
 
 namespace numkit {
 
@@ -1392,7 +1391,8 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
             if (tryObjectSubsrefFrameObj(target, dstReg, keel::ArrayRef<Value>(idx.data(), na), frame, ip))
                 return true;
             Value out;
-            if (engine_.tryObjectSubsref(const_cast<Value&>(target), keel::ArrayRef<Value>(idx.data(), na), 1,
+            Value selfCopy = target;
+            if (engine_.tryObjectSubsref(selfCopy, keel::ArrayRef<Value>(idx.data(), na), 1,
                                          out, currentCallEnv())) {
                 R[dstReg] = keel::move(out);
                 return false;

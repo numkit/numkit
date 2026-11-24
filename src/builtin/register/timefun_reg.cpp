@@ -748,7 +748,7 @@ void tic_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
              CallContext &ctx) {
     argcheck::checkNargin(args.size(), 0, 0, "tic");
     const keel::u64 nowNs = keel::monotonic_ns();
-    ctx.engine->setTicTimer(nowNs);
+    coreEngine(ctx).setTicTimer(nowNs);
     if (nargout > 0) {
         const keel::f64 id = keel::as<keel::f64>(nowNs / 1000ULL);
         outs[0] = Value::scalar(id, ctx.engine->allocator());
@@ -765,8 +765,8 @@ void toc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     if (!args.empty() && args[0].isScalar()) {
         const keel::f64 v = args[0].toScalar();
         startNs = (v > 0.0) ? keel::as<keel::u64>(v) * 1000ULL : 0ULL;
-    } else if (ctx.engine->ticWasCalled()) {
-        startNs = ctx.engine->ticTimer();
+    } else if (coreEngine(ctx).ticWasCalled()) {
+        startNs = coreEngine(ctx).ticTimer();
     } else {
         throw numkit::Error("toc: You must call 'tic' before calling 'toc'.");
     }
@@ -774,7 +774,7 @@ void toc_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     if (nargout > 0) {
         outs[0] = Value::scalar(elapsed, ctx.engine->allocator());
     } else {
-        ctx.engine->outputText(keel::format("Elapsed time is %g seconds.\n", elapsed));
+        coreEngine(ctx).outputText(keel::format("Elapsed time is %g seconds.\n", elapsed));
         outs[0] = Value();
     }
 }

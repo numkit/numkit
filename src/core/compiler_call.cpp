@@ -1,5 +1,6 @@
 // src/core/compiler_call.cpp
 #include <keel/core.h>
+#include <keel/number.h>
 #include <keel/format.h>
 #include <keel/utf8.h>
 #include <numkit/core/compiler.hpp>
@@ -8,7 +9,6 @@
 #include <numkit/core/vm.hpp>
 #include "compiler_internal.hpp"
 
-#include <cstdlib>
 
 namespace numkit {
 
@@ -721,10 +721,10 @@ keel::u16 Compiler::compileCommandCall(const ASTNode *node)
             || engine_.isReservedName(name) != 0)) {
         const keel::String &arg = node->children[0]->strValue;
         if (arg.size() >= 2 && (arg[0] == '-' || arg[0] == '/')) {
-            const keel::String rest = keel::String::from(arg.substr(1));
-            char *endPtr = nullptr;
-            keel::f64 numVal = std::strtod(rest.c_str(), &endPtr);
-            const bool isNum = (endPtr != rest.c_str() && *endPtr == '\0');
+            const keel::StringRef rest = arg.substr(1);
+            auto parsed = keel::parse_f64(rest);
+            const bool isNum = parsed.is_ok();
+            const keel::f64 numVal = isNum ? parsed.value() : 0.0;
             auto isIdent = [](keel::StringRef s) {
                 if (s.empty())
                     return false;

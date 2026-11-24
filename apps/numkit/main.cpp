@@ -27,7 +27,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 
 namespace {
 
@@ -198,7 +197,7 @@ bool readStdinLine(keel::String &line)
     bool any = false;
     while (std::fgets(buf, sizeof(buf), stdin) != nullptr) {
         any = true;
-        keel::usize len = std::strlen(buf);
+        keel::usize len = keel::StringRef(buf).size();
         bool hasNewline = (len > 0 && buf[len - 1] == '\n');
         if (hasNewline) {
             --len;
@@ -224,7 +223,7 @@ int runRepl()
     keel::String line;
     while (true) {
         const char *prompt = accum.empty() ? ">> " : "... ";
-        std::fwrite(prompt, 1, std::strlen(prompt), stdout);
+        std::fwrite(prompt, 1, keel::StringRef(prompt).size(), stdout);
         std::fflush(stdout);
         if (!readStdinLine(line)) {
             if (gSigIntSeen.exchange(false, keel::MemoryOrder::AcqRel)) {

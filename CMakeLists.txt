@@ -176,6 +176,9 @@ if(NUMKIT_BUILD_CLI)
         ARCHIVE_OUTPUT_NAME numkit_cli
     )
     target_link_libraries(numkit_cli PRIVATE numkit)
+    if(MSVC)
+        target_link_options(numkit_cli PRIVATE /STACK:8388608)
+    endif()
 endif()
 
 # ── Testing: numkit_gtest ────────────────────────────────────────────────
@@ -219,6 +222,9 @@ if(NUMKIT_BUILD_TESTS)
         numkit
         GTest::gtest
     )
+    if(MSVC)
+        target_link_options(numkit_gtest PRIVATE /STACK:8388608)
+    endif()
 
     include(GoogleTest)
     gtest_discover_tests(numkit_gtest)

@@ -23,9 +23,9 @@ void type_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     if (!args[0].isChar() && !args[0].isString())
         throw Error("type: requires a filename string",
                      0, 0, "type", "", "numkit:type:nargin");
-    auto sink = [&ctx](keel::StringRef s) { ctx.engine->outputText(s); };
+    auto sink = [&ctx](keel::StringRef s) { coreEngine(ctx).outputText(s); };
     const keel::String filename = args[0].toString();
-    type(ctx.engine->fsContext(), sink, filename);
+    type(coreEngine(ctx).fsContext(), sink, filename);
     outs[0] = Value();
 }
 

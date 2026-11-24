@@ -335,7 +335,7 @@ void metaclass_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     } else {
         cn = mtypeName(args[0].type());
     }
-    outs[0] = buildMetaClass(cn, *ctx.engine, mr);
+    outs[0] = buildMetaClass(cn, coreEngine(ctx), mr);
 }
 
 void iscategorical_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
@@ -344,7 +344,7 @@ void iscategorical_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
     if (args.size() != 1)
         throw Error("iscategorical: requires 1 argument", 0, 0, "iscategorical", "",
                     "numkit:iscategorical:nargin");
-    outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "categorical", *ctx.engine),
+    outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "categorical", coreEngine(ctx)),
                                    ctx.engine->allocator());
 }
 
@@ -354,7 +354,7 @@ void istimetable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
     if (args.size() != 1)
         throw Error("istimetable: requires 1 argument", 0, 0, "istimetable", "",
                     "numkit:istimetable:nargin");
-    outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "timetable", *ctx.engine),
+    outs[0] = Value::logicalScalar(checkIsClassOrSub(args[0], "timetable", coreEngine(ctx)),
                                    ctx.engine->allocator());
 }
 

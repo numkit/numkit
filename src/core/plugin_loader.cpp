@@ -56,29 +56,19 @@ public:
             }
             if (!sub.empty() && sub != prefixNs_.as_ref()) {
                 auto sharedFn = keel::make_arc<ExternalFunc>(keel::move(func));
-                try {
-                    engine_.registerFunction(prefixNs_, name, makeSharedWrapper(sharedFn));
-                } catch (...) {}
-                try {
-                    keel::String fullSub = keel::format("{}.{}", prefixNs_, sub);
-                    engine_.registerFunction(fullSub, name, makeSharedWrapper(sharedFn));
-                } catch (...) {}
+                engine_.registerFunctionIfAbsent(prefixNs_, name, makeSharedWrapper(sharedFn));
+                keel::String fullSub = keel::format("{}.{}", prefixNs_, sub);
+                engine_.registerFunctionIfAbsent(fullSub, name, makeSharedWrapper(sharedFn));
             } else {
-                try {
-                    engine_.registerFunction(prefixNs_, name, keel::move(func));
-                } catch (...) {}
+                engine_.registerFunctionIfAbsent(prefixNs_, name, keel::move(func));
             }
         } else if (ns.empty()) {
             // Never register bare names into core root from a plugin: keep inside defaultNs_
             // (shortNameIndex_ resolves bare calls in Compat mode; Isolated mode stays clean).
             if (!defaultNs_.empty()) {
-                try {
-                    engine_.registerFunction(defaultNs_, name, keel::move(func));
-                } catch (const std::exception &) {}
+                engine_.registerFunctionIfAbsent(defaultNs_, name, keel::move(func));
             } else {
-                try {
-                    engine_.registerFunction(name, keel::move(func));
-                } catch (const std::exception &) {}
+                engine_.registerFunctionIfAbsent(name, keel::move(func));
             }
         } else {
             keel::usize dot = ns.find('.');
@@ -86,37 +76,21 @@ public:
             engine_.markPluginNamespace(topNs, /*isolated=*/false);
             if (dot != keel::kInvalidIndex) {
                 auto sharedFn = keel::make_arc<ExternalFunc>(keel::move(func));
-                try {
-                    engine_.registerFunction(ns, name, makeSharedWrapper(sharedFn));
-                } catch (const std::exception &) {
-                    // Ignore duplicate registration when replacing or already present
-                }
-                try {
-                    engine_.registerFunction(topNs, name, makeSharedWrapper(sharedFn));
-                } catch (const std::exception &) {}
+                engine_.registerFunctionIfAbsent(ns, name, makeSharedWrapper(sharedFn));
+                engine_.registerFunctionIfAbsent(topNs, name, makeSharedWrapper(sharedFn));
             } else {
-                try {
-                    engine_.registerFunction(ns, name, keel::move(func));
-                } catch (const std::exception &) {}
+                engine_.registerFunctionIfAbsent(ns, name, keel::move(func));
             }
         }
     }
 
     void registerFunction(keel::StringRef name, ExternalFunc func) override {
         if (!prefixNs_.empty()) {
-            try {
-                engine_.registerFunction(prefixNs_, name, keel::move(func));
-            } catch (...) {}
+            engine_.registerFunctionIfAbsent(prefixNs_, name, keel::move(func));
         } else if (!defaultNs_.empty()) {
-            try {
-                engine_.registerFunction(defaultNs_, name, keel::move(func));
-            } catch (const std::exception &) {}
+            engine_.registerFunctionIfAbsent(defaultNs_, name, keel::move(func));
         } else {
-            try {
-                engine_.registerFunction(name, keel::move(func));
-            } catch (const std::exception &) {
-                // Ignore duplicate registration when replacing or already present
-            }
+            engine_.registerFunctionIfAbsent(name, keel::move(func));
         }
     }
 
@@ -149,9 +123,7 @@ public:
     }
 
     void registerClass(BuiltinClass cls) override {
-        try {
-            engine_.registerClass(keel::move(cls));
-        } catch (const std::exception &) {}
+        engine_.registerClassIfAbsent(keel::move(cls));
     }
 
     const BuiltinClass *findClass(keel::StringRef name) const override {

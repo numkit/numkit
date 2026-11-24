@@ -6,8 +6,11 @@
 #include <keel/core.h>
 #include <keel/hash_map.h>
 #include <keel/hash_set.h>
+#include <keel/small_array.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
+#include <numkit/core/engine.hpp>
+#include <numkit/core/fusion_rule.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/value/value.hpp>
@@ -143,6 +146,49 @@ struct MFileResolverState
     keel::Array<keel::String> mPath;
     keel::HashMap<keel::String, MFileCacheEntry> mFileCache;
     keel::HashSet<keel::String> mFileMissCache;
+};
+
+// Encapsulated function, namespace, callback, and persistent state owned by Engine.
+struct FunctionRegistryState
+{
+    // Arc-backed symbol maps guarantee pointer stability across open-addressing
+    // HashMap rehashes (returned const T* and cached CallCacheEntry pointers stay valid).
+    keel::HashMap<keel::String, keel::Arc<ExternalFunc>> externalFuncs;
+    // Auxiliary indices into externalFuncs, populated by registerFunction.
+    keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> shortNameIndex;
+    keel::Array<keel::String> namespaceOrder;
+    keel::HashSet<keel::String> namespaceSet;
+    keel::HashSet<keel::String> pluginNamespaces;
+    keel::HashSet<keel::String> isolatedPluginNamespaces;
+    NamespaceMode namespaceMode = NamespaceMode::Compat;
+    // Higher-order builtins that can run callbacks as pausable VM frames.
+    keel::HashMap<keel::String, keel::Arc<CallbackBuiltin>> callbackBuiltins;
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> userFuncs;
+    // Script-lexical user functions — peer to userFuncs but never cleared by `clear all`.
+    keel::HashMap<keel::String, keel::Arc<UserFunction>> scriptLocalUserFuncs;
+    keel::Array<keel::HashMap<keel::String, keel::Arc<UserFunction>>> savedScriptLocalUserFuncs;
+    keel::HashMap<keel::String, keel::Arc<keel::HashMap<keel::String, Value>>> persistentStore;
+    // Startup registration sources retained for post-clear replay (reinstallBuiltinSources).
+    keel::Array<keel::String> builtinMSourceTexts;
+};
+
+// Encapsulated session state (warnings, env overlay, timers, errors, host
+// constants, var-decl commands, and fusion telemetry) owned by Engine.
+struct SessionState
+{
+    keel::String lastWarnMsg;
+    keel::String lastWarnId;
+    keel::HashMap<keel::String, keel::String> envOverlay;
+    keel::HashMap<keel::String, Value> userConstants;
+    keel::HashMap<keel::String, PluginContext::VarDeclExtractor> varDeclCommands;
+    TimePoint ticBase{};
+    bool ticCalled = false;
+    bool clearAllCalled = false;
+    keel::Array<CallStackFrame> lastErrorStack;
+    Value lastErrorStruct;
+    keel::Array<FusionRule> fusionRules;
+    bool fusionEnabled = true;
+    keel::usize fusionHits = 0;
 };
 
 inline bool hasPathSepOrColon(keel::StringRef s) noexcept

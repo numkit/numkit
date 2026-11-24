@@ -15,15 +15,22 @@ protected:
     std::string findPluginLib(const std::string &pkgName) {
         keel::String foundK = engine.pluginLoader().findPackageLibrary(pkgName);
         std::string found(foundK.data(), foundK.size());
-        if (!found.empty() && keel::fs_exists(found))
-            return found;
+        if (!found.empty()) {
+            if (keel::fs_exists(found))
+                return found;
+#ifdef _WIN32
+            if (keel::fs_exists(found + ".dll"))
+                return found + ".dll";
+#endif
+        }
         const std::vector<std::string> candidates = {
             "build/lib/libnumkit_" + pkgName + ".so",
             "build/lib/libnumkit_" + pkgName + ".dylib",
+            "build/bin/Release/modules/" + pkgName + "/numkit_" + pkgName + ".dll",
+            "build/bin/Release/numkit_" + pkgName + ".dll",
             "build/bin/numkit_" + pkgName + ".dll",
             "build/bin/modules/" + pkgName + "/libnumkit_" + pkgName + ".so",
-            "../lib/libnumkit_" + pkgName + ".so",
-            "C:/Users/User/Projects/numkit/" + pkgName + "/build/Release/numkit_" + pkgName + ".dll"
+            "../lib/libnumkit_" + pkgName + ".so"
         };
         for (const auto &c : candidates) {
             if (keel::fs_exists(c)) {

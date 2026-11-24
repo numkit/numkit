@@ -34,7 +34,6 @@
 #include <keel/static_array.h>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <initializer_list>
 
 namespace numkit {
@@ -340,7 +339,7 @@ const keel::u8 *namedPalette(keel::StringRef name, keel::i32 &n)
         };
         for (keel::usize idx = 0; idx < kNumPalettes; ++idx) {
             const char *hex = kNamedPaletteHex[idx].hex;
-            const keel::usize len = std::strlen(hex);
+            const keel::usize len = keel::StringRef(hex).size();
             for (keel::usize i = 0, outIdx = 0; i + 1 < len && outIdx < 256 * 3; i += 2, ++outIdx)
                 t[idx][outIdx] = keel::as<keel::u8>((hexNibble(hex[i]) << 4) | hexNibble(hex[i + 1]));
         }

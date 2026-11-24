@@ -73,7 +73,7 @@ void setenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
             throw Error("setenv: value must be a char array");
         value = args[1].toString();
     }
-    ctx.engine->setEnvVar(name.as_ref(), value.as_ref());
+    coreEngine(ctx).setEnvVar(name.as_ref(), value.as_ref());
 }
 
 void getenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -81,7 +81,7 @@ void getenv_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
     (void)nargout;
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
         throw Error("getenv: argument must be a variable name");
-    outs[0] = Value::fromString(ctx.engine->getEnvVar(args[0].toString().as_ref()).as_ref(),
+    outs[0] = Value::fromString(coreEngine(ctx).getEnvVar(args[0].toString().as_ref()).as_ref(),
                                 ctx.engine->allocator());
 }
 
@@ -96,7 +96,7 @@ void loadmodule_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
             throw Error("loadmodule: second argument must be a namespace string");
         targetNs = args[1].toString();
     }
-    bool ok = ctx.engine->pluginLoader().loadModule(path.as_ref(), targetNs.as_ref());
+    bool ok = coreEngine(ctx).pluginLoader().loadModule(path.as_ref(), targetNs.as_ref());
     if (nargout > 0 && !outs.empty()) {
         outs[0] = Value::logicalScalar(ok);
     }
@@ -106,7 +106,7 @@ void loadedmodules_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::Mu
 {
     (void)args;
     (void)nargout;
-    auto mods = ctx.engine->pluginLoader().loadedModules();
+    auto mods = coreEngine(ctx).pluginLoader().loadedModules();
     Value c = Value::cell(1, mods.size(), ctx.engine->allocator());
     for (keel::usize i = 0; i < mods.size(); ++i) {
         c.cellAt(i) = Value::fromString(mods[i].as_ref(), ctx.engine->allocator());

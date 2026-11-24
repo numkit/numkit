@@ -1,5 +1,6 @@
 // src/engine.cpp
 #include <keel/array.h>
+#include <keel/number.h>
 #include <keel/algo.h>
 #include <keel/exception.h>
 #include <keel/core.h>
@@ -14,7 +15,6 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <keel/math.h>
-#include <cstdio>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/figure_manager.hpp>
@@ -29,8 +29,6 @@
 #include <numkit/core/vm.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
-#include <cerrno>
-#include <cstdlib>
 
 #include "engine_internal.hpp"
 
@@ -46,8 +44,10 @@ Engine::Engine() : Engine(numkit::defaultCachedAllocator()) {}
 
 Engine::Engine(keel::Allocator *mr)
     : mr_(mr ? mr : numkit::defaultCachedAllocator())
+    , funcReg_(keel::make_unique<FunctionRegistryState>())
     , classReg_(keel::make_unique<ClassRegistryState>())
     , mFileReg_(keel::make_unique<MFileResolverState>())
+    , session_(keel::make_unique<SessionState>())
 {
     globalsEnv_ = keel::make_arc<Environment>();
     constantsEnv_ = keel::make_unique<Environment>(nullptr, globalsEnv_.get());
@@ -67,13 +67,13 @@ Engine::Engine(keel::Allocator *mr)
     // Element-wise fusion default: on unless NUMKIT_FUSE=0 (kill switch). No
     // effect until the standard library registers rules (see fusionEnabled()).
     if (auto fe = keel::env_get("NUMKIT_FUSE"))
-        fusionEnabled_ = (fe->as_ref() != "0");
+        session_->fusionEnabled = (fe->as_ref() != "0");
 
     keel::String nm = numkit::envGet("NUMKIT_MODE");
     if (nm.empty())
         nm = numkit::envGet("NUMKIT_NAMESPACE_MODE");
     if (nm.as_ref() == "isolated" || nm.as_ref() == "namespaced" || nm.as_ref() == "strict")
-        namespaceMode_ = NamespaceMode::Isolated;
+        funcReg_->namespaceMode = NamespaceMode::Isolated;
     // No library installs here — a bare Engine has the language runtime,
     // constants and primitive arithmetic, but no named functions. Call
     // numkit::installStandardLibrary(engine) to load the full set.
@@ -92,25 +92,204 @@ Engine::~Engine()
     workspaceEnv_.reset();
     constantsEnv_.reset();
     globalsEnv_.reset();
-    userConstants_.clear();
-    scriptLocalUserFuncs_.clear();
-    savedScriptLocalUserFuncs_.clear();
-    userFuncs_.clear();
+    if (session_) {
+        session_->userConstants.clear();
+        session_->fusionRules.clear();
+    }
+    if (funcReg_) {
+        funcReg_->scriptLocalUserFuncs.clear();
+        funcReg_->savedScriptLocalUserFuncs.clear();
+        funcReg_->userFuncs.clear();
+        funcReg_->callbackBuiltins.clear();
+        funcReg_->externalFuncs.clear();
+        funcReg_->shortNameIndex.clear();
+    }
     if (classReg_) {
         classReg_->classDefAst.clear();
         classReg_->classDefs.clear();
         classReg_->classes.clear();
     }
-    callbackBuiltins_.clear();
-    fusionRules_.clear();
     binaryOps_.clear();
     unaryOps_.clear();
-    externalFuncs_.clear();
-    shortNameIndex_.clear();
+    session_.reset();
     mFileReg_.reset();
     classReg_.reset();
+    funcReg_.reset();
     pluginLoader_.reset();
     figureManager_.reset();
+}
+
+void Engine::setNamespaceMode(NamespaceMode mode) noexcept
+{
+    funcReg_->namespaceMode = mode;
+    bumpCallCacheEpoch();
+}
+
+NamespaceMode Engine::namespaceMode() const noexcept
+{
+    return funcReg_->namespaceMode;
+}
+
+const keel::Array<keel::String> &Engine::namespaces() const
+{
+    return funcReg_->namespaceOrder;
+}
+
+const keel::HashMap<keel::String, keel::SmallArray<keel::String, 2>> &Engine::shortNameIndex() const
+{
+    return funcReg_->shortNameIndex;
+}
+
+bool Engine::hasDirectExternalFunction(keel::StringRef name) const
+{
+    return funcReg_->externalFuncs.contains(name);
+}
+
+void Engine::putUserFunction(keel::String key, keel::Arc<UserFunction> uf)
+{
+    funcReg_->userFuncs.put(keel::move(key), keel::move(uf));
+}
+
+void Engine::putScriptLocalUserFunction(keel::String key, keel::Arc<UserFunction> uf)
+{
+    funcReg_->scriptLocalUserFuncs.put(keel::move(key), keel::move(uf));
+}
+
+bool Engine::inScriptScope() const
+{
+    return !funcReg_->savedScriptLocalUserFuncs.empty();
+}
+
+const keel::Arc<keel::HashMap<keel::String, Value>> &Engine::persistentBucketPtr(keel::StringRef funcName)
+{
+    if (auto *existing = funcReg_->persistentStore.get(funcName)) {
+        if (!*existing)
+            *existing = keel::make_arc<keel::HashMap<keel::String, Value>>();
+        return *existing;
+    }
+    auto res = funcReg_->persistentStore.try_insert(
+        keel::String::from(funcName),
+        keel::make_arc<keel::HashMap<keel::String, Value>>());
+    return *res.value;
+}
+
+keel::HashMap<keel::String, Value> &Engine::persistentBucket(keel::StringRef funcName)
+{
+    return *persistentBucketPtr(funcName);
+}
+
+void Engine::clearAllPersistent()
+{
+    for (auto [k, b] : funcReg_->persistentStore)
+        if (b)
+            b->clear();
+}
+
+const keel::Array<CallStackFrame> &Engine::lastErrorStack() const
+{
+    return session_->lastErrorStack;
+}
+
+void Engine::setLastErrorStack(keel::Array<CallStackFrame> stack)
+{
+    session_->lastErrorStack = keel::move(stack);
+}
+
+keel::Array<CallStackFrame> Engine::takeLastErrorStack()
+{
+    return keel::exchange(session_->lastErrorStack, {});
+}
+
+void Engine::clearLastErrorStack()
+{
+    session_->lastErrorStack.clear();
+}
+
+void Engine::resetLastError()
+{
+    session_->lastErrorStruct = Value();
+}
+
+void Engine::addFusionRule(FusionRule rule)
+{
+    session_->fusionRules.push_back(keel::move(rule));
+}
+
+const keel::Array<FusionRule> &Engine::fusionRules() const
+{
+    return session_->fusionRules;
+}
+
+void Engine::setFusion(bool on)
+{
+    session_->fusionEnabled = on;
+}
+
+bool Engine::fusionEnabled() const
+{
+    return session_->fusionEnabled && !session_->fusionRules.empty();
+}
+
+void Engine::noteFusionHit()
+{
+    ++session_->fusionHits;
+}
+
+keel::usize Engine::fusionHits() const
+{
+    return session_->fusionHits;
+}
+
+void Engine::resetFusionHits()
+{
+    session_->fusionHits = 0;
+}
+
+void Engine::setTicTimer(TimePoint tp)
+{
+    session_->ticBase = tp;
+    session_->ticCalled = true;
+}
+
+TimePoint Engine::ticTimer() const
+{
+    return session_->ticBase;
+}
+
+bool Engine::ticWasCalled() const
+{
+    return session_->ticCalled;
+}
+
+void Engine::setLastWarn(keel::StringRef msg, keel::StringRef id)
+{
+    session_->lastWarnMsg.assign(msg);
+    session_->lastWarnId.assign(id);
+}
+
+const keel::String &Engine::lastWarnMsg() const noexcept
+{
+    return session_->lastWarnMsg;
+}
+
+const keel::String &Engine::lastWarnId() const noexcept
+{
+    return session_->lastWarnId;
+}
+
+void Engine::setEnvVar(keel::StringRef name, keel::StringRef val)
+{
+    session_->envOverlay.put(keel::String::from(name), keel::String::from(val));
+}
+
+void Engine::markClearAll()
+{
+    session_->clearAllCalled = true;
+}
+
+void Engine::resetClearAllFlag()
+{
+    session_->clearAllCalled = false;
 }
 
 const keel::Array<keel::String> &Engine::path() const
@@ -187,19 +366,19 @@ void Engine::reinstallConstants()
     constantsEnv_->set("j", Value::complexScalar(0.0, 1.0, mr_));
 
     // Re-install host-registered constants so they survive `clear all`.
-    for (auto [name, val] : userConstants_)
+    for (auto [name, val] : session_->userConstants)
         constantsEnv_->set(name, val);
 }
 
 void Engine::registerConstant(keel::StringRef name, Value val)
 {
-    userConstants_.put(keel::String::from(name), val);
+    session_->userConstants.put(keel::String::from(name), val);
     constantsEnv_->set(name, keel::move(val));
 }
 
 bool Engine::isReservedName(keel::StringRef name) const
 {
-    return isBuiltinName(name) || userConstants_.contains(name);
+    return isBuiltinName(name) || session_->userConstants.contains(name);
 }
 
 // ============================================================
@@ -215,13 +394,16 @@ void Engine::registerUnaryOp(keel::StringRef op, UnaryOpFunc func)
 }
 // Internal helper — implements the actual registration logic shared
 // by both registerFunction overloads. Maintains the auxiliary indices
-// (shortNameIndex_, namespaceOrder_) and enforces uniqueness of the
-// full name in the primary externalFuncs_ map.
-void Engine::registerFunctionImpl_(keel::StringRef fullName,
+// (funcReg_->shortNameIndex, funcReg_->namespaceOrder) and enforces uniqueness of the
+// full name in the primary funcReg_->externalFuncs map.
+bool Engine::registerFunctionImpl_(keel::StringRef fullName,
                                    keel::StringRef leafName,
-                                   ExternalFunc func)
+                                   ExternalFunc func,
+                                   bool ignoreDuplicate)
 {
-    if (externalFuncs_.contains(fullName)) {
+    if (funcReg_->externalFuncs.contains(fullName)) {
+        if (ignoreDuplicate)
+            return false;
         // Common cause for `compat.<name>` collisions: a stale `noop`
         // placeholder was left in a library's install() while the real
         // implementation was registered elsewhere. Each `reg(<sub>,
@@ -238,9 +420,9 @@ void Engine::registerFunctionImpl_(keel::StringRef fullName,
         auto msg = keel::format("duplicate function registration: {}{}", fullName, hint);
         throw numkit::Error(msg.c_str());
     }
-    externalFuncs_.put(keel::String::from(fullName),
+    funcReg_->externalFuncs.put(keel::String::from(fullName),
                        keel::make_arc<ExternalFunc>(keel::move(func)));
-    shortNameIndex_.get_or_insert(keel::String::from(leafName),
+    funcReg_->shortNameIndex.get_or_insert(keel::String::from(leafName),
                                   keel::SmallArray<keel::String, 2>{})
         .push_back(keel::String::from(fullName));
     bumpCallCacheEpoch();
@@ -250,27 +432,33 @@ void Engine::registerFunctionImpl_(keel::StringRef fullName,
     const keel::usize dot = fullName.find('.');
     if (dot != keel::kInvalidIndex) {
         keel::StringRef topNs = fullName.substr(0, dot);
-        if (namespaceSet_.insert(keel::String::from(topNs))) {
-            namespaceOrder_.push_back(keel::String::from(topNs));
+        if (funcReg_->namespaceSet.insert(keel::String::from(topNs))) {
+            funcReg_->namespaceOrder.push_back(keel::String::from(topNs));
         }
     }
+    return true;
 }
 
 void Engine::registerFunction(keel::StringRef name, ExternalFunc func)
 {
     // 1-arg form: equivalent to namespace = "" (core). full name == leaf name.
-    registerFunctionImpl_(name, name, keel::move(func));
+    registerFunctionImpl_(name, name, keel::move(func), false);
+}
+
+bool Engine::registerFunctionIfAbsent(keel::StringRef name, ExternalFunc func)
+{
+    return registerFunctionImpl_(name, name, keel::move(func), true);
 }
 
 void Engine::registerCallbackBuiltin(keel::StringRef name, keel::Arc<CallbackBuiltin> cb)
 {
-    callbackBuiltins_.put(keel::String::from(name), keel::move(cb));
+    funcReg_->callbackBuiltins.put(keel::String::from(name), keel::move(cb));
     bumpCallCacheEpoch();
 }
 
 CallbackBuiltin *Engine::callbackBuiltin(keel::StringRef name) const
 {
-    const auto *p = callbackBuiltins_.get(name);
+    const auto *p = funcReg_->callbackBuiltins.get(name);
     return p ? p->get() : nullptr;
 }
 
@@ -419,10 +607,10 @@ void Engine::syncEnvRemovalsToFrame(Environment *env)
 
 void Engine::clearPersistentForFunc(keel::StringRef funcName)
 {
-    if (auto *bp = persistentStore_.get(funcName); bp && *bp)
+    if (auto *bp = funcReg_->persistentStore.get(funcName); bp && *bp)
         (*bp)->clear();
     const keel::String prefix = keel::format("{}>", funcName);
-    for (auto [key, bucket] : persistentStore_) {
+    for (auto [key, bucket] : funcReg_->persistentStore) {
         if (bucket && key.starts_with(prefix))
             bucket->clear();
     }
@@ -430,7 +618,7 @@ void Engine::clearPersistentForFunc(keel::StringRef funcName)
 
 keel::String Engine::getEnvVar(keel::StringRef name) const
 {
-    if (const auto *v = envOverlay_.get(name))
+    if (const auto *v = session_->envOverlay.get(name))
         return v->clone();
     return numkit::envGet(name);
 }
@@ -468,7 +656,7 @@ keel::i64 Engine::currentFunctionNargout() const
 
 void Engine::clearUserFunctions()
 {
-    userFuncs_.clear();
+    funcReg_->userFuncs.clear();
     clearAllPersistent();
     if (compiler_)
         compiler_->clearCompiledFuncs();
@@ -477,8 +665,8 @@ void Engine::clearUserFunctions()
 
 void Engine::beginScript(const ASTNode *ast)
 {
-    savedScriptLocalUserFuncs_.push_back(keel::move(scriptLocalUserFuncs_));
-    scriptLocalUserFuncs_.clear();
+    funcReg_->savedScriptLocalUserFuncs.push_back(keel::move(funcReg_->scriptLocalUserFuncs));
+    funcReg_->scriptLocalUserFuncs.clear();
     if (compiler_)
         compiler_->beginScriptScope();
     bumpCallCacheEpoch();
@@ -505,7 +693,7 @@ void Engine::beginScript(const ASTNode *ast)
         uf.body = keel::Arc<const ASTNode>(cloneNode(f->children[0].get()));
         uf.closureEnv = nullptr;
         keel::String key = uf.name.clone();
-        scriptLocalUserFuncs_.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(uf)));
+        funcReg_->scriptLocalUserFuncs.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(uf)));
     };
     if (ast->type == NodeType::BLOCK) {
         for (const auto &c : ast->children)
@@ -520,22 +708,22 @@ void Engine::endScript()
     if (compiler_)
         compiler_->endScriptScope();
     bumpCallCacheEpoch();
-    if (savedScriptLocalUserFuncs_.empty()) {
-        scriptLocalUserFuncs_.clear();
+    if (funcReg_->savedScriptLocalUserFuncs.empty()) {
+        funcReg_->scriptLocalUserFuncs.clear();
         return;
     }
-    scriptLocalUserFuncs_ = keel::move(savedScriptLocalUserFuncs_.back());
-    savedScriptLocalUserFuncs_.pop_back();
+    funcReg_->scriptLocalUserFuncs = keel::move(funcReg_->savedScriptLocalUserFuncs.back());
+    funcReg_->savedScriptLocalUserFuncs.pop_back();
 }
 
 void Engine::promoteScriptLocalsToWorkspace()
 {
-    for (auto [k, v] : scriptLocalUserFuncs_) {
+    for (auto [k, v] : funcReg_->scriptLocalUserFuncs) {
         if (backend_ != Backend::VM && compiler_)
             compiler_->eraseCompiledFunc(k);
-        userFuncs_.put(k.clone(), keel::move(v));
+        funcReg_->userFuncs.put(k.clone(), keel::move(v));
     }
-    scriptLocalUserFuncs_.clear();
+    funcReg_->scriptLocalUserFuncs.clear();
     if (compiler_)
         compiler_->promoteScriptLocalsToWorkspace();
     bumpCallCacheEpoch();
@@ -559,7 +747,7 @@ void Engine::setDebugObserver(keel::Arc<DebugObserver> observer)
 // executing a single statement (or a whole single-expression chunk).
 Value Engine::runOneChunk(const ASTNode *ast, keel::Arc<const keel::String> src)
 {
-    clearAllCalled_ = false;
+    session_->clearAllCalled = false;
     vm_->clearLastVarMap();
 
     auto chunk = compiler_->compile(ast, src);
@@ -658,14 +846,15 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
             continue;
         if (!getVariable(name) && !isReservedName(name))
             continue;
-        const keel::String tail = keel::String::from(arg.substr(1));
-        char *endPtr = nullptr;
-        errno = 0;
+        const keel::StringRef tail = arg.substr(1);
         keel::f64 parsedNum = 0.0;
         bool isNum = false;
         if (!tail.empty() && tail != ".") {
-            parsedNum = std::strtod(tail.c_str(), &endPtr);
-            isNum = (errno == 0 && endPtr == tail.c_str() + tail.size());
+            auto parsed = keel::parse_f64(tail);
+            if (parsed.is_ok()) {
+                parsedNum = parsed.value();
+                isNum = true;
+            }
         }
         bool isIdent = !tail.empty()
                        && (keel::is_ascii_alpha(tail[0])
@@ -687,7 +876,7 @@ void Engine::rewriteVarHeadedCommands(ASTNode *root)
             operand->numValue = parsedNum;
         } else {
             operand = keel::make_unique<ASTNode>(NodeType::IDENTIFIER);
-            operand->strValue = tail.clone();
+            operand->strValue = keel::String::from(tail);
         }
         operand->line = ln; operand->col = cl;
         // Replicate parseExpressionStatement's shape: the statement
@@ -713,7 +902,7 @@ Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
     checkCancelled();
     auto src = keel::make_arc<const keel::String>(keel::String::from(code));
     if (callerDepth() == 0)
-        lastErrorStack_.clear();
+        session_->lastErrorStack.clear();
     refreshStaleMFiles();
     if (useVM_())
         vm_->flushWorkspaceFrame();
@@ -807,12 +996,12 @@ Value Engine::eval(keel::StringRef code, bool suppressTopLevelDisplay)
     return runOneChunk(ast.get(), src);
 }
 
-Value Engine::evalStatement(const ASTNode *stmt,
+Value Engine::evalStatement(ASTNode *stmt,
                             keel::Arc<const keel::String> src)
 {
     if (!stmt)
         return Value();
-    rewriteVarHeadedCommands(const_cast<ASTNode *>(stmt));
+    rewriteVarHeadedCommands(stmt);
     return runOneChunk(stmt, keel::move(src));
 }
 
@@ -851,18 +1040,18 @@ keel::Array<CallStackFrame> Engine::captureCallStack() const
 void Engine::recordLastError(keel::StringRef msg, keel::StringRef id,
                              keel::ArrayRef<CallStackFrame> stack)
 {
-    lastErrorStruct_ = makeExceptionStruct(msg, id, stack, mr_);
+    session_->lastErrorStruct = makeExceptionStruct(msg, id, stack, mr_);
 }
 
 void Engine::setLastError(const Value &errStruct)
 {
-    lastErrorStruct_ = errStruct;
+    session_->lastErrorStruct = errStruct;
 }
 
 Value Engine::lastError() const
 {
-    if (lastErrorStruct_.isStruct())
-        return lastErrorStruct_;
+    if (session_->lastErrorStruct.isStruct())
+        return session_->lastErrorStruct;
     return makeExceptionStruct("", "", {}, mr_);
 }
 
@@ -928,10 +1117,10 @@ ExecStatus Engine::debugResume(DebugAction action)
 
 void Engine::syncVMToWorkspace()
 {
-    if (clearAllCalled_) {
+    if (session_->clearAllCalled) {
         workspaceEnv_->clearAll();
         syncScopeClearAll_(workspaceEnv_.get());
-        clearAllCalled_ = false;
+        session_->clearAllCalled = false;
     }
     for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
@@ -952,10 +1141,10 @@ void Engine::syncVMToScope(Environment *scope)
         syncVMToWorkspace();
         return;
     }
-    if (clearAllCalled_) {
+    if (session_->clearAllCalled) {
         scope->clearAll();
         syncScopeClearAll_(scope);
-        clearAllCalled_ = false;
+        session_->clearAllCalled = false;
     }
     for (const auto &[name, val] : vm_->lastVarMap()) {
         if (val.isUnset() || val.isDeleted()) {
@@ -1011,7 +1200,7 @@ Value Engine::eval(keel::StringRef code, Environment *scope,
     vm_->setNextFrameDynVars(callerSnapshot.empty() ? nullptr : &callerSnapshot);
 
     Environment *prevInherited = vm_->inheritedScope_;
-    bool prevClearAll = clearAllCalled_;
+    bool prevClearAll = session_->clearAllCalled;
     struct ScopedEvalGuard {
         Engine *eng;
         VM *vm;
@@ -1022,12 +1211,12 @@ Value Engine::eval(keel::StringRef code, Environment *scope,
                 vm->setNextFrameDynVars(nullptr);
                 vm->inheritedScope_ = prevInherited;
             }
-            eng->clearAllCalled_ = prevClearAll;
+            eng->session_->clearAllCalled = prevClearAll;
         }
     } guard{this, vm_.get(), prevInherited, prevClearAll};
 
     vm_->inheritedScope_ = scope;
-    clearAllCalled_ = false;
+    session_->clearAllCalled = false;
     vm_->clearLastVarMap();
 
     auto chunk = compiler_->compile(ast.get(), src);

@@ -23,7 +23,7 @@ namespace detail {
 void fscanf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, 3, "fscanf");
-    ::numkit::runtime::fscanf(*ctx.engine, args, nargout, outs);
+    ::numkit::runtime::fscanf(coreEngine(ctx), args, nargout, outs);
 }
 
 void sscanf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -34,7 +34,7 @@ void sscanf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayR
 
 void textscan_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    ::numkit::runtime::textscan(*ctx.engine, args, nargout, outs);
+    ::numkit::runtime::textscan(coreEngine(ctx), args, nargout, outs);
 }
 
 } // namespace detail

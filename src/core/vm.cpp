@@ -16,7 +16,6 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
 
-#include <cstdio>
 
 // Forward-declarations from toolboxes/builtin/src/backends/binary_ops_loops.hpp.
 // Linked from the same nk library; lets the VM bypass the public

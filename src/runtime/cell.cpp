@@ -629,7 +629,7 @@ void cellfun_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Valu
 
     // Legacy string-function-name form: cellfun('isempty', C), cellfun('size', C, k), …
     if (args[0].isChar() || args[0].isString()) {
-        outs[0] = cellfunStringForm(args, mr, ctx.engine);
+        outs[0] = cellfunStringForm(args, mr, coreEnginePtr(ctx));
         return;
     }
 
@@ -872,10 +872,10 @@ void celldisp_reg(keel::ArrayRef<Value> args, keel::usize,
                                   ? args[1].toString()
                                   : keel::String::from("ans");
     for (keel::usize i = 0; i < c.numel(); ++i) {
-        ctx.engine->outputText(keel::format("{}{{{}}} =\n", name, i + 1));
+        coreEngine(ctx).outputText(keel::format("{}{{{}}} =\n", name, i + 1));
         keel::String disp = c.cellAt(i).formatDisplay("");
         disp.push_back('\n');
-        ctx.engine->outputText(disp);
+        coreEngine(ctx).outputText(disp);
     }
 }
 

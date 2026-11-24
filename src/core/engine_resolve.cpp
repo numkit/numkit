@@ -2,8 +2,8 @@
 // Engine symbol & file resolution: namespaces, imports, plugins, search path,
 // builtin M-sources, and on-demand .m-file loading/rehash.
 #include <keel/array.h>
+#include <keel/io.h>
 #include <keel/algo.h>
-#include <cstdio>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -29,11 +29,22 @@ void Engine::registerFunction(keel::StringRef ns,
                               ExternalFunc func)
 {
     if (ns.empty()) {
-        registerFunctionImpl_(name, name, keel::move(func));
+        registerFunctionImpl_(name, name, keel::move(func), false);
     } else {
         keel::String full = keel::format("{}.{}", ns, name);
-        registerFunctionImpl_(full, name, keel::move(func));
+        registerFunctionImpl_(full, name, keel::move(func), false);
     }
+}
+
+bool Engine::registerFunctionIfAbsent(keel::StringRef ns,
+                                      keel::StringRef name,
+                                      ExternalFunc func)
+{
+    if (ns.empty()) {
+        return registerFunctionImpl_(name, name, keel::move(func), true);
+    }
+    keel::String full = keel::format("{}.{}", ns, name);
+    return registerFunctionImpl_(full, name, keel::move(func), true);
 }
 
 // Internal helper: walk active imports across env→parent chain plus the
@@ -42,7 +53,7 @@ void Engine::registerFunction(keel::StringRef ns,
 //
 // Resolution rules (mirrors namespace_design.md §4):
 //   * `import a.b.*`     → tries "a.b.<name>" first, then "deep" candidates
-//                          via shortNameIndex_: any registered fullname that
+//                          via funcReg_->shortNameIndex: any registered fullname that
 //                          starts with "a.b." and ends with ".<name>". This
 //                          lets `import signal.*` find `signal.transforms.fft`
 //                          when calling bare `fft()` — sub-namespaces are
@@ -193,9 +204,9 @@ void Engine::markPluginNamespace(keel::StringRef ns, bool isolated)
     if (ns.empty()) return;
     const keel::usize dot = ns.find('.');
     keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
-    pluginNamespaces_.insert(keel::String::from(topNs));
+    funcReg_->pluginNamespaces.insert(keel::String::from(topNs));
     if (isolated) {
-        isolatedPluginNamespaces_.insert(keel::String::from(topNs));
+        funcReg_->isolatedPluginNamespaces.insert(keel::String::from(topNs));
     }
     bumpCallCacheEpoch();
 }
@@ -204,14 +215,14 @@ bool Engine::isPluginNamespace(keel::StringRef ns) const
 {
     const keel::usize dot = ns.find('.');
     keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
-    return pluginNamespaces_.contains(topNs);
+    return funcReg_->pluginNamespaces.contains(topNs);
 }
 
 bool Engine::isIsolatedPluginNamespace(keel::StringRef ns) const
 {
     const keel::usize dot = ns.find('.');
     keel::StringRef topNs = (dot != keel::kInvalidIndex) ? ns.substr(0, dot) : ns;
-    return isolatedPluginNamespaces_.contains(topNs);
+    return funcReg_->isolatedPluginNamespaces.contains(topNs);
 }
 
 keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
@@ -220,14 +231,14 @@ keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
     if (name.find('.') != keel::kInvalidIndex)
         return keel::String::from(baseMsg);
 
-    if (namespaceMode_ == NamespaceMode::Isolated) {
+    if (funcReg_->namespaceMode == NamespaceMode::Isolated) {
         keel::String modName;
-        if (const auto *vec = shortNameIndex_.get(name)) {
+        if (const auto *vec = funcReg_->shortNameIndex.get(name)) {
             for (const auto &full : *vec) {
                 const keel::usize dot = full.find('.');
                 if (dot != keel::kInvalidIndex) {
                     keel::StringRef topNs = full.substr(0, dot);
-                    if (pluginNamespaces_.contains(topNs)) {
+                    if (funcReg_->pluginNamespaces.contains(topNs)) {
                         modName.assign(topNs);
                         break;
                     }
@@ -235,7 +246,7 @@ keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
             }
         }
         if (modName.empty()) {
-            modName = const_cast<Engine *>(this)->pluginLoader().moduleProvidingFunction(name);
+            modName = pluginLoader_->moduleProvidingFunction(name);
         }
         if (!modName.empty()) {
             return keel::format(
@@ -243,12 +254,12 @@ keel::String Engine::formatUndefinedFunctionError(keel::StringRef name,
                 baseMsg, name, modName, modName, name, modName);
         }
     } else {
-        if (const auto *vec = shortNameIndex_.get(name)) {
+        if (const auto *vec = funcReg_->shortNameIndex.get(name)) {
             for (const auto &full : *vec) {
                 const keel::usize dot = full.find('.');
                 if (dot != keel::kInvalidIndex) {
                     keel::StringRef topNs = full.substr(0, dot);
-                    if (isolatedPluginNamespaces_.contains(topNs)) {
+                    if (funcReg_->isolatedPluginNamespaces.contains(topNs)) {
                         return keel::format(
                             "{} ('{}' is loaded in isolated namespace '{}' — use '{}.{}(...)' or 'import {}.*')",
                             baseMsg, name, topNs, topNs, name, topNs);
@@ -264,7 +275,7 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                                          const Environment *env) const
 {
     auto getExt = [this](keel::StringRef key) -> const ExternalFunc * {
-        if (const auto *e = externalFuncs_.get(key))
+        if (const auto *e = funcReg_->externalFuncs.get(key))
             return e->get();
         return nullptr;
     };
@@ -278,13 +289,13 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
     //    test code with imports at the top can flatten
     //    those names inside nested function bodies too.
     const ExternalFunc *hit = nullptr;
-    walkImportCandidates_(name, env, workspaceEnv_.get(), shortNameIndex_,
+    walkImportCandidates_(name, env, workspaceEnv_.get(), funcReg_->shortNameIndex,
         [&](keel::StringRef qualified) {
             if (const ExternalFunc *q = getExt(qualified)) {
                 hit = q;
                 return true;
             }
-            if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(qualified)) {
+            if (pluginLoader_->tryAutoLoadForFunction(qualified)) {
                 if (const ExternalFunc *q2 = getExt(qualified)) {
                     hit = q2;
                     return true;
@@ -298,21 +309,21 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
         const keel::usize dot = full.find('.');
         if (dot == keel::kInvalidIndex) return true;
         keel::StringRef topNs = full.substr(0, dot);
-        if (isolatedPluginNamespaces_.contains(topNs))
+        if (funcReg_->isolatedPluginNamespaces.contains(topNs))
             return false;
-        if (namespaceMode_ == NamespaceMode::Isolated
-            && pluginNamespaces_.contains(topNs))
+        if (funcReg_->namespaceMode == NamespaceMode::Isolated
+            && funcReg_->pluginNamespaces.contains(topNs))
             return false;
         return true;
     };
 
     // 3. Bare-name fallback (Compat mode; core-only in Isolated mode):
-    //    shortNameIndex_ maps leaf names to full qualified names.
+    //    funcReg_->shortNameIndex maps leaf names to full qualified names.
     //    For the rare leaf-name collision across namespaces, pick by namespace
-    //    registration order (namespaceOrder_), which is deterministic.
+    //    registration order (funcReg_->namespaceOrder), which is deterministic.
     const bool isQualified = (name.find('.') != keel::kInvalidIndex);
     if (!isQualified) {
-        if (const auto *vec = shortNameIndex_.get(name); vec && !vec->empty()) {
+        if (const auto *vec = funcReg_->shortNameIndex.get(name); vec && !vec->empty()) {
             // Fast path: unique leaf name (99%+ of cases) — one lookup.
             if (vec->size() == 1) {
                 if (allowBareFromFull((*vec)[0])) {
@@ -327,10 +338,10 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
                     keel::StringRef topNs = (dot != keel::kInvalidIndex)
                                                 ? full.substr(0, dot)
                                                 : full;
-                    for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
-                        if (namespaceOrder_[i] == topNs)
+                    for (keel::usize i = 0; i < funcReg_->namespaceOrder.size(); ++i)
+                        if (funcReg_->namespaceOrder[i] == topNs)
                             return keel::as<keel::i32>(i);
-                    return keel::as<keel::i32>(namespaceOrder_.size());
+                    return keel::as<keel::i32>(funcReg_->namespaceOrder.size());
                 };
                 const keel::String *best = nullptr;
                 keel::i32 bestRank = keel::Limits<keel::i32>::kMax;
@@ -356,12 +367,12 @@ const ExternalFunc *Engine::findExternal(keel::StringRef name,
     //    that has not been loaded yet, try to load it now on-demand.
     //    In Isolated mode, only qualified names (with '.') auto-load here;
     //    imported names were already handled in Step 2.
-    if (isQualified || namespaceMode_ == NamespaceMode::Compat) {
-        if (const_cast<Engine *>(this)->pluginLoader().tryAutoLoadForFunction(name)) {
+    if (isQualified || funcReg_->namespaceMode == NamespaceMode::Compat) {
+        if (pluginLoader_->tryAutoLoadForFunction(name)) {
             if (const ExternalFunc *f = getExt(name))
                 return f;
             if (!isQualified) {
-                if (const auto *vec2 = shortNameIndex_.get(name)) {
+                if (const auto *vec2 = funcReg_->shortNameIndex.get(name)) {
                     for (const auto &full : *vec2) {
                         if (!allowBareFromFull(full))
                             continue;
@@ -380,7 +391,7 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
 {
     if (name.find('.') != keel::kInvalidIndex)
         return {};
-    const auto *vec = shortNameIndex_.get(name);
+    const auto *vec = funcReg_->shortNameIndex.get(name);
     if (!vec || vec->empty())
         return {};
 
@@ -388,10 +399,10 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
         const keel::usize dot = full.find('.');
         if (dot == keel::kInvalidIndex) return true;
         keel::StringRef topNs = full.substr(0, dot);
-        if (isolatedPluginNamespaces_.contains(topNs))
+        if (funcReg_->isolatedPluginNamespaces.contains(topNs))
             return false;
-        if (namespaceMode_ == NamespaceMode::Isolated
-            && pluginNamespaces_.contains(topNs))
+        if (funcReg_->namespaceMode == NamespaceMode::Isolated
+            && funcReg_->pluginNamespaces.contains(topNs))
             return false;
         return true;
     };
@@ -406,10 +417,10 @@ keel::String Engine::bareNameSource(keel::StringRef name) const
         keel::StringRef topNs = (dot != keel::kInvalidIndex)
                                     ? full.substr(0, dot)
                                     : full;
-        for (keel::usize i = 0; i < namespaceOrder_.size(); ++i)
-            if (namespaceOrder_[i] == topNs)
+        for (keel::usize i = 0; i < funcReg_->namespaceOrder.size(); ++i)
+            if (funcReg_->namespaceOrder[i] == topNs)
                 return keel::as<keel::i32>(i);
-        return keel::as<keel::i32>(namespaceOrder_.size());
+        return keel::as<keel::i32>(funcReg_->namespaceOrder.size());
     };
     const keel::String *best = nullptr;
     keel::i32 bestRank = keel::Limits<keel::i32>::kMax;
@@ -432,42 +443,35 @@ bool Engine::isKnownLeafName(keel::StringRef name) const
 
 PluginLoader &Engine::pluginLoader()
 {
-    if (!pluginLoader_) {
-        pluginLoader_ = keel::make_unique<PluginLoader>(*this);
-    }
     return *pluginLoader_;
 }
 
 const PluginLoader &Engine::pluginLoader() const
 {
-    if (!pluginLoader_) {
-        pluginLoader_ = keel::make_unique<PluginLoader>(const_cast<Engine &>(*this));
-    }
     return *pluginLoader_;
 }
 
 void Engine::registerVarDeclCommand(keel::StringRef cmdName, PluginContext::VarDeclExtractor fn)
 {
-    varDeclCommands_.put(keel::String::from(cmdName), keel::move(fn));
+    session_->varDeclCommands.put(keel::String::from(cmdName), keel::move(fn));
 }
 
 bool Engine::isVarDeclCommand(keel::StringRef cmdName) const
 {
-    if (varDeclCommands_.contains(cmdName))
+    if (session_->varDeclCommands.contains(cmdName))
         return true;
-    return const_cast<Engine *>(this)->pluginLoader().isVarDeclCommand(cmdName);
+    return pluginLoader_->isVarDeclCommand(cmdName);
 }
 
 void Engine::extractVarDeclCommandNames(keel::StringRef cmdName,
                                         keel::ArrayRef<keel::StringRef> args,
                                         keel::Array<keel::String> &outNames) const
 {
-    const auto *fn = varDeclCommands_.get(cmdName);
+    const auto *fn = session_->varDeclCommands.get(cmdName);
     if (!fn) {
-        auto &loader = const_cast<Engine *>(this)->pluginLoader();
-        if (loader.isVarDeclCommand(cmdName))
-            (void)loader.tryAutoLoadForFunction(cmdName);
-        fn = varDeclCommands_.get(cmdName);
+        if (pluginLoader_->isVarDeclCommand(cmdName))
+            (void)pluginLoader_->tryAutoLoadForFunction(cmdName);
+        fn = session_->varDeclCommands.get(cmdName);
     }
     if (fn && *fn)
         (*fn)(args, outNames);
@@ -514,36 +518,36 @@ void Engine::outputText(keel::StringRef s)
     if (outputFunc_) {
         outputFunc_(s);
     } else {
-        std::fwrite(s.data(), 1, s.size(), stdout);
-        std::fflush(stdout);
+        keel::stdout_write(s);
+        keel::stdout_flush();
     }
 }
 
 bool Engine::hasFunction(keel::StringRef name) const
 {
-    return externalFuncs_.contains(name) || hasUserFunction(name);
+    return funcReg_->externalFuncs.contains(name) || hasUserFunction(name);
 }
 
 bool Engine::hasUserFunction(keel::StringRef name) const
 {
-    return scriptLocalUserFuncs_.contains(name)
-           || userFuncs_.contains(name);
+    return funcReg_->scriptLocalUserFuncs.contains(name)
+           || funcReg_->userFuncs.contains(name);
 }
 
 keel::Arc<UserFunction> Engine::lookupUserFunctionLocalArc(keel::StringRef name) const
 {
-    if (const auto *f = scriptLocalUserFuncs_.get(name))
+    if (const auto *f = funcReg_->scriptLocalUserFuncs.get(name))
         return *f;
-    if (const auto *f = userFuncs_.get(name))
+    if (const auto *f = funcReg_->userFuncs.get(name))
         return *f;
     return nullptr;
 }
 
 const UserFunction *Engine::lookupUserFunctionLocal(keel::StringRef name) const
 {
-    if (const auto *f = scriptLocalUserFuncs_.get(name))
+    if (const auto *f = funcReg_->scriptLocalUserFuncs.get(name))
         return f->get();
-    if (const auto *f = userFuncs_.get(name))
+    if (const auto *f = funcReg_->userFuncs.get(name))
         return f->get();
     return nullptr;
 }
@@ -602,9 +606,9 @@ const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
 
     // Walk imports across env→parent → workspaceEnv fallback. Each
     // successful resolveMFile_ caches the entry under its full
-    // qualified key, so subsequent calls hit userFuncs_ directly.
+    // qualified key, so subsequent calls hit funcReg_->userFuncs directly.
     const UserFunction *hit = nullptr;
-    walkImportCandidates_(name, env, workspaceEnv_.get(), shortNameIndex_,
+    walkImportCandidates_(name, env, workspaceEnv_.get(), funcReg_->shortNameIndex,
         [&](keel::StringRef qualified) {
             if (auto *f = lookupUserFunctionLocal(qualified)) {
                 hit = f;
@@ -697,15 +701,15 @@ void Engine::adoptUserFunction(keel::StringRef name,
     clearPersistentForFunc(name);
     auto arc = keel::make_arc<UserFunction>(keel::move(uf));
     if (scriptScope)
-        scriptLocalUserFuncs_.put(keel::String::from(name), keel::move(arc));
+        funcReg_->scriptLocalUserFuncs.put(keel::String::from(name), keel::move(arc));
     else
-        userFuncs_.put(keel::String::from(name), keel::move(arc));
+        funcReg_->userFuncs.put(keel::String::from(name), keel::move(arc));
     bumpCallCacheEpoch();
 }
 
 void Engine::registerBuiltinMSource(keel::StringRef src)
 {
-    builtinMSourceTexts_.push_back(keel::String::from(src));
+    funcReg_->builtinMSourceTexts.push_back(keel::String::from(src));
     adoptBuiltinMSource_(src);
 }
 
@@ -718,7 +722,7 @@ void Engine::adoptBuiltinMSource_(keel::StringRef src)
     Parser parser(lexer.tokenize());
     auto ast = parser.parse();
     // Persistently register one parsed `function` def (mirrors the m-file
-    // loader): VM compiled chunk via registerFunctionAs + TW via userFuncs_.
+    // loader): VM compiled chunk via registerFunctionAs + TW via funcReg_->userFuncs.
     auto adopt = [this](const ASTNode *fd) {
         UserFunction func;
         func.name = fd->strValue.clone();
@@ -730,12 +734,12 @@ void Engine::adoptBuiltinMSource_(keel::StringRef src)
             try {
                 compiler_->registerFunctionAs(func.name, fd);
             } catch (const std::exception &) {
-                // Non-fatal at adopt time — userFuncs_ remains populated and
+                // Non-fatal at adopt time — funcReg_->userFuncs remains populated and
                 // VM call sites re-trigger compilation via ensureClassMethodChunk.
             }
         }
         keel::String key = func.name.clone();
-        userFuncs_.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(func)));
+        funcReg_->userFuncs.put(keel::move(key), keel::make_arc<UserFunction>(keel::move(func)));
         bumpCallCacheEpoch();
     };
     if (ast->type == NodeType::FUNCTION_DEF) {
@@ -778,7 +782,7 @@ void Engine::adoptBuiltinClassSource_(keel::StringRef src)
 // from inside the `clear` external mid-chunk.
 void Engine::reinstallBuiltinSources()
 {
-    for (const auto &src : builtinMSourceTexts_)
+    for (const auto &src : funcReg_->builtinMSourceTexts)
         adoptBuiltinMSource_(src);
     for (const auto &src : classReg_->builtinClassSourceTexts)
         adoptBuiltinClassSource_(src);
@@ -786,17 +790,17 @@ void Engine::reinstallBuiltinSources()
 
 void Engine::evictUserFunction_(keel::StringRef name)
 {
-    userFuncs_.remove(name);
+    funcReg_->userFuncs.remove(name);
     clearPersistentForFunc(name);
     const keel::String subPrefix = keel::format("{}>", name);
     keel::Array<keel::String> staleSubs;
-    for (auto [k, v] : userFuncs_) {
+    for (auto [k, v] : funcReg_->userFuncs) {
         (void)v;
         if (k.size() > subPrefix.size() && k.starts_with(subPrefix))
             staleSubs.push_back(k.clone());
     }
     for (const auto &sk : staleSubs) {
-        userFuncs_.remove(sk);
+        funcReg_->userFuncs.remove(sk);
         clearPersistentForFunc(sk);
     }
     if (compiler_)
@@ -1030,7 +1034,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 if (sameMtime && sameSize) {
                     if (auto *uf = lookupUserFunctionLocal(name))
                         return uf;
-                    if (ce->hasExternal && externalFuncs_.contains(name))
+                    if (ce->hasExternal && funcReg_->externalFuncs.contains(name))
                         return nullptr;
                 }
             }
@@ -1137,7 +1141,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                         auto msg = keel::format("classdef '{}' has no constructor", cn);
                         throw numkit::Error(msg.c_str());
                     }
-                    outs[0] = ctx.engine->constructChecked(c, args, ctx);
+                    outs[0] = coreEngine(ctx).constructChecked(c, args, ctx);
                 });
                 MFileCacheEntry ce;
                 ce.fullPath = cachePath.clone();
@@ -1172,15 +1176,15 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                     const keel::String keepFs = fsName.clone();
                     const keel::String keepDir = sDir.clone();
                     const keel::String keepPath = sPath.clone();
-                    Environment *scope = ctx.env ? ctx.env : &ctx.engine->workspaceEnv();
-                    ctx.engine->pushScriptOrigin(keepFs, keepDir, keepPath);
+                    Environment *scope = ctx.env ? ctx.env : &coreEngine(ctx).workspaceEnv();
+                    coreEngine(ctx).pushScriptOrigin(keepFs, keepDir, keepPath);
                     try {
-                        ctx.engine->eval(*keepSrc, scope);
+                        coreEngine(ctx).eval(*keepSrc, scope);
                     } catch (...) {
-                        ctx.engine->popScriptOrigin();
+                        coreEngine(ctx).popScriptOrigin();
                         throw;
                     }
-                    ctx.engine->popScriptOrigin();
+                    coreEngine(ctx).popScriptOrigin();
                     if (!outs.empty()) {
                         const Value *ansVal = scope->getLocal("ans");
                         outs[0] = (ansVal && !ansVal->isUnset() && !ansVal->isDeleted())
@@ -1254,7 +1258,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
         // Bind under the QUALIFIED name so two packages with the same
         // leaf (`+a/foo.m` and `+b/foo.m`) don't collide in
         // compiledFuncs_. registerFunctionAs also writes
-        // engine_.userFuncs_[qualified] — but we still set it
+        // engine_.funcReg_->userFuncs[qualified] — but we still set it
         // explicitly below so non-VM-backed calls work even when the
         // compiler is unavailable or rejects the chunk.
         if (compiler_) {
@@ -1268,7 +1272,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                 // Defer compile errors (e.g. bare 'end') until actual invocation.
             }
         }
-        userFuncs_.put(keel::String::from(name), keel::make_arc<UserFunction>(keel::move(func)));
+        funcReg_->userFuncs.put(keel::String::from(name), keel::make_arc<UserFunction>(keel::move(func)));
         if (compiler_)
             compiler_->setChunkOrigin(name, rpFsName, scriptDir, rpPath);
 
@@ -1293,7 +1297,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
                     compiler_->registerFunctionAs(subKey, sf, rpFsName,
                                                   scriptDir, rpPath, fileSubfuncs);
                 } catch (const std::exception &) {
-                    /* TW still dispatches via userFuncs_ */
+                    /* TW still dispatches via funcReg_->userFuncs */
                 }
             }
             UserFunction lf;
@@ -1307,7 +1311,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
             lf.sourceDir    = scriptDir.clone();
             lf.sourceFile   = keel::String::from(rpPath);
             lf.fileSubfuncs = fileSubfuncs;
-            userFuncs_.put(subKey.clone(), keel::make_arc<UserFunction>(keel::move(lf)));
+            funcReg_->userFuncs.put(subKey.clone(), keel::make_arc<UserFunction>(keel::move(lf)));
             if (compiler_)
                 compiler_->setChunkOrigin(subKey, rpFsName, scriptDir, rpPath);
         }
@@ -1320,7 +1324,7 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
 
 bool Engine::hasExternalFunction(keel::StringRef name) const
 {
-    if (externalFuncs_.contains(name))
+    if (funcReg_->externalFuncs.contains(name))
         return true;
     if (name.find('.') != keel::kInvalidIndex) {
         return findExternal(name, workspaceEnv_.get()) != nullptr;
@@ -1330,7 +1334,7 @@ bool Engine::hasExternalFunction(keel::StringRef name) const
 
 bool Engine::hasCallableName(keel::StringRef name) const
 {
-    return externalFuncs_.contains(name)
+    return funcReg_->externalFuncs.contains(name)
         || !bareNameSource(name).empty()
         || lookupUserFunctionLocal(name) != nullptr;
 }

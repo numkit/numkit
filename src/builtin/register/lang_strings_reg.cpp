@@ -20,7 +20,6 @@
 #include <numkit/builtin/detail/strfun/strings_detail.hpp>
 #include <numkit/value/error.hpp>
 
-#include <cstring>
 
 namespace numkit::builtin {
 using namespace numkit::builtin;  // C4c localized (umbrella removed)
@@ -108,7 +107,7 @@ void str2num_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                     expr.append(ts.as_ref());
                 }
                 expr.push_back(']');
-                Value v = ctx.engine->eval(expr, /*suppressTopLevelDisplay=*/true);
+                Value v = coreEngine(ctx).eval(expr, /*suppressTopLevelDisplay=*/true);
                 if (v.isNumeric() || v.isLogical()) {
                     result = keel::move(v);
                     ok = true;

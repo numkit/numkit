@@ -16,8 +16,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <cstdio>
-#include <cstdlib>
 
 namespace numkit {
 

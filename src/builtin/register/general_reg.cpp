@@ -126,7 +126,7 @@ void checkFsKind(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs,
 
 void clc_impl_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    ctx.engine->outputText("__CLEAR__\n");
+    coreEngine(ctx).outputText("__CLEAR__\n");
     outs[0] = Value();
 }
 
@@ -136,11 +136,11 @@ void web_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
         throw Error("web: requires a string URL", 0, 0, "web", "",
                     "numkit:web:nargin");
     if (!args.empty())
-        ctx.engine->outputText(
+        coreEngine(ctx).outputText(
             keel::format("Warning: web: no browser in the nk CLI — URL '{}' not opened.\n",
                          args[0].toString()));
     else
-        ctx.engine->outputText(
+        coreEngine(ctx).outputText(
             "Warning: web: no browser in the nk CLI.\n");
     outs[0] = Value::scalar(0.0);
 }
@@ -170,14 +170,14 @@ void which_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
         || (env->isGlobal(baseName) && env->globalsEnv()
             && env->globalsEnv()->get(baseName)))
         res.assign("variable");
-    else if (ctx.engine->hasUserFunction(baseName))
+    else if (coreEngine(ctx).hasUserFunction(baseName))
         res = keel::format("{} is a user-defined function.", baseName);
-    else if (ctx.engine->hasExternalFunction(baseName))
+    else if (coreEngine(ctx).hasExternalFunction(baseName))
         res = keel::format("built-in ({})", baseName);
     else {
         auto *ext = ctx.engine->findExternal(baseName, env);
         if (ext) {
-            auto qualified = ctx.engine->bareNameSource(baseName);
+            auto qualified = coreEngine(ctx).bareNameSource(baseName);
             if (qualified.empty())
                 res = keel::format("built-in ({})", baseName);
             else
@@ -194,7 +194,7 @@ void which_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
                 }
             } catch (...) {}
             if (!found) {
-                for (const auto &dir : ctx.engine->path()) {
+                for (const auto &dir : coreEngine(ctx).path()) {
                     keel::String p = dir.clone(mr);
                     if (!p.empty() && p.back() != '/' && p.back() != '\\') p.push_back('/');
                     p.append(candName);
@@ -217,7 +217,7 @@ void which_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
 
     if (nargout == 0) {
         res.push_back('\n');
-        ctx.engine->outputText(res);
+        coreEngine(ctx).outputText(res);
         outs[0] = Value();
     } else {
         outs[0] = Value::fromString(isFound ? res.as_ref() : keel::StringRef(""), mr);
@@ -228,7 +228,7 @@ void addpath_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef
                       CallContext &ctx)
 {
     for (const auto &a : args) {
-        if (a.isChar()) ctx.engine->addPath(a.toString());
+        if (a.isChar()) coreEngine(ctx).addPath(a.toString());
     }
     outs[0] = Value();
 }
@@ -237,7 +237,7 @@ void rmpath_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
                      CallContext &ctx)
 {
     for (const auto &a : args) {
-        if (a.isChar()) ctx.engine->rmPath(a.toString());
+        if (a.isChar()) coreEngine(ctx).rmPath(a.toString());
     }
     outs[0] = Value();
 }
@@ -247,14 +247,14 @@ void path_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
 {
     auto *mr = ctx.engine->allocator();
     if (args.empty()) {
-        const auto &paths = ctx.engine->path();
+        const auto &paths = coreEngine(ctx).path();
         if (nargout == 0) {
             keel::String out(mr);
             for (const auto &p : paths) {
                 out.append(p);
                 out.push_back('\n');
             }
-            ctx.engine->outputText(out);
+            coreEngine(ctx).outputText(out);
             outs[0] = Value();
         } else {
             // Return as a single newline-joined char vector
@@ -268,10 +268,10 @@ void path_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
         return;
     }
     // path(p1, p2, ...) — replace path with the given list.
-    auto current = ctx.engine->path().clone(mr);
-    for (const auto &p : current) ctx.engine->rmPath(p);
+    auto current = coreEngine(ctx).path().clone(mr);
+    for (const auto &p : current) coreEngine(ctx).rmPath(p);
     for (const auto &a : args) {
-        if (a.isChar()) ctx.engine->addPath(a.toString());
+        if (a.isChar()) coreEngine(ctx).addPath(a.toString());
     }
     outs[0] = Value();
 }
@@ -279,7 +279,7 @@ void path_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArr
 void rehash_impl_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> outs,
                      CallContext &ctx)
 {
-    ctx.engine->rehashMFiles();
+    coreEngine(ctx).rehashMFiles();
     outs[0] = Value();
 }
 
@@ -287,7 +287,7 @@ void pwd_impl_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value> o
                   CallContext &ctx)
 {
     auto *mr = ctx.engine->allocator();
-    keel::String c = getActualCwd(*ctx.engine, mr);
+    keel::String c = getActualCwd(coreEngine(ctx), mr);
     outs[0] = Value::fromString(c, mr);
 }
 
@@ -296,10 +296,10 @@ void cd_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     auto *mr = ctx.engine->allocator();
     if (args.empty()) {
-        keel::String c = getActualCwd(*ctx.engine, mr);
+        keel::String c = getActualCwd(coreEngine(ctx), mr);
         if (nargout == 0) {
             c.push_back('\n');
-            ctx.engine->outputText(c);
+            coreEngine(ctx).outputText(c);
             outs[0] = Value();
         } else {
             outs[0] = Value::fromString(c, mr);
@@ -315,8 +315,8 @@ void cd_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
     auto st = rp.fs->stat(rp.path);
     if (!st || st->kind != FileStat::Kind::Directory)
         throw numkit::Error(keel::format("cd: not a directory: {}", target).c_str());
-    keel::String prev = getActualCwd(*ctx.engine, mr);
-    ctx.engine->setCwd(rp.path);
+    keel::String prev = getActualCwd(coreEngine(ctx), mr);
+    coreEngine(ctx).setCwd(rp.path);
     // With output, return the previous cwd.
     if (nargout > 0)
         outs[0] = Value::fromString(prev, mr);
@@ -483,7 +483,7 @@ void dir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
             if (e.isDirectory) out.push_back('/');
             out.push_back('\n');
         }
-        ctx.engine->outputText(out);
+        coreEngine(ctx).outputText(out);
         outs[0] = Value();
         return;
     }
@@ -526,7 +526,7 @@ void ls_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
             out.append(e.name);
             out.push_back('\n');
         }
-        ctx.engine->outputText(out);
+        coreEngine(ctx).outputText(out);
         outs[0] = Value();
     } else {
         keel::String out(mr);

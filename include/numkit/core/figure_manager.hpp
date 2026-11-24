@@ -9,8 +9,6 @@
 #include <keel/hash_map.h>
 #include <keel/ref.h>
 #include <keel/string.h>
-#include <cstdio>
-#include <cstdlib>
 
 #include <numkit/ops/decimate.hpp>
 

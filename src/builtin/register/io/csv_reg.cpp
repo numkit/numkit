@@ -16,7 +16,7 @@ void csvread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
 {
     (void)nargout;
     argcheck::checkNargin(args.size(), 1, 4, "csvread");
-    outs[0] = csvread(ctx.engine->fsContext(), args, ctx.engine->allocator());
+    outs[0] = csvread(coreEngine(ctx).fsContext(), args, ctx.engine->allocator());
 }
 
 void csvwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -24,7 +24,7 @@ void csvwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     (void)nargout;
     (void)outs;
     argcheck::checkNargin(args.size(), 2, 4, "csvwrite");
-    csvwrite(ctx.engine->fsContext(), args);
+    csvwrite(coreEngine(ctx).fsContext(), args);
 }
 
 void dlmwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
@@ -32,7 +32,7 @@ void dlmwrite_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     (void)nargout;
     (void)outs;
     argcheck::checkNargin(args.size(), 2, 10, "dlmwrite");
-    csvwrite(ctx.engine->fsContext(), keel::ArrayRef<Value>(args.data(), 2));
+    csvwrite(coreEngine(ctx).fsContext(), keel::ArrayRef<Value>(args.data(), 2));
 }
 
 

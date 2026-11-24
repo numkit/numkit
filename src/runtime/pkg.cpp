@@ -34,7 +34,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     if (action == "list" || action == "status") {
         pm.list(stdout);
     } else if (action == "avail" || action == "available" || action == "catalog" || action == "search") {
-        pm.avail(stdout, ctx.engine);
+        pm.avail(stdout, coreEnginePtr(ctx));
     } else if (action == "update" || action == "upgrade") {
         keel::Array<keel::String> names;
         for (keel::usize i = 1; i < args.size(); ++i) {
@@ -54,14 +54,14 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
             }
             keel::String m = args[1].toString();
             if (m == "isolated" || m == "strict") {
-                ctx.engine->setNamespaceMode(NamespaceMode::Isolated);
+                coreEngine(ctx).setNamespaceMode(NamespaceMode::Isolated);
             } else if (m == "compat" || m == "matlab") {
-                ctx.engine->setNamespaceMode(NamespaceMode::Compat);
+                coreEngine(ctx).setNamespaceMode(NamespaceMode::Compat);
             } else {
                 throw Error(keel::format("pkg mode: unknown mode '{}' (expected 'compat' or 'isolated')", m));
             }
         }
-        const char *cur = (ctx.engine->namespaceMode() == NamespaceMode::Isolated)
+        const char *cur = (coreEngine(ctx).namespaceMode() == NamespaceMode::Isolated)
                               ? "isolated"
                               : "compat";
         if (!outs.empty()) {
@@ -103,7 +103,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         } else if (args.size() > 4) {
             throw Error("pkg load: too many arguments");
         }
-        keel::i32 rc = pm.load(name.as_ref(), *ctx.engine, targetNs.as_ref());
+        keel::i32 rc = pm.load(name.as_ref(), coreEngine(ctx), targetNs.as_ref());
         if (rc != 0) {
             throw Error(keel::format("pkg load failed for '{}'", name));
         }

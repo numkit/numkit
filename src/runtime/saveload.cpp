@@ -198,12 +198,12 @@ void save_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef
 {
     (void)nargout;
     (void)outs;
-    save(*ctx.engine, *ctx.env, args);
+    save(coreEngine(ctx), *ctx.env, args);
 }
 
 void load_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    load(*ctx.engine, *ctx.env, args, nargout, outs);
+    load(coreEngine(ctx), *ctx.env, args, nargout, outs);
 }
 
 } // namespace detail

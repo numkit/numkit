@@ -16,7 +16,7 @@
 #include <numkit/linalg/properties.hpp>
 #include <numkit/linalg/eig.hpp>     // eig_symmetric / eig_general_VD (condeig [V,D])
 
-#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->allocator()
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>

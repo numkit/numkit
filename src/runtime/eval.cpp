@@ -27,9 +27,9 @@ namespace {
 
 Environment *resolveEvalScope(CallContext &ctx)
 {
-    keel::String legacy = ctx.engine->getEnvVar("NUMKIT_LEGACY_EVAL_SCOPE");
+    keel::String legacy = coreEngine(ctx).getEnvVar("NUMKIT_LEGACY_EVAL_SCOPE");
     if (legacy == "1")
-        return &ctx.engine->workspaceEnv();
+        return &coreEngine(ctx).workspaceEnv();
     return ctx.env;
 }
 
@@ -59,21 +59,21 @@ void run_reg(keel::ArrayRef<Value> args, keel::usize,
         else if (slash != keel::kInvalidIndex)
             scriptDir.assign(rpPath.substr(0, slash));
     }
-    ctx.engine->pushScriptOrigin(rp.fs->name().as_ref(), scriptDir.as_ref(), rp.path.as_ref());
+    coreEngine(ctx).pushScriptOrigin(rp.fs->name().as_ref(), scriptDir.as_ref(), rp.path.as_ref());
     keel::String primaryFn;
     bool isFunctionFile = numkit::runtime::primaryFunctionOfFile(content.as_ref(), primaryFn);
     Environment *scope = resolveEvalScope(ctx);
     try {
-        ctx.engine->eval(content.as_ref(), scope);
+        coreEngine(ctx).eval(content.as_ref(), scope);
         if (isFunctionFile) {
             primaryFn.push_back(';');
-            ctx.engine->eval(primaryFn.as_ref(), scope);
+            coreEngine(ctx).eval(primaryFn.as_ref(), scope);
         }
     } catch (...) {
-        ctx.engine->popScriptOrigin();
+        coreEngine(ctx).popScriptOrigin();
         throw;
     }
-    ctx.engine->popScriptOrigin();
+    coreEngine(ctx).popScriptOrigin();
     const Value *ansVal = scope ? scope->getLocal("ans") : nullptr;
     outs[0] = (ansVal && !ansVal->isDeleted()) ? *ansVal : Value();
 }
@@ -95,7 +95,7 @@ void mfilename_reg(keel::ArrayRef<Value> args, keel::usize,
                     .c_str());
         fullpath = true;
     }
-    const keel::String *file = ctx.engine->currentScriptFile();
+    const keel::String *file = coreEngine(ctx).currentScriptFile();
     if (!file || file->empty()) {
         outs[0] = Value::stringScalar("", ctx.engine->allocator());
         return;
@@ -141,7 +141,7 @@ void eval_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
         throw numkit::Error("eval requires a string");
     const bool suppress = (nargout >= 1);
-    outs[0] = ctx.engine->eval(args[0].toString().as_ref(),
+    outs[0] = coreEngine(ctx).eval(args[0].toString().as_ref(),
                                resolveEvalScope(ctx),
                                suppress);
 }
@@ -152,19 +152,19 @@ void evalc_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (args.empty() || (!args[0].isChar() && !args[0].isString()))
         throw numkit::Error("evalc requires a string");
     keel::String captured;
-    auto prevOut = ctx.engine->swapOutputFunc(
+    auto prevOut = coreEngine(ctx).swapOutputFunc(
         [&captured](keel::StringRef s) { captured.append(s); });
     Value res;
     const bool suppress = (nargout >= 2);
     try {
-        res = ctx.engine->eval(args[0].toString().as_ref(),
+        res = coreEngine(ctx).eval(args[0].toString().as_ref(),
                                resolveEvalScope(ctx),
                                suppress);
     } catch (...) {
-        ctx.engine->setOutputFunc(keel::move(prevOut));
+        coreEngine(ctx).setOutputFunc(keel::move(prevOut));
         throw;
     }
-    ctx.engine->setOutputFunc(keel::move(prevOut));
+    coreEngine(ctx).setOutputFunc(keel::move(prevOut));
     outs[0] = Value::fromString(captured.as_ref(), ctx.engine->allocator());
     if (nargout >= 2 && outs.size() >= 2)
         outs[1] = res;
@@ -241,9 +241,9 @@ void input_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nargout > 1)
         throw numkit::Error("input: Too many output arguments");
 
-    ctx.engine->outputText(args[0].toString().as_ref());
+    coreEngine(ctx).outputText(args[0].toString().as_ref());
     keel::String line;
-    const auto &provider = ctx.engine->inputProvider();
+    const auto &provider = coreEngine(ctx).inputProvider();
     if (provider) {
         line = provider();
     } else {
@@ -265,7 +265,7 @@ void input_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     else if (line.empty())
         outs[0] = Value::Empty;
     else
-        outs[0] = ctx.engine->eval(line.as_ref(), resolveEvalScope(ctx),
+        outs[0] = coreEngine(ctx).eval(line.as_ref(), resolveEvalScope(ctx),
                                    /*suppressDisplay=*/true);
 }
 
@@ -280,20 +280,20 @@ void evalin_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::String code = args[1].toString();
     Environment *target = nullptr;
     if (where == "base") {
-        target = &ctx.engine->workspaceEnv();
+        target = &coreEngine(ctx).workspaceEnv();
     } else if (where == "caller") {
-        if (ctx.engine->callerDepth() < 1)
+        if (coreEngine(ctx).callerDepth() < 1)
             throw numkit::Error(
                 "evalin: 'caller' is not valid in the base workspace");
-        target = ctx.engine->callerEnv(1);
-        if (!target) target = &ctx.engine->workspaceEnv();
+        target = coreEngine(ctx).callerEnv(1);
+        if (!target) target = &coreEngine(ctx).workspaceEnv();
     } else {
         throw numkit::Error(
             keel::format("evalin: workspace must be 'base' or 'caller', got '{}'", where)
                 .c_str());
     }
     const bool suppress = (nargout >= 1);
-    outs[0] = ctx.engine->eval(code.as_ref(), target, suppress);
+    outs[0] = coreEngine(ctx).eval(code.as_ref(), target, suppress);
 }
 
 } // namespace

@@ -10,7 +10,6 @@
 #include "compiler_internal.hpp"
 #include "scope_analysis.hpp"
 
-#include <cstdlib>
 
 namespace numkit {
 

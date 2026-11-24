@@ -182,10 +182,10 @@ keel::matfile::MatArray valueToMatArray(const Value &v, keel::Allocator *alloc)
                         if (const Value *fv = st->props.get(fnames[fi])) fval = *fv;
                     }
                 } else if (v.isStructArray()) {
-                    auto &m = const_cast<Value &>(v).structArrayElem(ei);
+                    const auto &m = v.structArrayElem(ei);
                     if (const Value *fv = m.get(fnames[fi])) fval = *fv;
                 } else {
-                    auto &m = const_cast<Value &>(v).structFields();
+                    const auto &m = v.structFields();
                     if (const Value *fv = m.get(fnames[fi])) fval = *fv;
                 }
                 *out.field_mut(ei, fi) = valueToMatArray(fval, alloc);

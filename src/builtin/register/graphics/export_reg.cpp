@@ -248,8 +248,8 @@ void saveas_reg(keel::ArrayRef<Value> args, keel::usize,
     bool firstIsTarget = args[0].isObject()
                          || (args[0].isScalar() && !args[0].isChar());
     ExportArgs ea = parseExportArgs(
-        *ctx.engine, args, "saveas", /*needTarget=*/!firstIsTarget);
-    runExport(*ctx.engine, ea, "saveas");
+        coreEngine(ctx), args, "saveas", /*needTarget=*/!firstIsTarget);
+    runExport(coreEngine(ctx), ea, "saveas");
     outs[0] = Value();
 }
 
@@ -257,10 +257,10 @@ void exportgraphics_reg(keel::ArrayRef<Value> args, keel::usize,
                         keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 2, "exportgraphics");
-    ExportArgs ea = parseExportArgs(*ctx.engine, args,
+    ExportArgs ea = parseExportArgs(coreEngine(ctx), args,
                                     "exportgraphics",
                                     /*needTarget=*/false);
-    runExport(*ctx.engine, ea, "exportgraphics");
+    runExport(coreEngine(ctx), ea, "exportgraphics");
     outs[0] = Value();
 }
 
@@ -268,9 +268,9 @@ void print_reg(keel::ArrayRef<Value> args, keel::usize,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "print");
-    ExportArgs ea = parseExportArgs(*ctx.engine, args, "print",
+    ExportArgs ea = parseExportArgs(coreEngine(ctx), args, "print",
                                     /*needTarget=*/true);
-    runExport(*ctx.engine, ea, "print");
+    runExport(coreEngine(ctx), ea, "print");
     outs[0] = Value();
 }
 
@@ -292,7 +292,7 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
     argcheck::checkNargin(args.size(), 0, 2, "getframe");
     auto *mr = ctx.engine->allocator();
     const FigureState *fig = nullptr;
-    if (!args.empty()) fig = targetFigure(*ctx.engine, args[0]);
+    if (!args.empty()) fig = targetFigure(coreEngine(ctx), args[0]);
     if (!fig) fig = &ctx.engine->figureManager().current();
     const keel::i32 W = 560, H = 420;
     keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);

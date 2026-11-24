@@ -16,8 +16,6 @@
 #include <numkit/core/stack_guard.hpp>
 #include <numkit/value/index.hpp>
 #include "tree_walker_internal.hpp"
-#include <cstdio>
-#include <cstdlib>
 
 namespace numkit {
 
@@ -104,7 +102,7 @@ Value TreeWalker::execute(const ASTNode *ast, Environment *env)
 
 bool TreeWalker::isKnownFunction(keel::StringRef name) const
 {
-    return engine_.externalFuncs_.contains(name) || engine_.hasUserFunction(name)
+    return engine_.hasDirectExternalFunction(name) || engine_.hasUserFunction(name)
            || name == "tic" || name == "toc";
 }
 

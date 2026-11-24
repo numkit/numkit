@@ -1,11 +1,10 @@
 #include <keel/core.h>
+#include <keel/number.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
 #include <keel/utf8.h>
 #include <numkit/core/parser.hpp>
 #include <numkit/value/error.hpp>
-#include <cerrno>
-#include <cstdlib>
 
 namespace numkit {
 
@@ -213,38 +212,42 @@ keel::f64 Parser::parseDouble(keel::StringRef text, keel::i32 line, keel::i32 co
 
     // Binary: 0b...
     if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'b' || clean[1] == 'B')) {
-        const char *start = clean.c_str() + 2;
-        if (*start == '-' || *start == '+')
+        keel::StringRef digits = clean.substr(2);
+        if (digits.empty() || digits[0] == '-' || digits[0] == '+')
             throwInvalid();
-        char *end = nullptr;
-        errno = 0;
-        keel::u64 val = std::strtoull(start, &end, 2);
-        if (end == start || *end != '\0' || errno == ERANGE)
+        auto res = keel::parse_u64(digits, 2);
+        if (!res.is_ok())
             throwInvalid();
-        return keel::as<keel::f64>(val);
+        return keel::as<keel::f64>(res.value());
     }
 
     // Octal: 0o...
     if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'o' || clean[1] == 'O')) {
-        const char *start = clean.c_str() + 2;
-        if (*start == '-' || *start == '+')
+        keel::StringRef digits = clean.substr(2);
+        if (digits.empty() || digits[0] == '-' || digits[0] == '+')
             throwInvalid();
-        char *end = nullptr;
-        errno = 0;
-        keel::u64 val = std::strtoull(start, &end, 8);
-        if (end == start || *end != '\0' || errno == ERANGE)
+        auto res = keel::parse_u64(digits, 8);
+        if (!res.is_ok())
             throwInvalid();
-        return keel::as<keel::f64>(val);
+        return keel::as<keel::f64>(res.value());
     }
 
-    // Hex и decimal — std::strtod обрабатывает оба
-    const char *start = clean.c_str();
-    char *end = nullptr;
-    errno = 0;
-    keel::f64 val = std::strtod(start, &end);
-    if (end == start || *end != '\0' || errno == ERANGE)
+    // Hex: 0x...
+    if (clean.size() > 2 && clean[0] == '0' && (clean[1] == 'x' || clean[1] == 'X')) {
+        keel::StringRef digits = clean.substr(2);
+        if (digits.empty() || digits[0] == '-' || digits[0] == '+')
+            throwInvalid();
+        auto res = keel::parse_u64(digits, 16);
+        if (!res.is_ok())
+            throwInvalid();
+        return keel::as<keel::f64>(res.value());
+    }
+
+    // Decimal / scientific floating-point literal
+    auto res = keel::parse_f64(clean);
+    if (!res.is_ok())
         throwInvalid();
-    return val;
+    return res.value();
 }
 
 // ============================================================

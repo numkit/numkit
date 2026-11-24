@@ -43,7 +43,7 @@ void str2func_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
         while (j < s.size() && (s[j] == ' ' || s[j] == '\t'))
             ++j;
         if (j < s.size() && s[j] == '(') {
-            outs[0] = ctx.engine->eval(s.as_ref(), true);
+            outs[0] = coreEngine(ctx).eval(s.as_ref(), true);
         } else {
             outs[0] = Value::funcHandle(s.substr(j), ctx.engine->allocator());
         }

@@ -12,7 +12,7 @@
 #include <keel/string.h>
 #include <numkit/linalg/ldl.hpp>
 
-#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->allocator()
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>

@@ -25,7 +25,7 @@
 #include <numkit/linalg/properties.hpp>               // inv (generalized eig B\A)
 #include <numkit/builtin/ops.hpp>  // mtimes (eig(A,B))
 
-#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->resource()
+#include <numkit/core/engine.hpp>   // CallContext, Span, ctx.engine->allocator()
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/error.hpp>
