@@ -8,11 +8,11 @@
 #include <numkit/builtin/lang.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/core/callback_builtin.hpp>
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/core/types.hpp>
 #include <numkit/value/argcheck.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/runtime/runtime.hpp>
 
 

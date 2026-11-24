@@ -9,7 +9,7 @@
 #include <numkit/builtin/elmat.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/core/callback_builtin.hpp>
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
 

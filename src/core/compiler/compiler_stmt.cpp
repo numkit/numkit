@@ -3,12 +3,12 @@
 #include <keel/algo.h>
 #include <keel/format.h>
 #include <keel/utf8.h>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/compiler.hpp"
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/core/stack_guard.hpp>
-#include <numkit/core/vm.hpp>
-#include "compiler_internal.hpp"
+#include "core/engine/stack_guard.hpp"
+#include "core/vm/vm.hpp"
+#include "core/compiler/compiler_internal.hpp"
 
 
 namespace numkit {

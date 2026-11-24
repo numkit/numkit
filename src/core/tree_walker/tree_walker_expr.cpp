@@ -9,13 +9,13 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
-#include <numkit/core/tree_walker.hpp>
+#include "core/tree_walker/tree_walker.hpp"
 #include <numkit/value/error.hpp>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/compiler.hpp"
 #include <numkit/core/engine.hpp>
-#include <numkit/core/stack_guard.hpp>
+#include "core/engine/stack_guard.hpp"
 #include <numkit/value/index.hpp>
-#include "tree_walker_internal.hpp"
+#include "core/tree_walker/tree_walker_internal.hpp"
 
 namespace numkit {
 

@@ -7,8 +7,8 @@
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
-#include <numkit/core/bytecode.hpp>
-#include <numkit/core/callback_builtin.hpp>
+#include "core/compiler/bytecode.hpp"
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/types.hpp>

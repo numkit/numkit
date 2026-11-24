@@ -22,11 +22,9 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/ast.hpp>
-#include <numkit/core/bytecode.hpp>
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/debug_workspace.hpp>
 #include <numkit/value/value.hpp>
-#include <numkit/core/vm.hpp>
 
 #include <initializer_list>
 
@@ -171,7 +169,7 @@ private:
     bool active_ = false;
 
     // Compiled chunk (must outlive VM execution)
-    BytecodeChunk chunk_;
+    keel::UniquePtr<BytecodeChunk> chunk_;
 
     // Parsed AST. Held for the lifetime of the debug session so the
     // engine's scriptLocalFuncs_ (populated in start()) keeps valid

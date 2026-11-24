@@ -6,7 +6,7 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
-#include <numkit/core/help/help_catalog.hpp>
+#include "core/help/help_catalog.hpp"
 
 #include <initializer_list>
 

@@ -9,7 +9,7 @@
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/core/figure_manager.hpp>
+#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>

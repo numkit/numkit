@@ -8,9 +8,9 @@
 #include <keel/hash_map.h>
 #include <keel/ref.h>
 #include <keel/smart_ptr.h>
-#include <numkit/core/callback_builtin.hpp>
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/core/engine.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/value/value.hpp>
 
 namespace numkit::runtime {

@@ -14,7 +14,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/runtime/runtime.hpp>
 
-#include <numkit/core/callback_builtin.hpp>
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/core/engine.hpp>
 #include <numkit/value/value.hpp>
 

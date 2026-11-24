@@ -8,11 +8,11 @@
 #include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/core/figure_manager.hpp>
+#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/runtime/runtime.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 

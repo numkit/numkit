@@ -14,7 +14,7 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <numkit/graphics/graphics_context.hpp>  // GraphicsContext, PlotEntry, GraphicsFn
-#include <numkit/core/figure_manager.hpp>      // DatasetInfo
+#include <numkit/graphics/figure_manager.hpp>      // DatasetInfo
 #include <numkit/value/value.hpp>                // Value
 
 #include <cstdio>

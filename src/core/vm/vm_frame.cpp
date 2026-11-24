@@ -11,10 +11,10 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/value/error.hpp>
 #include <numkit/value/index.hpp>
-#include "vm_internal.hpp"
+#include "core/vm/vm_internal.hpp"
 
 
 namespace numkit {

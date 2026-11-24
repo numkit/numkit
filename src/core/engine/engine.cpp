@@ -17,20 +17,20 @@
 #include <keel/math.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/core/figure_manager.hpp>
-#include <numkit/core/caching_allocator.hpp>
-#include <numkit/core/compiler.hpp>
+#include <numkit/graphics/figure_manager.hpp>
+#include "core/engine/caching_allocator.hpp"
+#include "core/compiler/compiler.hpp"
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
 // NOTE: core is library-agnostic — it includes ZERO <nk/<lib>/library.hpp>.
 // The standard library is installed by bundle/ (installStandardLibrary), not
 // by the Engine ctor. This is what keeps core free of any toolbox dependency.
-#include <numkit/core/tree_walker.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/tree_walker/tree_walker.hpp"
+#include "core/vm/vm.hpp"
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/env.hpp>
 
-#include "engine_internal.hpp"
+#include "core/engine/engine_internal.hpp"
 
 namespace numkit {
 

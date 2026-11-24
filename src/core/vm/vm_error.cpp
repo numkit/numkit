@@ -1,14 +1,14 @@
 // src/core/vm_error.cpp
 // VM exception dispatch, source-location enrichment, and call-stack capture.
-#include "vm_internal.hpp"
+#include "core/vm/vm_internal.hpp"
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/string.h>
-#include <numkit/core/bytecode.hpp>
+#include "core/compiler/bytecode.hpp"
 #include <numkit/core/debugger.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/value/error.hpp>
 
 #include <exception>

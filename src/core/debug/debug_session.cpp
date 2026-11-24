@@ -21,15 +21,18 @@
 #include <keel/hash_map.h>
 #include <keel/hash_set.h>
 #include <numkit/core/debug_session.hpp>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/bytecode.hpp"
+#include "core/compiler/compiler.hpp"
 #include <numkit/core/engine.hpp>
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
+#include "core/vm/vm.hpp"
 
 namespace numkit {
 
 DebugSession::DebugSession(Engine &engine)
     : engine_(engine)
+    , chunk_(keel::make_unique<BytecodeChunk>())
     , observer_(keel::make_arc<SessionObserver>())
 {
 }
@@ -87,7 +90,7 @@ ExecStatus DebugSession::start(keel::StringRef code)
 
         auto src = keel::make_arc<const keel::String>(keel::String::from(code));
         auto *compiler = engine_.compilerPtr();
-        chunk_ = compiler->compile(ast_.get(), src);
+        *chunk_ = compiler->compile(ast_.get(), src);
         engine_.vm_->setCompiledFuncs(&compiler->compiledFuncs(),
                                       &compiler->scriptLocalCompiledFuncs());
 
@@ -99,7 +102,7 @@ ExecStatus DebugSession::start(keel::StringRef code)
         bool runToStop = stopOnError_ || !engine_.debug().breakpoints().breakpoints().empty();
         DebugAction initial = runToStop ? DebugAction::Continue : DebugAction::StepInto;
 
-        ExecStatus status = engine_.vm_->startExecution(chunk_, nullptr, 0, initial);
+        ExecStatus status = engine_.vm_->startExecution(*chunk_, nullptr, 0, initial);
         status = skipFalseConditionalBreakpoints(status, initial == DebugAction::Continue);
 
         if (status == ExecStatus::Paused) {

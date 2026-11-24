@@ -14,13 +14,13 @@
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/compiler.hpp"
 #include <numkit/core/lexer.hpp>
 #include <numkit/core/parser.hpp>
 #include <numkit/core/plugin_loader.hpp>
-#include <numkit/core/tree_walker.hpp>
-#include <numkit/core/vm.hpp>
-#include "engine_internal.hpp"
+#include "core/tree_walker/tree_walker.hpp"
+#include "core/vm/vm.hpp"
+#include "core/engine/engine_internal.hpp"
 
 namespace numkit {
 
@@ -649,7 +649,9 @@ void Engine::addPath(keel::StringRef dir)
                 ? keel::format("{}:{}", fsName, rp.path)
                 : rp.path.clone();
         }
-    } catch (...) {}
+    } catch (const keel::Exception &) {
+        // Unregistered VFS prefix or invalid path — keep literal `dir` entry.
+    }
     // De-dup: ignore if already present.
     for (const auto &p : mFileReg_->mPath) {
         if (p == effectiveDir || p == dir) return;
@@ -683,7 +685,9 @@ void Engine::rmPath(keel::StringRef dir)
                 ? keel::format("{}:{}", fsName, rp.path)
                 : rp.path.clone();
         }
-    } catch (...) {}
+    } catch (const keel::Exception &) {
+        // Unregistered VFS prefix or invalid path — keep literal `dir` entry.
+    }
     for (keel::usize i = 0; i < mFileReg_->mPath.size(); ++i) {
         if (mFileReg_->mPath[i] == dir || mFileReg_->mPath[i] == effectiveDir) {
             mFileReg_->mFileMissCache.clear();

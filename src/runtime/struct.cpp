@@ -16,9 +16,9 @@
 #include <numkit/runtime/struct.hpp>
 #include <numkit/core/engine.hpp>
 
-#include <numkit/core/callback_builtin.hpp>
+#include "core/engine/callback_builtin.hpp"
 #include <numkit/core/types.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 
 #include "_handlefn_helpers.hpp"
 

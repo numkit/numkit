@@ -5,7 +5,7 @@
 #include <keel/core.h>
 #include <keel/string.h>
 #include <numkit/core/ast.hpp>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/compiler.hpp"
 
 namespace numkit {
 

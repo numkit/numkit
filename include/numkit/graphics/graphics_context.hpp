@@ -27,7 +27,7 @@
 #include <keel/function.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
-#include <numkit/core/figure_manager.hpp>  // FigureManager, DatasetInfo, AxesState
+#include <numkit/graphics/figure_manager.hpp>  // FigureManager, DatasetInfo, AxesState
 #include <numkit/value/value.hpp>            // Value, ValueType
 
 

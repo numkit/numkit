@@ -9,7 +9,7 @@
 #include <keel/function.h>
 #include <keel/ref.h>
 #include <keel/string.h>
-#include <numkit/core/figure_manager.hpp>
+#include <numkit/graphics/figure_manager.hpp>
 
 
 namespace numkit {

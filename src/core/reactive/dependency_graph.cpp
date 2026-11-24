@@ -311,7 +311,7 @@ StatementFacts factsFor(const ASTNode *s)
 keel::Array<StatementFacts> computeStatementFacts(const ASTNode *program)
 {
     keel::Array<StatementFacts> out;
-    (void)closeDirtySet;
+    (void)&closeDirtySet;
     if (!program)
         return out;
     for (const auto &s : program->children)

@@ -10,7 +10,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <numkit/core/ast.hpp>
-#include <numkit/core/bytecode.hpp>
+#include "core/compiler/bytecode.hpp"
 
 namespace numkit {
 

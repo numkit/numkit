@@ -2,7 +2,7 @@
 #include <keel/core.h>
 #include <keel/algo.h>
 #include <numkit/core/debugger.hpp>
-#include <numkit/core/bytecode.hpp>
+#include "core/compiler/bytecode.hpp"
 #include <numkit/core/environment.hpp>
 
 

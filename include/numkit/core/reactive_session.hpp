@@ -41,7 +41,7 @@
 #include <numkit/core/ast.hpp>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/types.hpp>
-#include <numkit/core/figure_manager.hpp>
+#include <numkit/graphics/figure_manager.hpp>
 
 
 namespace numkit {

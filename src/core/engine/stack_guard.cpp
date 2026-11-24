@@ -1,7 +1,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/process.h>
-#include <numkit/core/stack_guard.hpp>
+#include "core/engine/stack_guard.hpp"
 #include <numkit/value/error.hpp>
 
 

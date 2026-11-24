@@ -6,7 +6,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/string.h>
-#include <numkit/core/bytecode.hpp>
+#include "core/compiler/bytecode.hpp"
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>

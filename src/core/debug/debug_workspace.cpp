@@ -1,10 +1,10 @@
 // src/debug_workspace.cpp
 #include <keel/core.h>
 #include <numkit/core/debug_workspace.hpp>
-#include <numkit/core/bytecode.hpp>
+#include "core/compiler/bytecode.hpp"
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 
 namespace numkit {
 

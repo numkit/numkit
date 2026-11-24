@@ -1,10 +1,10 @@
-// src/core/figure_manager.cpp
+// src/graphics/figure_manager.cpp
 // Out-of-line implementations for FigureManager, figure state clones,
 // JSON serialization, and LOD tile resampling.
 #include <keel/math.h>
 #include <keel/io.h>
 #include <keel/number.h>
-#include <numkit/core/figure_manager.hpp>
+#include <numkit/graphics/figure_manager.hpp>
 
 
 namespace numkit {

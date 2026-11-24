@@ -11,7 +11,7 @@
 #include <keel/smart_ptr.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
-#include <numkit/core/vm.hpp>
+#include "core/vm/vm.hpp"
 #include <numkit/value/error.hpp>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/index.hpp>
@@ -29,7 +29,7 @@ void timesLoop  (const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::u
 void rdivideLoop(const keel::f64 *a, const keel::f64 *b, keel::f64 *out, keel::usize n);
 } // namespace numkit::ops::detail
 
-#include "vm_internal.hpp"
+#include "core/vm/vm_internal.hpp"
 
 namespace numkit {
 

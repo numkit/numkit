@@ -10,8 +10,8 @@
 
 #include "dual_engine_fixture.hpp"
 
-#include <numkit/core/bytecode.hpp>
-#include <numkit/core/compiler.hpp>
+#include "core/compiler/bytecode.hpp"
+#include "core/compiler/compiler.hpp"
 
 #include <chrono>
 #include <filesystem>

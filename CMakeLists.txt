@@ -134,7 +134,6 @@ target_link_libraries(numkit
         keel::matfile
 )
 
-target_compile_definitions(numkit PUBLIC NUMKIT_CORE_BUILD=1)
 
 if(NUMKIT_WITH_SIMD)
     target_compile_definitions(numkit PUBLIC NUMKIT_WITH_SIMD=1)

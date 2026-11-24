@@ -200,4 +200,101 @@ inline bool hasPathSepOrColon(keel::StringRef s) noexcept
     return false;
 }
 
+
+struct OpMethod
+{
+    const char *token;
+    const char *method;
+    bool unary;
+};
+
+inline constexpr OpMethod kOpMethods[] = {
+    {"+", "plus", false},      {"-", "minus", false},     {"*", "mtimes", false},
+    {".*", "times", false},    {"/", "mrdivide", false},  {"./", "rdivide", false},
+    {"\\", "mldivide", false}, {".\\", "ldivide", false}, {"^", "mpower", false},
+    {".^", "power", false},    {"==", "eq", false},       {"~=", "ne", false},
+    {"<", "lt", false},        {"<=", "le", false},       {">", "gt", false},
+    {">=", "ge", false},       {"&", "and", false},       {"|", "or", false},
+    {"-", "uminus", true},     {"+", "uplus", true},      {"~", "not", true},
+    {"'", "ctranspose", true}, {".'", "transpose", true},
+};
+
+inline const char *operatorMethodName(keel::StringRef op)
+{
+    for (const auto &e : kOpMethods)
+        if (!e.unary && op == e.token)
+            return e.method;
+    return nullptr;
+}
+
+inline const char *unaryOperatorMethodName(keel::StringRef op)
+{
+    for (const auto &e : kOpMethods)
+        if (e.unary && op == e.token)
+            return e.method;
+    return nullptr;
+}
+
+inline bool isOperatorMethodName(keel::StringRef n)
+{
+    for (const auto &e : kOpMethods)
+        if (n == e.method)
+            return true;
+    return false;
+}
+
+inline const char *accessWord(Access a)
+{
+    switch (a) {
+    case Access::Private:
+        return "private";
+    case Access::Protected:
+        return "protected";
+    case Access::Immutable:
+        return "immutable";
+    default:
+        return "public";
+    }
+}
+
+inline void enforceAccess(Engine *engine, Access level, keel::StringRef declClass,
+                          const char *kind, keel::StringRef name)
+{
+    if (level == Access::Public)
+        return;
+    if (level == Access::Immutable) {
+        if (engine->classCtxInCtorOf(declClass))
+            return;
+        auto msg = keel::format(
+            "Cannot set property '{}': it has immutable SetAccess (settable only in the {} constructor)",
+            name, declClass);
+        throw numkit::Error(msg.c_str());
+    }
+    if (engine->classCtxAllows(declClass, /*privateOnly=*/level == Access::Private))
+        return;
+    auto msg = keel::format("Cannot access {} '{}' of class '{}': it has {} access",
+                            kind, name, declClass, accessWord(level));
+    throw numkit::Error(msg.c_str());
+}
+
+inline const PropInfo *findProp(const ClassDefDesc &d, keel::StringRef name)
+{
+    for (const auto &p : d.props)
+        if (p.name == name)
+            return &p;
+    return nullptr;
+}
+
+inline Value buildSubsStruct(const char *type, keel::ArrayRef<Value> subscripts,
+                             keel::Allocator *mr)
+{
+    Value subs = Value::cell(1, subscripts.size(), mr);
+    for (keel::usize i = 0; i < subscripts.size(); ++i)
+        subs.cellAt(i) = subscripts[i];
+    Value s = Value::structure(mr);
+    s.setField(0, "type", Value::fromString(type, mr));
+    s.setField(0, "subs", subs);
+    return s;
+}
+
 } // namespace numkit

@@ -6,7 +6,6 @@
 #include <keel/core.h>
 #include <keel/function.h>
 #include <keel/hash_map.h>
-#include <keel/hash_set.h>
 #include <keel/memory.h>
 #include <keel/ref.h>
 #include <keel/small_array.h>

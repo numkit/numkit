@@ -8,7 +8,6 @@
 #include <numkit/core/ast.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/lexer.hpp>
-#include <numkit/core/stack_guard.hpp>
 #include <initializer_list>
 
 namespace numkit {
@@ -35,20 +34,7 @@ private:
     struct NestingGuard
     {
         Parser &p;
-        explicit NestingGuard(Parser &parser)
-            : p(parser)
-        {
-            // Watermark before the depth limit: on small-stack hosts (WASM
-            // workers) the descent can exhaust the stack before the fixed
-            // 200-level limit fires — refuse with a diagnostic either way.
-            StackGuard::check("parser");
-            if (++p.nestingDepth_ > MAX_NESTING_DEPTH) {
-                auto msg = keel::format(
-                    "Parse error at line {} col {}: Expression or block nesting exceeds maximum supported depth ({})",
-                    p.current().line, p.current().col, MAX_NESTING_DEPTH);
-                throw numkit::Error(msg.c_str());
-            }
-        }
+        explicit NestingGuard(Parser &parser);
         ~NestingGuard() { --p.nestingDepth_; }
     };
 
