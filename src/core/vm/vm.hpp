@@ -414,6 +414,9 @@ private:
                               const Instruction *ip);
     bool execCallIndirectMulti(const Instruction &I, Value *R,
                                CallFrame &frame, const Instruction *ip);
+    bool dispatchFuncHandle_(const Value &fh, const Value *userArgs, keel::usize na,
+                             keel::u16 outBase, keel::u16 nout, bool isMulti,
+                             Value *R, CallFrame &frame, const Instruction *ip);
     void execIndirectIndex(const Instruction &I, Value *R);
     void execIndirectIndexTarget(const Value &target, keel::u16 dstReg, keel::u16 argBase, keel::u16 na,
                                  Value *R);

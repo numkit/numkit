@@ -402,9 +402,9 @@ int runPkgCommand(int argc, char **argv)
         }
         return pm.update(names, /*verbose=*/true, forceHead);
     } else if (subcmd == "avail" || subcmd == "available" || subcmd == "catalog" || subcmd == "search") {
-        return pm.avail(stdout);
+        return pm.avail();
     } else if (subcmd == "list" || subcmd == "status") {
-        return pm.list(stdout);
+        return pm.list();
     } else if (subcmd == "build") {
         keel::StringRef dir = (argc >= 4) ? keel::StringRef(argv[3]) : keel::StringRef(".");
         return pm.build(dir);

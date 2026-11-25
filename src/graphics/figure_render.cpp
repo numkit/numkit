@@ -31,9 +31,9 @@
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/graphics/figure_manager.hpp>
 
+#include <keel/format.h>
+#include <keel/number.h>
 #include <keel/static_array.h>
-#include <cstdio>
-#include <cstdlib>
 #include <initializer_list>
 
 namespace numkit {
@@ -63,9 +63,8 @@ struct Rgb {
     }
     keel::String hex() const
     {
-        char buf[8];
-        std::snprintf(buf, sizeof buf, "#%02x%02x%02x", r, g, b);
-        return keel::String::from(buf);
+        return keel::format("#{:02x}{:02x}{:02x}", keel::as<keel::u32>(r),
+                            keel::as<keel::u32>(g), keel::as<keel::u32>(b));
     }
 };
 
@@ -561,10 +560,11 @@ keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, keel::i32 target)
                 : norm <= 5.0 ? 5 * pow : 10 * pow;
     for (keel::f64 v = keel::ceil(mn / step) * step; v <= mx + step * 1e-6; v += step) {
         char buf[64];
-        keel::i32 n = std::snprintf(buf, sizeof buf, "%f", v);
-        if (n > 12)
-            buf[12] = '\0';
-        major.push_back(std::strtod(buf, nullptr));
+        keel::StringRef s = keel::format_f64_fixed_to(buf, v, 6);
+        if (s.size() > 12)
+            s = s.substr(0, 12);
+        auto parsed = keel::parse_f64(s);
+        major.push_back(parsed.is_ok() ? parsed.value() : v);
     }
     return major;
 }
@@ -584,6 +584,52 @@ keel::Array<keel::f64> logTicks(keel::f64 mn, keel::f64 mx)
     return major;
 }
 
+// Safe printf-style tick formatter for xtickformat/ytickformat (e.g. "%.2f", "%g", "%.1e", "%d").
+keel::String formatTickSpec(keel::StringRef fmt, keel::f64 v)
+{
+    keel::String out;
+    for (keel::usize i = 0; i < fmt.size(); ++i) {
+        if (fmt[i] != '%') {
+            out.push_back(fmt[i]);
+            continue;
+        }
+        if (i + 1 < fmt.size() && fmt[i + 1] == '%') {
+            out.push_back('%');
+            ++i;
+            continue;
+        }
+        ++i;
+        // Skip optional flags/width.
+        while (i < fmt.size() && (fmt[i] == '-' || fmt[i] == '+' || fmt[i] == ' ' || fmt[i] == '#' || fmt[i] == '0'))
+            ++i;
+        while (i < fmt.size() && fmt[i] >= '0' && fmt[i] <= '9')
+            ++i;
+        keel::i32 prec = -1;
+        if (i < fmt.size() && fmt[i] == '.') {
+            ++i;
+            prec = 0;
+            while (i < fmt.size() && fmt[i] >= '0' && fmt[i] <= '9') {
+                prec = prec * 10 + (fmt[i] - '0');
+                ++i;
+            }
+        }
+        if (i >= fmt.size()) break;
+        const char sp = fmt[i];
+        char b[64];
+        if (sp == 'f' || sp == 'F')
+            out.append(keel::format_f64_fixed_to(b, v, prec >= 0 ? prec : 6));
+        else if (sp == 'e' || sp == 'E')
+            out.append(keel::format_f64_scientific_to(b, v, prec >= 0 ? prec : 6, sp == 'E'));
+        else if (sp == 'g' || sp == 'G')
+            out.append(keel::format_f64_general_to(b, v, prec >= 0 ? prec : 6, sp == 'G'));
+        else if (sp == 'd' || sp == 'i' || sp == 'u')
+            out.append(keel::format_i64_to(b, keel::as<keel::i64>(keel::round(v))));
+        else
+            out.append(keel::format_f64_general_to(b, v, 6));
+    }
+    return out;
+}
+
 // Default tick label: %g-style with trailing-zero trim + exponent
 // compaction ("1e+06" → "1e6").
 keel::String tickLabel(keel::f64 v)
@@ -591,8 +637,7 @@ keel::String tickLabel(keel::f64 v)
     if (v == 0)
         return keel::String::from("0");
     char buf[32];
-    std::snprintf(buf, sizeof buf, "%.6g", v);
-    keel::String s = keel::String::from(buf);
+    keel::String s = keel::String::from(keel::format_f64_general_to(buf, v, 6));
     keel::usize e = s.find('e');
     if (e != keel::kInvalidIndex) {
         keel::StringRef mantRef = s.substr(0, e);
@@ -1763,9 +1808,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                                : tickLabel(v);
         if (k >= txLab.size() && !ax.xTickFormat.empty()
             && ax.xTickFormat.size() > 1 && ax.xTickFormat[0] == '%') {
-            char b[40];
-            std::snprintf(b, sizeof b, ax.xTickFormat.c_str(), v);
-            lab.assign(b);
+            lab = formatTickSpec(ax.xTickFormat.as_ref(), v);
         }
         addText(out, lab, p - 3.0 * lab.size(), plot.y1 + 8, tickFS,
                 kTextCol, false, fBold, fam);
@@ -1779,9 +1822,7 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                                : tickLabel(v);
         if (k >= tyLab.size() && !ax.yTickFormat.empty()
             && ax.yTickFormat.size() > 1 && ax.yTickFormat[0] == '%') {
-            char b[40];
-            std::snprintf(b, sizeof b, ax.yTickFormat.c_str(), v);
-            lab.assign(b);
+            lab = formatTickSpec(ax.yTickFormat.as_ref(), v);
         }
         keel::f64 w = 6.0 * lab.size();
         addText(out, lab, plot.x0 - 8 - w, p + 4, tickFS, kTextCol, false,
@@ -2096,8 +2137,7 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
     };
     auto appendF = [](keel::String &dst, keel::f64 v) {
         char b[64];
-        keel::i32 n = std::snprintf(b, sizeof b, "%f", v);
-        if (n > 0) dst.append(keel::StringRef(b, keel::as<keel::usize>(n)));
+        dst.append(keel::format_f64_fixed_to(b, v, 6));
     };
     for (const Cmd &c : cmds) {
         if (c.kind == Cmd::IMAGE) {
@@ -2186,9 +2226,7 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
             for (keel::usize i = 0; i < c.xs.size(); ++i) {
                 if (i)
                     pts.push_back(' ');
-                char b[48];
-                std::snprintf(b, sizeof b, "%.1f,%.1f", c.xs[i], c.ys[i]);
-                pts.append(b);
+                keel::format_into(pts, "{:.1f},{:.1f}", c.xs[i], c.ys[i]);
             }
             if (c.kind == Cmd::POLY && c.fill) {
                 s.append("<polygon points=\""); s.append(pts);
@@ -2227,21 +2265,18 @@ keel::String renderFigureEps(const FigureState &fig, keel::i32 W, keel::i32 H)
         }
         return o;
     };
-    char buf[128];
     for (const Cmd &c : cmds) {
-        std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f setrgbcolor\n",
-                      c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
-        s.append(buf);
+        keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor\n",
+                          c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
         if (c.kind == Cmd::IMAGE) {
             keel::Array<keel::u8> rgb = imageCmdRgb(c);
             keel::f64 sx0 = keel::min(c.xs[0], c.xs[1]), sx1 = keel::max(c.xs[0], c.xs[1]);
             keel::f64 sy0 = keel::min(c.ys[0], c.ys[1]), sy1 = keel::max(c.ys[0], c.ys[1]);
             keel::i32 pw = keel::max(1, (keel::i32)keel::round_i64(sx1 - sx0));
             keel::i32 ph = keel::max(1, (keel::i32)keel::round_i64(sy1 - sy0));
-            std::snprintf(buf, sizeof buf,
-                          "gsave %.1f %.1f translate %.1f %.1f scale %d %d 8 [%d 0 0 -%d 0 %d] {<",
-                          sx0, H - sy1, sx1 - sx0, sy1 - sy0, pw, ph, pw, ph, ph);
-            s.append(buf);
+            keel::format_into(s,
+                              "gsave {:.1f} {:.1f} translate {:.1f} {:.1f} scale {} {} 8 [{} 0 0 -{} 0 {}] {{<",
+                              sx0, H - sy1, sx1 - sx0, sy1 - sy0, pw, ph, pw, ph, ph);
             static const char kHex[] = "0123456789abcdef";
             for (keel::u8 b : rgb) {
                 s.push_back(kHex[(b >> 4) & 0xF]);
@@ -2250,23 +2285,18 @@ keel::String renderFigureEps(const FigureState &fig, keel::i32 W, keel::i32 H)
             s.append(">} false 3 colorimage grestore\n");
         } else if (c.kind == Cmd::TEXT) {
             keel::String escaped = escPs(c.text);
-            std::snprintf(buf, sizeof buf, "/Courier findfont %.1f scalefont setfont %.1f %.1f moveto (%s) show\n",
-                          c.fontSize, c.x, H - c.y, escaped.c_str());
-            s.append(buf);
+            keel::format_into(s, "/Courier findfont {:.1f} scalefont setfont {:.1f} {:.1f} moveto ({}) show\n",
+                              c.fontSize, c.x, H - c.y, escaped);
         } else if (c.kind == Cmd::MARK) {
             keel::f64 r = c.width / 2.0;
-            std::snprintf(buf, sizeof buf, "newpath %.1f %.1f %.1f 0 360 arc stroke\n",
-                          c.x, H - c.y, r);
-            s.append(buf);
+            keel::format_into(s, "newpath {:.1f} {:.1f} {:.1f} 0 360 arc stroke\n",
+                              c.x, H - c.y, r);
         } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
-            std::snprintf(buf, sizeof buf, "%.2f setlinewidth %s newpath %.1f %.1f moveto\n",
-                          c.width, c.dash ? "[7 5] 0 setdash" : "[] 0 setdash",
-                          c.xs[0], H - c.ys[0]);
-            s.append(buf);
-            for (keel::usize i = 1; i < c.xs.size(); ++i) {
-                std::snprintf(buf, sizeof buf, "%.1f %.1f lineto\n", c.xs[i], H - c.ys[i]);
-                s.append(buf);
-            }
+            keel::format_into(s, "{:.2f} setlinewidth {} newpath {:.1f} {:.1f} moveto\n",
+                              c.width, c.dash ? "[7 5] 0 setdash" : "[] 0 setdash",
+                              c.xs[0], H - c.ys[0]);
+            for (keel::usize i = 1; i < c.xs.size(); ++i)
+                keel::format_into(s, "{:.1f} {:.1f} lineto\n", c.xs[i], H - c.ys[i]);
             s.append((c.kind == Cmd::POLY && c.fill) ? "closepath fill\n" : "stroke\n");
         }
     }
@@ -2287,7 +2317,6 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
         }
         return o;
     };
-    char buf[160];
     for (const Cmd &c : cmds) {
         keel::f64 r = c.color.r / 255.0, g = c.color.g / 255.0, b = c.color.b / 255.0;
         if (c.kind == Cmd::IMAGE) {
@@ -2296,10 +2325,9 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
             keel::f64 sy0 = keel::min(c.ys[0], c.ys[1]), sy1 = keel::max(c.ys[0], c.ys[1]);
             keel::i32 pw = keel::max(1, (keel::i32)keel::round_i64(sx1 - sx0));
             keel::i32 ph = keel::max(1, (keel::i32)keel::round_i64(sy1 - sy0));
-            std::snprintf(buf, sizeof buf,
-                          "q %.1f 0 0 %.1f %.1f %.1f cm BI /W %d /H %d /CS /RGB /BPC 8 /F /AHx ID ",
-                          sx1 - sx0, sy1 - sy0, sx0, H - sy1, pw, ph);
-            stream.append(buf);
+            keel::format_into(stream,
+                              "q {:.1f} 0 0 {:.1f} {:.1f} {:.1f} cm BI /W {} /H {} /CS /RGB /BPC 8 /F /AHx ID ",
+                              sx1 - sx0, sy1 - sy0, sx0, H - sy1, pw, ph);
             static const char kHex[] = "0123456789abcdef";
             for (keel::u8 by : rgb) {
                 stream.push_back(kHex[(by >> 4) & 0xF]);
@@ -2308,24 +2336,19 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
             stream.append("> EI Q\n");
         } else if (c.kind == Cmd::TEXT) {
             keel::String escaped = escPdf(c.text);
-            std::snprintf(buf, sizeof buf, "BT /F1 %.1f Tf %.3f %.3f %.3f rg %.1f %.1f Td (%s) Tj ET\n",
-                          c.fontSize, r, g, b, c.x, H - c.y, escaped.c_str());
-            stream.append(buf);
+            keel::format_into(stream, "BT /F1 {:.1f} Tf {:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} Td ({}) Tj ET\n",
+                              c.fontSize, r, g, b, c.x, H - c.y, escaped);
         } else if (c.kind == Cmd::MARK) {
             keel::f64 rad = c.width / 2.0;
-            std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f RG 1 w %.1f %.1f %.1f %.1f re S\n",
-                          r, g, b, c.x - rad, (H - c.y) - rad, c.width, c.width);
-            stream.append(buf);
+            keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG 1 w {:.1f} {:.1f} {:.1f} {:.1f} re S\n",
+                              r, g, b, c.x - rad, (H - c.y) - rad, c.width, c.width);
         } else if ((c.kind == Cmd::LINE || c.kind == Cmd::POLY) && c.xs.size() >= 2) {
-            std::snprintf(buf, sizeof buf, "%.3f %.3f %.3f %s %.2f w %s %.1f %.1f m\n",
-                          r, g, b, (c.kind == Cmd::POLY && c.fill) ? "rg" : "RG",
-                          c.width, c.dash ? "[7 5] 0 d" : "[] 0 d",
-                          c.xs[0], H - c.ys[0]);
-            stream.append(buf);
-            for (keel::usize i = 1; i < c.xs.size(); ++i) {
-                std::snprintf(buf, sizeof buf, "%.1f %.1f l\n", c.xs[i], H - c.ys[i]);
-                stream.append(buf);
-            }
+            keel::format_into(stream, "{:.3f} {:.3f} {:.3f} {} {:.2f} w {} {:.1f} {:.1f} m\n",
+                              r, g, b, (c.kind == Cmd::POLY && c.fill) ? "rg" : "RG",
+                              c.width, c.dash ? "[7 5] 0 d" : "[] 0 d",
+                              c.xs[0], H - c.ys[0]);
+            for (keel::usize i = 1; i < c.xs.size(); ++i)
+                keel::format_into(stream, "{:.1f} {:.1f} l\n", c.xs[i], H - c.ys[i]);
             stream.append((c.kind == Cmd::POLY && c.fill) ? "h f\n" : "S\n");
         }
     }
@@ -2348,10 +2371,8 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
     keel::usize xref = pdf.size();
     pdf.append("xref\n0 6\n0000000000 65535 f \n");
     keel::usize offs[5] = {off1, off2, off3, off4, off5};
-    for (keel::i32 i = 0; i < 5; ++i) {
-        std::snprintf(buf, sizeof buf, "%010zu 00000 n \n", offs[i]);
-        pdf.append(buf);
-    }
+    for (keel::i32 i = 0; i < 5; ++i)
+        keel::format_into(pdf, "{:010} 00000 n \n", offs[i]);
     pdf.append(keel::format("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref));
     return pdf;
 }

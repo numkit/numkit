@@ -10,8 +10,6 @@
 #include <numkit/sys/process.hpp>
 #include <numkit/sys/env.hpp>
 
-#include <cstdio>
-
 namespace numkit {
 class Engine;
 }
@@ -64,9 +62,9 @@ public:
     keel::i32 update(keel::ArrayRef<keel::String> names = {}, bool verbose = true,
                bool forceHead = false);
     keel::i32 list(keel::String &out) const;
-    keel::i32 list(std::FILE *out = stdout) const;
+    keel::i32 list() const;
     keel::i32 avail(keel::String &out, const Engine *engine = nullptr) const;
-    keel::i32 avail(std::FILE *out = stdout, const Engine *engine = nullptr) const;
+    keel::i32 avail(const Engine *engine = nullptr) const;
     keel::i32 build(keel::StringRef dir = ".", bool verbose = true);
     keel::i32 remove(keel::StringRef name);
     keel::i32 load(keel::StringRef name, Engine &engine, keel::StringRef targetNamespace = "");

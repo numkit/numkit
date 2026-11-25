@@ -1368,14 +1368,9 @@ bool VM::execCallIndirectTarget(const Value &target, keel::u16 dstReg, keel::u16
 bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value *AB, keel::usize na,
                               Value *R, CallFrame &frame, const Instruction *ip)
 {
-    // Resolve function handle (plain or closure)
-    Value funcHandleVal;
-    keel::usize numCaptures = 0;
-
-    if (target.isFuncHandle()) {
-        funcHandleVal = target;
-        numCaptures = target.funcHandleCaptureCount();
-    } else if (target.isObject()) {
+    if (target.isFuncHandle())
+        return dispatchFuncHandle_(target, AB, na, dstReg, 1, /*isMulti=*/false, R, frame, ip);
+    if (target.isObject()) {
         // OBJECT: obj(i…) dispatches to the class subsref overload.
         // (A known variable `obj(i)` compiles to CALL_INDIRECT, so the
         // object subsref hook is needed here too, not just in INDEX_GET.)
@@ -1431,52 +1426,77 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         execIndirectIndexSpan(target, dstReg, AB, na, R);
         return false;
     }
+}
 
-    const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
-
-    // Build args: user args + captured values
-    keel::usize totalArgsN = keel::as<keel::usize>(na) + numCaptures;
-    keel::Array<Value> argsBuf;
-    argsBuf.resize(totalArgsN);
+bool VM::dispatchFuncHandle_(const Value &fh, const Value *userArgs, keel::usize na,
+                             keel::u16 outBase, keel::u16 nout, bool isMulti,
+                             Value *R, CallFrame &frame, const Instruction *ip)
+{
+    const keel::StringRef funcName = fh.funcHandleNameRef();
+    const keel::usize numCaptures = fh.funcHandleCaptureCount();
+    const keel::usize totalArgs = na + numCaptures;
+    keel::Array<Value> argsBuf(totalArgs);
     for (keel::usize i = 0; i < na; ++i)
-        argsBuf[i] = AB[i];
+        argsBuf[i] = userArgs[i];
     for (keel::usize i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = funcHandleVal.funcHandleCapture(i);
-    const keel::usize totalArgs = totalArgsN;
+        argsBuf[na + i] = fh.funcHandleCapture(i);
 
-    // Try compiled user function
-    if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
+    auto pushChunk = [&](const BytecodeChunk &fc) -> bool {
         frame.ip = ip + 1;
-        pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
-        return true; // caller must re-enter dispatch loop
-    }
-
-    // External function
-    if (const ExternalFunc *extFn = engine_.findExternal(funcName, currentCallEnv())) {
-        keel::ArrayRef<Value> as(argsBuf.data(), na);
-        Value ob[1];
-        keel::MutArrayRef<Value> os(ob, 1);
-        CallContext ctx{&engine_, currentCallEnv()};
-        (*extFn)(as, 1, os, ctx);
-        frames_.back().R[dstReg] = keel::move(ob[0]);
-        return false;
-    }
-
-    // M-file fallback: a handle to a FILE function resolves exactly like
-    // a direct call (script-origin dirs included)
-    // (bugs/opened/lang/handle-to-file-function-unresolved.md).
-    if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
-        const BytecodeChunk *found = findCompiledFunc(uf->name);
-        if (!found)
-            found = engine_.ensureClassMethodChunk(*uf);
-        frame.ip = ip + 1;
-        pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
+        if (isMulti) {
+            returnBuf_.clear();
+            pushCallFrame(fc, argsBuf.data(), totalArgs, 0, nout, true, outBase, nout);
+        } else {
+            pushCallFrame(fc, argsBuf.data(), totalArgs, outBase, 1);
+        }
         return true;
+    };
+
+    if (const BytecodeChunk *found = findCompiledFunc(funcName))
+        return pushChunk(*found);
+
+    const auto *subfuncs = (frame.chunk && frame.chunk->fileSubfuncs)
+                               ? frame.chunk->fileSubfuncs.get()
+                               : nullptr;
+    const auto res = engine_.resolveFuncHandle(funcName, currentCallEnv(), subfuncs,
+                                               /*includeCompiled=*/true);
+    switch (res.kind) {
+    case Engine::ResolvedHandle::Kind::CompiledChunk:
+        return pushChunk(*res.chunk);
+    case Engine::ResolvedHandle::Kind::UserFunc: {
+        const BytecodeChunk *found = findCompiledFunc(res.userFunc->name);
+        if (!found)
+            found = engine_.ensureClassMethodChunk(*res.userFunc);
+        return pushChunk(*found);
     }
-    if (const BuiltinClass *cls = engine_.findClass(funcName); cls && cls->construct) {
+    case Engine::ResolvedHandle::Kind::External: {
+        keel::Array<Value> outBuf(nout);
         CallContext ctx{&engine_, currentCallEnv()};
-        R[dstReg] = cls->construct(keel::ArrayRef<Value>(argsBuf.data(), totalArgs), ctx);
+        (*res.extFunc)(keel::ArrayRef<Value>(argsBuf.data(), totalArgs), nout,
+                       keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
+        if (isMulti) {
+            for (keel::u16 i = 0; i < nout; ++i)
+                if (outBuf[i].isUnset())
+                    throw numkit::Error("Too many output arguments.");
+            for (keel::u16 i = 0; i < nout; ++i)
+                R[outBase + i] = keel::move(outBuf[i]);
+        } else if (nout > 0) {
+            frames_.back().R[outBase] = keel::move(outBuf[0]);
+        }
         return false;
+    }
+    case Engine::ResolvedHandle::Kind::ClassCtor: {
+        if (isMulti && nout > 1)
+            throw numkit::Error("Too many output arguments.");
+        CallContext ctx{&engine_, currentCallEnv()};
+        Value obj = res.builtinClass->construct(
+            keel::ArrayRef<Value>(argsBuf.data(), totalArgs), ctx);
+        if (nout > 0)
+            frames_.back().R[outBase] = keel::move(obj);
+        return false;
+    }
+    case Engine::ResolvedHandle::Kind::None:
+        break;
     }
     throw numkit::Error(
         keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
@@ -1490,21 +1510,17 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
     keel::u16 na = keel::as<keel::u16>(I.d);
     keel::u16 nout = I.e;
 
-    // Resolve the function handle (plain or closure) + its captures.
-    Value funcHandleVal;
-    keel::usize numCaptures = 0;
     if (R[fhReg].isFuncHandle()) {
-        funcHandleVal = R[fhReg];
-        numCaptures = funcHandleVal.funcHandleCaptureCount();
-    } else if (R[fhReg].isObject()) {
+        return dispatchFuncHandle_(R[fhReg], na ? &R[argBase] : nullptr, na,
+                                   outBase, nout, /*isMulti=*/true, R, frame, ip);
+    }
+    if (R[fhReg].isObject()) {
         const BuiltinClass *cls = engine_.findClass(R[fhReg].objectClassNameRef());
         if (cls && cls->subsref) {
-            keel::Array<Value> argsBuf;
-            argsBuf.resize(na);
+            keel::Array<Value> argsBuf(na);
             for (keel::usize i = 0; i < na; ++i)
                 argsBuf[i] = R[argBase + i];
-            keel::Array<Value> outBuf;
-            outBuf.resize(nout);
+            keel::Array<Value> outBuf(nout);
             CallContext ctx{&engine_, currentCallEnv()};
             cls->subsref(R[fhReg], keel::ArrayRef<Value>(argsBuf.data(), na), nout,
                          keel::MutArrayRef<Value>(outBuf.data(), nout), ctx);
@@ -1512,75 +1528,10 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
                 R[outBase + i] = keel::move(outBuf[i]);
             return false;
         }
-        throw numkit::Error(
-            "VM: multi-output call '[...] = f(...)' of a value that is not a "
-            "function handle");
-    } else {
-        throw numkit::Error(
-            "VM: multi-output call '[...] = f(...)' of a value that is not a "
-            "function handle");
-    }
-
-    const keel::StringRef funcName = funcHandleVal.funcHandleNameRef();
-
-    // Build args: user args followed by captured values.
-    keel::usize totalArgsN = keel::as<keel::usize>(na) + numCaptures;
-    keel::Array<Value> argsBuf;
-    argsBuf.resize(totalArgsN);
-    for (keel::usize i = 0; i < na; ++i)
-        argsBuf[i] = R[argBase + i];
-    for (keel::usize i = 0; i < numCaptures; ++i)
-        argsBuf[na + i] = funcHandleVal.funcHandleCapture(i);
-    const keel::usize totalArgs = totalArgsN;
-
-    // Compiled user / anonymous function → multi-return frame push (the body
-    // runs with nargout = nout and RET_MULTI distributes back to outBase).
-    if (const BytecodeChunk *found = findCompiledFunc(funcName)) {
-        frame.ip = ip + 1;
-        returnBuf_.clear();
-        pushCallFrame(*found, argsBuf.data(), totalArgs,
-                      0, nout, true, outBase, nout);
-        return true; // caller re-enters the dispatch loop
-    }
-
-    // External (builtin) function called for several outputs.
-    const ExternalFunc *fnPtr = engine_.findExternal(funcName, currentCallEnv());
-    if (fnPtr) {
-        keel::Array<Value> outBuf;
-        outBuf.resize(nout);
-        keel::ArrayRef<Value> as(argsBuf.data(), totalArgs);
-        keel::MutArrayRef<Value> os(outBuf.data(), nout);
-        CallContext ctx{&engine_, currentCallEnv()};
-        (*fnPtr)(as, nout, os, ctx);
-        for (keel::u16 i = 0; i < nout; ++i)
-            if (outBuf[i].isUnset())
-                throw numkit::Error("Too many output arguments.");
-        for (keel::usize i = 0; i < nout; ++i)
-            R[outBase + i] = keel::move(outBuf[i]);
-        return false;
-    }
-
-    if (auto *uf = engine_.lookupUserFunction(funcName, currentCallEnv())) {
-        const BytecodeChunk *found = findCompiledFunc(uf->name);
-        if (!found)
-            found = engine_.ensureClassMethodChunk(*uf);
-        frame.ip = ip + 1;
-        returnBuf_.clear();
-        pushCallFrame(*found, argsBuf.data(), totalArgs,
-                      0, nout, true, outBase, nout);
-        return true;
-    }
-    if (const BuiltinClass *cls = engine_.findClass(funcName); cls && cls->construct) {
-        if (nout > 1)
-            throw numkit::Error("Too many output arguments.");
-        CallContext ctx{&engine_, currentCallEnv()};
-        Value obj = cls->construct(keel::ArrayRef<Value>(argsBuf.data(), totalArgs), ctx);
-        if (nout > 0)
-            R[outBase] = keel::move(obj);
-        return false;
     }
     throw numkit::Error(
-        keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
+        "VM: multi-output call '[...] = f(...)' of a value that is not a "
+        "function handle");
 }
 
 void VM::execIndirectIndex(const Instruction &I, Value *R)

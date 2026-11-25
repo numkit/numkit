@@ -8,15 +8,16 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/math.h>
+#include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include "plot_internal.hpp"
 #include <numkit/builtin/datafun.hpp>
+#include <numkit/builtin/iofun.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 
 #include <keel/static_array.h>
-#include <cstdio>
 
 namespace numkit {
 
@@ -759,7 +760,6 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
         } else if (key == "facealpha" && val.isNumeric()) {
             faceAlpha = keel::min(1.0, keel::max(0.0, val.elemAsDouble(0)));
         } else if (key == "facecolor" || key == "edgecolor") {
-            char hex[8];
             keel::String *kv = (key == "facecolor") ? &faceKV : &edgeKV;
             if (val.isChar() || val.isString()) {
                 keel::String c = lowerStr(val.toString());
@@ -772,11 +772,10 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
                     if (c == sc.first)
                         kv->assign(sc.second);
             } else if (val.isNumeric() && val.numel() >= 3) {
-                std::snprintf(hex, sizeof hex, "#%02x%02x%02x",
-                              (keel::u32)(val.elemAsDouble(0) * 255 + 0.5),
-                              (keel::u32)(val.elemAsDouble(1) * 255 + 0.5),
-                              (keel::u32)(val.elemAsDouble(2) * 255 + 0.5));
-                kv->assign(hex);
+                *kv = keel::format("#{:02x}{:02x}{:02x}",
+                                   keel::as<keel::u32>(val.elemAsDouble(0) * 255.0 + 0.5),
+                                   keel::as<keel::u32>(val.elemAsDouble(1) * 255.0 + 0.5),
+                                   keel::as<keel::u32>(val.elemAsDouble(2) * 255.0 + 0.5));
             }
         }
     }
@@ -798,9 +797,8 @@ void histogram_plot(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
     StrBuf style;
     style << "binWidth=" << (ne > 1 ? edges[1] - edges[0] : 1.0);
     {
-        char ab[24];
-        std::snprintf(ab, sizeof ab, ";faceAlpha=%.4g", faceAlpha);
-        style << ab;
+        char ab[32];
+        style << ";faceAlpha=" << keel::format_f64_general_to(ab, faceAlpha, 4);
     }
     if (!faceKV.empty())
         style << ";faceColor=" << faceKV;
@@ -982,12 +980,10 @@ void patchImpl(keel::ArrayRef<Value> args, keel::usize nargout,
                 }
             }
         } else if (Carg.numel() >= 3) {
-            const keel::i32 r = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(0), 0.0, 1.0));
-            const keel::i32 g = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(1), 0.0, 1.0));
-            const keel::i32 b = (keel::i32)keel::round(255 * keel::clamp(Carg.elemAsDouble(2), 0.0, 1.0));
-            char buf[16];
-            std::snprintf(buf, sizeof buf, "#%02x%02x%02x", r, g, b);
-            color.assign(buf);
+            const keel::u32 r = keel::as<keel::u32>(keel::round(255.0 * keel::clamp(Carg.elemAsDouble(0), 0.0, 1.0)));
+            const keel::u32 g = keel::as<keel::u32>(keel::round(255.0 * keel::clamp(Carg.elemAsDouble(1), 0.0, 1.0)));
+            const keel::u32 b = keel::as<keel::u32>(keel::round(255.0 * keel::clamp(Carg.elemAsDouble(2), 0.0, 1.0)));
+            color = keel::format("#{:02x}{:02x}{:02x}", r, g, b);
         }
     }
 
@@ -1091,9 +1087,7 @@ void pieImpl(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
         // Auto-label "p%" so the legend (if user calls legend())
         // shows percentages. MATLAB uses cell labels — we ship the
         // numeric form by default.
-        char buf[16];
-        std::snprintf(buf, sizeof buf, "%.0f%%", v / total * 100.0);
-        ds.label.assign(buf);
+        ds.label = keel::format("{}%", keel::as<keel::i64>(keel::round(v / total * 100.0)));
         fm.pushDataset(keel::move(ds));
     }
     fm.emitModified();
@@ -1658,12 +1652,18 @@ void heatmap_plot(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value>
                     // of parula). Threshold 0.4 picks readable
                     // colour against parula's gradient.
                     const bool dark = (t_ < 0.4);
-                    char buf[32];
-                    std::snprintf(buf, sizeof buf, labelFmt.c_str(), v);
+                    keel::String cellStr;
+                    if (labelFmt == "%g") {
+                        char buf[64];
+                        cellStr = keel::String::from(keel::format_f64_general_to(buf, v, 6));
+                    } else {
+                        Value numVal = Value::scalar(v, gc.mr);
+                        cellStr = numkit::builtin::sprintf(labelFmt.as_ref(), keel::ArrayRef<Value>(&numVal, 1), gc.mr);
+                    }
                     pushCellText(fm,
                                  (keel::f64)(cc + 1),
                                  (keel::f64)(r + 1),
-                                 keel::StringRef(buf), dark);
+                                 cellStr.as_ref(), dark);
                 }
             }
         }

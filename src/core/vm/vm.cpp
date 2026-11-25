@@ -1939,55 +1939,10 @@ enter_frame:
                         "VM: multi-output call of a value that is not a "
                         "function handle");
                 }
-                const Value &fh = R[fhReg];
-                const keel::usize ncaps = fh.funcHandleCaptureCount();
-                const keel::StringRef fName = fh.funcHandleNameRef();
-                keel::Array<Value> cargs(nflat + ncaps);
-                for (keel::usize i = 0; i < nflat; ++i) cargs[i] = ABf[i];
-                for (keel::usize i = 0; i < ncaps; ++i)
-                    cargs[nflat + i] = fh.funcHandleCapture(i);
-                const keel::usize ctot = cargs.size();
-                if (const BytecodeChunk *fc = findCompiledFunc(fName)) {
-                    frame.ip = ip + 1;
-                    returnBuf_.clear();
-                    pushCallFrame(*fc, cargs.data(), ctot, 0, fnout,
-                                  true, I.a, fnout);
+                if (dispatchFuncHandle_(R[fhReg], ABf, nflat, I.a, fnout,
+                                        /*isMulti=*/true, R, frame, ip))
                     goto enter_frame;
-                }
-                if (auto *uf = engine_.lookupUserFunction(fName, currentCallEnv())) {
-                    const BytecodeChunk *fc = findCompiledFunc(uf->name);
-                    if (!fc)
-                        fc = engine_.ensureClassMethodChunk(*uf);
-                    frame.ip = ip + 1;
-                    returnBuf_.clear();
-                    pushCallFrame(*fc, cargs.data(), ctot, 0, fnout,
-                                  true, I.a, fnout);
-                    goto enter_frame;
-                }
-                if (const ExternalFunc *fp =
-                        engine_.findExternal(fName, currentCallEnv())) {
-                    keel::Array<Value> ob(fnout);
-                    CallContext ctx{&engine_, currentCallEnv()};
-                    (*fp)(keel::ArrayRef<Value>(cargs.data(), ctot), fnout,
-                          keel::MutArrayRef<Value>(ob.data(), fnout), ctx);
-                    for (keel::u16 i = 0; i < fnout; ++i)
-                        if (ob[i].isUnset())
-                            throw numkit::Error("Too many output arguments.");
-                    for (keel::u16 i = 0; i < fnout; ++i)
-                        R[I.a + i] = keel::move(ob[i]);
-                    break;
-                }
-                if (const BuiltinClass *cls = engine_.findClass(fName); cls && cls->construct) {
-                    if (fnout > 1)
-                        throw numkit::Error("Too many output arguments.");
-                    CallContext ctx{&engine_, currentCallEnv()};
-                    Value obj = cls->construct(keel::ArrayRef<Value>(cargs.data(), ctot), ctx);
-                    if (fnout > 0)
-                        R[I.a] = keel::move(obj);
-                    break;
-                }
-                throw numkit::Error(
-                    keel::format("VM: undefined function in handle '@{}'", fName).c_str());
+                break;
             }
 
             // ── Display ──────────────────────────────────────────

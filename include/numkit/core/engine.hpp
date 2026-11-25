@@ -564,6 +564,30 @@ public:
         const Environment *env,
         const keel::HashMap<keel::String, keel::String> *fileSubfuncs = nullptr);
 
+    // Unified function-handle target resolution shared by Engine::callHandleMulti,
+    // TreeWalker::callFuncHandleMulti, and VM indirect handle dispatch.
+    // Resolution order (fast zero-I/O checks first, lazy m-file lookup before ClassCtor):
+    //   1. File-private subfunction (`fileSubfuncs` or `env->findFileSubfunc`)
+    //   2. Compiled chunk (`compiler_->findCompiled`, when `includeCompiled` is true)
+    //   3. Already-loaded local user function (`lookupUserFunctionLocal`)
+    //   4. Registered external / builtin function (`findExternal`)
+    //   5. Lazy user function / m-file / +pkg load (`lookupUserFunction` + re-check `findExternal`)
+    //   6. Registered BuiltinClass constructor (`findClass` with `construct`)
+    struct ResolvedHandle
+    {
+        enum class Kind : keel::u8 { None, CompiledChunk, UserFunc, External, ClassCtor };
+        Kind kind = Kind::None;
+        const BytecodeChunk *chunk = nullptr;
+        const UserFunction *userFunc = nullptr;
+        const ExternalFunc *extFunc = nullptr;
+        const BuiltinClass *builtinClass = nullptr;
+    };
+    ResolvedHandle resolveFuncHandle(
+        keel::StringRef name,
+        const Environment *env,
+        const keel::HashMap<keel::String, keel::String> *fileSubfuncs = nullptr,
+        bool includeCompiled = true);
+
     // Clear workspace-scope user functions. Script-local functions
     // live in a separate bucket (see beginScript/endScript) and are
     // untouched — MATLAB treats file-scoped functions as lexically

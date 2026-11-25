@@ -580,6 +580,42 @@ Engine::ResolvedCallable Engine::resolveCallable(
     return {};
 }
 
+Engine::ResolvedHandle Engine::resolveFuncHandle(
+    keel::StringRef name,
+    const Environment *env,
+    const keel::HashMap<keel::String, keel::String> *fileSubfuncs,
+    bool includeCompiled)
+{
+    if (fileSubfuncs) {
+        if (const keel::String *q = fileSubfuncs->get(name)) {
+            if (const UserFunction *sf = lookupUserFunctionLocal(*q))
+                return {ResolvedHandle::Kind::UserFunc, nullptr, sf, nullptr, nullptr};
+        }
+    }
+    if (env) {
+        if (const keel::StringRef sub = env->findFileSubfunc(name); !sub.empty()) {
+            if (const UserFunction *sf = lookupUserFunctionLocal(sub))
+                return {ResolvedHandle::Kind::UserFunc, nullptr, sf, nullptr, nullptr};
+        }
+    }
+    if (includeCompiled && compiler_) {
+        if (const BytecodeChunk *fc = compiler_->findCompiled(name))
+            return {ResolvedHandle::Kind::CompiledChunk, fc, nullptr, nullptr, nullptr};
+    }
+    if (const UserFunction *uf = lookupUserFunctionLocal(name))
+        return {ResolvedHandle::Kind::UserFunc, nullptr, uf, nullptr, nullptr};
+    if (const ExternalFunc *ext = findExternal(name, env))
+        return {ResolvedHandle::Kind::External, nullptr, nullptr, ext, nullptr};
+    if (const UserFunction *uf = lookupUserFunction(name, env))
+        return {ResolvedHandle::Kind::UserFunc, nullptr, uf, nullptr, nullptr};
+    // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
+    if (const ExternalFunc *ext = findExternal(name, env))
+        return {ResolvedHandle::Kind::External, nullptr, nullptr, ext, nullptr};
+    if (const BuiltinClass *cls = findClass(name); cls && cls->construct)
+        return {ResolvedHandle::Kind::ClassCtor, nullptr, nullptr, nullptr, cls};
+    return {};
+}
+
 const UserFunction *Engine::lookupUserFunction(keel::StringRef name,
                                                 const Environment *env)
 {

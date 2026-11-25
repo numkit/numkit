@@ -21,7 +21,7 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
     pkg::PackageManager pm;
 
     if (args.empty()) {
-        pm.list(stdout);
+        pm.list();
         return;
     }
 
@@ -31,9 +31,9 @@ void pkg_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
 
     keel::String action = args[0].toString();
     if (action == "list" || action == "status") {
-        pm.list(stdout);
+        pm.list();
     } else if (action == "avail" || action == "available" || action == "catalog" || action == "search") {
-        pm.avail(stdout, coreEnginePtr(ctx));
+        pm.avail(coreEnginePtr(ctx));
     } else if (action == "update" || action == "upgrade") {
         keel::Array<keel::String> names;
         for (keel::usize i = 1; i < args.size(); ++i) {

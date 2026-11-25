@@ -120,7 +120,7 @@ if(NOT TARGET keel::crypto)
 endif()
 
 # ── Gather Sources ───────────────────────────────────────────────────────
-file(GLOB_RECURSE NUMKIT_SOURCES
+file(GLOB_RECURSE NUMKIT_SOURCES CONFIGURE_DEPENDS
     "src/core/*.cpp"
     "src/runtime/*.cpp"
     "src/builtin/*.cpp"

@@ -512,47 +512,33 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
     const keel::StringRef name = handle.funcHandleNameRef();
+    const BytecodeChunk *curChunk = vm_ ? vm_->currentFrameView().chunk : nullptr;
+    const auto res = resolveFuncHandle(
+        name, e,
+        (curChunk && curChunk->fileSubfuncs) ? curChunk->fileSubfuncs.get() : nullptr,
+        /*includeCompiled=*/compiler_ != nullptr);
 
-    // File-private subfunctions in the currently executing VM frame take
-    // precedence (e.g. `feval('GQU', level)` inside an .m file).
-    if (const BytecodeChunk *curChunk = vm_->currentFrameView().chunk;
-        curChunk && curChunk->fileSubfuncs) {
-        if (const keel::String *q = curChunk->fileSubfuncs->get(name)) {
-            if (const UserFunction *sf = lookupUserFunctionLocal(*q))
-                return invokeUserFunction_(*sf, args, nout);
-        }
-    }
-
-    if (const ExternalFunc *fn = findExternal(name, e)) {
+    switch (res.kind) {
+    case ResolvedHandle::Kind::CompiledChunk:
+        return vm_->callReentrant(*res.chunk, args, nout);
+    case ResolvedHandle::Kind::UserFunc:
+        return invokeUserFunction_(*res.userFunc, args, nout);
+    case ResolvedHandle::Kind::External: {
         keel::Array<Value> out(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
+        (*res.extFunc)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
         return out;
     }
-
-    if (compiler_) {
-        if (const BytecodeChunk *fc = compiler_->findCompiled(name))
-            return vm_->callReentrant(*fc, args, nout);
-    }
-
-    if (const UserFunction *uf = lookupUserFunction(name, e))
-        return invokeUserFunction_(*uf, args, nout);
-
-    // Re-check externals in case lookupUserFunction lazy-loaded a classdef or script .m file.
-    if (const ExternalFunc *fn = findExternal(name, e)) {
+    case ResolvedHandle::Kind::ClassCtor: {
         keel::Array<Value> out(nout);
         CallContext ctx{this, e};
-        (*fn)(args, nout, keel::MutArrayRef<Value>(out.data(), out.size()), ctx);
-        return out;
-    }
-
-    if (const BuiltinClass *cls = findClass(name); cls && cls->construct) {
-        keel::Array<Value> out(nout);
-        CallContext ctx{this, e};
-        Value obj = cls->construct(args, ctx);
+        Value obj = res.builtinClass->construct(args, ctx);
         if (nout > 0)
             out[0] = keel::move(obj);
         return out;
+    }
+    case ResolvedHandle::Kind::None:
+        break;
     }
 
     auto msg = keel::format("Undefined function in handle: @{}", name);

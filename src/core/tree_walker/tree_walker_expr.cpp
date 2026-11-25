@@ -159,21 +159,27 @@ keel::Array<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
     }
     Environment *e = env ? env : engine_.workspaceEnv_.get();
     const keel::StringRef name = handle.funcHandleNameRef();
-    if (auto *_uf = engine_.lookupUserFunction(name, e))
-        return callUserFunctionMulti(*_uf, args, e, nout, callNode);
-    if (const ExternalFunc *fn = engine_.findExternal(name, e)) {
+    const auto res = engine_.resolveFuncHandle(name, e, nullptr, /*includeCompiled=*/false);
+    switch (res.kind) {
+    case Engine::ResolvedHandle::Kind::UserFunc:
+        return callUserFunctionMulti(*res.userFunc, args, e, nout, callNode);
+    case Engine::ResolvedHandle::Kind::External: {
         keel::Array<Value> outBuf(nout);
         CallContext ctx{&engine_, e};
-        (*fn)(args, nout, keel::MutArrayRef<Value>(outBuf), ctx);
+        (*res.extFunc)(args, nout, keel::MutArrayRef<Value>(outBuf), ctx);
         return outBuf;
     }
-    if (const BuiltinClass *cls = engine_.findClass(name); cls && cls->construct) {
+    case Engine::ResolvedHandle::Kind::ClassCtor: {
         keel::Array<Value> outBuf(nout);
         CallContext ctx{&engine_, e};
-        Value obj = cls->construct(args, ctx);
+        Value obj = res.builtinClass->construct(args, ctx);
         if (nout > 0)
             outBuf[0] = keel::move(obj);
         return outBuf;
+    }
+    case Engine::ResolvedHandle::Kind::CompiledChunk:
+    case Engine::ResolvedHandle::Kind::None:
+        break;
     }
     auto msg = keel::format("Undefined function in handle: @{}", name);
     throw numkit::Error(msg.c_str());

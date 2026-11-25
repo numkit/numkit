@@ -19,7 +19,7 @@
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/toolchain.hpp>
 
-#include <cstdio>
+#include <keel/format.h>
 #include <keel/tuple.h>
 
 namespace numkit::pkg {
@@ -994,14 +994,12 @@ keel::i32 PackageManager::list(keel::String &out) const
     return 0;
 }
 
-keel::i32 PackageManager::list(std::FILE *out) const
+keel::i32 PackageManager::list() const
 {
     keel::String buf;
     keel::i32 rc = list(buf);
-    if (out && !buf.empty()) {
-        std::fwrite(buf.data(), 1, buf.size(), out);
-        std::fflush(out);
-    }
+    if (!buf.empty())
+        keel::print(buf);
     return rc;
 }
 
@@ -1032,14 +1030,12 @@ keel::i32 PackageManager::avail(keel::String &out, const Engine *engine) const
     return 0;
 }
 
-keel::i32 PackageManager::avail(std::FILE *out, const Engine *engine) const
+keel::i32 PackageManager::avail(const Engine *engine) const
 {
     keel::String buf;
     keel::i32 rc = avail(buf, engine);
-    if (out && !buf.empty()) {
-        std::fwrite(buf.data(), 1, buf.size(), out);
-        std::fflush(out);
-    }
+    if (!buf.empty())
+        keel::print(buf);
     return rc;
 }
 
