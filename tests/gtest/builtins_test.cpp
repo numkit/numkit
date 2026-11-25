@@ -1669,6 +1669,29 @@ TEST_P(BuiltinTest, CatchSameLineStatementNotSwallowedAsVar)
     EXPECT_THROW(eval("try; error('inner'); catch error('rethrow_msg'); end"), std::exception);
 }
 
+TEST_P(BuiltinTest, QuadAndDlmreadBuiltins)
+{
+    eval("q1 = quad(@sin, 0, pi); q2 = quad(@(x) x.^2, 0, 1, 1e-9); q3 = feval(@quad, @cos, 0, pi/2);");
+    EXPECT_NEAR(getVar("q1"), 2.0, 1e-6);
+    EXPECT_NEAR(getVar("q2"), 1.0 / 3.0, 1e-8);
+    EXPECT_NEAR(getVar("q3"), 1.0, 1e-6);
+
+    eval("p = fullfile(tempdir, 'nk_dlmread_test.txt');"
+         "fid = fopen(p, 'w'); fprintf(fid, '1 2.5 3\\n4 5.5 6\\n'); fclose(fid);"
+         "M = dlmread(p); M2 = dlmread(p, ' ', 1, 1); delete(p);");
+    auto *M = getVarPtr("M");
+    ASSERT_NE(M, nullptr);
+    EXPECT_EQ(rows(*M), 2u);
+    EXPECT_EQ(cols(*M), 3u);
+    EXPECT_DOUBLE_EQ((*M)(0, 1), 2.5);
+    EXPECT_DOUBLE_EQ((*M)(1, 2), 6.0);
+    auto *M2 = getVarPtr("M2");
+    ASSERT_NE(M2, nullptr);
+    EXPECT_EQ(rows(*M2), 1u);
+    EXPECT_EQ(cols(*M2), 2u);
+    EXPECT_DOUBLE_EQ((*M2)(0, 0), 5.5);
+}
+
 // ── shiftdim — Pack 12 ────────────────────────────────────────
 TEST_P(BuiltinTest, ShiftDimPositive)
 {

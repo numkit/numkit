@@ -55,6 +55,20 @@ keel::String csvwriteToString(const Value &M, keel::usize offR = 0, keel::usize 
 Value csvread(FsContext &fs, keel::ArrayRef<Value> args,
               keel::Allocator *mr = nullptr);
 
+/// @brief `dlmread` (`M = dlmread(filename[, delimiter[, R1, C1[, range]]])`).
+///
+/// Reads an ASCII-delimited numeric file into a DOUBLE matrix. When
+/// `delimiter` is omitted or empty, infers comma/tab/semicolon or whitespace.
+///
+/// @param fs    Filesystem session (VFS registry + resolver).
+/// @param args  Variadic arguments as documented above.
+/// @param mr    Allocator for the result Value (defaults to default resource).
+/// @return        DOUBLE matrix.
+/// @throws Error  Bad args / file not found / parse failure.
+/// @see csvread, readmatrix
+Value dlmread(FsContext &fs, keel::ArrayRef<Value> args,
+              keel::Allocator *mr = nullptr);
+
 /// @brief `csvwrite` (`csvwrite(filename, M, R0, C0)`).
 ///
 /// Writes a numeric matrix as comma-delimited text. Variadic forms:

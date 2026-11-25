@@ -252,6 +252,170 @@ Value csvread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
     return csvreadFromStringImpl(content.as_ref(), r1, c1, haveRange, r2, c2, mr);
 }
 
+Value dlmread(FsContext &fs, keel::ArrayRef<Value> args, keel::Allocator *mr)
+{
+    if (args.empty() || !(args[0].isChar() || args[0].isString()))
+        throw Error("dlmread: first argument must be a filename",
+                    0, 0, "dlmread", "", "numkit:dlmread:badFilename");
+
+    const keel::String filename = args[0].toString();
+    keel::String delim;
+    bool hasDelim = false;
+    keel::usize argIdx = 1;
+    if (argIdx < args.size() && (args[argIdx].isChar() || args[argIdx].isString())) {
+        delim = args[argIdx].toString();
+        hasDelim = !delim.empty();
+        ++argIdx;
+    }
+
+    keel::usize r1 = 0, c1 = 0, r2 = 0, c2 = 0;
+    bool haveRange = false;
+    if (argIdx < args.size()) {
+        if (args[argIdx].numel() == 4) {
+            r1 = keel::as<keel::usize>(args[argIdx].elemAsDouble(0));
+            c1 = keel::as<keel::usize>(args[argIdx].elemAsDouble(1));
+            r2 = keel::as<keel::usize>(args[argIdx].elemAsDouble(2));
+            c2 = keel::as<keel::usize>(args[argIdx].elemAsDouble(3));
+            haveRange = true;
+            if (r2 < r1 || c2 < c1)
+                throw Error("dlmread: invalid range [R1 C1 R2 C2]",
+                            0, 0, "dlmread", "", "numkit:dlmread:badRange");
+        } else {
+            r1 = keel::as<keel::usize>(args[argIdx].toScalar());
+            if (argIdx + 1 < args.size())
+                c1 = keel::as<keel::usize>(args[argIdx + 1].toScalar());
+            if (argIdx + 2 < args.size()) {
+                if (args[argIdx + 2].numel() != 4)
+                    throw Error("dlmread: range argument must be [R1 C1 R2 C2]",
+                                0, 0, "dlmread", "", "numkit:dlmread:badRange");
+                haveRange = true;
+                r2 = keel::as<keel::usize>(args[argIdx + 2].elemAsDouble(2));
+                c2 = keel::as<keel::usize>(args[argIdx + 2].elemAsDouble(3));
+                if (r2 < r1 || c2 < c1)
+                    throw Error("dlmread: invalid range [R1 C1 R2 C2]",
+                                0, 0, "dlmread", "", "numkit:dlmread:badRange");
+            }
+        }
+    }
+
+    FsContext::ResolvedPath resolved{};
+    try {
+        resolved = fs.resolvePath(filename.as_ref());
+    } catch (const keel::Exception &e) {
+        throw Error(e.what());
+    }
+    keel::String content;
+    try {
+        content = resolved.fs->readFile(resolved.path.as_ref());
+    } catch (const std::exception &e) {
+        throw Error(keel::format("dlmread: {}", e.what()));
+    }
+
+    // Determine delimiter: explicit char or infer from first non-empty line
+    char sep = '\0'; // '\0' => whitespace runs
+    if (hasDelim) {
+        if (delim == "\\t") sep = '\t';
+        else sep = delim[0];
+        if (sep == ' ') sep = '\0';
+    } else {
+        keel::usize p = 0;
+        while (p < content.size()) {
+            keel::usize nl = content.find('\n', p);
+            if (nl == keel::kInvalidIndex) nl = content.size();
+            keel::StringRef ln(content.data() + p, nl - p);
+            while (!ln.empty() && (ln.back() == '\r' || ln.back() == ' ' || ln.back() == '\t'))
+                ln = ln.substr(0, ln.size() - 1);
+            if (!ln.empty()) {
+                if (ln.find(',') != keel::kInvalidIndex) sep = ',';
+                else if (ln.find(';') != keel::kInvalidIndex) sep = ';';
+                else if (ln.find('\t') != keel::kInvalidIndex) sep = '\t';
+                else sep = '\0';
+                break;
+            }
+            p = (nl < content.size()) ? nl + 1 : content.size();
+        }
+    }
+
+    keel::ArenaTemp scratch = keel::get_scratch(mr);
+    keel::Array<keel::Array<keel::f64>> rows(scratch.allocator());
+    keel::usize lineNo = 0;
+    keel::usize pos = 0;
+    while (pos < content.size()) {
+        keel::usize nl = content.find('\n', pos);
+        if (nl == keel::kInvalidIndex) nl = content.size();
+        keel::StringRef raw(content.data() + pos, nl - pos);
+        pos = (nl < content.size()) ? nl + 1 : content.size();
+
+        if (!raw.empty() && raw.back() == '\r')
+            raw = raw.substr(0, raw.size() - 1);
+        keel::usize trimmedStart = 0;
+        while (trimmedStart < raw.size() && (raw[trimmedStart] == ' ' || raw[trimmedStart] == '\t'))
+            ++trimmedStart;
+        if (trimmedStart == raw.size()) {
+            ++lineNo;
+            continue;
+        }
+        if (lineNo < r1) {
+            ++lineNo;
+            continue;
+        }
+        if (haveRange && lineNo > r2)
+            break;
+
+        keel::Array<keel::f64> parsed(scratch.allocator());
+        if (sep == '\0') {
+            keel::usize i = trimmedStart;
+            while (i < raw.size()) {
+                while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t')) ++i;
+                if (i >= raw.size()) break;
+                keel::usize j = i;
+                while (j < raw.size() && raw[j] != ' ' && raw[j] != '\t') ++j;
+                keel::f64 v = 0.0;
+                if (auto res = keel::parse_f64(raw.substr(i, j - i)); res.is_ok())
+                    v = res.value();
+                parsed.push_back(v);
+                i = j;
+            }
+        } else {
+            keel::usize start = 0;
+            for (keel::usize i = 0; i <= raw.size(); ++i) {
+                if (i == raw.size() || raw[i] == sep) {
+                    const char *p = raw.data() + start;
+                    keel::usize n = i - start;
+                    while (n > 0 && (*p == ' ' || *p == '\t')) { ++p; --n; }
+                    while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '\t')) --n;
+                    keel::f64 v = 0.0;
+                    if (n > 0) {
+                        if (auto res = keel::parse_f64(keel::StringRef(p, n)); res.is_ok())
+                            v = res.value();
+                    }
+                    parsed.push_back(v);
+                    start = i + 1;
+                }
+            }
+        }
+
+        keel::Array<keel::f64> sliced(scratch.allocator());
+        keel::usize colEnd = haveRange ? keel::min(parsed.size(), c2 + 1) : parsed.size();
+        for (keel::usize col = c1; col < colEnd; ++col)
+            sliced.push_back(parsed[col]);
+        rows.push_back(keel::move(sliced));
+        ++lineNo;
+    }
+
+    if (rows.empty())
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    keel::usize maxCols = 0;
+    for (const auto &r : rows)
+        if (r.size() > maxCols) maxCols = r.size();
+    Value out = Value::matrix(rows.size(), maxCols, ValueType::DOUBLE, mr);
+    keel::f64 *dst = out.doubleDataMut();
+    for (keel::usize r = 0; r < rows.size(); ++r)
+        for (keel::usize c = 0; c < maxCols; ++c)
+            dst[c * rows.size() + r] = (c < rows[r].size()) ? rows[r][c] : 0.0;
+    return out;
+}
+
 void csvwrite(FsContext &fs, keel::ArrayRef<Value> args)
 {
     if (args.size() < 2)

@@ -438,9 +438,24 @@ function r = numkit_adaptint(fn, a, b, tol, depth, xk, wk, wg)
 end
 )NUMKIT_M";
 
+static const char *kQuadMSource = R"NUMKIT_M(
+function [q, fcnt] = quad(fun, a, b, tol, varargin)
+    % quad(fun, a, b[, tol[, trace]]): adaptive quadrature (legacy alias for integral).
+    if ischar(fun) || isstring(fun)
+        fun = str2func(char(fun));
+    end
+    if nargin < 4 || isempty(tol)
+        tol = 1e-6;
+    end
+    q = integral(fun, a, b, 'AbsTol', tol);
+    fcnt = 15;
+end
+)NUMKIT_M";
+
 void registerIntegralM(Engine &engine)
 {
     engine.registerBuiltinMSource(kIntegralMSource);
+    engine.registerBuiltinMSource(kQuadMSource);
 }
 
 

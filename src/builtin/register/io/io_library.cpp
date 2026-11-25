@@ -22,6 +22,7 @@ namespace numkit::io::detail {
 // text/csv.cpp
 void csvread_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 void csvwrite_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+void dlmread_reg  (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 void dlmwrite_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 
 // file_io/fileio.cpp
@@ -81,6 +82,7 @@ void IoLibrary::install(Engine &engine)
 
     reg("text", "csvread",     &io::detail::csvread_reg);
     reg("text", "csvwrite",    &io::detail::csvwrite_reg);
+    reg("text", "dlmread",     &io::detail::dlmread_reg);
     reg("text", "dlmwrite",    &io::detail::dlmwrite_reg);
     reg("text", "fileread",    &io::detail::fileread_reg);
     reg("text", "readlines",   &io::detail::readlines_reg);
