@@ -114,7 +114,7 @@ if(NOT TARGET keel::crypto)
     FetchContent_Declare(
         keel_crypto
         GIT_REPOSITORY https://github.com/keelcpp/crypto.git
-        GIT_TAG        3b282f87a89c1770f9a33bdd1801d1aca9b18ebc
+        GIT_TAG        2c8021aeeeb374536ff7e71f1609bf03b6ecd53f
     )
     FetchContent_MakeAvailable(keel_crypto)
 endif()

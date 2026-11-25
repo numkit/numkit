@@ -50,4 +50,13 @@ void registerTableClasses(Engine &engine);
 void registerTableOps(Engine &engine);
 void registerTableIo(Engine &engine);
 
+struct GridCell {
+    bool present = false;
+    bool isStr = false;
+    keel::String text;
+};
+
+keel::Array<keel::Array<GridCell>> parseXlsBiff8Grid(
+    keel::StringRef bytes, keel::StringRef sheetSpec, keel::i32 sheetNumSpec);
+
 } // namespace numkit::runtime::containers_detail

@@ -4,6 +4,8 @@
 #include <keel/core.h>
 #include <numkit/value/error.hpp>
 #include <keel/math.h>
+#include <cstring>
+#include <fstream>
 #include "dual_engine_fixture.hpp"
 
 using namespace m_test;
@@ -3440,12 +3442,161 @@ TEST_P(DisplayTest, GeoLimitsMontageListFontsWebOptionsJsonStructAndLsq)
     EXPECT_DOUBLE_EQ(evalScalar("s(2).b"), 4.0);
     EXPECT_TRUE(evalBool("iscell(c) && numel(c) == 2"));
 
-    // 5. weboptions defaults and overrides
+    // 5. weboptions defaults, overrides, and error paths for web builtins
     eval("wo = weboptions('Timeout', 25, 'ContentType', 'json');");
     EXPECT_DOUBLE_EQ(evalScalar("wo.Timeout"), 25.0);
     EXPECT_EQ(eval("wo.ContentType").toString(), "json");
+    EXPECT_THROW(eval("weboptions(123, 'bad')"), std::exception);
+    EXPECT_THROW(eval("urlread(123)"), std::exception);
+    EXPECT_THROW(eval("webread(123)"), std::exception);
+    EXPECT_THROW(eval("websave(123, 'http://127.0.0.1:1/')"), std::exception);
+    EXPECT_THROW(eval("websave('out.bin', 123)"), std::exception);
+    // Unreachable local port: 2-output urlread returns status == 0 without throwing;
+    // 1-output urlread / webread / websave throw cleanly.
+    eval("[uBody, uStatus] = urlread('http://127.0.0.1:1/numkit_unreachable', 'Timeout', 0.2);");
+    EXPECT_DOUBLE_EQ(evalScalar("uStatus"), 0.0);
+    EXPECT_EQ(eval("uBody").toString(), "");
+    EXPECT_THROW(eval("urlread('http://127.0.0.1:1/numkit_unreachable', 'Timeout', 0.2)"), std::exception);
+    EXPECT_THROW(eval("webread('http://127.0.0.1:1/numkit_unreachable', weboptions('Timeout', 0.2))"), std::exception);
 
-    // 6. lsqcurvefit central-difference LM precision
+    // 6. Offline OLE2/CFBF + BIFF8 .xls reader (xlsread + readtable)
+    {
+        // Construct a minimal 4-sector (2048-byte) OLE2 CFBF container:
+        //   Header (512B): FAT at sector 0, Directory at sector 1
+        //   Sector 0: FAT (-3=FATSECT, -2=ENDOFCHAIN dir, 3=wb sec0 -> sec3, -2=ENDOFCHAIN wb)
+        //   Sector 1: Directory ('Root Entry' + 'Workbook' at sector 2, size=wbLen)
+        //   Sector 2..3: BIFF8 Workbook stream (BOF, BOUNDSHEET, SST, EOF, Sheet BOF,
+        //                LABELSST x2, NUMBER x2, RK x2, EOF)
+        std::vector<uint8_t> wb;
+        auto pushU16 = [&](uint16_t v) {
+            wb.push_back(static_cast<uint8_t>(v & 0xFF));
+            wb.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+        };
+        auto pushU32 = [&](uint32_t v) {
+            for (int k = 0; k < 4; ++k) wb.push_back(static_cast<uint8_t>((v >> (8 * k)) & 0xFF));
+        };
+        auto pushF64 = [&](double v) {
+            uint8_t b[8];
+            std::memcpy(b, &v, 8);
+            wb.insert(wb.end(), b, b + 8);
+        };
+        auto pushRec = [&](uint16_t id, const std::vector<uint8_t> &body) {
+            pushU16(id);
+            pushU16(static_cast<uint16_t>(body.size()));
+            wb.insert(wb.end(), body.begin(), body.end());
+        };
+        // Globals BOF (0x0809, len 16)
+        pushRec(0x0809, std::vector<uint8_t>(16, 0));
+        // BOUNDSHEET placeholder (will patch sheet BOF offset after globals EOF)
+        const size_t bsPos = wb.size() + 4;
+        std::vector<uint8_t> bs = {0,0,0,0, 0,0, 6, 0, 'S','h','e','e','t','1'};
+        pushRec(0x0085, bs);
+        // SST with 2 strings: "X", "Y"
+        std::vector<uint8_t> sst = {2,0,0,0, 2,0,0,0, 1,0,0,'X', 1,0,0,'Y'};
+        pushRec(0x00FC, sst);
+        // Globals EOF
+        pushRec(0x000A, {});
+        // Patch BOUNDSHEET offset
+        const uint32_t sheetOff = static_cast<uint32_t>(wb.size());
+        for (int k = 0; k < 4; ++k) wb[bsPos + k] = static_cast<uint8_t>((sheetOff >> (8 * k)) & 0xFF);
+        // Sheet BOF
+        pushRec(0x0809, std::vector<uint8_t>(16, 0));
+        // Row 0: LABELSST (0,0)="X", (0,1)="Y"
+        pushRec(0x00FD, {0,0, 0,0, 0,0, 0,0,0,0});
+        pushRec(0x00FD, {0,0, 1,0, 0,0, 1,0,0,0});
+        // Row 1: NUMBER (1,0)=12.5, RK (1,1)=42 (int RK = (42 << 2) | 2)
+        {
+            std::vector<uint8_t> rec = {1,0, 0,0, 0,0};
+            double v = 12.5; uint8_t b[8]; std::memcpy(b, &v, 8);
+            rec.insert(rec.end(), b, b + 8);
+            pushRec(0x0203, rec);
+        }
+        {
+            uint32_t rk = (42u << 2u) | 2u;
+            std::vector<uint8_t> rec = {1,0, 1,0, 0,0,
+                static_cast<uint8_t>(rk & 0xFF), static_cast<uint8_t>((rk >> 8) & 0xFF),
+                static_cast<uint8_t>((rk >> 16) & 0xFF), static_cast<uint8_t>((rk >> 24) & 0xFF)};
+            pushRec(0x027E, rec);
+        }
+        // Row 2: NUMBER (2,0)=-3.25, RK (2,1)=1.5 (int 150 / 100 -> (150 << 2) | 3)
+        {
+            std::vector<uint8_t> rec = {2,0, 0,0, 0,0};
+            double v = -3.25; uint8_t b[8]; std::memcpy(b, &v, 8);
+            rec.insert(rec.end(), b, b + 8);
+            pushRec(0x0203, rec);
+        }
+        {
+            uint32_t rk = (150u << 2u) | 3u;
+            std::vector<uint8_t> rec = {2,0, 1,0, 0,0,
+                static_cast<uint8_t>(rk & 0xFF), static_cast<uint8_t>((rk >> 8) & 0xFF),
+                static_cast<uint8_t>((rk >> 16) & 0xFF), static_cast<uint8_t>((rk >> 24) & 0xFF)};
+            pushRec(0x027E, rec);
+        }
+        pushRec(0x000A, {});
+        // Pad workbook stream >= 4096 so it uses regular FAT (above miniCutoff)
+        wb.resize(4096, 0);
+
+        const size_t nWbSectors = 8; // 8 * 512 = 4096
+        std::vector<uint8_t> ole(512 * (1 + 2 + nWbSectors), 0);
+        auto setU16 = [&](size_t off, uint16_t v) {
+            ole[off] = static_cast<uint8_t>(v & 0xFF);
+            ole[off + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+        };
+        auto setU32 = [&](size_t off, uint32_t v) {
+            for (int k = 0; k < 4; ++k) ole[off + k] = static_cast<uint8_t>((v >> (8 * k)) & 0xFF);
+        };
+        const uint8_t sig[8] = {0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1};
+        std::memcpy(ole.data(), sig, 8);
+        setU16(24, 0x003E); setU16(26, 0x0003); setU16(28, 0xFFFE);
+        setU16(30, 9); setU16(32, 6);
+        setU32(44, 1);          // 1 FAT sector
+        setU32(48, 1);          // Dir start = sector 1
+        setU32(56, 4096);       // miniCutoff
+        setU32(60, 0xFFFFFFFEu);
+        setU32(68, 0xFFFFFFFEu);
+        for (size_t i = 0; i < 109; ++i) setU32(76 + i * 4, 0xFFFFFFFFu);
+        setU32(76, 0);          // FAT sector 0
+        // Sector 0: FAT
+        for (size_t i = 0; i < 128; ++i) setU32(512 + i * 4, 0xFFFFFFFFu);
+        setU32(512 + 0 * 4, 0xFFFFFFFDu); // FATSECT
+        setU32(512 + 1 * 4, 0xFFFFFFFEu); // Dir ENDOFCHAIN
+        for (size_t s = 0; s < nWbSectors; ++s)
+            setU32(512 + (2 + s) * 4, (s + 1 < nWbSectors) ? static_cast<uint32_t>(3 + s) : 0xFFFFFFFEu);
+        // Sector 1: Directory (Root Entry + Workbook)
+        const size_t dirOff = 512 * 2;
+        const char *rootNm = "Root Entry";
+        for (size_t i = 0; rootNm[i]; ++i) setU16(dirOff + i * 2, static_cast<uint8_t>(rootNm[i]));
+        setU16(dirOff + 64, 22); ole[dirOff + 66] = 5;
+        setU32(dirOff + 116, 0xFFFFFFFEu); setU32(dirOff + 120, 0);
+        const size_t wbDir = dirOff + 128;
+        const char *wbNm = "Workbook";
+        for (size_t i = 0; wbNm[i]; ++i) setU16(wbDir + i * 2, static_cast<uint8_t>(wbNm[i]));
+        setU16(wbDir + 64, 18); ole[wbDir + 66] = 2;
+        setU32(wbDir + 116, 2); setU32(wbDir + 120, 4096);
+        // Sectors 2..9: Workbook payload
+        std::memcpy(ole.data() + 512 * 3, wb.data(), wb.size());
+
+        const std::string xlsPath = "numkit_test_biff8.xls";
+        {
+            std::ofstream ofs(xlsPath, std::ios::binary);
+            ofs.write(reinterpret_cast<const char *>(ole.data()), static_cast<std::streamsize>(ole.size()));
+        }
+        eval("[xNum, xTxt, xRaw] = xlsread('numkit_test_biff8.xls'); "
+             "xTbl = readtable('numkit_test_biff8.xls'); "
+             "delete('numkit_test_biff8.xls');");
+        EXPECT_DOUBLE_EQ(evalScalar("size(xNum, 1)"), 2.0);
+        EXPECT_DOUBLE_EQ(evalScalar("size(xNum, 2)"), 2.0);
+        EXPECT_DOUBLE_EQ(evalScalar("xNum(1, 1)"), 12.5);
+        EXPECT_DOUBLE_EQ(evalScalar("xNum(1, 2)"), 42.0);
+        EXPECT_DOUBLE_EQ(evalScalar("xNum(2, 1)"), -3.25);
+        EXPECT_DOUBLE_EQ(evalScalar("xNum(2, 2)"), 1.5);
+        EXPECT_EQ(eval("xTxt{1, 1}").toString(), "X");
+        EXPECT_EQ(eval("xTxt{1, 2}").toString(), "Y");
+        EXPECT_DOUBLE_EQ(evalScalar("xTbl.X(1)"), 12.5);
+        EXPECT_DOUBLE_EQ(evalScalar("xTbl.Y(2)"), 1.5);
+    }
+
+    // 7. lsqcurvefit central-difference LM precision
     eval("t = (0:0.1:5)'; "
          "y = 2.5 * exp(-0.7 * t) + 0.3; "
          "p = lsqcurvefit(@(c, x) c(1) * exp(-c(2) * x) + c(3), [1 1 0], t, y);");
