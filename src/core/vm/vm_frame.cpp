@@ -1236,7 +1236,13 @@ bool VM::pushCallbackFrame(const Value &handle, keel::ArrayRef<Value> args, keel
         args = keel::ArrayRef<Value>(withCaptures.data(), withCaptures.size());
     }
     const keel::StringRef fhName = handle.funcHandleNameRef();
-    const UserFunction *uf = engine_.lookupUserFunctionLocal(fhName);
+    const UserFunction *uf = nullptr;
+    if (!frames_.empty() && frames_.back().chunk && frames_.back().chunk->fileSubfuncs) {
+        if (const keel::String *q = frames_.back().chunk->fileSubfuncs->get(fhName))
+            uf = engine_.lookupUserFunctionLocal(*q);
+    }
+    if (!uf)
+        uf = engine_.lookupUserFunctionLocal(fhName);
     if (!uf)
         uf = engine_.lookupUserFunction(fhName, currentCallEnv());
     if (!uf) {

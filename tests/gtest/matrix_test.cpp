@@ -1904,10 +1904,17 @@ TEST_P(GridKronTest, KronKnownSmallExample)
 
 TEST_P(GridKronTest, KronEmptyAGivesEmpty)
 {
-    // Probed R2025b: EMPTY operands ERROR (the reference fails with an
-    // internal badsubscript) — the old empty-result expectation was a
-    // divergence (kron contract, argcheck-drain 2026-09-18).
-    EXPECT_ANY_THROW(eval("K = kron(zeros(0, 0), [1 2; 3 4]);"));
+    // Reference engine: kron of m1xn1 and m2xn2 yields (m1*m2)x(n1*n2),
+    // including empty matrices (0x0 -> 0x0, 0x3 with 2x4 -> 0x12).
+    eval("K = kron(zeros(0, 0), [1 2; 3 4]); K2 = kron(zeros(0, 3), zeros(2, 4));");
+    auto *K = getVarPtr("K");
+    ASSERT_NE(K, nullptr);
+    EXPECT_EQ(rows(*K), 0u);
+    EXPECT_EQ(cols(*K), 0u);
+    auto *K2 = getVarPtr("K2");
+    ASSERT_NE(K2, nullptr);
+    EXPECT_EQ(rows(*K2), 0u);
+    EXPECT_EQ(cols(*K2), 12u);
 }
 
 // Complex kron: ordinary Kronecker product with complex element products

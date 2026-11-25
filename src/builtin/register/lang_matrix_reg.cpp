@@ -1703,19 +1703,58 @@ void diff_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                                     ctx.engine->allocator());
 }
 
-#define NUMKIT_LOGICAL_RED_REG(name, fn)                                           \
-    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,               \
-                    keel::MutArrayRef<Value> outs, CallContext &ctx)                       \
-    {                                                                          \
-        argcheck::checkNargin(args.size(), 1, 2, #name); \
-        keel::i32 dim = 0;                                                           \
-        if (args.size() >= 2 && !args[1].isEmpty())                            \
-            dim = argcheck::dimArg(args[1], #name);                        \
-        outs[0] = fn(args[0], dim, ctx.engine->allocator());                   \
+#define NUMKIT_LOGICAL_RED_REG(name, fn, emptyAllResult)                           \
+    void name##_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,           \
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)               \
+    {                                                                              \
+        argcheck::checkNargin(args.size(), 1, 2, #name);                           \
+        auto *mr = ctx.engine->allocator();                                        \
+        if (args.size() >= 2 && !args[1].isEmpty()) {                              \
+            if (args[1].isChar() || args[1].isString()) {                          \
+                const keel::StringRef opt = args[1].asStringRef();                 \
+                if (opt.equals_ignore_ascii_case("all")) {                         \
+                    if (args[0].numel() == 0) {                                    \
+                        outs[0] = Value::logicalScalar(emptyAllResult, mr);        \
+                        return;                                                    \
+                    }                                                              \
+                    Value cur = args[0];                                           \
+                    const keel::i32 nd = cur.dims().ndims();                       \
+                    for (keel::i32 d = 1; d <= nd; ++d)                            \
+                        cur = fn(cur, d, mr);                                      \
+                    outs[0] = keel::move(cur);                                     \
+                    return;                                                        \
+                }                                                                  \
+            }                                                                      \
+            if (!args[1].isScalar() && args[1].isNumeric()) {                      \
+                const keel::usize ndv = args[1].numel();                           \
+                keel::i32 dimsBuf[Dims::kMaxRank];                                 \
+                keel::usize nDims = 0;                                             \
+                for (keel::usize i = 0; i < ndv; ++i) {                            \
+                    const keel::i32 d = argcheck::dimArg(args[1].elemAsDouble(i), #name); \
+                    bool dup = false;                                              \
+                    for (keel::usize j = 0; j < nDims; ++j)                        \
+                        if (dimsBuf[j] == d) dup = true;                           \
+                    if (dup)                                                       \
+                        throw Error(#name ": duplicate entries in dimension vector", \
+                                    0, 0, #name, "", "numkit:" #name ":dupVecdim"); \
+                    if (nDims < keel::as<keel::usize>(Dims::kMaxRank))             \
+                        dimsBuf[nDims++] = d;                                      \
+                }                                                                  \
+                Value cur = args[0];                                               \
+                for (keel::usize i = 0; i < nDims; ++i)                            \
+                    cur = fn(cur, dimsBuf[i], mr);                                 \
+                outs[0] = keel::move(cur);                                         \
+                return;                                                            \
+            }                                                                      \
+            const keel::i32 dim = argcheck::dimArg(args[1], #name);                \
+            outs[0] = fn(args[0], dim, mr);                                        \
+            return;                                                                \
+        }                                                                          \
+        outs[0] = fn(args[0], 0, mr);                                              \
     }
 
-NUMKIT_LOGICAL_RED_REG(any, numkit::builtin::anyOf)
-NUMKIT_LOGICAL_RED_REG(all, numkit::builtin::allOf)
+NUMKIT_LOGICAL_RED_REG(any, numkit::builtin::anyOf, false)
+NUMKIT_LOGICAL_RED_REG(all, numkit::builtin::allOf, true)
 
 #undef NUMKIT_LOGICAL_RED_REG
 

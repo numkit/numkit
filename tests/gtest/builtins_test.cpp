@@ -1643,6 +1643,32 @@ TEST_P(BuiltinTest, LinspaceAndLogspaceFloorNonIntegerCount)
     EXPECT_EQ(getVarPtr("lc")->numel(), 0u);
 }
 
+TEST_P(BuiltinTest, AnyAndAllSupportAllOptionAndVecdim)
+{
+    eval("A = [0 0; 0 1]; B = [1 1; 1 1]; C = zeros(2, 2);");
+    eval("r1 = any(A, 'all'); r2 = any(C, 'all'); r3 = all(B, 'all'); r4 = all(A, 'all');");
+    EXPECT_DOUBLE_EQ(getVar("r1"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("r2"), 0.0);
+    EXPECT_DOUBLE_EQ(getVar("r3"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("r4"), 0.0);
+
+    eval("e1 = any([], 'all'); e2 = all([], 'all');");
+    EXPECT_DOUBLE_EQ(getVar("e1"), 0.0);
+    EXPECT_DOUBLE_EQ(getVar("e2"), 1.0);
+
+    eval("v1 = any(A, [1 2]); v2 = all(B, [1 2]);");
+    EXPECT_DOUBLE_EQ(getVar("v1"), 1.0);
+    EXPECT_DOUBLE_EQ(getVar("v2"), 1.0);
+}
+
+TEST_P(BuiltinTest, CatchSameLineStatementNotSwallowedAsVar)
+{
+    eval("caught = 0; try; error('boom'); catch caught = 42; end");
+    EXPECT_DOUBLE_EQ(getVar("caught"), 42.0);
+
+    EXPECT_THROW(eval("try; error('inner'); catch error('rethrow_msg'); end"), std::exception);
+}
+
 // ── shiftdim — Pack 12 ────────────────────────────────────────
 TEST_P(BuiltinTest, ShiftDimPositive)
 {

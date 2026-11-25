@@ -927,8 +927,13 @@ ASTNodePtr Parser::parseTryCatch()
 
     if (match(TokenType::KW_CATCH)) {
         if (check(TokenType::IDENTIFIER)) {
-            node->strValue = current().value.clone();
-            advance();
+            const TokenType next = peekToken(1).type;
+            if (next == TokenType::NEWLINE || next == TokenType::SEMICOLON ||
+                next == TokenType::COMMA || next == TokenType::KW_END ||
+                next == TokenType::END_OF_INPUT) {
+                node->strValue = current().value.clone();
+                advance();
+            }
         }
         skipTerminators();
         node->children.push_back(parseBlock({TokenType::KW_END}));

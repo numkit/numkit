@@ -513,6 +513,16 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
     }
     const keel::StringRef name = handle.funcHandleNameRef();
 
+    // File-private subfunctions in the currently executing VM frame take
+    // precedence (e.g. `feval('GQU', level)` inside an .m file).
+    if (const BytecodeChunk *curChunk = vm_->currentFrameView().chunk;
+        curChunk && curChunk->fileSubfuncs) {
+        if (const keel::String *q = curChunk->fileSubfuncs->get(name)) {
+            if (const UserFunction *sf = lookupUserFunctionLocal(*q))
+                return invokeUserFunction_(*sf, args, nout);
+        }
+    }
+
     if (const ExternalFunc *fn = findExternal(name, e)) {
         keel::Array<Value> out(nout);
         CallContext ctx{this, e};
