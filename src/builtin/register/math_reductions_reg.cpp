@@ -1087,23 +1087,21 @@ void min_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<
 // Generators
 void linspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 3, "linspace");
     argcheck::checkNargin(args.size(), 2, 3, "linspace");
     const keel::f64 a = args[0].toScalar();
     const keel::f64 b = args[1].toScalar();
     const keel::usize n = (args.size() >= 3)
-        ? argcheck::roundLength(args[2], 3, "n", "linspace") : 100u;
+        ? argcheck::floorLength(args[2], 3, "n", "linspace") : 100u;
     outs[0] = linspace(a, b, n, ctx.engine->allocator());
 }
 
 void logspace_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    argcheck::checkNargin(args.size(), 1, 3, "logspace");
     argcheck::checkNargin(args.size(), 2, 3, "logspace");
     const keel::f64 a = args[0].toScalar();
     const keel::f64 b = args[1].toScalar();
     const keel::usize n = (args.size() >= 3)
-        ? argcheck::roundLength(args[2], 3, "n", "logspace") : 50u;
+        ? argcheck::floorLength(args[2], 3, "n", "logspace") : 50u;
     outs[0] = logspace(a, b, n, ctx.engine->allocator());
 }
 

@@ -1609,6 +1609,40 @@ TEST_P(BuiltinTest, LegacyRngStateAndTwisterRoundTrip)
     EXPECT_EQ(getVarPtr("s_tw")->numel(), 625u);
 }
 
+TEST_P(BuiltinTest, LegacyRngIndependentRandAndRandnDefaults)
+{
+    // Entering legacy mode via randn('seed', 0) must keep rand on twister(0)
+    // and switch only randn to v4 normal (reference engine behavior).
+    eval("rng('default'); randn('seed', 0); r_s = rand(); n_s = randn();");
+    EXPECT_NEAR(getVar("r_s"), 0.8147236863931789, 1e-12);
+    EXPECT_NEAR(getVar("n_s"), 1.1649535105006568, 1e-12);
+
+    // Entering legacy mode via randn('state', 0) keeps rand on twister(0)
+    // and switches randn to v5 shr3cong normal.
+    eval("rng('default'); randn('state', 0); r_st = rand(); n_st = randn();");
+    EXPECT_NEAR(getVar("r_st"), 0.8147236863931789, 1e-12);
+    EXPECT_NEAR(getVar("n_st"), -0.4325648115282207, 1e-9);
+
+    // Entering legacy mode via rand('seed', 0) switches rand to v4 uniform
+    // and defaults randn to v5 shr3cong normal.
+    eval("rng('default'); rand('seed', 0); r_v4 = rand(); n_v5 = randn();");
+    EXPECT_NEAR(getVar("r_v4"), 0.2189591863280903, 1e-12);
+    EXPECT_NEAR(getVar("n_v5"), -0.4325648115282207, 1e-9);
+}
+
+TEST_P(BuiltinTest, LinspaceAndLogspaceFloorNonIntegerCount)
+{
+    eval("a = linspace(0, 1, 5.5); b = linspace(0, 1, 5.9); c = linspace(0, 1, -2);");
+    EXPECT_EQ(getVarPtr("a")->numel(), 5u);
+    EXPECT_EQ(getVarPtr("b")->numel(), 5u);
+    EXPECT_EQ(getVarPtr("c")->numel(), 0u);
+
+    eval("la = logspace(0, 1, 5.5); lb = logspace(0, 1, 5.9); lc = logspace(0, 1, 0.5);");
+    EXPECT_EQ(getVarPtr("la")->numel(), 5u);
+    EXPECT_EQ(getVarPtr("lb")->numel(), 5u);
+    EXPECT_EQ(getVarPtr("lc")->numel(), 0u);
+}
+
 // ── shiftdim — Pack 12 ────────────────────────────────────────
 TEST_P(BuiltinTest, ShiftDimPositive)
 {
