@@ -1473,6 +1473,11 @@ bool VM::execCallIndirectSpan(const Value &target, keel::u16 dstReg, const Value
         pushCallFrame(*found, argsBuf.data(), totalArgs, dstReg, 1);
         return true;
     }
+    if (const BuiltinClass *cls = engine_.findClass(funcName); cls && cls->construct) {
+        CallContext ctx{&engine_, currentCallEnv()};
+        R[dstReg] = cls->construct(keel::ArrayRef<Value>(argsBuf.data(), totalArgs), ctx);
+        return false;
+    }
     throw numkit::Error(
         keel::format("VM: undefined function in handle '@{}'", funcName).c_str());
 }
@@ -1564,6 +1569,15 @@ bool VM::execCallIndirectMulti(const Instruction &I, Value *R,
         pushCallFrame(*found, argsBuf.data(), totalArgs,
                       0, nout, true, outBase, nout);
         return true;
+    }
+    if (const BuiltinClass *cls = engine_.findClass(funcName); cls && cls->construct) {
+        if (nout > 1)
+            throw numkit::Error("Too many output arguments.");
+        CallContext ctx{&engine_, currentCallEnv()};
+        Value obj = cls->construct(keel::ArrayRef<Value>(argsBuf.data(), totalArgs), ctx);
+        if (nout > 0)
+            R[outBase] = keel::move(obj);
+        return false;
     }
     throw numkit::Error(
         keel::format("VM: undefined function in handle '@{}'", funcName).c_str());

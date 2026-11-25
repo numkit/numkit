@@ -838,10 +838,63 @@ TEST_P(BuiltinTest, OptimsetGet)
     eval("o = optimset('TolX', 1e-9, 'MaxIter', 200);");
     EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'TolX');"), 1e-9);
     EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'MaxIter');"), 200.0);
-    // Default is preserved when not overridden.
-    EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'TolFun');"), 1e-6);
+    // Unspecified fields are left empty so each solver applies its own default.
+    EXPECT_TRUE(eval("isempty(optimget(o, 'TolFun'));").toBool());
+    EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'TolFun', 1e-4);"), 1e-4);
+    // Updating an existing options struct preserves prior fields.
+    eval("o2 = optimset(o, 'TolFun', 1e-11);");
+    EXPECT_DOUBLE_EQ(evalScalar("optimget(o2, 'TolX');"), 1e-9);
+    EXPECT_DOUBLE_EQ(evalScalar("optimget(o2, 'TolFun');"), 1e-11);
     // Missing key with user default.
     EXPECT_DOUBLE_EQ(evalScalar("optimget(o, 'NoSuch', 42);"), 42.0);
+}
+
+TEST_P(BuiltinTest, BuiltinClassHandleAndDatetimePosix)
+{
+    // Direct function handle to a BuiltinClass constructor (@datetime) + 'posix' alias.
+    eval("h = @datetime; d = h(1620000000, 'ConvertFrom', 'posix');");
+    EXPECT_EQ(eval("class(d);").toString(), "datetime");
+    EXPECT_DOUBLE_EQ(evalScalar("year(d);"), 2021.0);
+    EXPECT_DOUBLE_EQ(evalScalar("month(d);"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("day(d);"), 3.0);
+
+    // arrayfun with uniform object output (datetime array).
+    eval("S = [1620000000, 1620086400]; dates = arrayfun(@(x) datetime(x, 'ConvertFrom', 'posix'), S);");
+    EXPECT_EQ(eval("class(dates);").toString(), "datetime");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(dates);"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("day(dates(1));"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("day(dates(2));"), 4.0);
+}
+
+TEST_P(BuiltinTest, FminsearchAndFzeroOptions)
+{
+    // fminsearch honors TolFun and MaxFunEvals from optimset.
+    eval("opts = optimset('TolX', 1e-5, 'TolFun', 1e-10, 'MaxFunEvals', 1500);"
+         "[x, fval, ef, out] = fminsearch(@(p) (p(1) - 1.25)^2 + (p(2) + 0.75)^2, [0; 0], opts);");
+    EXPECT_NEAR(evalScalar("x(1);"), 1.25, 1e-5);
+    EXPECT_NEAR(evalScalar("x(2);"), -0.75, 1e-5);
+    EXPECT_LT(evalScalar("fval;"), 1e-9);
+    EXPECT_GT(evalScalar("out.funcCount;"), 10.0);
+
+    // fzero tracks real iterations & funcCount and keeps full eps precision when TolX is empty.
+    eval("opts2 = optimset('FunValCheck', 'on');"
+         "[r, fv, ef2, out2] = fzero(@(t) t^3 - 2, 1.0, opts2);");
+    EXPECT_NEAR(evalScalar("r;"), 1.2599210498948732, 1e-12);
+    EXPECT_GT(evalScalar("out2.iterations;"), 1.0);
+    EXPECT_GT(evalScalar("out2.funcCount;"), 2.0);
+}
+
+TEST_P(BuiltinTest, TextreadFormatted)
+{
+    eval("fid = fopen('__nk_textread_test.txt', 'w');"
+         "fprintf(fid, 'alpha 10\\nbeta 20\\ngamma 30\\n');"
+         "fclose(fid);"
+         "[w, n] = textread('__nk_textread_test.txt', '%s %f');"
+         "delete('__nk_textread_test.txt');");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(w);"), 3.0);
+    EXPECT_EQ(eval("w{2};").toString(), "beta");
+    EXPECT_DOUBLE_EQ(evalScalar("n(1);"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("n(3);"), 30.0);
 }
 
 // ── Pack 35 ───────────────────────────────────────────────────

@@ -1713,7 +1713,7 @@ void register_timefun(Engine &engine) {
                         sds[i] = keel::Limits<keel::f64>::quiet_nan();
                     } else if (convFrom == "datenum") {
                         sds[i] = v;
-                    } else if (convFrom == "posixtime" || convFrom == "epochtime") {
+                    } else if (convFrom == "posixtime" || convFrom == "posix" || convFrom == "epochtime") {
                         sds[i] = kEpochSerialDay + v / kSecondsPerDay;
                     } else if (convFrom == "juliandate") {
                         sds[i] = v - 1721058.5;

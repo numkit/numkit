@@ -546,6 +546,15 @@ keel::Array<Value> Engine::callFunctionHandleMulti(const Value &handle,
         return out;
     }
 
+    if (const BuiltinClass *cls = findClass(name); cls && cls->construct) {
+        keel::Array<Value> out(nout);
+        CallContext ctx{this, e};
+        Value obj = cls->construct(args, ctx);
+        if (nout > 0)
+            out[0] = keel::move(obj);
+        return out;
+    }
+
     auto msg = keel::format("Undefined function in handle: @{}", name);
     throw numkit::Error(msg.c_str());
 }

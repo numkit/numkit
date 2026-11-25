@@ -167,6 +167,14 @@ keel::Array<Value> TreeWalker::callFuncHandleMulti(const Value &handle,
         (*fn)(args, nout, keel::MutArrayRef<Value>(outBuf), ctx);
         return outBuf;
     }
+    if (const BuiltinClass *cls = engine_.findClass(name); cls && cls->construct) {
+        keel::Array<Value> outBuf(nout);
+        CallContext ctx{&engine_, e};
+        Value obj = cls->construct(args, ctx);
+        if (nout > 0)
+            outBuf[0] = keel::move(obj);
+        return outBuf;
+    }
     auto msg = keel::format("Undefined function in handle: @{}", name);
     throw numkit::Error(msg.c_str());
 }

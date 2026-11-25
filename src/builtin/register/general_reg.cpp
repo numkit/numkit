@@ -578,12 +578,31 @@ void optimset_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
 {
     auto *mr = ctx.engine->allocator();
     auto s = Value::structure(mr);
-    s.field("Display")     = Value::fromString("notify", mr);
-    s.field("MaxFunEvals") = Value::scalar(1000.0, mr);
-    s.field("MaxIter")     = Value::scalar(500.0, mr);
-    s.field("TolFun")      = Value::scalar(1e-6, mr);
-    s.field("TolX")        = Value::scalar(1e-6, mr);
-    for (keel::usize i = 0; i + 1 < args.size(); i += 2) {
+    const Value empty = Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    s.field("Display")     = empty;
+    s.field("FunValCheck") = empty;
+    s.field("MaxFunEvals") = empty;
+    s.field("MaxIter")     = empty;
+    s.field("OutputFcn")   = empty;
+    s.field("PlotFcns")    = empty;
+    s.field("TolFun")      = empty;
+    s.field("TolX")        = empty;
+
+    keel::usize idx = 0;
+    if (idx < args.size() && args[idx].isStruct()) {
+        for (const auto &fn : args[idx].fieldNamesInOrder())
+            s.field(fn) = args[idx].field(fn);
+        ++idx;
+        if (idx < args.size() && args[idx].isStruct()) {
+            for (const auto &fn : args[idx].fieldNamesInOrder()) {
+                const Value &v = args[idx].field(fn);
+                if (!v.isEmpty())
+                    s.field(fn) = v;
+            }
+            ++idx;
+        }
+    }
+    for (keel::usize i = idx; i + 1 < args.size(); i += 2) {
         if (!args[i].isChar() && !args[i].isString())
             throw numkit::Error("optimset: option name must be a string");
         s.field(args[i].toString()) = args[i + 1];
@@ -592,18 +611,21 @@ void optimset_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRe
 }
 
 void optimget_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
-                       CallContext &)
+                       CallContext &ctx)
 {
     if (args.size() < 2)
         throw numkit::Error("optimget requires (options, name[, default])");
     const Value &opts = args[0];
     const keel::String name = args[1].toString();
     if (opts.isStruct() && opts.hasField(name)) {
-        outs[0] = opts.field(name);
-        return;
+        const Value &v = opts.field(name);
+        if (!v.isEmpty()) {
+            outs[0] = v;
+            return;
+        }
     }
     if (args.size() >= 3) outs[0] = args[2];
-    else outs[0] = Value();
+    else outs[0] = Value::matrix(0, 0, ValueType::DOUBLE, ctx.engine->allocator());
 }
 
 void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,

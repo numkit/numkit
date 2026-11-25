@@ -528,4 +528,48 @@ void textscan(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, k
     outs[0] = keel::move(result);
 }
 
+void textread(Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs)
+{
+    keel::Allocator *mr = engine.allocator();
+    if (args.empty() || (!args[0].isChar() && !args[0].isString()))
+        throw Error("textread: first argument must be a filename string",
+                    0, 0, "textread", "", "numkit:textread:badFilename");
+    keel::String filename = args[0].toString();
+    keel::i32 fid = engine.openFile(filename, "r");
+    if (fid < 0) {
+        auto rp = engine.resolvePath(filename.as_ref());
+        if (rp.fs && rp.fs->exists(rp.path.as_ref()))
+            fid = engine.openFile(rp.path.as_ref(), "r");
+    }
+    if (fid < 0)
+        throw Error(keel::format("textread: file not found '{}'", filename),
+                    0, 0, "textread", "", "numkit:textread:fileNotFound");
+
+    struct FidGuard {
+        Engine &eng;
+        keel::i32 id;
+        ~FidGuard() { eng.closeFile(id); }
+    } guard{engine, fid};
+
+    keel::Array<Value> scanArgs;
+    scanArgs.reserve(args.size() < 2 ? 2 : args.size());
+    scanArgs.push_back(Value::scalar(keel::as<keel::f64>(fid), mr));
+    if (args.size() < 2) {
+        scanArgs.push_back(Value::fromString("%f", mr));
+    } else {
+        for (keel::usize i = 1; i < args.size(); ++i)
+            scanArgs.push_back(args[i]);
+    }
+
+    Value cellOut;
+    textscan(engine, scanArgs.as_ref(), 1, keel::MutArrayRef<Value>(&cellOut, 1));
+    const keel::usize nCols = cellOut.isCell() ? cellOut.numel() : 0;
+    const keel::usize want = (nargout == 0) ? 1 : nargout;
+    if (want > nCols)
+        throw Error(keel::format("textread: requested {} outputs, but format specifies only {}", want, nCols),
+                    0, 0, "textread", "", "numkit:textread:tooManyOutputs");
+    for (keel::usize i = 0; i < want && i < outs.size(); ++i)
+        outs[i] = cellOut.cellAt(i);
+}
+
 } // namespace numkit::runtime

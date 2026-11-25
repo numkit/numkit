@@ -783,6 +783,51 @@ void mat2cell_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     }
 }
 
+static Value packArrayfunUniform(const keel::Array<Value> &results, const Dims &outDims, keel::Allocator *mr)
+{
+    const keel::usize n = results.size();
+    if (n == 0)
+        return allocMatrixShape(outDims, ValueType::DOUBLE, mr);
+    if (results[0].isObject())
+        return Value::objectConcatN(results.data(), n, outDims, mr);
+    if (results[0].isLogical()) {
+        Value out = allocMatrixShape(outDims, ValueType::LOGICAL, mr);
+        for (keel::usize k = 0; k < n; ++k)
+            out.logicalDataMut()[k] = results[k].toBool() ? 1 : 0;
+        return out;
+    }
+    if (results[0].isString()) {
+        keel::usize shape[Dims::kMaxRank];
+        for (keel::i32 d = 0; d < outDims.ndim(); ++d)
+            shape[d] = keel::as<keel::usize>(outDims.dim(d));
+        Value out = Value::stringArrayND(shape, outDims.ndim(), mr);
+        for (keel::usize k = 0; k < n; ++k)
+            out.stringElemSet(k, results[k].toString(mr));
+        return out;
+    }
+    bool anyComplex = false;
+    for (keel::usize k = 0; k < n; ++k) {
+        if (results[k].isComplex()) {
+            anyComplex = true;
+            break;
+        }
+    }
+    if (anyComplex) {
+        Value out = allocMatrixShape(outDims, ValueType::COMPLEX, mr);
+        for (keel::usize k = 0; k < n; ++k) {
+            if (results[k].isComplex())
+                out.complexDataMut()[k] = results[k].complexData()[0];
+            else
+                out.complexDataMut()[k] = keel::c64(results[k].toScalar(), 0.0);
+        }
+        return out;
+    }
+    Value out = allocMatrixShape(outDims, ValueType::DOUBLE, mr);
+    for (keel::usize k = 0; k < n; ++k)
+        out.doubleDataMut()[k] = results[k].toScalar();
+    return out;
+}
+
 struct ArrayfunCallbackBuiltin : CallbackBuiltin
 {
     keel::Arc<VmContinuation> tryStart(keel::ArrayRef<Value> args, keel::usize nargout,
@@ -828,15 +873,10 @@ struct ArrayfunCallbackBuiltin : CallbackBuiltin
             return callArgs;
         };
         cont->pack = [uniform, outDims, mr](keel::Array<Value> &results) -> Value {
-            const keel::usize n = results.size();
-            if (uniform) {
-                Value out = allocMatrixShape(outDims, ValueType::DOUBLE, mr);
-                for (keel::usize k = 0; k < n; ++k)
-                    out.doubleDataMut()[k] = results[k].toScalar();
-                return out;
-            }
+            if (uniform)
+                return packArrayfunUniform(results, outDims, mr);
             Value out = allocCellShape(outDims, mr);
-            for (keel::usize k = 0; k < n; ++k)
+            for (keel::usize k = 0; k < results.size(); ++k)
                 out.cellAt(k) = results[k];
             return out;
         };
@@ -918,18 +958,18 @@ void arrayfun_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
 
     keel::Array<Value> callArgs(inputs.size());
     if (uniformOutput) {
-        auto out = allocMatrixShape(inputs[0]->dims(), ValueType::DOUBLE, mr);
+        keel::Array<Value> results;
+        results.reserve(n);
         for (keel::usize i = 0; i < n; ++i) {
             for (keel::usize k = 0; k < inputs.size(); ++k)
                 callArgs[k] = Value::scalar(inputs[k]->elemAsDouble(i), mr);
-            Value r = ctx.engine->callFunctionHandle(
+            results.push_back(ctx.engine->callFunctionHandle(
                 handle,
                 keel::ArrayRef<Value>(callArgs.data(), callArgs.size()),
-                ctx.env);
-            out.doubleDataMut()[i] = r.toScalar();
+                ctx.env));
         }
         if (!outs.empty())
-            outs[0] = keel::move(out);
+            outs[0] = packArrayfunUniform(results, inputs[0]->dims(), mr);
     } else {
         auto cell = allocCellShape(inputs[0]->dims(), mr);
         for (keel::usize i = 0; i < n; ++i) {

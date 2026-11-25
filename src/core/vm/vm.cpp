@@ -1977,6 +1977,15 @@ enter_frame:
                         R[I.a + i] = keel::move(ob[i]);
                     break;
                 }
+                if (const BuiltinClass *cls = engine_.findClass(fName); cls && cls->construct) {
+                    if (fnout > 1)
+                        throw numkit::Error("Too many output arguments.");
+                    CallContext ctx{&engine_, currentCallEnv()};
+                    Value obj = cls->construct(keel::ArrayRef<Value>(cargs.data(), ctot), ctx);
+                    if (fnout > 0)
+                        R[I.a] = keel::move(obj);
+                    break;
+                }
                 throw numkit::Error(
                     keel::format("VM: undefined function in handle '@{}'", fName).c_str());
             }

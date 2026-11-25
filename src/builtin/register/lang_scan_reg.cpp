@@ -37,6 +37,12 @@ void textscan_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArra
     ::numkit::runtime::textscan(coreEngine(ctx), args, nargout, outs);
 }
 
+void textread_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    argcheck::checkNargin(args.size(), 1, "textread");
+    ::numkit::runtime::textread(coreEngine(ctx), args, nargout, outs);
+}
+
 } // namespace detail
 
 } // namespace numkit::builtin

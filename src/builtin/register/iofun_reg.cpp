@@ -23,6 +23,7 @@ void fscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, Ca
 void sprintf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void sscanf_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 void textscan_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
+void textread_reg(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext&);
 } // namespace numkit::builtin::detail
 #include <keel/number.h>
 
@@ -273,6 +274,7 @@ void register_iofun(Engine &engine) {
     engine.registerFunction("fscanf",     &::numkit::builtin::detail::fscanf_reg);
     engine.registerFunction("sscanf",     &::numkit::builtin::detail::sscanf_reg);
     engine.registerFunction("textscan",   &::numkit::builtin::detail::textscan_reg);
+    engine.registerFunction("textread",   &::numkit::builtin::detail::textread_reg);
     engine.registerFunction("jsonencode", &::numkit::builtin::detail::jsonencode_reg);
     engine.registerFunction("jsondecode", &::numkit::builtin::detail::jsondecode_reg);
 }

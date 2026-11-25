@@ -45,6 +45,13 @@ void fscanf(::numkit::Engine &engine, keel::ArrayRef<Value> args, keel::usize na
 /// @param outs Output spans to fill with results.
 void textscan(::numkit::Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs);
 
+/// @brief Reads formatted data from a text file into separate output arrays (`textread(filename, fmt, ...)`).
+/// @param engine Reference to executing Engine instance.
+/// @param args Input arguments span [filename, fmt, ...].
+/// @param nargout Number of requested outputs.
+/// @param outs Output spans to fill with results.
+void textread(::numkit::Engine &engine, keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArrayRef<Value> outs);
+
 
 /// @}
 } // namespace numkit::runtime

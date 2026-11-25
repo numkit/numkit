@@ -202,28 +202,41 @@ function [x, fval, exitflag, output] = fzero(fn, x0, options, varargin)
   else
     extra = {};
   end
+  tol = eps;
+  if nargin >= 3 && isstruct(options) && isfield(options, 'TolX') && ~isempty(options.TolX)
+    tol = options.TolX;
+  end
+  fcount = 0;
+  it = 0;
   if numel(x0) == 1
-    [a, b] = NUMKIT_fzero_bracket(fn, x0, extra);
+    [a, b, fa, fb, fc_b] = NUMKIT_fzero_bracket(fn, x0, extra);
+    fcount = fcount + fc_b;
     if a == b
       x = a;
+      fval = fa;
     else
       if a > b
         t = a; a = b; b = t;
+        ft = fa; fa = fb; fb = ft;
       end
-      x = NUMKIT_fzero_brent(fn, a, b, extra);
+      [x, fval, it, fc_r] = NUMKIT_fzero_brent(fn, a, b, fa, fb, tol, extra);
+      fcount = fcount + fc_r;
     end
   elseif numel(x0) == 2
     a = x0(1); b = x0(2);
     if ~(isfinite(a) && isfinite(b)) || a >= b
       error('numkit:fzero:badInterval', 'fzero: interval [a, b] must satisfy a < b and be finite');
     end
-    x = NUMKIT_fzero_brent(fn, a, b, extra);
+    fa = NUMKIT_fz_eval(fn, a, extra);
+    fb = NUMKIT_fz_eval(fn, b, extra);
+    fcount = 2;
+    [x, fval, it, fc_r] = NUMKIT_fzero_brent(fn, a, b, fa, fb, tol, extra);
+    fcount = fcount + fc_r;
   else
     error('numkit:fzero:badX0', 'fzero: 2nd argument must be a scalar x0 or a 2-element interval [a, b]');
   end
-  fval = NUMKIT_fz_eval(fn, x, extra);
   exitflag = 1;
-  output = struct('iterations', 1, 'funcCount', 1, 'algorithm', 'bisection, interpolation', 'message', 'Zero found.');
+  output = struct('iterations', it, 'funcCount', fcount, 'algorithm', 'bisection, interpolation', 'message', 'Zero found.');
 end
 
 function y = NUMKIT_fz_eval(fn, pt, extra)
@@ -234,83 +247,81 @@ function y = NUMKIT_fz_eval(fn, pt, extra)
   end
 end
 
-function [a, b] = NUMKIT_fzero_bracket(fn, x0, extra)
+function [a, b, fa, fb, fcount] = NUMKIT_fzero_bracket(fn, x0, extra)
   if ~isfinite(x0)
     error('numkit:fzero:badX0', 'fzero: x0 must be finite');
   end
   if x0 == 0
-    step = 0.02;
+    dx = 0.02;
   else
-    step = abs(x0) * 0.02;
-  end
-  if step == 0
-    step = 0.02;
+    dx = x0 / 50;
   end
   a = x0; b = x0;
   fa = NUMKIT_fz_eval(fn, a, extra);
+  fb = fa;
+  fcount = 1;
   if fa == 0
-    b = a; return;
+    return;
   end
-  for i = 0:59
-    s = step * 2^i;
-    aprev = a; faprev = fa;
-    a = x0 - s;
-    b = x0 + s;
+  twosqrt = sqrt(2);
+  for i = 1:200
+    dx = twosqrt * dx;
+    a = x0 - dx;
     fa = NUMKIT_fz_eval(fn, a, extra);
+    fcount = fcount + 1;
     if fa == 0
-      b = a; return;
+      b = a; fb = fa; return;
     end
-    fb = NUMKIT_fz_eval(fn, b, extra);
-    if fb == 0
-      a = b; return;
-    end
-    if (fa < 0) ~= (fb < 0)
+    if (fa > 0) ~= (fb > 0)
       return;
     end
-    if (faprev < 0) ~= (fa < 0)
-      b = aprev; return;
+    b = x0 + dx;
+    fb = NUMKIT_fz_eval(fn, b, extra);
+    fcount = fcount + 1;
+    if fb == 0
+      a = b; fa = fb; return;
+    end
+    if (fa > 0) ~= (fb > 0)
+      return;
     end
   end
   error('numkit:fzero:noBracket', 'fzero: failed to find a bracket containing a sign change near x0');
 end
 
-function r = NUMKIT_fzero_brent(fn, a, b, extra)
-  ep = 1e-15;
-  fa = NUMKIT_fz_eval(fn, a, extra); fb = NUMKIT_fz_eval(fn, b, extra);
-  if fa == 0, r = a; return; end
-  if fb == 0, r = b; return; end
+function [r, fr, it, fcount] = NUMKIT_fzero_brent(fn, a, b, fa, fb, tol, extra)
+  fcount = 0;
+  it = 0;
+  if fa == 0, r = a; fr = fa; return; end
+  if fb == 0, r = b; fr = fb; return; end
   if (fa < 0) == (fb < 0)
     error('numkit:fzero:noSignChange', 'fzero: f(a) and f(b) must have opposite signs (no sign change in the supplied interval)');
   end
   c = a; fc = fa; d = b - a; e = d;
   for it = 1:200
-    if (fb < 0) == (fc < 0)
+    if (fb > 0) == (fc > 0)
       c = a; fc = fa; d = b - a; e = d;
     end
     if abs(fc) < abs(fb)
       a = b; b = c; c = a;
       fa = fb; fb = fc; fc = fa;
     end
-    tol1 = 2*ep*abs(b) + 0.5e-15;
-    xm = 0.5*(c - b);
+    tol1 = 2.0 * tol * max(abs(b), 1.0);
+    xm = 0.5 * (c - b);
     if abs(xm) <= tol1 || fb == 0
-      r = b; return;
+      r = b; fr = fb; return;
     end
     if abs(e) >= tol1 && abs(fa) > abs(fb)
-      s = fb/fa;
+      s = fb / fa;
       if a == c
-        p = 2*xm*s; q = 1 - s;
+        p = 2.0 * xm * s; q = 1.0 - s;
       else
-        rr = fb/fc; sa = fa/fc;
-        p = s*(2*xm*sa*(sa - rr) - (b - a)*(rr - 1));
-        q = (sa - 1)*(rr - 1)*(s - 1);
+        q = fa / fc; rr = fb / fc;
+        p = s * (2.0 * xm * q * (q - rr) - (b - a) * (rr - 1.0));
+        q = (q - 1.0) * (rr - 1.0) * (s - 1.0);
       end
-      if p > 0, q = -q; end
-      p = abs(p);
-      mm1 = 3*xm*q - abs(tol1*q);
-      mm2 = abs(e*q);
-      if 2*p < min(mm1, mm2)
-        e = d; d = p/q;
+      if p > 0, q = -q; else, p = -p; end
+      if 2.0 * p < 3.0 * xm * q - abs(tol1 * q) && p < abs(0.5 * e * q)
+        e = d; d = p / q;
       else
         d = xm; e = d;
       end
@@ -320,14 +331,13 @@ function r = NUMKIT_fzero_brent(fn, a, b, extra)
     a = b; fa = fb;
     if abs(d) > tol1
       b = b + d;
+    elseif b > c
+      b = b - tol1;
     else
-      if xm > 0
-        b = b + abs(tol1);
-      else
-        b = b - abs(tol1);
-      end
+      b = b + tol1;
     end
     fb = NUMKIT_fz_eval(fn, b, extra);
+    fcount = fcount + 1;
   end
   error('numkit:fzero:noConverge', 'fzero: failed to converge within iteration limit');
 end
@@ -343,8 +353,8 @@ void registerFzeroM(Engine &engine)
 // Nelder-Mead simplex search is the natural `.m` algorithm and every objective
 // evaluation `fn(x)` runs as bytecode → pausable under the debugger. A faithful
 // transcription of the C++ `nelderMead` above (same reflection/expansion/
-// contraction/shrink constants, same dual TolFun+TolX convergence, same simplex
-// seeding, kMaxIter=500). The point is always passed to `fn` as a 1×n row, like
+// contraction/shrink constants, dual TolFun+TolX convergence, same simplex
+// seeding, MaxIter/MaxFunEvals). The point is always passed to `fn` as a 1×n row, like
 // the C++ `evalVecToScalar`. The C++ `Value fminsearch(...)` API is retained.
 // Split into fminsearch + NUMKIT_nelder_mead + NUMKIT_nm_eval so no chunk approaches the
 // 255-register VM limit (callback_pausability.md gotcha).
@@ -362,12 +372,20 @@ function [x, fval, exitflag, output] = fminsearch(fn, x0, tol, varargin)
   else
     extra = {};
   end
-  if nargin >= 3 && isstruct(tol) && isfield(tol, 'TolX') && ~isempty(tol.TolX)
-    tol = tol.TolX;
-  elseif nargin < 3 || isempty(tol) || ~isnumeric(tol) || ~(tol > 0)
-    tol = 1e-4;
+  tolX = 1e-4;
+  tolFun = 1e-4;
+  maxIter = 200 * n;
+  maxFunEvals = 200 * n;
+  if nargin >= 3 && isstruct(tol)
+    if isfield(tol, 'TolX') && ~isempty(tol.TolX), tolX = tol.TolX; end
+    if isfield(tol, 'TolFun') && ~isempty(tol.TolFun), tolFun = tol.TolFun; end
+    if isfield(tol, 'MaxIter') && ~isempty(tol.MaxIter), maxIter = tol.MaxIter; end
+    if isfield(tol, 'MaxFunEvals') && ~isempty(tol.MaxFunEvals), maxFunEvals = tol.MaxFunEvals; end
+  elseif nargin >= 3 && ~isempty(tol) && isnumeric(tol) && tol > 0
+    tolX = tol;
+    tolFun = tol;
   end
-  [best, it, fcount] = NUMKIT_nelder_mead(fn, reshape(x0, 1, n), n, tol, extra);
+  [best, it, fcount] = NUMKIT_nelder_mead(fn, reshape(x0, 1, n), n, tolX, tolFun, maxIter, maxFunEvals, extra);
   if size(x0, 1) == 1
     x = best;
   else
@@ -387,8 +405,8 @@ function s = NUMKIT_nm_eval(fn, pt, extra)
   s = v(1);
 end
 
-function [best, it, fcount] = NUMKIT_nelder_mead(fn, x0, n, tol, extra)
-  refl = 1; expd = 2; conr = 0.5; shrk = 0.5; max_iter = 500;
+function [best, it, fcount] = NUMKIT_nelder_mead(fn, x0, n, tolX, tolFun, maxIter, maxFunEvals, extra)
+  refl = 1; expd = 2; conr = 0.5; shrk = 0.5;
   S = zeros(n+1, n); fv = zeros(n+1, 1);
   S(1,:) = x0; fv(1) = NUMKIT_nm_eval(fn, x0, extra);
   fcount = 1;
@@ -399,13 +417,16 @@ function [best, it, fcount] = NUMKIT_nelder_mead(fn, x0, n, tol, extra)
     fv(i) = NUMKIT_nm_eval(fn, S(i,:), extra);
     fcount = fcount + 1;
   end
-  for it = 1:max_iter
+  it = 0;
+  for k = 1:maxIter
     [fv, ord] = sort(fv);
     S = S(ord, :);
     fspread = fv(n+1) - fv(1);
     df = abs(S(2:(n+1),:) - S(1,:));
     xspread = max(df(:));
-    if fspread <= tol && xspread <= tol, break; end
+    if fspread <= tolFun && xspread <= tolX, break; end
+    if fcount >= maxFunEvals, break; end
+    it = k;
     centroid = sum(S(1:n,:), 1) / n;
     worst = S(n+1,:);
     xr = centroid + refl*(centroid - worst);
@@ -440,6 +461,8 @@ function [best, it, fcount] = NUMKIT_nelder_mead(fn, x0, n, tol, extra)
       end
     end
   end
+  [fv, ord] = sort(fv);
+  S = S(ord, :);
   best = S(1,:);
 end
 )NKM";
