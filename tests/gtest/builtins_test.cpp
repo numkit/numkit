@@ -1,6 +1,7 @@
 // tests/test_builtins.cpp — Built-in functions (math, array creation, strings)
 // Parameterized: runs on both TreeWalker and VM backends
 
+#include <keel/compress.h>
 #include <keel/core.h>
 #include <keel/fs.h>
 #include <numkit/value/error.hpp>
@@ -3654,7 +3655,29 @@ TEST_P(DisplayTest, ArchiveZipGzipAndXlsx)
     EXPECT_DOUBLE_EQ(evalScalar("xt.ColA(2)"), -4.0);
     EXPECT_DOUBLE_EQ(evalScalar("xt.ColB(2)"), 3.25);
 
-    // 4. Error paths: missing archive / corrupt gzip / wrong arg types
+    // 4. Wildcard zip ('*.txt') + gunzip(folder) + Zip Slip rejection
+    eval("wzip = fullfile(d, 'wild.zip'); "
+         "wadded = zip(wzip, '*.txt', d); "
+         "wout = fullfile(d, 'w_extracted'); "
+         "wunpacked = unzip(wzip, wout); "
+         "ungzDir2 = fullfile(d, 'ungz_folder'); mkdir(ungzDir2); "
+         "fromFolder = gunzip(gzDir, ungzDir2);");
+    EXPECT_EQ(evalScalar("numel(wadded)"), 2.0);
+    EXPECT_EQ(evalScalar("numel(wunpacked)"), 2.0);
+    EXPECT_EQ(evalScalar("numel(fromFolder)"), 1.0);
+
+    {
+        // Craft a ZIP containing an unsafe '../evil.txt' entry and verify unzip rejects it
+        keel::compress::ZipWriter evilZw;
+        const keel::u8 dummy[] = {'x'};
+        (void)evilZw.add_file("../evil.txt", keel::ArrayRef<keel::u8>(dummy, 1u), 0);
+        keel::Array<keel::u8> evilBytes = evilZw.finish();
+        keel::String evilPath = keel::path_join(eval("d").toString().as_ref(), "evil.zip");
+        (void)keel::fs_write_file(evilPath.as_ref(), evilBytes.as_ref());
+        EXPECT_THROW(eval("unzip(fullfile(d, 'evil.zip'), fullfile(d, 'evil_out'));"), std::exception);
+    }
+
+    // 5. Error paths: missing archive / corrupt gzip / wrong arg types
     EXPECT_THROW(eval("unzip(fullfile(d, 'no_such_archive.zip'));"), std::exception);
     EXPECT_THROW(eval("gunzip(f1);"), std::exception); // plain text is not valid gzip
     EXPECT_THROW(eval("zip(123, f1);"), std::exception);

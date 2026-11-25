@@ -19,7 +19,6 @@
 #include <keel/utf8.h>
 
 #include <numkit/core/engine.hpp>
-#include <numkit/ops/deflate.hpp>
 #include <numkit/sys/fs_context.hpp>
 #include <numkit/sys/vfs.hpp>
 #include <numkit/value/argcheck.hpp>

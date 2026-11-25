@@ -57,6 +57,76 @@ static Value makeCellStrList(const keel::Array<keel::String> &items, keel::Alloc
     return cell;
 }
 
+static bool hasWildcard(keel::StringRef s) noexcept
+{
+    for (keel::usize i = 0; i < s.size(); ++i) {
+        if (s[i] == '*' || s[i] == '?') return true;
+    }
+    return false;
+}
+
+static bool matchWildcard(keel::StringRef pat, keel::StringRef text) noexcept
+{
+    keel::usize pi = 0, ti = 0;
+    keel::usize starPi = keel::kInvalidIndex, starTi = 0;
+    while (ti < text.size()) {
+        if (pi < pat.size() && (pat[pi] == '?' || pat[pi] == text[ti])) {
+            ++pi;
+            ++ti;
+        } else if (pi < pat.size() && pat[pi] == '*') {
+            starPi = pi++;
+            starTi = ti;
+        } else if (starPi != keel::kInvalidIndex) {
+            pi = starPi + 1;
+            ti = ++starTi;
+        } else {
+            return false;
+        }
+    }
+    while (pi < pat.size() && pat[pi] == '*') ++pi;
+    return pi == pat.size();
+}
+
+static keel::Array<keel::String> expandPathItem(numkit::sys::FsContext &fsc,
+                                                keel::StringRef item,
+                                                keel::StringRef rootFolder)
+{
+    keel::Array<keel::String> out;
+    if (!hasWildcard(item)) {
+        out.push_back(keel::String::from(item));
+        return out;
+    }
+    keel::String norm = keel::path_normalize(item);
+    keel::StringRef dirPart = keel::path_dirname(norm.as_ref());
+    keel::StringRef patPart = keel::path_basename(norm.as_ref());
+
+    keel::String searchDir;
+    if (rootFolder.empty()) {
+        searchDir = dirPart.empty() ? keel::String::from(".") : keel::String::from(dirPart);
+    } else {
+        searchDir = dirPart.empty()
+            ? keel::String::from(rootFolder)
+            : keel::path_join(rootFolder, dirPart);
+    }
+
+    auto res = fsc.resolvePath(searchDir.as_ref());
+    if (!res.fs) return out;
+    auto st = res.fs->stat(res.path.as_ref());
+    if (!st.has_value() || st->kind != numkit::sys::FileStat::Kind::Directory) return out;
+
+    auto entries = res.fs->listDir(res.path.as_ref());
+    for (const auto &e : entries) {
+        if (e.name == "." || e.name == "..") continue;
+        if (matchWildcard(patPart, e.name.as_ref())) {
+            keel::String matched = (dirPart.empty() || dirPart == ".")
+                ? e.name.clone()
+                : keel::path_join(dirPart, e.name.as_ref());
+            out.push_back(keel::move(matched));
+        }
+    }
+    return out;
+}
+
 static bool hasSuffixIgnoreCase(keel::StringRef s, keel::StringRef suffix) noexcept
 {
     if (s.size() < suffix.size()) return false;
@@ -181,22 +251,29 @@ static void zip_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::compress::ZipWriter zw;
     keel::Array<keel::String> addedEntries;
 
-    for (const auto &item : fileList) {
-        keel::String fullInput = rootFolder.empty()
-            ? item.clone()
-            : keel::path_join(rootFolder.as_ref(), item.as_ref());
-        auto resolved = fsc.resolvePath(fullInput.as_ref());
-        if (!resolved.fs) {
-            throw Error(keel::format("zip: cannot resolve path '{}'", fullInput),
+    for (const auto &rawItem : fileList) {
+        keel::Array<keel::String> expanded = expandPathItem(fsc, rawItem.as_ref(), rootFolder.as_ref());
+        if (expanded.empty()) {
+            throw Error(keel::format("zip: no files matching '{}'", rawItem),
                         0, 0, "zip", "", "numkit:zip:fileNotFound");
         }
+        for (const auto &item : expanded) {
+            keel::String fullInput = rootFolder.empty()
+                ? item.clone()
+                : keel::path_join(rootFolder.as_ref(), item.as_ref());
+            auto resolved = fsc.resolvePath(fullInput.as_ref());
+            if (!resolved.fs) {
+                throw Error(keel::format("zip: cannot resolve path '{}'", fullInput),
+                            0, 0, "zip", "", "numkit:zip:fileNotFound");
+            }
 
-        // Compute clean relative archive path
-        keel::String relPath = keel::path_normalize(item.as_ref());
-        if (keel::path_is_absolute(relPath.as_ref()) || !keel::compress::is_safe_zip_path(relPath.as_ref())) {
-            relPath = keel::String::from(keel::path_basename(relPath.as_ref()));
+            // Compute clean relative archive path
+            keel::String relPath = keel::path_normalize(item.as_ref());
+            if (keel::path_is_absolute(relPath.as_ref()) || !keel::compress::is_safe_zip_path(relPath.as_ref())) {
+                relPath = keel::String::from(keel::path_basename(relPath.as_ref()));
+            }
+            addPathToZip(*resolved.fs, resolved.path.as_ref(), relPath.as_ref(), zw, addedEntries);
         }
-        addPathToZip(*resolved.fs, resolved.path.as_ref(), relPath.as_ref(), zw, addedEntries);
     }
 
     keel::Array<keel::u8> archive = zw.finish();
@@ -363,26 +440,33 @@ static void gzip_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         createdFiles.push_back(keel::move(destPath));
     };
 
-    for (const auto &item : fileList) {
-        auto res = fsc.resolvePath(item.as_ref());
-        if (!res.fs) {
-            throw Error(keel::format("gzip: file '{}' not found", item),
+    for (const auto &rawItem : fileList) {
+        keel::Array<keel::String> expanded = expandPathItem(fsc, rawItem.as_ref(), "");
+        if (expanded.empty()) {
+            throw Error(keel::format("gzip: file '{}' not found", rawItem),
                         0, 0, "gzip", "", "numkit:gzip:fileNotFound");
         }
-        auto st = res.fs->stat(res.path.as_ref());
-        if (!st.has_value()) {
-            throw Error(keel::format("gzip: file '{}' not found", item),
-                        0, 0, "gzip", "", "numkit:gzip:fileNotFound");
-        }
-        if (st->kind == numkit::sys::FileStat::Kind::Directory) {
-            auto children = res.fs->listDir(res.path.as_ref());
-            for (const auto &ch : children) {
-                if (ch.isDirectory || ch.name == "." || ch.name == "..") continue;
-                keel::String childPath = keel::path_join(res.path.as_ref(), ch.name.as_ref());
-                compressOne(*res.fs, childPath.as_ref());
+        for (const auto &item : expanded) {
+            auto res = fsc.resolvePath(item.as_ref());
+            if (!res.fs) {
+                throw Error(keel::format("gzip: file '{}' not found", item),
+                            0, 0, "gzip", "", "numkit:gzip:fileNotFound");
             }
-        } else {
-            compressOne(*res.fs, res.path.as_ref());
+            auto st = res.fs->stat(res.path.as_ref());
+            if (!st.has_value()) {
+                throw Error(keel::format("gzip: file '{}' not found", item),
+                            0, 0, "gzip", "", "numkit:gzip:fileNotFound");
+            }
+            if (st->kind == numkit::sys::FileStat::Kind::Directory) {
+                auto children = res.fs->listDir(res.path.as_ref());
+                for (const auto &ch : children) {
+                    if (ch.isDirectory || ch.name == "." || ch.name == "..") continue;
+                    keel::String childPath = keel::path_join(res.path.as_ref(), ch.name.as_ref());
+                    compressOne(*res.fs, childPath.as_ref());
+                }
+            } else {
+                compressOne(*res.fs, res.path.as_ref());
+            }
         }
     }
 
@@ -419,41 +503,27 @@ static void gunzip_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
 
     keel::Array<keel::String> extractedFiles;
-    for (const auto &item : fileList) {
-        auto res = fsc.resolvePath(item.as_ref());
-        if ((!res.fs || !res.fs->exists(res.path.as_ref())) && !hasSuffixIgnoreCase(item.as_ref(), ".gz")) {
-            keel::String withExt = item.clone();
-            withExt.append(".gz");
-            auto alt = fsc.resolvePath(withExt.as_ref());
-            if (alt.fs && alt.fs->exists(alt.path.as_ref())) {
-                res = keel::move(alt);
-            }
-        }
-        if (!res.fs || !res.fs->exists(res.path.as_ref())) {
-            throw Error(keel::format("gunzip: file '{}' not found", item),
-                        0, 0, "gunzip", "", "numkit:gunzip:fileNotFound");
-        }
-
-        keel::String gzBytes = res.fs->readFileBytes(res.path.as_ref());
+    auto decompressOne = [&](numkit::sys::VirtualFS &inFs, keel::StringRef inPath, keel::StringRef origLabel) {
+        keel::String gzBytes = inFs.readFileBytes(inPath);
         keel::ArrayRef<keel::u8> raw(reinterpret_cast<const keel::u8 *>(gzBytes.data()), gzBytes.size());
         auto decRes = keel::compress::gzip_decompress(raw);
         if (decRes.is_err()) {
-            throw Error(keel::format("gunzip: invalid or corrupted GZIP file '{}'", item),
+            throw Error(keel::format("gunzip: invalid or corrupted GZIP file '{}'", origLabel),
                         0, 0, "gunzip", "", "numkit:gunzip:invalidArchive");
         }
 
-        keel::StringRef base = keel::path_basename(res.path.as_ref());
+        keel::StringRef base = keel::path_basename(inPath);
         keel::String outBaseName = hasSuffixIgnoreCase(base, ".gz")
             ? keel::String::from(base.substr(0, base.size() - 3))
             : keel::String::from(base);
         if (outBaseName.empty()) outBaseName = keel::String::from("gunzip_output");
 
-        numkit::sys::VirtualFS *dstFs = hasOutFolder ? outFs : res.fs;
+        numkit::sys::VirtualFS *dstFs = hasOutFolder ? outFs : &inFs;
         keel::String destPath;
         if (hasOutFolder) {
             destPath = keel::path_join(outFolderPath.as_ref(), outBaseName.as_ref());
         } else {
-            keel::StringRef dir = keel::path_dirname(res.path.as_ref());
+            keel::StringRef dir = keel::path_dirname(inPath);
             destPath = dir.empty() ? outBaseName.clone() : keel::path_join(dir, outBaseName.as_ref());
         }
         ensureParentDirs(*dstFs, destPath.as_ref());
@@ -465,6 +535,41 @@ static void gunzip_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                         0, 0, "gunzip", "", "numkit:gunzip:writeFailed");
         }
         extractedFiles.push_back(keel::move(destPath));
+    };
+
+    for (const auto &rawItem : fileList) {
+        keel::Array<keel::String> expanded = expandPathItem(fsc, rawItem.as_ref(), "");
+        if (expanded.empty()) {
+            throw Error(keel::format("gunzip: file '{}' not found", rawItem),
+                        0, 0, "gunzip", "", "numkit:gunzip:fileNotFound");
+        }
+        for (const auto &item : expanded) {
+            auto res = fsc.resolvePath(item.as_ref());
+            if ((!res.fs || !res.fs->exists(res.path.as_ref())) && !hasSuffixIgnoreCase(item.as_ref(), ".gz")) {
+                keel::String withExt = item.clone();
+                withExt.append(".gz");
+                auto alt = fsc.resolvePath(withExt.as_ref());
+                if (alt.fs && alt.fs->exists(alt.path.as_ref())) {
+                    res = keel::move(alt);
+                }
+            }
+            if (!res.fs || !res.fs->exists(res.path.as_ref())) {
+                throw Error(keel::format("gunzip: file '{}' not found", item),
+                            0, 0, "gunzip", "", "numkit:gunzip:fileNotFound");
+            }
+            auto st = res.fs->stat(res.path.as_ref());
+            if (st.has_value() && st->kind == numkit::sys::FileStat::Kind::Directory) {
+                auto children = res.fs->listDir(res.path.as_ref());
+                for (const auto &ch : children) {
+                    if (ch.isDirectory || ch.name == "." || ch.name == "..") continue;
+                    if (!hasSuffixIgnoreCase(ch.name.as_ref(), ".gz")) continue;
+                    keel::String childPath = keel::path_join(res.path.as_ref(), ch.name.as_ref());
+                    decompressOne(*res.fs, childPath.as_ref(), ch.name.as_ref());
+                }
+            } else {
+                decompressOne(*res.fs, res.path.as_ref(), item.as_ref());
+            }
+        }
     }
 
     if (nargout >= 1 && outs.size() >= 1) {

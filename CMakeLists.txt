@@ -306,6 +306,7 @@ if(NUMKIT_BUILD_TESTS)
     )
     target_link_libraries(numkit_gtest PRIVATE
         numkit
+        keel::compress
         GTest::gtest
     )
     if(MSVC)
