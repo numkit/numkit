@@ -91,6 +91,34 @@ if(NOT TARGET keel::matfile)
     FetchContent_MakeAvailable(keel_matfile)
 endif()
 
+# ── Dependency: keel::crypto ─────────────────────────────────────────────
+if(NOT TARGET keel::crypto)
+    find_package(keel_crypto QUIET CONFIG)
+    if(TARGET keel::keel_crypto AND NOT TARGET keel::crypto)
+        add_library(keel::crypto ALIAS keel::keel_crypto)
+    endif()
+endif()
+if(NOT TARGET keel::crypto)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_CRYPTO)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/crypto/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_CRYPTO
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/crypto"
+                CACHE PATH "")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/crypto/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_CRYPTO
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/crypto"
+                CACHE PATH "")
+        endif()
+    endif()
+    set(KEEL_CRYPTO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        keel_crypto
+        GIT_REPOSITORY https://github.com/keelcpp/crypto.git
+        GIT_TAG        4562b259000e576da972c365179fa23fbebcb3b9
+    )
+    FetchContent_MakeAvailable(keel_crypto)
+endif()
+
 # ── Gather Sources ───────────────────────────────────────────────────────
 file(GLOB_RECURSE NUMKIT_SOURCES
     "src/core/*.cpp"
@@ -132,6 +160,7 @@ target_link_libraries(numkit
         numkit_ops
     PRIVATE
         keel::matfile
+        keel::crypto
 )
 
 

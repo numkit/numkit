@@ -3305,4 +3305,51 @@ TEST_P(DisplayTest, IsequalMixedTypesFopenModesNarginchkHistogramAndAxisTight)
     EXPECT_NEAR(evalScalar("axv(3)"), -154.1234567 - 256.0, 1e-9);
 }
 
+TEST_P(DisplayTest, JavaSecurityMessageDigest)
+{
+    // 1. All 7 algorithms with handle mutation (update without reassignment),
+    //    both md.digest() and bare property-style md.digest, returning Nx1 int8.
+    eval("algs = {'MD2','MD5','SHA-1','SHA-224','SHA-256','SHA-384','SHA-512'}; "
+         "hexes = cell(1, numel(algs)); lens = zeros(1, numel(algs)); "
+         "for k = 1:numel(algs), "
+         "  md = java.security.MessageDigest.getInstance(algs{k}); "
+         "  md.update(uint8('abc')); "
+         "  raw = md.digest; "
+         "  assert(isa(raw, 'int8')); "
+         "  assert(size(raw, 2) == 1); "
+         "  lens(k) = md.getDigestLength(); "
+         "  assert(size(raw, 1) == lens(k)); "
+         "  hb = typecast(raw, 'uint8'); "
+         "  assert(size(hb, 1) == lens(k) && size(hb, 2) == 1); "
+         "  hexes{k} = lower(reshape(dec2hex(hb, 2)', 1, [])); "
+         "end");
+    EXPECT_EQ(eval("hexes{1}").toString(), "da853b0d3f88d99b30283a69e6ded6bb");
+    EXPECT_EQ(eval("hexes{2}").toString(), "900150983cd24fb0d6963f7d28e17f72");
+    EXPECT_EQ(eval("hexes{3}").toString(), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    EXPECT_EQ(eval("hexes{4}").toString(), "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7");
+    EXPECT_EQ(eval("hexes{5}").toString(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    EXPECT_EQ(eval("hexes{6}").toString(), "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7");
+    EXPECT_EQ(eval("hexes{7}").toString(), "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f");
+
+    // 2. Streaming update (incl. 3-arg offset/len), clone mid-stream, auto-reset,
+    //    one-shot digest(bytes), getAlgorithm, isEqual, and unknown-algorithm error.
+    eval("md = java.security.MessageDigest.getInstance('sha256'); "
+         "algName = md.getAlgorithm(); "
+         "md.update(uint8('xxabcyy'), 2, 3); "
+         "mdClone = md.clone(); "
+         "mdClone.update(uint8('def')); "
+         "h1 = md.digest(); "
+         "hEmpty = md.digest(); "
+         "hFork = mdClone.digest(); "
+         "hOneShot = md.digest(uint8('abcdef')); "
+         "eqSame = java.security.MessageDigest.isEqual(hFork, hOneShot); "
+         "eqDiff = java.security.MessageDigest.isEqual(h1, hFork);");
+    EXPECT_EQ(eval("algName").toString(), "SHA-256");
+    EXPECT_TRUE(evalBool("eqSame"));
+    EXPECT_FALSE(evalBool("eqDiff"));
+    EXPECT_EQ(eval("lower(reshape(dec2hex(typecast(hEmpty,'uint8'), 2)', 1, []))").toString(),
+              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    EXPECT_THROW(eval("java.security.MessageDigest.getInstance('NO-SUCH-ALG')"), std::exception);
+}
+
 INSTANTIATE_DUAL(DisplayTest);
