@@ -297,6 +297,7 @@ static void jsondecode_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArr
 }
 
 void register_web_io(Engine &engine);
+void register_archive_io(Engine &engine);
 
 void register_iofun(Engine &engine) {
     engine.registerFunction("sprintf",    &::numkit::builtin::detail::sprintf_reg);
@@ -310,6 +311,7 @@ void register_iofun(Engine &engine) {
     engine.registerFunction("jsonencode", &::numkit::builtin::detail::jsonencode_reg);
     engine.registerFunction("jsondecode", &::numkit::builtin::detail::jsondecode_reg);
     register_web_io(engine);
+    register_archive_io(engine);
 }
 
 } // namespace numkit::builtin::detail

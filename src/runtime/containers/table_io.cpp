@@ -6,6 +6,7 @@
 
 #include <keel/algo.h>
 #include <keel/array.h>
+#include <keel/compress.h>
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/hash_map.h>
@@ -106,66 +107,16 @@ static auto unescapeXmlStr = [](keel::StringRef s) -> keel::String {
 
 static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
                                keel::i32 sheetNumSpec) -> keel::Array<keel::Array<GridCell>> {
-    auto u16 = [&](keel::usize off) -> keel::u16 {
-        if (off + 2 > bytes.size()) return 0;
-        const auto *p = reinterpret_cast<const keel::u8 *>(bytes.data() + off);
-        return keel::as<keel::u16>(p[0] | (p[1] << 8));
-    };
-    auto u32 = [&](keel::usize off) -> keel::u32 {
-        if (off + 4 > bytes.size()) return 0;
-        const auto *p = reinterpret_cast<const keel::u8 *>(bytes.data() + off);
-        return keel::as<keel::u32>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
-    };
-    if (bytes.size() < 22)
+    keel::ArrayRef<keel::u8> rawBytes(reinterpret_cast<const keel::u8 *>(bytes.data()), bytes.size());
+    auto zrRes = keel::compress::ZipReader::open(rawBytes);
+    if (zrRes.is_err())
         return {};
-    keel::usize eocd = keel::kInvalidIndex;
-    keel::usize minOff = (bytes.size() > 65557) ? (bytes.size() - 65557) : 0;
-    for (keel::usize pos = bytes.size() - 22; ; --pos) {
-        if (u32(pos) == 0x06054b50u) {
-            eocd = pos;
-            break;
-        }
-        if (pos == minOff) break;
-    }
-    if (eocd == keel::kInvalidIndex)
-        return {};
-    keel::u16 numEntries = u16(eocd + 10);
-    keel::u32 cdPos = u32(eocd + 16);
-    struct ZipEntry { keel::u16 method; keel::u32 compSz, uncompSz, localOff; };
-    keel::HashMap<keel::String, ZipEntry> entries;
-    for (keel::u16 idx = 0; idx < numEntries && cdPos + 46 <= bytes.size(); ++idx) {
-        if (u32(cdPos) != 0x02014b50u) break;
-        keel::u16 method = u16(cdPos + 10);
-        keel::u32 compSz = u32(cdPos + 20);
-        keel::u32 uncompSz = u32(cdPos + 24);
-        keel::u16 nameLen = u16(cdPos + 28);
-        keel::u16 extraLen = u16(cdPos + 30);
-        keel::u16 commentLen = u16(cdPos + 32);
-        keel::u32 localOff = u32(cdPos + 42);
-        if (cdPos + 46 + nameLen <= bytes.size()) {
-            keel::String name = keel::String::from(bytes.substr(cdPos + 46, nameLen));
-            entries.put(keel::move(name), ZipEntry{method, compSz, uncompSz, localOff});
-        }
-        cdPos += 46 + nameLen + extraLen + commentLen;
-    }
+    const auto &zr = zrRes.value();
     auto readEntry = [&](keel::StringRef name) -> keel::String {
-        const ZipEntry *e = entries.get(name);
-        if (!e) return {};
-        if (e->localOff + 30 > bytes.size() || u32(e->localOff) != 0x04034b50u) return {};
-        keel::u16 ln = u16(e->localOff + 26);
-        keel::u16 le = u16(e->localOff + 28);
-        keel::usize dataOff = e->localOff + 30 + ln + le;
-        if (dataOff + e->compSz > bytes.size()) return {};
-        if (e->method == 0)
-            return keel::String::from(bytes.substr(dataOff, e->compSz));
-        if (e->method == 8) {
-            auto dec = numkit::ops::inflateRaw(
-                reinterpret_cast<const keel::u8 *>(bytes.data() + dataOff),
-                e->compSz, e->uncompSz);
-            return keel::String::from(keel::StringRef(
-                reinterpret_cast<const char *>(dec.data()), dec.size()));
-        }
-        return {};
+        auto ex = zr.extract(name);
+        if (ex.is_err()) return {};
+        return keel::String::from(keel::StringRef(
+            reinterpret_cast<const char *>(ex->data()), ex->size()));
     };
 
     keel::Array<keel::String> sst;

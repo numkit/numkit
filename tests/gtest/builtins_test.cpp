@@ -2,6 +2,7 @@
 // Parameterized: runs on both TreeWalker and VM backends
 
 #include <keel/core.h>
+#include <keel/fs.h>
 #include <numkit/value/error.hpp>
 #include <keel/math.h>
 #include <cstring>
@@ -3603,6 +3604,63 @@ TEST_P(DisplayTest, GeoLimitsMontageListFontsWebOptionsJsonStructAndLsq)
     EXPECT_NEAR(evalScalar("p(1)"), 2.5, 1e-9);
     EXPECT_NEAR(evalScalar("p(2)"), 0.7, 1e-9);
     EXPECT_NEAR(evalScalar("p(3)"), 0.3, 1e-9);
+}
+
+TEST_P(DisplayTest, ArchiveZipGzipAndXlsx)
+{
+    // 1. zip / unzip round-trip (multi-file cell list + outputfolder + auto .zip suffix)
+    eval("d = [tempname '_arc']; mkdir(d); "
+         "f1 = fullfile(d, 'alpha.txt'); f2 = fullfile(d, 'beta.txt'); "
+         "fid = fopen(f1, 'wb'); fwrite(fid, uint8('Hello ZIP from NumKit! Hello ZIP!')); fclose(fid); "
+         "fid = fopen(f2, 'wb'); fwrite(fid, uint8('Second payload 1234567890')); fclose(fid); "
+         "zbase = fullfile(d, 'bundle'); "
+         "added = zip(zbase, {'alpha.txt', 'beta.txt'}, d); "
+         "outDir = fullfile(d, 'extracted'); "
+         "unpacked = unzip(zbase, outDir); "
+         "s1 = fileread(fullfile(outDir, 'alpha.txt')); "
+         "s2 = fileread(fullfile(outDir, 'beta.txt'));");
+    EXPECT_EQ(evalScalar("numel(added)"), 2.0);
+    EXPECT_EQ(evalScalar("numel(unpacked)"), 2.0);
+    EXPECT_EQ(eval("s1").toString(), "Hello ZIP from NumKit! Hello ZIP!");
+    EXPECT_EQ(eval("s2").toString(), "Second payload 1234567890");
+
+    // 2. gzip / gunzip round-trip (single file + outputfolder)
+    eval("gzDir = fullfile(d, 'gz_out'); mkdir(gzDir); "
+         "gzFiles = gzip(f1, gzDir); "
+         "ungzDir = fullfile(d, 'ungz_out'); mkdir(ungzDir); "
+         "plainFiles = gunzip(gzFiles{1}, ungzDir); "
+         "s3 = fileread(plainFiles{1});");
+    EXPECT_EQ(evalScalar("numel(gzFiles)"), 1.0);
+    EXPECT_EQ(evalScalar("numel(plainFiles)"), 1.0);
+    EXPECT_EQ(eval("s3").toString(), "Hello ZIP from NumKit! Hello ZIP!");
+
+    // 3. XLSX reading backed by keel::compress::ZipReader (synthetic minimal OOXML via zip())
+    eval("xdir = fullfile(d, 'xlsx_src'); mkdir(fullfile(xdir, 'xl', 'worksheets')); "
+         "sstXml = ['<?xml version=\"1.0\"?><sst><si><t>ColA</t></si><si><t>ColB</t></si></sst>']; "
+         "shXml = ['<?xml version=\"1.0\"?><worksheet><sheetData>' "
+                  "'<row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row>' "
+                  "'<row r=\"2\"><c r=\"A2\"><v>10.5</v></c><c r=\"B2\"><v>20</v></c></row>' "
+                  "'<row r=\"3\"><c r=\"A3\"><v>-4</v></c><c r=\"B3\"><v>3.25</v></c></row>' "
+                  "'</sheetData></worksheet>']; "
+         "fid = fopen(fullfile(xdir, 'xl', 'sharedStrings.xml'), 'wb'); fwrite(fid, uint8(sstXml)); fclose(fid); "
+         "fid = fopen(fullfile(xdir, 'xl', 'worksheets', 'sheet1.xml'), 'wb'); fwrite(fid, uint8(shXml)); fclose(fid); "
+         "zip(fullfile(d, 'sample'), {'xl'}, xdir); "
+         "xlsxFile = fullfile(d, 'sample.xlsx'); "
+         "fid = fopen(fullfile(d, 'sample.zip'), 'rb'); rawz = fread(fid, Inf, '*uint8'); fclose(fid); "
+         "fid = fopen(xlsxFile, 'wb'); fwrite(fid, rawz); fclose(fid); "
+         "xt = readtable(xlsxFile);");
+    EXPECT_DOUBLE_EQ(evalScalar("xt.ColA(1)"), 10.5);
+    EXPECT_DOUBLE_EQ(evalScalar("xt.ColB(1)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("xt.ColA(2)"), -4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("xt.ColB(2)"), 3.25);
+
+    // 4. Error paths: missing archive / corrupt gzip / wrong arg types
+    EXPECT_THROW(eval("unzip(fullfile(d, 'no_such_archive.zip'));"), std::exception);
+    EXPECT_THROW(eval("gunzip(f1);"), std::exception); // plain text is not valid gzip
+    EXPECT_THROW(eval("zip(123, f1);"), std::exception);
+
+    // Cleanup temp directory
+    (void)keel::fs_remove_all(eval("d").toString().as_ref());
 }
 
 INSTANTIATE_DUAL(DisplayTest);

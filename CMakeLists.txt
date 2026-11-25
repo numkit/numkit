@@ -119,6 +119,34 @@ if(NOT TARGET keel::crypto)
     FetchContent_MakeAvailable(keel_crypto)
 endif()
 
+# ── Dependency: keel::compress ───────────────────────────────────────────
+if(NOT TARGET keel::compress)
+    find_package(keel_compress QUIET CONFIG)
+    if(TARGET keel::keel_compress AND NOT TARGET keel::compress)
+        add_library(keel::compress ALIAS keel::keel_compress)
+    endif()
+endif()
+if(NOT TARGET keel::compress)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_COMPRESS)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/compress/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_COMPRESS
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/compress"
+                CACHE PATH "")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/compress/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_COMPRESS
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/compress"
+                CACHE PATH "")
+        endif()
+    endif()
+    set(KEEL_COMPRESS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        keel_compress
+        GIT_REPOSITORY https://github.com/keelcpp/compress.git
+        GIT_TAG        6378540afae060da68da60fe78685954a8799e6c
+    )
+    FetchContent_MakeAvailable(keel_compress)
+endif()
+
 # ── Dependency: keel::http ───────────────────────────────────────────────
 if(NOT TARGET keel::http)
     find_package(keel_http QUIET CONFIG)
@@ -188,6 +216,7 @@ target_link_libraries(numkit
         numkit_ops
     PRIVATE
         keel::matfile
+        keel::compress
         keel::crypto
         keel::http
 )
