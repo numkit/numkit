@@ -3405,4 +3405,53 @@ TEST_P(DisplayTest, JavaSecurityMessageDigest)
     EXPECT_THROW(eval("java.security.MessageDigest.getInstance('NO-SUCH-ALG')"), std::exception);
 }
 
+TEST_P(DisplayTest, GeoLimitsMontageListFontsWebOptionsJsonStructAndLsq)
+{
+    // 1. listfonts includes Courier and Times
+    eval("fonts = listfonts(); "
+         "hasCourier = any(strcmpi('courier', fonts)); "
+         "hasTimes = any(strcmpi('times', fonts));");
+    EXPECT_TRUE(evalBool("hasCourier"));
+    EXPECT_TRUE(evalBool("hasTimes"));
+
+    // 2. geoscatter + geolimits set/query + geobasemap
+    eval("close all; geoscatter([48.853; 48.846], [2.3497; 2.3464], 64, [1 0 0; 0 0 1], 'filled'); "
+         "geolimits([48.8425 48.8625], [2.3283 2.3722]); "
+         "geobasemap('streets'); "
+         "[latL, lonL] = geolimits(); "
+         "bm = geobasemap();");
+    EXPECT_NEAR(evalScalar("latL(1)"), 48.8425, 1e-12);
+    EXPECT_NEAR(evalScalar("latL(2)"), 48.8625, 1e-12);
+    EXPECT_NEAR(evalScalar("lonL(1)"), 2.3283, 1e-12);
+    EXPECT_NEAR(evalScalar("lonL(2)"), 2.3722, 1e-12);
+    EXPECT_EQ(eval("bm").toString(), "streets");
+
+    // 3. montage on 3D and 4D grayscale/RGB stacks
+    eval("close all; "
+         "I3 = reshape(1:(4*4*6), 4, 4, 6); montage(I3); "
+         "I4 = reshape(1:(4*4*1*9), 4, 4, 1, 9); montage(I4, 'Size', [3 3], 'BorderSize', [1 1]); "
+         "Irgb = zeros(4, 4, 3, 4); montage(Irgb, 'Indices', [1 3]);");
+
+    // 4. jsondecode array of uniform objects -> struct array; heterogeneous -> cell
+    eval("s = jsondecode('[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]'); "
+         "c = jsondecode('[{\"a\":1},{\"b\":2}]');");
+    EXPECT_TRUE(evalBool("isstruct(s) && numel(s) == 2"));
+    EXPECT_DOUBLE_EQ(evalScalar("s(1).a"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("s(2).b"), 4.0);
+    EXPECT_TRUE(evalBool("iscell(c) && numel(c) == 2"));
+
+    // 5. weboptions defaults and overrides
+    eval("wo = weboptions('Timeout', 25, 'ContentType', 'json');");
+    EXPECT_DOUBLE_EQ(evalScalar("wo.Timeout"), 25.0);
+    EXPECT_EQ(eval("wo.ContentType").toString(), "json");
+
+    // 6. lsqcurvefit central-difference LM precision
+    eval("t = (0:0.1:5)'; "
+         "y = 2.5 * exp(-0.7 * t) + 0.3; "
+         "p = lsqcurvefit(@(c, x) c(1) * exp(-c(2) * x) + c(3), [1 1 0], t, y);");
+    EXPECT_NEAR(evalScalar("p(1)"), 2.5, 1e-9);
+    EXPECT_NEAR(evalScalar("p(2)"), 0.7, 1e-9);
+    EXPECT_NEAR(evalScalar("p(3)"), 0.3, 1e-9);
+}
+
 INSTANTIATE_DUAL(DisplayTest);

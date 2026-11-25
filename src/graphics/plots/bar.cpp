@@ -1470,6 +1470,52 @@ void geobubble_plot(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Valu
     // bubblechart routing — scatter accepts sizes as its 3rd arg.
     geoForward("scatter", a, o, gc);
 }
+void geolimits_plot(keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, GraphicsContext &gc)
+{
+    // geolimits([gx,] latlim, lonlim) or [latlim, lonlim] = geolimits([gx])
+    keel::usize start = 0;
+    if (!args.empty() && args[0].isObject()) start = 1;
+    const keel::usize rem = args.size() - start;
+    if (rem == 0) {
+        keel::StaticArray<Value, 1> yOut;
+        keel::StaticArray<Value, 1> xOut;
+        (void)gc.callBuiltin("ylim", keel::ArrayRef<Value>(), 1,
+                             keel::MutArrayRef<Value>(yOut.data(), 1));
+        (void)gc.callBuiltin("xlim", keel::ArrayRef<Value>(), 1,
+                             keel::MutArrayRef<Value>(xOut.data(), 1));
+        outs[0] = keel::move(yOut[0]);
+        if (nargout >= 2 && outs.size() >= 2)
+            outs[1] = keel::move(xOut[0]);
+        return;
+    }
+    keel::StaticArray<Value, 1> tmp;
+    // geoForward maps lat -> Y and lon -> X.
+    (void)gc.callBuiltin("ylim", keel::ArrayRef<Value>(&args[start], 1), 0,
+                         keel::MutArrayRef<Value>(tmp.data(), 1));
+    if (rem >= 2) {
+        (void)gc.callBuiltin("xlim", keel::ArrayRef<Value>(&args[start + 1], 1), 0,
+                             keel::MutArrayRef<Value>(tmp.data(), 1));
+    }
+    outs[0] = Value();
+}
+void geobasemap_plot(keel::ArrayRef<Value> args, keel::usize nargout,
+                     keel::MutArrayRef<Value> outs, GraphicsContext &gc)
+{
+    // geobasemap([gx,] basemap) — accept basemap name cleanly for headless parity.
+    keel::usize start = 0;
+    if (!args.empty() && args[0].isObject()) start = 1;
+    if (start < args.size() && (args[start].isChar() || args[start].isString())) {
+        gc.fm.current().modified = true;
+        gc.fm.emitModified();
+        outs[0] = Value();
+        return;
+    }
+    if (nargout >= 1)
+        outs[0] = Value::fromString("streets", gc.mr);
+    else
+        outs[0] = Value();
+}
 // ────────────────────────────────────────────────────────────────
 // bubblechart / bubblechart3 / swarmchart — variants of scatter
 // / scatter3 that emphasise size-modulated markers. We delegate
@@ -1753,6 +1799,8 @@ constexpr PlotRegRow kPlots[] = {
     {"bar", "fill3", false, &fill3_plot},
     {"bar", "geoscatter", false, &geoscatter_plot},
     {"bar", "geobubble", false, &geobubble_plot},
+    {"bar", "geolimits", false, &geolimits_plot},
+    {"bar", "geobasemap", false, &geobasemap_plot},
     {"bar", "bubblechart", false, &bubblechart_plot},
     {"bar", "bubblechart3", false, &bubblechart3_plot},
     {"bar", "swarmchart", false, &swarmchart_plot},

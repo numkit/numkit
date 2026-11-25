@@ -301,6 +301,190 @@ void imshow_plot(keel::ArrayRef<Value> args, keel::usize nargout,
     outs[0] = Value();
 }
 
+void montage_plot(keel::ArrayRef<Value> args, keel::usize nargout,
+                  keel::MutArrayRef<Value> outs, GraphicsContext &gc)
+{
+    if (args.empty()) { outs[0] = Value(); return; }
+    auto *mr = gc.mr;
+
+    // Parse optional name-value pairs.
+    keel::i32 reqRows = 0;
+    keel::i32 reqCols = 0;
+    keel::usize borderR = 0;
+    keel::usize borderC = 0;
+    keel::f64 bgVal = 0.0;
+    const Value *indicesArg = nullptr;
+    const Value *rangeArg = nullptr;
+    for (keel::usize i = 1; i + 1 < args.size(); i += 2) {
+        if (!args[i].isChar() && !args[i].isString()) continue;
+        keel::String k = args[i].toString();
+        k.to_ascii_lower_in_place();
+        const Value &v = args[i + 1];
+        if (k == "size" && v.isNumeric() && v.numel() >= 2) {
+            const keel::f64 r = v.elemAsDouble(0);
+            const keel::f64 c = v.elemAsDouble(1);
+            if (keel::is_finite(r) && r > 0.0) reqRows = keel::as<keel::i32>(r);
+            if (keel::is_finite(c) && c > 0.0) reqCols = keel::as<keel::i32>(c);
+        } else if (k == "bordersize" && v.isNumeric() && v.numel() >= 1) {
+            const keel::f64 r = v.elemAsDouble(0);
+            const keel::f64 c = (v.numel() >= 2) ? v.elemAsDouble(1) : r;
+            if (keel::is_finite(r) && r >= 0.0) borderR = keel::as<keel::usize>(r);
+            if (keel::is_finite(c) && c >= 0.0) borderC = keel::as<keel::usize>(c);
+        } else if (k == "backgroundcolor" && v.isNumeric() && v.numel() >= 1) {
+            bgVal = v.elemAsDouble(0);
+        } else if (k == "indices") {
+            indicesArg = &v;
+        } else if (k == "displayrange") {
+            rangeArg = &v;
+        }
+    }
+
+    // Collect frames into a flat list of 2D/3D (H x W [x C]) slices.
+    keel::Array<Value> frames;
+    const Value &in = args[0];
+    if (in.isCell()) {
+        for (keel::usize i = 0; i < in.numel(); ++i) {
+            const Value &el = in.cellAt(i);
+            if (el.isChar() || el.isString()) {
+                Value imreadFn = Value::funcHandle("imread", mr);
+                frames.push_back(gc.callHandle(imreadFn, keel::ArrayRef<Value>(&el, 1)));
+            } else if (!el.isEmpty()) {
+                frames.push_back(el);
+            }
+        }
+    } else if (in.isNumeric() || in.isLogical()) {
+        const auto &d = in.dims();
+        const keel::i32 nd = d.ndims();
+        const keel::usize H = d.rows();
+        const keel::usize W = d.cols();
+        if (H == 0 || W == 0) { outs[0] = Value(); return; }
+        if (nd <= 2) {
+            frames.push_back(in);
+        } else if (nd == 3) {
+            // 3D array [H W N] -> N grayscale frames.
+            const keel::usize N = d.dim(2);
+            const keel::usize plane = H * W;
+            for (keel::usize f = 0; f < N; ++f) {
+                Value slice = Value::matrix(H, W, ValueType::DOUBLE, mr);
+                keel::f64 *dst = slice.doubleDataMut();
+                for (keel::usize p = 0; p < plane; ++p)
+                    dst[p] = in.elemAsDouble(f * plane + p);
+                frames.push_back(keel::move(slice));
+            }
+        } else {
+            // 4D array [H W C N] -> N frames of H x W x C.
+            const keel::usize C = d.dim(2);
+            const keel::usize N = d.dim(3);
+            const keel::usize plane = H * W;
+            const keel::usize frameElems = plane * C;
+            for (keel::usize f = 0; f < N; ++f) {
+                if (C == 1) {
+                    Value slice = Value::matrix(H, W, ValueType::DOUBLE, mr);
+                    keel::f64 *dst = slice.doubleDataMut();
+                    for (keel::usize p = 0; p < plane; ++p)
+                        dst[p] = in.elemAsDouble(f * frameElems + p);
+                    frames.push_back(keel::move(slice));
+                } else {
+                    Value slice = Value::matrix3d(H, W, C, ValueType::DOUBLE, mr);
+                    keel::f64 *dst = slice.doubleDataMut();
+                    for (keel::usize p = 0; p < frameElems; ++p)
+                        dst[p] = in.elemAsDouble(f * frameElems + p);
+                    frames.push_back(keel::move(slice));
+                }
+            }
+        }
+    } else {
+        outs[0] = Value();
+        return;
+    }
+
+    // Apply optional 'Indices' subset.
+    keel::Array<keel::usize> sel;
+    if (indicesArg && indicesArg->isNumeric() && !indicesArg->isEmpty()) {
+        for (keel::usize i = 0; i < indicesArg->numel(); ++i) {
+            const keel::i64 idx = keel::as<keel::i64>(indicesArg->elemAsDouble(i));
+            if (idx >= 1 && keel::as<keel::usize>(idx) <= frames.size())
+                sel.push_back(keel::as<keel::usize>(idx - 1));
+        }
+    } else {
+        for (keel::usize i = 0; i < frames.size(); ++i) sel.push_back(i);
+    }
+    if (sel.empty()) { outs[0] = Value(); return; }
+
+    const keel::usize nFrames = sel.size();
+    keel::usize tileH = 1, tileW = 1, tileC = 1;
+    for (keel::usize k = 0; k < nFrames; ++k) {
+        const auto &fd = frames[sel[k]].dims();
+        tileH = keel::max(tileH, fd.rows());
+        tileW = keel::max(tileW, fd.cols());
+        if (fd.ndims() >= 3 && fd.dim(2) == 3) tileC = 3;
+    }
+
+    // Determine grid dimensions (rows x cols).
+    keel::usize gridR = 0, gridC = 0;
+    if (reqRows > 0 && reqCols > 0) {
+        gridR = keel::as<keel::usize>(reqRows);
+        gridC = keel::as<keel::usize>(reqCols);
+    } else if (reqRows > 0) {
+        gridR = keel::as<keel::usize>(reqRows);
+        gridC = (nFrames + gridR - 1) / gridR;
+    } else if (reqCols > 0) {
+        gridC = keel::as<keel::usize>(reqCols);
+        gridR = (nFrames + gridC - 1) / gridC;
+    } else {
+        gridC = keel::as<keel::usize>(keel::ceil(keel::sqrt(keel::as<keel::f64>(nFrames))));
+        if (gridC == 0) gridC = 1;
+        gridR = (nFrames + gridC - 1) / gridC;
+    }
+
+    const keel::usize cellH = tileH + 2 * borderR;
+    const keel::usize cellW = tileW + 2 * borderC;
+    const keel::usize outH = gridR * cellH;
+    const keel::usize outW = gridC * cellW;
+
+    Value mosaic;
+    if (tileC == 3) {
+        mosaic = Value::matrix3d(outH, outW, 3, ValueType::DOUBLE, mr);
+    } else {
+        mosaic = Value::matrix(outH, outW, ValueType::DOUBLE, mr);
+    }
+    keel::f64 *md = mosaic.doubleDataMut();
+    const keel::usize totalElems = outH * outW * tileC;
+    for (keel::usize i = 0; i < totalElems; ++i) md[i] = bgVal;
+
+    const keel::usize outPlane = outH * outW;
+    for (keel::usize k = 0; k < nFrames && k < gridR * gridC; ++k) {
+        const keel::usize gr = k / gridC;
+        const keel::usize gcIdx = k % gridC;
+        const keel::usize r0 = gr * cellH + borderR;
+        const keel::usize c0 = gcIdx * cellW + borderC;
+        const Value &fr = frames[sel[k]];
+        const keel::usize fh = keel::min(fr.dims().rows(), tileH);
+        const keel::usize fw = keel::min(fr.dims().cols(), tileW);
+        const keel::usize fc = (fr.dims().ndims() >= 3) ? fr.dims().dim(2) : 1;
+        const keel::usize fplane = fr.dims().rows() * fr.dims().cols();
+        for (keel::usize ch = 0; ch < tileC; ++ch) {
+            const keel::usize srcCh = (ch < fc) ? ch : 0;
+            for (keel::usize c = 0; c < fw; ++c) {
+                for (keel::usize r = 0; r < fh; ++r) {
+                    const keel::f64 val = fr.elemAsDouble(
+                        srcCh * fplane + c * fr.dims().rows() + r);
+                    md[ch * outPlane + (c0 + c) * outH + (r0 + r)] = val;
+                }
+            }
+        }
+    }
+
+    // Forward tiled mosaic to imshow_plot.
+    keel::Array<Value> showArgs;
+    showArgs.push_back(keel::move(mosaic));
+    if (rangeArg) {
+        showArgs.push_back(*rangeArg);
+    }
+    imshow_plot(keel::ArrayRef<Value>(showArgs.data(), showArgs.size()),
+                nargout, outs, gc);
+}
+
 struct ImagePlotEntry {
     const char *name;
     void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, GraphicsContext &);
@@ -310,6 +494,7 @@ constexpr ImagePlotEntry kImagePlots[] = {
     {"imagesc", &imagesc_plot},
     {"pcolor",  &pcolor_plot},
     {"imshow",  &imshow_plot},
+    {"montage", &montage_plot},
 };
 
 } // namespace

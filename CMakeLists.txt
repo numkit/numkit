@@ -86,7 +86,7 @@ if(NOT TARGET keel::matfile)
     FetchContent_Declare(
         keel_matfile
         GIT_REPOSITORY https://github.com/keelcpp/matfile.git
-        GIT_TAG        8391ebf206c1c42bdec69e765125f005ba24361f
+        GIT_TAG        19fe329c9fa4bf111930462e85f851a2411b9966
     )
     FetchContent_MakeAvailable(keel_matfile)
 endif()
@@ -114,9 +114,37 @@ if(NOT TARGET keel::crypto)
     FetchContent_Declare(
         keel_crypto
         GIT_REPOSITORY https://github.com/keelcpp/crypto.git
-        GIT_TAG        4562b259000e576da972c365179fa23fbebcb3b9
+        GIT_TAG        3b282f87a89c1770f9a33bdd1801d1aca9b18ebc
     )
     FetchContent_MakeAvailable(keel_crypto)
+endif()
+
+# ── Dependency: keel::http ───────────────────────────────────────────────
+if(NOT TARGET keel::http)
+    find_package(keel_http QUIET CONFIG)
+    if(TARGET keel::keel_http AND NOT TARGET keel::http)
+        add_library(keel::http ALIAS keel::keel_http)
+    endif()
+endif()
+if(NOT TARGET keel::http)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_HTTP)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/http/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_HTTP
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/http"
+                CACHE PATH "")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/http/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_HTTP
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/http"
+                CACHE PATH "")
+        endif()
+    endif()
+    set(KEEL_HTTP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        keel_http
+        GIT_REPOSITORY https://github.com/keelcpp/http.git
+        GIT_TAG        41e5ea330ceacda242d59dc3efbcc7ad5e9089e4
+    )
+    FetchContent_MakeAvailable(keel_http)
 endif()
 
 # ── Gather Sources ───────────────────────────────────────────────────────
@@ -161,6 +189,7 @@ target_link_libraries(numkit
     PRIVATE
         keel::matfile
         keel::crypto
+        keel::http
 )
 
 

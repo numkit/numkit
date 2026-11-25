@@ -72,35 +72,44 @@ end
 function [x, F] = NUMKIT_lsq_lm(fn, x, n, isRow)
   F = NUMKIT_lsq_eval(fn, x, n, isRow);
   m = numel(F);
-  nrm = norm(F);
-  lambda = 1e-2;
-  sqeps = sqrt(eps);
+  nrm2 = F.' * F;
+  lambda = 1e-3;
+  hstep = eps^(1/3);
   for iter = 1:400
     J = zeros(m, n);
     for j = 1:n
-      h = sqeps * max(abs(x(j)), 1);
+      h = hstep * max(abs(x(j)), 1);
       xp = x; xp(j) = xp(j) + h;
+      xm = x; xm(j) = xm(j) - h;
       Fp = NUMKIT_lsq_eval(fn, xp, n, isRow);
-      J(:, j) = (Fp - F) / h;
+      Fm = NUMKIT_lsq_eval(fn, xm, n, isRow);
+      J(:, j) = (Fp - Fm) / (2 * h);
     end
     A = J.' * J;
     g = J.' * F;
+    if norm(g, inf) <= 1e-12 * (1 + sqrt(nrm2))
+      break;
+    end
     d = diag(A);
     accepted = false;
     dx = zeros(n, 1);
-    for tries = 1:25
+    for tries = 1:30
       H = A + lambda * diag(max(d, 1e-12));
       dx = -(H \ g);
+      if any(~isfinite(dx))
+        lambda = lambda * 10;
+        continue;
+      end
       xn = x + dx;
       Fn = NUMKIT_lsq_eval(fn, xn, n, isRow);
-      nn = norm(Fn);
-      if nn < nrm
-        x = xn; F = Fn; nrm = nn;
-        lambda = max(lambda * 0.4, 1e-14);
+      nn2 = Fn.' * Fn;
+      if isfinite(nn2) && nn2 < nrm2
+        x = xn; F = Fn; nrm2 = nn2;
+        lambda = max(lambda * 0.3, 1e-15);
         accepted = true;
         break;
       else
-        lambda = lambda * 3;
+        lambda = lambda * 5;
       end
     end
     if ~accepted

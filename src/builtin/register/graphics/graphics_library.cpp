@@ -2176,11 +2176,13 @@ void listfonts_reg(keel::ArrayRef<Value>, keel::usize,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto *mr = ctx.engine->allocator();
-    Value c = Value::cell(4, 1, mr);
+    Value c = Value::cell(6, 1, mr);
     c.cellAt(0) = Value::fromString("Helvetica", mr);
     c.cellAt(1) = Value::fromString("Arial", mr);
-    c.cellAt(2) = Value::fromString("Times New Roman", mr);
-    c.cellAt(3) = Value::fromString("Courier New", mr);
+    c.cellAt(2) = Value::fromString("Times", mr);
+    c.cellAt(3) = Value::fromString("Times New Roman", mr);
+    c.cellAt(4) = Value::fromString("Courier", mr);
+    c.cellAt(5) = Value::fromString("Courier New", mr);
     outs[0] = c;
 }
 
