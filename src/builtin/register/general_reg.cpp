@@ -15,6 +15,7 @@
 #include "core/vm/vm.hpp"
 #include <numkit/runtime/runtime.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 
 #include <numkit/core/build_info.hpp>
 
@@ -397,23 +398,44 @@ void delete_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
                      CallContext &ctx)
 {
     auto &fm = ctx.engine->figureManager();
+    auto &scene = coreEngine(ctx).graphicsScene();
     bool anyFigureClosed = false;
     for (const auto &a : args) {
-        const keel::i32 hid = graphicsHandleIdOf(a);
-        if (hid >= 0) {
-            auto *rec = fm.findHandle(hid);
-            if (!rec)
-                continue;   // already deleted — idempotent
-            if (rec->type == "figure") {
-                fm.closeFigureNotify(rec->figureId);
-                anyFigureClosed = true;
-            } else if (rec->type == "axes") {
-                fm.removeAxes(rec->figureId, rec->axesIndex);
-                fm.markFigureModified(rec->figureId);
-            } else {
-                fm.deleteHandle(hid);
+        if (a.isObject() && a.objectCount() > 0) {
+            bool anyHandled = false;
+            for (keel::usize k = 0; k < a.objectCount(); ++k) {
+                keel::i32 hid = -1;
+                bool inScene = false;
+                if (!graphicsHandleAt(a, k, hid, inScene))
+                    continue;
+                anyHandled = true;
+                if (inScene) {
+                    if (hid == gfx::kPlaceholderNodeId)
+                        continue;
+                    if (const auto *fn = scene.findNode(hid); fn && fn->classId == gfx::ClassId::Figure && fn->figureNumber > 0) {
+                        fm.closeFigureNotify(fn->figureNumber);
+                        anyFigureClosed = true;
+                    }
+                    scene.deleteNode(hid, /*force=*/true);
+                    continue;
+                }
+                if (hid >= 0) {
+                    auto *rec = fm.findHandle(hid);
+                    if (!rec)
+                        continue;
+                    if (rec->type == "figure") {
+                        fm.closeFigureNotify(rec->figureId);
+                        anyFigureClosed = true;
+                    } else if (rec->type == "axes") {
+                        fm.removeAxes(rec->figureId, rec->axesIndex);
+                        fm.markFigureModified(rec->figureId);
+                    } else {
+                        fm.deleteHandle(hid);
+                    }
+                }
             }
-            continue;
+            if (anyHandled)
+                continue;
         }
         if (a.isNumeric() || a.isEmpty())
             continue;

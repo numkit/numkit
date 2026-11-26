@@ -21,17 +21,19 @@
 
 namespace numkit {
 
-// NativePayload carrying the FigureManager handle-registry id.
+// NativePayload carrying the GraphicsScene (inScene=true) or legacy FigureManager handle id.
 struct GraphicsHandlePayload : public NativePayload
 {
     keel::i32 handleId = 0;
     keel::i32 numericValue = 0;
+    bool inScene = false;
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
         auto *res = alloc ? alloc : keel::default_allocator();
         auto p = keel::make_arc_in<GraphicsHandlePayload>(res);
         p->handleId = handleId;
         p->numericValue = numericValue;
+        p->inScene = inScene;
         return p;
     }
     keel::f64 asDouble() const override { return keel::as<keel::f64>(numericValue != 0 ? numericValue : handleId); }
@@ -43,13 +45,40 @@ struct GraphicsHandlePayload : public NativePayload
 // NOT a discriminator — the payload is.
 inline keel::i32 graphicsHandleIdOf(const Value &v)
 {
-    if (!v.isObject())
+    if (!v.isObject() || v.objectCount() == 0)
         return -1;
     auto *st = v.objectStateConst();
     if (!st || !st->native)
         return -1;
     auto *p = dynamic_cast<const GraphicsHandlePayload *>(st->native.get());
     return p ? p->handleId : -1;
+}
+
+inline bool isSceneGraphicsHandle(const Value &v)
+{
+    if (!v.isObject() || v.objectCount() == 0)
+        return false;
+    auto *st = v.objectStateConst();
+    if (!st || !st->native)
+        return false;
+    auto *p = dynamic_cast<const GraphicsHandlePayload *>(st->native.get());
+    return p && p->inScene;
+}
+
+inline bool graphicsHandleAt(const Value &v, keel::usize idx,
+                             keel::i32 &idOut, bool &inSceneOut)
+{
+    if (!v.isObject() || idx >= v.objectCount())
+        return false;
+    const ObjectState *st = v.objectStateAt(idx);
+    if (!st || !st->native)
+        return false;
+    auto *p = dynamic_cast<const GraphicsHandlePayload *>(st->native.get());
+    if (!p)
+        return false;
+    idOut = p->handleId;
+    inSceneOut = p->inScene;
+    return true;
 }
 
 // Handle object Value wrapping registry id `id` with MATLAB class name

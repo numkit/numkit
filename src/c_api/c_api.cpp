@@ -12,6 +12,7 @@
 #include <numkit/core/c_api.h>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/core/standard_engine.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/value/c_api_bridge.hpp>
 
 #include <keel/dynlib.h>
@@ -475,6 +476,153 @@ void numkit_engine_clear_cancel(numkit_engine_ctx *ctx)
 int numkit_engine_is_cancel_requested(const numkit_engine_ctx *ctx)
 {
     return (ctx && ctx->engine.isCancelRequested()) ? 1 : 0;
+}
+
+int32_t numkit_gfx_root(const numkit_engine_ctx *ctx)
+{
+    if (!ctx) return numkit::gfx::kInvalidNodeId;
+    return ctx->engine.graphicsScene().rootId();
+}
+
+uint64_t numkit_gfx_generation(const numkit_engine_ctx *ctx)
+{
+    if (!ctx) return 0;
+    return ctx->engine.graphicsScene().generation();
+}
+
+int numkit_gfx_node_valid(const numkit_engine_ctx *ctx, int32_t node_id)
+{
+    if (!ctx) return 0;
+    return ctx->engine.graphicsScene().findNode(node_id) != nullptr ? 1 : 0;
+}
+
+size_t numkit_gfx_node_class(const numkit_engine_ctx *ctx, int32_t node_id,
+                             char *buf, size_t buf_cap)
+{
+    if (!ctx) {
+        if (buf && buf_cap > 0) buf[0] = '\0';
+        return 0;
+    }
+    try {
+        const auto *n = ctx->engine.graphicsScene().findNode(node_id);
+        if (!n) {
+            if (buf && buf_cap > 0) buf[0] = '\0';
+            return 0;
+        }
+        const keel::StringRef cn(numkit::gfx::schemaFor(n->classId).className);
+        if (!buf || buf_cap == 0) return cn.size();
+        const size_t copyN = keel::min<size_t>(cn.size(), buf_cap - 1);
+        if (copyN > 0) keel::mem_copy(buf, cn.data(), copyN);
+        buf[copyN] = '\0';
+        return cn.size();
+    } catch (...) {
+        if (buf && buf_cap > 0) buf[0] = '\0';
+        return 0;
+    }
+}
+
+int32_t numkit_gfx_node_parent(const numkit_engine_ctx *ctx, int32_t node_id)
+{
+    if (!ctx) return numkit::gfx::kInvalidNodeId;
+    const auto *n = ctx->engine.graphicsScene().findNode(node_id);
+    return n ? n->parentId : numkit::gfx::kInvalidNodeId;
+}
+
+size_t numkit_gfx_node_children(const numkit_engine_ctx *ctx, int32_t node_id,
+                                int include_hidden,
+                                int32_t *out_ids, size_t cap)
+{
+    if (!ctx) return 0;
+    try {
+        const auto &sc = ctx->engine.graphicsScene();
+        auto kids = include_hidden ? sc.allChildren(node_id) : sc.visibleChildren(node_id);
+        if (out_ids && cap > 0) {
+            const size_t n = keel::min<size_t>(kids.size(), cap);
+            for (size_t i = 0; i < n; ++i)
+                out_ids[i] = kids[i];
+        }
+        return kids.size();
+    } catch (...) {
+        return 0;
+    }
+}
+
+numkit_val *numkit_gfx_get_prop(numkit_engine_ctx *ctx, int32_t node_id,
+                                const char *prop_name, numkit_error *err)
+{
+    numkit::c_abi::clearError(err);
+    if (!ctx || !prop_name) {
+        numkit::c_abi::setError(err, 1, "numkit_gfx_get_prop: null argument");
+        return nullptr;
+    }
+    try {
+        numkit::Value v = ctx->engine.graphicsScene().getProperty(
+            node_id, prop_name, ctx->engine.allocator());
+        return numkit::c_abi::boxValue(keel::move(v));
+    } catch (const std::exception &ex) {
+        numkit::c_abi::setError(err, 1, ex.what());
+        return nullptr;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_gfx_get_prop");
+        return nullptr;
+    }
+}
+
+int numkit_gfx_set_prop(numkit_engine_ctx *ctx, int32_t node_id,
+                        const char *prop_name, const numkit_val *val,
+                        numkit_error *err)
+{
+    numkit::c_abi::clearError(err);
+    if (!ctx || !prop_name) {
+        numkit::c_abi::setError(err, 1, "numkit_gfx_set_prop: null argument");
+        return 1;
+    }
+    try {
+        ctx->engine.graphicsScene().setProperty(
+            node_id, prop_name,
+            val ? numkit::c_abi::unboxValue(val) : numkit::Value::Empty,
+            ctx->engine.allocator());
+        return 0;
+    } catch (const std::exception &ex) {
+        numkit::c_abi::setError(err, 1, ex.what());
+        return 1;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_gfx_set_prop");
+        return 1;
+    }
+}
+
+size_t numkit_gfx_poll_events(const numkit_engine_ctx *ctx, uint64_t since_gen,
+                              numkit_gfx_event *out_events, size_t cap)
+{
+    if (!ctx) return 0;
+    try {
+        auto evs = ctx->engine.graphicsScene().pollEvents(since_gen);
+        if (out_events && cap > 0) {
+            const size_t n = keel::min<size_t>(evs.size(), cap);
+            for (size_t i = 0; i < n; ++i) {
+                out_events[i].kind = static_cast<numkit_gfx_event_kind>(evs[i].kind);
+                out_events[i].node_id = evs[i].nodeId;
+                out_events[i].aux_id = evs[i].auxId;
+                out_events[i].generation = evs[i].generation;
+                const size_t pn = keel::min<size_t>(evs[i].propName.size(), 63u);
+                if (pn > 0) keel::mem_copy(out_events[i].prop_name, evs[i].propName.data(), pn);
+                out_events[i].prop_name[pn] = '\0';
+            }
+        }
+        return evs.size();
+    } catch (...) {
+        return 0;
+    }
+}
+
+void numkit_gfx_clear_events(numkit_engine_ctx *ctx)
+{
+    if (!ctx) return;
+    try {
+        ctx->engine.graphicsScene().clearEvents();
+    } catch (...) {
+    }
 }
 
 } // extern "C"

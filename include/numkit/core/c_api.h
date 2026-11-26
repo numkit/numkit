@@ -110,6 +110,41 @@ NUMKIT_ENGINE_API void numkit_engine_request_cancel(numkit_engine_ctx *ctx);
 NUMKIT_ENGINE_API void numkit_engine_clear_cancel(numkit_engine_ctx *ctx);
 NUMKIT_ENGINE_API int numkit_engine_is_cancel_requested(const numkit_engine_ctx *ctx);
 
+/* ── Handle Graphics Scene Model (GUI-ready DOM & change events) ───────── */
+typedef enum numkit_gfx_event_kind_e {
+    NUMKIT_GFX_EVENT_NODE_CREATED     = 0,
+    NUMKIT_GFX_EVENT_NODE_DELETED     = 1,
+    NUMKIT_GFX_EVENT_PROPERTY_CHANGED = 2,
+    NUMKIT_GFX_EVENT_REPARENTED       = 3,
+    NUMKIT_GFX_EVENT_CURRENT_CHANGED  = 4
+} numkit_gfx_event_kind;
+
+typedef struct numkit_gfx_event_s {
+    numkit_gfx_event_kind kind;
+    int32_t node_id;
+    int32_t aux_id;
+    uint64_t generation;
+    char prop_name[64];
+} numkit_gfx_event;
+
+NUMKIT_ENGINE_API int32_t numkit_gfx_root(const numkit_engine_ctx *ctx);
+NUMKIT_ENGINE_API uint64_t numkit_gfx_generation(const numkit_engine_ctx *ctx);
+NUMKIT_ENGINE_API int numkit_gfx_node_valid(const numkit_engine_ctx *ctx, int32_t node_id);
+NUMKIT_ENGINE_API size_t numkit_gfx_node_class(const numkit_engine_ctx *ctx, int32_t node_id,
+                                               char *buf, size_t buf_cap);
+NUMKIT_ENGINE_API int32_t numkit_gfx_node_parent(const numkit_engine_ctx *ctx, int32_t node_id);
+NUMKIT_ENGINE_API size_t numkit_gfx_node_children(const numkit_engine_ctx *ctx, int32_t node_id,
+                                                  int include_hidden,
+                                                  int32_t *out_ids, size_t cap);
+NUMKIT_ENGINE_API numkit_val *numkit_gfx_get_prop(numkit_engine_ctx *ctx, int32_t node_id,
+                                                  const char *prop_name, numkit_error *err);
+NUMKIT_ENGINE_API int numkit_gfx_set_prop(numkit_engine_ctx *ctx, int32_t node_id,
+                                          const char *prop_name, const numkit_val *val,
+                                          numkit_error *err);
+NUMKIT_ENGINE_API size_t numkit_gfx_poll_events(const numkit_engine_ctx *ctx, uint64_t since_gen,
+                                                numkit_gfx_event *out_events, size_t cap);
+NUMKIT_ENGINE_API void numkit_gfx_clear_events(numkit_engine_ctx *ctx);
+
 #ifdef __cplusplus
 }
 #endif

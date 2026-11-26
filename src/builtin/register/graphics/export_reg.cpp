@@ -26,6 +26,7 @@
 #include <numkit/graphics/figure_manager.hpp>
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/image/io/io.hpp>
 #include <numkit/value/argcheck.hpp>
 
@@ -103,6 +104,15 @@ figrender::SvgImageEmbedder svgPngEmbedder(
 const FigureState *targetFigure(Engine &engine, const Value &v)
 {
     auto &fm = engine.figureManager();
+    if (isSceneGraphicsHandle(v)) {
+        const keel::i32 hid = graphicsHandleIdOf(v);
+        const auto *fn = engine.graphicsScene().findNode(hid);
+        if (!fn)
+            throw numkit::Error("Invalid or deleted object.");
+        if (fn->classId == gfx::ClassId::Figure && fn->figureNumber > 0)
+            return fm.figureOf(fn->figureNumber);
+        return nullptr;
+    }
     const keel::i32 hid = graphicsHandleIdOf(v);
     if (hid >= 0) {
         auto *rec = fm.findHandle(hid);

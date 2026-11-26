@@ -103,3 +103,58 @@ TEST(NumkitEngineCApi, CooperativeCancelFromHostThread)
     numkit_engine_destroy(ctx);
     EXPECT_EQ(numkit_debug_live_values(), base);
 }
+
+TEST(NumkitEngineCApi, GraphicsSceneModelAndEvents)
+{
+    const int64_t base = numkit_debug_live_values();
+    numkit_error err{};
+    numkit_engine_ctx *ctx = numkit_engine_create(&err);
+    ASSERT_NE(ctx, nullptr) << err.message;
+
+    const int32_t rootId = numkit_gfx_root(ctx);
+    EXPECT_EQ(rootId, 1);
+    EXPECT_EQ(numkit_gfx_node_valid(ctx, rootId), 1);
+
+    char clsBuf[64]{};
+    EXPECT_GT(numkit_gfx_node_class(ctx, rootId, clsBuf, sizeof(clsBuf)), 0u);
+    EXPECT_STREQ(clsBuf, "matlab.ui.Root");
+
+    const uint64_t g0 = numkit_gfx_generation(ctx);
+    numkit_val *r = numkit_engine_eval(ctx, "f = figure('Visible','off','Name','GuiFig');", &err);
+    ASSERT_NE(r, nullptr) << err.message;
+    numkit_val_release(r);
+
+    int32_t kids[8]{};
+    const size_t nKids = numkit_gfx_node_children(ctx, rootId, 0, kids, 8);
+    ASSERT_EQ(nKids, 1u);
+    const int32_t figId = kids[0];
+    EXPECT_EQ(numkit_gfx_node_parent(ctx, figId), rootId);
+    EXPECT_GT(numkit_gfx_node_class(ctx, figId, clsBuf, sizeof(clsBuf)), 0u);
+    EXPECT_STREQ(clsBuf, "matlab.ui.Figure");
+
+    numkit_val *nameVal = numkit_gfx_get_prop(ctx, figId, "Name", &err);
+    ASSERT_NE(nameVal, nullptr) << err.message;
+    char fmtBuf[64]{};
+    EXPECT_GT(numkit_engine_format(ctx, nameVal, fmtBuf, sizeof(fmtBuf)), 0u);
+    EXPECT_STREQ(fmtBuf, "GuiFig");
+    numkit_val_release(nameVal);
+
+    numkit_val *newTag = numkit_engine_eval(ctx, "'from_gui'", &err);
+    ASSERT_NE(newTag, nullptr) << err.message;
+    EXPECT_EQ(numkit_gfx_set_prop(ctx, figId, "Tag", newTag, &err), 0) << err.message;
+    numkit_val_release(newTag);
+
+    numkit_val *evCheck = numkit_engine_eval(ctx, "strcmp(f.Tag, 'from_gui')", &err);
+    ASSERT_NE(evCheck, nullptr) << err.message;
+    EXPECT_DOUBLE_EQ(numkit_val_as_double(evCheck, &err), 1.0);
+    numkit_val_release(evCheck);
+
+    numkit_gfx_event evs[32]{};
+    const size_t nEvs = numkit_gfx_poll_events(ctx, g0, evs, 32);
+    EXPECT_GT(nEvs, 2u);
+    numkit_gfx_clear_events(ctx);
+    EXPECT_EQ(numkit_gfx_poll_events(ctx, 0, evs, 32), 0u);
+
+    numkit_engine_destroy(ctx);
+    EXPECT_EQ(numkit_debug_live_values(), base);
+}

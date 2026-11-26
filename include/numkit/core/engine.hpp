@@ -25,6 +25,7 @@ class TreeWalker;
 class VM;
 class Compiler;
 class FigureManager;
+namespace gfx { class GraphicsScene; }
 class DebugFacade;       // grouped debugger handle (engine.debug()); defined below
 struct FunctionRegistryState; // encapsulated function/namespace/persistent state; engine_internal.hpp
 struct ClassRegistryState;    // encapsulated class registry/classdef state; engine_internal.hpp
@@ -834,6 +835,10 @@ public:
     FsContext &fsContext() noexcept { return fsCtx_; }
     const FsContext &fsContext() const noexcept { return fsCtx_; }
 
+    // Model-first Handle Graphics scene graph (Root, Figure, Theme, ...).
+    gfx::GraphicsScene &graphicsScene() noexcept { return *graphicsScene_; }
+    const gfx::GraphicsScene &graphicsScene() const noexcept { return *graphicsScene_; }
+
     // The session RNG stream (rand/randn/randi/randperm + rng() control + every
     // toolbox *rnd sampler draw from this). Registration adapters pass
     // engine.rng() to the ops generators / RngContext&-taking samplers.
@@ -919,6 +924,7 @@ private:
     OutputFunc outputFunc_;
     InputProvider inputProvider_;   // empty → input() reads stdin
     keel::UniquePtr<FigureManager> figureManager_;
+    keel::UniquePtr<gfx::GraphicsScene> graphicsScene_;
     keel::UniquePtr<PluginLoader> pluginLoader_;
 
     // Evict a global user function plus its file-private subfunctions ("name>*"),

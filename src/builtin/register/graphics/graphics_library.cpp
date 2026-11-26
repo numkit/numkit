@@ -42,6 +42,19 @@
 #include <numkit/value/error.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
+#include <numkit/core/engine.hpp>
+
+namespace numkit::gfx::detail {
+void registerSceneGraphics(Engine &engine);
+bool trySceneGet(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs, CallContext &ctx);
+bool trySceneSet(keel::ArrayRef<Value> args, keel::usize nargout,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx);
+bool trySceneIsValid(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs, CallContext &ctx);
+bool trySceneIsGraphics(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs, CallContext &ctx);
+bool trySceneIsHandle(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs, CallContext &ctx);
+bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
+                  keel::MutArrayRef<Value> outs, CallContext &ctx);
+} // namespace numkit::gfx::detail
 
 #include <numkit/core/engine.hpp>  // Engine, CallContext, ExternalFunc, Span, Value
 #include <numkit/graphics/figure_manager.hpp>
@@ -1612,6 +1625,8 @@ keel::Array<SettableEntry> settableCatalogFor(keel::StringRef type)
 void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
              keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
+    if (gfx::detail::trySceneSet(args, nargout, outs, ctx))
+        return;
     if (args.empty()) { outs[0] = Value(); return; }
     const keel::i32 id = graphicsHandleIdOf(args[0]);
     if (id < 0) { outs[0] = Value(); return; }
@@ -1731,6 +1746,8 @@ void set_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 void get_reg(keel::ArrayRef<Value> args, keel::usize,
              keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
+    if (gfx::detail::trySceneGet(args, outs, ctx))
+        return;
     if (args.empty()) { outs[0] = Value(); return; }
     auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
@@ -1878,6 +1895,8 @@ void get_reg(keel::ArrayRef<Value> args, keel::usize,
 void findobj_reg(keel::ArrayRef<Value> args, keel::usize,
                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
+    if (gfx::detail::trySceneFind(args, /*includeHidden=*/false, outs, ctx))
+        return;
     auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
@@ -2056,9 +2075,19 @@ void findobj_reg(keel::ArrayRef<Value> args, keel::usize,
     outs[0] = makeHandleArray(cls, hits, mr);
 }
 
+void findall_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    if (gfx::detail::trySceneFind(args, /*includeHidden=*/true, outs, ctx))
+        return;
+    findobj_reg(args, nargout, outs, ctx);
+}
+
 void isgraphics_reg(keel::ArrayRef<Value> args, keel::usize,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
+    if (gfx::detail::trySceneIsGraphics(args, outs, ctx))
+        return;
     if (args.empty()) { outs[0] = Value(); return; }
     auto &fm = ctx.engine->figureManager();
     const keel::i32 id = graphicsHandleIdOf(args[0]);
@@ -2074,51 +2103,23 @@ void isgraphics_reg(keel::ArrayRef<Value> args, keel::usize,
     outs[0] = Value::logicalScalar(ok);
 }
 
-void groot_reg(keel::ArrayRef<Value>, keel::usize,
-               keel::MutArrayRef<Value> outs, CallContext &ctx)
-{
-    outs[0] = makeRootHandle(ctx.engine->figureManager(), ctx.engine->allocator());
-}
-
-void gobjects_reg(keel::ArrayRef<Value> args, keel::usize,
-                  keel::MutArrayRef<Value> outs, CallContext &ctx)
-{
-    auto *mr = ctx.engine->allocator();
-    keel::usize r = 1, c = 1;
-    if (args.size() == 1 && args[0].isNumeric()) {
-        if (args[0].numel() == 1) {
-            r = c = keel::as<keel::usize>(keel::max(0.0, args[0].toScalar()));
-        } else if (args[0].numel() >= 2) {
-            r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
-            c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(1)));
-        }
-    } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-        r = keel::as<keel::usize>(keel::max(0.0, args[0].toScalar()));
-        c = keel::as<keel::usize>(keel::max(0.0, args[1].toScalar()));
-    }
-    auto *res = mr ? mr : keel::default_allocator();
-    keel::usize n = r * c;
-    keel::Array<keel::Arc<ObjectState>> states(res);
-    states.reserve(n);
-    for (keel::usize i = 0; i < n; ++i) {
-        auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
-        payload->handleId = 0;
-        auto st = keel::make_arc_in<ObjectState>(res, res);
-        st->native = keel::move(payload);
-        states.push_back(keel::move(st));
-    }
-    outs[0] = Value::objectArray("matlab.graphics.GraphicsPlaceholder",
-                                 Dims(r, c), keel::move(states),
-                                 /*isHandle=*/true, res);
-}
-
 void ishandle_reg(keel::ArrayRef<Value> args, keel::usize,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
+    if (gfx::detail::trySceneIsHandle(args, outs, ctx))
+        return;
     if (args.empty()) { outs[0] = Value(); return; }
     auto &fm = ctx.engine->figureManager();
     const keel::i32 id = graphicsHandleIdOf(args[0]);
     outs[0] = Value::logicalScalar(id >= 0 && fm.findHandle(id) != nullptr);
+}
+
+void isvalid_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    if (gfx::detail::trySceneIsValid(args, outs, ctx))
+        return;
+    ishandle_reg(args, nargout, outs, ctx);
 }
 
 void graphicsNoop_reg(keel::ArrayRef<Value>, keel::usize nargout,
@@ -2245,12 +2246,10 @@ constexpr GfxRegEntry kHandleAccessorFns[] = {
     {"set",        &set_reg},
     {"get",        &get_reg},
     {"findobj",    &findobj_reg},
-    {"findall",    &findobj_reg},
+    {"findall",    &findall_reg},
     {"isgraphics", &isgraphics_reg},
-    {"groot",      &groot_reg},
-    {"gobjects",   &gobjects_reg},
     {"ishandle",   &ishandle_reg},
-    {"isvalid",    &ishandle_reg},
+    {"isvalid",    &isvalid_reg},
 };
 
 constexpr GfxRegEntry kMiscGfxFns[] = {
@@ -2296,14 +2295,11 @@ void registerGraphicsClasses(Engine &engine)
                 return;
         classToType.push_back(ClassTypePair{cn, rt});
     };
-    addClass(kFigureClass, "figure");
     addClass(kAxesClass,   "axes");
     addClass(kTextClass,   "text");
     addClass(kLegendClass, "legend");
     addClass(kTiledLayoutClass, "tiledlayout");
-    addClass(kRootClass,   "root");
     addClass("matlab.graphics.Graphics", "line");
-    addClass("matlab.graphics.GraphicsPlaceholder", "line");
     for (const auto &e : kHandleTypes)
         addClass(e.className, e.type);
 
@@ -2420,6 +2416,7 @@ void registerGraphicsClasses(Engine &engine)
 // ============================================================
 void GraphicsLibrary::install(Engine &engine)
 {
+    gfx::detail::registerSceneGraphics(engine);
     registerHandleAccessors(engine);
     registerGraphicsClasses(engine);
     registerFigureExport(engine);
@@ -2427,11 +2424,12 @@ void GraphicsLibrary::install(Engine &engine)
     keel::Array<PlotEntry> table;
     buildPlotTable(table);
 
-    // Handle-accessor names registered above — skip their (noop)
+    // Handle-accessor & Phase-1 scene names registered above — skip their
     // table entries (registerFunctionImpl_ throws on duplicates).
     auto isHandleAccessorName = [](keel::StringRef nm) -> bool {
         static constexpr const char *kNames[] = {
             "set", "get", "isgraphics", "ishandle", "isvalid",
+            "figure", "gcf", "clf", "close",
         };
         for (const char *n : kNames)
             if (nm == n) return true;
