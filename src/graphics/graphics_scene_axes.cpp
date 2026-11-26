@@ -516,6 +516,20 @@ NodeId GraphicsScene::createOrUpdateLegend(NodeId axId, keel::ArrayRef<keel::Str
         for (keel::usize i = 0; i < labels.size(); ++i)
             c.cellAt(i) = Value::fromString(labels[i], mr_);
         setProperty(lgId, "String", keel::move(c), mr_);
+        // Mirror legend labels onto the axes's chart children's DisplayName in creation order.
+        if (const GraphicsNode *axCur = findNode(axId)) {
+            keel::usize li = 0;
+            for (keel::usize ci = axCur->children.size(); ci > 0 && li < labels.size(); --ci) {
+                const NodeId cid = axCur->children[ci - 1];
+                const GraphicsNode *ch = findNode(cid);
+                if (!ch || ch->classId == ClassId::Text || ch->classId == ClassId::Image)
+                    continue;
+                if (hasProperty(cid, "DisplayName")) {
+                    setProperty(cid, "DisplayName", Value::fromString(labels[li], mr_), mr_);
+                    ++li;
+                }
+            }
+        }
     }
     return lgId;
 }

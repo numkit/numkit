@@ -149,7 +149,7 @@ public:
 
     // ── Phase 3: Chart Primitives, Annotations & Live Auto-Limits ───────
     static bool isChartClass(ClassId cls) noexcept;
-    NodeId prepareAxesForPlot(NodeId axId = kInvalidNodeId, bool resetIfReplace = true);
+    NodeId prepareAxesForPlot(NodeId axId = kInvalidNodeId, bool resetIfReplace = true, bool is3D = false);
     Value nextSeriesColor(NodeId axId, keel::i32 &seriesIdxOut, keel::Allocator *mr = nullptr);
     NodeId createChartNode(ClassId cls, NodeId parentId = kInvalidNodeId, bool consumeSeriesColor = true);
     void recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr = nullptr);

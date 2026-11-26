@@ -727,6 +727,38 @@ TEST_P(GraphicsSceneTest, FieldtestRealWorldGraphicsCompatibility)
     EXPECT_TRUE(evalBool("isprop(he, 'UData') && isprop(he, 'LData')"));
     EXPECT_NEAR(evalScalar("he.UData(1)"), 0.5, 1e-12);
     EXPECT_DOUBLE_EQ(evalScalar("numel(hc1.LevelList)"), 1.0);
+
+    // 6. Block A fidelity: 2D Box='on' & ZLim=[-1 1], hold on keeps Box='off',
+    //    3D surf sets XGrid/YGrid/ZGrid='on' & Box='off', imagesc exact pixel bounds,
+    //    legend mirrors DisplayName, contour auto nice LevelStep & contourf N+1 levels
+    eval("fa = figure('Visible', 'off'); axa = axes(fa);"
+         "hl1 = plot(axa, [1 2], [3 4]);"
+         "hold(axa, 'on'); hl2 = plot(axa, [1 2], [4 3]);"
+         "legend(axa, 'Alpha', 'Beta');"
+         "fb = figure('Visible', 'off'); axb = axes(fb); hold(axb, 'on'); plot(axb, [1 2], [3 4]);"
+         "fc = figure('Visible', 'off'); axc = axes(fc); surf(axc, peaks(6));"
+         "fd = figure('Visible', 'off'); axd = axes(fd); imagesc(axd, eye(4));"
+         "fe = figure('Visible', 'off'); axe = axes(fe); [~, hca] = contour(axe, peaks(10));"
+         "ff = figure('Visible', 'off'); axf = axes(ff); [~, hcf] = contourf(axf, peaks(10), 10);");
+    EXPECT_EQ(evalString("axa.Box"), "on");
+    EXPECT_DOUBLE_EQ(evalScalar("axa.ZLim(1)"), -1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("axa.ZLim(2)"), 1.0);
+    EXPECT_EQ(evalString("hl1.DisplayName"), "Alpha");
+    EXPECT_EQ(evalString("hl2.DisplayName"), "Beta");
+    EXPECT_EQ(evalString("axb.Box"), "off");
+    EXPECT_EQ(evalString("axc.Box"), "off");
+    EXPECT_EQ(evalString("axc.XGrid"), "on");
+    EXPECT_EQ(evalString("axc.YGrid"), "on");
+    EXPECT_EQ(evalString("axc.ZGrid"), "on");
+    EXPECT_DOUBLE_EQ(evalScalar("axd.XLim(1)"), 0.5);
+    EXPECT_DOUBLE_EQ(evalScalar("axd.XLim(2)"), 4.5);
+    EXPECT_DOUBLE_EQ(evalScalar("axd.YLim(1)"), 0.5);
+    EXPECT_DOUBLE_EQ(evalScalar("axd.YLim(2)"), 4.5);
+    EXPECT_DOUBLE_EQ(evalScalar("axe.ZLim(1)"), -1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("axe.ZLim(2)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hca.LevelStep"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hca.LevelList)"), 7.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hcf.LevelList)"), 11.0);
 }
 
 INSTANTIATE_DUAL(GraphicsSceneTest);

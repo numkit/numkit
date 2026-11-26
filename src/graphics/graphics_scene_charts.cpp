@@ -111,7 +111,7 @@ bool GraphicsScene::isChartClass(ClassId cls) noexcept
     }
 }
 
-NodeId GraphicsScene::prepareAxesForPlot(NodeId axId, bool resetIfReplace)
+NodeId GraphicsScene::prepareAxesForPlot(NodeId axId, bool resetIfReplace, bool is3D)
 {
     const NodeId target = (axId != kInvalidNodeId && findNode(axId) != nullptr)
                               ? axId : ensureCurrentAxes();
@@ -139,6 +139,10 @@ NodeId GraphicsScene::prepareAxesForPlot(NodeId axId, bool resetIfReplace)
                 ax->props.put(keel::String::from("XTickMode", mr_), Value::fromString("auto", mr_));
                 ax->props.put(keel::String::from("YTickMode", mr_), Value::fromString("auto", mr_));
                 ax->props.put(keel::String::from("ZTickMode", mr_), Value::fromString("auto", mr_));
+                if (ax->classId == ClassId::Axes) {
+                    ax->props.put(keel::String::from("Box", mr_),
+                                  Value::fromString(is3D ? "off" : "on", mr_));
+                }
             }
         }
     }
@@ -263,6 +267,10 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     keel::f64 cmin = 0.0, cmax = 0.0; bool anyC = false;
     bool hasBaseZero = false;
     keel::f64 baseVal = 0.0;
+    bool hasImage = false;
+    bool hasNonImage = false;
+    const Value viewV = getProperty(axId, "View", res);
+    const bool isView3D = (viewV.isNumeric() && viewV.numel() >= 2 && keel::abs(viewV.elemAsDouble(1) - 90.0) > 1e-6);
 
     for (NodeId cid : ax->children) {
         const GraphicsNode *ch = findNode(cid);
@@ -272,6 +280,7 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
             continue;
 
         if (ch->classId == ClassId::Histogram) {
+            hasNonImage = true;
             if (const Value *be = ch->props.get("BinEdges"))
                 scanNumericBounds(*be, xmin, xmax, anyX);
             if (const Value *vals = ch->props.get("Values")) {
@@ -281,28 +290,44 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
             continue;
         }
         if (ch->classId == ClassId::Image) {
+            hasImage = true;
             const Value *cd = ch->props.get("CData");
             const Value *xd = ch->props.get("XData");
             const Value *yd = ch->props.get("YData");
+            const keel::usize cols = (cd && !cd->isEmpty()) ? keel::max<keel::usize>(1, cd->dims().cols()) : 1;
+            const keel::usize rows = (cd && !cd->isEmpty()) ? keel::max<keel::usize>(1, cd->dims().rows()) : 1;
             if (xd && !xd->isEmpty()) {
-                scanNumericBounds(*xd, xmin, xmax, anyX);
+                keel::f64 x0 = xd->elemAsDouble(0);
+                keel::f64 x1 = xd->elemAsDouble(xd->numel() - 1);
+                if (x1 < x0) keel::swap(x0, x1);
+                const keel::f64 dx = (cols > 1) ? (x1 - x0) / keel::as<keel::f64>(cols - 1) : 1.0;
+                const keel::f64 lo = x0 - 0.5 * dx;
+                const keel::f64 hi = x1 + 0.5 * dx;
+                if (!anyX) { xmin = lo; xmax = hi; anyX = true; }
+                else { xmin = keel::min(xmin, lo); xmax = keel::max(xmax, hi); }
             } else if (cd && !cd->isEmpty()) {
-                const keel::f64 cols = keel::as<keel::f64>(cd->dims().cols());
-                keel::f64 lo = 0.5, hi = cols + 0.5;
+                const keel::f64 lo = 0.5, hi = keel::as<keel::f64>(cols) + 0.5;
                 if (!anyX) { xmin = lo; xmax = hi; anyX = true; }
                 else { xmin = keel::min(xmin, lo); xmax = keel::max(xmax, hi); }
             }
             if (yd && !yd->isEmpty()) {
-                scanNumericBounds(*yd, ymin, ymax, anyY);
+                keel::f64 y0 = yd->elemAsDouble(0);
+                keel::f64 y1 = yd->elemAsDouble(yd->numel() - 1);
+                if (y1 < y0) keel::swap(y0, y1);
+                const keel::f64 dy = (rows > 1) ? (y1 - y0) / keel::as<keel::f64>(rows - 1) : 1.0;
+                const keel::f64 lo = y0 - 0.5 * dy;
+                const keel::f64 hi = y1 + 0.5 * dy;
+                if (!anyY) { ymin = lo; ymax = hi; anyY = true; }
+                else { ymin = keel::min(ymin, lo); ymax = keel::max(ymax, hi); }
             } else if (cd && !cd->isEmpty()) {
-                const keel::f64 rows = keel::as<keel::f64>(cd->dims().rows());
-                keel::f64 lo = 0.5, hi = rows + 0.5;
+                const keel::f64 lo = 0.5, hi = keel::as<keel::f64>(rows) + 0.5;
                 if (!anyY) { ymin = lo; ymax = hi; anyY = true; }
                 else { ymin = keel::min(ymin, lo); ymax = keel::max(ymax, hi); }
             }
             if (cd) scanNumericBounds(*cd, cmin, cmax, anyC);
             continue;
         }
+        hasNonImage = true;
         if (ch->classId == ClassId::AnimatedLine) {
             for (keel::f64 v : ch->animX) {
                 if (keel::is_finite(v)) {
@@ -331,8 +356,15 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
             scanNumericBounds(*xd, xmin, xmax, anyX);
         if (const Value *yd = ch->props.get("YData"))
             scanNumericBounds(*yd, ymin, ymax, anyY);
-        if (const Value *zd = ch->props.get("ZData"))
-            scanNumericBounds(*zd, zmin, zmax, anyZ);
+        if (const Value *zd = ch->props.get("ZData")) {
+            if (ch->classId == ClassId::Contour) {
+                scanNumericBounds(*zd, cmin, cmax, anyC);
+                if (isView3D)
+                    scanNumericBounds(*zd, zmin, zmax, anyZ);
+            } else {
+                scanNumericBounds(*zd, zmin, zmax, anyZ);
+            }
+        }
         if (const Value *cd = ch->props.get("CData")) {
             if (ch->classId == ClassId::Surface || ch->classId == ClassId::Contour
                 || (ch->classId == ClassId::Scatter && cd->numel() != 3)) {
@@ -417,9 +449,15 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         }
     };
 
-    applyAxis('x', "XLim", "XLimMode", "XLimitMethod", "XScale", xmin, xmax, anyX);
-    applyAxis('y', "YLim", "YLimMode", "YLimitMethod", "YScale", ymin, ymax, anyY);
-    applyAxis('z', "ZLim", "ZLimMode", "ZLimitMethod", "ZScale", zmin, zmax, anyZ);
+    const bool imageOnlyTight = (hasImage && !hasNonImage);
+    applyAxis('x', "XLim", "XLimMode", imageOnlyTight ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
+    applyAxis('y', "YLim", "YLimMode", imageOnlyTight ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
+    if (anyZ) {
+        applyAxis('z', "ZLim", "ZLimMode", "ZLimitMethod", "ZScale", zmin, zmax, true);
+    } else if ((anyX || anyY) && asciiEqualNoCase(getProperty(axId, "ZLimMode", res).toString(), "auto")) {
+        // 2-D plots default auto ZLim to [-1, 1] (matches reference engine).
+        applyAxis('z', "ZLim", "ZLimMode", nullptr, "ZScale", -1.0, 1.0, true);
+    }
     applyAxis('c', "CLim", "CLimMode", nullptr, nullptr, cmin, cmax, anyC);
     ax->version = generation_ + 1;
 }

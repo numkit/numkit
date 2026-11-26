@@ -407,12 +407,12 @@ void plot3_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, true);
 
     const ClassSchema &lineSchema = schemaFor(ClassId::Line);
     keel::Array<NodeId> created(mr);
     keel::usize nvStart = args.size();
-    while (idx + 2 < args.size() && args[idx].isNumeric() && args[idx + 1].isNumeric() && args[idx + 2].isNumeric()) {
+    while (idx + 2 < args.size() && isPlottableCoord(args[idx]) && isPlottableCoord(args[idx + 1]) && isPlottableCoord(args[idx + 2])) {
         const Value xv = flattenToRowVec(args[idx], mr);
         const Value yv = flattenToRowVec(args[idx + 1], mr);
         const Value zv = flattenToRowVec(args[idx + 2], mr);
@@ -454,7 +454,7 @@ void scatterCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, is3D);
 
     const NodeId sid = scene.createChartNode(ClassId::Scatter, axId, true);
     if (idx + (is3D ? 2 : 1) < args.size()) {
@@ -639,7 +639,8 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace);
+    const bool is3DSurf = !isPcolor;
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace, is3DSurf);
 
     keel::Array<const Value *> nums(mr);
     while (idx < args.size() && args[idx].isNumeric()) {
@@ -685,6 +686,11 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
         Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
         vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
         scene.setProperty(axId, "View", vw, mr);
+        if (!scene.isHoldOn(axId)) {
+            scene.setProperty(axId, "XGrid", Value::fromString("on", mr), mr);
+            scene.setProperty(axId, "YGrid", Value::fromString("on", mr), mr);
+            scene.setProperty(axId, "ZGrid", Value::fromString("on", mr), mr);
+        }
     }
     scene.recomputeAxesAutoLimits(axId, mr);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(sid, mr) : Value();
@@ -708,7 +714,7 @@ void patchCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace, is3D);
 
     const NodeId pid = scene.createChartNode(ClassId::Patch, axId, false);
     if (idx < args.size() && isPlottableCoord(args[idx])) {
@@ -778,7 +784,7 @@ void quiverCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, is3D);
 
     keel::Array<const Value *> nums(mr);
     while (idx < args.size() && args[idx].isNumeric()) {
@@ -871,7 +877,7 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, is3D);
 
     keel::Array<const Value *> nums(mr);
     while (idx < args.size() && args[idx].isNumeric()) {
@@ -880,6 +886,7 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
     }
 
     Value xd, yd, zd;
+    bool hasExplicitN = false;
     keel::usize nLevels = 7;
     Value explicitLevels;
     if (nums.size() == 1) {
@@ -890,15 +897,23 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         zd = ensure2DDouble(*nums[0], mr);
         xd = makeRange1N(zd.dims().cols(), mr);
         yd = makeRange1N(zd.dims().rows(), mr);
-        if (nums[1]->numel() == 1) nLevels = keel::max<keel::usize>(1, keel::as<keel::usize>(nums[1]->toScalar()));
-        else explicitLevels = flattenToRowVec(*nums[1], mr);
+        if (nums[1]->numel() == 1) {
+            hasExplicitN = true;
+            nLevels = keel::max<keel::usize>(1, keel::as<keel::usize>(nums[1]->toScalar()));
+        } else {
+            explicitLevels = flattenToRowVec(*nums[1], mr);
+        }
     } else if (nums.size() >= 3) {
         xd = ensure2DDouble(*nums[0], mr);
         yd = ensure2DDouble(*nums[1], mr);
         zd = ensure2DDouble(*nums[2], mr);
         if (nums.size() >= 4) {
-            if (nums[3]->numel() == 1) nLevels = keel::max<keel::usize>(1, keel::as<keel::usize>(nums[3]->toScalar()));
-            else explicitLevels = flattenToRowVec(*nums[3], mr);
+            if (nums[3]->numel() == 1) {
+                hasExplicitN = true;
+                nLevels = keel::max<keel::usize>(1, keel::as<keel::usize>(nums[3]->toScalar()));
+            } else {
+                explicitLevels = flattenToRowVec(*nums[3], mr);
+            }
         }
     }
 
@@ -922,17 +937,54 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         }
     }
 
-    // Compute default LevelList across Z range.
+    // Compute LevelList & LevelStep across Z range.
+    keel::f64 autoLevelStep = 0.0;
     if (explicitLevels.isEmpty() && !zd.isEmpty()) {
-        keel::f64 zmin = 1e300, zmax = -1e300;
+        keel::f64 zmin = keel::Limits<keel::f64>::infinity();
+        keel::f64 zmax = -keel::Limits<keel::f64>::infinity();
         for (keel::usize i = 0; i < zd.numel(); ++i) {
             const keel::f64 v = zd.elemAsDouble(i);
             if (keel::is_finite(v)) { zmin = keel::min(zmin, v); zmax = keel::max(zmax, v); }
         }
-        if (zmax > zmin) {
-            explicitLevels = Value::matrix(1, nLevels, ValueType::DOUBLE, mr);
-            for (keel::usize k = 0; k < nLevels; ++k)
-                explicitLevels.doubleDataMut()[k] = zmin + (zmax - zmin) * keel::as<keel::f64>(k + 1) / keel::as<keel::f64>(nLevels + 1);
+        if (keel::is_finite(zmin) && keel::is_finite(zmax) && zmax > zmin) {
+            const keel::f64 span = zmax - zmin;
+            if (hasExplicitN) {
+                const keel::f64 dz = span / keel::as<keel::f64>(nLevels + 1);
+                autoLevelStep = dz;
+                const keel::usize count = filled ? (nLevels + 1) : nLevels;
+                explicitLevels = Value::matrix(1, count, ValueType::DOUBLE, mr);
+                for (keel::usize k = 0; k < count; ++k) {
+                    const keel::usize m = filled ? k : (k + 1);
+                    explicitLevels.doubleDataMut()[k] = zmin + dz * keel::as<keel::f64>(m);
+                }
+            } else {
+                // Auto nice step: ceil_to_1_2_5(span / 10)
+                const keel::f64 raw = span / 10.0;
+                const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(raw)));
+                const keel::f64 frac = raw / p10;
+                const keel::f64 mult = (frac <= 1.0 + 1e-12) ? 1.0
+                                     : (frac <= 2.0 + 1e-12) ? 2.0
+                                     : (frac <= 5.0 + 1e-12) ? 5.0
+                                                             : 10.0;
+                const keel::f64 step = mult * p10;
+                autoLevelStep = step;
+                keel::f64 first = keel::ceil(zmin / step - 1e-12) * step;
+                if (zmin == 0.0 && keel::abs(first) <= 1e-12 * step)
+                    first = step;
+                const keel::f64 last = keel::floor(zmax / step + 1e-12) * step;
+                keel::Array<keel::f64> lv(mr);
+                for (keel::i32 k = 0; k < 256; ++k) {
+                    const keel::f64 val = first + keel::as<keel::f64>(k) * step;
+                    if (val > last + 1e-9 * step)
+                        break;
+                    lv.push_back(keel::abs(val) < 1e-12 * step ? 0.0 : val);
+                }
+                if (!lv.empty()) {
+                    explicitLevels = Value::matrix(1, lv.size(), ValueType::DOUBLE, mr);
+                    for (keel::usize k = 0; k < lv.size(); ++k)
+                        explicitLevels.doubleDataMut()[k] = lv[k];
+                }
+            }
         }
     }
 
@@ -942,6 +994,7 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!yd.isEmpty()) cn->props.put(keel::String::from("YData", mr), yd);
         if (!zd.isEmpty()) cn->props.put(keel::String::from("ZData", mr), zd);
         if (!explicitLevels.isEmpty()) cn->props.put(keel::String::from("LevelList", mr), explicitLevels);
+        if (autoLevelStep > 0.0) cn->props.put(keel::String::from("LevelStep", mr), Value::scalar(autoLevelStep, mr));
         if (filled) cn->props.put(keel::String::from("Fill", mr), Value::fromString("on", mr));
     }
     if (idx < args.size())
@@ -979,7 +1032,7 @@ void stemCore(keel::ArrayRef<Value> args, keel::usize nargout,
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
-    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, is3D);
 
     Value xd, yd, zd;
     if (!is3D) {
