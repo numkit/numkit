@@ -27,6 +27,7 @@ struct GraphicsHandlePayload : public NativePayload
     keel::i32 handleId = 0;
     keel::i32 numericValue = 0;
     bool inScene = false;
+    keel::String className;
     keel::Arc<NativePayload> clone(keel::Allocator *alloc = nullptr) const override
     {
         auto *res = alloc ? alloc : keel::default_allocator();
@@ -34,9 +35,11 @@ struct GraphicsHandlePayload : public NativePayload
         p->handleId = handleId;
         p->numericValue = numericValue;
         p->inScene = inScene;
+        p->className = className.clone(res);
         return p;
     }
     keel::f64 asDouble() const override { return keel::as<keel::f64>(numericValue != 0 ? numericValue : handleId); }
+    keel::StringRef concreteClassName() const noexcept override { return className.as_ref(); }
 };
 
 // Registry id of a graphics-handle Value, or -1 when `v` is not one.
@@ -90,6 +93,7 @@ inline Value makeGraphicsHandleValue(keel::StringRef className, keel::i32 id,
     auto st = keel::make_arc_in<ObjectState>(res, res);
     auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
     payload->handleId = id;
+    payload->className = keel::String::from(className, res);
     st->native = keel::move(payload);
     return Value::object(className, keel::move(st), /*isHandle=*/true, res);
 }
@@ -103,6 +107,7 @@ inline Value makeGraphicsHandleValue(keel::StringRef className, keel::i32 id,
     auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
     payload->handleId = id;
     payload->numericValue = numericVal;
+    payload->className = keel::String::from(className, res);
     st->native = keel::move(payload);
     return Value::object(className, keel::move(st), /*isHandle=*/true, res);
 }

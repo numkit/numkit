@@ -58,7 +58,30 @@ NodeId resolveLeadingAxesOpt(GraphicsScene &scene, keel::ArrayRef<Value> args, k
     return kInvalidNodeId;
 }
 
-// Parse MATLAB LineSpec (e.g. 'r--o', 'k:', 'b*-', '.'). Returns true iff every char is a valid linespec token.
+inline bool isPlottableCoord(const Value &v) noexcept
+{
+    if (v.isNumeric() || v.isLogical())
+        return true;
+    if (v.isObject() && !isSceneGraphicsHandle(v)) {
+        const keel::StringRef cn = v.objectClassNameRef();
+        return cn == "datetime" || cn == "duration" || cn == "categorical";
+    }
+    return false;
+}
+
+inline bool isColorCharOrName(keel::StringRef s) noexcept
+{
+    return asciiEqualNoCase(s, "r") || asciiEqualNoCase(s, "red")
+        || asciiEqualNoCase(s, "g") || asciiEqualNoCase(s, "green")
+        || asciiEqualNoCase(s, "b") || asciiEqualNoCase(s, "blue")
+        || asciiEqualNoCase(s, "c") || asciiEqualNoCase(s, "cyan")
+        || asciiEqualNoCase(s, "m") || asciiEqualNoCase(s, "magenta")
+        || asciiEqualNoCase(s, "y") || asciiEqualNoCase(s, "yellow")
+        || asciiEqualNoCase(s, "k") || asciiEqualNoCase(s, "black")
+        || asciiEqualNoCase(s, "w") || asciiEqualNoCase(s, "white");
+}
+
+// Parse MATLAB LineSpec (e.g. 'r--o', 'k:', 'b o-', '.'). Returns true iff every non-space char is a valid linespec token.
 struct ParsedLineSpec {
     keel::String color;
     keel::String lineStyle;
@@ -69,21 +92,25 @@ struct ParsedLineSpec {
 ParsedLineSpec parseLineSpec(keel::StringRef s, keel::Allocator *mr)
 {
     ParsedLineSpec out;
-    if (s.empty() || s.size() > 6)
+    if (s.empty() || s.size() > 16)
         return out;
     keel::usize i = 0;
     while (i < s.size()) {
-        if (i + 1 < s.size() && s[i] == '-' && s[i + 1] == '-') {
+        const char c = s[i];
+        if (c == ' ' || c == '\t') {
+            ++i;
+            continue;
+        }
+        if (i + 1 < s.size() && c == '-' && s[i + 1] == '-') {
             if (!out.lineStyle.empty()) return ParsedLineSpec{};
             out.lineStyle = keel::String::from("--", mr);
             i += 2; continue;
         }
-        if (i + 1 < s.size() && s[i] == '-' && s[i + 1] == '.') {
+        if (i + 1 < s.size() && c == '-' && s[i + 1] == '.') {
             if (!out.lineStyle.empty()) return ParsedLineSpec{};
             out.lineStyle = keel::String::from("-.", mr);
             i += 2; continue;
         }
-        const char c = s[i];
         if (c == '-' || c == ':') {
             if (!out.lineStyle.empty()) return ParsedLineSpec{};
             const char b[2] = {c, '\0'};
@@ -230,13 +257,13 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
             nvStart = idx;
             break;
         }
-        if (!args[idx].isNumeric()) {
+        if (!isPlottableCoord(args[idx])) {
             ++idx;
             continue;
         }
         const Value &a0 = args[idx++];
         const Value *yPtr = nullptr;
-        if (idx < args.size() && args[idx].isNumeric()) {
+        if (idx < args.size() && isPlottableCoord(args[idx])) {
             yPtr = &args[idx++];
         }
         ParsedLineSpec ls;
@@ -520,9 +547,10 @@ void barCore(keel::ArrayRef<Value> args, keel::usize nargout,
     bool hasX = false;
     keel::f64 width = 0.8;
     keel::String layout = keel::String::from("grouped", mr);
+    keel::String colorSpec(mr);
 
-    if (idx < args.size() && args[idx].isNumeric()) {
-        if (idx + 1 < args.size() && args[idx + 1].isNumeric() && args[idx + 1].numel() > 1) {
+    if (idx < args.size() && isPlottableCoord(args[idx])) {
+        if (idx + 1 < args.size() && isPlottableCoord(args[idx + 1]) && args[idx + 1].numel() > 1) {
             xArg = args[idx++];
             yArg = args[idx++];
             hasX = true;
@@ -536,13 +564,22 @@ void barCore(keel::ArrayRef<Value> args, keel::usize nargout,
     const ClassSchema &barSchema = schemaFor(ClassId::Bar);
     while (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
-        if (asciiEqualNoCase(tok, "grouped") || asciiEqualNoCase(tok, "stacked")) {
-            layout = tok.clone(mr);
+        if (asciiEqualNoCase(tok, "grouped") || asciiEqualNoCase(tok, "stacked")
+            || asciiEqualNoCase(tok, "hist") || asciiEqualNoCase(tok, "histc")) {
+            if (asciiEqualNoCase(tok, "grouped") || asciiEqualNoCase(tok, "stacked"))
+                layout = tok.clone(mr);
+            else
+                width = 1.0;
             ++idx;
             continue;
         }
         if (((args.size() - idx) % 2 == 0) && barSchema.findExact(tok) != nullptr)
             break;
+        if (isColorCharOrName(tok)) {
+            colorSpec = tok.clone(mr);
+            ++idx;
+            continue;
+        }
         break;
     }
 
@@ -556,6 +593,8 @@ void barCore(keel::ArrayRef<Value> args, keel::usize nargout,
             bn->props.put(keel::String::from("BarLayout", mr), Value::fromString(layout, mr));
             bn->props.put(keel::String::from("Horizontal", mr), Value::fromString(horizontal ? "on" : "off", mr));
         }
+        if (!colorSpec.empty())
+            scene.setProperty(bid, "FaceColor", Value::fromString(colorSpec, mr), mr);
         created.push_back(bid);
     };
 
@@ -672,17 +711,21 @@ void patchCore(keel::ArrayRef<Value> args, keel::usize nargout,
     const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace);
 
     const NodeId pid = scene.createChartNode(ClassId::Patch, axId, false);
-    if (idx < args.size() && args[idx].isNumeric()) {
+    if (idx < args.size() && isPlottableCoord(args[idx])) {
         const Value xd = ensure2DDouble(args[idx++], mr);
         Value yd, zd;
-        if (idx < args.size() && args[idx].isNumeric())
+        if (idx < args.size() && isPlottableCoord(args[idx]))
             yd = ensure2DDouble(args[idx++], mr);
-        if (is3D && idx < args.size() && args[idx].isNumeric())
+        if (is3D && idx < args.size() && isPlottableCoord(args[idx]))
             zd = ensure2DDouble(args[idx++], mr);
-        else if (!is3D && idx + 1 < args.size() && args[idx].isNumeric()
+        else if (!is3D && idx + 1 < args.size() && isPlottableCoord(args[idx])
                  && (args[idx + 1].isChar() || args[idx + 1].isString() || args[idx + 1].isNumeric())) {
-            // patch(X, Y, Z, C)
-            if (args[idx].numel() == xd.numel())
+            // patch(X, Y, Z, C): distinguish Z from 3-element RGB triplet C followed by NV pairs
+            const bool looksLikeRgbBeforeNV = (args[idx].numel() == 3 && xd.numel() != 3)
+                || (args[idx].numel() == 3 && ((args.size() - idx - 1) % 2 == 0)
+                    && (args[idx + 1].isChar() || args[idx + 1].isString())
+                    && schemaFor(ClassId::Patch).findExact(args[idx + 1].toString()) != nullptr);
+            if (!looksLikeRgbBeforeNV && args[idx].numel() == xd.numel())
                 zd = ensure2DDouble(args[idx++], mr);
         }
         if (GraphicsNode *pn = scene.findNode(pid)) {
@@ -774,6 +817,35 @@ void quiverCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!vd.isEmpty()) qn->props.put(keel::String::from("VData", mr), vd);
         if (!wd.isEmpty()) qn->props.put(keel::String::from("WData", mr), wd);
     }
+    // Optional numeric scale argument (scale == 0 disables AutoScale)
+    if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() == 1) {
+        const keel::f64 sc = args[idx++].toScalar();
+        if (sc == 0.0) {
+            scene.setProperty(qid, "AutoScale", Value::fromString("off", mr), mr);
+        } else {
+            scene.setProperty(qid, "AutoScale", Value::fromString("on", mr), mr);
+            scene.setProperty(qid, "AutoScaleFactor", Value::scalar(sc, mr), mr);
+        }
+    }
+    // Optional 'filled' and/or LineSpec before Name-Value pairs
+    const ClassSchema &qSchema = schemaFor(ClassId::Quiver);
+    while (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
+        const keel::String tok = args[idx].toString();
+        if (asciiEqualNoCase(tok, "filled")) {
+            scene.setProperty(qid, "MarkerFaceColor", scene.getProperty(qid, "Color", mr), mr);
+            ++idx;
+            continue;
+        }
+        if (((args.size() - idx) % 2 == 0) && qSchema.findExact(tok) != nullptr)
+            break;
+        ParsedLineSpec ls = parseLineSpec(tok, mr);
+        if (ls.valid) {
+            applyLineSpecToNode(scene, qid, ls, mr);
+            ++idx;
+            continue;
+        }
+        break;
+    }
     if (idx < args.size())
         applyChartNV(scene, qid, args, idx, mr);
     if (is3D) {
@@ -827,6 +899,26 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (nums.size() >= 4) {
             if (nums[3]->numel() == 1) nLevels = keel::max<keel::usize>(1, keel::as<keel::usize>(nums[3]->toScalar()));
             else explicitLevels = flattenToRowVec(*nums[3], mr);
+        }
+    }
+
+    // Deduplicate & sort explicit contour levels (e.g. contour(X,Y,Z,[v v]) -> single level [v]).
+    if (!explicitLevels.isEmpty() && explicitLevels.numel() > 1) {
+        keel::Array<keel::f64> lv(mr);
+        lv.reserve(explicitLevels.numel());
+        for (keel::usize i = 0; i < explicitLevels.numel(); ++i)
+            lv.push_back(explicitLevels.elemAsDouble(i));
+        keel::sort(lv);
+        keel::Array<keel::f64> uniq(mr);
+        for (keel::f64 v : lv) {
+            if (uniq.empty() || uniq.back() != v)
+                uniq.push_back(v);
+        }
+        if (uniq.size() != explicitLevels.numel()) {
+            Value ul = Value::matrix(1, uniq.size(), ValueType::DOUBLE, mr);
+            for (keel::usize i = 0; i < uniq.size(); ++i)
+                ul.doubleDataMut()[i] = uniq[i];
+            explicitLevels = keel::move(ul);
         }
     }
 
@@ -950,12 +1042,40 @@ void areaStairCore(ClassId cls, keel::ArrayRef<Value> args, keel::usize nargout,
 
     Value xArg, yArg;
     bool hasX = false;
-    if (idx + 1 < args.size() && args[idx].isNumeric() && args[idx + 1].isNumeric()) {
-        xArg = args[idx++];
+    bool hasBaseValue = false;
+    keel::f64 baseValue = 0.0;
+    if (idx + 1 < args.size() && isPlottableCoord(args[idx]) && isPlottableCoord(args[idx + 1])) {
+        if (cls == ClassId::Area && args[idx + 1].isNumeric() && args[idx + 1].numel() == 1
+            && args[idx].numel() > 1 && (idx + 2 >= args.size() || !isPlottableCoord(args[idx + 2]))) {
+            // area(Y, basevalue, ...)
+            yArg = args[idx++];
+            baseValue = args[idx++].toScalar();
+            hasBaseValue = true;
+        } else {
+            xArg = args[idx++];
+            yArg = args[idx++];
+            hasX = true;
+            if (cls == ClassId::Area && idx < args.size() && args[idx].isNumeric() && args[idx].numel() == 1) {
+                // area(X, Y, basevalue, ...)
+                baseValue = args[idx++].toScalar();
+                hasBaseValue = true;
+            }
+        }
+    } else if (idx < args.size() && isPlottableCoord(args[idx])) {
         yArg = args[idx++];
-        hasX = true;
-    } else if (idx < args.size() && args[idx].isNumeric()) {
-        yArg = args[idx++];
+    }
+
+    ParsedLineSpec ls;
+    if (cls == ClassId::Stair && idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
+        const keel::String tok = args[idx].toString();
+        const ClassSchema &stSchema = schemaFor(ClassId::Stair);
+        if (!(((args.size() - idx) % 2 == 0) && stSchema.findExact(tok) != nullptr)) {
+            ParsedLineSpec cand = parseLineSpec(tok, mr);
+            if (cand.valid) {
+                ls = keel::move(cand);
+                ++idx;
+            }
+        }
     }
 
     keel::Array<NodeId> created(mr);
@@ -968,7 +1088,11 @@ void areaStairCore(ClassId cls, keel::ArrayRef<Value> args, keel::usize nargout,
             if (GraphicsNode *n = scene.findNode(id)) {
                 n->props.put(keel::String::from("XData", mr), xv);
                 n->props.put(keel::String::from("YData", mr), yv);
+                if (hasBaseValue)
+                    n->props.put(keel::String::from("BaseValue", mr), Value::scalar(baseValue, mr));
             }
+            if (ls.valid)
+                applyLineSpecToNode(scene, id, ls, mr);
             created.push_back(id);
         } else {
             const Value xv = hasX ? flattenToRowVec(xArg, mr) : makeRange1N(yArg.dims().rows(), mr);
@@ -977,7 +1101,11 @@ void areaStairCore(ClassId cls, keel::ArrayRef<Value> args, keel::usize nargout,
                 if (GraphicsNode *n = scene.findNode(id)) {
                     n->props.put(keel::String::from("XData", mr), xv);
                     n->props.put(keel::String::from("YData", mr), extractColAsRowVec(yArg, c, mr));
+                    if (hasBaseValue)
+                        n->props.put(keel::String::from("BaseValue", mr), Value::scalar(baseValue, mr));
                 }
+                if (ls.valid)
+                    applyLineSpecToNode(scene, id, ls, mr);
                 created.push_back(id);
             }
         }
@@ -1293,10 +1421,27 @@ void polarplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     if (paxId == kInvalidNodeId) {
         const NodeId cur = scene.currentAxesId();
-        if (const GraphicsNode *cn = scene.findNode(cur); cn && cn->classId == ClassId::PolarAxes)
+        if (const GraphicsNode *cn = scene.findNode(cur); cn && cn->classId == ClassId::PolarAxes) {
             paxId = cur;
-        else
+        } else if (cn && cn->classId == ClassId::Axes && cn->children.empty()) {
+            // Replace an empty Cartesian Axes (e.g. from subplot(1,2,2)) with PolarAxes in place.
+            const NodeId parId = cn->parentId;
+            const Value savedPos = scene.getProperty(cur, "Position", mr);
+            const keel::i32 spR = cn->subplotRows;
+            const keel::i32 spC = cn->subplotCols;
+            const keel::i32 spI = cn->subplotIdx;
+            scene.deleteNode(cur);
+            paxId = scene.createPolarAxes(parId);
+            if (GraphicsNode *pn = scene.findNode(paxId)) {
+                pn->subplotRows = spR;
+                pn->subplotCols = spC;
+                pn->subplotIdx = spI;
+                if (savedPos.numel() == 4)
+                    pn->props.put(keel::String::from("Position", mr), savedPos);
+            }
+        } else {
             paxId = scene.createPolarAxes();
+        }
     }
     scene.prepareAxesForPlot(paxId, true);
 
@@ -1346,10 +1491,27 @@ void polarscatter_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     if (paxId == kInvalidNodeId) {
         const NodeId cur = scene.currentAxesId();
-        if (const GraphicsNode *cn = scene.findNode(cur); cn && cn->classId == ClassId::PolarAxes)
+        if (const GraphicsNode *cn = scene.findNode(cur); cn && cn->classId == ClassId::PolarAxes) {
             paxId = cur;
-        else
+        } else if (cn && cn->classId == ClassId::Axes && cn->children.empty()) {
+            // Replace an empty Cartesian Axes (e.g. from subplot(1,2,2)) with PolarAxes in place.
+            const NodeId parId = cn->parentId;
+            const Value savedPos = scene.getProperty(cur, "Position", mr);
+            const keel::i32 spR = cn->subplotRows;
+            const keel::i32 spC = cn->subplotCols;
+            const keel::i32 spI = cn->subplotIdx;
+            scene.deleteNode(cur);
+            paxId = scene.createPolarAxes(parId);
+            if (GraphicsNode *pn = scene.findNode(paxId)) {
+                pn->subplotRows = spR;
+                pn->subplotCols = spC;
+                pn->subplotIdx = spI;
+                if (savedPos.numel() == 4)
+                    pn->props.put(keel::String::from("Position", mr), savedPos);
+            }
+        } else {
             paxId = scene.createPolarAxes();
+        }
     }
     scene.prepareAxesForPlot(paxId, true);
 

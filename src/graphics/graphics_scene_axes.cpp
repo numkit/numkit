@@ -473,7 +473,12 @@ NodeId GraphicsScene::setLabelText(NodeId ownerId, keel::StringRef slot, keel::S
     if (!ow)
         return kInvalidNodeId;
     NodeId targetId = kInvalidNodeId;
-    if (asciiEqualNoCase(slot, "title"))    targetId = ow->titleId;
+    if (ow->classId == ClassId::ColorBar) {
+        if (asciiEqualNoCase(slot, "ylabel") || asciiEqualNoCase(slot, "xlabel")
+            || asciiEqualNoCase(slot, "title")) {
+            targetId = ow->xLabelId;
+        }
+    } else if (asciiEqualNoCase(slot, "title"))    targetId = ow->titleId;
     else if (asciiEqualNoCase(slot, "subtitle")) targetId = ow->subtitleId;
     else if (asciiEqualNoCase(slot, "xlabel"))   targetId = ow->xLabelId;
     else if (asciiEqualNoCase(slot, "ylabel"))   targetId = (ow->yyRightActive && ow->yLabelRightId != kInvalidNodeId) ? ow->yLabelRightId : ow->yLabelId;

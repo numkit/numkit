@@ -38,8 +38,35 @@ Value makeHandleWithScene(keel::StringRef className, NodeId id, keel::i32 numeri
     payload->handleId = id;
     payload->numericValue = numericVal;
     payload->inScene = true;
+    payload->className = keel::String::from(className, res);
     st->native = keel::move(payload);
     return Value::object(className, keel::move(st), isHandle, res);
+}
+
+keel::StringRef resolveHiddenPropAlias(const GraphicsScene &scene,
+                                       const GraphicsNode *n,
+                                       keel::StringRef rawProp) noexcept
+{
+    if (!n)
+        return rawProp;
+    if (n->classId == ClassId::Contour && asciiEqualNoCase(rawProp, "LineColor"))
+        return "EdgeColor";
+    if (n->classId == ClassId::ErrorBar) {
+        if (asciiEqualNoCase(rawProp, "UData"))
+            return "YPositiveDelta";
+        if (asciiEqualNoCase(rawProp, "LData"))
+            return "YNegativeDelta";
+    }
+    if (n->classId == ClassId::Line || n->classId == ClassId::Scatter) {
+        const GraphicsNode *par = scene.findNode(n->parentId);
+        if (par && par->classId == ClassId::PolarAxes) {
+            if (asciiEqualNoCase(rawProp, "ThetaData"))
+                return "XData";
+            if (asciiEqualNoCase(rawProp, "RData"))
+                return "YData";
+        }
+    }
+    return rawProp;
 }
 
 } // anonymous namespace
@@ -746,7 +773,16 @@ bool GraphicsScene::hasProperty(NodeId id, keel::StringRef rawProp) const noexce
     const GraphicsNode *n = findNode(id);
     if (!n)
         return false;
-    return schemaFor(n->classId).findProperty(rawProp) != nullptr;
+    // Polar Line/Scatter exposes ThetaData/RData instead of XData/YData (matches reference engine).
+    if (n->classId == ClassId::Line || n->classId == ClassId::Scatter) {
+        const GraphicsNode *par = findNode(n->parentId);
+        if (par && par->classId == ClassId::PolarAxes
+            && (asciiEqualNoCase(rawProp, "XData") || asciiEqualNoCase(rawProp, "YData"))) {
+            return false;
+        }
+    }
+    const keel::StringRef eff = resolveHiddenPropAlias(*this, n, rawProp);
+    return schemaFor(n->classId).findExact(eff) != nullptr;
 }
 
 Value GraphicsScene::makeEmptyPlaceholder(keel::Allocator *mr) const
@@ -799,10 +835,12 @@ Value GraphicsScene::makeHandleColumn(keel::ArrayRef<NodeId> ids, keel::Allocato
     states.reserve(ids.size());
     for (NodeId id : ids) {
         const GraphicsNode *n = findNode(id);
+        const char *cls = n ? schemaFor(n->classId).className : kPlaceholderClass;
         auto payload = keel::make_arc_in<GraphicsHandlePayload>(res);
         payload->handleId = id;
         payload->numericValue = (n && n->classId == ClassId::Figure) ? n->figureNumber : 0;
         payload->inScene = true;
+        payload->className = keel::String::from(cls, res);
         auto st = keel::make_arc_in<ObjectState>(res, res);
         st->native = keel::move(payload);
         states.push_back(keel::move(st));
@@ -844,7 +882,8 @@ Value GraphicsScene::getProperty(NodeId id, keel::StringRef rawProp, keel::Alloc
     }
 
     const ClassSchema &schema = schemaFor(n->classId);
-    const PropertySpec *spec = schema.findProperty(rawProp);
+    const keel::StringRef effProp = resolveHiddenPropAlias(*this, n, rawProp);
+    const PropertySpec *spec = schema.findProperty(effProp);
     if (!spec) {
         auto msg = keel::format("Unrecognized property '{}' for class '{}'.", rawProp, schema.className);
         throw Error(msg.c_str(), 0, 0, "get", "", "numkit:graphics:UnrecognizedProperty");
@@ -1011,7 +1050,8 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
     }
 
     const ClassSchema &schema = schemaFor(n->classId);
-    const PropertySpec *spec = schema.findProperty(rawProp);
+    const keel::StringRef effProp = resolveHiddenPropAlias(*this, n, rawProp);
+    const PropertySpec *spec = schema.findProperty(effProp);
     if (!spec) {
         auto msg = keel::format("Unrecognized property '{}' for class '{}'.", rawProp, schema.className);
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:UnrecognizedProperty");

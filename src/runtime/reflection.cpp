@@ -11,6 +11,8 @@
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/core/types.hpp>
+#include <numkit/graphics/graphics_handle.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/object.hpp>
 #include <numkit/value/error.hpp>
@@ -247,7 +249,13 @@ void isprop_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value
                     "numkit:isprop:nargin");
     const BuiltinClass *cls =
         args[0].isObject() ? ctx.engine->findClass(args[0].objectClassNameRef()) : nullptr;
+    keel::i32 sceneId = -1;
+    bool inScene = false;
+    const bool isSceneObj = args[0].isObject() && args[0].objectCount() == 1
+                            && graphicsHandleAt(args[0], 0, sceneId, inScene) && inScene;
     auto has = [&](keel::StringRef n) {
+        if (isSceneObj)
+            return coreEngine(ctx).graphicsScene().hasProperty(sceneId, n);
         if (!cls) return false;
         for (const auto &p : cls->propNames)
             if (p == n) return true;

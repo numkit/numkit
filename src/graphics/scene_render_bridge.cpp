@@ -281,13 +281,65 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
             break;
         }
         case ClassId::Image: {
-            ds.type = keel::String::from("imagesc");
             const Value cd = scene.getProperty(cid, "CData", mr);
-            ds.originalRows = cd.dims().rows();
-            ds.originalCols = cd.dims().cols();
+            const keel::usize rows = cd.dims().rows();
+            const keel::usize cols = cd.dims().cols();
+            ds.originalRows = rows;
+            ds.originalCols = cols;
             ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
             ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
-            ds.zJson = serializeMat2D(cd);
+            if (cd.dims().ndim() >= 3 && cd.dims().dim(2) == 3 && rows > 0 && cols > 0) {
+                ds.type = keel::String::from("image-rgb");
+                const keel::usize plane = rows * cols;
+                const bool isU8 = (cd.type() == ValueType::UINT8);
+                ds.rgbBytes.resize(plane * 4u, 255u);
+                for (keel::usize r = 0; r < rows; ++r) {
+                    for (keel::usize c = 0; c < cols; ++c) {
+                        const keel::usize srcBase = r + c * rows;
+                        const keel::usize dstBase = (r * cols + c) * 4u;
+                        for (keel::usize ch = 0; ch < 3; ++ch) {
+                            keel::f64 v = cd.elemAsDouble(srcBase + ch * plane);
+                            if (!isU8) v *= 255.0;
+                            if (!keel::is_finite(v) || v < 0.0) v = 0.0;
+                            if (v > 255.0) v = 255.0;
+                            ds.rgbBytes[dstBase + ch] = keel::as<keel::u8>(keel::round_i64(v));
+                        }
+                        ds.rgbBytes[dstBase + 3u] = 255u;
+                    }
+                }
+            } else {
+                ds.type = keel::String::from("imagesc");
+                ds.zJson = serializeMat2D(cd);
+                const keel::usize n = rows * cols;
+                keel::f64 lo = keel::Limits<keel::f64>::infinity();
+                keel::f64 hi = -keel::Limits<keel::f64>::infinity();
+                for (keel::usize k = 0; k < n; ++k) {
+                    const keel::f64 v = cd.elemAsDouble(k);
+                    if (keel::is_finite(v)) {
+                        if (v < lo) lo = v;
+                        if (v > hi) hi = v;
+                    }
+                }
+                if (!keel::is_finite(lo) || !keel::is_finite(hi)) {
+                    lo = 0.0;
+                    hi = 1.0;
+                }
+                ds.cminOrig = lo;
+                ds.cmaxOrig = hi;
+                const keel::f64 span = (hi > lo) ? (hi - lo) : 1.0;
+                ds.zQuantized.resize(n, 255u);
+                for (keel::usize k = 0; k < n; ++k) {
+                    const keel::f64 v = cd.elemAsDouble(k);
+                    if (!keel::is_finite(v)) {
+                        ds.zQuantized[k] = 255u;
+                    } else {
+                        keel::f64 t = (v - lo) / span;
+                        if (t < 0.0) t = 0.0;
+                        if (t > 1.0) t = 1.0;
+                        ds.zQuantized[k] = keel::as<keel::u8>(keel::round_i64(t * 254.0));
+                    }
+                }
+            }
             break;
         }
         case ClassId::Stair: {

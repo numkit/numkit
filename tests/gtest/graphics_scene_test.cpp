@@ -635,4 +635,98 @@ TEST_P(GraphicsSceneTest, Phase4DirectSceneExportAndReactiveRollback)
     EXPECT_DOUBLE_EQ(rEng.eval("ax.YLim(2)").toScalar(), 12.0);
 }
 
+TEST_P(GraphicsSceneTest, FieldtestRealWorldGraphicsCompatibility)
+{
+    // 1. Heterogeneous handle arrays recover concrete element classes on indexing + isprop
+    eval("close all force;"
+         "f = figure('Visible', 'off');"
+         "ax = axes(f);"
+         "h1 = plot(ax, [1 2], [3 4], 'b o-');"
+         "hold(ax, 'on');"
+         "cl = xline(ax, 1.5, '--r');"
+         "lg = legend(ax, 'curve');"
+         "fk = get(f, 'Children');"
+         "ak = get(ax, 'Children');");
+    EXPECT_EQ(evalString("class(fk)"), "matlab.graphics.Graphics");
+    EXPECT_EQ(evalString("class(fk(1))"), "matlab.graphics.illustration.Legend");
+    EXPECT_EQ(evalString("class(fk(2))"), "matlab.graphics.axis.Axes");
+    EXPECT_TRUE(evalBool("isprop(fk(2), 'XScale')"));
+    EXPECT_EQ(evalString("class(ak)"), "matlab.graphics.Graphics");
+    EXPECT_EQ(evalString("class(ak(1))"), "matlab.graphics.chart.decoration.ConstantLine");
+    EXPECT_EQ(evalString("class(ak(2))"), "matlab.graphics.chart.primitive.Line");
+    EXPECT_TRUE(evalBool("isprop(ak(2), 'XData')"));
+    // LineSpec with embedded spaces ('b o-')
+    EXPECT_EQ(evalString("h1.LineStyle"), "-");
+    EXPECT_EQ(evalString("h1.Marker"), "o");
+    EXPECT_DOUBLE_EQ(evalScalar("h1.Color(3)"), 1.0);
+
+    // 2. 4-element RGBA color, ColorBar ylabel & numeric TickLabels, Contour LineColor alias
+    eval("h2 = plot(ax, [1 2], [5 6], 'Color', [0.2 0.4 0.6 0.3]);"
+         "cb = colorbar(ax);"
+         "ylabel(cb, 'Depth (km)');"
+         "cb.TickLabels = [-1 -0.5 0 0.5 1];"
+         "[~, hc] = contour(ax, peaks(8), 'LineColor', 'r', 'LineWidth', 2);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(h2.Color)"), 3.0);
+    EXPECT_NEAR(evalScalar("h2.Color(2)"), 0.4, 1e-12);
+    EXPECT_EQ(evalString("cb.Label.String"), "Depth (km)");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(cb.TickLabels)"), 5.0);
+    EXPECT_EQ(evalString("cb.TickLabels{2}"), "-0.5");
+    EXPECT_TRUE(evalBool("isprop(hc, 'LineColor') && isprop(hc, 'EdgeColor')"));
+    EXPECT_DOUBLE_EQ(evalScalar("hc.LineColor(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hc.EdgeColor(1)"), 1.0);
+
+    // 3. bar color char, stairs LineSpec, area basevalue, quiver scale + LineSpec
+    eval("f2 = figure('Visible', 'off'); ax2 = axes(f2); hold(ax2, 'on');"
+         "hb = bar(ax2, [1 2 3], [4 5 6], 'y');"
+         "hs = stairs(ax2, [1 2 3], [4 5 6], '-o');"
+         "ha = area(ax2, [1 2 3], [4 5 6], 2);"
+         "hq = quiver(ax2, -5, 0, 0, -4, 0, 'b', 'LineWidth', 2);");
+    EXPECT_DOUBLE_EQ(evalScalar("hb.FaceColor(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hb.FaceColor(2)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hb.FaceColor(3)"), 0.0);
+    EXPECT_EQ(evalString("hs.LineStyle"), "-");
+    EXPECT_EQ(evalString("hs.Marker"), "o");
+    EXPECT_DOUBLE_EQ(evalScalar("ha.BaseValue"), 2.0);
+    EXPECT_EQ(evalString("hq.AutoScale"), "off");
+    EXPECT_DOUBLE_EQ(evalScalar("hq.Color(3)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hq.LineWidth"), 2.0);
+
+    // 4. datetime coordinates in plot / patch / fill & polar Line ThetaData/RData aliases
+    eval("f3 = figure('Visible', 'off'); ax3 = axes(f3);"
+         "dt = [datetime(2020,1,1), datetime(2020,6,1), datetime(2020,12,1)];"
+         "hdt = plot(ax3, dt, [1 2 3], 'b-');"
+         "hold(ax3, 'on');"
+         "hf = fill(ax3, [dt(1) dt(2) dt(2) dt(1)], [0 0 3 3], [0.8 0.8 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.3);"
+         "fp = figure('Visible', 'off');"
+         "hp = polarplot([0 pi/2 pi], [1 2 3]);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hdt.XData)"), 3.0);
+    EXPECT_GT(evalScalar("hdt.XData(1)"), 737000.0);
+    EXPECT_NEAR(evalScalar("hf.FaceColor(1)"), 0.8, 1e-12);
+    EXPECT_NEAR(evalScalar("hf.FaceAlpha"), 0.3, 1e-12);
+    EXPECT_TRUE(evalBool("isprop(hp, 'ThetaData') && isprop(hp, 'RData')"));
+    EXPECT_FALSE(evalBool("isprop(hp, 'XData') || isprop(hp, 'YData')"));
+    EXPECT_NEAR(evalScalar("hp.RData(3)"), 3.0, 1e-12);
+
+    // 5. imagesc PNG export (no zQuantized crash), exact isprop, errorbar UData/LData,
+    //    contour [v v] dedup, and polarplot replacing empty subplot Axes in place
+    eval("f4 = figure('Visible', 'off');"
+         "imagesc(eye(4));"
+         "print(f4, 'numkit_imagesc_repro.png', '-dpng', '-r72');"
+         "if exist('numkit_imagesc_repro.png', 'file'), delete('numkit_imagesc_repro.png'); end;"
+         "f5 = figure('Visible', 'off');"
+         "subplot(1, 2, 1); plot([1 2], [3 4]);"
+         "subplot(1, 2, 2); polarplot([0 pi], [1 2]);"
+         "f6 = figure('Visible', 'off'); ax6 = axes(f6); hold(ax6, 'on');"
+         "hh = histogram(ax6, [1 2 2 3 4]);"
+         "he = errorbar(ax6, [1 2], [3 4], [0.5 0.5]);"
+         "[~, hc1] = contour(ax6, peaks(6), [0.5 0.5]);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(f5.Children)"), 2.0);
+    EXPECT_EQ(evalString("class(f5.Children(1))"), "matlab.graphics.axis.PolarAxes");
+    EXPECT_FALSE(evalBool("isprop(hh, 'Value')"));
+    EXPECT_TRUE(evalBool("isprop(hh, 'Values')"));
+    EXPECT_TRUE(evalBool("isprop(he, 'UData') && isprop(he, 'LData')"));
+    EXPECT_NEAR(evalScalar("he.UData(1)"), 0.5, 1e-12);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hc1.LevelList)"), 1.0);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

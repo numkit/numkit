@@ -49,7 +49,7 @@ inline bool isLabelOwner(const GraphicsScene &scene, NodeId id) noexcept
 {
     const GraphicsNode *n = scene.findNode(id);
     return n && (n->classId == ClassId::Axes || n->classId == ClassId::PolarAxes
-                 || n->classId == ClassId::TiledChartLayout);
+                 || n->classId == ClassId::TiledChartLayout || n->classId == ClassId::ColorBar);
 }
 
 void applyNV(GraphicsScene &scene, NodeId id,
@@ -668,7 +668,14 @@ void constantLineHelper(char axisChar, keel::ArrayRef<Value> args, keel::usize n
 
     keel::usize idx = 0;
     const NodeId axId = resolveLeadingAxes(scene, args, idx);
-    if (idx >= args.size() || !args[idx].isNumeric()) {
+    if (idx >= args.size()) {
+        throw Error("xline/yline: numeric intercept value is required.",
+                    0, 0, axisChar == 'x' ? "xline" : "yline", "", "numkit:graphics:InvalidArgument");
+    }
+    const bool okCoord = args[idx].isNumeric() || args[idx].isLogical()
+        || (args[idx].isObject() && !isSceneGraphicsHandle(args[idx])
+            && (args[idx].objectClassNameRef() == "datetime" || args[idx].objectClassNameRef() == "duration"));
+    if (!okCoord) {
         throw Error("xline/yline: numeric intercept value is required.",
                     0, 0, axisChar == 'x' ? "xline" : "yline", "", "numkit:graphics:InvalidArgument");
     }

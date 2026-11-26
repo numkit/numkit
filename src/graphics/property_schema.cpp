@@ -451,15 +451,16 @@ Value parseColorSpec(const Value &v, bool allowNone, bool allowAuto,
                      keel::StringRef propName, keel::Allocator *mr)
 {
     if (v.isNumeric() && !v.isComplex()) {
-        if (v.numel() != 3) {
+        if (v.numel() != 3 && v.numel() != 4) {
             auto msg = keel::format("Property '{}' RGB triplet must have 3 elements in [0, 1].", propName);
             throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidColor");
         }
         const keel::f64 r = v.elemAsDouble(0);
         const keel::f64 g = v.elemAsDouble(1);
         const keel::f64 b = v.elemAsDouble(2);
-        if (!keel::is_finite(r) || !keel::is_finite(g) || !keel::is_finite(b)
-            || r < 0.0 || r > 1.0 || g < 0.0 || g > 1.0 || b < 0.0 || b > 1.0) {
+        const keel::f64 a = (v.numel() == 4) ? v.elemAsDouble(3) : 1.0;
+        if (!keel::is_finite(r) || !keel::is_finite(g) || !keel::is_finite(b) || !keel::is_finite(a)
+            || r < 0.0 || r > 1.0 || g < 0.0 || g > 1.0 || b < 0.0 || b > 1.0 || a < 0.0 || a > 1.0) {
             auto msg = keel::format("Property '{}' RGB values must be in range [0, 1].", propName);
             throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidColor");
         }
@@ -637,6 +638,15 @@ Value validatePropValue(const PropertySpec &spec, const Value &v, keel::Allocato
             return v;
         if (v.isEmpty() && v.isNumeric())
             return Value::fromString("", mr);
+        if (v.isNumeric() && !v.isComplex()) {
+            const keel::usize n = v.numel();
+            Value cell = Value::cell(n, 1, mr);
+            for (keel::usize i = 0; i < n; ++i) {
+                keel::String s = keel::format("{:.6g}", v.elemAsDouble(i));
+                cell.cellAt(i) = Value::fromString(s, mr);
+            }
+            return cell;
+        }
         auto msg = keel::format("Property '{}' must be text or a cell array of character vectors.", spec.name);
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidString");
     }

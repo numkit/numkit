@@ -428,6 +428,11 @@ inline keel::Array<keel::u8> imageCmdRgb(const Cmd &c)
     keel::i32 ph = keel::max(1, (keel::i32)keel::round_i64(sy1 - sy0));
     keel::Array<keel::u8> buf;
     buf.resize((keel::usize)pw * ph * 3, 255);
+    const keel::usize need = c.rgbDirect
+        ? (keel::usize)c.imgW * (keel::usize)c.imgH * 4u
+        : (keel::usize)c.imgW * (keel::usize)c.imgH;
+    if (c.imgW <= 0 || c.imgH <= 0 || c.img.size() < need)
+        return buf;
 
     // u increases from the screen end of data edge ix0 toward ix1; same
     // for v with iy0. When the transform flipped the axis, the ix0 end
