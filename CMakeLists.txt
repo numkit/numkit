@@ -86,7 +86,7 @@ if(NOT TARGET keel::matfile)
     FetchContent_Declare(
         keel_matfile
         GIT_REPOSITORY https://github.com/keelcpp/matfile.git
-        GIT_TAG        221a27bf97178c7b66d75450702ebf59c333fab6
+        GIT_TAG        b4c9d4c8fd68e506dd1a374c6da431b7ec5fda08
     )
     FetchContent_MakeAvailable(keel_matfile)
 endif()
@@ -114,7 +114,7 @@ if(NOT TARGET keel::crypto)
     FetchContent_Declare(
         keel_crypto
         GIT_REPOSITORY https://github.com/keelcpp/crypto.git
-        GIT_TAG        00c79fa006b3862c5ca57f392ce0db45d7ec4369
+        GIT_TAG        3f825bff7da1bf774f55b3598111c9b1a58d54c3
     )
     FetchContent_MakeAvailable(keel_crypto)
 endif()
@@ -142,7 +142,7 @@ if(NOT TARGET keel::compress)
     FetchContent_Declare(
         keel_compress
         GIT_REPOSITORY https://github.com/keelcpp/compress.git
-        GIT_TAG        6378540afae060da68da60fe78685954a8799e6c
+        GIT_TAG        404bc3321bc0f973479b7752c9614c666d59843a
     )
     FetchContent_MakeAvailable(keel_compress)
 endif()
@@ -170,7 +170,7 @@ if(NOT TARGET keel::http)
     FetchContent_Declare(
         keel_http
         GIT_REPOSITORY https://github.com/keelcpp/http.git
-        GIT_TAG        41e5ea330ceacda242d59dc3efbcc7ad5e9089e4
+        GIT_TAG        821d3ea93ed2c728da38c09651e9f1d88f975a73
     )
     FetchContent_MakeAvailable(keel_http)
 endif()
