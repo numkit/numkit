@@ -442,6 +442,177 @@ void evalColormap(const char *cname, keel::ArrayRef<Value> args,
                 d[i + m]     = (i < n) ? 0.0 : (i < 2 * n ? keel::f64(i - n + 1) / keel::f64(n) : 1.0);
                 d[i + 2 * m] = (i < 2 * n) ? 0.0 : keel::f64(i - 2 * n + 1) / keel::f64(mi - 2 * n);
             }
+        } else if (paletteName == "spring") {
+            const keel::f64 inv = (m == 1) ? 0.0 : 1.0 / keel::as<keel::f64>(m - 1);
+            for (keel::usize i = 0; i < m; ++i) {
+                const keel::f64 g = (m == 1) ? 0.0 : keel::as<keel::f64>(i) * inv;
+                d[i] = 1.0; d[i + m] = g; d[i + 2 * m] = 1.0 - g;
+            }
+        } else if (paletteName == "summer") {
+            const keel::f64 inv = (m == 1) ? 0.0 : 1.0 / keel::as<keel::f64>(m - 1);
+            for (keel::usize i = 0; i < m; ++i) {
+                const keel::f64 r = (m == 1) ? 0.0 : keel::as<keel::f64>(i) * inv;
+                d[i] = r; d[i + m] = 0.5 + 0.5 * r; d[i + 2 * m] = 0.4;
+            }
+        } else if (paletteName == "autumn") {
+            const keel::f64 inv = (m == 1) ? 0.0 : 1.0 / keel::as<keel::f64>(m - 1);
+            for (keel::usize i = 0; i < m; ++i) {
+                d[i] = 1.0;
+                d[i + m] = (m == 1) ? 0.0 : keel::as<keel::f64>(i) * inv;
+                d[i + 2 * m] = 0.0;
+            }
+        } else if (paletteName == "winter") {
+            const keel::f64 inv = (m == 1) ? 0.0 : 1.0 / keel::as<keel::f64>(m - 1);
+            for (keel::usize i = 0; i < m; ++i) {
+                const keel::f64 g = (m == 1) ? 0.0 : keel::as<keel::f64>(i) * inv;
+                d[i] = 0.0; d[i + m] = g; d[i + 2 * m] = 1.0 - 0.5 * g;
+            }
+        } else if (paletteName == "copper") {
+            const keel::f64 inv = (m == 1) ? 0.0 : 1.0 / keel::as<keel::f64>(m - 1);
+            for (keel::usize i = 0; i < m; ++i) {
+                const keel::f64 x = (m == 1) ? 0.0 : keel::as<keel::f64>(i) * inv;
+                keel::f64 r = 1.25 * x;
+                if (r > 1.0) r = 1.0;
+                d[i] = r; d[i + m] = 0.7812 * x; d[i + 2 * m] = 0.4975 * x;
+            }
+        } else if (paletteName == "hsv") {
+            if (m == 1) {
+                d[0] = 1.0; d[1] = 0.0; d[2] = 0.0;
+            } else {
+                const keel::f64 inv = 1.0 / keel::as<keel::f64>(m);
+                for (keel::usize i = 0; i < m; ++i) {
+                    const keel::f64 h6 = 6.0 * keel::as<keel::f64>(i) * inv;
+                    const keel::i32 sector = keel::as<keel::i32>(keel::floor(h6)) % 6;
+                    const keel::f64 f = h6 - keel::floor(h6);
+                    keel::f64 r = 0.0, g = 0.0, b = 0.0;
+                    if (sector == 0)      { r = 1.0; g = f;       b = 0.0;     }
+                    else if (sector == 1) { r = 1.0 - f; g = 1.0; b = 0.0;     }
+                    else if (sector == 2) { r = 0.0; g = 1.0;     b = f;       }
+                    else if (sector == 3) { r = 0.0; g = 1.0 - f; b = 1.0;     }
+                    else if (sector == 4) { r = f;   g = 0.0;     b = 1.0;     }
+                    else                  { r = 1.0; g = 0.0;     b = 1.0 - f; }
+                    d[i] = r; d[i + m] = g; d[i + 2 * m] = b;
+                }
+            }
+        } else if (paletteName == "lines") {
+            if (m == 1) {
+                d[0] = 0.0; d[1] = 0.0; d[2] = 1.0;
+            } else {
+                static constexpr keel::f64 kLines[7][3] = {
+                    {0.066, 0.443, 0.745},
+                    {0.866, 0.329, 0.000},
+                    {0.929, 0.694, 0.125},
+                    {0.521, 0.086, 0.819},
+                    {0.231, 0.666, 0.196},
+                    {0.184, 0.745, 0.937},
+                    {0.819, 0.015, 0.545}
+                };
+                for (keel::usize i = 0; i < m; ++i) {
+                    const keel::usize k = i % 7;
+                    d[i] = kLines[k][0]; d[i + m] = kLines[k][1]; d[i + 2 * m] = kLines[k][2];
+                }
+            }
+        } else if (paletteName == "bone") {
+            const keel::i32 mi = keel::as<keel::i32>(m);
+            if (mi == 1) {
+                d[0] = 0.125; d[1] = 0.125; d[2] = 0.125;
+            } else if (mi == 2) {
+                d[0] = 1.0 / 16.0; d[2] = 0.125; d[4] = 0.125;
+                d[1] = 1.0;        d[3] = 1.0;   d[5] = 1.0;
+            } else {
+                const keel::f64 inv = 1.0 / keel::as<keel::f64>(mi - 1);
+                auto xv = [&](keel::i32 i) { return keel::as<keel::f64>(i) * inv; };
+                keel::Array<keel::f64> r(m, mr), g(m, mr), b(m, mr);
+                const keel::i32 idxR = keel::as<keel::i32>(keel::floor(0.75 * mi));
+                const keel::i32 nelR = mi - idxR + 1;
+                const keel::i32 rem8 = mi % 8;
+                keel::f64 baseR = 0.0;
+                if (rem8 == 2 || rem8 == 4)      baseR = 1.0 / (16.0 + 2.0 * (mi - rem8));
+                else if (rem8 == 5 || rem8 == 7) baseR = 1.0 / (24.0 + 2.0 * (mi - rem8));
+                for (keel::i32 i = 0; i < idxR; ++i) r[keel::as<keel::usize>(i)] = (7.0 / 8.0) * xv(i);
+                const keel::f64 aR = (7.0 / 8.0) * xv(idxR - 1) + baseR;
+                for (keel::i32 j = 0; j < nelR; ++j) {
+                    const keel::i32 pos = idxR - 1 + j;
+                    if (pos >= 0 && pos < mi)
+                        r[keel::as<keel::usize>(pos)] = aR + (1.0 - aR) * keel::as<keel::f64>(j) / keel::as<keel::f64>(nelR - 1);
+                }
+                const keel::i32 idxG = keel::as<keel::i32>(keel::floor(0.375 * mi));
+                for (keel::i32 i = 0; i < idxG; ++i) g[keel::as<keel::usize>(i)] = (7.0 / 8.0) * xv(i);
+                const keel::i32 lenG = idxG + 1;
+                const keel::f64 aG = (7.0 / 8.0) * xv(idxG - 1);
+                const keel::f64 bG = (7.0 / 8.0) * xv(2 * idxG - 1) + 0.125;
+                for (keel::i32 j = 0; j < lenG; ++j) {
+                    const keel::i32 pos = idxG - 1 + j;
+                    if (pos >= 0 && pos < mi)
+                        g[keel::as<keel::usize>(pos)] = aG + (bG - aG) * keel::as<keel::f64>(j) / keel::as<keel::f64>(lenG - 1);
+                }
+                for (keel::i32 i = 2 * idxG; i < mi; ++i) g[keel::as<keel::usize>(i)] = (7.0 / 8.0) * xv(i) + 0.125;
+                const keel::f64 baseB = 1.0 / (8.0 * idxG);
+                const keel::f64 bB = (7.0 / 8.0) * xv(idxG - 1) + 0.125;
+                for (keel::i32 j = 0; j < idxG; ++j) {
+                    if (j < mi)
+                        b[keel::as<keel::usize>(j)] = (idxG == 1)
+                            ? baseB
+                            : baseB + (bB - baseB) * keel::as<keel::f64>(j) / keel::as<keel::f64>(idxG - 1);
+                }
+                for (keel::i32 i = idxG - 1; i < mi; ++i) b[keel::as<keel::usize>(i)] = (7.0 / 8.0) * xv(i) + 0.125;
+                for (keel::usize i = 0; i < m; ++i) { d[i] = r[i]; d[i + m] = g[i]; d[i + 2 * m] = b[i]; }
+            }
+        } else if (paletteName == "pink") {
+            const keel::i32 mi = keel::as<keel::i32>(m);
+            if (mi == 1) {
+                const keel::f64 v = keel::sqrt(1.0 / 3.0);
+                d[0] = v; d[1] = v; d[2] = v;
+            } else if (mi == 2) {
+                const keel::f64 s = keel::sqrt(1.0 / 3.0);
+                const keel::f64 s2 = keel::sqrt(1.0 / 6.0);
+                d[0] = s;   d[2] = s;   d[4] = s2;
+                d[1] = 1.0; d[3] = 1.0; d[5] = 1.0;
+            } else {
+                const keel::i32 idx = keel::as<keel::i32>(keel::floor(3.0 / 8.0 * mi));
+                const keel::f64 base = 1.0 / (3.0 * idx);
+                const keel::f64 inv = 1.0 / keel::as<keel::f64>(mi - 1);
+                keel::Array<keel::f64> r(m, mr), g(m, mr), b(m, mr);
+                const keel::f64 rEnd = (2.0 / 3.0) * keel::as<keel::f64>(idx - 1) * inv + 1.0 / 3.0;
+                if (idx == 1) {
+                    r[0] = base;
+                } else {
+                    for (keel::i32 i = 0; i < idx; ++i)
+                        r[keel::as<keel::usize>(i)] = base + (rEnd - base) * keel::as<keel::f64>(i) / keel::as<keel::f64>(idx - 1);
+                }
+                for (keel::i32 i = idx; i < mi; ++i)
+                    r[keel::as<keel::usize>(i)] = (2.0 / 3.0) * keel::as<keel::f64>(i) * inv + 1.0 / 3.0;
+                for (keel::i32 i = 0; i < idx; ++i)
+                    g[keel::as<keel::usize>(i)] = (2.0 / 3.0) * keel::as<keel::f64>(i) * inv;
+                const keel::f64 aG = (2.0 / 3.0) * keel::as<keel::f64>(idx - 1) * inv;
+                const keel::f64 bG = (2.0 / 3.0) * keel::as<keel::f64>(2 * idx - 1) * inv + 1.0 / 3.0;
+                const keel::i32 lenG = idx + 1;
+                for (keel::i32 j = 0; j < lenG; ++j) {
+                    const keel::i32 pos = idx - 1 + j;
+                    if (pos >= 0 && pos < mi)
+                        g[keel::as<keel::usize>(pos)] = aG + (bG - aG) * keel::as<keel::f64>(j) / keel::as<keel::f64>(lenG - 1);
+                }
+                for (keel::i32 i = 2 * idx; i < mi; ++i)
+                    g[keel::as<keel::usize>(i)] = (2.0 / 3.0) * keel::as<keel::f64>(i) * inv + 1.0 / 3.0;
+                const keel::i32 upto = keel::min(2 * idx, mi);
+                for (keel::i32 i = 0; i < upto; ++i)
+                    b[keel::as<keel::usize>(i)] = (2.0 / 3.0) * keel::as<keel::f64>(i) * inv;
+                const keel::i32 bStart = 2 * idx - 1;
+                if (bStart >= 0 && bStart < mi) {
+                    const keel::i32 lenB = mi - 2 * idx + 1;
+                    const keel::f64 aB = (2.0 / 3.0) * keel::as<keel::f64>(bStart) * inv;
+                    for (keel::i32 j = 0; j < lenB; ++j) {
+                        const keel::i32 pos = bStart + j;
+                        if (pos >= mi) break;
+                        b[keel::as<keel::usize>(pos)] = aB + (1.0 - aB) * keel::as<keel::f64>(j) / keel::as<keel::f64>(lenB - 1);
+                    }
+                }
+                for (keel::usize i = 0; i < m; ++i) {
+                    d[i]         = keel::sqrt(r[i]);
+                    d[i + m]     = keel::sqrt(g[i]);
+                    d[i + 2 * m] = keel::sqrt(b[i]);
+                }
+            }
         } else {
             keel::i32 tableN = 256;
             const keel::u8 *tbl = figrender::namedPalette(paletteName, tableN);

@@ -961,6 +961,49 @@ TEST_P(BuiltinTest, LocalFunctions)
     EXPECT_EQ(c->numel(), 0u);
 }
 
+TEST_P(BuiltinTest, StructfunPreservesFieldOrder)
+{
+    eval("s = struct('a', 1, 'b', 2, 'c', 3, 'd', 4, 'e', 5);"
+         "y_lam = structfun(@(x) x * 2, s);"
+         "y_bi  = structfun(@abs, struct('z', -1, 'a', -2, 'm', -3));");
+    for (int i = 1; i <= 5; ++i) {
+        EXPECT_DOUBLE_EQ(evalScalar("y_lam(" + std::to_string(i) + ");"), 2.0 * i);
+    }
+    EXPECT_DOUBLE_EQ(evalScalar("y_bi(1);"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("y_bi(2);"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("y_bi(3);"), 3.0);
+}
+
+TEST_P(BuiltinTest, SylvesterSingularReturnsRealNaN)
+{
+    eval("Xz = sylvester(zeros(2), zeros(2), zeros(2));"
+         "Xs = sylvester(single(zeros(2)), zeros(2), zeros(2));");
+    EXPECT_TRUE(keel::is_nan(evalScalar("Xz(1,1);")));
+    EXPECT_TRUE(keel::is_nan(evalScalar("Xz(2,2);")));
+    EXPECT_DOUBLE_EQ(evalScalar("double(isreal(Xz));"), 1.0);
+    EXPECT_TRUE(keel::is_nan(evalScalar("double(Xs(1,1));")));
+    EXPECT_EQ(getVarPtr("Xs")->type(), ValueType::SINGLE);
+}
+
+TEST_P(BuiltinTest, AnalyticalColormapsExactDouble)
+{
+    eval("a = autumn(32); sp = spring(32); su = summer(32); wi = winter(32);"
+         "co = copper(32); hs = hsv(6); l1 = lines(1); l7 = lines(7);"
+         "bo = bone(32); pi_m = pink(32);");
+    EXPECT_NEAR(evalScalar("a(2, 2);"), 1.0 / 31.0, 1e-15);
+    EXPECT_NEAR(evalScalar("sp(2, 2);"), 1.0 / 31.0, 1e-15);
+    EXPECT_NEAR(evalScalar("su(2, 1);"), 1.0 / 31.0, 1e-15);
+    EXPECT_NEAR(evalScalar("wi(2, 3);"), 1.0 - 0.5 / 31.0, 1e-15);
+    EXPECT_NEAR(evalScalar("co(2, 2);"), 0.7812 / 31.0, 1e-15);
+    EXPECT_DOUBLE_EQ(evalScalar("hs(2, 1);"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hs(2, 2);"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hs(2, 3);"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("l1(1, 3);"), 1.0);
+    EXPECT_NEAR(evalScalar("l7(1, 1);"), 0.066, 1e-15);
+    EXPECT_NEAR(evalScalar("bo(2, 1);"), (7.0 / 8.0) / 31.0, 1e-15);
+    EXPECT_NEAR(evalScalar("pi_m(1, 1);"), keel::sqrt(1.0 / 36.0), 1e-15);
+}
+
 // ── idivide / bsxfun — Pack 33 ────────────────────────────────
 TEST_P(BuiltinTest, Idivide)
 {

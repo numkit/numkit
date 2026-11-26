@@ -148,13 +148,14 @@ Value structfun(FnHandle fn, const Value &s, bool uniformOutput,
                      0, 0, "structfun", "", "numkit:structfun:notStruct");
 
     const auto &fields = s.structFields();
-    const keel::usize n = fields.size();
     keel::ArenaTemp scratch = keel::get_scratch(mr);
+    const auto ordered = s.fieldNamesInOrder(scratch.allocator());
+    const keel::usize n = ordered.size();
     keel::Array<Value> results(scratch.allocator());
     results.reserve(n);
-    for (auto [key, val] : fields) {
-        (void)key;
-        Value arg = val;
+    for (keel::usize i = 0; i < n; ++i) {
+        const auto *valPtr = fields.get(ordered[i]);
+        Value arg = valPtr ? *valPtr : Value();
         Value out;
         keel::ArrayRef<Value> ar(&arg, 1);
         keel::MutArrayRef<Value> ou(&out, 1);
@@ -463,11 +464,13 @@ struct StructfunCallbackBuiltin : CallbackBuiltin
             return nullptr; // non-scalar-struct → synchronous path reports it
         const bool uniform = hf::parseUniformOutputFlag(args, 2, "structfun");
         auto *mr = eng.allocator();
+        const auto &fields = args[1].structFields();
+        const auto ordered = args[1].fieldNamesInOrder();
         auto fieldVals = keel::make_arc<keel::Array<Value>>();
-        fieldVals->reserve(args[1].structFields().size());
-        for (auto [key, val] : args[1].structFields()) {
-            (void)key;
-            fieldVals->push_back(val);
+        fieldVals->reserve(ordered.size());
+        for (keel::usize i = 0; i < ordered.size(); ++i) {
+            const auto *valPtr = fields.get(ordered[i]);
+            fieldVals->push_back(valPtr ? *valPtr : Value());
         }
         auto cont = keel::make_arc<LoopContinuation>();
         cont->handle = args[0];
