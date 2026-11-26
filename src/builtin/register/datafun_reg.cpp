@@ -644,8 +644,28 @@ void conv2_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value>
                             0, 0, "conv2", "", "numkit:conv2:badShape");
             shape = args[3].toString();
         }
+        if ((!args[0].isNumeric() && !args[0].isLogical()) ||
+            (!args[1].isNumeric() && !args[1].isLogical())) {
+            throw Error("conv2: first two arguments u and v must be numeric or logical vectors",
+                        0, 0, "conv2", "", "numkit:conv2:inputType");
+        }
         const keel::usize m = args[0].numel();
         const keel::usize n = args[1].numel();
+        if (args[0].isComplex() || args[1].isComplex()) {
+            Value k = Value::matrix(m, n, ValueType::COMPLEX, mr);
+            keel::c64 *kd = k.complexDataMut();
+            for (keel::usize c = 0; c < n; ++c) {
+                const keel::c64 vc = args[1].isComplex() ? args[1].complexData()[c]
+                                                         : keel::c64(args[1].elemAsDouble(c), 0.0);
+                for (keel::usize r = 0; r < m; ++r) {
+                    const keel::c64 ur = args[0].isComplex() ? args[0].complexData()[r]
+                                                             : keel::c64(args[0].elemAsDouble(r), 0.0);
+                    kd[r + c * m] = ur * vc;
+                }
+            }
+            outs[0] = signal::conv2(args[2], k, shape, mr);
+            return;
+        }
         Value k = Value::matrix(m, n, ValueType::DOUBLE, mr);
         keel::f64 *kd = k.doubleDataMut();
         for (keel::usize c = 0; c < n; ++c) {

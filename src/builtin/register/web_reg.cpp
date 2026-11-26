@@ -64,7 +64,9 @@ static void applyWebOptions(const Value &opts, keel::HttpRequest &req, keel::Str
     if (opts.hasField("Timeout") && opts.field("Timeout").isNumeric() && !opts.field("Timeout").isEmpty()) {
         const keel::f64 sec = opts.field("Timeout").elemAsDouble(0);
         if (keel::is_finite(sec) && sec > 0.0) {
-            const keel::u32 ms = keel::as<keel::u32>(sec * 1000.0);
+            const keel::f64 msF = sec * 1000.0;
+            const keel::f64 maxU32 = keel::as<keel::f64>(keel::Limits<keel::u32>::kMax);
+            const keel::u32 ms = (msF >= maxU32) ? keel::Limits<keel::u32>::kMax : keel::as<keel::u32>(msF);
             req.connect_timeout_ms = ms;
             req.read_timeout_ms = ms;
         }
@@ -170,9 +172,14 @@ static void urlread_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         keel::String k = args[i].toString();
         k.to_ascii_lower_in_place();
         if (k == "timeout" && args[i + 1].isNumeric() && !args[i + 1].isEmpty()) {
-            const keel::u32 ms = keel::as<keel::u32>(args[i + 1].elemAsDouble(0) * 1000.0);
-            req.connect_timeout_ms = ms;
-            req.read_timeout_ms = ms;
+            const keel::f64 sec = args[i + 1].elemAsDouble(0);
+            if (keel::is_finite(sec) && sec > 0.0) {
+                const keel::f64 msF = sec * 1000.0;
+                const keel::f64 maxU32 = keel::as<keel::f64>(keel::Limits<keel::u32>::kMax);
+                const keel::u32 ms = (msF >= maxU32) ? keel::Limits<keel::u32>::kMax : keel::as<keel::u32>(msF);
+                req.connect_timeout_ms = ms;
+                req.read_timeout_ms = ms;
+            }
         } else if (k == "useragent" && (args[i + 1].isChar() || args[i + 1].isString())) {
             req.user_agent = args[i + 1].toString();
         }

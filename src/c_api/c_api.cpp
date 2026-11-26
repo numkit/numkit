@@ -98,10 +98,23 @@ int runEngineDispatch(const numkit_val *const *args,
     using numkit::c_abi::unboxValue;
 
     clearError(err);
+    keel::usize boxedCount = 0;
+    auto releaseBoxed = [&]() noexcept {
+        if (outs) {
+            for (keel::usize i = 0; i < boxedCount; ++i) {
+                numkit_val_release(outs[i]);
+                outs[i] = nullptr;
+            }
+        }
+        boxedCount = 0;
+    };
     try {
         if (nargout > 0 && !outs) {
             setError(err, 1, "outs array must be non-null when nargout > 0");
             return 1;
+        }
+        for (keel::usize i = 0; i < nargout; ++i) {
+            outs[i] = nullptr;
         }
 
         Value inStack[8];
@@ -128,12 +141,15 @@ int runEngineDispatch(const numkit_val *const *args,
 
         for (keel::usize i = 0; i < nargout; ++i) {
             outs[i] = boxValue(keel::move(outPtr[i]));
+            boxedCount = i + 1;
         }
         return 0;
     } catch (const std::exception &ex) {
+        releaseBoxed();
         setError(err, 1, ex.what());
         return 1;
     } catch (...) {
+        releaseBoxed();
         setError(err, 1, "Unknown C++ exception in numkit_engine");
         return 1;
     }
@@ -151,6 +167,9 @@ numkit_engine_ctx *numkit_engine_create(numkit_error *err)
     } catch (const std::exception &ex) {
         numkit::c_abi::setError(err, 1, ex.what());
         return nullptr;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_create");
+        return nullptr;
     }
 }
 
@@ -167,7 +186,10 @@ void numkit_engine_seed_rng(numkit_engine_ctx *ctx, keel::u64 seed)
 void numkit_engine_add_plugin_search_dir(numkit_engine_ctx *ctx, const char *dir_path)
 {
     if (ctx && dir_path && *dir_path) {
-        ctx->engine.pluginLoader().addSearchPath(dir_path);
+        try {
+            ctx->engine.pluginLoader().addSearchPath(dir_path);
+        } catch (...) {
+        }
     }
 }
 
@@ -196,6 +218,9 @@ int numkit_engine_load_plugin(numkit_engine_ctx *ctx,
         return 0;
     } catch (const std::exception &ex) {
         numkit::c_abi::setError(err, 1, ex.what());
+        return 1;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_load_plugin");
         return 1;
     }
 }
@@ -228,6 +253,9 @@ int numkit_engine_register_fn(numkit_engine_ctx *ctx,
     } catch (const std::exception &ex) {
         numkit::c_abi::setError(err, 1, ex.what());
         return 1;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_register_fn");
+        return 1;
     }
 }
 
@@ -236,8 +264,12 @@ const numkit_fn *numkit_engine_resolve(numkit_engine_ctx *ctx,
                                        const char *name)
 {
     if (!ctx || !name || !*name) return nullptr;
-    const numkit::ExternalFunc *fn = ctx->resolve(ns ? ns : "", name);
-    return reinterpret_cast<const numkit_fn *>(fn);
+    try {
+        const numkit::ExternalFunc *fn = ctx->resolve(ns ? ns : "", name);
+        return reinterpret_cast<const numkit_fn *>(fn);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 int numkit_engine_invoke(numkit_engine_ctx *ctx,
@@ -315,12 +347,20 @@ numkit_val *numkit_engine_eval(numkit_engine_ctx *ctx, const char *code, numkit_
         numkit::c_abi::setError(err, 1, "Invalid engine context or null source string");
         return nullptr;
     }
-    auto res = ctx->engine.evalSafe(code);
-    if (!res.ok) {
-        numkit::c_abi::setError(err, 1, res.errorMessage.c_str());
+    try {
+        auto res = ctx->engine.evalSafe(code);
+        if (!res.ok) {
+            numkit::c_abi::setError(err, 1, res.errorMessage.c_str());
+            return nullptr;
+        }
+        return numkit::c_abi::boxValue(keel::move(res.value));
+    } catch (const std::exception &ex) {
+        numkit::c_abi::setError(err, 1, ex.what());
+        return nullptr;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_eval");
         return nullptr;
     }
-    return numkit::c_abi::boxValue(keel::move(res.value));
 }
 
 numkit_val *numkit_engine_workspace_get(numkit_engine_ctx *ctx,
@@ -332,13 +372,21 @@ numkit_val *numkit_engine_workspace_get(numkit_engine_ctx *ctx,
         numkit::c_abi::setError(err, 1, "Invalid engine context or variable name");
         return nullptr;
     }
-    const numkit::Value *v = ctx->engine.getVariable(name);
-    if (!v || v->isUnset() || v->isDeleted()) {
-        keel::String msg = keel::format("Undefined variable '{}'", name);
-        numkit::c_abi::setError(err, 1, msg.c_str());
+    try {
+        const numkit::Value *v = ctx->engine.getVariable(name);
+        if (!v || v->isUnset() || v->isDeleted()) {
+            keel::String msg = keel::format("Undefined variable '{}'", name);
+            numkit::c_abi::setError(err, 1, msg.c_str());
+            return nullptr;
+        }
+        return numkit::c_abi::boxValue(*v);
+    } catch (const std::exception &ex) {
+        numkit::c_abi::setError(err, 1, ex.what());
+        return nullptr;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_workspace_get");
         return nullptr;
     }
-    return numkit::c_abi::boxValue(*v);
 }
 
 int numkit_engine_workspace_set(numkit_engine_ctx *ctx,
@@ -356,6 +404,9 @@ int numkit_engine_workspace_set(numkit_engine_ctx *ctx,
         return 0;
     } catch (const std::exception &ex) {
         numkit::c_abi::setError(err, 1, ex.what());
+        return 1;
+    } catch (...) {
+        numkit::c_abi::setError(err, 1, "Unknown C++ exception in numkit_engine_workspace_set");
         return 1;
     }
 }

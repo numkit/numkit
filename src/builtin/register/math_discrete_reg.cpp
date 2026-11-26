@@ -351,8 +351,8 @@ void histcounts_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             ++i;
         } else if (key == "binlimits") {
             const Value &bl = args[i + 1];
-            if (bl.numel() != 2)
-                throw Error("histcounts: 'BinLimits' must be a two-element vector",
+            if ((!bl.isNumeric() && !bl.isLogical()) || bl.isComplex() || bl.numel() != 2)
+                throw Error("histcounts: 'BinLimits' must be a two-element real numeric vector",
                              0, 0, "histcounts", "", "numkit:histcounts:badBinLimits");
             spec.hasBinLimits = true;
             spec.limLo = bl.elemAsDouble(0);

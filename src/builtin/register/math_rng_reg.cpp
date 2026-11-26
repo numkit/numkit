@@ -112,6 +112,11 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && !dimArgs[1].isChar()) {
         const keel::String flag = dimArgs[0].toString();
+        if (flag == "seed" || flag == "state" || flag == "twister") {
+            if (!dimArgs[1].isNumeric() && !dimArgs[1].isLogical())
+                throw Error("rand: state/seed argument must be numeric",
+                            0, 0, "rand", "", "numkit:rand:invalidState");
+        }
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Rand(
                 keel::as<keel::u64>(dimArgs[1].toScalar()));
@@ -128,10 +133,15 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
             if (dimArgs[1].numel() == 35) {
                 keel::f64 z[32];
                 for (keel::usize i = 0; i < 32; ++i) z[i] = dimArgs[1].elemAsDouble(i);
-                const keel::usize idx = keel::as<keel::usize>(dimArgs[1].elemAsDouble(32));
+                const keel::f64 idxD = dimArgs[1].elemAsDouble(32);
                 const keel::f64 borrow = dimArgs[1].elemAsDouble(33);
+                const keel::f64 jD = dimArgs[1].elemAsDouble(34);
+                if (!keel::is_finite(idxD) || idxD < 0.0 || !keel::is_finite(jD) || jD < 0.0)
+                    throw Error("rand: invalid legacy state vector",
+                                0, 0, "rand", "", "numkit:rand:invalidState");
+                const keel::usize idx = keel::as<keel::usize>(idxD);
                 const keel::u32 j = keel::as<keel::u32>(
-                    keel::round(dimArgs[1].elemAsDouble(34) / 2.2204460492503131e-16));
+                    keel::round(jD / 2.2204460492503131e-16));
                 rngRef.setLegacyV5RandState(z, idx, borrow, j);
                 outs[0] = Value();
                 return;
@@ -148,7 +158,11 @@ void rand_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArra
                 keel::u32 mt[ops::MatlabMT19937::STATE_SIZE];
                 for (keel::usize i = 0; i < 624; ++i)
                     mt[i] = keel::as<keel::u32>(dimArgs[1].elemAsDouble(i));
-                const keel::i32 idx = keel::as<keel::i32>(dimArgs[1].elemAsDouble(624));
+                const keel::f64 idxD = dimArgs[1].elemAsDouble(624);
+                if (!keel::is_finite(idxD))
+                    throw Error("rand: invalid twister state vector",
+                                0, 0, "rand", "", "numkit:rand:invalidState");
+                const keel::i32 idx = keel::as<keel::i32>(idxD);
                 rngRef.setLegacyTwisterRandState(mt, idx);
                 outs[0] = Value();
                 return;
@@ -200,6 +214,11 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     if (dimArgs.size() == 2 && (dimArgs[0].isChar() || dimArgs[0].isString())
         && !dimArgs[1].isChar()) {
         const keel::String flag = dimArgs[0].toString();
+        if (flag == "seed" || flag == "state" || flag == "twister") {
+            if (!dimArgs[1].isNumeric() && !dimArgs[1].isLogical())
+                throw Error("randn: state/seed argument must be numeric",
+                            0, 0, "randn", "", "numkit:randn:invalidState");
+        }
         if (flag == "seed" && dimArgs[1].isScalar()) {
             rngRef.setLegacyV4Randn(
                 keel::as<keel::u64>(dimArgs[1].toScalar()));
@@ -214,9 +233,14 @@ void randn_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
                 return;
             }
             if (dimArgs[1].numel() == 2) {
+                const keel::f64 s0 = dimArgs[1].elemAsDouble(0);
+                const keel::f64 s1 = dimArgs[1].elemAsDouble(1);
+                if (!keel::is_finite(s0) || !keel::is_finite(s1))
+                    throw Error("randn: invalid legacy state vector",
+                                0, 0, "randn", "", "numkit:randn:invalidState");
                 rngRef.setLegacyV5RandnState(
-                    keel::as<keel::u32>(dimArgs[1].elemAsDouble(0)),
-                    keel::as<keel::u32>(dimArgs[1].elemAsDouble(1)));
+                    keel::as<keel::u32>(s0),
+                    keel::as<keel::u32>(s1));
                 outs[0] = Value();
                 return;
             }

@@ -236,6 +236,9 @@ void lambertw_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Val
     if (args.size() == 2)
         branch = argcheck::expectedInteger(
             argcheck::expectedReal(args[0], 1, "k", "lambertw"), 1, "k", "lambertw");
+    if (!x.isNumeric() && !x.isLogical())
+        throw Error("lambertw: input X must be numeric",
+                    0, 0, "lambertw", "", "numkit:lambertw:invalidInput");
     const keel::usize n = x.numel();
     if (n == 1) {
         outs[0] = Value::scalar(evalLambertW(branch, x.elemAsDouble(0)), mr);

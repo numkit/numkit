@@ -171,6 +171,9 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     argcheck::checkNargin(args.size(), 2, "histcounts2");
     const auto &xv = args[0];
     const auto &yv = args[1];
+    if ((!xv.isNumeric() && !xv.isLogical()) || (!yv.isNumeric() && !yv.isLogical()))
+        throw Error("histcounts2: X and Y must be numeric arrays",
+                    0, 0, "histcounts2", "", "numkit:histcounts2:invalidInput");
     const keel::usize n = keel::min(xv.numel(), yv.numel());
     auto *mr = ctx.engine->allocator();
     if (n == 0) {
@@ -182,6 +185,9 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
     keel::i32 nx = 10, ny = 10;
     keel::Array<keel::f64> xedges(mr), yedges(mr);
     if (args.size() == 3) {
+        if (!args[2].isNumeric() && !args[2].isLogical())
+            throw Error("histcounts2: bin specification must be numeric",
+                        0, 0, "histcounts2", "", "numkit:histcounts2:invalidBins");
         if (args[2].numel() == 1) {
             nx = ny = (keel::i32)args[2].toScalar();
         } else if (args[2].numel() >= 2) {
@@ -199,6 +205,10 @@ void histcounts2_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/,
             }
         }
     } else if (args.size() >= 4) {
+        if ((!args[2].isNumeric() && !args[2].isLogical())
+            || (!args[3].isNumeric() && !args[3].isLogical()))
+            throw Error("histcounts2: bin edges must be numeric",
+                        0, 0, "histcounts2", "", "numkit:histcounts2:invalidEdges");
         xedges.resize(args[2].numel());
         yedges.resize(args[3].numel());
         for (keel::usize i = 0; i < xedges.size(); ++i)

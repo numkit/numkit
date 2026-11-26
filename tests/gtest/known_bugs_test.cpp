@@ -14,6 +14,7 @@
 #include <numkit/core/standard_engine.hpp>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <limits>
 
 using namespace numkit;
@@ -566,12 +567,17 @@ TEST_P(CommandGlueTest, DottedRvalueOnCallResult)
 TEST_P(CommandGlueTest, ExistFileInsideFunction)
 {
     eval("function e = q(p)\n e = exist(p, 'file');\nend\n");
-    const std::string tmp = (std::string)std::tmpnam(nullptr) + "_ex.txt";
+    static std::atomic<int> tmpCounter{0};
+    const keel::String tmpDir = keel::fs_temp_dir().value_or(keel::String::from("."));
+    const keel::String tmpPath = keel::path_join(
+        tmpDir.as_ref(),
+        keel::format("numkit_kb_ex_{}_{}.txt", static_cast<int>(GetParam()), ++tmpCounter).as_ref());
+    const std::string tmp(tmpPath.data(), tmpPath.size());
     engine.figureManager();   // no-op; keep engine warm
     eval("fid = fopen('" + tmp + "', 'w'); fwrite(fid, uint8('x')); fclose(fid);");
     eval("eIn = q('" + tmp + "');");
     eval("eTop = exist('" + tmp + "', 'file');");
-    ::remove(tmp.c_str());
+    (void)keel::fs_remove(tmpPath.as_ref());
     EXPECT_DOUBLE_EQ(evalScalar("eTop"), 2.0);
     EXPECT_DOUBLE_EQ(evalScalar("eIn"), 2.0);
 }
@@ -591,7 +597,12 @@ TEST_P(CommandGlueTest, MldivideSingularWarns)
 // inside fprintf(...) just like in an assignment.
 TEST_P(CommandGlueTest, DirNargoutInsideCallArgument)
 {
-    const std::string tmp = (std::string)std::tmpnam(nullptr) + "_dirarg.txt";
+    static std::atomic<int> tmpCounter{0};
+    const keel::String tmpDir = keel::fs_temp_dir().value_or(keel::String::from("."));
+    const keel::String tmpPath = keel::path_join(
+        tmpDir.as_ref(),
+        keel::format("numkit_kb_dirarg_{}_{}.txt", static_cast<int>(GetParam()), ++tmpCounter).as_ref());
+    const std::string tmp(tmpPath.data(), tmpPath.size());
     eval("fid = fopen('" + tmp + "', 'w'); fwrite(fid, uint8('x')); fclose(fid);");
     // Assignment context: outer call requests an output, the inner dir
     // inherits it — works today.
@@ -602,7 +613,7 @@ TEST_P(CommandGlueTest, DirNargoutInsideCallArgument)
     // so ans must be 1 there too. Observable via ans.
     eval("numel(dir('" + tmp + "'));");
     EXPECT_DOUBLE_EQ(evalScalar("ans"), 1.0);
-    ::remove(tmp.c_str());
+    (void)keel::fs_remove(tmpPath.as_ref());
 }
 
 // bugs/closed/runtime/exist-toolbox-fn-returns-zero.md — the

@@ -638,6 +638,9 @@ void freqspace_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (a0.numel() == 1) {
         n_rows = n_cols = argcheck::arrayDim(a0, "freqspace");
     } else if (a0.numel() == 2) {
+        if (!a0.isNumeric() && !a0.isLogical())
+            throw numkit::Error("freqspace: N must be a numeric scalar or 2-element vector",
+                                0, 0, "freqspace", "", "numkit:freqspace:invalidN");
         argcheck::arrayDimReal(a0, "freqspace");
         n_rows = argcheck::arrayDim(a0.elemAsDouble(0), "freqspace");
         n_cols = argcheck::arrayDim(a0.elemAsDouble(1), "freqspace");

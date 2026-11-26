@@ -134,7 +134,18 @@ void weekday_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
         }
         static const char *kShort[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         static const char *kLong[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+        if (args[0].isEmpty()) {
+            outs[1] = Value::matrix(0, 0, ValueType::CHAR, mr);
+            return;
+        }
+        if (!args[0].isNumeric() && !args[0].isLogical() && !args[0].isChar())
+            throw numkit::Error("weekday: input must be a numeric date number",
+                                0, 0, "weekday", "", "numkit:weekday:invalidInput");
         keel::f64 dval = args[0].numel() == 1 ? args[0].toScalar() : args[0].elemAsDouble(0);
+        if (!keel::is_finite(dval)) {
+            outs[1] = Value::fromString("", mr);
+            return;
+        }
         keel::i64 f = keel::as<keel::i64>(keel::floor(dval)) - 2;
         keel::i64 r = f % 7;
         if (r < 0) r += 7;
@@ -311,15 +322,19 @@ void nat_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> o
     auto *mr = ctx.engine->allocator();
     keel::usize r = 1, c = 1;
     if (args.size() == 1 && args[0].isNumeric()) {
-        if (args[0].numel() == 1) {
-            r = c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
-        } else if (args[0].numel() >= 2) {
-            r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
-            c = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(1)));
+        if (args[0].isEmpty()) {
+            r = 0;
+            c = 0;
+        } else if (args[0].numel() == 1) {
+            r = c = argcheck::arrayDim(args[0], "NaT");
+        } else {
+            argcheck::arrayDimReal(args[0], "NaT");
+            r = argcheck::arrayDim(args[0].elemAsDouble(0), "NaT");
+            c = argcheck::arrayDim(args[0].elemAsDouble(1), "NaT");
         }
     } else if (args.size() >= 2 && args[0].isNumeric() && args[1].isNumeric()) {
-        r = keel::as<keel::usize>(keel::max(0.0, args[0].elemAsDouble(0)));
-        c = keel::as<keel::usize>(keel::max(0.0, args[1].elemAsDouble(0)));
+        r = argcheck::arrayDim(args[0], "NaT");
+        c = argcheck::arrayDim(args[1], "NaT");
     }
     keel::Array<keel::f64> nats(mr);
     nats.assign(r * c, keel::Limits<keel::f64>::quiet_nan());

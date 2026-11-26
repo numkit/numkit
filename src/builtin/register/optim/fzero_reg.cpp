@@ -90,6 +90,10 @@ void fzero_reg(keel::ArrayRef<Value> args, keel::usize /*nargout*/, keel::MutArr
     };
     auto *mr = ctx.engine->allocator();
     const Value &v = args[1];
+    if ((!v.isNumeric() && !v.isLogical()) || v.isComplex())
+        throw Error("fzero: 2nd argument must be a real numeric scalar x0 or a 2-element "
+                    "interval [a, b]",
+                    0, 0, "fzero", "", "numkit:fzero:badX0");
     if (v.numel() == 1) {
         outs[0] = fzero(cb, v.toScalar(), mr);
     } else if (v.numel() == 2) {

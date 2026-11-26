@@ -3517,14 +3517,6 @@ TEST_P(DisplayTest, GeoLimitsMontageListFontsWebOptionsJsonStructAndLsq)
             wb.push_back(static_cast<uint8_t>(v & 0xFF));
             wb.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
         };
-        auto pushU32 = [&](uint32_t v) {
-            for (int k = 0; k < 4; ++k) wb.push_back(static_cast<uint8_t>((v >> (8 * k)) & 0xFF));
-        };
-        auto pushF64 = [&](double v) {
-            uint8_t b[8];
-            std::memcpy(b, &v, 8);
-            wb.insert(wb.end(), b, b + 8);
-        };
         auto pushRec = [&](uint16_t id, const std::vector<uint8_t> &body) {
             pushU16(id);
             pushU16(static_cast<uint16_t>(body.size()));
@@ -3727,6 +3719,36 @@ TEST_P(DisplayTest, ArchiveZipGzipAndXlsx)
 
     // Cleanup temp directory
     (void)keel::fs_remove_all(eval("d").toString().as_ref());
+}
+
+TEST_P(DisplayTest, ConstantIndexElemAsDoubleHardening)
+{
+    // weekday([]) with 2 outputs used to OOB-read elemAsDouble(0) on empty array.
+    eval("[wd, ws] = weekday([]);");
+    EXPECT_EQ(evalScalar("numel(wd)"), 0.0);
+    EXPECT_EQ(evalScalar("numel(ws)"), 0.0);
+    // weekday(NaN) with 2 outputs must not UB-cast NaN to int64.
+    EXPECT_NO_THROW(eval("[wdn, wsn] = weekday(NaN);"));
+
+    // NaT([], 3) / NaT(3, []) used to OOB-read elemAsDouble(0) on empty arg.
+    EXPECT_THROW(eval("NaT([], 3);"), numkit::Error);
+    EXPECT_THROW(eval("NaT(3, []);"), numkit::Error);
+    EXPECT_THROW(eval("NaT(NaN);"), numkit::Error);
+    EXPECT_THROW(eval("NaT(Inf, 2);"), numkit::Error);
+    eval("ne = NaT([]);");
+    EXPECT_EQ(evalScalar("numel(ne)"), 0.0);
+
+    // Non-numeric / complex guards before constant-index elemAsDouble(k).
+    EXPECT_THROW(eval("freqspace({'a', 'b'});"), numkit::Error);
+    EXPECT_THROW(eval("histcounts([1 2 3], 'BinLimits', {'a', 'b'});"), numkit::Error);
+    EXPECT_THROW(eval("histcounts([1 2 3], 'BinLimits', [1+1i, 2]);"), numkit::Error);
+    EXPECT_THROW(eval("histcounts2({'a'}, {'b'});"), numkit::Error);
+    EXPECT_THROW(eval("histcounts2([1 2], [1 2], {'a', 'b'});"), numkit::Error);
+    EXPECT_THROW(eval("fzero(@sin, {'a', 'b'});"), numkit::Error);
+    EXPECT_THROW(eval("fzero(@sin, [1+1i, 2]);"), numkit::Error);
+    EXPECT_THROW(eval("lambertw({'a'});"), numkit::Error);
+    EXPECT_THROW(eval("rand('state', cell(35, 1));"), numkit::Error);
+    EXPECT_THROW(eval("randn('state', {'a', 'b'});"), numkit::Error);
 }
 
 INSTANTIATE_DUAL(DisplayTest);

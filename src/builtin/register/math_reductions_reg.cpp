@@ -242,6 +242,8 @@ Value reduceTypedAlongDim(const Value &x, keel::i32 dim, ValueType outType, keel
             Value out;
             if (x.dims().isVector())
                 out = createMatrix({x.dims().rows(), x.dims().cols(), 0}, outType, mr);
+            else if (n == 0)
+                return Value::matrix(0, 0, outType, mr);
             else
                 return makeNativeScalar<T>(toOutT<T>(x.elemAsDouble(0)), outType, mr);
             T *dst = static_cast<T *>(out.rawDataMut());
@@ -575,8 +577,11 @@ Value nanReduceAlongDimImpl(const Value &x, keel::i32 dim, ValueType outType, ke
         if (dim != numkit::ops::firstNonSingletonDim(x)) {
             // Identity: copy x as outType (cast where needed).
             const keel::usize n = x.numel();
-            if (!x.dims().isVector())
+            if (!x.dims().isVector()) {
+                if (n == 0)
+                    return Value::matrix(0, 0, outType, mr);
                 return makeNativeScalar<T>(toOutT<T>(x.elemAsDouble(0)), outType, mr);
+            }
             Value out = createMatrix({x.dims().rows(), x.dims().cols(), 0}, outType, mr);
             T *dst = static_cast<T *>(out.rawDataMut());
             for (keel::usize i = 0; i < n; ++i) dst[i] = toOutT<T>(x.elemAsDouble(i));
