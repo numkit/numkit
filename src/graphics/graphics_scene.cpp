@@ -48,6 +48,7 @@ GraphicsScene::GraphicsScene(keel::Allocator *mr)
     : mr_(mr ? mr : keel::default_allocator())
     , nodes_(mr_)
     , events_(mr_)
+    , linkGroups_(mr_)
 {
     GraphicsNode root;
     root.id = kRootNodeId;
@@ -125,6 +126,32 @@ NodeId GraphicsScene::allocateNode(ClassId cls, NodeId parentId)
     node.classId = cls;
     node.parentId = parentId;
     node.version = generation_ + 1;
+
+    // Snapshot any active ancestor defaults for this class at creation time
+    // (matches reference engine: removing a default later does not retroactively
+    // alter already-created objects).
+    const ClassSchema &schema = schemaFor(cls);
+    const keel::StringRef pref(schema.defaultPrefix);
+    if (!pref.empty() && parentId != kInvalidNodeId) {
+        NodeId cur = parentId;
+        while (cur != kInvalidNodeId) {
+            const GraphicsNode *anc = findNode(cur);
+            if (!anc)
+                break;
+            for (const auto &kv : anc->defaults) {
+                const keel::StringRef kref = kv.key.as_ref();
+                if (kref.size() > pref.size() && asciiStartsWithNoCase(kref, pref)) {
+                    const keel::StringRef pName = kref.substr(pref.size());
+                    if (const PropertySpec *sp = schema.findExact(pName)) {
+                        if (!node.props.contains(sp->name))
+                            node.props.put(keel::String::from(sp->name, mr_), kv.value);
+                    }
+                }
+            }
+            cur = anc->parentId;
+        }
+    }
+
     nodes_.put(id, keel::move(node));
     if (parentId != kInvalidNodeId)
         attachChildFront(parentId, id);
@@ -317,8 +344,15 @@ void GraphicsScene::deleteNode(NodeId id, bool force)
     for (NodeId cid : childCopy)
         deleteNode(cid, force);
 
-    const NodeId ownedTheme = n->themeId;
+    const NodeId ownedSub[] = {
+        n->themeId, n->xAxisId, n->yAxisId, n->yAxisRightId, n->zAxisId,
+        n->titleId, n->subtitleId, n->xLabelId, n->yLabelId, n->yLabelRightId, n->zLabelId
+    };
+    const NodeId attachedLegend = n->legendId;
+    const NodeId attachedColorBar = n->colorBarId;
+    const NodeId ownerAxesId = n->ownerAxesId;
     const NodeId parentId = n->parentId;
+    const NodeId figId = containingFigure(id);
     const ClassId cls = n->classId;
 
     if (parentId != kInvalidNodeId)
@@ -333,10 +367,35 @@ void GraphicsScene::deleteNode(NodeId id, bool force)
         self->version = generation_ + 1;
     }
 
-    if (ownedTheme != kInvalidNodeId) {
-        if (GraphicsNode *tn = nodes_.get(ownedTheme)) {
-            tn->deleted = true;
-            tn->props.clear();
+    for (NodeId subId : ownedSub) {
+        if (subId != kInvalidNodeId) {
+            if (GraphicsNode *sn = nodes_.get(subId)) {
+                sn->deleted = true;
+                sn->props.clear();
+            }
+        }
+    }
+
+    if (cls == ClassId::Axes || cls == ClassId::PolarAxes) {
+        if (attachedLegend != kInvalidNodeId && findNode(attachedLegend) != nullptr)
+            deleteNode(attachedLegend, force);
+        if (attachedColorBar != kInvalidNodeId && findNode(attachedColorBar) != nullptr)
+            deleteNode(attachedColorBar, force);
+        for (auto &grp : linkGroups_) {
+            for (keel::usize i = grp.axes.size(); i > 0; --i) {
+                if (grp.axes[i - 1] == id)
+                    grp.axes.erase(i - 1);
+            }
+        }
+    }
+    if (cls == ClassId::Legend && ownerAxesId != kInvalidNodeId) {
+        if (GraphicsNode *ow = findNode(ownerAxesId)) {
+            if (ow->legendId == id) ow->legendId = kInvalidNodeId;
+        }
+    }
+    if (cls == ClassId::ColorBar && ownerAxesId != kInvalidNodeId) {
+        if (GraphicsNode *ow = findNode(ownerAxesId)) {
+            if (ow->colorBarId == id) ow->colorBarId = kInvalidNodeId;
         }
     }
 
@@ -344,6 +403,11 @@ void GraphicsScene::deleteNode(NodeId id, bool force)
     if (cls == ClassId::Figure && currentFigureId_ == id) {
         currentFigureId_ = kInvalidNodeId;
         updateCurrentFigureAfterRemoval();
+    } else if ((cls == ClassId::Axes || cls == ClassId::PolarAxes) && figId != kInvalidNodeId) {
+        if (GraphicsNode *fn = findNode(figId); fn && fn->currentAxesId == id) {
+            fn->currentAxesId = kInvalidNodeId;
+            updateCurrentAxesAfterRemoval(figId);
+        }
     }
 }
 
@@ -420,8 +484,20 @@ void GraphicsScene::reparentNode(NodeId id, NodeId newParentId)
         throw Error("Cannot change Parent of Root object.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
     if (n->classId == ClassId::Figure && newParentId != kRootNodeId)
         throw Error("Parent of a Figure must be the Root object.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
-    if (findNode(newParentId) == nullptr)
+    const GraphicsNode *newP = findNode(newParentId);
+    if (!newP)
         throw Error("Invalid or deleted Parent object.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+    if ((n->classId == ClassId::Axes || n->classId == ClassId::PolarAxes)
+        && newP->classId != ClassId::Figure && newP->classId != ClassId::TiledChartLayout) {
+        throw Error("Parent of Axes must be a Figure or TiledChartLayout.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+    }
+    if (n->classId == ClassId::TiledChartLayout && newP->classId != ClassId::Figure) {
+        throw Error("Parent of TiledChartLayout must be a Figure.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+    }
+    if ((n->classId == ClassId::Text || n->classId == ClassId::ConstantLine)
+        && newP->classId != ClassId::Axes && newP->classId != ClassId::PolarAxes) {
+        throw Error("Parent of Text or ConstantLine must be an Axes or PolarAxes.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+    }
     if (n->parentId == newParentId)
         return;
     const NodeId oldParent = n->parentId;
@@ -595,9 +671,19 @@ bool GraphicsScene::parseDefaultKey(keel::StringRef raw,
         return false;
     }
 
-    // Match longest class prefix (e.g. "Figure", "Root", "Theme").
+    // Match longest class prefix first (e.g. "TiledChartLayout" before "Text", "PolarAxes" before "Axes").
     static constexpr ClassId kDefaultTargets[] = {
-        ClassId::Figure, ClassId::Root, ClassId::Theme
+        ClassId::TiledChartLayout,
+        ClassId::NumericRuler,
+        ClassId::ConstantLine,
+        ClassId::PolarAxes,
+        ClassId::ColorBar,
+        ClassId::Figure,
+        ClassId::Legend,
+        ClassId::Theme,
+        ClassId::Axes,
+        ClassId::Root,
+        ClassId::Text,
     };
     for (ClassId cid : kDefaultTargets) {
         const ClassSchema &s = schemaFor(cid);
@@ -790,6 +876,84 @@ Value GraphicsScene::getProperty(NodeId id, keel::StringRef rawProp, keel::Alloc
         }
     }
 
+    if (n->classId == ClassId::Axes) {
+        if (prop == "XAxis") return makeHandleValue(n->xAxisId, res);
+        if (prop == "YAxis") {
+            if (n->yAxisRightId != kInvalidNodeId) {
+                const NodeId pairIds[2] = {n->yAxisId, n->yAxisRightId};
+                return makeHandleColumn(keel::ArrayRef<NodeId>(pairIds, 2), res);
+            }
+            return makeHandleValue(n->yAxisId, res);
+        }
+        if (prop == "ZAxis") return makeHandleValue(n->zAxisId, res);
+        if (prop == "Title") return makeHandleValue(n->titleId, res);
+        if (prop == "Subtitle") return makeHandleValue(n->subtitleId, res);
+        if (prop == "XLabel") return makeHandleValue(n->xLabelId, res);
+        if (prop == "YLabel") {
+            const NodeId yid = (n->yyRightActive && n->yLabelRightId != kInvalidNodeId)
+                                   ? n->yLabelRightId : n->yLabelId;
+            return makeHandleValue(yid, res);
+        }
+        if (prop == "ZLabel") return makeHandleValue(n->zLabelId, res);
+        if (prop == "Legend") return makeHandleValue(n->legendId, res);
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+
+        // When yyaxis right is active, Y-axis scalar properties read from right ruler.
+        if (n->yyRightActive && n->yAxisRightId != kInvalidNodeId) {
+            const char *rProp = nullptr;
+            if (prop == "YLim") rProp = "Limits";
+            else if (prop == "YLimMode") rProp = "LimitsMode";
+            else if (prop == "YScale") rProp = "Scale";
+            else if (prop == "YDir") rProp = "Direction";
+            else if (prop == "YColor") rProp = "Color";
+            else if (prop == "YTick") rProp = "TickValues";
+            else if (prop == "YTickMode") rProp = "TickValuesMode";
+            else if (prop == "YTickLabel") rProp = "TickLabels";
+            else if (prop == "YTickLabelMode") rProp = "TickLabelsMode";
+            else if (prop == "YTickLabelRotation") rProp = "TickLabelRotation";
+            else if (prop == "YTickLabelRotationMode") rProp = "TickLabelRotationMode";
+            else if (prop == "YMinorTick") rProp = "MinorTick";
+            if (rProp)
+                return getProperty(n->yAxisRightId, rProp, res);
+        }
+    }
+
+    if (n->classId == ClassId::PolarAxes) {
+        if (prop == "ThetaAxis") return makeHandleValue(n->xAxisId, res);
+        if (prop == "RAxis") return makeHandleValue(n->yAxisId, res);
+        if (prop == "Title") return makeHandleValue(n->titleId, res);
+        if (prop == "Subtitle") return makeHandleValue(n->subtitleId, res);
+        if (prop == "Legend") return makeHandleValue(n->legendId, res);
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    }
+
+    if (n->classId == ClassId::TiledChartLayout) {
+        if (prop == "Title") return makeHandleValue(n->titleId, res);
+        if (prop == "Subtitle") return makeHandleValue(n->subtitleId, res);
+        if (prop == "XLabel") return makeHandleValue(n->xLabelId, res);
+        if (prop == "YLabel") return makeHandleValue(n->yLabelId, res);
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    }
+
+    if (n->classId == ClassId::NumericRuler) {
+        if (prop == "Label") return makeHandleValue(n->xLabelId, res);
+        if (prop == "Parent") return makeHandleValue(n->ownerAxesId, res);
+    }
+
+    if (n->classId == ClassId::Legend) {
+        if (prop == "Title") return makeHandleValue(n->titleId, res);
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    }
+
+    if (n->classId == ClassId::ColorBar) {
+        if (prop == "Label") return makeHandleValue(n->xLabelId, res);
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    }
+
+    if (n->classId == ClassId::Text || n->classId == ClassId::ConstantLine) {
+        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    }
+
     // 3. Explicit override on node -> inherited default -> factory default.
     if (const Value *hit = n->props.get(prop))
         return *hit;
@@ -831,6 +995,25 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:UnrecognizedProperty");
     }
     if (spec->isReadOnly()) {
+        // Allow no-op write-back from chained handle mutation (e.g. `lg.Title.String = 'x'`
+        // or `cb.Label.String = 'y'`), where the runtime writes back the identical handle.
+        if (spec->kind == PropKind::Handle && val.isObject() && isSceneGraphicsHandle(val)) {
+            const Value cur = getProperty(id, spec->name, res);
+            if (cur.isObject() && cur.objectCount() == val.objectCount() && cur.objectCount() > 0) {
+                bool same = true;
+                for (keel::usize i = 0; i < cur.objectCount(); ++i) {
+                    keel::i32 idA = -1, idB = -1;
+                    bool scA = false, scB = false;
+                    if (!graphicsHandleAt(cur, i, idA, scA) || !graphicsHandleAt(val, i, idB, scB)
+                        || !scA || !scB || idA != idB) {
+                        same = false;
+                        break;
+                    }
+                }
+                if (same)
+                    return;
+            }
+        }
         auto msg = keel::format("You cannot set the read-only property '{}' of '{}'.",
                                 spec->name, schema.className);
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:ReadOnlyProperty");
@@ -878,6 +1061,17 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
         return;
     }
 
+    if (n->classId == ClassId::Figure && prop == "CurrentAxes") {
+        if (val.isEmpty() || graphicsHandleIdOf(val) == kPlaceholderNodeId) {
+            n->currentAxesId = kInvalidNodeId;
+            n->version = generation_ + 1;
+            emitEvent(SceneEventKind::CurrentChanged, id, kInvalidNodeId, "CurrentAxes");
+            return;
+        }
+        setCurrentAxes(graphicsHandleIdOf(val));
+        return;
+    }
+
     if (n->classId == ClassId::Figure && prop == "Theme") {
         keel::String styleStr;
         if (val.isChar() || val.isString()) {
@@ -901,14 +1095,61 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
 
     // 4. Validate and store value.
     Value validated = validatePropValue(*spec, val, res);
-    n->props.put(keel::String::from(prop, mr_), validated);
 
-    // 5. Paired Mode property automation (e.g. Renderer -> RendererMode = 'manual').
-    if (spec->pairedMode != nullptr) {
-        n->props.put(keel::String::from(spec->pairedMode, mr_), Value::fromString("manual", res));
+    // Special validation: Limits vectors must be strictly increasing finite [lo, hi].
+    const bool isLimVec = (prop == "XLim" || prop == "YLim" || prop == "ZLim"
+                           || prop == "CLim" || prop == "ALim" || prop == "RLim"
+                           || prop == "ThetaLim" || prop == "Limits");
+    if (isLimVec && validated.isNumeric() && validated.numel() == 2) {
+        const keel::f64 lo = validated.elemAsDouble(0);
+        const keel::f64 hi = validated.elemAsDouble(1);
+        if (!(lo < hi) || !keel::is_finite(lo) || !keel::is_finite(hi)) {
+            auto msg = keel::format("Property '{}' must be a 2-element increasing finite numeric vector.", prop);
+            throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidLimits");
+        }
     }
 
-    // 6. Figure-specific synchronized property groups.
+    // Text.Position accepts [x y] (promoted to [x y 0]) or [x y z].
+    if (n->classId == ClassId::Text && prop == "Position") {
+        if (!validated.isNumeric() || (validated.numel() != 2 && validated.numel() != 3)) {
+            throw Error("Text Position must be a 2- or 3-element numeric vector.",
+                        0, 0, "set", "", "numkit:graphics:InvalidPosition");
+        }
+        Value p3 = Value::matrix(1, 3, ValueType::DOUBLE, res);
+        p3.doubleDataMut()[0] = validated.elemAsDouble(0);
+        p3.doubleDataMut()[1] = validated.elemAsDouble(1);
+        p3.doubleDataMut()[2] = (validated.numel() == 3) ? validated.elemAsDouble(2) : 0.0;
+        validated = keel::move(p3);
+    }
+
+    // Axes yyaxis right: route Y-side properties directly to right ruler without clobbering left.
+    bool routedToRightRuler = false;
+    if (n->classId == ClassId::Axes && n->yyRightActive && n->yAxisRightId != kInvalidNodeId) {
+        if (prop == "YLim" || prop == "YLimMode" || prop == "YScale" || prop == "YDir"
+            || prop == "YColor" || prop == "YColorMode" || prop == "YTick" || prop == "YTickMode"
+            || prop == "YTickLabel" || prop == "YTickLabelMode" || prop == "YTickLabelRotation"
+            || prop == "YTickLabelRotationMode" || prop == "YMinorTick") {
+            syncAxesToRuler(id, 'y', prop, validated, res);
+            if (prop == "YLim" || prop == "YScale"
+                || (prop == "YTickMode" && asciiEqualNoCase(validated.toString(), "auto"))) {
+                recomputeAutoTicksForAxis(id, 'y', res);
+            }
+            if (prop == "YLim")
+                propagateLinkedLimits(id, false, validated, res);
+            routedToRightRuler = true;
+        }
+    }
+
+    if (!routedToRightRuler) {
+        n->props.put(keel::String::from(prop, mr_), validated);
+
+        // 5. Paired Mode property automation (e.g. Renderer -> RendererMode = 'manual').
+        if (spec->pairedMode != nullptr) {
+            n->props.put(keel::String::from(spec->pairedMode, mr_), Value::fromString("manual", res));
+        }
+    }
+
+    // 6. Class-specific synchronized property groups.
     if (n->classId == ClassId::Figure) {
         if (prop == "Position" || prop == "InnerPosition" || prop == "OuterPosition") {
             n->props.put(keel::String::from("Position", mr_), validated);
@@ -947,6 +1188,60 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
             }
         } else if (prop == "PaperSize") {
             n->props.put(keel::String::from("PaperType", mr_), Value::fromString("<custom>", res));
+        }
+    } else if (n->classId == ClassId::Axes && !routedToRightRuler) {
+        if (prop == "Position" || prop == "InnerPosition" || prop == "OuterPosition") {
+            n->props.put(keel::String::from("Position", mr_), validated);
+            n->props.put(keel::String::from("InnerPosition", mr_), validated);
+            n->props.put(keel::String::from("OuterPosition", mr_), validated);
+        } else if (prop == "FontSize" && validated.isNumeric() && validated.numel() == 1) {
+            const keel::f64 fs = validated.toScalar();
+            const keel::f64 tMult = getProperty(id, "TitleFontSizeMultiplier", res).toScalar();
+            const keel::f64 lMult = getProperty(id, "LabelFontSizeMultiplier", res).toScalar();
+            if (GraphicsNode *tn = findNode(n->titleId))
+                tn->props.put(keel::String::from("FontSize", mr_), Value::scalar(fs * tMult, res));
+            if (GraphicsNode *sn = findNode(n->subtitleId))
+                sn->props.put(keel::String::from("FontSize", mr_), Value::scalar(fs, res));
+            for (NodeId lid : {n->xLabelId, n->yLabelId, n->yLabelRightId, n->zLabelId}) {
+                if (GraphicsNode *ln = findNode(lid))
+                    ln->props.put(keel::String::from("FontSize", mr_), Value::scalar(fs * lMult, res));
+            }
+            for (NodeId rid : {n->xAxisId, n->yAxisId, n->yAxisRightId, n->zAxisId}) {
+                if (GraphicsNode *rn = findNode(rid))
+                    rn->props.put(keel::String::from("FontSize", mr_), Value::scalar(fs, res));
+            }
+        } else if (prop == "FontName" || prop == "FontWeight" || prop == "FontAngle") {
+            for (NodeId lid : {n->titleId, n->subtitleId, n->xLabelId, n->yLabelId, n->yLabelRightId, n->zLabelId,
+                               n->xAxisId, n->yAxisId, n->yAxisRightId, n->zAxisId}) {
+                if (GraphicsNode *ln = findNode(lid))
+                    ln->props.put(keel::String::from(prop, mr_), validated);
+            }
+        } else if (prop == "CLim" && n->colorBarId != kInvalidNodeId) {
+            if (GraphicsNode *cb = findNode(n->colorBarId))
+                cb->props.put(keel::String::from("Limits", mr_), validated);
+        }
+
+        // Sync Axes X/Y/Z properties to owned NumericRuler + auto-ticks + linked axes.
+        const char axCh = (!prop.empty() && (prop[0] == 'X' || prop[0] == 'Y' || prop[0] == 'Z'))
+                              ? static_cast<char>(prop[0] - 'A' + 'a') : '\0';
+        if (axCh != '\0') {
+            syncAxesToRuler(id, axCh, prop, validated, res);
+            if (prop == "XLim" || prop == "YLim" || prop == "ZLim"
+                || prop == "XScale" || prop == "YScale" || prop == "ZScale"
+                || ((prop == "XTickMode" || prop == "YTickMode" || prop == "ZTickMode")
+                    && asciiEqualNoCase(validated.toString(), "auto"))) {
+                recomputeAutoTicksForAxis(id, axCh, res);
+            }
+            if (prop == "XLim" || prop == "YLim")
+                propagateLinkedLimits(id, prop == "XLim", validated, res);
+        }
+    } else if (n->classId == ClassId::NumericRuler) {
+        syncRulerToAxes(id, prop, validated, res);
+    } else if (n->classId == ClassId::PolarAxes || n->classId == ClassId::TiledChartLayout) {
+        if (prop == "Position" || prop == "InnerPosition" || prop == "OuterPosition") {
+            n->props.put(keel::String::from("Position", mr_), validated);
+            n->props.put(keel::String::from("InnerPosition", mr_), validated);
+            n->props.put(keel::String::from("OuterPosition", mr_), validated);
         }
     }
 

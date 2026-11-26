@@ -254,7 +254,32 @@ keel::String sceneDispText(Engine &engine, const Value &self)
             scene.getProperty(id, "Name").toString(),
             scene.getProperty(id, "BaseColorStyle").toString());
     }
-    return keel::format("  {}\n", s.className);
+    if (n->classId == ClassId::Axes) {
+        const Value xl = scene.getProperty(id, "XLim");
+        const Value yl = scene.getProperty(id, "YLim");
+        return keel::format(
+            "  Axes with properties:\n\n"
+            "             XLim: [{:.4g} {:.4g}]\n"
+            "             YLim: [{:.4g} {:.4g}]\n"
+            "           XScale: '{}'\n"
+            "           YScale: '{}'\n"
+            "         NextPlot: '{}'\n",
+            xl.elemAsDouble(0), xl.elemAsDouble(1),
+            yl.elemAsDouble(0), yl.elemAsDouble(1),
+            scene.getProperty(id, "XScale").toString(),
+            scene.getProperty(id, "YScale").toString(),
+            scene.getProperty(id, "NextPlot").toString());
+    }
+    if (n->classId == ClassId::Text) {
+        return keel::format(
+            "  Text ('{}') with properties:\n\n"
+            "      String: '{}'\n"
+            "    FontSize: {:.4g}\n",
+            scene.getProperty(id, "String").toString(),
+            scene.getProperty(id, "String").toString(),
+            scene.getProperty(id, "FontSize").toScalar());
+    }
+    return keel::format("  {} with properties\n", s.className);
 }
 
 void registerOneSceneClass(Engine &engine, ClassId cid)
@@ -299,6 +324,41 @@ void registerOneSceneClass(Engine &engine, ClassId cid)
             if (const GraphicsNode *fn = scene.findNode(fid); fn && fn->figureNumber > 0)
                 ctx.engine->figureManager().setFigure(fn->figureNumber);
             return scene.makeHandleValue(fid, mr);
+        }
+        if (cid == ClassId::Axes) {
+            const NodeId axId = scene.createAxes();
+            applyNameValuePairs(scene, axId, args, 0, mr);
+            return scene.makeHandleValue(axId, mr);
+        }
+        if (cid == ClassId::PolarAxes) {
+            const NodeId paxId = scene.createPolarAxes();
+            applyNameValuePairs(scene, paxId, args, 0, mr);
+            return scene.makeHandleValue(paxId, mr);
+        }
+        if (cid == ClassId::TiledChartLayout) {
+            const NodeId tlId = scene.createTiledLayout(kInvalidNodeId, 1, 1);
+            applyNameValuePairs(scene, tlId, args, 0, mr);
+            return scene.makeHandleValue(tlId, mr);
+        }
+        if (cid == ClassId::Text) {
+            const NodeId tid = scene.createText(kInvalidNodeId, 0.0, 0.0, 0.0, {});
+            applyNameValuePairs(scene, tid, args, 0, mr);
+            return scene.makeHandleValue(tid, mr);
+        }
+        if (cid == ClassId::Legend) {
+            const NodeId lgId = scene.createOrUpdateLegend(scene.ensureCurrentAxes(), {});
+            applyNameValuePairs(scene, lgId, args, 0, mr);
+            return scene.makeHandleValue(lgId, mr);
+        }
+        if (cid == ClassId::ColorBar) {
+            const NodeId cbId = scene.createOrUpdateColorBar(scene.ensureCurrentAxes());
+            applyNameValuePairs(scene, cbId, args, 0, mr);
+            return scene.makeHandleValue(cbId, mr);
+        }
+        if (cid == ClassId::ConstantLine) {
+            const NodeId clId = scene.createConstantLine(kInvalidNodeId, 'x', 0.0, {});
+            applyNameValuePairs(scene, clId, args, 0, mr);
+            return scene.makeHandleValue(clId, mr);
         }
         return scene.makeEmptyPlaceholder(mr);
     };
@@ -978,11 +1038,14 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
             continue;
         }
         if (idx + 1 < args.size()) {
-            // If caller queries a legacy chart type (e.g. 'Type','line' / 'axes'), defer to legacy findobj until Phases 2-3.
+            // If caller queries a legacy Phase-3 chart type (e.g. 'Type','line'), defer to legacy findobj until Phase 3.
             if (asciiEqualNoCase(tok, "Type") && (args[idx + 1].isChar() || args[idx + 1].isString())) {
                 const keel::String wantT = args[idx + 1].toString();
                 if (!asciiEqualNoCase(wantT, "figure") && !asciiEqualNoCase(wantT, "root")
-                    && !asciiEqualNoCase(wantT, "theme")) {
+                    && !asciiEqualNoCase(wantT, "theme") && !asciiEqualNoCase(wantT, "axes")
+                    && !asciiEqualNoCase(wantT, "polaraxes") && !asciiEqualNoCase(wantT, "tiledlayout")
+                    && !asciiEqualNoCase(wantT, "text") && !asciiEqualNoCase(wantT, "legend")
+                    && !asciiEqualNoCase(wantT, "colorbar") && !asciiEqualNoCase(wantT, "constantline")) {
                     return false;
                 }
             }
@@ -1059,12 +1122,22 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
     return true;
 }
 
+void registerSceneAxesBuiltins(Engine &engine);
+
 void registerSceneGraphics(Engine &engine)
 {
     registerOneSceneClass(engine, ClassId::Root);
     registerOneSceneClass(engine, ClassId::Figure);
     registerOneSceneClass(engine, ClassId::Theme);
     registerOneSceneClass(engine, ClassId::Placeholder);
+    registerOneSceneClass(engine, ClassId::Axes);
+    registerOneSceneClass(engine, ClassId::NumericRuler);
+    registerOneSceneClass(engine, ClassId::PolarAxes);
+    registerOneSceneClass(engine, ClassId::TiledChartLayout);
+    registerOneSceneClass(engine, ClassId::Text);
+    registerOneSceneClass(engine, ClassId::Legend);
+    registerOneSceneClass(engine, ClassId::ColorBar);
+    registerOneSceneClass(engine, ClassId::ConstantLine);
 
     auto regBoth = [&](const char *sub, const char *name,
                        void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &)) {
@@ -1084,6 +1157,8 @@ void registerSceneGraphics(Engine &engine)
     regBoth("handle", "ancestor", &ancestor_scene_reg);
     regBoth("handle", "copyobj",  &copyobj_scene_reg);
     regBoth("handle", "reset",    &reset_scene_reg);
+
+    registerSceneAxesBuiltins(engine);
 }
 
 } // namespace numkit::gfx::detail

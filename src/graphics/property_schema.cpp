@@ -17,6 +17,17 @@
 
 namespace numkit::gfx {
 
+// Phase 2 schemas implemented in schema_axes_decor.cpp
+const ClassSchema &axesSchema() noexcept;
+const ClassSchema &numericRulerSchema() noexcept;
+const ClassSchema &polarAxesSchema() noexcept;
+const ClassSchema &tiledChartLayoutSchema() noexcept;
+const ClassSchema &textSchema() noexcept;
+const ClassSchema &legendSchema() noexcept;
+const ClassSchema &colorBarSchema() noexcept;
+const ClassSchema &constantLineSchema() noexcept;
+Value factoryDefaultPhase2(ClassId cls, keel::StringRef prop, keel::Allocator *mr);
+
 namespace {
 
 template <keel::usize N>
@@ -195,13 +206,6 @@ inline constexpr ClassSchema kThemeSchema{
     ClassId::Theme, "matlab.graphics.theme.GraphicsTheme", "theme", "Theme", kThemeProps, sizeof(kThemeProps) / sizeof(kThemeProps[0])
 };
 
-inline constexpr const ClassSchema *const kAllSchemas[] = {
-    &kPlaceholderSchema,
-    &kRootSchema,
-    &kFigureSchema,
-    &kThemeSchema,
-};
-
 bool parseHexDigit(char c, keel::u32 &out) noexcept
 {
     if (c >= '0' && c <= '9') { out = keel::as<keel::u32>(c - '0'); return true; }
@@ -313,36 +317,66 @@ const PropertySpec *ClassSchema::findProperty(keel::StringRef raw) const noexcep
 
 const ClassSchema &schemaFor(ClassId id) noexcept
 {
-    for (const ClassSchema *s : kAllSchemas) {
-        if (s->id == id)
-            return *s;
+    switch (id) {
+    case ClassId::Placeholder:      return kPlaceholderSchema;
+    case ClassId::Root:             return kRootSchema;
+    case ClassId::Figure:           return kFigureSchema;
+    case ClassId::Theme:            return kThemeSchema;
+    case ClassId::Axes:             return axesSchema();
+    case ClassId::NumericRuler:     return numericRulerSchema();
+    case ClassId::PolarAxes:        return polarAxesSchema();
+    case ClassId::TiledChartLayout: return tiledChartLayoutSchema();
+    case ClassId::Text:             return textSchema();
+    case ClassId::Legend:           return legendSchema();
+    case ClassId::ColorBar:         return colorBarSchema();
+    case ClassId::ConstantLine:     return constantLineSchema();
+    default:                        return kPlaceholderSchema;
     }
-    return kPlaceholderSchema;
 }
+
+namespace {
+inline constexpr ClassId kRegisteredSchemaIds[] = {
+    ClassId::Placeholder,
+    ClassId::Root,
+    ClassId::Figure,
+    ClassId::Theme,
+    ClassId::Axes,
+    ClassId::NumericRuler,
+    ClassId::PolarAxes,
+    ClassId::TiledChartLayout,
+    ClassId::Text,
+    ClassId::Legend,
+    ClassId::ColorBar,
+    ClassId::ConstantLine,
+};
+} // anonymous namespace
 
 const ClassSchema *schemaByClassName(keel::StringRef className) noexcept
 {
-    for (const ClassSchema *s : kAllSchemas) {
-        if (keel::StringRef(s->className) == className)
-            return s;
+    for (ClassId cid : kRegisteredSchemaIds) {
+        const ClassSchema &s = schemaFor(cid);
+        if (keel::StringRef(s.className) == className)
+            return &s;
     }
     return nullptr;
 }
 
 const ClassSchema *schemaByTypeName(keel::StringRef typeName) noexcept
 {
-    for (const ClassSchema *s : kAllSchemas) {
-        if (asciiEqualNoCase(s->typeName, typeName))
-            return s;
+    for (ClassId cid : kRegisteredSchemaIds) {
+        const ClassSchema &s = schemaFor(cid);
+        if (s.typeName[0] != '\0' && asciiEqualNoCase(s.typeName, typeName))
+            return &s;
     }
     return nullptr;
 }
 
 const ClassSchema *schemaByDefaultPrefix(keel::StringRef prefix) noexcept
 {
-    for (const ClassSchema *s : kAllSchemas) {
-        if (s->defaultPrefix[0] != '\0' && asciiEqualNoCase(s->defaultPrefix, prefix))
-            return s;
+    for (ClassId cid : kRegisteredSchemaIds) {
+        const ClassSchema &s = schemaFor(cid);
+        if (s.defaultPrefix[0] != '\0' && asciiEqualNoCase(s.defaultPrefix, prefix))
+            return &s;
     }
     return nullptr;
 }
@@ -731,7 +765,7 @@ Value factoryDefaultValue(ClassId cls, keel::StringRef prop, keel::Allocator *mr
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
     }
 
-    return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    return factoryDefaultPhase2(cls, prop, mr);
 }
 
 } // namespace numkit::gfx

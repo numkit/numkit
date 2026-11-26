@@ -2295,10 +2295,6 @@ void registerGraphicsClasses(Engine &engine)
                 return;
         classToType.push_back(ClassTypePair{cn, rt});
     };
-    addClass(kAxesClass,   "axes");
-    addClass(kTextClass,   "text");
-    addClass(kLegendClass, "legend");
-    addClass(kTiledLayoutClass, "tiledlayout");
     addClass("matlab.graphics.Graphics", "line");
     for (const auto &e : kHandleTypes)
         addClass(e.className, e.type);
@@ -2424,12 +2420,20 @@ void GraphicsLibrary::install(Engine &engine)
     keel::Array<PlotEntry> table;
     buildPlotTable(table);
 
-    // Handle-accessor & Phase-1 scene names registered above — skip their
+    // Handle-accessor & Phase-1/2 scene names registered above — skip their
     // table entries (registerFunctionImpl_ throws on duplicates).
     auto isHandleAccessorName = [](keel::StringRef nm) -> bool {
         static constexpr const char *kNames[] = {
             "set", "get", "isgraphics", "ishandle", "isvalid",
             "figure", "gcf", "clf", "close",
+            "axes", "gca", "polaraxes", "tiledlayout", "nexttile", "subplot",
+            "cla", "hold", "ishold", "yyaxis", "linkaxes",
+            "title", "subtitle", "xlabel", "ylabel", "zlabel",
+            "text", "legend", "colorbar", "xline", "yline",
+            "xlim", "ylim", "zlim", "clim", "caxis", "rlim", "thetalim",
+            "xticks", "yticks", "zticks", "rticks", "thetaticks",
+            "xticklabels", "yticklabels", "zticklabels",
+            "xscale", "yscale", "zscale", "grid", "box", "view", "colormap", "axis",
         };
         for (const char *n : kNames)
             if (nm == n) return true;

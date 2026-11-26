@@ -257,4 +257,203 @@ TEST_P(GraphicsSceneTest, SceneChangeLogRecordsLifecycleEvents)
     EXPECT_TRUE(sawDeleted);
 }
 
+TEST_P(GraphicsSceneTest, Phase2All8ClassesExactPropertyCounts)
+{
+    eval("f = figure('Visible', 'off');"
+         "ax = axes(f);"
+         "xr = ax.XAxis;"
+         "tx = text(ax, 0.5, 0.5, 'hi');"
+         "lg = legend(ax, {'a', 'b'});"
+         "cb = colorbar(ax);"
+         "cl = xline(ax, 0.5, '--r', 'mid');"
+         "f2 = figure('Visible', 'off');"
+         "pax = polaraxes(f2);"
+         "f3 = figure('Visible', 'off');"
+         "tl = tiledlayout(f3, 2, 2);");
+
+    EXPECT_EQ(evalString("class(ax)"),  "matlab.graphics.axis.Axes");
+    EXPECT_EQ(evalString("class(xr)"),  "matlab.graphics.axis.decorator.NumericRuler");
+    EXPECT_EQ(evalString("class(pax)"), "matlab.graphics.axis.PolarAxes");
+    EXPECT_EQ(evalString("class(tl)"),  "matlab.graphics.layout.TiledChartLayout");
+    EXPECT_EQ(evalString("class(tx)"),  "matlab.graphics.primitive.Text");
+    EXPECT_EQ(evalString("class(lg)"),  "matlab.graphics.illustration.Legend");
+    EXPECT_EQ(evalString("class(cb)"),  "matlab.graphics.illustration.ColorBar");
+    EXPECT_EQ(evalString("class(cl)"),  "matlab.graphics.chart.decoration.ConstantLine");
+
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(ax))"),  156.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(ax)))"), 156.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(xr))"),  35.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(xr)))"), 35.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(pax))"), 110.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(pax)))"), 110.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(tl))"),  30.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(tl)))"), 30.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(tx))"),  44.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(tx)))"), 44.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(lg))"),  44.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(lg)))"), 44.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(cb))"),  42.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(cb)))"), 42.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(cl))"),  41.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(cl)))"), 41.0);
+}
+
+TEST_P(GraphicsSceneTest, AxesRulerBidirectionalSyncAutoTicksAndFontCascade)
+{
+    eval("f = figure('Visible', 'off'); ax = axes(f);");
+    EXPECT_EQ(evalString("ax.XLimMode"), "auto");
+    EXPECT_EQ(evalString("ax.XTickMode"), "auto");
+
+    // Axes -> Ruler sync + auto nice-ticks recomputation
+    eval("ax.XLim = [0 10];");
+    EXPECT_EQ(evalString("ax.XLimMode"), "manual");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XAxis.Limits(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XAxis.Limits(2)"), 10.0);
+    EXPECT_EQ(evalString("ax.XAxis.LimitsMode"), "manual");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XTick(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XTick(end)"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XAxis.TickValues(end)"), 10.0);
+
+    // Ruler -> Axes bidirectional sync
+    eval("ax.XAxis.Limits = [-5 5]; ax.XAxis.Direction = 'reverse'; ax.XAxis.Scale = 'log';");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XLim(1)"), -5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XLim(2)"), 5.0);
+    EXPECT_EQ(evalString("ax.XDir"), "reverse");
+    EXPECT_EQ(evalString("ax.XScale"), "log");
+
+    // Manual tick override switches XTickMode to manual; reverting to auto regenerates ticks
+    eval("ax.XScale = 'linear'; ax.XLim = [0 10]; ax.XTick = [0 3 7 10];");
+    EXPECT_EQ(evalString("ax.XTickMode"), "manual");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.XTick)"), 4.0);
+    eval("ax.XTickMode = 'auto';");
+    EXPECT_EQ(evalString("ax.XTickMode"), "auto");
+    EXPECT_GT(evalScalar("numel(ax.XTick)"), 4.0);
+
+    // FontSize cascade to Title (1.1x), XLabel (1.1x), YLabel (1.1x), XAxis (1x)
+    eval("ax.FontSize = 14;");
+    EXPECT_NEAR(evalScalar("ax.Title.FontSize"), 15.4, 1e-12);
+    EXPECT_NEAR(evalScalar("ax.XLabel.FontSize"), 15.4, 1e-12);
+    EXPECT_NEAR(evalScalar("ax.YLabel.FontSize"), 15.4, 1e-12);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XAxis.FontSize"), 14.0);
+
+    // Invalid limits (lo >= hi) must throw
+    EXPECT_THROW(eval("ax.XLim = [5 5];"), numkit::Error);
+    EXPECT_THROW(eval("ax.YLim = [10 2];"), numkit::Error);
+}
+
+TEST_P(GraphicsSceneTest, HoldClaYYAxisLinkAxesAndSubplotTiledLayout)
+{
+    eval("f = figure('Visible', 'off'); ax = axes(f);");
+    EXPECT_FALSE(evalBool("ishold(ax)"));
+    eval("hold(ax, 'on');");
+    EXPECT_TRUE(evalBool("ishold(ax)"));
+    EXPECT_EQ(evalString("ax.NextPlot"), "add");
+    eval("hold(ax, 'off');");
+    EXPECT_FALSE(evalBool("ishold(ax)"));
+    EXPECT_EQ(evalString("ax.NextPlot"), "replace");
+
+    // yyaxis left/right creates 2x1 YAxis with independent limits and labels
+    eval("yyaxis(ax, 'left'); ylim(ax, [0 10]); ylabel(ax, 'LeftY');"
+         "yyaxis(ax, 'right'); ylim(ax, [100 500]); ylabel(ax, 'RightY');");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.YAxis)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 500.0);
+    EXPECT_EQ(evalString("ax.YLabel.String"), "RightY");
+    eval("yyaxis(ax, 'left');");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 10.0);
+    EXPECT_EQ(evalString("ax.YLabel.String"), "LeftY");
+
+    // cla clears children; cla('reset') also clears labels and resets properties
+    eval("text(ax, 0.2, 0.2, 'tmp'); xline(ax, 1.0);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.Children)"), 2.0);
+    eval("cla(ax);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.Children)"), 0.0);
+    EXPECT_EQ(evalString("ax.YLabel.String"), "LeftY");
+    eval("cla(ax, 'reset');");
+    EXPECT_EQ(evalString("ax.YLabel.String"), "");
+
+    // subplot + linkaxes
+    eval("f2 = figure('Visible', 'off');"
+         "a1 = subplot(2, 1, 1); xlim(a1, [0 5]);"
+         "a2 = subplot(2, 1, 2); xlim(a2, [2 10]);"
+         "linkaxes([a1 a2], 'x');");
+    // Union on link -> [0 10] on both
+    EXPECT_DOUBLE_EQ(evalScalar("a1.XLim(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("a1.XLim(2)"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("a2.XLim(2)"), 10.0);
+    // Changing one propagates to the other
+    eval("xlim(a1, [-3 7]);");
+    EXPECT_DOUBLE_EQ(evalScalar("a2.XLim(1)"), -3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("a2.XLim(2)"), 7.0);
+    // Unlink breaks propagation
+    eval("linkaxes([a1 a2], 'off'); xlim(a1, [1 2]);");
+    EXPECT_DOUBLE_EQ(evalScalar("a2.XLim(2)"), 7.0);
+
+    // tiledlayout + nexttile
+    eval("f3 = figure('Visible', 'off');"
+         "tl = tiledlayout(f3, 2, 3, 'TileSpacing', 'compact', 'Padding', 'tight');"
+         "t1 = nexttile(tl); t2 = nexttile(tl, 4, [1 2]);");
+    EXPECT_DOUBLE_EQ(evalScalar("tl.GridSize(1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tl.GridSize(2)"), 3.0);
+    EXPECT_EQ(evalString("tl.TileSpacing"), "compact");
+    EXPECT_EQ(evalString("tl.Padding"), "tight");
+    EXPECT_DOUBLE_EQ(evalScalar("t1.Layout.Tile"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("t2.Layout.Tile"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("t2.Layout.TileSpan(2)"), 2.0);
+    EXPECT_TRUE(evalBool("t1.Parent == tl"));
+}
+
+TEST_P(GraphicsSceneTest, PolarAxesDecorationsAndCascadingDefaults)
+{
+    // Cascading defaults via groot & Figure
+    eval("set(groot, 'defaultAxesFontSize', 12);"
+         "f = figure('Visible', 'off');"
+         "set(f, 'defaultTextColor', 'r');"
+         "ax = axes(f);"
+         "tx = text(ax, 1, 2, 'hello');"
+         "set(groot, 'defaultAxesFontSize', 'remove');");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.FontSize"), 12.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tx.Color(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tx.Color(2)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tx.Position(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tx.Position(2)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("tx.Position(3)"), 0.0);
+
+    // Legend, ColorBar (CLim sync), xline/yline (vector creation)
+    eval("lg = legend(ax, {'s1', 's2'}, 'Location', 'northwest', 'Box', 'off');"
+         "lg.Title.String = 'Curves';"
+         "cb = colorbar(ax, 'southoutside');"
+         "cb.Label.String = 'Intensity';"
+         "clim(ax, [-2 8]);"
+         "xls = xline(ax, [1 2 3], '--b', 'cut');");
+    EXPECT_EQ(evalString("lg.Location"), "northwest");
+    EXPECT_EQ(evalString("lg.Box"), "off");
+    EXPECT_EQ(evalString("lg.Title.String"), "Curves");
+    EXPECT_TRUE(evalBool("ax.Legend == lg"));
+    EXPECT_EQ(evalString("cb.Location"), "southoutside");
+    EXPECT_EQ(evalString("cb.Label.String"), "Intensity");
+    EXPECT_DOUBLE_EQ(evalScalar("cb.Limits(1)"), -2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("cb.Limits(2)"), 8.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(xls)"), 3.0);
+    EXPECT_EQ(evalString("xls(2).InterceptAxis"), "x");
+    EXPECT_DOUBLE_EQ(evalScalar("xls(2).Value"), 2.0);
+    EXPECT_EQ(evalString("xls(2).LineStyle"), "--");
+    EXPECT_EQ(evalString("xls(2).Label"), "cut");
+
+    // PolarAxes & polar limit/tick builtins
+    eval("fp = figure('Visible', 'off');"
+         "pax = polaraxes(fp);"
+         "rlim(pax, [0 5]);"
+         "thetalim(pax, [0 180]);"
+         "rticks(pax, [0 2.5 5]);"
+         "thetaticks(pax, [0 90 180]);"
+         "grid(pax, 'off');");
+    EXPECT_DOUBLE_EQ(evalScalar("pax.RLim(2)"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("pax.ThetaLim(2)"), 180.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(pax.RTick)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(pax.ThetaTick)"), 3.0);
+    EXPECT_EQ(evalString("pax.RGrid"), "off");
+    EXPECT_EQ(evalString("pax.ThetaGrid"), "off");
+    EXPECT_TRUE(evalBool("isgraphics(pax.RAxis) && isgraphics(pax.ThetaAxis)"));
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

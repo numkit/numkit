@@ -47,6 +47,29 @@ struct GraphicsNode {
     NodeId themeId = kInvalidNodeId; // owned GraphicsTheme node for Figure
     NodeId currentAxesId = kInvalidNodeId;
     NodeId currentObjectId = kInvalidNodeId;
+
+    // Owned sub-objects for Axes / PolarAxes / TiledChartLayout / NumericRuler:
+    NodeId ownerAxesId = kInvalidNodeId;   // back-link for owned NumericRuler / Label / Legend / ColorBar
+    char rulerAxis = '\0';                 // 'x', 'y', 'Y' (yyaxis right), 'z'
+    NodeId xAxisId = kInvalidNodeId;
+    NodeId yAxisId = kInvalidNodeId;
+    NodeId yAxisRightId = kInvalidNodeId;
+    NodeId zAxisId = kInvalidNodeId;
+    bool yyRightActive = false;
+    NodeId titleId = kInvalidNodeId;
+    NodeId subtitleId = kInvalidNodeId;
+    NodeId xLabelId = kInvalidNodeId;
+    NodeId yLabelId = kInvalidNodeId;
+    NodeId yLabelRightId = kInvalidNodeId;
+    NodeId zLabelId = kInvalidNodeId;
+    NodeId legendId = kInvalidNodeId;
+    NodeId colorBarId = kInvalidNodeId;
+    // Subplot / TiledChartLayout placement metadata:
+    keel::i32 subplotRows = 0;
+    keel::i32 subplotCols = 0;
+    keel::i32 subplotIdx = 0;
+    keel::i32 nextTileIdx = 1;
+
     bool deleted = false;
     bool beingDeleted = false;
     keel::u64 version = 0;
@@ -55,6 +78,12 @@ struct GraphicsNode {
     keel::HashMap<keel::String, Value> props;
     // Inheritable defaults: key = "<DefaultPrefix><CanonicalProp>" (e.g. "FigureColor").
     keel::HashMap<keel::String, Value> defaults;
+};
+
+struct AxisLinkGroup {
+    keel::Array<NodeId> axes;
+    bool linkX = false;
+    bool linkY = false;
 };
 
 class GraphicsScene {
@@ -87,6 +116,30 @@ public:
     void clearFigure(NodeId figId, bool resetProps = false);
     void closeFigure(NodeId figId, bool force = false);
     void closeAllFigures(bool includeHidden = false, bool force = false);
+
+    // ── Phase 2: Axes, PolarAxes, TiledChartLayout, Decorations ─────────
+    NodeId createAxes(NodeId parentId = kInvalidNodeId);
+    NodeId createPolarAxes(NodeId parentId = kInvalidNodeId);
+    NodeId ensureCurrentAxes(NodeId figId = kInvalidNodeId);
+    NodeId currentAxesId(NodeId figId = kInvalidNodeId) const noexcept;
+    void setCurrentAxes(NodeId axId);
+    void clearAxes(NodeId axId, bool resetProps = false);
+    void setHoldMode(NodeId axId, keel::StringRef mode); // "on"|"off"|"all"|"toggle"
+    bool isHoldOn(NodeId axId) const noexcept;
+    void setYYAxisSide(NodeId axId, bool rightSide);
+
+    NodeId createTiledLayout(NodeId figId, keel::i32 rows, keel::i32 cols);
+    NodeId nextTile(NodeId tlId, keel::i32 tileNum = 0, keel::i32 rowSpan = 1, keel::i32 colSpan = 1);
+    NodeId createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::i32 p);
+
+    NodeId createText(NodeId parentId, keel::f64 x, keel::f64 y, keel::f64 z, keel::StringRef str);
+    NodeId setLabelText(NodeId ownerId, keel::StringRef slot, keel::StringRef str);
+    NodeId createOrUpdateLegend(NodeId axId, keel::ArrayRef<keel::String> labels);
+    NodeId createOrUpdateColorBar(NodeId axId);
+    NodeId createConstantLine(NodeId axId, char axisChar, keel::f64 value, keel::StringRef label = {});
+
+    void linkAxes(keel::ArrayRef<NodeId> axIds, keel::StringRef mode); // "x"|"y"|"xy"|"off"
+    NodeId containingFigure(NodeId id) const noexcept;
 
     // ── Generic tree operations ─────────────────────────────────────────
     void deleteNode(NodeId id, bool force = false);
@@ -139,6 +192,11 @@ private:
 
     void emitEvent(SceneEventKind kind, NodeId nodeId, NodeId auxId = kInvalidNodeId,
                    keel::StringRef propName = {});
+    void syncAxesToRuler(NodeId axId, char axisChar, keel::StringRef axProp, const Value &val, keel::Allocator *mr = nullptr);
+    void syncRulerToAxes(NodeId rulerId, keel::StringRef rulerProp, const Value &val, keel::Allocator *mr = nullptr);
+    void recomputeAutoTicksForAxis(NodeId axId, char axisChar, keel::Allocator *mr = nullptr);
+    void propagateLinkedLimits(NodeId srcAxId, bool isX, const Value &limVal, keel::Allocator *mr = nullptr);
+    void updateCurrentAxesAfterRemoval(NodeId figId);
 
     keel::Allocator *mr_ = nullptr;
     keel::HashMap<NodeId, GraphicsNode> nodes_;
@@ -146,7 +204,9 @@ private:
     NodeId currentFigureId_ = kInvalidNodeId;
     keel::u64 generation_ = 0;
     bool changeLogEnabled_ = true;
+    bool inSyncGuard_ = false;
     keel::Array<SceneEvent> events_;
+    keel::Array<AxisLinkGroup> linkGroups_;
     static constexpr keel::usize kMaxBufferedEvents = 4096;
 };
 
