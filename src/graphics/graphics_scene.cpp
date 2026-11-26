@@ -1384,4 +1384,126 @@ void GraphicsScene::clearEvents()
     events_.clear();
 }
 
+GraphicsScene::SceneCheckpoint GraphicsScene::checkpoint(keel::Allocator *alloc) const
+{
+    auto *a = alloc ? alloc : mr_;
+    SceneCheckpoint cp;
+    cp.nextId = nextId_;
+    cp.currentFigureId = currentFigureId_;
+    cp.nodes = keel::Array<GraphicsNode>(a);
+    cp.nodes.reserve(nodes_.size());
+    for (const auto &kv : nodes_) {
+        const GraphicsNode &src = kv.value;
+        GraphicsNode dst;
+        dst.id = src.id;
+        dst.classId = src.classId;
+        dst.parentId = src.parentId;
+        dst.children = src.children.clone(a);
+        dst.figureNumber = src.figureNumber;
+        dst.themeId = src.themeId;
+        dst.currentAxesId = src.currentAxesId;
+        dst.currentObjectId = src.currentObjectId;
+        dst.ownerAxesId = src.ownerAxesId;
+        dst.rulerAxis = src.rulerAxis;
+        dst.xAxisId = src.xAxisId;
+        dst.yAxisId = src.yAxisId;
+        dst.yAxisRightId = src.yAxisRightId;
+        dst.zAxisId = src.zAxisId;
+        dst.yyRightActive = src.yyRightActive;
+        dst.titleId = src.titleId;
+        dst.subtitleId = src.subtitleId;
+        dst.xLabelId = src.xLabelId;
+        dst.yLabelId = src.yLabelId;
+        dst.yLabelRightId = src.yLabelRightId;
+        dst.zLabelId = src.zLabelId;
+        dst.legendId = src.legendId;
+        dst.colorBarId = src.colorBarId;
+        dst.subplotRows = src.subplotRows;
+        dst.subplotCols = src.subplotCols;
+        dst.subplotIdx = src.subplotIdx;
+        dst.nextTileIdx = src.nextTileIdx;
+        dst.animX = src.animX.clone(a);
+        dst.animY = src.animY.clone(a);
+        dst.animZ = src.animZ.clone(a);
+        dst.animHasZ = src.animHasZ;
+        dst.deleted = src.deleted;
+        dst.beingDeleted = src.beingDeleted;
+        dst.version = src.version;
+        for (const auto &pkv : src.props)
+            dst.props.put(pkv.key.clone(a), pkv.value);
+        for (const auto &dkv : src.defaults)
+            dst.defaults.put(dkv.key.clone(a), dkv.value);
+        cp.nodes.push_back(keel::move(dst));
+    }
+    cp.linkGroups = keel::Array<AxisLinkGroup>(a);
+    cp.linkGroups.reserve(linkGroups_.size());
+    for (const auto &g : linkGroups_) {
+        AxisLinkGroup cg;
+        cg.axes = g.axes.clone(a);
+        cg.linkX = g.linkX;
+        cg.linkY = g.linkY;
+        cp.linkGroups.push_back(keel::move(cg));
+    }
+    return cp;
+}
+
+void GraphicsScene::restore(const SceneCheckpoint &cp)
+{
+    nodes_.clear();
+    for (const auto &src : cp.nodes) {
+        GraphicsNode dst;
+        dst.id = src.id;
+        dst.classId = src.classId;
+        dst.parentId = src.parentId;
+        dst.children = src.children.clone(mr_);
+        dst.figureNumber = src.figureNumber;
+        dst.themeId = src.themeId;
+        dst.currentAxesId = src.currentAxesId;
+        dst.currentObjectId = src.currentObjectId;
+        dst.ownerAxesId = src.ownerAxesId;
+        dst.rulerAxis = src.rulerAxis;
+        dst.xAxisId = src.xAxisId;
+        dst.yAxisId = src.yAxisId;
+        dst.yAxisRightId = src.yAxisRightId;
+        dst.zAxisId = src.zAxisId;
+        dst.yyRightActive = src.yyRightActive;
+        dst.titleId = src.titleId;
+        dst.subtitleId = src.subtitleId;
+        dst.xLabelId = src.xLabelId;
+        dst.yLabelId = src.yLabelId;
+        dst.yLabelRightId = src.yLabelRightId;
+        dst.zLabelId = src.zLabelId;
+        dst.legendId = src.legendId;
+        dst.colorBarId = src.colorBarId;
+        dst.subplotRows = src.subplotRows;
+        dst.subplotCols = src.subplotCols;
+        dst.subplotIdx = src.subplotIdx;
+        dst.nextTileIdx = src.nextTileIdx;
+        dst.animX = src.animX.clone(mr_);
+        dst.animY = src.animY.clone(mr_);
+        dst.animZ = src.animZ.clone(mr_);
+        dst.animHasZ = src.animHasZ;
+        dst.deleted = src.deleted;
+        dst.beingDeleted = src.beingDeleted;
+        dst.version = src.version;
+        for (const auto &pkv : src.props)
+            dst.props.put(pkv.key.clone(mr_), pkv.value);
+        for (const auto &dkv : src.defaults)
+            dst.defaults.put(dkv.key.clone(mr_), dkv.value);
+        nodes_.put(dst.id, keel::move(dst));
+    }
+    nextId_ = cp.nextId;
+    currentFigureId_ = cp.currentFigureId;
+    linkGroups_.clear();
+    linkGroups_.reserve(cp.linkGroups.size());
+    for (const auto &g : cp.linkGroups) {
+        AxisLinkGroup cg;
+        cg.axes = g.axes.clone(mr_);
+        cg.linkX = g.linkX;
+        cg.linkY = g.linkY;
+        linkGroups_.push_back(keel::move(cg));
+    }
+    emitEvent(SceneEventKind::CurrentChanged, kRootNodeId, currentFigureId_, "*");
+}
+
 } // namespace numkit::gfx

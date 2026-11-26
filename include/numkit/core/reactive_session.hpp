@@ -41,7 +41,7 @@
 #include <numkit/core/ast.hpp>
 #include <numkit/core/dependency_graph.hpp>
 #include <numkit/core/types.hpp>
-#include <numkit/graphics/figure_manager.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 
 
 namespace numkit {
@@ -105,11 +105,11 @@ private:
     // last CLEAN statement before the dirty set, so re-run graphics
     // statements reproduce the full-re-run figure (no `hold on`
     // line accumulation across ticks).
-    keel::Array<FigureManager::FigureCheckpoint> checkpoints_;
-    // Figure state captured in load() BEFORE the first statement runs
+    keel::Array<gfx::GraphicsScene::SceneCheckpoint> checkpoints_;
+    // Scene state captured in load() BEFORE the first statement runs
     // (may hold a PREVIOUS script's figures — sessions share the
     // engine). The rollback target when a dirty set starts at 0.
-    FigureManager::FigureCheckpoint preScriptCp_;
+    gfx::GraphicsScene::SceneCheckpoint preScriptCp_;
     keel::HashSet<keel::usize> dirty_;
     keel::HashSet<keel::String> params_;   // externally-set variables
     keel::String lastError_;

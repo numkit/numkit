@@ -18,7 +18,6 @@
 #include <keel/string.h>
 
 #include <numkit/core/engine.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/graphics/property_schema.hpp>
@@ -205,77 +204,6 @@ Value ensure2DDouble(const Value &v, keel::Allocator *mr)
     return out;
 }
 
-// Transitional Phase-3 mirror to legacy FigureManager so saveas/exportgraphics
-// tests (DisplayTest.FigureExportGaps) stay 100% green until Phase 4 removes FigureManager.
-void mirrorFlatDataset(FigureManager &fm, const char *dsType,
-                       const Value &x, const Value &y,
-                       const Value *u = nullptr, const Value *v = nullptr,
-                       bool clearIfNotHold = false)
-{
-    AxesState &fax = fm.currentAxes();
-    if (clearIfNotHold && !fax.holdOn)
-        fax.datasets.clear();
-    DatasetInfo ds;
-    ds.type = keel::String::from(dsType);
-    if (fax.yyEnabled && fax.activeYside == "right")
-        ds.yside = keel::String::from("right");
-    auto toArr = [](const Value &val) -> keel::Array<keel::f64> {
-        keel::Array<keel::f64> a;
-        a.resize(val.numel());
-        for (keel::usize i = 0; i < val.numel(); ++i) a[i] = val.elemAsDouble(i);
-        return a;
-    };
-    const auto xv = toArr(x);
-    const auto yv = toArr(y);
-    ds.xRaw = xv.clone();
-    ds.yRaw = yv.clone();
-    ds.xJson = figdetail::serializeFlatDoubles(xv);
-    ds.yJson = figdetail::serializeFlatDoubles(yv);
-    if (u && v) {
-        ds.uJson = figdetail::serializeFlatDoubles(toArr(*u));
-        ds.vJson = figdetail::serializeFlatDoubles(toArr(*v));
-    }
-    fax.datasets.push_back(keel::move(ds));
-    fm.emitModified();
-}
-
-void mirrorSurfDataset(FigureManager &fm, const Value &x, const Value &y, const Value &z,
-                       const char *dsType, bool clearIfNotHold = true)
-{
-    AxesState &fax = fm.currentAxes();
-    if (clearIfNotHold && !fax.holdOn)
-        fax.datasets.clear();
-    DatasetInfo ds;
-    ds.type = keel::String::from(dsType);
-    const keel::usize R = z.dims().rows();
-    const keel::usize C = z.dims().cols();
-    auto ser1 = [](const Value &val) -> keel::String {
-        keel::Array<keel::f64> a;
-        a.resize(val.numel());
-        for (keel::usize i = 0; i < val.numel(); ++i) a[i] = val.elemAsDouble(i);
-        return figdetail::serializeFlatDoubles(a);
-    };
-    ds.xJson = ser1(x);
-    ds.yJson = ser1(y);
-    keel::String zj = keel::String::from("[");
-    char buf[40];
-    for (keel::usize r = 0; r < R; ++r) {
-        if (r) zj.push_back(',');
-        zj.push_back('[');
-        for (keel::usize c = 0; c < C; ++c) {
-            if (c) zj.push_back(',');
-            const keel::f64 val = z.elemAsDouble(r + c * R);
-            if (keel::is_finite(val)) zj.append(keel::format_f64_general_to(buf, val, 12));
-            else zj.append("null");
-        }
-        zj.push_back(']');
-    }
-    zj.push_back(']');
-    ds.zJson = keel::move(zj);
-    fax.datasets.push_back(keel::move(ds));
-    fm.emitModified();
-}
-
 // ── plot / plot3 / semilogx / semilogy / loglog / line ──────────────────
 
 void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
@@ -283,14 +211,11 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
               const char *xScale, const char *yScale, bool clearOnReplace)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
     const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace);
-    if (clearOnReplace && !fm.currentAxes().holdOn)
-        fm.currentAxes().datasets.clear();
 
     const ClassSchema &lineSchema = schemaFor(ClassId::Line);
     keel::Array<NodeId> created(mr);
@@ -335,7 +260,6 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
             }
             applyLineSpecToNode(scene, lid, ls, mr);
             created.push_back(lid);
-            mirrorFlatDataset(fm, "plot", xv, yv, nullptr, nullptr, false);
         };
 
         if (yPtr == nullptr) {
@@ -673,7 +597,6 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
                  bool isMesh, bool isPcolor, bool clearOnReplace)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
@@ -724,8 +647,6 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
         vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
         scene.setProperty(axId, "View", vw, mr);
     }
-    if (!zd.isEmpty())
-        mirrorSurfDataset(fm, xd, yd, zd, isMesh ? "mesh" : (isPcolor ? "pcolor" : "surf"), clearOnReplace);
     scene.recomputeAxesAutoLimits(axId, mr);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(sid, mr) : Value();
 }
@@ -811,7 +732,6 @@ void quiverCore(keel::ArrayRef<Value> args, keel::usize nargout,
                 keel::MutArrayRef<Value> outs, CallContext &ctx, bool is3D)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
@@ -856,8 +776,6 @@ void quiverCore(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     if (idx < args.size())
         applyChartNV(scene, qid, args, idx, mr);
-    if (!is3D && !xd.isEmpty() && !ud.isEmpty())
-        mirrorFlatDataset(fm, "quiver", xd, yd, &ud, &vd, true);
     if (is3D) {
         Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
         vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
@@ -1360,7 +1278,6 @@ void polarplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                          keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
@@ -1407,10 +1324,6 @@ void polarplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
     if (idx < args.size())
         applyChartNV(scene, lid, args, idx, mr);
-    if (!th.isEmpty() && !rh.isEmpty()) {
-        fm.currentAxes().polar = true;
-        mirrorFlatDataset(fm, "line", th, rh, nullptr, nullptr, true);
-    }
     scene.recomputeAxesAutoLimits(paxId, mr);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(lid, mr) : Value();
 }

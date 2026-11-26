@@ -54,7 +54,7 @@ bool ReactiveSession::load(keel::StringRef source)
     // State that preceded the script (figures of a PREVIOUS script in
     // the same engine session): the rollback target when the dirty
     // set starts at statement 0 (wildcard-prefix pull).
-    preScriptCp_ = engine_.figureManager().checkpointFigures();
+    preScriptCp_ = engine_.graphicsScene().checkpoint();
     try {
         for (keel::usize i = 0; i < statements_.size(); ++i) {
             const ASTNode *s = statements_[i].get();
@@ -135,10 +135,9 @@ keel::usize ReactiveSession::evalDirty()
             // The wildcard-prefix rule pulls the whole prefix (pure
             // defs of NON-params included) — roll back to the state
             // that preceded the script itself.
-            engine_.figureManager().restoreFigures(preScriptCp_);
+            engine_.graphicsScene().restore(preScriptCp_);
         } else if (firstDirty - 1 < checkpoints_.size()) {
-            engine_.figureManager().restoreFigures(
-                checkpoints_[firstDirty - 1]);
+            engine_.graphicsScene().restore(checkpoints_[firstDirty - 1]);
         }
         for (keel::usize idx = firstDirty; idx < statements_.size(); ++idx) {
             if (!dirty_.contains(idx))
@@ -181,7 +180,7 @@ Value ReactiveSession::runStatement(keel::usize index)
     } restore{stmt, had};
     Value out = engine_.evalStatement(stmt, src_);
     if (index < checkpoints_.size())
-        checkpoints_[index] = engine_.figureManager().checkpointFigures();
+        checkpoints_[index] = engine_.graphicsScene().checkpoint();
     return out;
 }
 

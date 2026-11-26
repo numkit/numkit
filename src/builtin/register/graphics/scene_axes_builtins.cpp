@@ -18,7 +18,6 @@
 #include <keel/string.h>
 
 #include <numkit/core/engine.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/graphics/property_schema.hpp>
@@ -139,81 +138,6 @@ keel::String joinTextArg(const Value &v, keel::Allocator *mr)
     return keel::String(mr);
 }
 
-keel::String formatLimJson(keel::f64 lo, keel::f64 hi)
-{
-    char b0[40];
-    char b1[40];
-    keel::String out = keel::String::from("[");
-    out.append(keel::format_f64_general_to(b0, lo, 17));
-    out.push_back(',');
-    out.append(keel::format_f64_general_to(b1, hi, 17));
-    out.push_back(']');
-    return out;
-}
-
-// Transitional Phase-2 helper: if a chart was created in legacy FigureManager
-// (before Phase 3 migrates plot/bar/surf) and Scene Axes has no chart children
-// yet and LimMode == 'auto', read legacy auto-computed limits so `bar(...); ylim`
-// stays accurate.
-bool tryLegacyAutoLim(FigureManager &fm, char axisChar, Value &out, keel::Allocator *mr)
-{
-    const FigureState &fs = fm.current();
-    if (fs.axes.empty())
-        return false;
-    const AxesState &ax = fs.axes[keel::as<keel::usize>(fs.currentAxes)];
-    const keel::String &limJson = (axisChar == 'x') ? ax.xlimJson
-                                : (axisChar == 'y' ? ax.ylimJson : ax.zlimJson);
-    if (!limJson.empty()) {
-        auto vals = figdetail::parseFlatDoubles(limJson);
-        if (vals.size() == 2) {
-            out = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-            out.doubleDataMut()[0] = vals[0];
-            out.doubleDataMut()[1] = vals[1];
-            return true;
-        }
-    }
-    if (ax.datasets.empty())
-        return false;
-    keel::f64 dmin = 1e300;
-    keel::f64 dmax = -1e300;
-    bool hasBar = false;
-    for (const auto &ds : ax.datasets) {
-        if (!ds.visible) continue;
-        if (ds.type == "bar" || ds.type == "barh") hasBar = true;
-        const keel::String &j = (axisChar == 'x') ? ds.xJson
-                              : (axisChar == 'y' ? ds.yJson : ds.zJson);
-        for (keel::f64 v : figdetail::parseFlatDoubles(j)) {
-            if (keel::is_finite(v)) {
-                if (v < dmin) dmin = v;
-                if (v > dmax) dmax = v;
-            }
-        }
-    }
-    if (hasBar && axisChar == 'y' && dmin > 0.0)
-        dmin = 0.0;
-    if (!(dmin <= dmax))
-        return false;
-    keel::f64 lo = 0.0, hi = 1.0;
-    if (dmax > dmin) {
-        const keel::f64 span = dmax - dmin;
-        const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(span)));
-        const keel::f64 s = span / p10;
-        const keel::f64 step = (s <= 1.5) ? 0.2 * p10
-                             : (s <= 3.0) ? 0.5 * p10
-                             : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
-                                                      : 2.0 * p10;
-        lo = keel::floor(dmin / step + 1e-12) * step;
-        hi = keel::ceil(dmax / step - 1e-12) * step;
-    } else {
-        lo = dmin - 1.0;
-        hi = dmin + 1.0;
-    }
-    out = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-    out.doubleDataMut()[0] = lo;
-    out.doubleDataMut()[1] = hi;
-    return true;
-}
-
 // Resolve optional leading target Axes (returns target axId and first remaining arg index).
 NodeId resolveLeadingAxes(GraphicsScene &scene, keel::ArrayRef<Value> args, keel::usize &nextIdx)
 {
@@ -322,7 +246,6 @@ void tiledlayout_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                            keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     NodeId figId = kInvalidNodeId;
@@ -356,7 +279,6 @@ void tiledlayout_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (idx < args.size())
         applyNV(scene, tlId, args, idx, mr);
 
-    fm.setSubplot(rows, cols, 1);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(tlId, mr) : Value();
 }
 
@@ -364,7 +286,6 @@ void nexttile_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                         keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     NodeId tlId = kInvalidNodeId;
@@ -410,14 +331,6 @@ void nexttile_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     }
 
     const NodeId axId = scene.nextTile(tlId, tileNum, rSpan, cSpan);
-    const Value gs = scene.getProperty(tlId, "GridSize", mr);
-    const keel::i32 rows = keel::max<keel::i32>(1, keel::as<keel::i32>(gs.elemAsDouble(0)));
-    const keel::i32 cols = keel::max<keel::i32>(1, keel::as<keel::i32>(gs.elemAsDouble(1)));
-    const Value lo = scene.getProperty(axId, "Layout", mr);
-    const keel::i32 chosen = (lo.isStruct() && lo.hasField("Tile"))
-                                 ? keel::as<keel::i32>(lo.field("Tile").toScalar()) : 1;
-    fm.setSubplot(rows, cols, keel::min(chosen, rows * cols));
-
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(axId, mr) : Value();
 }
 
@@ -425,7 +338,6 @@ void subplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                        keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     if (args.empty()) {
@@ -470,7 +382,6 @@ void subplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const NodeId axId = scene.createOrActivateSubplot(kInvalidNodeId, m, n, p);
     if (nvStart < args.size())
         applyNV(scene, axId, args, nvStart, mr);
-    fm.setSubplot(m, n, p);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(axId, mr) : Value();
 }
 
@@ -478,7 +389,6 @@ void cla_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
@@ -489,16 +399,6 @@ void cla_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             doReset = true;
     }
     scene.clearAxes(axId, doReset);
-    fm.currentAxes().datasets.clear();
-    if (doReset) {
-        fm.currentAxes().xlimJson.clear();
-        fm.currentAxes().ylimJson.clear();
-        fm.currentAxes().zlimJson.clear();
-        fm.currentAxes().title.clear();
-        fm.currentAxes().xlabel.clear();
-        fm.currentAxes().ylabel.clear();
-    }
-    fm.emitModified();
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(axId, mr) : Value();
 }
 
@@ -506,7 +406,6 @@ void hold_scene_reg(keel::ArrayRef<Value> args, keel::usize,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
 
     keel::usize idx = 0;
     const NodeId axId = resolveLeadingAxes(scene, args, idx);
@@ -515,7 +414,6 @@ void hold_scene_reg(keel::ArrayRef<Value> args, keel::usize,
         mode = args[idx].toString();
 
     scene.setHoldMode(axId, mode);
-    fm.currentAxes().holdOn = scene.isHoldOn(axId);
     outs[0] = Value();
 }
 
@@ -535,7 +433,6 @@ void yyaxis_scene_reg(keel::ArrayRef<Value> args, keel::usize,
 {
     argcheck::checkNargin(args.size(), 1, 2, "yyaxis");
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
 
     keel::usize idx = 0;
     const NodeId axId = resolveLeadingAxes(scene, args, idx);
@@ -550,9 +447,6 @@ void yyaxis_scene_reg(keel::ArrayRef<Value> args, keel::usize,
         throw Error("yyaxis: side must be 'left' or 'right'.", 0, 0, "yyaxis", "", "numkit:graphics:InvalidOption");
 
     scene.setYYAxisSide(axId, isRight);
-    AxesState &fax = fm.currentAxes();
-    fax.yyEnabled = true;
-    fax.activeYside = keel::String::from(isRight ? "right" : "left");
     outs[0] = Value();
 }
 
@@ -584,7 +478,6 @@ void labelHelper(const char *slot, keel::ArrayRef<Value> args, keel::usize nargo
                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     NodeId targetId = kInvalidNodeId;
@@ -603,18 +496,6 @@ void labelHelper(const char *slot, keel::ArrayRef<Value> args, keel::usize nargo
     const NodeId textId = scene.setLabelText(targetId, slot, txt);
     if (textId != kInvalidNodeId && idx + 1 < args.size())
         applyNV(scene, textId, args, idx + 1, mr);
-
-    // Mirror to legacy FigureManager for Phase-2 export compatibility.
-    AxesState &fax = fm.currentAxes();
-    const keel::StringRef sref(slot);
-    if (sref == "title") fax.title = txt.clone();
-    else if (sref == "subtitle") fax.subtitle = txt.clone();
-    else if (sref == "xlabel") fax.xlabel = txt.clone();
-    else if (sref == "ylabel") {
-        if (fax.yyEnabled && fax.activeYside == "right") fax.ylabel2 = txt.clone();
-        else fax.ylabel = txt.clone();
-    } else if (sref == "zlabel") fax.zlabel = txt.clone();
-    fm.emitModified();
 
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(textId, mr) : Value();
 }
@@ -849,12 +730,11 @@ void yline_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<
 
 // ── Limits / Ticks / Scale / Grid / Box / View / Colormap / Axis ────────
 
-void limHelper(const char *limProp, const char *modeProp, const char *methodProp, char legacyAxis,
+void limHelper(const char *limProp, const char *modeProp, const char *methodProp,
                keel::ArrayRef<Value> args, keel::usize nargout,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
@@ -862,17 +742,6 @@ void limHelper(const char *limProp, const char *modeProp, const char *methodProp
 
     // Query form: xlim / xlim(ax)
     if (idx >= args.size()) {
-        if (legacyAxis != '\0') {
-            const GraphicsNode *ax = scene.findNode(axId);
-            const Value modeV = scene.getProperty(axId, modeProp, mr);
-            if (ax && ax->children.empty() && asciiEqualNoCase(modeV.toString(), "auto")) {
-                Value legLim;
-                if (tryLegacyAutoLim(fm, legacyAxis, legLim, mr)) {
-                    outs[0] = keel::move(legLim);
-                    return;
-                }
-            }
-        }
         outs[0] = scene.getProperty(axId, limProp, mr);
         return;
     }
@@ -889,11 +758,6 @@ void limHelper(const char *limProp, const char *modeProp, const char *methodProp
         }
         if (asciiEqualNoCase(tok, "auto") || asciiEqualNoCase(tok, "manual")) {
             scene.setProperty(axId, modeProp, args[idx], mr);
-            if (legacyAxis != '\0' && asciiEqualNoCase(tok, "auto")) {
-                if (legacyAxis == 'x') fm.currentAxes().xlimJson.clear();
-                else if (legacyAxis == 'y') fm.currentAxes().ylimJson.clear();
-                else if (legacyAxis == 'z') fm.currentAxes().zlimJson.clear();
-            }
             outs[0] = (nargout >= 1) ? scene.getProperty(axId, limProp, mr) : Value();
             return;
         }
@@ -906,28 +770,21 @@ void limHelper(const char *limProp, const char *modeProp, const char *methodProp
     }
 
     scene.setProperty(axId, limProp, args[idx], mr);
-    if (legacyAxis != '\0' && args[idx].isNumeric() && args[idx].numel() >= 2) {
-        const keel::String lj = formatLimJson(args[idx].elemAsDouble(0), args[idx].elemAsDouble(1));
-        if (legacyAxis == 'x') fm.currentAxes().xlimJson = lj.clone();
-        else if (legacyAxis == 'y') fm.currentAxes().ylimJson = lj.clone();
-        else if (legacyAxis == 'z') fm.currentAxes().zlimJson = lj.clone();
-        fm.emitModified();
-    }
     outs[0] = (nargout >= 1) ? scene.getProperty(axId, limProp, mr) : Value();
 }
 
 void xlim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("XLim", "XLimMode", "XLimitMethod", 'x', a, no, o, c); }
+{ limHelper("XLim", "XLimMode", "XLimitMethod", a, no, o, c); }
 void ylim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("YLim", "YLimMode", "YLimitMethod", 'y', a, no, o, c); }
+{ limHelper("YLim", "YLimMode", "YLimitMethod", a, no, o, c); }
 void zlim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("ZLim", "ZLimMode", "ZLimitMethod", 'z', a, no, o, c); }
+{ limHelper("ZLim", "ZLimMode", "ZLimitMethod", a, no, o, c); }
 void clim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("CLim", "CLimMode", nullptr, '\0', a, no, o, c); }
+{ limHelper("CLim", "CLimMode", nullptr, a, no, o, c); }
 void rlim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("RLim", "RLimMode", nullptr, '\0', a, no, o, c); }
+{ limHelper("RLim", "RLimMode", nullptr, a, no, o, c); }
 void thetalim_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ limHelper("ThetaLim", "ThetaLimMode", nullptr, '\0', a, no, o, c); }
+{ limHelper("ThetaLim", "ThetaLimMode", nullptr, a, no, o, c); }
 
 void tickHelper(const char *valProp, const char *modeProp,
                 keel::ArrayRef<Value> args, keel::usize,
@@ -975,11 +832,10 @@ void yticklabels_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArr
 void zticklabels_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
 { tickHelper("ZTickLabel", "ZTickLabelMode", a, no, o, c); }
 
-void scaleHelper(const char *prop, char axisChar, keel::ArrayRef<Value> args,
+void scaleHelper(const char *prop, keel::ArrayRef<Value> args,
                  keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
@@ -989,23 +845,20 @@ void scaleHelper(const char *prop, char axisChar, keel::ArrayRef<Value> args,
         return;
     }
     scene.setProperty(axId, prop, args[idx], mr);
-    if (axisChar == 'x') fm.currentAxes().xscale = scene.getProperty(axId, prop, mr).toString();
-    else if (axisChar == 'y') fm.currentAxes().yscale = scene.getProperty(axId, prop, mr).toString();
     outs[0] = Value();
 }
 
 void xscale_scene_reg(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, CallContext &c)
-{ scaleHelper("XScale", 'x', a, o, c); }
+{ scaleHelper("XScale", a, o, c); }
 void yscale_scene_reg(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, CallContext &c)
-{ scaleHelper("YScale", 'y', a, o, c); }
+{ scaleHelper("YScale", a, o, c); }
 void zscale_scene_reg(keel::ArrayRef<Value> a, keel::usize, keel::MutArrayRef<Value> o, CallContext &c)
-{ scaleHelper("ZScale", 'z', a, o, c); }
+{ scaleHelper("ZScale", a, o, c); }
 
 void grid_scene_reg(keel::ArrayRef<Value> args, keel::usize,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
@@ -1030,7 +883,6 @@ void grid_scene_reg(keel::ArrayRef<Value> args, keel::usize,
             scene.setProperty(axId, "YMinorGrid", nv, mr);
             scene.setProperty(axId, "ZMinorGrid", nv, mr);
         }
-        fm.currentAxes().gridMinor = !fm.currentAxes().gridMinor;
     } else {
         const char *probeProp = isPolar ? "RGrid" : "XGrid";
         const bool cur = asciiEqualNoCase(scene.getProperty(axId, probeProp, mr).toString(), "on");
@@ -1045,9 +897,7 @@ void grid_scene_reg(keel::ArrayRef<Value> args, keel::usize,
             scene.setProperty(axId, "YGrid", nv, mr);
             scene.setProperty(axId, "ZGrid", nv, mr);
         }
-        fm.currentAxes().gridMajor = wantOn;
     }
-    fm.emitModified();
     outs[0] = Value();
 }
 
@@ -1182,22 +1032,14 @@ void axis_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     keel::usize idx = 0;
     const NodeId axId = resolveLeadingAxes(scene, args, idx);
 
     auto getLimVec = [&]() -> Value {
-        Value xl = scene.getProperty(axId, "XLim", mr);
-        Value yl = scene.getProperty(axId, "YLim", mr);
-        const GraphicsNode *axNode = scene.findNode(axId);
-        if (axNode && axNode->children.empty()) {
-            if (asciiEqualNoCase(scene.getProperty(axId, "XLimMode", mr).toString(), "auto"))
-                tryLegacyAutoLim(fm, 'x', xl, mr);
-            if (asciiEqualNoCase(scene.getProperty(axId, "YLimMode", mr).toString(), "auto"))
-                tryLegacyAutoLim(fm, 'y', yl, mr);
-        }
+        const Value xl = scene.getProperty(axId, "XLim", mr);
+        const Value yl = scene.getProperty(axId, "YLim", mr);
         Value v = Value::matrix(1, 4, ValueType::DOUBLE, mr);
         v.doubleDataMut()[0] = xl.elemAsDouble(0);
         v.doubleDataMut()[1] = xl.elemAsDouble(1);
@@ -1221,14 +1063,11 @@ void axis_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             yl.doubleDataMut()[1] = args[i].elemAsDouble(3);
             scene.setProperty(axId, "XLim", xl, mr);
             scene.setProperty(axId, "YLim", yl, mr);
-            fm.currentAxes().xlimJson = formatLimJson(xl.elemAsDouble(0), xl.elemAsDouble(1));
-            fm.currentAxes().ylimJson = formatLimJson(yl.elemAsDouble(0), yl.elemAsDouble(1));
             if (args[i].numel() >= 6) {
                 Value zl = Value::matrix(1, 2, ValueType::DOUBLE, mr);
                 zl.doubleDataMut()[0] = args[i].elemAsDouble(4);
                 zl.doubleDataMut()[1] = args[i].elemAsDouble(5);
                 scene.setProperty(axId, "ZLim", zl, mr);
-                fm.currentAxes().zlimJson = formatLimJson(zl.elemAsDouble(0), zl.elemAsDouble(1));
             }
             continue;
         }
@@ -1256,46 +1095,6 @@ void axis_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             scene.setProperty(axId, "XLimitMethod", args[i], mr);
             scene.setProperty(axId, "YLimitMethod", args[i], mr);
             scene.setProperty(axId, "ZLimitMethod", args[i], mr);
-            if (asciiEqualNoCase(opt, "tight")) {
-                // Transitional Phase-2: compute exact data extrema from legacy FigureManager datasets.
-                const AxesState &fax = fm.currentAxes();
-                keel::f64 xmin = 1e300, xmax = -1e300, ymin = 1e300, ymax = -1e300;
-                for (const auto &ds : fax.datasets) {
-                    if (!ds.visible) continue;
-                    auto scan = [](const keel::Array<keel::f64> &raw, const keel::String &js,
-                                   keel::f64 &lo, keel::f64 &hi) {
-                        if (!raw.empty()) {
-                            for (keel::f64 val : raw) {
-                                if (keel::is_finite(val)) {
-                                    if (val < lo) lo = val;
-                                    if (val > hi) hi = val;
-                                }
-                            }
-                        } else {
-                            for (keel::f64 val : figdetail::parseFlatDoubles(js)) {
-                                if (keel::is_finite(val)) {
-                                    if (val < lo) lo = val;
-                                    if (val > hi) hi = val;
-                                }
-                            }
-                        }
-                    };
-                    scan(ds.xRaw, ds.xJson, xmin, xmax);
-                    scan(ds.yRaw, ds.yJson, ymin, ymax);
-                }
-                if (xmin < xmax) {
-                    Value xl = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-                    xl.doubleDataMut()[0] = xmin; xl.doubleDataMut()[1] = xmax;
-                    scene.setProperty(axId, "XLim", xl, mr);
-                    fm.currentAxes().xlimJson = formatLimJson(xmin, xmax);
-                }
-                if (ymin < ymax) {
-                    Value yl = Value::matrix(1, 2, ValueType::DOUBLE, mr);
-                    yl.doubleDataMut()[0] = ymin; yl.doubleDataMut()[1] = ymax;
-                    scene.setProperty(axId, "YLim", yl, mr);
-                    fm.currentAxes().ylimJson = formatLimJson(ymin, ymax);
-                }
-            }
         } else if (asciiEqualNoCase(opt, "auto") || asciiEqualNoCase(opt, "manual")) {
             scene.setProperty(axId, "XLimMode", args[i], mr);
             scene.setProperty(axId, "YLimMode", args[i], mr);
@@ -1308,7 +1107,6 @@ void axis_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             scene.setProperty(axId, "Visible", Value::fromString(asciiEqualNoCase(opt, "on") ? "on" : "off", mr), mr);
         }
     }
-    fm.emitModified();
     outs[0] = (nargout >= 1) ? getLimVec() : Value();
 }
 

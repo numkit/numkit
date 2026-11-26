@@ -158,3 +158,66 @@ TEST(NumkitEngineCApi, GraphicsSceneModelAndEvents)
     numkit_engine_destroy(ctx);
     EXPECT_EQ(numkit_debug_live_values(), base);
 }
+
+TEST(NumkitEngineCApi, GraphicsSceneFullTreeTraversalAndLiveMutation)
+{
+    const int64_t base = numkit_debug_live_values();
+    numkit_error err{};
+    numkit_engine_ctx *ctx = numkit_engine_create(&err);
+    ASSERT_NE(ctx, nullptr) << err.message;
+
+    const uint64_t g0 = numkit_gfx_generation(ctx);
+    numkit_val *r = numkit_engine_eval(
+        ctx,
+        "f = figure('Visible','off','Name','PlotFig');"
+        "ax = axes(f);"
+        "h = plot(ax, [0 10], [0 20]);"
+        "hold(ax, 'on');"
+        "cl = xline(ax, 5, '--r', 'mid');",
+        &err);
+    ASSERT_NE(r, nullptr) << err.message;
+    numkit_val_release(r);
+
+    // Traverse Root -> Figure -> Axes -> [ConstantLine, Line] (newest-first)
+    const int32_t rootId = numkit_gfx_root(ctx);
+    int32_t figs[4]{};
+    ASSERT_EQ(numkit_gfx_node_children(ctx, rootId, 0, figs, 4), 1u);
+    int32_t axKids[4]{};
+    ASSERT_EQ(numkit_gfx_node_children(ctx, figs[0], 0, axKids, 4), 1u);
+    const int32_t axId = axKids[0];
+
+    char clsBuf[80]{};
+    EXPECT_GT(numkit_gfx_node_class(ctx, axId, clsBuf, sizeof(clsBuf)), 0u);
+    EXPECT_STREQ(clsBuf, "matlab.graphics.axis.Axes");
+
+    int32_t chartKids[8]{};
+    ASSERT_EQ(numkit_gfx_node_children(ctx, axId, 0, chartKids, 8), 2u);
+    // Newest-first: chartKids[0] = ConstantLine, chartKids[1] = Line
+    EXPECT_GT(numkit_gfx_node_class(ctx, chartKids[0], clsBuf, sizeof(clsBuf)), 0u);
+    EXPECT_STREQ(clsBuf, "matlab.graphics.chart.decoration.ConstantLine");
+    const int32_t lineId = chartKids[1];
+    EXPECT_GT(numkit_gfx_node_class(ctx, lineId, clsBuf, sizeof(clsBuf)), 0u);
+    EXPECT_STREQ(clsBuf, "matlab.graphics.chart.primitive.Line");
+
+    // Mutate Line.YData directly from host C-API -> verify Axes.YLim auto-updates to [0 200]
+    numkit_val *newY = numkit_engine_eval(ctx, "[0 200]", &err);
+    ASSERT_NE(newY, nullptr) << err.message;
+    ASSERT_EQ(numkit_gfx_set_prop(ctx, lineId, "YData", newY, &err), 0) << err.message;
+    numkit_val_release(newY);
+
+    numkit_val *ylimV = numkit_gfx_get_prop(ctx, axId, "YLim", &err);
+    ASSERT_NE(ylimV, nullptr) << err.message;
+    ASSERT_EQ(numkit_val_numel(ylimV), 2u);
+    ASSERT_EQ(numkit_val_type(ylimV), NUMKIT_DTYPE_DOUBLE);
+    const double *ylData = static_cast<const double *>(numkit_val_raw_data(ylimV));
+    ASSERT_NE(ylData, nullptr);
+    EXPECT_DOUBLE_EQ(ylData[0], 0.0);
+    EXPECT_DOUBLE_EQ(ylData[1], 200.0);
+    numkit_val_release(ylimV);
+
+    numkit_gfx_event evs[64]{};
+    EXPECT_GT(numkit_gfx_poll_events(ctx, g0, evs, 64), 4u);
+
+    numkit_engine_destroy(ctx);
+    EXPECT_EQ(numkit_debug_live_values(), base);
+}

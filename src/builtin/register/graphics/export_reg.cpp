@@ -32,6 +32,11 @@
 
 #include <keel/number.h>
 
+namespace numkit::gfx {
+bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
+                                     FigureState &out, keel::Allocator *mr);
+} // namespace numkit::gfx
+
 namespace numkit {
 
 namespace {
@@ -97,40 +102,59 @@ figrender::SvgImageEmbedder svgPngEmbedder(
     };
 }
 
-// Resolve the TARGET FIGURE from any graphics handle / figure number.
-// exportgraphics(gca)/saveas(chart) scope to the axes in MATLAB; the
-// portion-32 renderer works per-figure, so axes/chart targets map to
-// their containing figure (gap noted in figure-export-gaps.md).
-const FigureState *targetFigure(Engine &engine, const Value &v)
+struct ExportArgs {
+    const FigureState *fig = nullptr;
+    FigureState projectedFig;
+    bool useProjected = false;
+    keel::String path;
+    keel::String ext;       // from filename or explicit format
+    keel::i32 dpi = 150;          // MATLAB png default; scales the 840×630 base
+
+    const FigureState *resolvedFigure() const noexcept
+    {
+        return useProjected ? &projectedFig : fig;
+    }
+};
+
+bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
 {
+    auto &scene = engine.graphicsScene();
     auto &fm = engine.figureManager();
     if (isSceneGraphicsHandle(v)) {
         const keel::i32 hid = graphicsHandleIdOf(v);
-        const auto *fn = engine.graphicsScene().findNode(hid);
-        if (!fn)
+        const auto *node = scene.findNode(hid);
+        if (!node)
             throw numkit::Error("Invalid or deleted object.");
-        if (fn->classId == gfx::ClassId::Figure && fn->figureNumber > 0)
-            return fm.figureOf(fn->figureNumber);
-        return nullptr;
+        const gfx::NodeId figId = (node->classId == gfx::ClassId::Figure)
+                                      ? hid : scene.containingFigure(hid);
+        if (figId != gfx::kInvalidNodeId
+            && gfx::projectSceneFigureToRenderState(scene, figId, out.projectedFig, engine.allocator())) {
+            out.useProjected = true;
+            return true;
+        }
+        return false;
     }
     const keel::i32 hid = graphicsHandleIdOf(v);
     if (hid >= 0) {
         auto *rec = fm.findHandle(hid);
         if (!rec)
             throw numkit::Error("Invalid or deleted object.");
-        return fm.figureOf(rec->figureId);
+        out.fig = fm.figureOf(rec->figureId);
+        return out.fig != nullptr;
     }
-    if (v.isScalar())
-        return fm.figureOf((keel::i32)v.toScalar());
-    return nullptr;
+    if (v.isScalar()) {
+        const keel::i32 num = keel::as<keel::i32>(v.toScalar());
+        const gfx::NodeId figId = scene.findFigureByNumber(num);
+        if (figId != gfx::kInvalidNodeId
+            && gfx::projectSceneFigureToRenderState(scene, figId, out.projectedFig, engine.allocator())) {
+            out.useProjected = true;
+            return true;
+        }
+        out.fig = fm.figureOf(num);
+        return out.fig != nullptr;
+    }
+    return false;
 }
-
-struct ExportArgs {
-    const FigureState *fig = nullptr;
-    keel::String path;
-    keel::String ext;       // from filename or explicit format
-    keel::i32 dpi = 150;          // MATLAB png default; scales the 840×630 base
-};
 
 // Shared argument walk for all three entry points: a handle/number
 // target, one filename, format flags ('-dpng', 'png'), '-r###'
@@ -144,8 +168,7 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         const Value &a = args[i];
         if (a.isObject() || (a.isScalar() && !a.isChar())) {
             if (!haveTarget) {
-                out.fig = targetFigure(engine, a);
-                if (!out.fig)
+                if (!resolveTargetFigure(engine, a, out))
                     throw numkit::Error(keel::format(
                         "{}: first argument must be a graphics handle or figure number",
                         who).c_str());
@@ -186,8 +209,15 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             out.ext = keel::move(sl);
         }
     }
-    if (needTarget && !out.fig)
-        out.fig = &engine.figureManager().current();
+    if (needTarget && !out.resolvedFigure()) {
+        const gfx::NodeId curFig = engine.graphicsScene().currentFigureId();
+        if (curFig != gfx::kInvalidNodeId
+            && gfx::projectSceneFigureToRenderState(engine.graphicsScene(), curFig, out.projectedFig, engine.allocator())) {
+            out.useProjected = true;
+        } else {
+            out.fig = &engine.figureManager().current();
+        }
+    }
     if (!havePath)
         throw numkit::Error(keel::format("{}: a filename is required", who).c_str());
     if (out.ext.empty())
@@ -200,7 +230,8 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
 
 void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 {
-    if (!ea.fig)
+    const FigureState *targetFig = ea.resolvedFigure();
+    if (!targetFig)
         throw numkit::Error(keel::format("{}: no figure to export", who).c_str());
     // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
     // Resolution scales it linearly.
@@ -213,19 +244,19 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
 
     if (ea.ext == "svg") {
         rp.fs->writeFile(rp.path,
-                         figrender::renderFigureSvg(*ea.fig, W, H,
+                         figrender::renderFigureSvg(*targetFig, W, H,
                                                      svgPngEmbedder(
                                                          engine.allocator())));
         return;
     }
     if (ea.ext == "pdf") {
         rp.fs->writeFileBytes(rp.path,
-                              figrender::renderFigurePdf(*ea.fig, W, H));
+                              figrender::renderFigurePdf(*targetFig, W, H));
         return;
     }
     if (ea.ext.is_one_of({"eps", "epsc", "eps2", "epsc2"})) {
         rp.fs->writeFile(rp.path,
-                         figrender::renderFigureEps(*ea.fig, W, H));
+                         figrender::renderFigureEps(*targetFig, W, H));
         return;
     }
     if (ea.ext.is_one_of({"fig", "emf", "hdf"})) {
@@ -236,7 +267,7 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
     }
     // Raster formats → RGB buffer → image toolbox encoder.
     keel::Array<keel::u8> rgb =
-        figrender::renderFigureRgb(*ea.fig, W, H);
+        figrender::renderFigureRgb(*targetFig, W, H);
     const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
     Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8,
                               engine.allocator());
@@ -305,8 +336,19 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
 {
     argcheck::checkNargin(args.size(), 0, 2, "getframe");
     auto *mr = ctx.engine->allocator();
-    const FigureState *fig = nullptr;
-    if (!args.empty()) fig = targetFigure(coreEngine(ctx), args[0]);
+    auto &eng = coreEngine(ctx);
+    ExportArgs ea;
+    if (!args.empty())
+        resolveTargetFigure(eng, args[0], ea);
+    const FigureState *fig = ea.resolvedFigure();
+    if (!fig) {
+        const gfx::NodeId curFig = eng.graphicsScene().currentFigureId();
+        if (curFig != gfx::kInvalidNodeId
+            && gfx::projectSceneFigureToRenderState(eng.graphicsScene(), curFig, ea.projectedFig, mr)) {
+            ea.useProjected = true;
+            fig = ea.resolvedFigure();
+        }
+    }
     if (!fig) fig = &ctx.engine->figureManager().current();
     const keel::i32 W = 560, H = 420;
     keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);

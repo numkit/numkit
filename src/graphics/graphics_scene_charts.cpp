@@ -116,19 +116,30 @@ NodeId GraphicsScene::prepareAxesForPlot(NodeId axId, bool resetIfReplace)
     const NodeId target = (axId != kInvalidNodeId && findNode(axId) != nullptr)
                               ? axId : ensureCurrentAxes();
     if (resetIfReplace && !isHoldOn(target)) {
-        clearAxes(target, false);
-        if (GraphicsNode *ax = findNode(target)) {
-            ax->props.remove("XLim");
-            ax->props.remove("YLim");
-            ax->props.remove("ZLim");
-            ax->props.remove("CLim");
-            ax->props.put(keel::String::from("XLimMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("YLimMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("ZLimMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("CLimMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("XTickMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("YTickMode", mr_), Value::fromString("auto", mr_));
-            ax->props.put(keel::String::from("ZTickMode", mr_), Value::fromString("auto", mr_));
+        const GraphicsNode *axCur = findNode(target);
+        if (axCur && axCur->classId == ClassId::Axes && axCur->yAxisRightId != kInvalidNodeId) {
+            // Dual-Y axes: only clear children on the active side so the opposite side persists.
+            const char activeSide = axCur->yyRightActive ? 'Y' : '\0';
+            keel::Array<NodeId> kids = axCur->children.clone(mr_);
+            for (NodeId cid : kids) {
+                if (const GraphicsNode *cn = findNode(cid); cn && cn->rulerAxis == activeSide)
+                    deleteNode(cid, true);
+            }
+        } else {
+            clearAxes(target, false);
+            if (GraphicsNode *ax = findNode(target)) {
+                ax->props.remove("XLim");
+                ax->props.remove("YLim");
+                ax->props.remove("ZLim");
+                ax->props.remove("CLim");
+                ax->props.put(keel::String::from("XLimMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("YLimMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("ZLimMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("CLimMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("XTickMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("YTickMode", mr_), Value::fromString("auto", mr_));
+                ax->props.put(keel::String::from("ZTickMode", mr_), Value::fromString("auto", mr_));
+            }
         }
     }
     return target;
@@ -184,6 +195,11 @@ NodeId GraphicsScene::createChartNode(ClassId cls, NodeId parentId, bool consume
     }
 
     const NodeId id = allocateNode(cls, actualParent);
+    if (const GraphicsNode *pn = findNode(actualParent);
+        pn && pn->classId == ClassId::Axes && pn->yyRightActive) {
+        if (GraphicsNode *n = findNode(id))
+            n->rulerAxis = 'Y';
+    }
     if (consumeSeriesColor && cls != ClassId::TextBox && cls != ClassId::Image
         && cls != ClassId::Surface && cls != ClassId::Contour && cls != ClassId::Patch) {
         keel::i32 sIdx = 1;

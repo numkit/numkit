@@ -194,6 +194,16 @@ public:
     void setChangeLogEnabled(bool enabled) noexcept { changeLogEnabled_ = enabled; }
     bool changeLogEnabled() const noexcept { return changeLogEnabled_; }
 
+    // ── Scene snapshot / rollback (ReactiveSession) ─────────────────────
+    struct SceneCheckpoint {
+        keel::Array<GraphicsNode> nodes;
+        NodeId nextId = 2;
+        NodeId currentFigureId = kInvalidNodeId;
+        keel::Array<AxisLinkGroup> linkGroups;
+    };
+    SceneCheckpoint checkpoint(keel::Allocator *alloc = nullptr) const;
+    void restore(const SceneCheckpoint &cp);
+
 private:
     NodeId allocateNode(ClassId cls, NodeId parentId);
     keel::i32 allocateLowestFigureNumber() const noexcept;

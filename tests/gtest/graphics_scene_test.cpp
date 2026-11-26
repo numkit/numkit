@@ -4,6 +4,7 @@
 // findobj/findall/allchild/ancestor/copyobj/reset, and SceneChangeLog.
 
 #include <keel/core.h>
+#include <numkit/core/reactive_session.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 #include "dual_engine_fixture.hpp"
 
@@ -592,6 +593,46 @@ TEST_P(GraphicsSceneTest, Phase3BarHistogramPatchAnimatedLineAndAnnotation)
     EXPECT_NEAR(evalScalar("fl.YData(end)"), 16.0, 1e-12);
     EXPECT_EQ(evalString("tb.String"), "Hello");
     EXPECT_DOUBLE_EQ(evalScalar("tb.Position(3)"), 0.3);
+}
+
+TEST_P(GraphicsSceneTest, Phase4DirectSceneExportAndReactiveRollback)
+{
+    // 1. Live GraphicsScene mutation exported directly to SVG without FigureManager mirror
+    eval("close all force;"
+         "f = figure('Visible', 'off');"
+         "ax = axes(f);"
+         "h = plot(ax, [1 2 3], [10 20 30]);"
+         "h.YData = [100 250 400];"
+         "ax.Title.String = 'DirectSceneSVG';"
+         "saveas(f, 'numkit_phase4_scene.svg');"
+         "svgTxt = fileread('numkit_phase4_scene.svg');"
+         "delete('numkit_phase4_scene.svg');");
+    ASSERT_NE(getVarPtr("svgTxt"), nullptr);
+    EXPECT_NE(getVarPtr("svgTxt")->toString().find("DirectSceneSVG"), std::string::npos);
+    EXPECT_NE(getVarPtr("svgTxt")->toString().find("400"), std::string::npos);
+
+    // 2. ReactiveSession checkpoints & rolls back GraphicsScene cleanly across hold on ticks
+    numkit::StandardEngine rEng;
+    numkit::ReactiveSession rs(rEng);
+    const char *script =
+        "gain = 2;\n"
+        "f = figure('Visible', 'off');\n"
+        "ax = axes(f);\n"
+        "hold(ax, 'on');\n"
+        "h = plot(ax, [0 1], [0 gain]);\n";
+    ASSERT_TRUE(rs.load(script)) << rs.lastError().c_str();
+    EXPECT_DOUBLE_EQ(rEng.eval("numel(ax.Children)").toScalar(), 1.0);
+    EXPECT_DOUBLE_EQ(rEng.eval("ax.YLim(2)").toScalar(), 2.0);
+
+    rs.setParam("gain", numkit::Value::scalar(5.0, rEng.allocator()));
+    EXPECT_GT(rs.evalDirty(), 0u);
+    EXPECT_DOUBLE_EQ(rEng.eval("numel(ax.Children)").toScalar(), 1.0);
+    EXPECT_DOUBLE_EQ(rEng.eval("ax.YLim(2)").toScalar(), 5.0);
+
+    rs.setParam("gain", numkit::Value::scalar(12.0, rEng.allocator()));
+    EXPECT_GT(rs.evalDirty(), 0u);
+    EXPECT_DOUBLE_EQ(rEng.eval("numel(ax.Children)").toScalar(), 1.0);
+    EXPECT_DOUBLE_EQ(rEng.eval("ax.YLim(2)").toScalar(), 12.0);
 }
 
 INSTANTIATE_DUAL(GraphicsSceneTest);
