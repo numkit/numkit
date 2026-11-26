@@ -286,6 +286,7 @@ if(NUMKIT_BUILD_TESTS)
         tests/gtest/main.cpp
         tests/gtest/plugin_loader_test.cpp
         tests/gtest/builtins_test.cpp
+        tests/gtest/decomposition_test.cpp
         tests/gtest/lang_test.cpp
         tests/gtest/matrix_test.cpp
         tests/gtest/ops_test.cpp

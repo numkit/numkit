@@ -434,6 +434,7 @@ void HelpCatalog::initCategories() {
                     "Matrix factorizations.",
                     {
                         {"lu", "LU matrix factorization.", "[L, U, P] = lu(A)", "lu factors square or rectangular matrix into permutation, unit lower and upper triangular."},
+                        {"decomposition", "Reusable matrix decomposition for solving linear systems.", "D = decomposition(A, TYPE)", "decomposition caches matrix factorizations (lu, chol, ldl, qr, cod, triangular, diagonal, banded, hessenberg, permutedTriangular) for fast repeated solves via D\\B and B/D."},
                         {"qr", "QR matrix factorization.", "[Q, R, P] = qr(A)", "qr factors matrix into orthogonal Q and upper triangular R."},
                         {"chol", "Cholesky factorization of positive definite matrix.", "R = chol(A)", "chol factors Hermitian positive-definite matrix into R'*R."},
                         {"cholupdate", "Rank 1 update to Cholesky factorization.", "R1 = cholupdate(R, X, OP)", "cholupdate updates Cholesky factor R after rank-1 modification."},

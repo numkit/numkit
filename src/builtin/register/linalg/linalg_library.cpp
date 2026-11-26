@@ -104,59 +104,11 @@ void pagenorm_reg       (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<V
 void pagemldivide_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 void pagemrdivide_reg   (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
 void pagelsqminnorm_reg (keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &);
+// decomposition_class.cpp
+void register_decomposition(Engine &engine);
 } // namespace numkit::linalg::detail
 
 namespace numkit {
-
-// decomposition — object caching matrix factorizations
-static const char *kDecompositionMSource = R"NKM(
-classdef decomposition
-  properties
-    A
-    Type
-    Factors
-  end
-  methods
-    function obj = decomposition(A, type)
-      if nargin < 2
-        type = 'auto';
-      end
-      obj.A = A;
-      obj.Type = type;
-      if strcmp(type, 'lu')
-        [L, U, P] = lu(A);
-        obj.Factors = {L, U, P};
-      elseif strcmp(type, 'qr')
-        [Q, R] = qr(A);
-        obj.Factors = {Q, R};
-      elseif strcmp(type, 'chol')
-        R = chol(A);
-        obj.Factors = {R};
-      else
-        [L, U, P] = lu(A);
-        obj.Factors = {L, U, P};
-      end
-    end
-    function x = mldivide(obj, B)
-      if strcmp(obj.Type, 'lu') || strcmp(obj.Type, 'auto')
-        L = obj.Factors{1}; U = obj.Factors{2}; P = obj.Factors{3};
-        x = U \ (L \ (P * B));
-      elseif strcmp(obj.Type, 'qr')
-        Q = obj.Factors{1}; R = obj.Factors{2};
-        x = R \ (Q' * B);
-      elseif strcmp(obj.Type, 'chol')
-        R = obj.Factors{1};
-        x = R \ (R' \ B);
-      else
-        x = obj.A \ B;
-      end
-    end
-    function x = solve(obj, B)
-      x = mldivide(obj, B);
-    end
-  end
-end
-)NKM";
 
 void LinalgLibrary::install(Engine &engine)
 {
@@ -272,7 +224,7 @@ void LinalgLibrary::install(Engine &engine)
     reg("page", "pagemrdivide",   &linalg::detail::pagemrdivide_reg);
     reg("page", "pagelsqminnorm", &linalg::detail::pagelsqminnorm_reg);
 
-    engine.registerBuiltinMSource(kDecompositionMSource);
+    linalg::detail::register_decomposition(engine);
 }
 
 } // namespace numkit
