@@ -456,4 +456,142 @@ TEST_P(GraphicsSceneTest, PolarAxesDecorationsAndCascadingDefaults)
     EXPECT_TRUE(evalBool("isgraphics(pax.RAxis) && isgraphics(pax.ThetaAxis)"));
 }
 
+TEST_P(GraphicsSceneTest, Phase3All15ChartClassesExactPropertyCounts)
+{
+    eval("f = figure('Visible', 'off'); ax = axes(f); hold(ax, 'on');"
+         "h_ln = plot(ax, [0 1], [0 1]);"
+         "h_sc = scatter(ax, [1 2], [3 4]);"
+         "h_br = bar(ax, [1 2 3]);"
+         "h_sf = surf(ax, [1 2; 3 4]);"
+         "h_pt = patch(ax, [0 1 0], [0 0 1], 'r');"
+         "h_qv = quiver(ax, [0 1], [0 1], [1 0], [0 1]);"
+         "[~, h_ct] = contour(ax, peaks(6));"
+         "h_st = stem(ax, [1 2 3]);"
+         "h_eb = errorbar(ax, [1 2], [3 4], [0.5 0.5]);"
+         "h_hg = histogram(ax, [1 2 2 3 3 3]);"
+         "h_ar = area(ax, [1 2 3]);"
+         "h_im = image(ax, [1 2; 3 4]);"
+         "h_sr = stairs(ax, [1 2 3]);"
+         "h_al = animatedline(ax);"
+         "h_tb = annotation(f, 'textbox', [0.2 0.2 0.3 0.1], 'String', 'box');");
+
+    EXPECT_EQ(evalString("class(h_ln)"), "matlab.graphics.chart.primitive.Line");
+    EXPECT_EQ(evalString("class(h_sc)"), "matlab.graphics.chart.primitive.Scatter");
+    EXPECT_EQ(evalString("class(h_br)"), "matlab.graphics.chart.primitive.Bar");
+    EXPECT_EQ(evalString("class(h_sf)"), "matlab.graphics.chart.primitive.Surface");
+    EXPECT_EQ(evalString("class(h_pt)"), "matlab.graphics.primitive.Patch");
+    EXPECT_EQ(evalString("class(h_qv)"), "matlab.graphics.chart.primitive.Quiver");
+    EXPECT_EQ(evalString("class(h_ct)"), "matlab.graphics.chart.primitive.Contour");
+    EXPECT_EQ(evalString("class(h_st)"), "matlab.graphics.chart.primitive.Stem");
+    EXPECT_EQ(evalString("class(h_eb)"), "matlab.graphics.chart.primitive.ErrorBar");
+    EXPECT_EQ(evalString("class(h_hg)"), "matlab.graphics.chart.primitive.Histogram");
+    EXPECT_EQ(evalString("class(h_ar)"), "matlab.graphics.chart.primitive.Area");
+    EXPECT_EQ(evalString("class(h_im)"), "matlab.graphics.primitive.Image");
+    EXPECT_EQ(evalString("class(h_sr)"), "matlab.graphics.chart.primitive.Stair");
+    EXPECT_EQ(evalString("class(h_al)"), "matlab.graphics.animation.AnimatedLine");
+    EXPECT_EQ(evalString("class(h_tb)"), "matlab.graphics.shape.TextBox");
+
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_ln))"), 50.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(fieldnames(get(h_ln)))"), 50.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_sc))"), 63.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_br))"), 57.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_sf))"), 60.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_pt))"), 58.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_qv))"), 54.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_ct))"), 50.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_st))"), 49.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_eb))"), 48.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_hg))"), 41.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_ar))"), 39.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_im))"), 27.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_sr))"), 42.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_al))"), 34.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(h_tb))"), 38.0);
+    EXPECT_EQ(evalString("h_ln.Visible"), "on");
+}
+
+TEST_P(GraphicsSceneTest, Phase3LiveAutoLimitsColorOrderAndNextPlot)
+{
+    eval("f = figure('Visible', 'off'); ax = axes(f);"
+         "h1 = plot(ax, [0 10], [0 20]);");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XLim(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XLim(2)"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 20.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.XAxis.Limits(2)"), 10.0);
+    EXPECT_DOUBLE_EQ(evalScalar("h1.SeriesIndex"), 1.0);
+
+    // Live YData mutation automatically updates Axes.YLim when YLimMode == 'auto'
+    eval("h1.YData = [0 100];");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 100.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YAxis.Limits(2)"), 100.0);
+
+    // hold on cycles ColorOrderIndex and appends Children
+    eval("hold(ax, 'on'); h2 = plot(ax, [0 5], [0 50]);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.Children)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("h2.SeriesIndex"), 2.0);
+    EXPECT_TRUE(evalBool("any(h1.Color ~= h2.Color)"));
+
+    // Deleting h1 recomputes auto limits down to h2's range [0 50]
+    eval("delete(h1);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.Children)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 50.0);
+
+    // hold off -> new plot replaces previous children and resets SeriesIndex to 1
+    eval("hold(ax, 'off'); h3 = plot(ax, [1 2], [3 4]);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ax.Children)"), 1.0);
+    EXPECT_FALSE(evalBool("isvalid(h2)"));
+    EXPECT_DOUBLE_EQ(evalScalar("h3.SeriesIndex"), 1.0);
+}
+
+TEST_P(GraphicsSceneTest, Phase3BarHistogramPatchAnimatedLineAndAnnotation)
+{
+    // Histogram live Normalization & NumBins recomputation
+    eval("f = figure('Visible', 'off'); ax = axes(f);"
+         "h = histogram(ax, [1 1 2 2 2 3 4 4], 4);"
+         "v_cnt = h.Values;"
+         "h.Normalization = 'probability';"
+         "v_prob = h.Values;"
+         "h.Normalization = 'cdf';"
+         "v_cdf = h.Values;");
+    EXPECT_DOUBLE_EQ(evalScalar("sum(v_cnt)"), 8.0);
+    EXPECT_NEAR(evalScalar("sum(v_prob)"), 1.0, 1e-12);
+    EXPECT_NEAR(evalScalar("v_cdf(end)"), 1.0, 1e-12);
+
+    // Patch bidirectional XData/YData <-> Vertices/Faces sync
+    eval("p = patch(ax, [0 2 0], [0 0 3], 'g');");
+    EXPECT_DOUBLE_EQ(evalScalar("size(p.Vertices, 1)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p.Vertices(2, 1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p.Vertices(3, 2)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("p.FaceColor(2)"), 1.0);
+    eval("p.Vertices = [0 0; 5 0; 5 4; 0 4]; p.Faces = [1 2 3 4];");
+    EXPECT_DOUBLE_EQ(evalScalar("max(p.XData(:))"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("max(p.YData(:))"), 4.0);
+
+    // AnimatedLine addpoints / getpoints / clearpoints / MaximumNumPoints
+    eval("cla(ax, 'reset'); an = animatedline(ax, 'MaximumNumPoints', 3);"
+         "addpoints(an, [1 2], [10 20]);"
+         "addpoints(an, [3 4], [30 40]);"
+         "[axp, ayp] = getpoints(an);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(axp)"), 3.0);
+    EXPECT_DOUBLE_EQ(evalScalar("axp(1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ayp(3)"), 40.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.YLim(2)"), 40.0);
+    eval("clearpoints(an); [axp2, ayp2] = getpoints(an);");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(axp2)"), 0.0);
+
+    // imagesc sets YDir='reverse', CDataMapping='scaled', CLim
+    eval("im = imagesc(ax, [1 2 3; 4 5 6]);");
+    EXPECT_EQ(evalString("ax.YDir"), "reverse");
+    EXPECT_EQ(evalString("im.CDataMapping"), "scaled");
+    EXPECT_DOUBLE_EQ(evalScalar("ax.CLim(1)"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("ax.CLim(2)"), 6.0);
+
+    // fplot & annotation TextBox
+    eval("fl = fplot(ax, @(x) x.^2, [0 4]);"
+         "tb = annotation(f, 'textbox', [0.1 0.2 0.3 0.4], 'String', 'Hello');");
+    EXPECT_NEAR(evalScalar("fl.YData(end)"), 16.0, 1e-12);
+    EXPECT_EQ(evalString("tb.String"), "Hello");
+    EXPECT_DOUBLE_EQ(evalScalar("tb.Position(3)"), 0.3);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

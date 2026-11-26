@@ -360,6 +360,22 @@ void registerOneSceneClass(Engine &engine, ClassId cid)
             applyNameValuePairs(scene, clId, args, 0, mr);
             return scene.makeHandleValue(clId, mr);
         }
+        if (GraphicsScene::isChartClass(cid) || cid == ClassId::TextBox) {
+            const NodeId id = scene.createChartNode(cid, kInvalidNodeId, cid != ClassId::TextBox);
+            if (cid == ClassId::Line) {
+                Value def = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+                def.doubleDataMut()[0] = 0.0;
+                def.doubleDataMut()[1] = 1.0;
+                if (GraphicsNode *ln = scene.findNode(id)) {
+                    ln->props.put(keel::String::from("XData", mr), def);
+                    ln->props.put(keel::String::from("YData", mr), def);
+                }
+            }
+            applyNameValuePairs(scene, id, args, 0, mr);
+            if (const GraphicsNode *n = scene.findNode(id); n && GraphicsScene::isChartClass(cid))
+                scene.recomputeAxesAutoLimits(n->parentId, mr);
+            return scene.makeHandleValue(id, mr);
+        }
         return scene.makeEmptyPlaceholder(mr);
     };
     engine.registerClass(keel::move(cls));
@@ -818,14 +834,37 @@ bool trySceneSet(keel::ArrayRef<Value> args, keel::usize nargout,
         if (targets.size() != 1)
             throw Error("set: query form requires a scalar handle.", 0, 0, "set", "", "numkit:graphics:NonScalarHandle");
         Value spec = scene.getSettableSpec(targets[0], {}, false, mr);
-        outs[0] = (nargout >= 1) ? keel::move(spec) : Value();
+        if (nargout == 0 && spec.isStruct()) {
+            const auto fields = spec.fieldNamesInOrder(mr);
+            keel::String buf(mr);
+            for (const auto &fn : fields) {
+                buf.append("    ");
+                buf.append(fn);
+                buf.push_back('\n');
+            }
+            coreEngine(ctx).outputText(buf);
+            outs[0] = Value();
+        } else {
+            outs[0] = keel::move(spec);
+        }
         return true;
     }
     if (args.size() == 2 && (args[1].isChar() || args[1].isString())) {
         if (targets.size() != 1)
             throw Error("set: query form requires a scalar handle.", 0, 0, "set", "", "numkit:graphics:NonScalarHandle");
         Value spec = scene.getSettableSpec(targets[0], args[1].toString(), true, mr);
-        outs[0] = (nargout >= 1) ? keel::move(spec) : Value();
+        if (nargout == 0 && spec.isCell()) {
+            keel::String buf(mr);
+            for (keel::usize i = 0; i < spec.numel(); ++i) {
+                buf.append("    ");
+                buf.append(spec.cellAt(i).toString());
+                buf.push_back('\n');
+            }
+            coreEngine(ctx).outputText(buf);
+            outs[0] = Value();
+        } else {
+            outs[0] = keel::move(spec);
+        }
         return true;
     }
     // Cell property names + cell values: set(hArr, {'P1','P2'}, valsCell)
@@ -1038,16 +1077,11 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
             continue;
         }
         if (idx + 1 < args.size()) {
-            // If caller queries a legacy Phase-3 chart type (e.g. 'Type','line'), defer to legacy findobj until Phase 3.
+            // All Phase 1-3 object types live in GraphicsScene now; only defer unknown legacy types.
             if (asciiEqualNoCase(tok, "Type") && (args[idx + 1].isChar() || args[idx + 1].isString())) {
                 const keel::String wantT = args[idx + 1].toString();
-                if (!asciiEqualNoCase(wantT, "figure") && !asciiEqualNoCase(wantT, "root")
-                    && !asciiEqualNoCase(wantT, "theme") && !asciiEqualNoCase(wantT, "axes")
-                    && !asciiEqualNoCase(wantT, "polaraxes") && !asciiEqualNoCase(wantT, "tiledlayout")
-                    && !asciiEqualNoCase(wantT, "text") && !asciiEqualNoCase(wantT, "legend")
-                    && !asciiEqualNoCase(wantT, "colorbar") && !asciiEqualNoCase(wantT, "constantline")) {
+                if (schemaByTypeName(wantT) == nullptr && !asciiEqualNoCase(wantT, "theme"))
                     return false;
-                }
             }
             Term t;
             t.kind = TermKind::PropEq;
@@ -1123,6 +1157,7 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
 }
 
 void registerSceneAxesBuiltins(Engine &engine);
+void registerSceneChartsBuiltins(Engine &engine);
 
 void registerSceneGraphics(Engine &engine)
 {
@@ -1138,6 +1173,21 @@ void registerSceneGraphics(Engine &engine)
     registerOneSceneClass(engine, ClassId::Legend);
     registerOneSceneClass(engine, ClassId::ColorBar);
     registerOneSceneClass(engine, ClassId::ConstantLine);
+    registerOneSceneClass(engine, ClassId::Line);
+    registerOneSceneClass(engine, ClassId::Scatter);
+    registerOneSceneClass(engine, ClassId::Bar);
+    registerOneSceneClass(engine, ClassId::Surface);
+    registerOneSceneClass(engine, ClassId::Patch);
+    registerOneSceneClass(engine, ClassId::Quiver);
+    registerOneSceneClass(engine, ClassId::Contour);
+    registerOneSceneClass(engine, ClassId::Stem);
+    registerOneSceneClass(engine, ClassId::ErrorBar);
+    registerOneSceneClass(engine, ClassId::Histogram);
+    registerOneSceneClass(engine, ClassId::Area);
+    registerOneSceneClass(engine, ClassId::Image);
+    registerOneSceneClass(engine, ClassId::Stair);
+    registerOneSceneClass(engine, ClassId::AnimatedLine);
+    registerOneSceneClass(engine, ClassId::TextBox);
 
     auto regBoth = [&](const char *sub, const char *name,
                        void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &)) {
@@ -1159,6 +1209,7 @@ void registerSceneGraphics(Engine &engine)
     regBoth("handle", "reset",    &reset_scene_reg);
 
     registerSceneAxesBuiltins(engine);
+    registerSceneChartsBuiltins(engine);
 }
 
 } // namespace numkit::gfx::detail

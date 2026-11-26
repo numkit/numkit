@@ -42,6 +42,7 @@
 #include <numkit/value/error.hpp>
 #include <numkit/graphics/graphics_context.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
+#include <numkit/graphics/property_schema.hpp>
 #include <numkit/core/engine.hpp>
 
 namespace numkit::gfx::detail {
@@ -2296,8 +2297,11 @@ void registerGraphicsClasses(Engine &engine)
         classToType.push_back(ClassTypePair{cn, rt});
     };
     addClass("matlab.graphics.Graphics", "line");
-    for (const auto &e : kHandleTypes)
+    for (const auto &e : kHandleTypes) {
+        if (gfx::schemaByClassName(e.className) != nullptr)
+            continue;
         addClass(e.className, e.type);
+    }
 
     for (const auto &pair : classToType) {
         const char *clsName = pair.className;
@@ -2420,7 +2424,7 @@ void GraphicsLibrary::install(Engine &engine)
     keel::Array<PlotEntry> table;
     buildPlotTable(table);
 
-    // Handle-accessor & Phase-1/2 scene names registered above — skip their
+    // Handle-accessor & Phase-1/2/3 scene names registered above — skip their
     // table entries (registerFunctionImpl_ throws on duplicates).
     auto isHandleAccessorName = [](keel::StringRef nm) -> bool {
         static constexpr const char *kNames[] = {
@@ -2434,6 +2438,13 @@ void GraphicsLibrary::install(Engine &engine)
             "xticks", "yticks", "zticks", "rticks", "thetaticks",
             "xticklabels", "yticklabels", "zticklabels",
             "xscale", "yscale", "zscale", "grid", "box", "view", "colormap", "axis",
+            "plot", "plot3", "line", "semilogx", "semilogy", "loglog",
+            "scatter", "scatter3", "bar", "barh", "surf", "mesh", "surfc", "meshc",
+            "pcolor", "surface", "patch", "fill", "fill3", "quiver", "quiver3",
+            "contour", "contourf", "contour3", "stem", "stem3", "errorbar",
+            "histogram", "area", "image", "imagesc", "stairs",
+            "animatedline", "addpoints", "getpoints", "clearpoints",
+            "annotation", "polarplot", "polarscatter", "fplot",
         };
         for (const char *n : kNames)
             if (nm == n) return true;

@@ -408,6 +408,8 @@ void GraphicsScene::deleteNode(NodeId id, bool force)
             fn->currentAxesId = kInvalidNodeId;
             updateCurrentAxesAfterRemoval(figId);
         }
+    } else if (isChartClass(cls) && parentId != kInvalidNodeId) {
+        recomputeAxesAutoLimits(parentId, mr_);
     }
 }
 
@@ -494,9 +496,12 @@ void GraphicsScene::reparentNode(NodeId id, NodeId newParentId)
     if (n->classId == ClassId::TiledChartLayout && newP->classId != ClassId::Figure) {
         throw Error("Parent of TiledChartLayout must be a Figure.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
     }
-    if ((n->classId == ClassId::Text || n->classId == ClassId::ConstantLine)
+    if ((n->classId == ClassId::Text || n->classId == ClassId::ConstantLine || isChartClass(n->classId))
         && newP->classId != ClassId::Axes && newP->classId != ClassId::PolarAxes) {
-        throw Error("Parent of Text or ConstantLine must be an Axes or PolarAxes.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+        throw Error("Parent of chart primitive must be an Axes or PolarAxes.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
+    }
+    if (n->classId == ClassId::TextBox && newP->classId != ClassId::Figure) {
+        throw Error("Parent of TextBox annotation must be a Figure.", 0, 0, "set", "", "numkit:graphics:InvalidParent");
     }
     if (n->parentId == newParentId)
         return;
@@ -676,14 +681,29 @@ bool GraphicsScene::parseDefaultKey(keel::StringRef raw,
         ClassId::TiledChartLayout,
         ClassId::NumericRuler,
         ClassId::ConstantLine,
+        ClassId::AnimatedLine,
         ClassId::PolarAxes,
+        ClassId::Histogram,
         ClassId::ColorBar,
+        ClassId::ErrorBar,
+        ClassId::Scatter,
+        ClassId::Surface,
+        ClassId::Contour,
+        ClassId::TextBox,
         ClassId::Figure,
         ClassId::Legend,
+        ClassId::Quiver,
         ClassId::Theme,
+        ClassId::Patch,
+        ClassId::Stair,
+        ClassId::Image,
         ClassId::Axes,
         ClassId::Root,
         ClassId::Text,
+        ClassId::Line,
+        ClassId::Stem,
+        ClassId::Area,
+        ClassId::Bar,
     };
     for (ClassId cid : kDefaultTargets) {
         const ClassSchema &s = schemaFor(cid);
@@ -950,8 +970,10 @@ Value GraphicsScene::getProperty(NodeId id, keel::StringRef rawProp, keel::Alloc
         if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
     }
 
-    if (n->classId == ClassId::Text || n->classId == ClassId::ConstantLine) {
-        if (prop == "ContextMenu") return makeEmptyPlaceholder(res);
+    if (n->classId == ClassId::Text || n->classId == ClassId::ConstantLine
+        || n->classId == ClassId::TextBox || isChartClass(n->classId)) {
+        if (prop == "ContextMenu" || prop == "BaseLine")
+            return makeEmptyPlaceholder(res);
     }
 
     // 3. Explicit override on node -> inherited default -> factory default.
@@ -1232,6 +1254,11 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
                     && asciiEqualNoCase(validated.toString(), "auto"))) {
                 recomputeAutoTicksForAxis(id, axCh, res);
             }
+            if (prop == "XLimitMethod" || prop == "YLimitMethod" || prop == "ZLimitMethod"
+                || ((prop == "XLimMode" || prop == "YLimMode" || prop == "ZLimMode")
+                    && asciiEqualNoCase(validated.toString(), "auto"))) {
+                recomputeAxesAutoLimits(id, res);
+            }
             if (prop == "XLim" || prop == "YLim")
                 propagateLinkedLimits(id, prop == "XLim", validated, res);
         }
@@ -1243,6 +1270,37 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
             n->props.put(keel::String::from("InnerPosition", mr_), validated);
             n->props.put(keel::String::from("OuterPosition", mr_), validated);
         }
+    } else if (isChartClass(n->classId)) {
+        if (n->classId == ClassId::Histogram) {
+            if (prop == "BinEdges") {
+                n->props.put(keel::String::from("_EdgesExplicit", mr_), Value::logicalScalar(true, mr_));
+                n->props.remove("_NumBinsExplicit");
+                n->props.remove("_BinWidthExplicit");
+                recomputeHistogramBins(id, res);
+            } else if (prop == "NumBins") {
+                n->props.put(keel::String::from("_NumBinsExplicit", mr_), Value::logicalScalar(true, mr_));
+                n->props.remove("_EdgesExplicit");
+                n->props.remove("_BinWidthExplicit");
+                recomputeHistogramBins(id, res);
+            } else if (prop == "BinWidth") {
+                n->props.put(keel::String::from("_BinWidthExplicit", mr_), Value::logicalScalar(true, mr_));
+                n->props.remove("_EdgesExplicit");
+                n->props.remove("_NumBinsExplicit");
+                recomputeHistogramBins(id, res);
+            } else if (prop == "Data" || prop == "Normalization" || prop == "BinLimits" || prop == "BinMethod") {
+                recomputeHistogramBins(id, res);
+            }
+        } else if (n->classId == ClassId::Bar) {
+            if (prop == "XData" || prop == "YData" || prop == "BarWidth" || prop == "BarLayout")
+                recomputeBarEndPoints(n->parentId, res);
+        } else if (n->classId == ClassId::Patch) {
+            if (prop == "XData" || prop == "YData" || prop == "ZData"
+                || prop == "Vertices" || prop == "Faces") {
+                syncPatchVerticesAndData(id, prop, res);
+            }
+        }
+        if ((spec->flags & PropFlag::AffectsLimits) != 0u || prop == "Visible")
+            recomputeAxesAutoLimits(n->parentId, res);
     }
 
     n->version = generation_ + 1;

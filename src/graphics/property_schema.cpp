@@ -28,6 +28,24 @@ const ClassSchema &colorBarSchema() noexcept;
 const ClassSchema &constantLineSchema() noexcept;
 Value factoryDefaultPhase2(ClassId cls, keel::StringRef prop, keel::Allocator *mr);
 
+// Phase 3 schemas implemented in schema_charts.cpp
+const ClassSchema &lineSchema() noexcept;
+const ClassSchema &scatterSchema() noexcept;
+const ClassSchema &barSchema() noexcept;
+const ClassSchema &surfaceSchema() noexcept;
+const ClassSchema &patchSchema() noexcept;
+const ClassSchema &quiverSchema() noexcept;
+const ClassSchema &contourSchema() noexcept;
+const ClassSchema &stemSchema() noexcept;
+const ClassSchema &errorBarSchema() noexcept;
+const ClassSchema &histogramSchema() noexcept;
+const ClassSchema &areaSchema() noexcept;
+const ClassSchema &imageSchema() noexcept;
+const ClassSchema &stairSchema() noexcept;
+const ClassSchema &animatedLineSchema() noexcept;
+const ClassSchema &textBoxSchema() noexcept;
+Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *mr);
+
 namespace {
 
 template <keel::usize N>
@@ -330,6 +348,21 @@ const ClassSchema &schemaFor(ClassId id) noexcept
     case ClassId::Legend:           return legendSchema();
     case ClassId::ColorBar:         return colorBarSchema();
     case ClassId::ConstantLine:     return constantLineSchema();
+    case ClassId::Line:             return lineSchema();
+    case ClassId::Scatter:          return scatterSchema();
+    case ClassId::Bar:              return barSchema();
+    case ClassId::Surface:          return surfaceSchema();
+    case ClassId::Patch:            return patchSchema();
+    case ClassId::Quiver:           return quiverSchema();
+    case ClassId::Contour:          return contourSchema();
+    case ClassId::Stem:             return stemSchema();
+    case ClassId::ErrorBar:         return errorBarSchema();
+    case ClassId::Histogram:        return histogramSchema();
+    case ClassId::Area:             return areaSchema();
+    case ClassId::Image:            return imageSchema();
+    case ClassId::Stair:            return stairSchema();
+    case ClassId::AnimatedLine:     return animatedLineSchema();
+    case ClassId::TextBox:          return textBoxSchema();
     default:                        return kPlaceholderSchema;
     }
 }
@@ -348,6 +381,21 @@ inline constexpr ClassId kRegisteredSchemaIds[] = {
     ClassId::Legend,
     ClassId::ColorBar,
     ClassId::ConstantLine,
+    ClassId::Line,
+    ClassId::Scatter,
+    ClassId::Bar,
+    ClassId::Surface,
+    ClassId::Patch,
+    ClassId::Quiver,
+    ClassId::Contour,
+    ClassId::Stem,
+    ClassId::ErrorBar,
+    ClassId::Histogram,
+    ClassId::Area,
+    ClassId::Image,
+    ClassId::Stair,
+    ClassId::AnimatedLine,
+    ClassId::TextBox,
 };
 } // anonymous namespace
 
@@ -493,6 +541,10 @@ Value validatePropValue(const PropertySpec &spec, const Value &v, keel::Allocato
 {
     switch (spec.kind) {
     case PropKind::DoubleScalar: {
+        if ((v.isChar() || v.isString()) && spec.enumCount > 0 && spec.enumChoices != nullptr) {
+            keel::String s = matchEnumChoice(v, spec.enumChoices, spec.enumCount, spec.name);
+            return Value::fromString(s, mr);
+        }
         if (!v.isNumeric() || v.isComplex() || v.numel() != 1) {
             auto msg = keel::format("Property '{}' must be a real numeric scalar.", spec.name);
             throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidScalar");
@@ -557,13 +609,20 @@ Value validatePropValue(const PropertySpec &spec, const Value &v, keel::Allocato
         return Value::fromString(s, mr);
     }
     case PropKind::ColorSpec:
-        return parseColorSpec(v, false, false, spec.name, mr);
     case PropKind::ColorOrNone:
-        return parseColorSpec(v, true, false, spec.name, mr);
     case PropKind::ColorOrAuto:
-        return parseColorSpec(v, false, true, spec.name, mr);
-    case PropKind::ColorOrAutoNone:
-        return parseColorSpec(v, true, true, spec.name, mr);
+    case PropKind::ColorOrAutoNone: {
+        if ((v.isChar() || v.isString()) && spec.enumCount > 0 && spec.enumChoices != nullptr) {
+            const keel::String s = v.toString();
+            for (keel::usize i = 0; i < spec.enumCount; ++i) {
+                if (asciiEqualNoCase(spec.enumChoices[i], s))
+                    return Value::fromString(spec.enumChoices[i], mr);
+            }
+        }
+        const bool allowNone = (spec.kind == PropKind::ColorOrNone || spec.kind == PropKind::ColorOrAutoNone);
+        const bool allowAuto = (spec.kind == PropKind::ColorOrAuto || spec.kind == PropKind::ColorOrAutoNone);
+        return parseColorSpec(v, allowNone, allowAuto, spec.name, mr);
+    }
     case PropKind::String: {
         if (v.isEmpty() && v.isNumeric())
             return Value::fromString("", mr);
@@ -765,7 +824,12 @@ Value factoryDefaultValue(ClassId cls, keel::StringRef prop, keel::Allocator *mr
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
     }
 
-    return factoryDefaultPhase2(cls, prop, mr);
+    if (cls == ClassId::Axes || cls == ClassId::NumericRuler || cls == ClassId::PolarAxes
+        || cls == ClassId::TiledChartLayout || cls == ClassId::Text || cls == ClassId::Legend
+        || cls == ClassId::ColorBar || cls == ClassId::ConstantLine) {
+        return factoryDefaultPhase2(cls, prop, mr);
+    }
+    return factoryDefaultPhase3(cls, prop, mr);
 }
 
 } // namespace numkit::gfx

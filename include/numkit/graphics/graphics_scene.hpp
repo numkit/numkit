@@ -70,6 +70,12 @@ struct GraphicsNode {
     keel::i32 subplotIdx = 0;
     keel::i32 nextTileIdx = 1;
 
+    // AnimatedLine point buffers (exposed via addpoints / getpoints / clearpoints):
+    keel::Array<keel::f64> animX;
+    keel::Array<keel::f64> animY;
+    keel::Array<keel::f64> animZ;
+    bool animHasZ = false;
+
     bool deleted = false;
     bool beingDeleted = false;
     keel::u64 version = 0;
@@ -140,6 +146,21 @@ public:
 
     void linkAxes(keel::ArrayRef<NodeId> axIds, keel::StringRef mode); // "x"|"y"|"xy"|"off"
     NodeId containingFigure(NodeId id) const noexcept;
+
+    // ── Phase 3: Chart Primitives, Annotations & Live Auto-Limits ───────
+    static bool isChartClass(ClassId cls) noexcept;
+    NodeId prepareAxesForPlot(NodeId axId = kInvalidNodeId, bool resetIfReplace = true);
+    Value nextSeriesColor(NodeId axId, keel::i32 &seriesIdxOut, keel::Allocator *mr = nullptr);
+    NodeId createChartNode(ClassId cls, NodeId parentId = kInvalidNodeId, bool consumeSeriesColor = true);
+    void recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr = nullptr);
+    void recomputeBarEndPoints(NodeId axId, keel::Allocator *mr = nullptr);
+    void recomputeHistogramBins(NodeId histId, keel::Allocator *mr = nullptr);
+    void syncPatchVerticesAndData(NodeId patchId, keel::StringRef changedProp, keel::Allocator *mr = nullptr);
+    void animatedLineAddPoints(NodeId alId, const Value &x, const Value &y,
+                               const Value *z = nullptr, keel::Allocator *mr = nullptr);
+    void animatedLineClearPoints(NodeId alId);
+    void animatedLineGetPoints(NodeId alId, Value &xOut, Value &yOut, Value &zOut,
+                               bool wantZ, keel::Allocator *mr = nullptr) const;
 
     // ── Generic tree operations ─────────────────────────────────────────
     void deleteNode(NodeId id, bool force = false);
