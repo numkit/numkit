@@ -316,6 +316,15 @@ const PropertySpec *ClassSchema::findExact(keel::StringRef canonical) const noex
     return nullptr;
 }
 
+const PropertySpec *ClassSchema::findExactNoCase(keel::StringRef raw) const noexcept
+{
+    for (keel::usize i = 0; i < propCount; ++i) {
+        if (asciiEqualNoCase(props[i].name, raw))
+            return &props[i];
+    }
+    return nullptr;
+}
+
 const PropertySpec *ClassSchema::findProperty(keel::StringRef raw) const noexcept
 {
     if (raw.empty())
@@ -526,7 +535,24 @@ keel::String matchEnumChoice(const Value &v,
         auto msg = keel::format("Property '{}' requires a character vector or string scalar.", propName);
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidEnum");
     }
-    const keel::String s = v.toString();
+    keel::String s = v.toString();
+    // Legacy short compass aliases for Location (Legend / ColorBar).
+    if (propName == "Location") {
+        struct Alias { const char *abbr; const char *full; };
+        static constexpr Alias kLocAliases[] = {
+            {"n", "north"}, {"s", "south"}, {"e", "east"}, {"w", "west"},
+            {"ne", "northeast"}, {"nw", "northwest"}, {"se", "southeast"}, {"sw", "southwest"},
+            {"no", "northoutside"}, {"so", "southoutside"}, {"eo", "eastoutside"}, {"wo", "westoutside"},
+            {"neo", "northeastoutside"}, {"nwo", "northwestoutside"},
+            {"seo", "southeastoutside"}, {"swo", "southwestoutside"},
+        };
+        for (const auto &a : kLocAliases) {
+            if (asciiEqualNoCase(s, a.abbr)) {
+                s = keel::String::from(a.full);
+                break;
+            }
+        }
+    }
     // 1. Exact case-insensitive match
     for (keel::usize i = 0; i < choiceCount; ++i) {
         if (asciiEqualNoCase(choices[i], s))
@@ -602,11 +628,21 @@ Value validatePropValue(const PropertySpec &spec, const Value &v, keel::Allocato
         return out;
     }
     case PropKind::DoubleArray: {
+        if (v.isLogical()) {
+            if (keel::StringRef(spec.name) == "CData")
+                return v;
+            Value out = Value::matrix(v.dims().rows(), v.dims().cols(), ValueType::DOUBLE, mr);
+            for (keel::usize i = 0; i < v.numel(); ++i)
+                out.doubleDataMut()[i] = v.elemAsDouble(i);
+            return out;
+        }
         if (!v.isNumeric() || v.isComplex()) {
             auto msg = keel::format("Property '{}' must be a real numeric array.", spec.name);
             throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidArray");
         }
         if (v.type() == ValueType::DOUBLE)
+            return v;
+        if (keel::StringRef(spec.name) == "CData" && v.dims().ndim() >= 3)
             return v;
         Value out = Value::matrix(v.dims().rows(), v.dims().cols(), ValueType::DOUBLE, mr);
         for (keel::usize i = 0; i < v.numel(); ++i)

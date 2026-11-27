@@ -2432,7 +2432,7 @@ void GraphicsLibrary::install(Engine &engine)
             "figure", "gcf", "clf", "close",
             "axes", "gca", "polaraxes", "tiledlayout", "nexttile", "subplot",
             "cla", "hold", "ishold", "yyaxis", "linkaxes",
-            "title", "subtitle", "xlabel", "ylabel", "zlabel",
+            "title", "subtitle", "sgtitle", "xlabel", "ylabel", "zlabel",
             "text", "legend", "colorbar", "xline", "yline",
             "xlim", "ylim", "zlim", "clim", "caxis", "rlim", "thetalim",
             "xticks", "yticks", "zticks", "rticks", "thetaticks",

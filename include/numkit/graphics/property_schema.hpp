@@ -106,6 +106,7 @@ struct ClassSchema {
 
     const PropertySpec *findProperty(keel::StringRef raw) const noexcept;
     const PropertySpec *findExact(keel::StringRef canonical) const noexcept;
+    const PropertySpec *findExactNoCase(keel::StringRef raw) const noexcept;
 };
 
 const ClassSchema &schemaFor(ClassId id) noexcept;

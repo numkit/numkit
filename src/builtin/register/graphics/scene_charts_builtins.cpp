@@ -11,6 +11,7 @@
 #include <keel/array.h>
 #include <keel/core.h>
 #include <keel/format.h>
+#include <keel/hash_map.h>
 #include <keel/math.h>
 #include <keel/memory.h>
 #include <keel/number.h>
@@ -95,8 +96,19 @@ ParsedLineSpec parseLineSpec(keel::StringRef s, keel::Allocator *mr)
     ParsedLineSpec out;
     if (s.empty() || s.size() > 16)
         return out;
-    keel::usize i = 0;
-    while (i < s.size()) {
+    // Trim whitespace for full color name check (e.g. 'green', 'blue', 'black').
+    keel::usize lo = 0;
+    keel::usize hi = s.size();
+    while (lo < hi && (s[lo] == ' ' || s[lo] == '\t')) ++lo;
+    while (hi > lo && (s[hi - 1] == ' ' || s[hi - 1] == '\t')) --hi;
+    const keel::StringRef trimmed = s.substr(lo, hi - lo);
+    if (trimmed.size() > 1 && isColorCharOrName(trimmed)) {
+        out.color = keel::String::from(trimmed, mr);
+        out.valid = true;
+        return out;
+    }
+    keel::usize i = lo;
+    while (i < hi) {
         const char c = s[i];
         if (c == ' ' || c == '\t') {
             ++i;
@@ -270,7 +282,7 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
         ParsedLineSpec ls;
         if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
             const keel::String tok = args[idx].toString();
-            const bool isPropName = ((args.size() - idx) % 2 == 0) && (lineSchema.findExact(tok) != nullptr);
+            const bool isPropName = ((args.size() - idx) % 2 == 0) && (lineSchema.findExactNoCase(tok) != nullptr);
             if (!isPropName) {
                 ParsedLineSpec cand = parseLineSpec(tok, mr);
                 if (cand.valid) {
@@ -421,7 +433,7 @@ void plot3_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         ParsedLineSpec ls;
         if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
             const keel::String tok = args[idx].toString();
-            if (!(((args.size() - idx) % 2 == 0) && lineSchema.findExact(tok) != nullptr)) {
+            if (!(((args.size() - idx) % 2 == 0) && lineSchema.findExactNoCase(tok) != nullptr)) {
                 ParsedLineSpec cand = parseLineSpec(tok, mr);
                 if (cand.valid) { ls = keel::move(cand); ++idx; }
             }
@@ -484,7 +496,7 @@ void scatterCore(keel::ArrayRef<Value> args, keel::usize nargout,
             if (asciiEqualNoCase(tok, "filled")) {
                 scene.setProperty(sid, "MarkerFaceColor", Value::fromString("flat", mr), mr);
                 ++idx;
-            } else if (!(((args.size() - idx) % 2 == 0) && scSchema.findExact(tok) != nullptr)) {
+            } else if (!(((args.size() - idx) % 2 == 0) && scSchema.findExactNoCase(tok) != nullptr)) {
                 ParsedLineSpec ls = parseLineSpec(tok, mr);
                 if (ls.valid) {
                     if (!ls.color.empty()) {
@@ -506,7 +518,7 @@ void scatterCore(keel::ArrayRef<Value> args, keel::usize nargout,
             ++idx;
             continue;
         }
-        if (((args.size() - idx) % 2 == 0) && scSchema.findExact(tok) != nullptr)
+        if (((args.size() - idx) % 2 == 0) && scSchema.findExactNoCase(tok) != nullptr)
             break;
         ParsedLineSpec ls = parseLineSpec(tok, mr);
         if (ls.valid && !ls.marker.empty()) {
@@ -574,7 +586,7 @@ void barCore(keel::ArrayRef<Value> args, keel::usize nargout,
             ++idx;
             continue;
         }
-        if (((args.size() - idx) % 2 == 0) && barSchema.findExact(tok) != nullptr)
+        if (((args.size() - idx) % 2 == 0) && barSchema.findExactNoCase(tok) != nullptr)
             break;
         if (isColorCharOrName(tok)) {
             colorSpec = tok.clone(mr);
@@ -731,7 +743,7 @@ void patchCore(keel::ArrayRef<Value> args, keel::usize nargout,
             const bool looksLikeRgbBeforeNV = (args[idx].numel() == 3 && xd.numel() != 3)
                 || (args[idx].numel() == 3 && ((args.size() - idx - 1) % 2 == 0)
                     && (args[idx + 1].isChar() || args[idx + 1].isString())
-                    && schemaFor(ClassId::Patch).findExact(args[idx + 1].toString()) != nullptr);
+                    && schemaFor(ClassId::Patch).findExactNoCase(args[idx + 1].toString()) != nullptr);
             if (!looksLikeRgbBeforeNV && args[idx].numel() == xd.numel())
                 zd = ensure2DDouble(args[idx++], mr);
         }
@@ -747,7 +759,7 @@ void patchCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (idx < args.size()) {
             if (args[idx].isChar() || args[idx].isString()) {
                 const keel::String tok = args[idx].toString();
-                if (!(((args.size() - idx) % 2 == 0) && pSchema.findExact(tok) != nullptr)) {
+                if (!(((args.size() - idx) % 2 == 0) && pSchema.findExactNoCase(tok) != nullptr)) {
                     scene.setProperty(pid, "FaceColor", args[idx++], mr);
                 }
             } else if (args[idx].isNumeric()) {
@@ -843,7 +855,7 @@ void quiverCore(keel::ArrayRef<Value> args, keel::usize nargout,
             ++idx;
             continue;
         }
-        if (((args.size() - idx) % 2 == 0) && qSchema.findExact(tok) != nullptr)
+        if (((args.size() - idx) % 2 == 0) && qSchema.findExactNoCase(tok) != nullptr)
             break;
         ParsedLineSpec ls = parseLineSpec(tok, mr);
         if (ls.valid) {
@@ -870,6 +882,197 @@ void quiver3_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRe
 { quiverCore(a, no, o, c, true); }
 
 // ── contour / contourf / contour3 ───────────────────────────────────────
+
+// Build standard 2-by-M contour matrix [level, x1..xk; count, y1..yk] via marching squares + edge chaining.
+Value computeContourMatrix(const Value &xd, const Value &yd, const Value &zd,
+                           const Value &levels, keel::Allocator *mr)
+{
+    if (zd.isEmpty() || levels.isEmpty())
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    const keel::usize R = zd.dims().rows();
+    const keel::usize C = zd.dims().cols();
+    if (R < 2 || C < 2)
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+
+    const bool xIsGrid = (xd.dims().rows() == R && xd.dims().cols() == C);
+    const bool yIsGrid = (yd.dims().rows() == R && yd.dims().cols() == C);
+    auto xAt = [&](keel::usize r, keel::usize c) -> keel::f64 {
+        if (xIsGrid) return xd.elemAsDouble(r + c * R);
+        if (xd.numel() == C) return xd.elemAsDouble(c);
+        return keel::as<keel::f64>(c + 1);
+    };
+    auto yAt = [&](keel::usize r, keel::usize c) -> keel::f64 {
+        if (yIsGrid) return yd.elemAsDouble(r + c * R);
+        if (yd.numel() == R) return yd.elemAsDouble(r);
+        return keel::as<keel::f64>(r + 1);
+    };
+    auto zAt = [&](keel::usize r, keel::usize c) -> keel::f64 {
+        return zd.elemAsDouble(r + c * R);
+    };
+
+    struct Pt { keel::f64 x; keel::f64 y; };
+    struct Seg { keel::u64 k0; keel::u64 k1; Pt p0; Pt p1; bool used; };
+
+    // Edge key uniquely identifies a grid edge shared by at most 2 cells:
+    // dir 0 = horizontal edge between (r, c) and (r, c+1);
+    // dir 1 = vertical edge between (r, c) and (r+1, c).
+    auto makeEdgeKey = [](keel::usize r, keel::usize c, keel::u64 dir) -> keel::u64 {
+        return ((keel::as<keel::u64>(r) << 33) | (keel::as<keel::u64>(c) << 1) | dir);
+    };
+    auto interpT = [](keel::f64 va, keel::f64 vb, keel::f64 L) -> keel::f64 {
+        const keel::f64 d = vb - va;
+        if (keel::abs(d) < 1e-30) return 0.5;
+        return keel::clamp((L - va) / d, 0.0, 1.0);
+    };
+
+    keel::Array<keel::f64> row0(mr);
+    keel::Array<keel::f64> row1(mr);
+
+    for (keel::usize li = 0; li < levels.numel(); ++li) {
+        const keel::f64 L = levels.elemAsDouble(li);
+        if (!keel::is_finite(L))
+            continue;
+
+        keel::Array<Seg> segs(mr);
+        keel::HashMap<keel::u64, keel::i64> outEdge(mr);
+        keel::HashMap<keel::u64, keel::i64> inEdge(mr);
+
+        for (keel::usize r = 0; r + 1 < R; ++r) {
+            for (keel::usize c = 0; c + 1 < C; ++c) {
+                const keel::f64 vTL = zAt(r, c);
+                const keel::f64 vTR = zAt(r, c + 1);
+                const keel::f64 vBR = zAt(r + 1, c + 1);
+                const keel::f64 vBL = zAt(r + 1, c);
+                if (!keel::is_finite(vTL) || !keel::is_finite(vTR)
+                    || !keel::is_finite(vBR) || !keel::is_finite(vBL))
+                    continue;
+                keel::i32 code = 0;
+                if (vTL >= L) code |= 1;
+                if (vTR >= L) code |= 2;
+                if (vBR >= L) code |= 4;
+                if (vBL >= L) code |= 8;
+                if (code == 0 || code == 15)
+                    continue;
+
+                auto edgePt = [&](keel::i32 e, keel::u64 &keyOut) -> Pt {
+                    // 0=Top(TL-TR), 1=Right(TR-BR), 2=Bottom(BL-BR), 3=Left(TL-BL)
+                    if (e == 0) {
+                        keyOut = makeEdgeKey(r, c, 0);
+                        const keel::f64 t = interpT(vTL, vTR, L);
+                        return {xAt(r, c) + t * (xAt(r, c + 1) - xAt(r, c)),
+                                yAt(r, c) + t * (yAt(r, c + 1) - yAt(r, c))};
+                    }
+                    if (e == 1) {
+                        keyOut = makeEdgeKey(r, c + 1, 1);
+                        const keel::f64 t = interpT(vTR, vBR, L);
+                        return {xAt(r, c + 1) + t * (xAt(r + 1, c + 1) - xAt(r, c + 1)),
+                                yAt(r, c + 1) + t * (yAt(r + 1, c + 1) - yAt(r, c + 1))};
+                    }
+                    if (e == 2) {
+                        keyOut = makeEdgeKey(r + 1, c, 0);
+                        const keel::f64 t = interpT(vBL, vBR, L);
+                        return {xAt(r + 1, c) + t * (xAt(r + 1, c + 1) - xAt(r + 1, c)),
+                                yAt(r + 1, c) + t * (yAt(r + 1, c + 1) - yAt(r + 1, c))};
+                    }
+                    keyOut = makeEdgeKey(r, c, 1);
+                    const keel::f64 t = interpT(vTL, vBL, L);
+                    return {xAt(r, c) + t * (xAt(r + 1, c) - xAt(r, c)),
+                            yAt(r, c) + t * (yAt(r + 1, c) - yAt(r, c))};
+                };
+
+                // Directed segments with higher values (>= L) on the LEFT (CCW around highs).
+                keel::i32 ePairs[4] = {-1, -1, -1, -1};
+                keel::i32 nPairs = 0;
+                switch (code) {
+                case 1:  ePairs[0] = 0; ePairs[1] = 3; nPairs = 1; break;
+                case 14: ePairs[0] = 3; ePairs[1] = 0; nPairs = 1; break;
+                case 2:  ePairs[0] = 1; ePairs[1] = 0; nPairs = 1; break;
+                case 13: ePairs[0] = 0; ePairs[1] = 1; nPairs = 1; break;
+                case 3:  ePairs[0] = 1; ePairs[1] = 3; nPairs = 1; break;
+                case 12: ePairs[0] = 3; ePairs[1] = 1; nPairs = 1; break;
+                case 4:  ePairs[0] = 2; ePairs[1] = 1; nPairs = 1; break;
+                case 11: ePairs[0] = 1; ePairs[1] = 2; nPairs = 1; break;
+                case 6:  ePairs[0] = 2; ePairs[1] = 0; nPairs = 1; break;
+                case 9:  ePairs[0] = 0; ePairs[1] = 2; nPairs = 1; break;
+                case 7:  ePairs[0] = 2; ePairs[1] = 3; nPairs = 1; break;
+                case 8:  ePairs[0] = 3; ePairs[1] = 2; nPairs = 1; break;
+                case 5: {
+                    const keel::f64 ctr = 0.25 * (vTL + vTR + vBR + vBL);
+                    if (ctr >= L) { ePairs[0] = 2; ePairs[1] = 3; ePairs[2] = 0; ePairs[3] = 1; }
+                    else          { ePairs[0] = 0; ePairs[1] = 3; ePairs[2] = 2; ePairs[3] = 1; }
+                    nPairs = 2;
+                    break;
+                }
+                case 10: {
+                    const keel::f64 ctr = 0.25 * (vTL + vTR + vBR + vBL);
+                    if (ctr >= L) { ePairs[0] = 3; ePairs[1] = 0; ePairs[2] = 1; ePairs[3] = 2; }
+                    else          { ePairs[0] = 3; ePairs[1] = 2; ePairs[2] = 1; ePairs[3] = 0; }
+                    nPairs = 2;
+                    break;
+                }
+                default: break;
+                }
+                for (keel::i32 s = 0; s < nPairs; ++s) {
+                    keel::u64 k0 = 0, k1 = 0;
+                    const Pt p0 = edgePt(ePairs[2 * s], k0);
+                    const Pt p1 = edgePt(ePairs[2 * s + 1], k1);
+                    const keel::i64 idxS = keel::as<keel::i64>(segs.size());
+                    segs.push_back(Seg{k0, k1, p0, p1, false});
+                    outEdge.put(k0, idxS);
+                    inEdge.put(k1, idxS);
+                }
+            }
+        }
+
+        // Pass 1: open polylines starting at entry boundary edges (no incoming segment at k0);
+        // Pass 2: closed loops.
+        for (keel::i32 pass = 0; pass < 2; ++pass) {
+            for (keel::usize si = 0; si < segs.size(); ++si) {
+                if (segs[si].used)
+                    continue;
+                if (pass == 0 && inEdge.contains(segs[si].k0))
+                    continue;
+
+                keel::Array<Pt> poly(mr);
+                segs[si].used = true;
+                const keel::u64 startKey = segs[si].k0;
+                poly.push_back(segs[si].p0);
+                poly.push_back(segs[si].p1);
+                keel::u64 curKey = segs[si].k1;
+                for (;;) {
+                    const keel::i64 *nxt = outEdge.get(curKey);
+                    if (!nxt || segs[keel::as<keel::usize>(*nxt)].used)
+                        break;
+                    Seg &ns = segs[keel::as<keel::usize>(*nxt)];
+                    ns.used = true;
+                    poly.push_back(ns.p1);
+                    curKey = ns.k1;
+                    if (curKey == startKey)
+                        break;
+                }
+                if (poly.size() >= 2) {
+                    row0.push_back(L);
+                    row1.push_back(keel::as<keel::f64>(poly.size()));
+                    for (const Pt &pt : poly) {
+                        row0.push_back(pt.x);
+                        row1.push_back(pt.y);
+                    }
+                }
+            }
+        }
+    }
+
+    if (row0.empty())
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    const keel::usize cols = row0.size();
+    Value out = Value::matrix(2, cols, ValueType::DOUBLE, mr);
+    keel::f64 *dst = out.doubleDataMut();
+    for (keel::usize c = 0; c < cols; ++c) {
+        dst[2 * c]     = row0[c];
+        dst[2 * c + 1] = row1[c];
+    }
+    return out;
+}
 
 void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
                  keel::MutArrayRef<Value> outs, CallContext &ctx, bool filled, bool is3D)
@@ -997,6 +1200,27 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!explicitLevels.isEmpty()) cn->props.put(keel::String::from("LevelList", mr), explicitLevels);
         if (autoLevelStep > 0.0) cn->props.put(keel::String::from("LevelStep", mr), Value::scalar(autoLevelStep, mr));
         if (filled) cn->props.put(keel::String::from("Fill", mr), Value::fromString("on", mr));
+        if (nargout >= 2 && !zd.isEmpty() && !explicitLevels.isEmpty()) {
+            cn->props.put(keel::String::from("ContourMatrix", mr),
+                          computeContourMatrix(xd, yd, zd, explicitLevels, mr));
+        }
+    }
+    // Optional LineSpec token after Z/levels (e.g. contour3(X, Y, Z, 10, 'k', 'LineWidth', 1)).
+    if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
+        const keel::String tok = args[idx].toString();
+        const ClassSchema &cSchema = schemaFor(ClassId::Contour);
+        const bool isPropName = ((args.size() - idx) % 2 == 0)
+                                && (cSchema.findExactNoCase(tok) != nullptr || asciiEqualNoCase(tok, "LineColor"));
+        if (!isPropName) {
+            const ParsedLineSpec ls = parseLineSpec(tok, mr);
+            if (ls.valid) {
+                if (!ls.color.empty())
+                    scene.setProperty(cid, "EdgeColor", Value::fromString(ls.color, mr), mr);
+                if (!ls.lineStyle.empty())
+                    scene.setProperty(cid, "LineStyle", Value::fromString(ls.lineStyle, mr), mr);
+                ++idx;
+            }
+        }
     }
     if (idx < args.size())
         applyChartNV(scene, cid, args, idx, mr);
@@ -1064,7 +1288,7 @@ void stemCore(keel::ArrayRef<Value> args, keel::usize nargout,
             ++idx;
             continue;
         }
-        if (((args.size() - idx) % 2 == 0) && sSchema.findExact(tok) != nullptr) break;
+        if (((args.size() - idx) % 2 == 0) && sSchema.findExactNoCase(tok) != nullptr) break;
         ParsedLineSpec ls = parseLineSpec(tok, mr);
         if (ls.valid) { applyLineSpecToNode(scene, stId, ls, mr); ++idx; continue; }
         break;
@@ -1123,7 +1347,7 @@ void areaStairCore(ClassId cls, keel::ArrayRef<Value> args, keel::usize nargout,
     if (cls == ClassId::Stair && idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
         const ClassSchema &stSchema = schemaFor(ClassId::Stair);
-        if (!(((args.size() - idx) % 2 == 0) && stSchema.findExact(tok) != nullptr)) {
+        if (!(((args.size() - idx) % 2 == 0) && stSchema.findExactNoCase(tok) != nullptr)) {
             ParsedLineSpec cand = parseLineSpec(tok, mr);
             if (cand.valid) {
                 ls = keel::move(cand);
@@ -1225,7 +1449,7 @@ void errorbar_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const ClassSchema &eSchema = schemaFor(ClassId::ErrorBar);
     if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
-        if (!(((args.size() - idx) % 2 == 0) && eSchema.findExact(tok) != nullptr)) {
+        if (!(((args.size() - idx) % 2 == 0) && eSchema.findExactNoCase(tok) != nullptr)) {
             ParsedLineSpec ls = parseLineSpec(tok, mr);
             if (ls.valid) { applyLineSpecToNode(scene, eid, ls, mr); ++idx; }
         }
@@ -1287,7 +1511,7 @@ void imageCore(keel::ArrayRef<Value> args, keel::usize nargout,
 
     Value xd, yd, cd;
     keel::Array<const Value *> nums(mr);
-    while (idx < args.size() && args[idx].isNumeric()) {
+    while (idx < args.size() && (args[idx].isNumeric() || args[idx].isLogical())) {
         nums.push_back(&args[idx++]);
         if (nums.size() == 4) break;
     }
@@ -1303,6 +1527,14 @@ void imageCore(keel::ArrayRef<Value> args, keel::usize nargout,
         yd = flattenToRowVec(*nums[1], mr);
         cd = *nums[2];
         if (scaled && nums.size() >= 4 && nums[3]->numel() == 2) climArg = *nums[3];
+    }
+
+    // Trailing [cmin cmax] CLim vector after NV pairs (e.g. imagesc(A, 'EraseMode', 'none', [-1 1])).
+    keel::usize nvEnd = args.size();
+    if (scaled && climArg.isEmpty() && nvEnd > idx && ((nvEnd - idx) % 2 == 1)
+        && args[nvEnd - 1].isNumeric() && args[nvEnd - 1].numel() == 2) {
+        climArg = args[nvEnd - 1];
+        --nvEnd;
     }
 
     const NodeId iid = scene.createChartNode(ClassId::Image, axId, false);
@@ -1327,8 +1559,8 @@ void imageCore(keel::ArrayRef<Value> args, keel::usize nargout,
         in->props.put(keel::String::from("CDataMapping", mr),
                       Value::fromString(scaled ? "scaled" : "direct", mr));
     }
-    if (idx < args.size())
-        applyChartNV(scene, iid, args, idx, mr);
+    if (idx < nvEnd)
+        applyChartNV(scene, iid, args.slice(0, nvEnd), idx, mr);
     if (scaled) {
         scene.setProperty(axId, "YDir", Value::fromString("reverse", mr), mr);
         if (!climArg.isEmpty())
@@ -1516,7 +1748,7 @@ void polarplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const ClassSchema &lSchema = schemaFor(ClassId::Line);
     if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
-        if (!(((args.size() - idx) % 2 == 0) && lSchema.findExact(tok) != nullptr)) {
+        if (!(((args.size() - idx) % 2 == 0) && lSchema.findExactNoCase(tok) != nullptr)) {
             ParsedLineSpec ls = parseLineSpec(tok, mr);
             if (ls.valid) { applyLineSpecToNode(scene, lid, ls, mr); ++idx; }
         }
@@ -1591,9 +1823,51 @@ void fplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
     const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
 
-    if (idx >= args.size() || !args[idx].isFuncHandle())
+    if (idx >= args.size())
+        throw Error("fplot: first argument must be a function handle or symbolic expression.",
+                    0, 0, "fplot", "", "numkit:graphics:InvalidArgument");
+    Value fn;
+    bool zeroArgFn = false;
+    if (args[idx].isFuncHandle()) {
+        fn = args[idx++];
+    } else if (args[idx].isObject()
+               && (args[idx].objectClassNameRef() == "sym" || args[idx].objectClassNameRef() == "symfun")) {
+        const ExternalFunc *mf = ctx.engine->findExternal("matlabFunction", ctx.env);
+        if (!mf) mf = ctx.engine->findExternal("cas.matlabFunction", ctx.env);
+        if (!mf) {
+            throw Error("fplot: symbolic conversion requires matlabFunction.",
+                        0, 0, "fplot", "", "numkit:graphics:InvalidArgument");
+        }
+        // Check if expression has 0 symbolic variables (constant sym).
+        if (const ExternalFunc *svf = ctx.engine->findExternal("symvar", ctx.env)) {
+            Value svOut[1];
+            (*svf)(keel::ArrayRef<Value>(&args[idx], 1), 1, keel::MutArrayRef<Value>(svOut, 1), ctx);
+            if (svOut[0].isEmpty())
+                zeroArgFn = true;
+        }
+        Value mfOut[1];
+        (*mf)(keel::ArrayRef<Value>(&args[idx], 1), 1, keel::MutArrayRef<Value>(mfOut, 1), ctx);
+        fn = keel::move(mfOut[0]);
+        ++idx;
+    } else if (args[idx].isChar() || args[idx].isString()) {
+        const keel::String expr = args[idx++].toString();
+        const ExternalFunc *s2f = ctx.engine->findExternal("str2func", ctx.env);
+        if (s2f) {
+            keel::String body(mr);
+            if (expr.find('@') == keel::kInvalidIndex && expr.find('(') != keel::kInvalidIndex) {
+                body.append("@(x) ");
+                body.append(expr);
+            } else {
+                body.append(expr);
+            }
+            Value sArg = Value::fromString(body, mr);
+            Value sOut[1];
+            (*s2f)(keel::ArrayRef<Value>(&sArg, 1), 1, keel::MutArrayRef<Value>(sOut, 1), ctx);
+            fn = keel::move(sOut[0]);
+        }
+    }
+    if (!fn.isFuncHandle())
         throw Error("fplot: first argument must be a function handle.", 0, 0, "fplot", "", "numkit:graphics:InvalidArgument");
-    const Value &fn = args[idx++];
 
     keel::f64 lo = -5.0, hi = 5.0;
     if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() >= 2) {
@@ -1609,7 +1883,9 @@ void fplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         const keel::f64 x = lo + (hi - lo) * keel::as<keel::f64>(i) / keel::as<keel::f64>(kN - 1);
         xv.doubleDataMut()[i] = x;
         const Value argArr[1] = {Value::scalar(x, mr)};
-        const Value yRes = ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>(argArr, 1));
+        const Value yRes = zeroArgFn
+            ? ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>())
+            : ctx.engine->callFunctionHandle(fn, keel::ArrayRef<Value>(argArr, 1));
         yv.doubleDataMut()[i] = yRes.isNumeric() && !yRes.isEmpty() ? yRes.elemAsDouble(0) : keel::kNaN;
     }
 
@@ -1621,7 +1897,7 @@ void fplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     const ClassSchema &lSchema = schemaFor(ClassId::Line);
     if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
-        if (!(((args.size() - idx) % 2 == 0) && lSchema.findExact(tok) != nullptr)) {
+        if (!(((args.size() - idx) % 2 == 0) && lSchema.findExactNoCase(tok) != nullptr)) {
             ParsedLineSpec ls = parseLineSpec(tok, mr);
             if (ls.valid) { applyLineSpecToNode(scene, lid, ls, mr); ++idx; }
         }

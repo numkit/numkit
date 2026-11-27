@@ -156,9 +156,9 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
             dst.zlimJson = serializeVec1D(scene.getProperty(axId, "ZLim", mr));
     }
 
-    // Walk children in creation order (reverse of newest-first ax->children).
-    for (keel::usize i = ax->children.size(); i > 0; --i) {
-        const NodeId cid = ax->children[i - 1];
+    // Walk children in creation order (ax->children is stored oldest-first).
+    for (keel::usize i = 0; i < ax->children.size(); ++i) {
+        const NodeId cid = ax->children[i];
         const GraphicsNode *ch = scene.findNode(cid);
         if (!ch) continue;
 
@@ -391,8 +391,8 @@ bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
 
     // Collect direct Axes/PolarAxes and TiledChartLayout children in creation order.
     keel::Array<NodeId> axList(res);
-    for (keel::usize i = fn->children.size(); i > 0; --i) {
-        const NodeId cid = fn->children[i - 1];
+    for (keel::usize i = 0; i < fn->children.size(); ++i) {
+        const NodeId cid = fn->children[i];
         const GraphicsNode *ch = scene.findNode(cid);
         if (!ch) continue;
         if (ch->classId == ClassId::Axes || ch->classId == ClassId::PolarAxes) {
@@ -405,8 +405,8 @@ bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
                 out.subplotRows = keel::as<keel::i32>(gs.elemAsDouble(0));
                 out.subplotCols = keel::as<keel::i32>(gs.elemAsDouble(1));
             }
-            for (keel::usize j = ch->children.size(); j > 0; --j) {
-                const NodeId tcid = ch->children[j - 1];
+            for (keel::usize j = 0; j < ch->children.size(); ++j) {
+                const NodeId tcid = ch->children[j];
                 if (const GraphicsNode *tc = scene.findNode(tcid);
                     tc && (tc->classId == ClassId::Axes || tc->classId == ClassId::PolarAxes)) {
                     axList.push_back(tcid);

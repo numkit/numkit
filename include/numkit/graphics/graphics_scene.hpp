@@ -42,7 +42,7 @@ struct GraphicsNode {
     NodeId id = kInvalidNodeId;
     ClassId classId = ClassId::Placeholder;
     NodeId parentId = kInvalidNodeId;
-    keel::Array<NodeId> children; // newest-first (matches MATLAB Children order)
+    keel::Array<NodeId> children; // creation order (oldest-first); visibleChildren/allChildren return newest-first
     keel::i32 figureNumber = 0;   // >0 when Figure has IntegerHandle == 'on'
     NodeId themeId = kInvalidNodeId; // owned GraphicsTheme node for Figure
     NodeId currentAxesId = kInvalidNodeId;
@@ -79,6 +79,26 @@ struct GraphicsNode {
     bool deleted = false;
     bool beingDeleted = false;
     keel::u64 version = 0;
+
+    // Incremental auto-limits cache for Cartesian Axes (avoids O(N^2) rescan in tight hold-on loops).
+    bool boundsValid = false;
+    keel::usize boundsScannedCount = 0;
+    bool boundsAnyX = false;
+    bool boundsAnyY = false;
+    bool boundsAnyZ = false;
+    bool boundsAnyC = false;
+    bool boundsHasBaseZero = false;
+    bool boundsHasImage = false;
+    bool boundsHasNonImage = false;
+    keel::f64 boundsXMin = 0.0;
+    keel::f64 boundsXMax = 0.0;
+    keel::f64 boundsYMin = 0.0;
+    keel::f64 boundsYMax = 0.0;
+    keel::f64 boundsZMin = 0.0;
+    keel::f64 boundsZMax = 0.0;
+    keel::f64 boundsCMin = 0.0;
+    keel::f64 boundsCMax = 0.0;
+    keel::f64 boundsBaseVal = 0.0;
 
     // Explicitly set property values (canonical name -> native Value).
     keel::HashMap<keel::String, Value> props;
@@ -137,6 +157,7 @@ public:
     NodeId createTiledLayout(NodeId figId, keel::i32 rows, keel::i32 cols);
     NodeId nextTile(NodeId tlId, keel::i32 tileNum = 0, keel::i32 rowSpan = 1, keel::i32 colSpan = 1);
     NodeId createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::i32 p);
+    NodeId createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::ArrayRef<keel::i32> pList);
 
     NodeId createText(NodeId parentId, keel::f64 x, keel::f64 y, keel::f64 z, keel::StringRef str);
     NodeId setLabelText(NodeId ownerId, keel::StringRef slot, keel::StringRef str);

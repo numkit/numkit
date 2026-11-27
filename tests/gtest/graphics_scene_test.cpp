@@ -813,4 +813,91 @@ TEST_P(GraphicsSceneTest, FieldtestBlockBSecondaryChartsAndSchemas)
     EXPECT_DOUBLE_EQ(evalScalar("numel(hcc.LevelList)"), 12.0);
 }
 
+TEST_P(GraphicsSceneTest, FieldtestRegressionCompatibility)
+{
+    // 1. subplot command-syntax string code, vector span, and exact reference Position geometry
+    eval("f = figure('Visible', 'off');"
+         "a1 = subplot('211');"
+         "a2 = subplot(2, 1, 2);"
+         "p1 = a1.Position; p2 = a2.Position;");
+    EXPECT_NEAR(evalScalar("p1(1)"), 0.13, 1e-6);
+    EXPECT_NEAR(evalScalar("p1(2)"), 0.5838372093, 1e-6);
+    EXPECT_NEAR(evalScalar("p1(3)"), 0.775, 1e-6);
+    EXPECT_NEAR(evalScalar("p1(4)"), 0.3411627907, 1e-6);
+    EXPECT_NEAR(evalScalar("p2(2)"), 0.11, 1e-6);
+    EXPECT_NEAR(evalScalar("p2(4)"), 0.3411627907, 1e-6);
+    eval("f2 = figure('Visible', 'off'); a_span = subplot(2, 2, [1 2]); ps = a_span.Position;");
+    EXPECT_NEAR(evalScalar("ps(1)"), 0.13, 1e-6);
+    EXPECT_NEAR(evalScalar("ps(3)"), 0.775, 1e-6);
+
+    // 2. axis / XLim / YLim with -Inf / Inf allowed; NaN and non-increasing still rejected
+    eval("f3 = figure('Visible', 'off'); plot(1:5, 1:5); axis([-inf inf 0 inf]); xl = xlim; yl = ylim;");
+    EXPECT_TRUE(std::isinf(evalScalar("xl(1)")) && evalScalar("xl(1)") < 0.0);
+    EXPECT_TRUE(std::isinf(evalScalar("xl(2)")) && evalScalar("xl(2)") > 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("yl(1)"), 0.0);
+    EXPECT_TRUE(std::isinf(evalScalar("yl(2)")) && evalScalar("yl(2)") > 0.0);
+    EXPECT_THROW(eval("xlim([2 1]);"), numkit::Error);
+    EXPECT_THROW(eval("xlim([NaN 1]);"), numkit::Error);
+
+    // 3. Full color names as LineSpec, title(legend, ...), title(main, sub), yline case-insensitive NV
+    eval("f4 = figure('Visible', 'off');"
+         "hl = plot(1:5, 'green');"
+         "lg = legend('series', 'Location', 'NE');"
+         "title(lg, 'LegTitle');"
+         "[tt, ts] = title('Main', 'Sub');"
+         "yl = yline(2, '-k', 'linewidth', 1.5);");
+    EXPECT_NEAR(evalScalar("hl.Color(2)"), 1.0, 1e-12);
+    EXPECT_EQ(evalString("lg.Location"), "northeast");
+    EXPECT_EQ(evalString("lg.Title.String"), "LegTitle");
+    EXPECT_EQ(evalString("tt.String"), "Main");
+    EXPECT_EQ(evalString("ts.String"), "Sub");
+    EXPECT_DOUBLE_EQ(evalScalar("yl.LineWidth"), 1.5);
+    EXPECT_EQ(evalString("yl.LineStyle"), "-");
+
+    // 4. Legacy 'phong' lighting, XTickLabels alias, logical CData, EraseMode, trailing clims
+    eval("f5 = figure('Visible', 'off');"
+         "hp = patch([0 1 0], [0 0 1], 'r', 'FaceLighting', 'phong', 'EdgeLighting', 'phong');"
+         "ax5 = gca; set(ax5, 'XTickLabels', {'a', 'b'});"
+         "f6 = figure('Visible', 'off');"
+         "im1 = imagesc(logical([0 1; 1 0]));"
+         "set(im1, 'CData', logical([1 0; 0 1]));"
+         "f6b = figure('Visible', 'off');"
+         "im2 = imagesc([1 2; 3 4], 'EraseMode', 'none', [-1 1]);"
+         "cl = clim;");
+    EXPECT_EQ(evalString("hp.FaceLighting"), "phong");
+    EXPECT_EQ(evalString("hp.EdgeLighting"), "phong");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(get(ax5, 'XTickLabel'))"), 2.0);
+    EXPECT_EQ(evalString("class(im1.CData)"), "logical");
+    EXPECT_DOUBLE_EQ(evalScalar("cl(1)"), -1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("cl(2)"), 1.0);
+
+    // 5. annotation textarrow TextEdgeColor, sgtitle scene handle mutation, contour3 LineSpec & ContourMatrix
+    eval("f7 = figure('Visible', 'off');"
+         "an = annotation(f7, 'textarrow', [0.2 0.3], [0.4 0.5], 'TextEdgeColor', 'none', 'String', {'Peak'});"
+         "sgt = sgtitle(f7, 'SuperTitle', 'Color', 'blue');"
+         "sgt.FontSize = 20;"
+         "[Xg, Yg] = meshgrid(linspace(0, 10, 20), linspace(0, 10, 20));"
+         "Zg = Xg + Yg;"
+         "[Cm, hc] = contour3(Xg, Yg, Zg, [5 10], 'k', 'LineWidth', 1.5);");
+    EXPECT_EQ(evalString("an.EdgeColor"), "none");
+    EXPECT_DOUBLE_EQ(evalScalar("sgt.FontSize"), 20.0);
+    EXPECT_EQ(evalString("sgt.String"), "SuperTitle");
+    EXPECT_DOUBLE_EQ(evalScalar("hc.LineWidth"), 1.5);
+    EXPECT_NEAR(evalScalar("hc.EdgeColor(1)"), 0.0, 1e-12);
+    EXPECT_DOUBLE_EQ(evalScalar("size(Cm, 1)"), 2.0);
+    EXPECT_GT(evalScalar("size(Cm, 2)"), 10.0);
+
+    // 6. Tight hold-on loop exercises O(1) child append & incremental auto-bounds cache
+    eval("f8 = figure('Visible', 'off'); ax8 = axes(f8); hold(ax8, 'on');"
+         "for k = 1:200, plot(ax8, [k k+1], [0 k]); end;"
+         "xl8 = ax8.XLim; yl8 = ax8.YLim; nch8 = numel(ax8.Children);"
+         "firstChildY = ax8.Children(1).YData(2); lastChildY = ax8.Children(end).YData(2);");
+    EXPECT_DOUBLE_EQ(evalScalar("nch8"), 200.0);
+    EXPECT_DOUBLE_EQ(evalScalar("firstChildY"), 200.0); // newest-first Children order preserved
+    EXPECT_DOUBLE_EQ(evalScalar("lastChildY"), 1.0);
+    EXPECT_LE(evalScalar("xl8(1)"), 1.0);
+    EXPECT_GE(evalScalar("xl8(2)"), 201.0);
+    EXPECT_GE(evalScalar("yl8(2)"), 200.0);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

@@ -49,6 +49,14 @@ keel::StringRef resolveHiddenPropAlias(const GraphicsScene &scene,
 {
     if (!n)
         return rawProp;
+    if (n->classId == ClassId::Axes) {
+        if (asciiEqualNoCase(rawProp, "XTickLabels"))
+            return "XTickLabel";
+        if (asciiEqualNoCase(rawProp, "YTickLabels"))
+            return "YTickLabel";
+        if (asciiEqualNoCase(rawProp, "ZTickLabels"))
+            return "ZTickLabel";
+    }
     if (n->classId == ClassId::Contour && asciiEqualNoCase(rawProp, "LineColor"))
         return "EdgeColor";
     if (n->classId == ClassId::ErrorBar) {
@@ -56,6 +64,20 @@ keel::StringRef resolveHiddenPropAlias(const GraphicsScene &scene,
             return "YPositiveDelta";
         if (asciiEqualNoCase(rawProp, "LData"))
             return "YNegativeDelta";
+    }
+    if (n->classId == ClassId::TextBox) {
+        if (asciiEqualNoCase(rawProp, "TextEdgeColor"))
+            return "EdgeColor";
+        if (asciiEqualNoCase(rawProp, "TextBackgroundColor"))
+            return "BackgroundColor";
+        if (asciiEqualNoCase(rawProp, "TextColor"))
+            return "Color";
+        if (asciiEqualNoCase(rawProp, "TextLineWidth"))
+            return "LineWidth";
+        if (asciiEqualNoCase(rawProp, "TextMargin"))
+            return "Margin";
+        if (asciiEqualNoCase(rawProp, "TextRotation"))
+            return "Rotation";
     }
     if (n->classId == ClassId::Line || n->classId == ClassId::Scatter) {
         const GraphicsNode *par = scene.findNode(n->parentId);
@@ -67,6 +89,26 @@ keel::StringRef resolveHiddenPropAlias(const GraphicsScene &scene,
         }
     }
     return rawProp;
+}
+
+bool isLegacyNoOpProp(ClassId cls, keel::StringRef rawProp) noexcept
+{
+    if (asciiEqualNoCase(rawProp, "EraseMode")) {
+        return cls == ClassId::Image || cls == ClassId::Line || cls == ClassId::Patch
+            || cls == ClassId::Surface || cls == ClassId::Text || cls == ClassId::Scatter
+            || cls == ClassId::Bar || cls == ClassId::Stair || cls == ClassId::Area
+            || cls == ClassId::Stem || cls == ClassId::Quiver || cls == ClassId::Contour
+            || cls == ClassId::ErrorBar;
+    }
+    if (cls == ClassId::TextBox) {
+        return asciiEqualNoCase(rawProp, "HeadStyle") || asciiEqualNoCase(rawProp, "HeadWidth")
+            || asciiEqualNoCase(rawProp, "HeadLength") || asciiEqualNoCase(rawProp, "Head1Style")
+            || asciiEqualNoCase(rawProp, "Head2Style") || asciiEqualNoCase(rawProp, "Head1Width")
+            || asciiEqualNoCase(rawProp, "Head2Width") || asciiEqualNoCase(rawProp, "Head1Length")
+            || asciiEqualNoCase(rawProp, "Head2Length") || asciiEqualNoCase(rawProp, "X")
+            || asciiEqualNoCase(rawProp, "Y");
+    }
+    return false;
 }
 
 } // anonymous namespace
@@ -191,10 +233,9 @@ void GraphicsScene::attachChildFront(NodeId parentId, NodeId childId)
     GraphicsNode *p = findNode(parentId);
     if (!p)
         return;
+    // Stored in creation order (oldest-first) for O(1) append;
+    // visibleChildren()/allChildren() yield newest-first order.
     p->children.push_back(childId);
-    for (keel::usize i = p->children.size() - 1; i > 0; --i)
-        p->children[i] = p->children[i - 1];
-    p->children[0] = childId;
     p->version = generation_ + 1;
 }
 
@@ -206,6 +247,8 @@ void GraphicsScene::detachChild(NodeId parentId, NodeId childId)
     for (keel::usize i = 0; i < p->children.size(); ++i) {
         if (p->children[i] == childId) {
             p->children.erase(i);
+            p->boundsValid = false;
+            p->boundsScannedCount = 0;
             p->version = generation_ + 1;
             return;
         }
@@ -217,13 +260,14 @@ void GraphicsScene::promoteChildToFront(NodeId parentId, NodeId childId)
     GraphicsNode *p = findNode(parentId);
     if (!p)
         return;
-    for (keel::usize i = 0; i < p->children.size(); ++i) {
+    const keel::usize n = p->children.size();
+    for (keel::usize i = 0; i < n; ++i) {
         if (p->children[i] == childId) {
-            if (i == 0)
+            if (i + 1 == n)
                 return;
-            for (keel::usize j = i; j > 0; --j)
-                p->children[j] = p->children[j - 1];
-            p->children[0] = childId;
+            for (keel::usize j = i; j + 1 < n; ++j)
+                p->children[j] = p->children[j + 1];
+            p->children[n - 1] = childId;
             p->version = generation_ + 1;
             return;
         }
@@ -340,7 +384,8 @@ void GraphicsScene::updateCurrentFigureAfterRemoval()
     const GraphicsNode *root = findNode(kRootNodeId);
     NodeId nextFig = kInvalidNodeId;
     if (root) {
-        for (NodeId cid : root->children) {
+        for (keel::usize i = root->children.size(); i > 0; --i) {
+            const NodeId cid = root->children[i - 1];
             const GraphicsNode *fn = findNode(cid);
             if (fn && fn->classId == ClassId::Figure && isHandleVisible(cid)) {
                 nextFig = cid;
@@ -579,10 +624,10 @@ NodeId GraphicsScene::copyNode(NodeId id, NodeId newParentId)
         }
     }
 
-    // Copy children in reverse order so attachChildFront preserves original Children order.
+    // Copy children in creation order so O(1) append preserves original Children order.
     keel::Array<NodeId> srcChildren = srcNow->children.clone(mr_);
-    for (keel::usize i = srcChildren.size(); i > 0; --i)
-        copyNode(srcChildren[i - 1], dstId);
+    for (keel::usize i = 0; i < srcChildren.size(); ++i)
+        copyNode(srcChildren[i], dstId);
 
     return dstId;
 }
@@ -638,7 +683,8 @@ keel::Array<NodeId> GraphicsScene::visibleChildren(NodeId id, keel::Allocator *a
     if (!n)
         return out;
     out.reserve(n->children.size());
-    for (NodeId cid : n->children) {
+    for (keel::usize i = n->children.size(); i > 0; --i) {
+        const NodeId cid = n->children[i - 1];
         if (findNode(cid) != nullptr && isHandleVisible(cid))
             out.push_back(cid);
     }
@@ -653,7 +699,8 @@ keel::Array<NodeId> GraphicsScene::allChildren(NodeId id, keel::Allocator *alloc
     if (!n)
         return out;
     out.reserve(n->children.size());
-    for (NodeId cid : n->children) {
+    for (keel::usize i = n->children.size(); i > 0; --i) {
+        const NodeId cid = n->children[i - 1];
         if (findNode(cid) != nullptr)
             out.push_back(cid);
     }
@@ -885,6 +932,13 @@ Value GraphicsScene::getProperty(NodeId id, keel::StringRef rawProp, keel::Alloc
     const keel::StringRef effProp = resolveHiddenPropAlias(*this, n, rawProp);
     const PropertySpec *spec = schema.findProperty(effProp);
     if (!spec) {
+        if (isLegacyNoOpProp(n->classId, rawProp)) {
+            if (const Value *stored = n->props.get(rawProp))
+                return *stored;
+            if (asciiEqualNoCase(rawProp, "EraseMode"))
+                return Value::fromString("normal", res);
+            return Value::fromString("", res);
+        }
         auto msg = keel::format("Unrecognized property '{}' for class '{}'.", rawProp, schema.className);
         throw Error(msg.c_str(), 0, 0, "get", "", "numkit:graphics:UnrecognizedProperty");
     }
@@ -1053,6 +1107,11 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
     const keel::StringRef effProp = resolveHiddenPropAlias(*this, n, rawProp);
     const PropertySpec *spec = schema.findProperty(effProp);
     if (!spec) {
+        if (isLegacyNoOpProp(n->classId, rawProp)) {
+            n->props.put(keel::String::from(rawProp, mr_), val);
+            n->version = generation_ + 1;
+            return;
+        }
         auto msg = keel::format("Unrecognized property '{}' for class '{}'.", rawProp, schema.className);
         throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:UnrecognizedProperty");
     }
@@ -1158,15 +1217,15 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
     // 4. Validate and store value.
     Value validated = validatePropValue(*spec, val, res);
 
-    // Special validation: Limits vectors must be strictly increasing finite [lo, hi].
+    // Special validation: Limits vectors must be strictly increasing [lo, hi] (non-NaN; -Inf/Inf allowed).
     const bool isLimVec = (prop == "XLim" || prop == "YLim" || prop == "ZLim"
                            || prop == "CLim" || prop == "ALim" || prop == "RLim"
                            || prop == "ThetaLim" || prop == "Limits");
     if (isLimVec && validated.isNumeric() && validated.numel() == 2) {
         const keel::f64 lo = validated.elemAsDouble(0);
         const keel::f64 hi = validated.elemAsDouble(1);
-        if (!(lo < hi) || !keel::is_finite(lo) || !keel::is_finite(hi)) {
-            auto msg = keel::format("Property '{}' must be a 2-element increasing finite numeric vector.", prop);
+        if (keel::is_nan(lo) || keel::is_nan(hi) || !(lo < hi)) {
+            auto msg = keel::format("Property '{}' must be a 2-element increasing numeric vector.", prop);
             throw Error(msg.c_str(), 0, 0, "set", "", "numkit:graphics:InvalidLimits");
         }
     }
@@ -1283,6 +1342,10 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
                 cb->props.put(keel::String::from("Limits", mr_), validated);
         }
 
+        if (prop == "View") {
+            n->boundsValid = false;
+            n->boundsScannedCount = 0;
+        }
         // Sync Axes X/Y/Z properties to owned NumericRuler + auto-ticks + linked axes.
         const char axCh = (!prop.empty() && (prop[0] == 'X' || prop[0] == 'Y' || prop[0] == 'Z'))
                               ? static_cast<char>(prop[0] - 'A' + 'a') : '\0';
@@ -1339,8 +1402,13 @@ void GraphicsScene::setProperty(NodeId id, keel::StringRef rawProp, const Value 
                 syncPatchVerticesAndData(id, prop, res);
             }
         }
-        if ((spec->flags & PropFlag::AffectsLimits) != 0u || prop == "Visible")
+        if ((spec->flags & PropFlag::AffectsLimits) != 0u || prop == "Visible" || prop == "BaseValue") {
+            if (GraphicsNode *par = findNode(n->parentId)) {
+                par->boundsValid = false;
+                par->boundsScannedCount = 0;
+            }
             recomputeAxesAutoLimits(n->parentId, res);
+        }
     }
 
     n->version = generation_ + 1;

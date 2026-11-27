@@ -22,7 +22,7 @@ namespace {
 
 void scanNumericBounds(const Value &v, keel::f64 &lo, keel::f64 &hi, bool &any) noexcept
 {
-    if (!v.isNumeric() || v.isEmpty())
+    if ((!v.isNumeric() && !v.isLogical()) || v.isEmpty())
         return;
     const keel::usize n = v.numel();
     for (keel::usize i = 0; i < n; ++i) {
@@ -268,19 +268,30 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         return;
     }
 
-    // Cartesian Axes
-    keel::f64 xmin = 0.0, xmax = 0.0; bool anyX = false;
-    keel::f64 ymin = 0.0, ymax = 0.0; bool anyY = false;
-    keel::f64 zmin = 0.0, zmax = 0.0; bool anyZ = false;
-    keel::f64 cmin = 0.0, cmax = 0.0; bool anyC = false;
-    bool hasBaseZero = false;
-    keel::f64 baseVal = 0.0;
-    bool hasImage = false;
-    bool hasNonImage = false;
+    // Cartesian Axes (incremental scan when new children are appended under hold-on)
+    const bool incremental = ax->boundsValid && ax->children.size() >= ax->boundsScannedCount;
+    keel::f64 xmin = incremental ? ax->boundsXMin : 0.0;
+    keel::f64 xmax = incremental ? ax->boundsXMax : 0.0;
+    bool anyX = incremental ? ax->boundsAnyX : false;
+    keel::f64 ymin = incremental ? ax->boundsYMin : 0.0;
+    keel::f64 ymax = incremental ? ax->boundsYMax : 0.0;
+    bool anyY = incremental ? ax->boundsAnyY : false;
+    keel::f64 zmin = incremental ? ax->boundsZMin : 0.0;
+    keel::f64 zmax = incremental ? ax->boundsZMax : 0.0;
+    bool anyZ = incremental ? ax->boundsAnyZ : false;
+    keel::f64 cmin = incremental ? ax->boundsCMin : 0.0;
+    keel::f64 cmax = incremental ? ax->boundsCMax : 0.0;
+    bool anyC = incremental ? ax->boundsAnyC : false;
+    bool hasBaseZero = incremental ? ax->boundsHasBaseZero : false;
+    keel::f64 baseVal = incremental ? ax->boundsBaseVal : 0.0;
+    bool hasImage = incremental ? ax->boundsHasImage : false;
+    bool hasNonImage = incremental ? ax->boundsHasNonImage : false;
     const Value viewV = getProperty(axId, "View", res);
     const bool isView3D = (viewV.isNumeric() && viewV.numel() >= 2 && keel::abs(viewV.elemAsDouble(1) - 90.0) > 1e-6);
 
-    for (NodeId cid : ax->children) {
+    const keel::usize startChild = incremental ? ax->boundsScannedCount : 0;
+    for (keel::usize ci = startChild; ci < ax->children.size(); ++ci) {
+        const NodeId cid = ax->children[ci];
         const GraphicsNode *ch = findNode(cid);
         if (!ch || !isChartClass(ch->classId))
             continue;
@@ -437,6 +448,15 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         }
     }
 
+    ax->boundsValid = true;
+    ax->boundsScannedCount = ax->children.size();
+    ax->boundsAnyX = anyX; ax->boundsXMin = xmin; ax->boundsXMax = xmax;
+    ax->boundsAnyY = anyY; ax->boundsYMin = ymin; ax->boundsYMax = ymax;
+    ax->boundsAnyZ = anyZ; ax->boundsZMin = zmin; ax->boundsZMax = zmax;
+    ax->boundsAnyC = anyC; ax->boundsCMin = cmin; ax->boundsCMax = cmax;
+    ax->boundsHasBaseZero = hasBaseZero; ax->boundsBaseVal = baseVal;
+    ax->boundsHasImage = hasImage; ax->boundsHasNonImage = hasNonImage;
+
     if (hasBaseZero && anyY) {
         if (ymin > baseVal) ymin = baseVal;
         if (ymax < baseVal) ymax = baseVal;
@@ -492,10 +512,10 @@ void GraphicsScene::recomputeBarEndPoints(NodeId axId, keel::Allocator *mr)
     if (!ax || ax->classId != ClassId::Axes)
         return;
 
-    // Collect Bar children in creation order (reverse of newest-first ax->children).
+    // Collect Bar children in creation order (ax->children is stored oldest-first).
     keel::Array<NodeId> bars(res);
-    for (keel::usize i = ax->children.size(); i > 0; --i) {
-        const NodeId cid = ax->children[i - 1];
+    for (keel::usize i = 0; i < ax->children.size(); ++i) {
+        const NodeId cid = ax->children[i];
         if (const GraphicsNode *cn = findNode(cid); cn && cn->classId == ClassId::Bar)
             bars.push_back(cid);
     }
@@ -742,6 +762,10 @@ void GraphicsScene::animatedLineAddPoints(NodeId alId, const Value &x, const Val
     }
     al->version = generation_ + 1;
     emitEvent(SceneEventKind::PropertyChanged, alId, kInvalidNodeId, "Points");
+    if (GraphicsNode *par = findNode(al->parentId)) {
+        par->boundsValid = false;
+        par->boundsScannedCount = 0;
+    }
     recomputeAxesAutoLimits(al->parentId, res);
 }
 
@@ -757,6 +781,10 @@ void GraphicsScene::animatedLineClearPoints(NodeId alId)
     al->animHasZ = false;
     al->version = generation_ + 1;
     emitEvent(SceneEventKind::PropertyChanged, alId, kInvalidNodeId, "Points");
+    if (GraphicsNode *par = findNode(al->parentId)) {
+        par->boundsValid = false;
+        par->boundsScannedCount = 0;
+    }
     recomputeAxesAutoLimits(al->parentId, mr_);
 }
 

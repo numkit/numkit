@@ -245,7 +245,8 @@ void GraphicsScene::updateCurrentAxesAfterRemoval(NodeId figId)
     if (findNode(fn->currentAxesId) != nullptr)
         return;
     NodeId nextAx = kInvalidNodeId;
-    for (NodeId cid : fn->children) {
+    for (keel::usize i = fn->children.size(); i > 0; --i) {
+        const NodeId cid = fn->children[i - 1];
         const GraphicsNode *c = findNode(cid);
         if (!c) continue;
         if (c->classId == ClassId::Axes || c->classId == ClassId::PolarAxes) {
@@ -253,7 +254,8 @@ void GraphicsScene::updateCurrentAxesAfterRemoval(NodeId figId)
             break;
         }
         if (c->classId == ClassId::TiledChartLayout) {
-            for (NodeId tcid : c->children) {
+            for (keel::usize j = c->children.size(); j > 0; --j) {
+                const NodeId tcid = c->children[j - 1];
                 const GraphicsNode *tc = findNode(tcid);
                 if (tc && (tc->classId == ClassId::Axes || tc->classId == ClassId::PolarAxes)) {
                     nextAx = tcid;
@@ -276,6 +278,8 @@ void GraphicsScene::clearAxes(NodeId axId, bool resetProps)
     for (NodeId cid : childCopy)
         deleteNode(cid, /*force=*/true);
     if (GraphicsNode *a2 = findNode(axId)) {
+        a2->boundsValid = false;
+        a2->boundsScannedCount = 0;
         a2->props.put(keel::String::from("ColorOrderIndex", mr_), Value::scalar(1.0, mr_));
         a2->props.put(keel::String::from("LineStyleOrderIndex", mr_), Value::scalar(1.0, mr_));
         a2->props.put(keel::String::from("NextSeriesIndex", mr_), Value::scalar(1.0, mr_));
@@ -418,21 +422,65 @@ NodeId GraphicsScene::nextTile(NodeId tlId, keel::i32 tileNum, keel::i32 rowSpan
     return axId;
 }
 
-NodeId GraphicsScene::createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::i32 p)
+NodeId GraphicsScene::createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::ArrayRef<keel::i32> pList)
 {
-    if (m < 1 || n < 1 || p < 1 || p > m * n) {
+    if (m < 1 || n < 1 || pList.empty()) {
         throw Error("subplot: index out of range for m-by-n grid.",
                     0, 0, "subplot", "", "numkit:graphics:InvalidSubplot");
     }
+    keel::i32 rowMin = m, rowMax = -1, colMin = n, colMax = -1;
+    for (keel::i32 p : pList) {
+        if (p < 1 || p > m * n) {
+            throw Error("subplot: index out of range for m-by-n grid.",
+                        0, 0, "subplot", "", "numkit:graphics:InvalidSubplot");
+        }
+        const keel::i32 r = (p - 1) / n;
+        const keel::i32 c = (p - 1) % n;
+        rowMin = keel::min(rowMin, r);
+        rowMax = keel::max(rowMax, r);
+        colMin = keel::min(colMin, c);
+        colMax = keel::max(colMax, c);
+    }
+
+    // Reference default axes geometry & subplot inset ratios:
+    // def_pos = [0.13, 0.11, 0.775, 0.815], inset = [0.20, 0.18, 0.04, 0.10]
+    constexpr keel::f64 kDefLeft = 0.13;
+    constexpr keel::f64 kDefBottom = 0.11;
+    constexpr keel::f64 kDefW = 0.775;
+    constexpr keel::f64 kDefH = 0.815;
+    constexpr keel::f64 kXInset = 0.24; // 0.20 + 0.04
+    constexpr keel::f64 kYInset = 0.28; // 0.18 + 0.10
+    const keel::f64 colStep = kDefW / (keel::as<keel::f64>(n) - kXInset);
+    const keel::f64 tileW = colStep * (1.0 - kXInset);
+    const keel::f64 rowStep = kDefH / (keel::as<keel::f64>(m) - kYInset);
+    const keel::f64 tileH = rowStep * (1.0 - kYInset);
+    const keel::f64 left = kDefLeft + keel::as<keel::f64>(colMin) * colStep;
+    const keel::f64 right = kDefLeft + keel::as<keel::f64>(colMax) * colStep + tileW;
+    const keel::f64 bottom = kDefBottom + keel::as<keel::f64>(m - 1 - rowMax) * rowStep;
+    const keel::f64 top = kDefBottom + keel::as<keel::f64>(m - 1 - rowMin) * rowStep + tileH;
+    const keel::f64 width = right - left;
+    const keel::f64 height = top - bottom;
+
     const NodeId fid = (figId != kInvalidNodeId) ? figId : ensureCurrentFigure();
-    // Reuse existing axes at exact (m, n, p) slot if present.
+    const keel::i32 primaryP = pList[0];
+    // Reuse existing axes at exact matching (m, n, p) or identical position if present.
     if (const GraphicsNode *fn = findNode(fid)) {
         for (NodeId cid : fn->children) {
             const GraphicsNode *c = findNode(cid);
-            if (c && (c->classId == ClassId::Axes || c->classId == ClassId::PolarAxes)
-                && c->subplotRows == m && c->subplotCols == n && c->subplotIdx == p) {
+            if (!c || (c->classId != ClassId::Axes && c->classId != ClassId::PolarAxes))
+                continue;
+            if (pList.size() == 1 && c->subplotRows == m && c->subplotCols == n && c->subplotIdx == primaryP) {
                 setCurrentAxes(cid);
                 return cid;
+            }
+            if (const Value *ep = c->props.get("Position"); ep && ep->isNumeric() && ep->numel() == 4) {
+                if (keel::abs(ep->elemAsDouble(0) - left) < 1e-6
+                    && keel::abs(ep->elemAsDouble(1) - bottom) < 1e-6
+                    && keel::abs(ep->elemAsDouble(2) - width) < 1e-6
+                    && keel::abs(ep->elemAsDouble(3) - height) < 1e-6) {
+                    setCurrentAxes(cid);
+                    return cid;
+                }
             }
         }
     }
@@ -441,19 +489,18 @@ NodeId GraphicsScene::createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i
     if (GraphicsNode *ax = findNode(axId)) {
         ax->subplotRows = m;
         ax->subplotCols = n;
-        ax->subplotIdx = p;
-        const keel::i32 row = (p - 1) / n;
-        const keel::i32 col = (p - 1) % n;
-        const keel::f64 w = 0.775 / keel::as<keel::f64>(n);
-        const keel::f64 h = 0.815 / keel::as<keel::f64>(m);
-        const keel::f64 left = 0.13 + keel::as<keel::f64>(col) * (0.86 / keel::as<keel::f64>(n));
-        const keel::f64 bottom = 0.925 - keel::as<keel::f64>(row + 1) * (0.86 / keel::as<keel::f64>(m));
-        const Value pos = makeVec4Local(left, keel::max(0.05, bottom), w * 0.92, h * 0.88, mr_);
+        ax->subplotIdx = (pList.size() == 1) ? primaryP : 0;
+        const Value pos = makeVec4Local(left, bottom, width, height, mr_);
         ax->props.put(keel::String::from("Position", mr_), pos);
         ax->props.put(keel::String::from("InnerPosition", mr_), pos);
         ax->props.put(keel::String::from("OuterPosition", mr_), pos);
     }
     return axId;
+}
+
+NodeId GraphicsScene::createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i32 n, keel::i32 p)
+{
+    return createOrActivateSubplot(figId, m, n, keel::ArrayRef<keel::i32>(&p, 1));
 }
 
 NodeId GraphicsScene::createText(NodeId parentId, keel::f64 x, keel::f64 y, keel::f64 z, keel::StringRef str)
@@ -525,8 +572,8 @@ NodeId GraphicsScene::createOrUpdateLegend(NodeId axId, keel::ArrayRef<keel::Str
         // Mirror legend labels onto the axes's chart children's DisplayName in creation order.
         if (const GraphicsNode *axCur = findNode(axId)) {
             keel::usize li = 0;
-            for (keel::usize ci = axCur->children.size(); ci > 0 && li < labels.size(); --ci) {
-                const NodeId cid = axCur->children[ci - 1];
+            for (keel::usize ci = 0; ci < axCur->children.size() && li < labels.size(); ++ci) {
+                const NodeId cid = axCur->children[ci];
                 const GraphicsNode *ch = findNode(cid);
                 if (!ch || ch->classId == ClassId::Text || ch->classId == ClassId::Image)
                     continue;

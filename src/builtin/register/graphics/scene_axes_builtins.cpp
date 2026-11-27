@@ -50,7 +50,7 @@ inline bool isLabelOwner(const GraphicsScene &scene, NodeId id) noexcept
     const GraphicsNode *n = scene.findNode(id);
     return n && (n->classId == ClassId::Axes || n->classId == ClassId::PolarAxes
                  || n->classId == ClassId::TiledChartLayout || n->classId == ClassId::ColorBar
-                 || n->classId == ClassId::HeatmapChart);
+                 || n->classId == ClassId::HeatmapChart || n->classId == ClassId::Legend);
 }
 
 void applyNV(GraphicsScene &scene, NodeId id,
@@ -362,25 +362,71 @@ void subplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         return;
     }
 
-    keel::i32 m = 1, n = 1, p = 1;
+    auto parseIntStr = [](const Value &v, keel::i32 &outVal) -> bool {
+        if (!v.isChar() && !v.isString())
+            return false;
+        const keel::String s = v.toString();
+        if (s.empty())
+            return false;
+        keel::i32 acc = 0;
+        for (keel::usize i = 0; i < s.size(); ++i) {
+            const char ch = s[i];
+            if (ch < '0' || ch > '9')
+                return false;
+            acc = acc * 10 + keel::as<keel::i32>(ch - '0');
+        }
+        outVal = acc;
+        return true;
+    };
+
+    keel::i32 m = 1, n = 1;
+    keel::Array<keel::i32> pList(mr);
     keel::usize nvStart = args.size();
-    if (args.size() >= 3 && args[0].isNumeric() && args[1].isNumeric() && args[2].isNumeric()) {
+    keel::i32 strCode = 0;
+    keel::i32 sM = 0, sN = 0, sP = 0;
+    if (args.size() >= 3 && args[0].isNumeric() && args[1].isNumeric() && args[2].isNumeric() && !args[2].isEmpty()) {
         m = keel::as<keel::i32>(args[0].toScalar());
         n = keel::as<keel::i32>(args[1].toScalar());
-        p = keel::as<keel::i32>(args[2].elemAsDouble(0));
+        pList.reserve(args[2].numel());
+        for (keel::usize k = 0; k < args[2].numel(); ++k)
+            pList.push_back(keel::as<keel::i32>(args[2].elemAsDouble(k)));
+        nvStart = 3;
+    } else if (args.size() >= 3 && parseIntStr(args[0], sM) && parseIntStr(args[1], sN) && parseIntStr(args[2], sP)) {
+        m = sM;
+        n = sN;
+        pList.push_back(sP);
         nvStart = 3;
     } else if (args[0].isNumeric() && args[0].numel() == 1) {
         const keel::i32 code = keel::as<keel::i32>(args[0].toScalar());
         m = code / 100;
         n = (code / 10) % 10;
-        p = code % 10;
+        pList.push_back(code % 10);
+        nvStart = 1;
+    } else if (parseIntStr(args[0], strCode) && strCode >= 111 && strCode <= 999) {
+        m = strCode / 100;
+        n = (strCode / 10) % 10;
+        pList.push_back(strCode % 10);
         nvStart = 1;
     } else {
         throw Error("subplot: expected (m, n, p), 3-digit code, 'Position', or Axes handle.",
                     0, 0, "subplot", "", "numkit:graphics:InvalidSubplot");
     }
 
-    const NodeId axId = scene.createOrActivateSubplot(kInvalidNodeId, m, n, p);
+    // Consume optional standalone flag ('replace' / 'align') after (m, n, p).
+    bool forceReplace = false;
+    if (nvStart < args.size() && (args[nvStart].isChar() || args[nvStart].isString())) {
+        const keel::String tok = args[nvStart].toString();
+        if (asciiEqualNoCase(tok, "replace")) {
+            forceReplace = true;
+            ++nvStart;
+        } else if (asciiEqualNoCase(tok, "align")) {
+            ++nvStart;
+        }
+    }
+
+    const NodeId axId = scene.createOrActivateSubplot(kInvalidNodeId, m, n, pList.as_ref());
+    if (forceReplace)
+        scene.clearAxes(axId, true);
     if (nvStart < args.size())
         applyNV(scene, axId, args, nvStart, mr);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(axId, mr) : Value();
@@ -495,7 +541,7 @@ void labelHelper(const char *slot, keel::ArrayRef<Value> args, keel::usize nargo
         // target it directly instead of creating a new overlapping Axes.
         const NodeId figId = scene.currentFigureId();
         if (const GraphicsNode *fn = scene.findNode(figId); fn && !fn->children.empty()) {
-            const NodeId topId = fn->children.front();
+            const NodeId topId = fn->children.back();
             if (const GraphicsNode *tn = scene.findNode(topId); tn && tn->classId == ClassId::HeatmapChart)
                 targetId = topId;
         }
@@ -505,9 +551,65 @@ void labelHelper(const char *slot, keel::ArrayRef<Value> args, keel::usize nargo
 
     const keel::String txt = (idx < args.size()) ? joinTextArg(args[idx], mr) : keel::String(mr);
     const NodeId textId = scene.setLabelText(targetId, slot, txt);
+    keel::usize nvStart = idx + 1;
+    NodeId subId = kInvalidNodeId;
+    // title(titleText, subtitleText, Name, Value) two-string form.
+    if (asciiEqualNoCase(slot, "title") && nvStart < args.size()
+        && (args[nvStart].isChar() || args[nvStart].isString() || args[nvStart].isCell())) {
+        const ClassSchema &txtSchema = schemaFor(ClassId::Text);
+        const bool isPropName = ((args.size() - nvStart) % 2 == 0)
+                                && (args[nvStart].isChar() || args[nvStart].isString())
+                                && txtSchema.findExactNoCase(args[nvStart].toString()) != nullptr;
+        if (!isPropName) {
+            subId = scene.setLabelText(targetId, "subtitle", joinTextArg(args[nvStart], mr));
+            ++nvStart;
+        }
+    }
+    if (textId != kInvalidNodeId && nvStart < args.size())
+        applyNV(scene, textId, args, nvStart, mr);
+
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(textId, mr) : Value();
+    if (nargout >= 2 && outs.size() >= 2)
+        outs[1] = scene.makeHandleValue(subId, mr);
+}
+
+void sgtitle_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+
+    NodeId figId = kInvalidNodeId;
+    keel::usize idx = 0;
+    if (!args.empty()) {
+        NodeId h = kInvalidNodeId;
+        if (extractSceneHandle(args[0], h)) {
+            if (const GraphicsNode *n = scene.findNode(h);
+                n && (n->classId == ClassId::Figure || n->classId == ClassId::TiledChartLayout)) {
+                figId = h;
+                idx = 1;
+            }
+        }
+    }
+    if (figId == kInvalidNodeId)
+        figId = scene.ensureCurrentFigure();
+
+    const keel::String txt = (idx < args.size()) ? joinTextArg(args[idx], mr) : keel::String(mr);
+    NodeId textId = kInvalidNodeId;
+    if (GraphicsNode *fn = scene.findNode(figId)) {
+        if (fn->titleId == kInvalidNodeId || scene.findNode(fn->titleId) == nullptr) {
+            textId = scene.createText(figId, 0.5, 0.96, 0.0, txt);
+            if (GraphicsNode *fn2 = scene.findNode(figId))
+                fn2->titleId = textId;
+            if (GraphicsNode *tn = scene.findNode(textId))
+                tn->props.put(keel::String::from("HandleVisibility", mr), Value::fromString("off", mr));
+        } else {
+            textId = fn->titleId;
+            scene.setProperty(textId, "String", Value::fromString(txt, mr), mr);
+        }
+    }
     if (textId != kInvalidNodeId && idx + 1 < args.size())
         applyNV(scene, textId, args, idx + 1, mr);
-
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(textId, mr) : Value();
 }
 
@@ -616,7 +718,7 @@ void legend_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (args[idx].isChar() || args[idx].isString()) {
             const keel::String tok = args[idx].toString();
             // If an even number of args remain and tok is an exact Legend property name, start NV pairs here.
-            if (((args.size() - idx) % 2 == 0) && lgSchema.findExact(tok) != nullptr) {
+            if (((args.size() - idx) % 2 == 0) && lgSchema.findExactNoCase(tok) != nullptr) {
                 nvStart = idx;
                 break;
             }
@@ -697,12 +799,12 @@ void constantLineHelper(char axisChar, keel::ArrayRef<Value> args, keel::usize n
     const ClassSchema &clSchema = schemaFor(ClassId::ConstantLine);
     if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
         const keel::String tok = args[idx].toString();
-        if (!((args.size() - idx) % 2 == 0 && clSchema.findExact(tok) != nullptr)) {
+        if (!((args.size() - idx) % 2 == 0 && clSchema.findExactNoCase(tok) != nullptr)) {
             lineSpec = tok.clone(mr);
             ++idx;
             if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
                 const keel::String tok2 = args[idx].toString();
-                if (!((args.size() - idx) % 2 == 0 && clSchema.findExact(tok2) != nullptr)) {
+                if (!((args.size() - idx) % 2 == 0 && clSchema.findExactNoCase(tok2) != nullptr)) {
                     label = tok2.clone(mr);
                     ++idx;
                 }
@@ -1154,6 +1256,7 @@ void registerSceneAxesBuiltins(Engine &engine)
 
     regBoth("layout", "title",       &title_scene_reg);
     regBoth("layout", "subtitle",    &subtitle_scene_reg);
+    regBoth("layout", "sgtitle",     &sgtitle_scene_reg);
     regBoth("layout", "xlabel",      &xlabel_scene_reg);
     regBoth("layout", "ylabel",      &ylabel_scene_reg);
     regBoth("layout", "zlabel",      &zlabel_scene_reg);
